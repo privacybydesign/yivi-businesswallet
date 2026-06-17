@@ -1,7 +1,16 @@
+name: yivi-business-wallet
+
 services:
-  api:
+  backend:
     build:
       context: backend
-      target: build
+      dockerfile: docker/production/Dockerfile
     ports:
       - "8080:8080"
+
+  frontend:
+    build:
+      context: frontend
+      dockerfile: src/docker/development/Dockerfile
+    ports:
+      - "5173:5173"

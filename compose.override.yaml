@@ -1,0 +1,17 @@
+services:
+  backend:
+    build:
+      dockerfile: docker/development/Dockerfile
+    volumes:
+      - ./backend:/app
+      - backend-go-build:/root/.cache/go-build
+      - backend-go-mod:/go/pkg/mod
+
+  frontend:
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  backend-go-build:
+  backend-go-mod:
