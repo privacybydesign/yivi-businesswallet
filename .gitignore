@@ -25,6 +25,9 @@ backend/build-errors.log
 *.out
 coverage.*
 
+# ---- Node (root tooling: husky, lint-staged) ----
+node_modules/
+
 # ---- Frontend (Node / Vite) ----
 frontend/node_modules/
 frontend/dist/
