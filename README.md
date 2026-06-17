@@ -1,1 +1,114 @@
-# yivi-businesswallet
+# Yivi Business Wallet
+
+SaaS business wallet based on [Yivi](https://yivi.app). Multi-tenant
+(organizations), with authentication via Yivi.
+
+> **Status:** early scaffold. The backend currently exposes a health check and a
+> ping endpoint; the frontend is a minimal React + Vite app. Multi-tenancy and
+> Yivi authentication are not implemented yet.
+
+## Repository layout
+
+```
+backend/    Go (gorilla/mux) HTTP API
+frontend/   React 19 + Vite + TypeScript + react-router
+compose.yaml + compose.override.yaml   Docker Compose dev/prod orchestration
+```
+
+Endpoints available today:
+
+- `GET /healthz` — health check (`{"status":"ok"}`)
+- `GET /api/v1/ping` — ping (`{"message":"pong"}`)
+
+## Prerequisites
+
+- [Go](https://go.dev/dl/) 1.26+
+- [Node.js](https://nodejs.org/) 26+
+- [Docker](https://docs.docker.com/get-docker/) with Docker Compose
+
+## Quick start (Docker Compose)
+
+`compose.override.yaml` is applied automatically and wires up live-reload for
+development (air for the backend, Vite dev server for the frontend).
+
+```sh
+docker compose up
+```
+
+- Frontend: http://localhost:5173
+- Backend: http://localhost:8080
+
+The Vite dev server proxies `/healthz` and `/api` to the backend container, so
+the frontend talks to the backend out of the box.
+
+## Local development (without Docker)
+
+### Backend
+
+```sh
+cd backend
+go run .                      # run the server
+go tool air -c .air.toml      # run with live-reload
+```
+
+### Frontend
+
+```sh
+cd frontend
+npm ci
+npm run dev
+```
+
+## Scripts & tooling
+
+### Frontend (`cd frontend`)
+
+| Command                | Description                          |
+| ---------------------- | ------------------------------------ |
+| `npm run dev`          | Start the Vite dev server            |
+| `npm run build`        | Production build                     |
+| `npm run preview`      | Preview the production build         |
+| `npm run typecheck`    | Type-check with `tsc --build`        |
+| `npm run lint`         | Run ESLint                           |
+| `npm run lint:fix`     | Run ESLint with `--fix`              |
+| `npm run format`       | Check formatting with Prettier       |
+| `npm run format:write` | Apply Prettier formatting            |
+
+### Backend (`cd backend`)
+
+| Command                      | Description                            |
+| ---------------------------- | -------------------------------------- |
+| `go build ./...`             | Build                                  |
+| `go vet ./...`               | Vet                                    |
+| `gofmt -l .`                 | List unformatted files                 |
+| `go tool air -c .air.toml`   | Run with live-reload                   |
+| `go tool golangci-lint run`  | Lint (pinned version via `go.mod`)     |
+
+Dev tools (`air`, `golangci-lint`) are managed as Go
+[tool directives](https://go.dev/doc/modules/managing-dependencies#tools) in
+`backend/go.mod`. Running `go tool <name>` fetches and builds the pinned version
+automatically on first use — no separate install step required.
+
+## Environment variables
+
+Copy the example file and adjust as needed:
+
+```sh
+cp frontend/.env.example frontend/.env
+```
+
+- `VITE_API_BASE_URL` (frontend, optional) — base URL for API requests. Leave
+  empty to use the Vite dev-server proxy.
+
+The backend currently reads no environment variables.
+
+## Pre-commit hooks
+
+[husky](https://typicode.github.io/husky/) + lint-staged run automatically on
+commit: `gofmt` for backend Go files, and Prettier + ESLint for frontend files.
+Install hooks once after cloning with `npm install` at the repo root.
+
+## Continuous integration
+
+GitHub Actions (`.github/workflows/ci.yml`) runs format, lint, type-check and
+build for both the frontend and backend on every push and pull request.

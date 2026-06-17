@@ -5,7 +5,4 @@ ENV CGO_ENABLED=0
 
 WORKDIR /app
 
-# Install air (Go live-reload tool).
-RUN go install github.com/air-verse/air@latest
-
-CMD ["air", "-c", ".air.toml"]
+CMD ["go", "tool", "air", "-c", ".air.toml"]
