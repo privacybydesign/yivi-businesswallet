@@ -1,5 +1,5 @@
 {
-  "name": "yivi-businesswallet",
+  "name": "yivi-business-wallet",
   "private": true,
   "scripts": {
     "prepare": "husky"
