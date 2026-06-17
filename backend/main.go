@@ -50,12 +50,16 @@ func main() {
 
 func health(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status": "ok"}`))
+	if _, err := w.Write([]byte(`{"status": "ok"}`)); err != nil {
+		log.Printf("health: write response: %v", err)
+	}
 }
 
 func ping(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"message": "pong"}`))
+	if _, err := w.Write([]byte(`{"message": "pong"}`)); err != nil {
+		log.Printf("ping: write response: %v", err)
+	}
 }
 
 func logging(next http.Handler) http.Handler {
