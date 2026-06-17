@@ -17,7 +17,7 @@ func main() {
 	router := mux.NewRouter()
 	router.Use(logging)
 
-	router.HandleFunc("/health", health).Methods(http.MethodGet)
+	router.HandleFunc("/healthz", health).Methods(http.MethodGet)
 
 	api := router.PathPrefix("/api/v1").Subrouter()
 	api.HandleFunc("/ping", ping).Methods(http.MethodGet)
@@ -31,7 +31,7 @@ func main() {
 	}
 
 	go func() {
-		log.Println("Listening on port %s", server.Addr)
+		log.Printf("Listening on port %s\n", server.Addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
 		}
@@ -55,7 +55,7 @@ func health(w http.ResponseWriter, _ *http.Request) {
 
 func ping(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"message": "pong"`))
+	w.Write([]byte(`{"message": "pong"}`))
 }
 
 func logging(next http.Handler) http.Handler {
