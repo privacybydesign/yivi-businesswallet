@@ -1,14 +1,15 @@
-import { useEffect, useState } from "react";
-import { getHealth } from "../api/client";
+import { useHealthQuery } from "../api/health.queries";
 
 export default function Health() {
-  const [status, setStatus] = useState("loading…");
+  const { data, isPending, isError, error } = useHealthQuery();
 
-  useEffect(() => {
-    getHealth()
-      .then((data) => setStatus(data.status))
-      .catch(() => setStatus("error"));
-  }, []);
+  if (isPending) {
+    return <h1>Health: loading…</h1>;
+  }
 
-  return <h1>Health: {status}</h1>;
+  if (isError) {
+    return <h1>Health: error ({error.message})</h1>;
+  }
+
+  return <h1>Health: {data.status}</h1>;
 }

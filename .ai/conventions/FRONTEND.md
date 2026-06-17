@@ -29,8 +29,23 @@ Load when editing `frontend/`. General rules (magic values, formatter authority,
 ## Structure & Patterns
 
 - Routes live in `src/routes/` and are wired through `src/router.tsx` (react-router). Add new pages there.
-- All backend calls go through `src/api/` clients — never `fetch` directly from components.
+- All backend calls go through `src/api/` — never `fetch` directly from components.
 - API base URL comes from `import.meta.env.VITE_API_BASE_URL ?? ""` (empty string = use the Vite dev-server proxy). Don't hardcode hosts.
-- Type API responses as named exported types (e.g. `HealthResponse`) and throw on non-`ok` responses (see `src/api/client.ts`).
 - File names: kebab-case.
-- Organize by feature as the app grows; co-locate route + its API client concerns where it reads cleanly.
+- Organize by feature as the app grows; co-locate route + its API concerns where it reads cleanly.
+
+### API layer (`src/api/`)
+
+- **Transport** lives in `src/api/http.ts`: the `request()` helper handles base URL, JSON encode/decode, timeout/abort, auth headers, and retries. Don't call `fetch` elsewhere.
+- **Resource clients** are one file per resource (e.g. `src/api/health.ts`), exporting plain async functions that call `request()`.
+- **Query hooks** for TanStack Query live alongside as `<resource>.queries.ts` (e.g. `src/api/health.queries.ts`), exporting a `<resource>QueryKey` and `use<Resource>Query()`.
+- **Validate, don't cast**: define a zod schema per response and pass it to `request({ schema })`; derive the type via `z.infer`. Never cast `res.json()`.
+- **Errors**: `request()` throws `ApiError` (non-2xx, carries `status`/`body`/`url`) or `ApiValidationError` (schema mismatch). Don't swallow these in components — surface them via the query's `isError`/`error`.
+- **Retries**: idempotent GETs only (network errors + 5xx, capped backoff). Retry lives in the transport, so the `QueryClient` sets `retry: false` to avoid compounding.
+- **Auth**: `getAuthHeaders()` in `http.ts` is a no-op stub today; Yivi auth (and central 401 handling) plugs in there without touching callers.
+
+### Data fetching (TanStack Query)
+
+- A single `QueryClient` is provided in `src/main.tsx` via `QueryClientProvider`.
+- Components consume data through query hooks (`use<Resource>Query`), not manual `useEffect` + `useState`.
+- Use stable, exported query keys so cache entries are shared and invalidatable.

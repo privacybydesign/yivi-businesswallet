@@ -2,6 +2,7 @@ import js from "@eslint/js";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
+import pluginQuery from "@tanstack/eslint-plugin-query";
 import tseslint from "typescript-eslint";
 import prettier from "eslint-config-prettier/flat";
 import { defineConfig, globalIgnores } from "eslint/config";
@@ -15,6 +16,7 @@ export default defineConfig([
       tseslint.configs.recommendedTypeChecked,
       reactHooks.configs.flat["recommended-latest"],
       reactRefresh.configs.vite,
+      pluginQuery.configs["flat/recommended"],
     ],
     languageOptions: {
       ecmaVersion: "latest",
