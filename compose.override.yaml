@@ -10,8 +10,9 @@ services:
   frontend:
     volumes:
       - ./frontend:/app
-      - /app/node_modules
+      - frontend-node-modules:/app/node_modules
 
 volumes:
   backend-go-build:
   backend-go-mod:
+  frontend-node-modules:

@@ -44,6 +44,7 @@ go tool golangci-lint run ./...
 - **Vite proxy hardcodes `http://backend:8080`** (`frontend/vite.config.ts`) — the Docker Compose service name. Proxying `/healthz` and `/api` only resolves inside Docker. For non-Docker frontend dev, run the backend on `:8080` and set `VITE_API_BASE_URL=http://localhost:8080` in `frontend/.env`.
 - **Pre-commit runs lint-staged twice**: root `package.json` (`gofmt -w` on Go files) and `frontend/.lintstagedrc.json` (prettier + eslint). Install hooks once with `npm install` at the repo root.
 - Backend currently reads **no environment variables**; frontend reads only `VITE_API_BASE_URL`.
+- **Frontend deps auto-install in Docker**: the dev container's entrypoint runs `npm ci` on start only when `package-lock.json` changed (lockfile-hash guard), so just `docker compose up` after a dep change. `node_modules` lives in the `frontend-node-modules` volume — remove it to force a clean reinstall.
 
 ## General Conventions
 

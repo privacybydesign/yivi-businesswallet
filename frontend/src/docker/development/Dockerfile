@@ -13,4 +13,6 @@ COPY . .
 
 EXPOSE 5173
 
+ENTRYPOINT ["sh", "/app/src/docker/development/entrypoint.sh"]
+
 CMD ["npm", "run", "dev"]
