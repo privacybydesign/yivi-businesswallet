@@ -7,5 +7,5 @@ export async function getHealth(): Promise<HealthResponse> {
     if (!res.ok) {
         throw new Error(`Health check failed: ${res.status}`);
     }
-    return res.json();
+    return res.json() as Promise<HealthResponse>;
 }
