@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -13,17 +14,31 @@ import (
 	"github.com/gorilla/mux"
 )
 
+const (
+	serverAddr = ":8080"
+	healthPath = "/healthz"
+
+	healthcheckURL     = "http://localhost" + serverAddr + healthPath
+	healthcheckTimeout = 2 * time.Second
+)
+
 func main() {
+	healthcheck := flag.Bool("healthcheck", false, "probe the local /healthz endpoint and exit (used by container HEALTHCHECK)")
+	flag.Parse()
+	if *healthcheck {
+		os.Exit(runHealthcheck())
+	}
+
 	router := mux.NewRouter()
 	router.Use(logging)
 
-	router.HandleFunc("/healthz", health).Methods(http.MethodGet)
+	router.HandleFunc(healthPath, health).Methods(http.MethodGet)
 
 	api := router.PathPrefix("/api/v1").Subrouter()
 	api.HandleFunc("/ping", ping).Methods(http.MethodGet)
 
 	server := &http.Server{
-		Addr:         ":8080",
+		Addr:         serverAddr,
 		Handler:      router,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -46,6 +61,30 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// runHealthcheck probes the local health endpoint and returns a process exit
+// code: 0 when the server reports healthy, 1 otherwise. It lets the compiled
+// binary act as its own container HEALTHCHECK in images without a shell or
+// HTTP client (e.g. distroless).
+func runHealthcheck() int {
+	client := &http.Client{Timeout: healthcheckTimeout}
+	resp, err := client.Get(healthcheckURL)
+	if err != nil {
+		log.Printf("healthcheck: get %s: %v", healthcheckURL, err)
+		return 1
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("healthcheck: close response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("healthcheck: unexpected status %d", resp.StatusCode)
+		return 1
+	}
+	return 0
 }
 
 func health(w http.ResponseWriter, _ *http.Request) {
