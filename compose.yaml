@@ -1,12 +1,45 @@
 name: yivi-business-wallet
 
 services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-yivi_business_wallet}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-yivi_business_wallet}"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
+
+  migrate:
+    build:
+      context: backend
+      dockerfile: docker/production/Dockerfile
+    entrypoint: ["/migrate"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+
   backend:
     build:
       context: backend
       dockerfile: docker/production/Dockerfile
     ports:
       - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   frontend:
     build:
@@ -17,3 +50,6 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+
+volumes:
+  pgdata:

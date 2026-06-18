@@ -11,17 +11,19 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -ldflags="-s -w" -o /bin/backend main.go
+RUN go build -ldflags="-s -w" -o /bin/backend ./cmd/api
+RUN go build -ldflags="-s -w" -o /bin/migrate ./cmd/migrate
 
-FROM gcr.io/distroless/static-nonroot
+FROM alpine:3.22
 
 COPY --from=build /bin/backend /backend
+COPY --from=build /bin/migrate /migrate
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/backend", "-healthcheck"]
+    CMD ["wget", "-qO-", "http://localhost:8080/healthz"]
 
-USER nonroot:nonroot
+USER nobody
 
 ENTRYPOINT ["/backend"]
