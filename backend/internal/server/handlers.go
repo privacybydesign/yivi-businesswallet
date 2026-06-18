@@ -8,8 +8,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
-// health reports OK only when the database is reachable, so the container
-// HEALTHCHECK reflects database connectivity too.
 func health(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
