@@ -1,51 +1,46 @@
 # Frontend Conventions – React 19 / Vite / TypeScript
 
-Load when editing `frontend/`. General rules (magic values, formatter authority, scoped changes, no silent error swallowing) live in the root `AGENTS.md` — not repeated here.
+Load when editing `frontend/`. General rules (magic values, formatter, scoped changes, no silent error swallowing) live in `AGENTS.md`.
 
 ## TypeScript
 
-- `strict: true`, `noEmit` — type-checking via `tsc --build`, Vite handles transpilation.
-- `verbatimModuleSyntax: true` — type-only imports **must** use `import type { Foo }`. Mixing value and type imports without `type` is an error.
-- `isolatedModules` + bundler module resolution — no `const enum`, no namespace tricks.
-- No `any`. Prefer `unknown` + a narrowing guard. Never `as any` to silence the compiler.
-- Explicit return types on exported functions and on component prop types.
+- `strict: true`, `noEmit` — type-check via `tsc --build`, Vite transpiles.
+- `verbatimModuleSyntax: true` — type-only imports **must** use `import type { Foo }`.
+- `isolatedModules` + bundler resolution — no `const enum`, no namespace tricks.
+- No `any`. Prefer `unknown` + narrowing guard. Never `as any` to silence the compiler.
+- Explicit return types on exported functions and component prop types.
 
 ## Imports
 
-- External packages first, then local imports. Don't reorder existing imports unnecessarily.
-- Keep `import type` separate from value imports per `verbatimModuleSyntax`.
+- External packages first, then local. Don't reorder existing imports unnecessarily.
+- Keep `import type` separate from value imports (`verbatimModuleSyntax`).
 
-## ESLint
+## ESLint / Prettier
 
-- Flat config (`eslint.config.ts`) uses `recommendedTypeChecked` (type-aware), `react-hooks` (rules-of-hooks), and `react-refresh`.
-- Runs with `--cache`; `dist` is globally ignored.
-- No new disables without an inline `// eslint-disable-next-line <rule> // reason`.
-
-## Prettier
-
-- Default config (`.prettierrc` is `{}`) — double quotes, semicolons, 2-space indent, trailing commas as Prettier decides.
-- `npm run format` is check-only; use `npm run format:write` to apply. Never hand-format.
+- Flat config (`eslint.config.ts`): `recommendedTypeChecked`, `react-hooks`, `react-refresh`. Runs `--cache`; `dist` ignored.
+- No new disables without inline `// eslint-disable-next-line <rule> // reason`.
+- Prettier default (`.prettierrc` = `{}`): double quotes, semicolons, 2-space, trailing commas. `npm run format` is check-only; `format:write` applies.
 
 ## Structure & Patterns
 
-- Routes live in `src/routes/` and are wired through `src/router.tsx` (react-router). Add new pages there.
+- Routes in `src/routes/`, wired through `src/router.tsx` (react-router).
 - All backend calls go through `src/api/` — never `fetch` directly from components.
-- API base URL comes from `import.meta.env.VITE_API_BASE_URL ?? ""` (empty string = use the Vite dev-server proxy). Don't hardcode hosts.
+- API base URL: `import.meta.env.VITE_API_BASE_URL ?? ""` (empty = Vite proxy). Don't hardcode hosts.
 - File names: kebab-case.
 - Organize by feature as the app grows; co-locate route + its API concerns where it reads cleanly.
 
 ### API layer (`src/api/`)
 
-- **Transport** lives in `src/api/http.ts`: the `request()` helper handles base URL, JSON encode/decode, timeout/abort, auth headers, and retries. Don't call `fetch` elsewhere.
-- **Resource clients** are one file per resource (e.g. `src/api/health.ts`), exporting plain async functions that call `request()`.
-- **Query hooks** for TanStack Query live alongside as `<resource>.queries.ts` (e.g. `src/api/health.queries.ts`), exporting a `<resource>QueryKey` and `use<Resource>Query()`.
-- **Validate, don't cast**: define a zod schema per response and pass it to `request({ schema })`; derive the type via `z.infer`. Never cast `res.json()`.
-- **Errors**: `request()` throws `ApiError` (non-2xx, carries `status`/`body`/`url`) or `ApiValidationError` (schema mismatch). Don't swallow these in components — surface them via the query's `isError`/`error`.
-- **Retries**: idempotent GETs only (network errors + 5xx, capped backoff). Retry lives in the transport, so the `QueryClient` sets `retry: false` to avoid compounding.
-- **Auth**: `getAuthHeaders()` in `http.ts` is a no-op stub today; Yivi auth (and central 401 handling) plugs in there without touching callers.
+- **Transport** in `src/api/http.ts`: `request()` handles base URL, JSON, timeout/abort, auth headers, retries. Don't call `fetch` elsewhere.
+- **Resource clients**: one file per resource (`src/api/health.ts`), exporting plain async functions calling `request()`.
+- **Query hooks**: co-located `<resource>.queries.ts`, exporting `<resource>QueryKey` + `use<Resource>Query()`.
+- **Validate, don't cast**: zod schema per response, passed to `request({ schema })`; type via `z.infer`. Never cast `res.json()`.
+- **Errors**: `request()` throws `ApiError` (non-2xx; carries `status`/`body`/`url`) or `ApiValidationError` (schema mismatch). Surface via the query's `isError`/`error`, don't swallow.
+- **Retries**: idempotent GETs only (network + 5xx, capped backoff), in the transport — so `QueryClient` sets `retry: false`.
+- **Auth**: `getAuthHeaders()` in `http.ts` is a no-op stub; Yivi auth + central 401 handling plug in there without touching callers.
 
 ### Data fetching (TanStack Query)
 
-- A single `QueryClient` is provided in `src/main.tsx` via `QueryClientProvider`.
-- Components consume data through query hooks (`use<Resource>Query`), not manual `useEffect` + `useState`.
-- Use stable, exported query keys so cache entries are shared and invalidatable.
+- Single `QueryClient` provided in `src/main.tsx`.
+- Consume data through query hooks, not manual `useEffect` + `useState`.
+- Stable, exported query keys so cache entries are shared and invalidatable.

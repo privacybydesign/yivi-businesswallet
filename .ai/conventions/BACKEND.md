@@ -1,46 +1,49 @@
 # Backend Conventions – Go (gorilla/mux)
 
-Load when editing `backend/`. General rules (magic values, formatter authority, scoped changes, no silent error swallowing) live in the root `AGENTS.md` — not repeated here.
+Load when editing `backend/`. General rules (magic values, formatter, scoped changes, no silent error swallowing) live in `AGENTS.md`.
 
-The backend is an early scaffold (`main.go` only). The rules below encode the intended direction; follow them as the package structure grows, and anchor on the patterns already present in `main.go`.
+Layout: entry points in `cmd/api` + `cmd/migrate`, packages under `internal/`. `internal/organization` is the canonical domain example — anchor new domains on it.
 
 ## Toolchain
 
-- `gofmt` is mandatory — CI fails on any unformatted file. Never hand-format against it.
-- `go vet ./...` and `go tool golangci-lint run ./...` must pass clean.
-- Dev tools (`air`, `golangci-lint`) are pinned `tool` directives in `go.mod` — invoke via `go tool <name>`, never assume a global install.
+- `gofmt` mandatory — CI fails on unformatted files.
+- `go vet ./...` and `go tool golangci-lint run ./...` pass clean.
+- Dev tools (`air`, `golangci-lint`) are pinned `tool` directives in `go.mod` — `go tool <name>`, never a global install.
 
 ## Routing & HTTP
 
-- gorilla/mux, no web framework. Register routes in one place (today `main.go`).
-- Version the API under a subrouter: `router.PathPrefix("/api/v1").Subrouter()`. Keep the `/healthz` health check outside the versioned prefix.
-- Restrict each route to its method (`.Methods(http.MethodGet)`).
-- Cross-cutting concerns are mux middleware wired via `router.Use` (e.g. the existing `logging` middleware).
-- Handlers: set `Content-Type` explicitly, and check + log the error from `w.Write` (existing pattern). One handler per endpoint as the surface grows.
+- gorilla/mux, no framework. Router assembled in `internal/server`; each domain exposes `RegisterRoutes(*mux.Router)`.
+- Version under `router.PathPrefix("/api/v1").Subrouter()`; keep `/healthz` outside the prefix.
+- Restrict each route to its method: `.Methods(http.MethodGet)`.
+- Cross-cutting concerns are middleware via `router.Use` (e.g. `logging`).
+- Handlers: set `Content-Type` explicitly; check + log the error from `w.Write`.
+- JSON field names are `snake_case` (`json:"created_at"`) — explicit tags, not Go's exported-field default.
 
 ## Server Lifecycle
 
-- Preserve graceful shutdown: trap `SIGINT`/`SIGTERM` and call `server.Shutdown(ctx)` with a timeout (already wired in `main.go`).
-- Keep the explicit `http.Server` timeouts (`ReadTimeout`, `WriteTimeout`, `IdleTimeout`) set — don't drop them.
+- `internal/server` owns it: `New(db)` builds the `*http.Server`, `Run(srv)` serves + shuts down gracefully (traps `SIGINT`/`SIGTERM`, `Shutdown(ctx)` with timeout).
+- Keep the explicit `http.Server` timeouts (`ReadTimeout`, `WriteTimeout`, `IdleTimeout`).
 
-## Layering (intended)
+## Layering
 
-Top-down dependencies only:
-
+Top-down only:
 ```
-handler  →  service  →  repository / client
+handler → store / client
 ```
 
 - Inject dependencies; no package-level globals for state.
-- Keep business logic out of handlers — handlers parse/validate input, call a service, write the response.
+- No service layer: the store owns persistence + small domain logic (validation, slug derivation). Handlers parse/validate the request, call a store method, map result/error to a response.
+- Accept interfaces, return structs: constructors return concrete (`func NewStore(...) *Store`); define interfaces in the consumer, listing only the methods it uses.
+- Translate storage errors to package sentinels (`organization.ErrNotFound`, `ErrSlugTaken`) so handlers branch without importing GORM.
 
 ## Errors & Logging
 
-- Wrap errors with context: `fmt.Errorf("doing X: %w", err)`. Don't discard errors.
-- Return errors up the stack; only the top layer (handler) decides the HTTP response.
-- Use structured logging with context as the logging approach is chosen; until then follow the `log.Printf` pattern in `main.go` and always include the failing operation.
+- Wrap with context: `fmt.Errorf("doing X: %w", err)`. Don't discard errors.
+- Wrap once, at the layer that adds context: the store wraps storage errors; handlers map them to a status code, never re-wrap.
+- Return errors up the stack; only the handler decides the HTTP response.
+- `log.Printf` until structured logging is chosen; always include the failing operation.
 
 ## Config
 
-- Read config and secrets from the environment (none today). Never hardcode ports, hosts, or regions — extract named constants.
-- Group packages by domain as the codebase grows; avoid a single sprawling `main` package long-term.
+- Read config/secrets from the environment via `internal/config` (single `DATABASE_URL`, local-dev default). Never hardcode ports, hosts, regions.
+- Group packages by domain as the codebase grows.
