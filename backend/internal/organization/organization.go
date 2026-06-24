@@ -1,8 +1,14 @@
 package organization
 
-import "github.com/google/uuid"
+import (
+	"errors"
+
+	"github.com/google/uuid"
+)
+
+var ErrNotFound = errors.New("organization not found")
 
 type Organization struct {
-	ID   uuid.UUID
-	Name string
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
 }

@@ -216,4 +216,20 @@ func TestRecoverer_ReturnsInternalServerError(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected status 500, got %d", rec.Code)
 	}
+
+	ct := rec.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Fatalf("expected Content-Type application/json, got %q", ct)
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v\nbody: %s", err, rec.Body.String())
+	}
+	if body["code"] != "internal_error" {
+		t.Errorf("expected code=internal_error, got %q", body["code"])
+	}
+	if body["error"] != "internal server error" {
+		t.Errorf("expected error=%q, got %q", "internal server error", body["error"])
+	}
 }

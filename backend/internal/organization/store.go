@@ -2,8 +2,10 @@ package organization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
@@ -18,6 +20,9 @@ func NewStore(db database.DB) *Store {
 func (s *Store) GetByID(ctx context.Context, id int64) (Organization, error) {
 	var org Organization
 	err := s.db.QueryRow(ctx, "SELECT id, name FROM organizations WHERE id = $1", id).Scan(&org.ID, &org.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Organization{}, ErrNotFound
+	}
 	if err != nil {
 		return Organization{}, fmt.Errorf("organization: get by id %d: %w", id, err)
 	}
@@ -31,7 +36,7 @@ func (s *Store) List(ctx context.Context) ([]Organization, error) {
 	}
 	defer rows.Close()
 
-	var orgs []Organization
+	orgs := []Organization{}
 	for rows.Next() {
 		var org Organization
 		if err := rows.Scan(&org.ID, &org.Name); err != nil {

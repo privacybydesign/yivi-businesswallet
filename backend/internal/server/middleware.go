@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
 const (
@@ -74,7 +75,7 @@ func recoverer(next http.Handler) http.Handler {
 					slog.String(attrMethod, r.Method),
 					slog.String(attrPath, r.URL.Path),
 				)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
+				respond.Error(w, r, http.StatusInternalServerError, "internal_error", "internal server error")
 			}
 		}()
 		next.ServeHTTP(w, r)
