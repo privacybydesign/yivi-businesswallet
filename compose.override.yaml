@@ -6,6 +6,9 @@ services:
   backend:
     build:
       dockerfile: docker/development/Dockerfile
+    depends_on:
+      seed:
+        condition: service_completed_successfully
     volumes:
       - ./backend:/app
       - backend-go-build:/root/.cache/go-build
@@ -15,6 +18,21 @@ services:
     build:
       dockerfile: docker/development/Dockerfile
     entrypoint: [ "go", "run", "./cmd/migrate"]
+    volumes:
+      - ./backend:/app
+      - backend-go-build:/root/.cache/go-build
+      - backend-go-mod:/go/pkg/mod
+
+  seed:
+    build:
+      context: backend
+      dockerfile: docker/development/Dockerfile
+    entrypoint: ["go", "run", "./cmd/seed"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - ./backend:/app
       - backend-go-build:/root/.cache/go-build
