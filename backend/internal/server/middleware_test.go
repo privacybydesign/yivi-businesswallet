@@ -12,9 +12,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 )
 
-// installTestLogger replaces the global slog.Default with a JSON logger
-// writing to buf, wrapped in the context-aware handler so request_id appears.
-// Returns a restore function that should be deferred.
 func installTestLogger(buf *bytes.Buffer) func() {
 	prev := slog.Default()
 	inner := slog.NewJSONHandler(buf, nil)
@@ -22,7 +19,6 @@ func installTestLogger(buf *bytes.Buffer) func() {
 	return func() { slog.SetDefault(prev) }
 }
 
-// parseLogs splits the buffer on newlines and JSON-decodes each line.
 func parseLogs(t *testing.T, buf *bytes.Buffer) []map[string]any {
 	t.Helper()
 	var records []map[string]any
@@ -39,8 +35,6 @@ func parseLogs(t *testing.T, buf *bytes.Buffer) []map[string]any {
 	return records
 }
 
-// TestRequestID_Generated verifies that a fresh UUID is generated and
-// returned in the X-Request-Id response header when no ID is supplied.
 func TestRequestID_Generated(t *testing.T) {
 	handler := requestID(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -60,8 +54,6 @@ func TestRequestID_Generated(t *testing.T) {
 	}
 }
 
-// TestRequestID_Propagated verifies that a valid client-supplied X-Request-Id
-// is propagated through to the response.
 func TestRequestID_Propagated(t *testing.T) {
 	handler := requestID(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -78,8 +70,6 @@ func TestRequestID_Propagated(t *testing.T) {
 	}
 }
 
-// TestRequestID_Sanitized verifies that invalid/oversized X-Request-Id values
-// are discarded and a fresh UUID is generated instead.
 func TestRequestID_Sanitized(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -112,8 +102,6 @@ func TestRequestID_Sanitized(t *testing.T) {
 	}
 }
 
-// TestRequestLogger_LogsRequestWithID verifies that requestLogger logs a
-// request line containing the request_id from context.
 func TestRequestLogger_LogsRequestWithID(t *testing.T) {
 	var buf bytes.Buffer
 	restore := installTestLogger(&buf)
@@ -123,7 +111,6 @@ func TestRequestLogger_LogsRequestWithID(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Full chain: requestID → recoverer → requestLogger → handler
 	handler := requestID(recoverer(requestLogger(AlwaysLog)(inner)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
@@ -155,8 +142,6 @@ func TestRequestLogger_LogsRequestWithID(t *testing.T) {
 	}
 }
 
-// TestRequestLogger_SkipsHealthProbes verifies that /livez and /readyz are
-// not logged.
 func TestRequestLogger_SkipsHealthProbes(t *testing.T) {
 	var buf bytes.Buffer
 	restore := installTestLogger(&buf)
@@ -180,9 +165,8 @@ func TestRequestLogger_SkipsHealthProbes(t *testing.T) {
 	}
 }
 
-// TestRecoverer_PanicCarriesRequestID is the critical test: a panic in the
-// handler must produce a log line that carries the request_id. This validates
-// the middleware order (requestID outermost, recoverer inside it).
+// Validates middleware order: a panic must produce a log line that carries the
+// request_id (requestID outermost, recoverer inside it).
 func TestRecoverer_PanicCarriesRequestID(t *testing.T) {
 	var buf bytes.Buffer
 	restore := installTestLogger(&buf)
@@ -192,14 +176,12 @@ func TestRecoverer_PanicCarriesRequestID(t *testing.T) {
 		panic("test panic")
 	})
 
-	// requestID → recoverer → handler
 	handler := requestID(recoverer(panicking))
 
 	req := httptest.NewRequest(http.MethodGet, "/boom", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	// Should return 500, not crash.
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected status 500, got %d", rec.Code)
 	}
@@ -221,8 +203,6 @@ func TestRecoverer_PanicCarriesRequestID(t *testing.T) {
 	}
 }
 
-// TestRecoverer_ReturnsInternalServerError verifies that recoverer turns a
-// panic into a clean 500 response.
 func TestRecoverer_ReturnsInternalServerError(t *testing.T) {
 	panicking := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		panic("boom")

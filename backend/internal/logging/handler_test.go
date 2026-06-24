@@ -10,9 +10,6 @@ import (
 	"testing/slogtest"
 )
 
-// TestContextHandler_Conformance runs the stdlib slogtest suite against
-// contextHandler to verify it correctly implements the slog.Handler contract,
-// including WithAttrs and WithGroup delegation.
 func TestContextHandler_Conformance(t *testing.T) {
 	var buf bytes.Buffer
 
@@ -37,8 +34,6 @@ func TestContextHandler_Conformance(t *testing.T) {
 	})
 }
 
-// TestContextHandler_RequestID verifies that the request_id stored in the
-// context via ContextWithRequestID appears in the log output.
 func TestContextHandler_RequestID(t *testing.T) {
 	var buf bytes.Buffer
 	inner := slog.NewJSONHandler(&buf, nil)
@@ -62,8 +57,6 @@ func TestContextHandler_RequestID(t *testing.T) {
 	}
 }
 
-// TestContextHandler_NoRequestID verifies that when no request ID is in the
-// context, the attribute is omitted entirely (not set to empty string).
 func TestContextHandler_NoRequestID(t *testing.T) {
 	var buf bytes.Buffer
 	inner := slog.NewJSONHandler(&buf, nil)
@@ -82,14 +75,13 @@ func TestContextHandler_NoRequestID(t *testing.T) {
 	}
 }
 
-// TestContextHandler_WithAttrsPreservesWrapper verifies that calling WithAttrs
-// returns a handler that still injects request_id from context.
+// Verifies WithAttrs returns a handler that still injects request_id from
+// context (i.e. the wrapper is preserved, not unwrapped).
 func TestContextHandler_WithAttrsPreservesWrapper(t *testing.T) {
 	var buf bytes.Buffer
 	inner := slog.NewJSONHandler(&buf, nil)
 	handler := NewContextHandler(inner)
 
-	// WithAttrs should return a new contextHandler, not an unwrapped inner.
 	child := handler.WithAttrs([]slog.Attr{slog.String("component", "test")})
 	logger := slog.New(child)
 
