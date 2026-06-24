@@ -10,10 +10,10 @@ type Config struct {
 	DatabaseDSN string
 }
 
-func Load() Config {
+func Load() (Config, error) {
 	dsn := os.Getenv(envDatabaseURL)
 	if dsn == "" {
 		dsn = defaultDatabaseURL
 	}
-	return Config{DatabaseDSN: dsn}
+	return Config{DatabaseDSN: dsn}, nil
 }

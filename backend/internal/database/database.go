@@ -2,75 +2,41 @@ package database
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
-	"log"
-	"time"
 
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
-	maxOpenConns    = 25
-	maxIdleConns    = 5
-	connMaxLifetime = 5 * time.Minute
-	pingTimeout     = 5 * time.Second
+	MaxConns = 10
+	MinConns = 2
 )
 
-type DB struct {
-	gorm *gorm.DB
-	sql  *sql.DB
+type DB interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-func Run(dsn string, fn func(*DB) error) error {
-	db, err := Open(dsn)
+func New(context context.Context, dsn string) (*pgxpool.Pool, error) {
+	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return fmt.Errorf("open database: %w", err)
-	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			log.Printf("close database: %v", err)
-		}
-	}()
-	return fn(db)
-}
-
-func Open(dsn string) (*DB, error) {
-	g, err := gorm.Open(postgres.Open(dsn), &gorm.Config{TranslateError: true})
-	if err != nil {
-		return nil, fmt.Errorf("open gorm postgres: %w", err)
-	}
-
-	s, err := g.DB()
-	if err != nil {
-		return nil, fmt.Errorf("access underlying sql.DB: %w", err)
-	}
-	s.SetMaxOpenConns(maxOpenConns)
-	s.SetMaxIdleConns(maxIdleConns)
-	s.SetConnMaxLifetime(connMaxLifetime)
-
-	db := &DB{gorm: g, sql: s}
-	if err := db.Ping(context.Background()); err != nil {
 		return nil, err
 	}
-	return db, nil
-}
 
-func (db *DB) Gorm() *gorm.DB { return db.gorm }
+	config.MaxConns = MaxConns
+	config.MinConns = MinConns
 
-func (db *DB) Ping(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, pingTimeout)
-	defer cancel()
-	if err := db.sql.PingContext(ctx); err != nil {
-		return fmt.Errorf("ping database: %w", err)
+	pool, err := pgxpool.NewWithConfig(context, config)
+	if err != nil {
+		return nil, err
 	}
-	return nil
-}
 
-func (db *DB) Close() error {
-	if err := db.sql.Close(); err != nil {
-		return fmt.Errorf("close database: %w", err)
+	if err := pool.Ping(context); err != nil {
+		pool.Close()
+		return nil, err
 	}
-	return nil
+
+	return pool, nil
 }

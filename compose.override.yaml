@@ -10,12 +10,15 @@ services:
       - ./backend:/app
       - backend-go-build:/root/.cache/go-build
       - backend-go-mod:/go/pkg/mod
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
-      interval: 10s
-      timeout: 3s
-      start_period: 5s
-      retries: 3
+
+  migrate:
+    build:
+      dockerfile: docker/development/Dockerfile
+    entrypoint: [ "go", "run", "./cmd/migrate"]
+    volumes:
+      - ./backend:/app
+      - backend-go-build:/root/.cache/go-build
+      - backend-go-mod:/go/pkg/mod
 
   frontend:
     volumes:

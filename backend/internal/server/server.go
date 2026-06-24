@@ -2,66 +2,55 @@ package server
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"log"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
-
-	"github.com/gorilla/mux"
-
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
 
 const (
-	serverAddr = ":8080"
-	healthPath = "/healthz"
-	apiPrefix  = "/api/v1"
+	livePath    = "/livez"
+	readyPath   = "/readyz"
+	apiV1Prefix = "/api/v1"
 
-	readTimeout     = 5 * time.Second
-	writeTimeout    = 10 * time.Second
-	idleTimeout     = 60 * time.Second
-	shutdownTimeout = 10 * time.Second
+	readTimeout = 2 * time.Second
 )
 
-func New(db *database.DB) *http.Server {
-	router := mux.NewRouter()
-	router.Use(logging)
-	router.HandleFunc(healthPath, health(db)).Methods(http.MethodGet)
-
-	api := router.PathPrefix(apiPrefix).Subrouter()
-	api.HandleFunc("/ping", ping).Methods(http.MethodGet)
-	organization.NewHandler(organization.NewStore(db.Gorm())).RegisterRoutes(api)
-
-	return &http.Server{
-		Addr:         serverAddr,
-		Handler:      router,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-		IdleTimeout:  idleTimeout,
-	}
+type Pinger interface {
+	Ping(context.Context) error
 }
 
-func Run(srv *http.Server) error {
-	go func() {
-		log.Printf("Listening on port %s\n", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
-		}
-	}()
+type Registerer interface {
+	Register(*http.ServeMux)
+}
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+func New(db Pinger, features ...Registerer) http.Handler {
+	root := http.NewServeMux()
 
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		return fmt.Errorf("shutdown server: %w", err)
+	root.HandleFunc(livePath, live)
+	root.HandleFunc(readyPath, ready(db))
+
+	v1 := http.NewServeMux()
+	for _, f := range features {
+		f.Register(v1)
 	}
-	return nil
+	root.Handle(apiV1Prefix+"/", http.StripPrefix(apiV1Prefix, v1))
+
+	return root
+}
+
+func live(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}
+
+func ready(db Pinger) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+		defer cancel()
+
+		if err := db.Ping(ctx); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}
 }
