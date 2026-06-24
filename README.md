@@ -3,22 +3,13 @@
 SaaS business wallet based on [Yivi](https://yivi.app). Multi-tenant
 (organizations), with authentication via Yivi.
 
-> **Status:** early scaffold. The backend currently exposes a health check and a
-> ping endpoint; the frontend is a minimal React + Vite app. Multi-tenancy and
-> Yivi authentication are not implemented yet.
-
 ## Repository layout
 
 ```
-backend/    Go (gorilla/mux) HTTP API
+backend/    Go (stdlib net/http) HTTP API
 frontend/   React 19 + Vite + TypeScript + react-router
 compose.yaml + compose.override.yaml   Docker Compose dev/prod orchestration
 ```
-
-Endpoints available today:
-
-- `GET /healthz` — health check (`{"status":"ok"}`)
-- `GET /api/v1/ping` — ping (`{"message":"pong"}`)
 
 ## Prerequisites
 
@@ -28,17 +19,17 @@ Endpoints available today:
 
 ## Quick start (Docker Compose)
 
-`compose.override.yaml` is applied automatically and wires up live-reload for
-development (air for the backend, Vite dev server for the frontend).
+From the repo root:
 
 ```sh
-docker compose up
+npm run dev           # start full dev environment (DB + migrate + seed + backend + frontend)
+npm run dev:reset     # same, but wipes DB volumes first (clean slate)
 ```
 
 - Frontend: http://localhost:5173
 - Backend: http://localhost:8080
 
-The Vite dev server proxies `/healthz` and `/api` to the backend container, so
+The Vite dev server proxies health probes and `/api` to the backend container, so
 the frontend talks to the backend out of the box.
 
 ## Local development (without Docker)
@@ -47,8 +38,8 @@ the frontend talks to the backend out of the box.
 
 ```sh
 cd backend
-go run .                      # run the server
-go tool air -c .air.toml      # run with live-reload
+go run ./cmd/api                # run the server
+go tool air -c .air.toml        # run with live-reload
 ```
 
 ### Frontend
@@ -83,24 +74,21 @@ npm run dev
 | `gofmt -l .`                 | List unformatted files                 |
 | `go tool air -c .air.toml`   | Run with live-reload                   |
 | `go tool golangci-lint run`  | Lint (pinned version via `go.mod`)     |
+| `go test -race ./...`        | Run tests with race detector           |
 
-Dev tools (`air`, `golangci-lint`) are managed as Go
+Dev tools (`air`, `golangci-lint`, `goose`) are managed as Go
 [tool directives](https://go.dev/doc/modules/managing-dependencies#tools) in
 `backend/go.mod`. Running `go tool <name>` fetches and builds the pinned version
 automatically on first use — no separate install step required.
 
 ## Environment variables
 
-Copy the example file and adjust as needed:
+The backend reads `DATABASE_URL`, `LOG_LEVEL`, `LOG_FORMAT`, and `LOG_SOURCE`
+(sensible local-dev defaults when unset). Compose builds the DSN from root `.env`
+`POSTGRES_*` variables.
 
-```sh
-cp frontend/.env.example frontend/.env
-```
-
-- `VITE_API_BASE_URL` (frontend, optional) — base URL for API requests. Leave
-  empty to use the Vite dev-server proxy.
-
-The backend currently reads no environment variables.
+The frontend reads only `VITE_API_BASE_URL` — leave empty to use the Vite
+dev-server proxy.
 
 ## Pre-commit hooks
 
@@ -110,5 +98,5 @@ Install hooks once after cloning with `npm install` at the repo root.
 
 ## Continuous integration
 
-GitHub Actions (`.github/workflows/ci.yml`) runs format, lint, type-check and
-build for both the frontend and backend on every push and pull request.
+GitHub Actions (`.github/workflows/ci.yml`) runs format, lint, type-check, build,
+and test for both the frontend and backend on every push and pull request.

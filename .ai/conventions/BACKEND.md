@@ -2,7 +2,7 @@
 
 Load when editing `backend/`. General rules (magic values, formatter, scoped changes, no silent error swallowing) live in `AGENTS.md`.
 
-Layout: entry points in `cmd/api` + `cmd/migrate`, packages under `internal/`. `internal/organization` is the canonical domain example — anchor new domains on it.
+Layout: entry points in `cmd/api` + `cmd/migrate` + `cmd/seed`, packages under `internal/`. `internal/organization` is the canonical domain example — anchor new domains on it. `internal/respond` provides JSON response helpers, `HandlerFunc` adapter, and `ApiError`. `internal/seed` populates dev data (runs via the Compose `seed` service).
 
 ## Toolchain
 
@@ -43,7 +43,7 @@ handler → store / client
 ```
 
 - Inject dependencies; no package-level globals for state.
-- No service layer: the store owns persistence + small domain logic (validation, slug derivation). Handlers parse/validate the request, call a store method, map result/error to a response.
+- No service layer: the store owns persistence + small domain logic (validation, slug derivation). Handlers parse/validate the request, call a store method, and use `internal/respond` to write JSON or error responses.
 - Accept interfaces, return structs: constructors return concrete (`func NewStore(...) *Store`); define interfaces in the consumer, listing only the methods it uses.
 - Translate storage errors to package sentinels (`organization.ErrNotFound`, `ErrSlugTaken`) so handlers branch without importing the database driver. Use `%w` wrapping to preserve `errors.Is` matching.
 
