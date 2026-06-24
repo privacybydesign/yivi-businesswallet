@@ -10,10 +10,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/migrate"
 )
 
-const (
-	maxOpenConns = 1
-)
-
 func main() {
 	if err := run(); err != nil {
 		slog.Error("migrate failed", "error", err)
