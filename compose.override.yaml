@@ -21,9 +21,17 @@ services:
       - backend-go-mod:/go/pkg/mod
 
   frontend:
+    build:
+      context: frontend
+      dockerfile: src/docker/development/Dockerfile
+    ports:
+      - "5173:5173"
     volumes:
       - ./frontend:/app
       - frontend-node-modules:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
 
 volumes:
   backend-go-build:
