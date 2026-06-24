@@ -12,6 +12,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/config"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 )
@@ -25,7 +26,7 @@ const (
 
 func main() {
 	if err := run(); err != nil {
-		slog.Error("startup failed", "error", err)
+		slog.Error("fatal error", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 }
@@ -38,6 +39,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
+	logging.Setup(cfg.LogLevel, cfg.LogFormat, cfg.LogSource)
 
 	startupCtx, cancel := context.WithTimeout(ctx, pingTimeout)
 	defer cancel()
@@ -58,15 +61,22 @@ func run() error {
 	shutdownErr := make(chan error, 1)
 	go func() {
 		<-ctx.Done()
+		slog.Info("shutting down server")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		shutdownErr <- httpServer.Shutdown(shutdownCtx)
 	}()
 
-	slog.Info("starting server", "addr", httpServer.Addr)
+	slog.Info("starting server", slog.String("addr", httpServer.Addr))
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 
-	return <-shutdownErr
+	if err := <-shutdownErr; err != nil {
+		slog.Error("shutdown error", slog.String("error", err.Error()))
+		return err
+	}
+
+	slog.Info("server stopped")
+	return nil
 }

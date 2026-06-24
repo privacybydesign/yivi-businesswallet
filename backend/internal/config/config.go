@@ -1,19 +1,42 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
-const defaultDatabaseURL = "postgres://postgres:postgres@localhost:5432/yivi_business_wallet?sslmode=disable"
+const (
+	envDatabaseURL = "DATABASE_URL"
+	envLogLevel    = "LOG_LEVEL"
+	envLogFormat   = "LOG_FORMAT"
+	envLogSource   = "LOG_SOURCE"
 
-const envDatabaseURL = "DATABASE_URL"
+	defaultDatabaseURL = "postgres://postgres:postgres@localhost:5432/yivi_business_wallet?sslmode=disable"
+	defaultLogLevel    = "info"
+	defaultLogFormat   = "text"
+	defaultLogSource   = "true"
+)
 
 type Config struct {
 	DatabaseDSN string
+	LogLevel    string
+	LogFormat   string
+	LogSource   bool
 }
 
 func Load() (Config, error) {
-	dsn := os.Getenv(envDatabaseURL)
-	if dsn == "" {
-		dsn = defaultDatabaseURL
+	return Config{
+		DatabaseDSN: envOrDefault(envDatabaseURL, defaultDatabaseURL),
+		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
+		LogFormat:   envOrDefault(envLogFormat, defaultLogFormat),
+		LogSource:   strings.EqualFold(envOrDefault(envLogSource, defaultLogSource), "true"),
+	}, nil
+}
+
+func envOrDefault(key, fallback string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
 	}
-	return Config{DatabaseDSN: dsn}, nil
+	return v
 }

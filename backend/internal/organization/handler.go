@@ -34,13 +34,21 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		slog.ErrorContext(r.Context(), "failed to get organization",
+			slog.String("error", err.Error()),
+			slog.Int64("organization_id", id),
+		)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"id": "` + org.ID.String() + `", "name": "` + org.Name + `"}`))
+	if _, err := w.Write([]byte(`{"id": "` + org.ID.String() + `", "name": "` + org.Name + `"}`)); err != nil {
+		slog.ErrorContext(r.Context(), "failed to write response",
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -50,19 +58,40 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.Error("failed to list organizations", "error", err)
+		slog.ErrorContext(r.Context(), "failed to list organizations",
+			slog.String("error", err.Error()),
+		)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`[`))
+	if _, err := w.Write([]byte(`[`)); err != nil {
+		slog.ErrorContext(r.Context(), "failed to write response",
+			slog.String("error", err.Error()),
+		)
+		return
+	}
 	for i, org := range orgs {
 		if i > 0 {
-			w.Write([]byte(`,`))
+			if _, err := w.Write([]byte(`,`)); err != nil {
+				slog.ErrorContext(r.Context(), "failed to write response",
+					slog.String("error", err.Error()),
+				)
+				return
+			}
 		}
-		w.Write([]byte(`{"id": "` + org.ID.String() + `", "name": "` + org.Name + `"}`))
+		if _, err := w.Write([]byte(`{"id": "` + org.ID.String() + `", "name": "` + org.Name + `"}`)); err != nil {
+			slog.ErrorContext(r.Context(), "failed to write response",
+				slog.String("error", err.Error()),
+			)
+			return
+		}
 	}
-	w.Write([]byte(`]`))
+	if _, err := w.Write([]byte(`]`)); err != nil {
+		slog.ErrorContext(r.Context(), "failed to write response",
+			slog.String("error", err.Error()),
+		)
+	}
 }

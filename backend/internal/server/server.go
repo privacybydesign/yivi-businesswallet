@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -34,7 +35,7 @@ func New(db Pinger, features ...Registerer) http.Handler {
 	}
 	root.Handle(apiV1Prefix+"/", http.StripPrefix(apiV1Prefix, v1))
 
-	return root
+	return defaultMiddleware()(root)
 }
 
 func live(w http.ResponseWriter, _ *http.Request) {
@@ -42,11 +43,14 @@ func live(w http.ResponseWriter, _ *http.Request) {
 }
 
 func ready(db Pinger) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), readTimeout)
 		defer cancel()
 
 		if err := db.Ping(ctx); err != nil {
+			slog.ErrorContext(r.Context(), "readiness probe failed",
+				slog.String("error", err.Error()),
+			)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
