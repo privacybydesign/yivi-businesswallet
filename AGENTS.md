@@ -73,9 +73,9 @@ Backend + frontend:
 
 ## Gotchas
 
-- **Vite proxy hardcodes `http://backend:8080`** (`frontend/vite.config.ts`) — health probes and `/api` only proxy inside Docker. Non-Docker dev: run backend on `:8080`, set `VITE_API_BASE_URL=http://localhost:8080` in `frontend/.env`.
+- **Vite proxy hardcodes `http://backend:8080`** (`frontend/vite.config.ts`) — health probes and `/api` only proxy inside Docker (dev). For the static production frontend there is no proxy: set `VITE_API_BASE_URL` at build time to point at the centralized backend.
 - **Pre-commit runs lint-staged twice**: root `package.json` (`gofmt -w`) + `frontend/.lintstagedrc.json` (prettier + eslint). Install hooks once with `npm install` at the repo root.
-- **Config is env-driven**: backend reads `DATABASE_URL`, `LOG_LEVEL`, `LOG_FORMAT`, `LOG_SOURCE` (local-dev defaults when unset); Compose builds the DSN from root `.env` `POSTGRES_*`. Frontend reads only `VITE_API_BASE_URL`.
+- **Config is env-driven**: backend requires `DATABASE_URL` (errors at startup if unset) and reads optional `LOG_LEVEL`, `LOG_FORMAT`, `LOG_SOURCE` (defaults when unset); Compose builds the DSN from root `.env` `POSTGRES_*`. Frontend reads only `VITE_API_BASE_URL`.
 - **Migrations run as a dedicated Compose service**, never on API startup and never via air `pre_cmd`. The `migrate` service runs `cmd/migrate` before the API starts; deploy/k8s runs `go run ./cmd/migrate`. Health probes: `/livez` (liveness, always 200) and `/readyz` (readiness, pings DB).
 - **Dev Compose also runs a `seed` service** (`cmd/seed`) after migrations — populates dev data.
 - **`npm run dev` / `npm run dev:reset`** (repo root): bootstraps the full Docker dev environment. `dev:reset` wipes DB volumes first for a clean slate.

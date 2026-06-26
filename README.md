@@ -32,24 +32,6 @@ npm run dev:reset     # same, but wipes DB volumes first (clean slate)
 The Vite dev server proxies health probes and `/api` to the backend container, so
 the frontend talks to the backend out of the box.
 
-## Local development (without Docker)
-
-### Backend
-
-```sh
-cd backend
-go run ./cmd/api                # run the server
-go tool air -c .air.toml        # run with live-reload
-```
-
-### Frontend
-
-```sh
-cd frontend
-npm ci
-npm run dev
-```
-
 ## Scripts & tooling
 
 ### Frontend (`cd frontend`)
@@ -83,12 +65,14 @@ automatically on first use — no separate install step required.
 
 ## Environment variables
 
-The backend reads `DATABASE_URL`, `LOG_LEVEL`, `LOG_FORMAT`, and `LOG_SOURCE`
-(sensible local-dev defaults when unset). Compose builds the DSN from root `.env`
-`POSTGRES_*` variables.
+The backend requires `DATABASE_URL` and reads optional `LOG_LEVEL`, `LOG_FORMAT`,
+and `LOG_SOURCE` (sensible defaults when unset). Compose builds `DATABASE_URL`
+from root `.env` `POSTGRES_*` variables; in production it is supplied by the
+deployment (e.g. a Kubernetes secret).
 
 The frontend reads only `VITE_API_BASE_URL` — leave empty to use the Vite
-dev-server proxy.
+dev-server proxy; set it at build time to point the static frontend at a
+centralized backend in production.
 
 ## Pre-commit hooks
 

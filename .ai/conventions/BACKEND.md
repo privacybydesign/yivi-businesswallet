@@ -57,7 +57,7 @@ handler → store / client
 
 ## Config
 
-- Read config/secrets from the environment via `internal/config` (`DATABASE_URL`, `LOG_LEVEL`, `LOG_FORMAT`, `LOG_SOURCE`; local-dev defaults). Never hardcode ports, hosts, regions.
+- Read config/secrets from the environment via `internal/config`: `DATABASE_URL` is required (startup errors if unset); `LOG_LEVEL`, `LOG_FORMAT`, `LOG_SOURCE` are optional with defaults. Never hardcode ports, hosts, regions.
 - Group packages by domain as the codebase grows.
 
 ## Testing
