@@ -21,6 +21,8 @@ const (
 	envSessionTTL          = "SESSION_TTL"
 	envSessionPruneEvery   = "SESSION_PRUNE_INTERVAL"
 
+	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
+
 	defaultLogLevel  = "info"
 	defaultLogFormat = "text"
 	defaultLogSource = "true"
@@ -47,6 +49,8 @@ type Config struct {
 	SessionCookieSecure bool
 	SessionTTL          time.Duration
 	SessionPruneEvery   time.Duration
+
+	PlatformAdminEmails []string
 }
 
 func Load() (Config, error) {
@@ -85,7 +89,23 @@ func Load() (Config, error) {
 		SessionCookieSecure: cookieSecure,
 		SessionTTL:          sessionTTL,
 		SessionPruneEvery:   sessionPruneEvery,
+
+		PlatformAdminEmails: parseList(os.Getenv(envPlatformAdminEmails)),
 	}, nil
+}
+
+func parseList(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func envOrDefault(key, fallback string) string {

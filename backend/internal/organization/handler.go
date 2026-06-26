@@ -1,51 +1,55 @@
 package organization
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
+	"strings"
 
+	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
-type Handler struct {
-	store *Store
+type repository interface {
+	List(ctx context.Context) ([]Organization, error)
+	Create(ctx context.Context, name, slug string) (Organization, error)
+	GetByID(ctx context.Context, id uuid.UUID) (Organization, error)
+	GetBySlug(ctx context.Context, slug string) (Organization, error)
+	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
+	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
+	ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, error)
 }
 
-func NewHandler(store *Store) *Handler {
-	return &Handler{store: store}
+type Handler struct {
+	store       repository
+	requireUser func(http.Handler) http.Handler
+	admins      auth.PlatformAdmins
+}
+
+func NewHandler(store repository, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
+	return &Handler{store: store, requireUser: requireUser, admins: admins}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	mux.Handle("GET /organizations/{id}", respond.HandlerFunc(h.get))
-	mux.Handle("GET /organizations", respond.HandlerFunc(h.list))
-}
-
-func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		return &respond.APIError{
-			Status:  http.StatusBadRequest,
-			Code:    "invalid_id",
-			Message: "invalid id",
-		}
+	platform := func(next http.Handler) http.Handler {
+		return h.requireUser(auth.RequirePlatformAdmin(h.admins)(next))
+	}
+	orgScoped := func(next http.Handler) http.Handler {
+		return h.requireUser(h.Authorize(next))
 	}
 
-	org, err := h.store.GetByID(r.Context(), id)
-	if errors.Is(err, ErrNotFound) {
-		return &respond.APIError{
-			Status:  http.StatusNotFound,
-			Code:    "org_not_found",
-			Message: "organization not found",
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("getting organization %d: %w", id, err)
-	}
+	mux.Handle("GET /organizations", platform(respond.HandlerFunc(h.list)))
+	mux.Handle("POST /organizations", platform(respond.HandlerFunc(h.create)))
+	mux.Handle("GET /organizations/{id}", platform(respond.HandlerFunc(h.get)))
 
-	respond.JSON(w, r, http.StatusOK, org)
-	return nil
+	mux.Handle("GET /me/organizations", h.requireUser(respond.HandlerFunc(h.listForUser)))
+
+	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
+	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {
@@ -53,7 +57,90 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("listing organizations: %w", err)
 	}
-
 	respond.JSON(w, r, http.StatusOK, orgs)
 	return nil
+}
+
+type createRequest struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+func (h *Handler) create(w http.ResponseWriter, r *http.Request) error {
+	var req createRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return badRequest("invalid_body", "invalid request body")
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.Slug = strings.TrimSpace(req.Slug)
+	if req.Name == "" || req.Slug == "" {
+		return badRequest("invalid_input", "name and slug are required")
+	}
+
+	org, err := h.store.Create(r.Context(), req.Name, req.Slug)
+	if errors.Is(err, ErrSlugTaken) {
+		return &respond.APIError{Status: http.StatusConflict, Code: "slug_taken", Message: "slug already taken"}
+	}
+	if err != nil {
+		return fmt.Errorf("creating organization: %w", err)
+	}
+
+	respond.JSON(w, r, http.StatusCreated, org)
+	return nil
+}
+
+func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid id")
+	}
+
+	org, err := h.store.GetByID(r.Context(), id)
+	if errors.Is(err, ErrNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "org_not_found", Message: "organization not found"}
+	}
+	if err != nil {
+		return fmt.Errorf("getting organization %s: %w", id, err)
+	}
+
+	respond.JSON(w, r, http.StatusOK, org)
+	return nil
+}
+
+func (h *Handler) listForUser(w http.ResponseWriter, r *http.Request) error {
+	u := auth.UserFromContext(r.Context())
+	orgs, err := h.store.ListForUser(r.Context(), u.ID)
+	if err != nil {
+		return fmt.Errorf("listing organizations for user: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, orgs)
+	return nil
+}
+
+type orgDetailResponse struct {
+	Organization
+	Role string `json:"role"`
+}
+
+func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
+	respond.JSON(w, r, http.StatusOK, orgDetailResponse{
+		Organization: OrgFromContext(ctx),
+		Role:         roleFromContext(ctx),
+	})
+	return nil
+}
+
+func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
+	org := OrgFromContext(r.Context())
+	members, err := h.store.ListMembers(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("listing members: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, members)
+	return nil
+}
+
+func badRequest(code, msg string) error {
+	return &respond.APIError{Status: http.StatusBadRequest, Code: code, Message: msg}
 }

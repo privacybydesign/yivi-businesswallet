@@ -86,10 +86,14 @@ func run() error {
 
 	startSessionPruner(ctx, sessionStore, cfg.SessionPruneEvery)
 
+	requireUser := auth.RequireUser(sessionStore)
+	platformAdmins := auth.NewPlatformAdmins(cfg.PlatformAdminEmails)
+	orgHandler := organization.NewHandler(organization.NewStore(pool), requireUser, platformAdmins)
+
 	handler := server.New(
 		pool,
 		authHandler,
-		organization.NewHandler(organization.NewStore(pool)),
+		orgHandler,
 	)
 
 	httpServer := &http.Server{

@@ -13,7 +13,7 @@ backend/      Go HTTP API (stdlib net/http, Go 1.22+ pattern routing)
   internal/database/     pgx/v5 Postgres pool lifecycle
   internal/logging/      slog setup + context-aware handler (request ID injection)
   internal/migrate/      embedded goose migrations/*.sql
-  internal/organization/ domain slice (model + store + handler)
+  internal/organization/ domain slice (orgs + memberships + org-scoped authz)
   internal/respond/      JSON response helpers, HandlerFunc adapter, ApiError
   internal/seed/         dev seed logic
   internal/server/       router assembly, middleware, lifecycle
@@ -77,7 +77,8 @@ Backend + frontend:
 
 - **Vite proxy hardcodes `http://backend:8080`** (`frontend/vite.config.ts`) — health probes and `/api` only proxy inside Docker (dev). For the static production frontend there is no proxy: set `VITE_API_BASE_URL` at build time to point at the centralized backend.
 - **Pre-commit runs lint-staged twice**: root `package.json` (`gofmt -w`) + `frontend/.lintstagedrc.json` (prettier + eslint). Install hooks once with `npm install` at the repo root.
-- **Config is env-driven**: backend requires `DATABASE_URL` (errors at startup if unset) and reads optional `LOG_LEVEL`, `LOG_FORMAT`, `LOG_SOURCE` (defaults when unset); Compose builds the DSN from root `.env` `POSTGRES_*`. Frontend reads only `VITE_API_BASE_URL`.
+- **Config is env-driven**: backend requires `DATABASE_URL` (errors at startup if unset) and reads optional `LOG_LEVEL`, `LOG_FORMAT`, `LOG_SOURCE`, `PLATFORM_ADMIN_EMAILS` (comma-separated, defaults when unset); Compose builds the DSN from root `.env` `POSTGRES_*`. Frontend reads only `VITE_API_BASE_URL`.
+- **Multi-tenancy is unified-identity-per-deployment, swapped by config not code.** One deployment's DB holds one global user per email, linked to orgs via `memberships`; sessions and `/api/v1/auth/*` + `/me*` are central (slug-free). Org-scoped data lives under `/api/v1/orgs/{slug}/...` — `organization.Handler.Authorize` (after `auth.RequireUser`) resolves the slug, lets platform admins through, else requires a membership, and stashes the org + effective role in context (`OrgFromContext`); `RequireOrgAdmin` gates admin-only routes. **Bring-your-own-storage = a self-hosted deployment pointed at the tenant's own `DATABASE_URL`** — their users/orgs are separate because it's a different DB, no per-request routing. Per-tenant *business data* doesn't exist yet; when it does, it gets per-org RLS isolation (see git history / the multi-tenancy plan) behind the unchanged `database.DB` store interface — as does the central-API-to-external-DB variant. Neither is built yet.
 - **Migrations run as a dedicated Compose service**, never on API startup and never via air `pre_cmd`. The `migrate` service runs `cmd/migrate` before the API starts; deploy/k8s runs `go run ./cmd/migrate`. Health probes: `/livez` (liveness, always 200) and `/readyz` (readiness, pings DB).
 - **Dev Compose also runs a `seed` service** (`cmd/seed`) after migrations — populates dev data.
 - **`npm run dev` / `npm run dev:reset`** (repo root): bootstraps the full Docker dev environment. `dev:reset` wipes DB volumes first for a clean slate.

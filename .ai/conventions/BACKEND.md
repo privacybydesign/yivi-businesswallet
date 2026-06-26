@@ -50,6 +50,7 @@ handler → store / client                (pure CRUD — no service)
 - Accept interfaces, return structs: constructors return concrete (`func NewStore(...) *Store`); define interfaces in the consumer, listing only the methods it uses.
 - Translate storage errors to package sentinels (`organization.ErrNotFound`, `ErrSlugTaken`) so handlers branch without importing the database driver. Use `%w` wrapping to preserve `errors.Is` matching.
 - Accepted cross-domain seam: `session.Lookup` runs one `sessions JOIN users` query and returns `user.User`. Keep this single-query seam; do not split it behind the service.
+- **Tenant access seam:** org-scoped routes (`/orgs/{slug}/...`) compose `auth.RequireUser` → `organization.Handler.Authorize` (resolves the org, platform-admin-or-member check, stashes org + role in context) → optional `organization.RequireOrgAdmin`. New org-scoped slices read the org via `organization.OrgFromContext` and register their routes the same way; identity (users/sessions) stays central and slug-free.
 
 ## Errors & Logging
 

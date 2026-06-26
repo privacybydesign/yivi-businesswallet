@@ -38,6 +38,7 @@ services:
       IRMA_REQUESTOR_URL: ${IRMA_REQUESTOR_URL:-http://irma:8088}
       IRMA_REQUESTOR_TOKEN: ${IRMA_REQUESTOR_TOKEN:-}
       IRMA_EMAIL_ATTRIBUTE: ${IRMA_EMAIL_ATTRIBUTE:-irma-demo.sidn-pbdf.email.email}
+      PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-admin@yivi.app}
     depends_on:
       seed:
         condition: service_completed_successfully
