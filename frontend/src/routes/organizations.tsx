@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useMyOrganizationsQuery } from "../api/organization.queries";
 import { Avatar, Card, Input, TopBar } from "../ui";
 import * as React from "react";
 
 export default function Organizations(): React.JSX.Element {
+  const { t } = useTranslation();
   const { data, isPending, isError, error } = useMyOrganizationsQuery();
   const [query, setQuery] = useState("");
 
@@ -22,20 +24,20 @@ export default function Organizations(): React.JSX.Element {
   return (
     <>
       <TopBar
-        title="Organizations"
+        title={t("organizations.title")}
         subtitle={
           isPending
-            ? "Loading…"
-            : `${data?.length ?? 0} organization${data?.length === 1 ? "" : "s"}`
+            ? t("common.loading")
+            : t("organizations.count", { count: data?.length ?? 0 })
         }
         actions={
           <div className="w-64">
             <Input
               icon="search"
-              placeholder="Search organizations"
+              placeholder={t("organizations.searchPlaceholder")}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              aria-label="Search organizations"
+              aria-label={t("organizations.searchPlaceholder")}
             />
           </div>
         }
@@ -45,7 +47,7 @@ export default function Organizations(): React.JSX.Element {
         {isError ? (
           <Card className="p-6">
             <p className="text-[14px] text-error">
-              Could not load organizations: {error.message}
+              {t("organizations.loadError", { message: error.message })}
             </p>
           </Card>
         ) : (
@@ -54,10 +56,10 @@ export default function Organizations(): React.JSX.Element {
               <thead>
                 <tr>
                   <th className="border-b border-line bg-surface-2 px-3.5 py-2.5 text-left font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-muted">
-                    Organization
+                    {t("organizations.columnOrganization")}
                   </th>
                   <th className="border-b border-line bg-surface-2 px-3.5 py-2.5 text-left font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-muted">
-                    Slug
+                    {t("common.slug")}
                   </th>
                 </tr>
               </thead>
@@ -65,15 +67,15 @@ export default function Organizations(): React.JSX.Element {
                 {isPending ? (
                   <tr>
                     <td className="px-3.5 py-3 text-ink-soft" colSpan={2}>
-                      Loading…
+                      {t("common.loading")}
                     </td>
                   </tr>
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td className="px-3.5 py-3 text-ink-soft" colSpan={2}>
                       {data && data.length > 0
-                        ? "No organizations match your search."
-                        : "No organizations found."}
+                        ? t("organizations.noMatch")
+                        : t("organizations.none")}
                     </td>
                   </tr>
                 ) : (

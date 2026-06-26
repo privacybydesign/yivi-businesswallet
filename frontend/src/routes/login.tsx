@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import * as yivi from "@privacybydesign/yivi-frontend";
 import "@privacybydesign/yivi-css";
@@ -15,6 +17,7 @@ const AUTH_SESSION_URL = "/api/v1/auth/session";
 type LoginPhase = "idle" | "running" | "claiming" | "error";
 
 export default function Login(): React.JSX.Element {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<LoginPhase>("running");
@@ -58,7 +61,7 @@ export default function Login(): React.JSX.Element {
           if (cancelled) {
             return;
           }
-          handleClaimError(error, setPhase, setMessage);
+          handleClaimError(error, setPhase, setMessage, t);
         }
       })
       .catch(() => {
@@ -66,14 +69,14 @@ export default function Login(): React.JSX.Element {
           return;
         }
         setPhase("idle");
-        setMessage("Login was not completed. Please try again.");
+        setMessage(t("login.notCompleted"));
       });
 
     return () => {
       cancelled = true;
       void yiviWeb.abort();
     };
-  }, [navigate, queryClient]);
+  }, [navigate, queryClient, t]);
 
   const showMessage = phase === "error" || (phase === "idle" && message !== "");
 
@@ -83,14 +86,16 @@ export default function Login(): React.JSX.Element {
         <div className="flex justify-center">
           <Logo />
         </div>
-        <h1 className="mt-6 text-center text-[24px] font-bold">Sign in</h1>
+        <h1 className="mt-6 text-center text-[24px] font-bold">
+          {t("login.title")}
+        </h1>
         <p className="mt-1 text-center text-[14px] text-ink-soft">
-          Use your Yivi app to sign in to the business wallet.
+          {t("login.subtitle")}
         </p>
 
         {phase === "claiming" && (
           <p className="mt-4 text-center text-[14px] text-ink-soft">
-            Completing sign-in…
+            {t("login.completing")}
           </p>
         )}
         {showMessage && (
@@ -114,12 +119,13 @@ function handleClaimError(
   error: unknown,
   setPhase: (p: LoginPhase) => void,
   setMessage: (m: string) => void,
+  t: TFunction,
 ): void {
   if (error instanceof ApiError && error.status === 422) {
     setPhase("error");
-    setMessage("This credential can't be used to sign in.");
+    setMessage(t("login.credentialRejected"));
     return;
   }
   setPhase("idle");
-  setMessage("Sign-in could not be completed. Please try again.");
+  setMessage(t("login.failed"));
 }

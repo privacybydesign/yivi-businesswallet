@@ -1,10 +1,12 @@
 import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useMeQuery } from "../api/auth.queries";
 import { useMyOrganizationsQuery } from "../api/organization.queries";
 import { Button, Card, Stat, TopBar } from "../ui";
 import * as React from "react";
 
 export default function Home(): React.JSX.Element {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: me } = useMeQuery();
   const organizations = useMyOrganizationsQuery();
@@ -14,41 +16,38 @@ export default function Home(): React.JSX.Element {
   return (
     <>
       <TopBar
-        title="Dashboard"
+        title={t("home.title")}
         subtitle={
-          me ? `Welcome back, ${me.email}` : "Your organizations at a glance"
+          me ? t("home.welcome", { email: me.email }) : t("home.subtitle")
         }
       />
 
       <div className="flex flex-col gap-6 p-8">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat
-            label="Organizations"
+            label={t("home.statOrganizations")}
             value={organizations.isPending ? "—" : orgCount}
-            hint="Total managed"
+            hint={t("home.statOrganizationsHint")}
             icon="personal"
           />
           <Stat
-            label="Attestations issued"
+            label={t("home.statAttestations")}
             value="0"
-            hint="Coming soon"
+            hint={t("home.comingSoon")}
             icon="valid"
           />
           <Stat
-            label="Documents to sign"
+            label={t("home.statDocuments")}
             value="0"
-            hint="Coming soon"
+            hint={t("home.comingSoon")}
             icon="edit"
           />
         </div>
 
         <Card variant="highlight" className="p-6">
-          <h2 className="text-[18px] font-semibold">
-            Manage your organizations
-          </h2>
+          <h2 className="text-[18px] font-semibold">{t("home.manageTitle")}</h2>
           <p className="mt-1 max-w-xl text-[14px] text-ink-soft">
-            Review the organizations connected to your business wallet, their
-            details, and the credentials they can issue.
+            {t("home.manageBody")}
           </p>
           <div className="mt-4">
             <Button
@@ -56,7 +55,7 @@ export default function Home(): React.JSX.Element {
               icon="arrow_front"
               onClick={() => void navigate("/organizations")}
             >
-              View organizations
+              {t("home.viewOrganizations")}
             </Button>
           </div>
         </Card>

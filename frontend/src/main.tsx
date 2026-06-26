@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { router } from "./router";
 import { setUnauthorizedHandler } from "./api/http";
 import { meQueryKey } from "./api/auth.queries";
+import "./i18n";
 import "./index.css";
 
 const STALE_TIME_MS = 30_000;

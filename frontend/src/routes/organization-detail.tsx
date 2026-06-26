@@ -1,4 +1,6 @@
 import { useParams } from "react-router";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   useOrganizationMembersQuery,
   useOrganizationQuery,
@@ -9,17 +11,18 @@ import { Avatar, Card, Tag, TopBar } from "../ui";
 const FORBIDDEN_STATUS = 403;
 const NOT_FOUND_STATUS = 404;
 
-function accessMessage(error: Error): string {
+function accessMessage(error: Error, t: TFunction): string {
   if (error instanceof ApiError && error.status === FORBIDDEN_STATUS) {
-    return "You are not a member of this organization.";
+    return t("organizationDetail.notMember");
   }
   if (error instanceof ApiError && error.status === NOT_FOUND_STATUS) {
-    return "This organization does not exist.";
+    return t("organizationDetail.notExist");
   }
   return error.message;
 }
 
 export default function OrganizationDetail(): React.JSX.Element {
+  const { t } = useTranslation();
   const { orgSlug } = useParams();
   const slug = orgSlug ?? "";
 
@@ -30,10 +33,12 @@ export default function OrganizationDetail(): React.JSX.Element {
   if (org.isError) {
     return (
       <>
-        <TopBar title={slug} subtitle="Organization" />
+        <TopBar title={slug} subtitle={t("organizationDetail.subtitle")} />
         <div className="p-8">
           <Card className="p-6">
-            <p className="text-[14px] text-error">{accessMessage(org.error)}</p>
+            <p className="text-[14px] text-error">
+              {accessMessage(org.error, t)}
+            </p>
           </Card>
         </div>
       </>
@@ -44,7 +49,11 @@ export default function OrganizationDetail(): React.JSX.Element {
     <>
       <TopBar
         title={org.data?.name ?? slug}
-        subtitle={org.isPending ? "Loading…" : `Your role: ${org.data?.role}`}
+        subtitle={
+          org.isPending
+            ? t("common.loading")
+            : t("organizationDetail.role", { role: org.data?.role ?? "" })
+        }
         actions={
           org.data ? (
             <Tag tone={isAdmin ? "blue" : "default"}>{org.data.role}</Tag>
@@ -54,13 +63,15 @@ export default function OrganizationDetail(): React.JSX.Element {
 
       <div className="flex flex-col gap-6 p-8">
         <Card className="p-6">
-          <h2 className="text-[16px] font-semibold">Details</h2>
+          <h2 className="text-[16px] font-semibold">
+            {t("organizationDetail.details")}
+          </h2>
           <dl className="mt-3 grid grid-cols-[120px_1fr] gap-y-2 text-[13.5px]">
-            <dt className="text-muted">Name</dt>
+            <dt className="text-muted">{t("organizationDetail.name")}</dt>
             <dd className="text-ink">{org.data?.name ?? "—"}</dd>
-            <dt className="text-muted">Slug</dt>
+            <dt className="text-muted">{t("common.slug")}</dt>
             <dd className="font-mono text-ink-soft">{org.data?.slug ?? "—"}</dd>
-            <dt className="text-muted">ID</dt>
+            <dt className="text-muted">{t("organizationDetail.id")}</dt>
             <dd className="font-mono text-[12px] text-ink-soft">
               {org.data?.id ?? "—"}
             </dd>
@@ -70,11 +81,15 @@ export default function OrganizationDetail(): React.JSX.Element {
         {isAdmin && (
           <Card className="overflow-hidden">
             <div className="border-b border-line px-6 py-4">
-              <h2 className="text-[16px] font-semibold">Members</h2>
+              <h2 className="text-[16px] font-semibold">
+                {t("organizationDetail.members")}
+              </h2>
             </div>
             {members.isError ? (
               <p className="px-6 py-4 text-[14px] text-error">
-                Could not load members: {members.error.message}
+                {t("organizationDetail.membersLoadError", {
+                  message: members.error.message,
+                })}
               </p>
             ) : (
               <table className="w-full border-collapse text-[13.5px]">
@@ -82,7 +97,7 @@ export default function OrganizationDetail(): React.JSX.Element {
                   {members.isPending ? (
                     <tr>
                       <td className="px-6 py-3 text-ink-soft" colSpan={2}>
-                        Loading…
+                        {t("common.loading")}
                       </td>
                     </tr>
                   ) : (
