@@ -1,0 +1,174 @@
+/* ==========================================================================
+   Yivi Business Wallet — global stylesheet.
+
+   Design tokens are lifted verbatim from the Yivi Design System
+   (`colors_and_type.css` + `ui_kits/business/tokens.css`). They live as plain
+   CSS custom properties on :root so they remain a single source of truth, and
+   `@theme inline` maps them onto Tailwind utilities (bg-*, text-*, font-*, …).
+
+   Dark mode is intentionally out of scope for now, but because every utility
+   resolves through the --yb-* variables, adding a `[data-theme="dark"]` block
+   that overrides them is all it would take.
+   ========================================================================== */
+
+@import url("https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap");
+@import "tailwindcss";
+
+/* --------- Alexandria (display / UI headlines), self-hosted --------- */
+@font-face {
+  font-family: "Alexandria";
+  src: url("./assets/fonts/Alexandria-Light.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Alexandria";
+  src: url("./assets/fonts/Alexandria-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Alexandria";
+  src: url("./assets/fonts/Alexandria-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Alexandria";
+  src: url("./assets/fonts/Alexandria-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Alexandria";
+  src: url("./assets/fonts/Alexandria-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Alexandria";
+  src: url("./assets/fonts/Alexandria-ExtraBold.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* --------- Raw design tokens (single source of truth) --------- */
+:root {
+  /* Brand & ink */
+  --yb-brand: #ba3354; /* rose — accent only */
+  --yb-brand-600: #9a2744;
+  --yb-ink: #484747; /* default text & primary CTA (neutral) */
+  --yb-ink-soft: #757375;
+  --yb-muted: #9f9a9a;
+
+  /* Lines & surfaces */
+  --yb-line: #eae5e2;
+  --yb-line-strong: #d7d2cd;
+  --yb-surface: #ffffff;
+  --yb-surface-2: #faf8f6; /* page bg, slightly warm */
+  --yb-surface-3: #f5f2ef; /* row hover */
+  --yb-highlight: #eaf3f9;
+  --yb-highlight-border: #cfe4ef;
+
+  /* Communicating */
+  --yb-success: #00973a;
+  --yb-success-bg: #e3f4e9;
+  --yb-warning: #eba73b;
+  --yb-warning-fg: #8a5d17;
+  --yb-warning-bg: #fbefd8;
+  --yb-error: #bd1919;
+  --yb-error-bg: #f0dede;
+  --yb-link: #1d4e89;
+
+  /* Primary action colour — neutral ink, per the design system */
+  --yb-primary: var(--yb-ink);
+  --yb-primary-hover: #3a3939;
+  --yb-primary-fg: #ffffff;
+
+  /* Radii & elevation */
+  --yb-radius: 8px;
+  --yb-radius-sm: 6px;
+  --yb-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
+  --yb-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+/* --------- Map tokens onto Tailwind utilities --------- */
+@theme inline {
+  --color-brand: var(--yb-brand);
+  --color-brand-600: var(--yb-brand-600);
+  --color-ink: var(--yb-ink);
+  --color-ink-soft: var(--yb-ink-soft);
+  --color-muted: var(--yb-muted);
+
+  --color-line: var(--yb-line);
+  --color-line-strong: var(--yb-line-strong);
+  --color-surface: var(--yb-surface);
+  --color-surface-2: var(--yb-surface-2);
+  --color-surface-3: var(--yb-surface-3);
+  --color-highlight: var(--yb-highlight);
+  --color-highlight-border: var(--yb-highlight-border);
+
+  --color-success: var(--yb-success);
+  --color-success-bg: var(--yb-success-bg);
+  --color-warning: var(--yb-warning);
+  --color-warning-fg: var(--yb-warning-fg);
+  --color-warning-bg: var(--yb-warning-bg);
+  --color-error: var(--yb-error);
+  --color-error-bg: var(--yb-error-bg);
+  --color-link: var(--yb-link);
+
+  --color-primary: var(--yb-primary);
+  --color-primary-hover: var(--yb-primary-hover);
+  --color-primary-fg: var(--yb-primary-fg);
+
+  --font-display:
+    "Alexandria", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans:
+    "Open Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --radius-yivi: var(--yb-radius);
+  --radius-yivi-sm: var(--yb-radius-sm);
+
+  --shadow-card: var(--yb-shadow);
+  --shadow-card-lg: var(--yb-shadow-lg);
+}
+
+/* --------- Base layer --------- */
+@layer base {
+  body {
+    background-color: var(--yb-surface-2);
+    color: var(--yb-ink);
+    font-family: var(--font-sans), sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display), sans-serif;
+    color: var(--yb-ink);
+  }
+
+  /* Inlined IrmaIcons SVGs: fill follows the surrounding text colour. */
+  .yivi-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    line-height: 0;
+  }
+  .yivi-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    fill: currentColor;
+  }
+}

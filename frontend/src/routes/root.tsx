@@ -1,38 +1,23 @@
-import { NavLink, Outlet } from "react-router";
+import { Outlet } from "react-router";
 import { useMeQuery, useLogoutMutation } from "../api/auth.queries";
+import { Sidebar } from "../ui";
 
 export default function Root(): React.JSX.Element {
   const { data: me, isPending } = useMeQuery();
   const logout = useLogoutMutation();
 
-  const loggedIn = !isPending && me != null;
+  const email = !isPending && me != null ? me.email : null;
 
   return (
-    <>
-      <header>
-        <nav>
-          <NavLink to="/">Home</NavLink>
-          <NavLink to="/organizations">Organizations</NavLink>
-          {loggedIn ? (
-            <>
-              <span>{me.email}</span>
-              <button
-                type="button"
-                onClick={() => logout.mutate()}
-                disabled={logout.isPending}
-              >
-                Logout
-              </button>
-            </>
-          ) : (
-            <NavLink to="/login">Login</NavLink>
-          )}
-        </nav>
-      </header>
-      <main>
+    <div className="flex min-h-screen">
+      <Sidebar
+        email={email}
+        onLogout={() => logout.mutate()}
+        loggingOut={logout.isPending}
+      />
+      <main className="min-w-0 flex-1">
         <Outlet />
       </main>
-      <footer></footer>
-    </>
+    </div>
   );
 }

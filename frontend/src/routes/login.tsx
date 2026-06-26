@@ -6,6 +6,8 @@ import "@privacybydesign/yivi-css";
 import { ApiError } from "../api/http";
 import { claimAuthSession } from "../api/auth";
 import { meQueryKey } from "../api/auth.queries";
+import { Card, Logo } from "../ui";
+import * as React from "react";
 
 const YIVI_ELEMENT_ID = "yivi-web-form";
 const AUTH_SESSION_URL = "/api/v1/auth/session";
@@ -25,6 +27,7 @@ export default function Login(): React.JSX.Element {
     const yiviWeb = yivi.newWeb({
       debugging: import.meta.env.DEV,
       element: `#${YIVI_ELEMENT_ID}`,
+      minimal: true,
       session: {
         url: "",
         start: {
@@ -72,14 +75,38 @@ export default function Login(): React.JSX.Element {
     };
   }, [navigate, queryClient]);
 
+  const showMessage = phase === "error" || (phase === "idle" && message !== "");
+
   return (
-    <section>
-      <h1>Login</h1>
-      {phase === "claiming" && <p>Completing sign-in…</p>}
-      {phase === "error" && <p role="alert">{message}</p>}
-      {phase === "idle" && message !== "" && <p role="alert">{message}</p>}
-      <div id={YIVI_ELEMENT_ID} />
-    </section>
+    <div className="flex min-h-screen items-center justify-center bg-surface-2 p-6">
+      <Card className="w-full max-w-md p-8">
+        <div className="flex justify-center">
+          <Logo />
+        </div>
+        <h1 className="mt-6 text-center text-[24px] font-bold">Sign in</h1>
+        <p className="mt-1 text-center text-[14px] text-ink-soft">
+          Use your Yivi app to sign in to the business wallet.
+        </p>
+
+        {phase === "claiming" && (
+          <p className="mt-4 text-center text-[14px] text-ink-soft">
+            Completing sign-in…
+          </p>
+        )}
+        {showMessage && (
+          <p
+            role="alert"
+            className="mt-4 rounded-yivi bg-error-bg px-3 py-2 text-center text-[13px] text-error"
+          >
+            {message}
+          </p>
+        )}
+
+        <div className="mt-6 flex justify-center">
+          <div id={YIVI_ELEMENT_ID} />
+        </div>
+      </Card>
+    </div>
   );
 }
 
