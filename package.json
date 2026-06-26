@@ -4,6 +4,7 @@
   "scripts": {
     "prepare": "husky",
     "dev": "tsx dev-setup",
+    "dev:debug": "tsx dev-setup --debug",
     "dev:reset": "tsx dev-setup --reset"
   },
   "devDependencies": {

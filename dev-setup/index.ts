@@ -5,13 +5,16 @@ import { copyFileSync, existsSync } from "node:fs";
 
 const execAsync = promisify(execCallback)
 
+process.env.DOCKER_CLI_HINTS = "false";
+process.env.COMPOSE_MENU = "false";
+
 const reset = process.argv.includes('--reset')
+const debug = process.argv.includes('--debug')
 
 const REPO_ROOT_PATH = join(__dirname, '..');
 const BACKEND_PATH = join(REPO_ROOT_PATH, 'backend');
 const FRONTEND_PATH = join(REPO_ROOT_PATH, 'frontend');
 const TIMING_THRESHOLD_MS = 2000;
-
 const IRMA_CLIENT_URL_ENV = "IRMA_CLIENT_URL";
 const CLOUDFLARED_METRICS_URL = "http://localhost:2000/quicktunnel";
 const TUNNEL_POLL_INTERVAL_MS = 1000;
@@ -37,11 +40,12 @@ function spawnAsync(
     command: string,
     args: string[] = [],
     cwd: string,
-    env?: Record<string, string>
+    env?: Record<string, string>,
+    detached = false
 ): Promise<void> {
     return new Promise((resolve, reject) => {
         const childProcess = spawn(command, args, {
-            cwd, stdio: "inherit", env: {
+            cwd, detached, stdio: "inherit", env: {
                 ...process.env,
                 ...(env ?? {}),
             }
@@ -143,10 +147,30 @@ async function startTunnelAndIrma(): Promise<string> {
     return clientUrl;
 }
 
-async function startDockerCompose(clientUrl: string): Promise<void> {
-    console.log("Running docker compose up for the full development stack");
-    await spawnAsync("docker", ["compose", "up"], REPO_ROOT_PATH, {
+async function streamDockerCompose(clientUrl: string): Promise<void> {
+    await spawnAsync(
+        "docker",
+        ["compose", "up"],
+        REPO_ROOT_PATH,
+        { [IRMA_CLIENT_URL_ENV]: clientUrl },
+        true
+    ).catch((error: unknown) => {
+        if (isShuttingDown) {
+            return;
+        }
+        throw error;
+    });
+}
+
+async function startDockerComposeDetached(clientUrl: string): Promise<void> {
+    await spawnAsync("docker", ["compose", "up", "-d"], REPO_ROOT_PATH, {
         [IRMA_CLIENT_URL_ENV]: clientUrl,
+    });
+}
+
+function waitForShutdownSignal(): Promise<never> {
+    return new Promise<never>(() => {
+        setInterval(() => {}, 1 << 30);
     });
 }
 
@@ -168,12 +192,24 @@ async function main() {
         ? (console.log(`${IRMA_CLIENT_URL_ENV} is preset (${presetClientUrl}); skipping auto tunnel`), presetClientUrl)
         : await withTiming("Start Cloudflare tunnel + IRMA daemon", () => startTunnelAndIrma());
 
-    await withTiming("Start Docker compose (full stack)", () => startDockerCompose(clientUrl));
+    if (debug) {
+        const elapsed = ((performance.now() - totalStart) / 1000).toFixed(1);
+        console.log(`\n✓ Setup ready in ${elapsed}s — starting the full development stack (--debug: streaming logs)`);
+        console.log(`Phone-facing IRMA URL (scan target): ${clientUrl}`);
+        console.log("Press CTRL-C to stop Docker containers\n");
+        await streamDockerCompose(clientUrl);
+        return;
+    }
+
+    await withTiming("Start Docker compose (full stack)", () => startDockerComposeDetached(clientUrl));
 
     const totalElapsed = ((performance.now() - totalStart) / 1000).toFixed(1);
     console.log(`\n✓ Development setup complete! (${totalElapsed}s total)`);
     console.log(`Phone-facing IRMA URL (scan target): ${clientUrl}`);
-    console.log("Press CTRL-C to stop Docker containers");
+    console.log("Press CTRL-C to stop Docker containers (stack runs in background; re-run with --debug to stream logs)");
+
+    // Stack runs detached; idle until CTRL-C triggers the SIGINT handler's down.
+    await waitForShutdownSignal();
 }
 
 main().catch(error => {
