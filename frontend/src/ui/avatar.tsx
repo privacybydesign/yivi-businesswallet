@@ -40,7 +40,7 @@ export function Avatar({
   return (
     <span
       className={[
-        "inline-flex shrink-0 items-center justify-center rounded-full font-display font-semibold",
+        "font-display inline-flex shrink-0 items-center justify-center rounded-full font-semibold",
         TONE_CLASSES[tone],
         SIZE_CLASSES[size],
       ].join(" ")}

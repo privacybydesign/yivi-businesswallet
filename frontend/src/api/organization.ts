@@ -45,6 +45,18 @@ export function getMyOrganizations(
   });
 }
 
+export function createOrganization(
+  input: { name: string; slug: string },
+  signal?: AbortSignal,
+): Promise<Organization> {
+  return request("/api/v1/organizations", {
+    schema: organizationSchema,
+    method: "POST",
+    body: input,
+    signal,
+  });
+}
+
 export function getOrganization(
   slug: string,
   signal?: AbortSignal,

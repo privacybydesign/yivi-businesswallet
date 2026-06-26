@@ -81,7 +81,7 @@ export default function Login(): React.JSX.Element {
   const showMessage = phase === "error" || (phase === "idle" && message !== "");
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-2 p-6">
+    <div className="bg-surface-2 flex min-h-screen items-center justify-center p-6">
       <Card className="w-full max-w-md p-8">
         <div className="flex justify-center">
           <Logo />
@@ -89,19 +89,19 @@ export default function Login(): React.JSX.Element {
         <h1 className="mt-6 text-center text-[24px] font-bold">
           {t("login.title")}
         </h1>
-        <p className="mt-1 text-center text-[14px] text-ink-soft">
+        <p className="text-ink-soft mt-1 text-center text-[14px]">
           {t("login.subtitle")}
         </p>
 
         {phase === "claiming" && (
-          <p className="mt-4 text-center text-[14px] text-ink-soft">
+          <p className="text-ink-soft mt-4 text-center text-[14px]">
             {t("login.completing")}
           </p>
         )}
         {showMessage && (
           <p
             role="alert"
-            className="mt-4 rounded-yivi bg-error-bg px-3 py-2 text-center text-[13px] text-error"
+            className="rounded-yivi bg-error-bg text-error mt-4 px-3 py-2 text-center text-[13px]"
           >
             {message}
           </p>

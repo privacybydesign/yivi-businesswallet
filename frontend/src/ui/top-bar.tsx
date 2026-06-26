@@ -12,14 +12,14 @@ export function TopBar({
   actions,
 }: TopBarProps): React.JSX.Element {
   return (
-    <div className="sticky top-0 z-10 border-b border-line bg-surface px-8 pb-[18px] pt-[22px]">
+    <div className="border-line bg-surface sticky top-0 z-10 border-b px-8 pt-[22px] pb-[18px]">
       <div className="flex items-end justify-between gap-5">
         <div>
-          <h1 className="text-[26px] font-bold leading-[1.15] tracking-[-0.01em]">
+          <h1 className="text-[26px] leading-[1.15] font-bold tracking-[-0.01em]">
             {title}
           </h1>
           {subtitle && (
-            <div className="mt-1 text-[12.5px] text-ink-soft">{subtitle}</div>
+            <div className="text-ink-soft mt-1 text-[12.5px]">{subtitle}</div>
           )}
         </div>
         {actions && <div className="flex gap-2">{actions}</div>}

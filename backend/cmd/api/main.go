@@ -81,13 +81,13 @@ func run() error {
 		Secure: cfg.SessionCookieSecure,
 		MaxAge: int(cfg.SessionTTL.Seconds()),
 	}
+	platformAdmins := auth.NewPlatformAdmins(cfg.PlatformAdminEmails)
 	authService := auth.NewService(requestor, userStore, sessionStore, emailAttr)
-	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg)
+	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, platformAdmins)
 
 	startSessionPruner(ctx, sessionStore, cfg.SessionPruneEvery)
 
 	requireUser := auth.RequireUser(sessionStore)
-	platformAdmins := auth.NewPlatformAdmins(cfg.PlatformAdminEmails)
 	orgHandler := organization.NewHandler(organization.NewStore(pool), requireUser, platformAdmins)
 
 	handler := server.New(

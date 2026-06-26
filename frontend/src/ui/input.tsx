@@ -16,11 +16,11 @@ export function Input({
   const field = (
     <input
       className={[
-        "h-9 w-full rounded-yivi border border-line-strong bg-surface text-ink",
-        "text-[13.5px] outline-none transition-colors",
+        "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border",
+        "text-[13.5px] transition-colors outline-none",
         "placeholder:text-muted",
-        "focus:border-ink focus:ring-3 focus:ring-ink/10",
-        icon ? "pl-9 pr-3" : "px-3",
+        "focus:border-ink focus:ring-ink/10 focus:ring-3",
+        icon ? "pr-3 pl-9" : "px-3",
         className ?? "",
       ].join(" ")}
       {...rest}
@@ -36,7 +36,7 @@ export function Input({
       <Icon
         name={icon}
         size={ICON_SIZE}
-        className="absolute left-3 text-muted"
+        className="text-muted absolute left-3"
       />
       {field}
     </div>

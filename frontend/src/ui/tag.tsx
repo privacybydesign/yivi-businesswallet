@@ -24,13 +24,13 @@ export function Tag({
   return (
     <span
       className={[
-        "inline-flex items-center gap-1.5 h-[22px] px-2 rounded-full text-[11.5px] font-semibold",
+        "inline-flex h-[22px] items-center gap-1.5 rounded-full px-2 text-[11.5px] font-semibold",
         TONE_CLASSES[tone],
       ].join(" ")}
     >
       {dot && (
         <span
-          className="w-1.5 h-1.5 rounded-full bg-current"
+          className="h-1.5 w-1.5 rounded-full bg-current"
           aria-hidden="true"
         />
       )}

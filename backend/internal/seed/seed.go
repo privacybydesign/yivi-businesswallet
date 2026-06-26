@@ -33,9 +33,7 @@ type demoMembership struct {
 }
 
 var demoMemberships = []demoMembership{
-	{email: "admin@yivi.app", slug: "yivi", role: "admin"},
-	{email: "admin@yivi.app", slug: "firsty", role: "member"},
-	{email: "user@yivi.app", slug: "yivi", role: "member"},
+	{email: "user@yivi.app", slug: "yivi", role: "admin"},
 	{email: "user@yivi.app", slug: "firsty", role: "member"},
 }
 

@@ -40,7 +40,7 @@ export function Button({
     <button
       type={type}
       className={[
-        "inline-flex items-center justify-center gap-2 rounded-yivi font-display font-semibold whitespace-nowrap",
+        "rounded-yivi font-display inline-flex items-center justify-center gap-2 font-semibold whitespace-nowrap",
         "cursor-pointer transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50",
         VARIANT_CLASSES[variant],
         SIZE_CLASSES[size],

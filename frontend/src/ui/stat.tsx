@@ -20,7 +20,7 @@ export function Stat({
   return (
     <Card className="px-4 py-3.5">
       <div className="flex items-center justify-between">
-        <span className="font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-muted">
+        <span className="text-muted font-mono text-[11px] font-medium tracking-[0.08em] uppercase">
           {label}
         </span>
         {icon && (
@@ -29,10 +29,10 @@ export function Stat({
           </span>
         )}
       </div>
-      <div className="mt-1.5 font-display text-[26px] font-bold tracking-[-0.01em] text-ink">
+      <div className="font-display text-ink mt-1.5 text-[26px] font-bold tracking-[-0.01em]">
         {value}
       </div>
-      {hint && <div className="mt-0.5 text-[12px] text-muted">{hint}</div>}
+      {hint && <div className="text-muted mt-0.5 text-[12px]">{hint}</div>}
     </Card>
   );
 }

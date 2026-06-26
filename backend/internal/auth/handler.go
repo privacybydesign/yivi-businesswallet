@@ -10,19 +10,22 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/irmarequestor"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 type Handler struct {
 	svc      *Service
 	sessions sessionLookuper
 	cookie   CookieConfig
+	admins   PlatformAdmins
 }
 
-func NewHandler(svc *Service, sessions sessionLookuper, cookie CookieConfig) *Handler {
+func NewHandler(svc *Service, sessions sessionLookuper, cookie CookieConfig, admins PlatformAdmins) *Handler {
 	return &Handler{
 		svc:      svc,
 		sessions: sessions,
 		cookie:   cookie,
+		admins:   admins,
 	}
 }
 
@@ -67,14 +70,22 @@ func (h *Handler) claim(w http.ResponseWriter, r *http.Request) error {
 	}
 	setSessionCookie(w, raw, h.cookie)
 
-	respond.JSON(w, r, http.StatusOK, meResponse{ID: u.ID, Email: u.Email})
+	respond.JSON(w, r, http.StatusOK, h.meResponse(u))
 	return nil
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) error {
 	u := UserFromContext(r.Context())
-	respond.JSON(w, r, http.StatusOK, meResponse{ID: u.ID, Email: u.Email})
+	respond.JSON(w, r, http.StatusOK, h.meResponse(u))
 	return nil
+}
+
+func (h *Handler) meResponse(u user.User) meResponse {
+	return meResponse{
+		ID:              u.ID,
+		Email:           u.Email,
+		IsPlatformAdmin: h.admins.Has(u.Email),
+	}
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) error {
@@ -115,6 +126,7 @@ type statusResponse struct {
 }
 
 type meResponse struct {
-	ID    uuid.UUID `json:"id"`
-	Email string    `json:"email"`
+	ID              uuid.UUID `json:"id"`
+	Email           string    `json:"email"`
+	IsPlatformAdmin bool      `json:"isPlatformAdmin"`
 }

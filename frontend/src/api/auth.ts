@@ -4,6 +4,7 @@ import { request } from "./http";
 export const meSchema = z.object({
   id: z.string(),
   email: z.string(),
+  isPlatformAdmin: z.boolean(),
 });
 
 export type Me = z.infer<typeof meSchema>;

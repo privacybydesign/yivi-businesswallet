@@ -13,6 +13,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/irmarequestor"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 // fakeRequestor is the test double for the irmaRequestor seam, exercising the
@@ -44,6 +45,41 @@ func newTestHandler(r irmaRequestor) *Handler {
 	return &Handler{
 		svc:    NewService(r, nil, nil, irma.NewAttributeTypeIdentifier(testEmailAttr)),
 		cookie: CookieConfig{},
+	}
+}
+
+func TestMeReportsPlatformAdminStatus(t *testing.T) {
+	admins := NewPlatformAdmins([]string{"admin@yivi.app"})
+	tests := []struct {
+		name  string
+		email string
+		want  bool
+	}{
+		{name: "platform admin", email: "admin@yivi.app", want: true},
+		{name: "regular member", email: "user@yivi.app", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &Handler{admins: admins}
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/me", nil)
+			req = req.WithContext(ContextWithUser(req.Context(), user.User{Email: tc.email}))
+
+			if err := h.me(rec, req); err != nil {
+				t.Fatalf("me: %v", err)
+			}
+
+			var body meResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if body.IsPlatformAdmin != tc.want {
+				t.Errorf("isPlatformAdmin = %v, want %v", body.IsPlatformAdmin, tc.want)
+			}
+			if body.Email != tc.email {
+				t.Errorf("email = %q, want %q", body.Email, tc.email)
+			}
+		})
 	}
 }
 
