@@ -72,9 +72,15 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_body", "invalid request body")
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	req.Slug = strings.TrimSpace(req.Slug)
+	req.Slug = strings.ToLower(strings.TrimSpace(req.Slug))
 	if req.Name == "" || req.Slug == "" {
 		return badRequest("invalid_input", "name and slug are required")
+	}
+	switch err := ValidateSlug(req.Slug); {
+	case errors.Is(err, ErrReservedSlug):
+		return badRequest("reserved_slug", "slug is reserved and cannot be used")
+	case errors.Is(err, ErrInvalidSlug):
+		return badRequest("invalid_slug", "slug may only contain letters, numbers, and hyphens")
 	}
 
 	org, err := h.store.Create(r.Context(), req.Name, req.Slug)

@@ -9,9 +9,27 @@ import * as React from "react";
 
 const CONFLICT_STATUS = 409;
 
+function errorCode(error: ApiError): string | null {
+  const body = error.body;
+  if (typeof body === "object" && body !== null && "code" in body) {
+    const code = (body as { code?: unknown }).code;
+    return typeof code === "string" ? code : null;
+  }
+  return null;
+}
+
 function errorMessage(error: Error, t: TFunction): string {
-  if (error instanceof ApiError && error.status === CONFLICT_STATUS) {
-    return t("createOrg.slugTaken");
+  if (error instanceof ApiError) {
+    if (error.status === CONFLICT_STATUS) {
+      return t("createOrg.slugTaken");
+    }
+    const code = errorCode(error);
+    if (code === "reserved_slug") {
+      return t("createOrg.slugReserved");
+    }
+    if (code === "invalid_slug") {
+      return t("createOrg.slugInvalid");
+    }
   }
   return t("createOrg.error", { message: error.message });
 }
