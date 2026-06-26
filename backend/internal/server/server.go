@@ -33,9 +33,13 @@ func New(db Pinger, features ...Registerer) http.Handler {
 	for _, f := range features {
 		f.Register(v1)
 	}
-	root.Handle(apiV1Prefix+"/", http.StripPrefix(apiV1Prefix, v1))
 
-	return defaultMiddleware()(root)
+	// defaultMiddleware wraps outside StripPrefix so the request logger sees the
+	// full /api/v1/... path, while the feature handlers receive stripped paths.
+	apiHandler := defaultMiddleware()(http.StripPrefix(apiV1Prefix, v1))
+	root.Handle(apiV1Prefix+"/", apiHandler)
+
+	return root
 }
 
 func live(w http.ResponseWriter, _ *http.Request) {

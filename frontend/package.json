@@ -13,6 +13,8 @@
     "format:write": "prettier --write ."
   },
   "dependencies": {
+    "@privacybydesign/yivi-css": "^1.0.1",
+    "@privacybydesign/yivi-frontend": "^1.0.4",
     "@tanstack/react-query": "^5.101.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

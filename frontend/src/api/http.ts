@@ -59,15 +59,14 @@ export class ApiValidationError extends Error {
   }
 }
 
-/**
- * Returns headers used to authenticate requests.
- *
- * Stub for the upcoming Yivi authentication: today it injects nothing. When
- * auth lands, return the Authorization header here and handle 401s centrally
- * in `request` (see the marked spot below).
- */
-function getAuthHeaders(): Record<string, string> {
-  return {};
+const UNAUTHORIZED_STATUS = 401;
+
+type UnauthorizedHandler = () => void;
+
+let onUnauthorized: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler): void {
+  onUnauthorized = handler;
 }
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -119,7 +118,6 @@ async function performFetch<T>(
   const hasBody = options.body !== undefined;
   const headers: Record<string, string> = {
     Accept: "application/json",
-    ...getAuthHeaders(),
     ...options.headers,
   };
   if (hasBody) {
@@ -132,13 +130,15 @@ async function performFetch<T>(
       headers,
       body: hasBody ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
+      credentials: "include",
     });
 
     const body = await parseBody(res);
 
     if (!res.ok) {
-      // Future: when Yivi auth lands, handle res.status === 401 here
-      // (clear session / trigger re-auth) before throwing.
+      if (res.status === UNAUTHORIZED_STATUS) {
+        onUnauthorized?.();
+      }
       throw new ApiError(res.status, res.statusText, url, body);
     }
 

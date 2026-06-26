@@ -2,7 +2,7 @@
 
 Load when editing `backend/`. General rules (magic values, formatter, scoped changes, no silent error swallowing) live in `AGENTS.md`.
 
-Layout: entry points in `cmd/api` + `cmd/migrate` + `cmd/seed`, packages under `internal/`. `internal/organization` is the canonical domain example — anchor new domains on it. `internal/respond` provides JSON response helpers, `HandlerFunc` adapter, and `ApiError`. `internal/seed` populates dev data (runs via the Compose `seed` service).
+Layout: entry points in `cmd/api` + `cmd/migrate` + `cmd/seed`, packages under `internal/`. Two domain templates: `internal/organization` is the no-orchestration example (handler → store), `internal/auth` is the with-service example (handler → service → stores/client) — anchor new domains on whichever fits (see Layering). `internal/respond` provides JSON response helpers, `HandlerFunc` adapter, and `ApiError`. `internal/seed` populates dev data (runs via the Compose `seed` service).
 
 ## Toolchain
 
@@ -18,7 +18,7 @@ Layout: entry points in `cmd/api` + `cmd/migrate` + `cmd/seed`, packages under `
 - Version under `/api/v1/` prefix via sub-mux + `http.StripPrefix`; health probes `/livez` and `/readyz` sit outside the prefix.
 - Cross-cutting concerns are middleware via plain `func(http.Handler) http.Handler` wrappers, composed in `internal/server/middleware.go`. Order: `requestID` (outermost) → `recoverer` → `requestLogger`.
 - Handlers: set `Content-Type` explicitly; check + log the error from `w.Write`.
-- JSON field names are `snake_case` (`json:"created_at"`) — explicit tags, not Go's exported-field default.
+- JSON field names are `camelCase` (`json:"createdAt"`) — explicit tags, not Go's exported-field default.
 
 ## Server Lifecycle
 
@@ -39,13 +39,17 @@ Layout: entry points in `cmd/api` + `cmd/migrate` + `cmd/seed`, packages under `
 
 Top-down only:
 ```
-handler → store / client
+handler → service → store / client      (flow orchestrates 2+ stores/clients or carries cross-domain rules)
+handler → store / client                (pure CRUD — no service)
 ```
 
+- A service is required only when a flow orchestrates 2+ stores/clients or carries cross-domain business rules; pure-CRUD slices skip it. `auth.Service` owns the disclosure→user→session login flow and its idempotency key; the auth handler stays HTTP-only (parse, cookies, status mapping). `organization` has no service — the handler calls the store directly.
+- The service is additive, not a replacement: per-entity logic stays in the store (validation, slug derivation, sentinel-error translation). The service only coordinates collaborators and holds the cross-domain rules; the handler parses/validates the request, calls a service (or store, for CRUD), and uses `internal/respond` to write JSON or error responses.
+- A facade above services is admitted when coordination across services is needed later — not built yet.
 - Inject dependencies; no package-level globals for state.
-- No service layer: the store owns persistence + small domain logic (validation, slug derivation). Handlers parse/validate the request, call a store method, and use `internal/respond` to write JSON or error responses.
 - Accept interfaces, return structs: constructors return concrete (`func NewStore(...) *Store`); define interfaces in the consumer, listing only the methods it uses.
 - Translate storage errors to package sentinels (`organization.ErrNotFound`, `ErrSlugTaken`) so handlers branch without importing the database driver. Use `%w` wrapping to preserve `errors.Is` matching.
+- Accepted cross-domain seam: `session.Lookup` runs one `sessions JOIN users` query and returns `user.User`. Keep this single-query seam; do not split it behind the service.
 
 ## Errors & Logging
 

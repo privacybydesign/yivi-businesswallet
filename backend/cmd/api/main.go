@@ -10,16 +10,25 @@ import (
 	"syscall"
 	"time"
 
+	irma "github.com/privacybydesign/irmago/irma"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/config"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/irmarequestor"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 const (
 	pingTimeout     = 5 * time.Second
 	shutdownTimeout = 10 * time.Second
+
+	irmaProbeTimeout = 10 * time.Second
+	irmaHTTPTimeout  = 15 * time.Second
 
 	serverAddr = ":8080"
 )
@@ -51,7 +60,37 @@ func run() error {
 	}
 	defer pool.Close()
 
-	handler := server.New(pool, organization.NewHandler(organization.NewStore(pool)))
+	emailAttr := irma.NewAttributeTypeIdentifier(cfg.IrmaEmailAttribute)
+	requestor := irmarequestor.New(
+		cfg.IrmaRequestorURL,
+		irmarequestor.NewTokenAuthenticator(cfg.IrmaRequestorToken),
+		&http.Client{Timeout: irmaHTTPTimeout},
+	)
+
+	// Fatal startup readiness gate: fail the process at boot rather than let a
+	// misconfigured daemon silently fail a user's first login (see Ping).
+	probeCtx, probeCancel := context.WithTimeout(ctx, irmaProbeTimeout)
+	defer probeCancel()
+	if err := requestor.Ping(probeCtx, emailAttr); err != nil {
+		return err
+	}
+
+	userStore := user.NewStore(pool)
+	sessionStore := session.NewStore(pool, cfg.SessionTTL)
+	cookieCfg := auth.CookieConfig{
+		Secure: cfg.SessionCookieSecure,
+		MaxAge: int(cfg.SessionTTL.Seconds()),
+	}
+	authService := auth.NewService(requestor, userStore, sessionStore, emailAttr)
+	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg)
+
+	startSessionPruner(ctx, sessionStore, cfg.SessionPruneEvery)
+
+	handler := server.New(
+		pool,
+		authHandler,
+		organization.NewHandler(organization.NewStore(pool)),
+	)
 
 	httpServer := &http.Server{
 		Addr:    serverAddr,
