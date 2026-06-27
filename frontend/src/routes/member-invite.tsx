@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { useOrganizationQuery } from "../api/organization.queries";
+import type { TFunction } from "i18next";
+import {
+  useInviteMemberMutation,
+  useOrganizationDepartmentsQuery,
+  useOrganizationQuery,
+} from "../api/organization.queries";
+import { ApiError } from "../api/http";
 import { Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
 
@@ -11,11 +17,27 @@ const INVITE_MODES = [
   { key: "bulk", labelKey: "memberInvite.modeBulk", icon: "add" },
 ] as const;
 
+const CONFLICT_STATUS = 409;
+
 const EYEBROW =
   "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
 const FIELD_LABEL = "text-ink-soft text-[12px] font-semibold";
 const CONTROL =
   "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
+
+function errorMessage(error: Error, t: TFunction): string {
+  if (error instanceof ApiError && error.status === CONFLICT_STATUS) {
+    return t("memberInvite.alreadyMember");
+  }
+  return t("memberInvite.error", { message: error.message });
+}
+
+// Trims a field and returns undefined when empty so optional values are omitted
+// from the request body rather than sent as "".
+function optional(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
 
 function Field({
   label,
@@ -43,7 +65,18 @@ export default function MemberInvite(): React.JSX.Element | null {
   // Guaranteed by the ":orgSlug" route segment this component mounts under.
   const slug = orgSlug!;
   const org = useOrganizationQuery(slug);
+  const isAdmin = org.data?.role === "admin";
+  const departments = useOrganizationDepartmentsQuery(slug, isAdmin);
+  const invite = useInviteMemberMutation(slug);
   const [mode, setMode] = useState("email");
+  const [givenNames, setGivenNames] = useState("");
+  const [namePrefix, setNamePrefix] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [preferredName, setPreferredName] = useState("");
+  const [email, setEmail] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
+  const [departmentId, setDepartmentId] = useState("");
+  const [role, setRole] = useState("member");
 
   if (org.isPending) {
     return null;
@@ -56,6 +89,34 @@ export default function MemberInvite(): React.JSX.Element | null {
   const orgName = org.data.name;
   const backToMembers = (): void => void navigate(`/${slug}/members`);
 
+  const canSubmit =
+    givenNames.trim() !== "" &&
+    lastName.trim() !== "" &&
+    email.trim() !== "" &&
+    !invite.isPending;
+
+  // TODO: this creates the member synchronously — no email is sent yet. The
+  // email-preview, onboarding link, and "expires in 7 days" panels are an
+  // aspirational mockup pending a real onboarding-email/token flow.
+  function handleSubmit(): void {
+    if (!canSubmit) {
+      return;
+    }
+    invite.mutate(
+      {
+        email: email.trim(),
+        givenNames: givenNames.trim(),
+        lastName: lastName.trim(),
+        preferredName: optional(preferredName),
+        namePrefix: optional(namePrefix),
+        role,
+        jobTitle: optional(jobTitle),
+        departmentId: departmentId === "" ? undefined : departmentId,
+      },
+      { onSuccess: backToMembers },
+    );
+  }
+
   return (
     <>
       <TopBar
@@ -66,8 +127,10 @@ export default function MemberInvite(): React.JSX.Element | null {
             <Button variant="secondary" onClick={backToMembers}>
               {t("memberInvite.cancel")}
             </Button>
-            <Button icon="email" onClick={backToMembers}>
-              {t("memberInvite.send")}
+            <Button icon="email" onClick={handleSubmit} disabled={!canSubmit}>
+              {invite.isPending
+                ? t("memberInvite.sending")
+                : t("memberInvite.send")}
             </Button>
           </>
         }
@@ -104,37 +167,83 @@ export default function MemberInvite(): React.JSX.Element | null {
             <div className={EYEBROW}>{t("memberInvite.recipient")}</div>
             <div className="mt-2.5 grid grid-cols-2 gap-3">
               <Field label={t("memberInvite.givenNames")}>
-                <input className={CONTROL} autoFocus />
+                <input
+                  className={CONTROL}
+                  value={givenNames}
+                  onChange={(e) => setGivenNames(e.target.value)}
+                  autoFocus
+                />
               </Field>
               <Field label={t("memberInvite.prefix")}>
-                <input className={CONTROL} />
+                <input
+                  className={CONTROL}
+                  value={namePrefix}
+                  onChange={(e) => setNamePrefix(e.target.value)}
+                />
               </Field>
               <Field label={t("memberInvite.lastName")}>
-                <input className={CONTROL} />
+                <input
+                  className={CONTROL}
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                />
               </Field>
               <Field label={t("memberInvite.preferredName")}>
-                <input className={CONTROL} />
+                <input
+                  className={CONTROL}
+                  value={preferredName}
+                  onChange={(e) => setPreferredName(e.target.value)}
+                />
               </Field>
               <Field label={t("memberInvite.email")} wide>
-                <input className={CONTROL} type="email" />
+                <input
+                  className={CONTROL}
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
               </Field>
               <Field label={t("memberInvite.jobTitle")}>
-                <input className={CONTROL} />
+                <input
+                  className={CONTROL}
+                  value={jobTitle}
+                  onChange={(e) => setJobTitle(e.target.value)}
+                />
               </Field>
               <Field label={t("memberInvite.department")}>
-                <select className={CONTROL} defaultValue="">
-                  <option value="" disabled>
-                    {t("memberInvite.selectDepartment")}
-                  </option>
+                <select
+                  className={CONTROL}
+                  value={departmentId}
+                  onChange={(e) => setDepartmentId(e.target.value)}
+                >
+                  <option value="">{t("memberInvite.selectDepartment")}</option>
+                  {departments.data?.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
                 </select>
               </Field>
               <Field label={t("memberInvite.role")}>
-                <select className={CONTROL} defaultValue="member">
+                <select
+                  className={CONTROL}
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                >
                   <option value="member">{t("memberInvite.roleMember")}</option>
                   <option value="admin">{t("memberInvite.roleAdmin")}</option>
                 </select>
               </Field>
             </div>
+
+            {invite.isError && (
+              <p
+                role="alert"
+                className="rounded-yivi bg-error-bg text-error mt-3 px-3 py-2 text-[13px]"
+              >
+                {errorMessage(invite.error, t)}
+              </p>
+            )}
           </Card>
 
           <Card className="p-5">

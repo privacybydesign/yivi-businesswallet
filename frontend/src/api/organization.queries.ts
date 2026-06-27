@@ -9,6 +9,7 @@ import {
   getOrganizationDepartments,
   getOrganizationMembers,
   getOrganizations,
+  inviteMember,
   updateDepartment,
   updateOrganizationMember,
 } from "./organization";
@@ -149,6 +150,31 @@ export function useDeleteDepartmentMutation(
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: organizationDepartmentsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useInviteMemberMutation(slug: string): UseMutationResult<
+  Member,
+  Error,
+  {
+    email: string;
+    givenNames: string;
+    lastName: string;
+    preferredName?: string;
+    namePrefix?: string;
+    role?: string;
+    jobTitle?: string;
+    departmentId?: string;
+  }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input) => inviteMember(slug, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
       });
     },
   });

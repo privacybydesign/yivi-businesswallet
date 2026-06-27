@@ -94,6 +94,28 @@ export function getOrganizationMembers(
   });
 }
 
+export function inviteMember(
+  slug: string,
+  input: {
+    email: string;
+    givenNames: string;
+    lastName: string;
+    preferredName?: string;
+    namePrefix?: string;
+    role?: string;
+    jobTitle?: string;
+    departmentId?: string;
+  },
+  signal?: AbortSignal,
+): Promise<Member> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/members`, {
+    schema: memberSchema,
+    method: "POST",
+    body: input,
+    signal,
+  });
+}
+
 export function updateOrganizationMember(
   slug: string,
   userId: string,
