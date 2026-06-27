@@ -57,7 +57,6 @@ func TestStoreUpdateRenamesOrg(t *testing.T) {
 	if updated.Name != "Acme Renamed" {
 		t.Errorf("Name = %q, want %q", updated.Name, "Acme Renamed")
 	}
-	// Slug is immutable, so the rename must leave it untouched.
 	if updated.Slug != created.Slug {
 		t.Errorf("Slug = %q, want %q", updated.Slug, created.Slug)
 	}
