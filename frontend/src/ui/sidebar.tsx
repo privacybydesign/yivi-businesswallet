@@ -14,6 +14,7 @@ import * as React from "react";
 type NavLabelKey =
   | "nav.dashboard"
   | "nav.members"
+  | "nav.settings"
   | "nav.adminDashboard"
   | "nav.allOrganizations";
 
@@ -28,6 +29,7 @@ function orgNavItems(slug: string): NavItem[] {
   return [
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
+    { to: `/${slug}/settings`, labelKey: "nav.settings", icon: "settings" },
   ];
 }
 

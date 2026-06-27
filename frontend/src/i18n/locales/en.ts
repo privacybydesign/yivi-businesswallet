@@ -10,6 +10,7 @@ export const en = {
     allOrganizations: "Organizations",
     admin: "Admin",
     platformAdmin: "Platform Admin",
+    settings: "Settings",
     logOut: "Log out",
     logIn: "Log in",
   },
@@ -86,6 +87,18 @@ export const en = {
     previewExpiry: "This invitation expires in 7 days.",
     appNote:
       "The member needs the personal Yivi app installed to accept. Their BSN and other personal data stay on their phone.",
+  },
+  settings: {
+    title: "Settings",
+    subtitle: "Organization profile and preferences",
+    tabOrg: "Organization",
+    tabWallets: "Wallets",
+    adminOnly: "Only organization admins can manage settings.",
+    orgProfile: "Organization profile",
+    name: "Name",
+    save: "Save changes",
+    discard: "Discard",
+    walletsPlaceholder: "Allowed wallets settings are coming soon.",
   },
   adminDashboard: {
     title: "Platform admin",

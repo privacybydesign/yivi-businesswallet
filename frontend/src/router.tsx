@@ -10,6 +10,7 @@ import Login from "./routes/login";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
 import MemberInvite from "./routes/member-invite";
+import Settings from "./routes/settings";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
 import CreateOrganization from "./routes/create-organization";
@@ -27,6 +28,7 @@ const orgCrumb: RouteHandle = {
 };
 const membersCrumb: RouteHandle = { crumb: ({ t }) => t("members.title") };
 const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
+const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
 const adminCrumb: RouteHandle = { crumb: ({ t }) => t("adminDashboard.title") };
 const orgsCrumb: RouteHandle = {
   crumb: ({ t }) => t("allOrganizations.title"),
@@ -59,6 +61,7 @@ export const router = createBrowserRouter([
                   },
                 ],
               },
+              { path: "settings", Component: Settings, handle: settingsCrumb },
             ],
           },
           {
