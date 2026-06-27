@@ -12,18 +12,78 @@ import { Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const INVITE_MODES = [
-  { key: "email", labelKey: "memberInvite.modeEmail", icon: "email" },
-  { key: "link", labelKey: "memberInvite.modeLink", icon: "arrow_front" },
-  { key: "bulk", labelKey: "memberInvite.modeBulk", icon: "add" },
+  {
+    key: "email",
+    labelKey: "memberInvite.modeEmail",
+    icon: "email",
+    enabled: true,
+  },
+  {
+    key: "link",
+    labelKey: "memberInvite.modeLink",
+    icon: "arrow_front",
+    enabled: false,
+  },
+  {
+    key: "bulk",
+    labelKey: "memberInvite.modeBulk",
+    icon: "add",
+    enabled: false,
+  },
 ] as const;
 
+const FORM_ID = "member-invite-form";
 const CONFLICT_STATUS = 409;
+// Plausible-format check only; the backend is the authority (it just requires "@").
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const EYEBROW =
   "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
 const FIELD_LABEL = "text-ink-soft text-[12px] font-semibold";
+const SUBHEAD = "text-ink text-[12px] font-semibold";
 const CONTROL =
-  "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
+  "rounded-yivi bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:ring-3";
+const CONTROL_OK = "border-line-strong focus:border-ink focus:ring-ink/10";
+const CONTROL_ERR = "border-error focus:border-error focus:ring-error/10";
+
+function control(hasError: boolean): string {
+  return [CONTROL, hasError ? CONTROL_ERR : CONTROL_OK].join(" ");
+}
+
+type MessageKey =
+  | "memberInvite.givenNamesRequired"
+  | "memberInvite.lastNameRequired"
+  | "memberInvite.emailRequired"
+  | "memberInvite.emailInvalid";
+
+type FieldErrors = {
+  givenNames?: MessageKey;
+  lastName?: MessageKey;
+  email?: MessageKey;
+};
+
+type Values = {
+  givenNames: string;
+  lastName: string;
+  email: string;
+};
+
+function validate(values: Values): FieldErrors {
+  const errors: FieldErrors = {};
+  if (values.givenNames.trim() === "") {
+    errors.givenNames = "memberInvite.givenNamesRequired";
+  }
+  if (values.lastName.trim() === "") {
+    errors.lastName = "memberInvite.lastNameRequired";
+  }
+  const email = values.email.trim();
+  if (email === "") {
+    errors.email = "memberInvite.emailRequired";
+  } else if (!EMAIL_PATTERN.test(email)) {
+    errors.email = "memberInvite.emailInvalid";
+  }
+  return errors;
+}
 
 function errorMessage(error: Error, t: TFunction): string {
   if (error instanceof ApiError && error.status === CONFLICT_STATUS) {
@@ -40,21 +100,41 @@ function optional(value: string): string | undefined {
 }
 
 function Field({
+  id,
   label,
-  wide,
+  required,
+  error,
+  className,
   children,
 }: {
+  id: string;
   label: string;
-  wide?: boolean;
+  required?: boolean;
+  error?: string;
+  className?: string;
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <label
-      className={["flex flex-col gap-1", wide ? "col-span-2" : ""].join(" ")}
-    >
-      <span className={FIELD_LABEL}>{label}</span>
+    <div className={["flex flex-col gap-1", className ?? ""].join(" ")}>
+      <label htmlFor={id} className={FIELD_LABEL}>
+        {label}
+        {required && (
+          <span aria-hidden className="text-error ml-0.5">
+            *
+          </span>
+        )}
+      </label>
       {children}
-    </label>
+      {error && (
+        <span
+          id={`${id}-error`}
+          role="alert"
+          className="text-error text-[12px]"
+        >
+          {error}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -77,6 +157,7 @@ export default function MemberInvite(): React.JSX.Element | null {
   const [jobTitle, setJobTitle] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [role, setRole] = useState("member");
+  const [attempted, setAttempted] = useState(false);
 
   if (org.isPending) {
     return null;
@@ -89,17 +170,21 @@ export default function MemberInvite(): React.JSX.Element | null {
   const orgName = org.data.name;
   const backToMembers = (): void => void navigate(`/${slug}/members`);
 
-  const canSubmit =
-    givenNames.trim() !== "" &&
-    lastName.trim() !== "" &&
-    email.trim() !== "" &&
-    !invite.isPending;
+  // Errors surface only after the first submit attempt, then track edits live so
+  // they clear as the user fixes each field.
+  const errors = attempted ? validate({ givenNames, lastName, email }) : {};
 
   // TODO: this creates the member synchronously — no email is sent yet. The
   // email-preview, onboarding link, and "expires in 7 days" panels are an
   // aspirational mockup pending a real onboarding-email/token flow.
-  function handleSubmit(): void {
-    if (!canSubmit) {
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    setAttempted(true);
+    if (invite.isPending) {
+      return;
+    }
+    const found = validate({ givenNames, lastName, email });
+    if (Object.keys(found).length > 0) {
       return;
     }
     invite.mutate(
@@ -127,7 +212,12 @@ export default function MemberInvite(): React.JSX.Element | null {
             <Button variant="secondary" onClick={backToMembers}>
               {t("memberInvite.cancel")}
             </Button>
-            <Button icon="email" onClick={handleSubmit} disabled={!canSubmit}>
+            <Button
+              type="submit"
+              form={FORM_ID}
+              icon="email"
+              disabled={invite.isPending}
+            >
               {invite.isPending
                 ? t("memberInvite.sending")
                 : t("memberInvite.send")}
@@ -136,7 +226,12 @@ export default function MemberInvite(): React.JSX.Element | null {
         }
       />
 
-      <div className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_340px]">
+      <form
+        id={FORM_ID}
+        onSubmit={handleSubmit}
+        noValidate
+        className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_340px]"
+      >
         <div className="flex flex-col gap-4">
           <Card className="p-5">
             <div className={EYEBROW}>{t("memberInvite.howTo")}</div>
@@ -147,12 +242,17 @@ export default function MemberInvite(): React.JSX.Element | null {
                   <button
                     key={m.key}
                     type="button"
-                    onClick={() => setMode(m.key)}
+                    disabled={!m.enabled}
+                    aria-disabled={!m.enabled}
+                    title={m.enabled ? undefined : t("memberInvite.comingSoon")}
+                    onClick={() => m.enabled && setMode(m.key)}
                     className={[
                       "rounded-yivi flex flex-1 items-center gap-2.5 border px-3 py-3.5 text-[13.5px] font-semibold transition-colors",
-                      active
-                        ? "bg-highlight border-highlight-border text-link"
-                        : "bg-surface border-line-strong text-ink hover:bg-surface-3",
+                      !m.enabled
+                        ? "bg-surface border-line-strong text-muted cursor-not-allowed opacity-60"
+                        : active
+                          ? "bg-highlight border-highlight-border text-link"
+                          : "bg-surface border-line-strong text-ink hover:bg-surface-3",
                     ].join(" ")}
                   >
                     <Icon name={m.icon} size={16} />
@@ -165,75 +265,152 @@ export default function MemberInvite(): React.JSX.Element | null {
 
           <Card className="p-5">
             <div className={EYEBROW}>{t("memberInvite.recipient")}</div>
-            <div className="mt-2.5 grid grid-cols-2 gap-3">
-              <Field label={t("memberInvite.givenNames")}>
-                <input
-                  className={CONTROL}
-                  value={givenNames}
-                  onChange={(e) => setGivenNames(e.target.value)}
-                  autoFocus
-                />
-              </Field>
-              <Field label={t("memberInvite.prefix")}>
-                <input
-                  className={CONTROL}
-                  value={namePrefix}
-                  onChange={(e) => setNamePrefix(e.target.value)}
-                />
-              </Field>
-              <Field label={t("memberInvite.lastName")}>
-                <input
-                  className={CONTROL}
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                />
-              </Field>
-              <Field label={t("memberInvite.preferredName")}>
-                <input
-                  className={CONTROL}
-                  value={preferredName}
-                  onChange={(e) => setPreferredName(e.target.value)}
-                />
-              </Field>
-              <Field label={t("memberInvite.email")} wide>
-                <input
-                  className={CONTROL}
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </Field>
-              <Field label={t("memberInvite.jobTitle")}>
-                <input
-                  className={CONTROL}
-                  value={jobTitle}
-                  onChange={(e) => setJobTitle(e.target.value)}
-                />
-              </Field>
-              <Field label={t("memberInvite.department")}>
-                <select
-                  className={CONTROL}
-                  value={departmentId}
-                  onChange={(e) => setDepartmentId(e.target.value)}
+            <div className="mt-3 flex flex-col gap-5">
+              <div className="flex flex-col gap-2">
+                <div className={SUBHEAD}>{t("memberInvite.groupName")}</div>
+                <div className="grid grid-cols-12 gap-3">
+                  <Field
+                    id="invite-given-names"
+                    label={t("memberInvite.givenNames")}
+                    required
+                    error={errors.givenNames && t(errors.givenNames)}
+                    className="col-span-5"
+                  >
+                    <input
+                      id="invite-given-names"
+                      className={control(Boolean(errors.givenNames))}
+                      value={givenNames}
+                      onChange={(e) => setGivenNames(e.target.value)}
+                      aria-required
+                      aria-invalid={errors.givenNames ? true : undefined}
+                      aria-describedby={
+                        errors.givenNames
+                          ? "invite-given-names-error"
+                          : undefined
+                      }
+                      autoFocus
+                    />
+                  </Field>
+                  <Field
+                    id="invite-prefix"
+                    label={t("memberInvite.prefix")}
+                    className="col-span-3"
+                  >
+                    <input
+                      id="invite-prefix"
+                      className={control(false)}
+                      value={namePrefix}
+                      onChange={(e) => setNamePrefix(e.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    id="invite-last-name"
+                    label={t("memberInvite.lastName")}
+                    required
+                    error={errors.lastName && t(errors.lastName)}
+                    className="col-span-4"
+                  >
+                    <input
+                      id="invite-last-name"
+                      className={control(Boolean(errors.lastName))}
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      aria-required
+                      aria-invalid={errors.lastName ? true : undefined}
+                      aria-describedby={
+                        errors.lastName ? "invite-last-name-error" : undefined
+                      }
+                    />
+                  </Field>
+                  <Field
+                    id="invite-preferred-name"
+                    label={t("memberInvite.preferredName")}
+                    className="col-span-12"
+                  >
+                    <input
+                      id="invite-preferred-name"
+                      className={control(false)}
+                      value={preferredName}
+                      onChange={(e) => setPreferredName(e.target.value)}
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <div className={SUBHEAD}>{t("memberInvite.groupContact")}</div>
+                <Field
+                  id="invite-email"
+                  label={t("memberInvite.email")}
+                  required
+                  error={errors.email && t(errors.email)}
                 >
-                  <option value="">{t("memberInvite.selectDepartment")}</option>
-                  {departments.data?.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label={t("memberInvite.role")}>
-                <select
-                  className={CONTROL}
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                >
-                  <option value="member">{t("memberInvite.roleMember")}</option>
-                  <option value="admin">{t("memberInvite.roleAdmin")}</option>
-                </select>
-              </Field>
+                  <input
+                    id="invite-email"
+                    className={control(Boolean(errors.email))}
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    aria-required
+                    aria-invalid={errors.email ? true : undefined}
+                    aria-describedby={
+                      errors.email ? "invite-email-error" : undefined
+                    }
+                  />
+                </Field>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <div className={SUBHEAD}>{t("memberInvite.groupRoleDept")}</div>
+                <div className="grid grid-cols-3 gap-3">
+                  <Field id="invite-role" label={t("memberInvite.role")}>
+                    <select
+                      id="invite-role"
+                      className={control(false)}
+                      value={role}
+                      onChange={(e) => setRole(e.target.value)}
+                    >
+                      <option value="member">
+                        {t("memberInvite.roleMember")}
+                      </option>
+                      <option value="admin">
+                        {t("memberInvite.roleAdmin")}
+                      </option>
+                    </select>
+                  </Field>
+                  <Field
+                    id="invite-department"
+                    label={t("memberInvite.department")}
+                  >
+                    <select
+                      id="invite-department"
+                      className={control(false)}
+                      value={departmentId}
+                      onChange={(e) => setDepartmentId(e.target.value)}
+                    >
+                      <option value="">
+                        {t("memberInvite.selectDepartment")}
+                      </option>
+                      {departments.data?.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field
+                    id="invite-job-title"
+                    label={t("memberInvite.jobTitle")}
+                  >
+                    <input
+                      id="invite-job-title"
+                      className={control(false)}
+                      value={jobTitle}
+                      onChange={(e) => setJobTitle(e.target.value)}
+                    />
+                  </Field>
+                </div>
+              </div>
             </div>
 
             {invite.isError && (
@@ -249,7 +426,14 @@ export default function MemberInvite(): React.JSX.Element | null {
           <Card className="p-5">
             <div className="flex items-center justify-between">
               <div className={EYEBROW}>{t("memberInvite.attestations")}</div>
-              <Button variant="ghost" size="sm" icon="add">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                icon="add"
+                disabled
+                title={t("memberInvite.comingSoon")}
+              >
                 {t("memberInvite.addMore")}
               </Button>
             </div>
@@ -295,7 +479,7 @@ export default function MemberInvite(): React.JSX.Element | null {
             </div>
           </Card>
         </div>
-      </div>
+      </form>
     </>
   );
 }
