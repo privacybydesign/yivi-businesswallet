@@ -1,7 +1,10 @@
 import { NavLink, useMatches } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { IconName } from "./icon";
+import type { Me } from "../api/auth";
 import type { Organization } from "../api/organization";
+import { useOrganizationQuery } from "../api/organization.queries";
+import { personInitials, shortName } from "../lib/name";
 import { Icon } from "./icon";
 import { Avatar } from "./avatar";
 import { Logo } from "./logo";
@@ -40,21 +43,19 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
 const NAV_ICON_SIZE = 16;
 
 interface SidebarProps {
-  email: string | null;
+  me: Me;
   onLogout: () => void;
   loggingOut: boolean;
   organizations: Organization[];
   organizationsPending: boolean;
-  isPlatformAdmin: boolean;
 }
 
 export function Sidebar({
-  email,
+  me,
   onLogout,
   loggingOut,
   organizations,
   organizationsPending,
-  isPlatformAdmin,
 }: SidebarProps): React.JSX.Element {
   const { t } = useTranslation();
   const matches = useMatches();
@@ -65,21 +66,26 @@ export function Sidebar({
   )?.params.orgSlug;
   const navItems = activeSlug ? orgNavItems(activeSlug) : ADMIN_NAV_ITEMS;
 
+  // Platform admins outrank any single org; otherwise show the membership role
+  // for the org currently in the URL.
+  const activeOrg = useOrganizationQuery(activeSlug ?? "");
+  const roleLabel = me.isPlatformAdmin
+    ? t("nav.platformAdmin")
+    : activeOrg.data?.role;
+
   return (
     <aside className="border-line bg-surface sticky top-0 flex h-screen w-58 shrink-0 flex-col border-r">
       <div className="border-line border-b px-4 pt-4.5 pb-3.5">
         <Logo />
       </div>
 
-      {email && (
-        <OrgSwitcher
-          organizations={organizations}
-          isPending={organizationsPending}
-          isPlatformAdmin={isPlatformAdmin}
-        />
-      )}
+      <OrgSwitcher
+        organizations={organizations}
+        isPending={organizationsPending}
+        isPlatformAdmin={me.isPlatformAdmin}
+      />
 
-      <nav className="flex-1 overflow-y-auto px-2.5 py-2">
+      <nav className="flex-1 overflow-y-auto px-2.5 py-1.5">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
@@ -108,36 +114,24 @@ export function Sidebar({
       </nav>
 
       <div className="border-line flex items-center gap-2.5 border-t px-3.5 py-2.5">
-        {email ? (
-          <>
-            <Avatar name={email.split("@")[0] ?? email} tone="violet" />
-            <div className="min-w-0 flex-1">
-              <div className="text-ink truncate text-[12.5px] font-semibold">
-                {email}
-              </div>
-              <div className="text-ink-soft font-mono text-[10.5px]">
-                {t("nav.admin")}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onLogout}
-              disabled={loggingOut}
-              aria-label={t("nav.logOut")}
-              className="text-ink-soft hover:text-ink transition-colors disabled:opacity-50"
-            >
-              <Icon name="logout" size={NAV_ICON_SIZE} />
-            </button>
-          </>
-        ) : (
-          <NavLink
-            to="/login"
-            className="text-ink-soft hover:text-ink flex items-center gap-2 text-[13px] font-semibold"
-          >
-            <Icon name="personal" size={NAV_ICON_SIZE} />
-            {t("nav.logIn")}
-          </NavLink>
-        )}
+        <Avatar initials={personInitials(me)} />
+        <div className="min-w-0 flex-1">
+          <div className="text-ink truncate text-[12.5px] font-semibold">
+            {shortName(me)}
+          </div>
+          <div className="text-ink-soft text-[10.5px] capitalize">
+            {roleLabel}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onLogout}
+          disabled={loggingOut}
+          aria-label={t("nav.logOut")}
+          className="text-ink-soft hover:text-ink transition-colors disabled:opacity-50"
+        >
+          <Icon name="logout" size={NAV_ICON_SIZE} />
+        </button>
       </div>
     </aside>
   );

@@ -15,6 +15,18 @@ const SIZE_CLASSES: Record<AvatarSize, string> = {
   lg: "w-12 h-12 text-[17px]",
 };
 
+const TONES = ["blue", "rose", "green", "amber", "violet", "slate"] as const;
+
+const TONE_HASH_MULTIPLIER = 31;
+
+function toneFromName(name: string): AvatarTone {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * TONE_HASH_MULTIPLIER + name.charCodeAt(i)) | 0;
+  }
+  return TONES[Math.abs(hash) % TONES.length] ?? "blue";
+}
+
 const MAX_INITIALS = 2;
 
 function initialsFrom(name: string): string {
@@ -26,27 +38,31 @@ function initialsFrom(name: string): string {
     .toUpperCase();
 }
 
-interface AvatarProps {
-  name: string;
+// Either give a `name` (initials derived from its words, e.g. an org) or
+// pre-computed `initials` (e.g. a person's preferred + last initial).
+type AvatarProps = {
   tone?: AvatarTone;
   size?: AvatarSize;
-}
+} & ({ name: string; initials?: string } | { name?: string; initials: string });
 
 export function Avatar({
   name,
-  tone = "blue",
+  initials,
+  tone,
   size = "md",
 }: AvatarProps): React.JSX.Element {
+  const text = initials ?? initialsFrom(name ?? "");
+  const resolvedTone = tone ?? toneFromName(text);
   return (
     <span
       className={[
         "font-display inline-flex shrink-0 items-center justify-center rounded-full font-semibold",
-        TONE_CLASSES[tone],
+        TONE_CLASSES[resolvedTone],
         SIZE_CLASSES[size],
       ].join(" ")}
       aria-hidden="true"
     >
-      {initialsFrom(name)}
+      {text}
     </span>
   );
 }

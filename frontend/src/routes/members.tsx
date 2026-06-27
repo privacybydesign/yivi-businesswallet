@@ -1,31 +1,19 @@
 import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import {
   useOrganizationMembersQuery,
   useOrganizationQuery,
 } from "../api/organization.queries";
-import { ApiError } from "../api/http";
+import { accessMessage } from "../lib/access-message";
+import { fullName, personInitials } from "../lib/name";
 import { Avatar, Card, Tag, TopBar } from "../ui";
 import * as React from "react";
-
-const FORBIDDEN_STATUS = 403;
-const NOT_FOUND_STATUS = 404;
-
-function accessMessage(error: Error, t: TFunction): string {
-  if (error instanceof ApiError && error.status === FORBIDDEN_STATUS) {
-    return t("dashboard.notMember");
-  }
-  if (error instanceof ApiError && error.status === NOT_FOUND_STATUS) {
-    return t("dashboard.notExist");
-  }
-  return error.message;
-}
 
 export default function Members(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug } = useParams();
-  const slug = orgSlug ?? "";
+  // Guaranteed by the ":orgSlug" route segment this component mounts under.
+  const slug = orgSlug!;
 
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
@@ -72,11 +60,15 @@ export default function Members(): React.JSX.Element {
                     <tr key={member.userId}>
                       <td className="border-line border-b px-6 py-3">
                         <div className="flex items-center gap-2.5">
-                          <Avatar
-                            name={member.email.split("@")[0] ?? member.email}
-                            tone="violet"
-                          />
-                          <span className="text-ink">{member.email}</span>
+                          <Avatar initials={personInitials(member)} />
+                          <div className="min-w-0">
+                            <div className="text-ink truncate">
+                              {fullName(member)}
+                            </div>
+                            <div className="text-ink-soft truncate text-[12px]">
+                              {member.email}
+                            </div>
+                          </div>
                         </div>
                       </td>
                       <td className="border-line border-b px-6 py-3 text-right">

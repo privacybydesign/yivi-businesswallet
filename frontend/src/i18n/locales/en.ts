@@ -9,6 +9,7 @@ export const en = {
     adminDashboard: "Overview",
     allOrganizations: "Organizations",
     admin: "Admin",
+    platformAdmin: "Platform Admin",
     logOut: "Log out",
     logIn: "Log in",
   },
@@ -28,8 +29,9 @@ export const en = {
     failed: "Sign-in could not be completed. Please try again.",
   },
   dashboard: {
-    welcome: "Welcome back, {{email}}",
-    role: "Your role: {{role}}",
+    goodMorning: "Good morning, {{name}}",
+    goodAfternoon: "Good afternoon, {{name}}",
+    goodEvening: "Good evening, {{name}}",
     statAttestations: "Attestations issued",
     statDocuments: "Documents to sign",
     comingSoon: "Coming soon",
@@ -37,6 +39,8 @@ export const en = {
     name: "Name",
     id: "ID",
     viewMembers: "View members",
+  },
+  access: {
     notMember: "You are not a member of this organization.",
     notExist: "This organization does not exist.",
   },

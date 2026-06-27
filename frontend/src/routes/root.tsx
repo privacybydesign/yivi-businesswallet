@@ -9,16 +9,15 @@ import { setStoredOrgSlug } from "../lib/active-org";
 import { Sidebar } from "../ui";
 import * as React from "react";
 
-export default function Root(): React.JSX.Element {
-  const { data: me, isPending } = useMeQuery();
+export default function Root(): React.JSX.Element | null {
+  const { data: me } = useMeQuery();
   const logout = useLogoutMutation();
   const matches = useMatches();
 
-  const email = !isPending && me != null ? me.email : null;
   const isPlatformAdmin = me?.isPlatformAdmin ?? false;
 
-  const allOrgs = useOrganizationsQuery(email != null && isPlatformAdmin);
-  const myOrgs = useMyOrganizationsQuery(email != null && !isPlatformAdmin);
+  const allOrgs = useOrganizationsQuery(me != null && isPlatformAdmin);
+  const myOrgs = useMyOrganizationsQuery(me != null && !isPlatformAdmin);
   const orgsQuery = isPlatformAdmin ? allOrgs : myOrgs;
   const organizations = orgsQuery.data;
 
@@ -34,15 +33,20 @@ export default function Root(): React.JSX.Element {
     }
   }, [activeSlug, organizations]);
 
+  // ProtectedRoute guarantees an authenticated user before Root mounts; this
+  // narrows the nullable query type instead of re-deriving it defensively.
+  if (me == null) {
+    return null;
+  }
+
   return (
     <div className="flex min-h-screen">
       <Sidebar
-        email={email}
+        me={me}
         onLogout={() => logout.mutate()}
         loggingOut={logout.isPending}
         organizations={organizations ?? []}
         organizationsPending={orgsQuery.isPending}
-        isPlatformAdmin={isPlatformAdmin}
       />
       <main className="min-w-0 flex-1">
         <Outlet />

@@ -1,31 +1,23 @@
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
+import { useMeQuery } from "../api/auth.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
-import { ApiError } from "../api/http";
+import { accessMessage } from "../lib/access-message";
+import { greetingKey } from "../lib/greeting";
+import { displayName } from "../lib/name";
 import { Button, Card, Stat, Tag, TopBar } from "../ui";
 import * as React from "react";
-
-const FORBIDDEN_STATUS = 403;
-const NOT_FOUND_STATUS = 404;
-
-function accessMessage(error: Error, t: TFunction): string {
-  if (error instanceof ApiError && error.status === FORBIDDEN_STATUS) {
-    return t("dashboard.notMember");
-  }
-  if (error instanceof ApiError && error.status === NOT_FOUND_STATUS) {
-    return t("dashboard.notExist");
-  }
-  return error.message;
-}
 
 export default function Dashboard(): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
-  const slug = orgSlug ?? "";
+  // Guaranteed by the ":orgSlug" route segment this component mounts under.
+  const slug = orgSlug!;
+  const { data: me } = useMeQuery();
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
+  const greeting = t(greetingKey(), { name: me ? displayName(me) : "" });
 
   if (org.isError) {
     return (
@@ -45,11 +37,9 @@ export default function Dashboard(): React.JSX.Element {
   return (
     <>
       <TopBar
-        title={org.data?.name ?? slug}
+        title={greeting}
         subtitle={
-          org.isPending
-            ? t("common.loading")
-            : t("dashboard.role", { role: org.data?.role ?? "" })
+          org.isPending ? t("common.loading") : (org.data?.name ?? slug)
         }
         actions={
           org.data ? (
