@@ -84,6 +84,19 @@ export function getOrganization(
   });
 }
 
+export function updateOrganization(
+  slug: string,
+  input: { name: string },
+  signal?: AbortSignal,
+): Promise<Organization> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}`, {
+    schema: organizationSchema,
+    method: "PATCH",
+    body: input,
+    signal,
+  });
+}
+
 export function getOrganizationMembers(
   slug: string,
   signal?: AbortSignal,

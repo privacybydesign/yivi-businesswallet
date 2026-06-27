@@ -40,6 +40,39 @@ func TestStoreCreateRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreUpdateRenamesOrg(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool)
+	ctx := context.Background()
+
+	created, err := store.Create(ctx, "Acme", "acme")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	updated, err := store.Update(ctx, created.ID, "Acme Renamed")
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Name != "Acme Renamed" {
+		t.Errorf("Name = %q, want %q", updated.Name, "Acme Renamed")
+	}
+	// Slug is immutable, so the rename must leave it untouched.
+	if updated.Slug != created.Slug {
+		t.Errorf("Slug = %q, want %q", updated.Slug, created.Slug)
+	}
+}
+
+func TestStoreUpdateNotFound(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool)
+
+	_, err := store.Update(context.Background(), uuid.New(), "Ghost")
+	if !errors.Is(err, organization.ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestStoreCreateDuplicateSlug(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := organization.NewStore(pool)

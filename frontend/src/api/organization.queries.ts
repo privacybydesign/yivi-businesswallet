@@ -11,6 +11,7 @@ import {
   getOrganizations,
   inviteMember,
   updateDepartment,
+  updateOrganization,
   updateOrganizationMember,
 } from "./organization";
 import type {
@@ -58,6 +59,18 @@ export function useCreateOrganizationMutation(): UseMutationResult<
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
       void queryClient.invalidateQueries({ queryKey: myOrganizationsQueryKey });
+    },
+  });
+}
+
+export function useUpdateOrganizationMutation(
+  slug: string,
+): UseMutationResult<Organization, Error, { name: string }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input) => updateOrganization(slug, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
     },
   });
 }

@@ -141,7 +141,9 @@ export const en = {
     orgProfile: "Organization profile",
     name: "Name",
     save: "Save changes",
+    saving: "Saving…",
     discard: "Discard",
+    error: "Could not save changes: {{message}}",
     walletsPlaceholder: "Allowed wallets settings are coming soon.",
   },
   departments: {

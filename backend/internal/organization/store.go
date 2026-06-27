@@ -65,6 +65,19 @@ func (s *Store) Create(ctx context.Context, name, slug string) (Organization, er
 	return org, nil
 }
 
+func (s *Store) Update(ctx context.Context, id uuid.UUID, name string) (Organization, error) {
+	const q = `UPDATE organizations SET name = $2, updated_at = now() WHERE id = $1 RETURNING id, name, slug`
+	var org Organization
+	err := s.db.QueryRow(ctx, q, id, name).Scan(&org.ID, &org.Name, &org.Slug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Organization{}, ErrNotFound
+	}
+	if err != nil {
+		return Organization{}, fmt.Errorf("organization: update %s: %w", id, err)
+	}
+	return org, nil
+}
+
 func (s *Store) List(ctx context.Context) ([]Organization, error) {
 	rows, err := s.db.Query(ctx, "SELECT id, name, slug FROM organizations ORDER BY name")
 	if err != nil {

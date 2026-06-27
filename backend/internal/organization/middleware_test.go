@@ -32,6 +32,10 @@ func (f fakeRepo) GetByID(context.Context, uuid.UUID) (Organization, error) {
 func (f fakeRepo) GetBySlug(context.Context, string) (Organization, error) {
 	return f.org, f.getBySlugErr
 }
+
+func (f fakeRepo) Update(context.Context, uuid.UUID, string) (Organization, error) {
+	return Organization{}, nil
+}
 func (f fakeRepo) ListForUser(context.Context, uuid.UUID) ([]Organization, error) { return nil, nil }
 func (f fakeRepo) GetMembership(context.Context, uuid.UUID, uuid.UUID) (Membership, error) {
 	return f.membership, f.membershipErr

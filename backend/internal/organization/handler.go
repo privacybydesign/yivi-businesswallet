@@ -19,6 +19,7 @@ type repository interface {
 	Create(ctx context.Context, name, slug string) (Organization, error)
 	GetByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetBySlug(ctx context.Context, slug string) (Organization, error)
+	Update(ctx context.Context, id uuid.UUID, name string) (Organization, error)
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, error)
@@ -59,6 +60,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /me/organizations", h.requireUser(respond.HandlerFunc(h.listForUser)))
 
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
+	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))
 	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
 	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.addMember))))
 	mux.Handle("PATCH /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMember))))
@@ -151,6 +153,33 @@ func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
 		Organization: OrgFromContext(ctx),
 		Role:         roleFromContext(ctx),
 	})
+	return nil
+}
+
+type updateRequest struct {
+	Name string `json:"name"`
+}
+
+func (h *Handler) update(w http.ResponseWriter, r *http.Request) error {
+	var req updateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return badRequest("invalid_body", "invalid request body")
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		return badRequest("invalid_input", "name is required")
+	}
+
+	org := OrgFromContext(r.Context())
+	updated, err := h.store.Update(r.Context(), org.ID, req.Name)
+	if errors.Is(err, ErrNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "org_not_found", Message: "organization not found"}
+	}
+	if err != nil {
+		return fmt.Errorf("updating organization: %w", err)
+	}
+
+	respond.JSON(w, r, http.StatusOK, updated)
 	return nil
 }
 
