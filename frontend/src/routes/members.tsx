@@ -1,4 +1,4 @@
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
   useOrganizationMembersQuery,
@@ -6,11 +6,12 @@ import {
 } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { fullName, personInitials } from "../lib/name";
-import { Avatar, Card, Tag, TopBar } from "../ui";
+import { Avatar, Button, Card, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 export default function Members(): React.JSX.Element {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { orgSlug } = useParams();
   // Guaranteed by the ":orgSlug" route segment this component mounts under.
   const slug = orgSlug!;
@@ -24,6 +25,16 @@ export default function Members(): React.JSX.Element {
       <TopBar
         title={t("members.title")}
         subtitle={org.data?.name ?? t("members.subtitle")}
+        actions={
+          isAdmin ? (
+            <Button
+              icon="add"
+              onClick={() => void navigate(`/${slug}/members/invite`)}
+            >
+              {t("members.invite")}
+            </Button>
+          ) : undefined
+        }
       />
 
       <div className="p-8">

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Breadcrumbs } from "./breadcrumb";
 
 interface TopBarProps {
   title: string;
@@ -15,6 +16,7 @@ export function TopBar({
     <div className="border-line bg-surface sticky top-0 z-10 border-b px-8 pt-[22px] pb-[18px]">
       <div className="flex items-end justify-between gap-5">
         <div>
+          <Breadcrumbs />
           <h1 className="text-[26px] leading-[1.15] font-bold tracking-[-0.01em]">
             {title}
           </h1>

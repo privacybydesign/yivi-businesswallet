@@ -39,7 +39,9 @@ export default function Dashboard(): React.JSX.Element {
       <TopBar
         title={greeting}
         subtitle={
-          org.isPending ? t("common.loading") : (org.data?.name ?? slug)
+          org.isPending
+            ? t("common.loading")
+            : t("dashboard.role", { role: org.data?.role ?? "" })
         }
         actions={
           org.data ? (

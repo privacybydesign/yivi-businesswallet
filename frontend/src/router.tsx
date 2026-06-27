@@ -1,4 +1,7 @@
 import { createBrowserRouter } from "react-router";
+import type { CrumbContext, RouteHandle } from "./ui";
+import type { OrganizationDetail } from "./api/organization";
+import { organizationQueryKey } from "./api/organization.queries";
 import Root from "./routes/root";
 import RootRedirect from "./routes/root-redirect";
 import ProtectedRoute from "./routes/protected-route";
@@ -6,9 +9,29 @@ import AdminRoute from "./routes/admin-route";
 import Login from "./routes/login";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
+import MemberInvite from "./routes/member-invite";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
 import CreateOrganization from "./routes/create-organization";
+
+// Breadcrumb labels live on the routes themselves; the trail is assembled
+// automatically from the matched chain (see ui/breadcrumb.tsx).
+const orgCrumb: RouteHandle = {
+  crumb: ({ params, queryClient }: CrumbContext) => {
+    const slug = params.orgSlug ?? "";
+    const org = queryClient.getQueryData<OrganizationDetail>(
+      organizationQueryKey(slug),
+    );
+    return org?.name ?? slug;
+  },
+};
+const membersCrumb: RouteHandle = { crumb: ({ t }) => t("members.title") };
+const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
+const adminCrumb: RouteHandle = { crumb: ({ t }) => t("adminDashboard.title") };
+const orgsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("allOrganizations.title"),
+};
+const newOrgCrumb: RouteHandle = { crumb: ({ t }) => t("createOrg.title") };
 
 export const router = createBrowserRouter([
   { path: "/login", Component: Login },
@@ -21,9 +44,21 @@ export const router = createBrowserRouter([
         children: [
           {
             path: ":orgSlug",
+            handle: orgCrumb,
             children: [
               { index: true, Component: Dashboard },
-              { path: "members", Component: Members },
+              {
+                path: "members",
+                handle: membersCrumb,
+                children: [
+                  { index: true, Component: Members },
+                  {
+                    path: "invite",
+                    Component: MemberInvite,
+                    handle: inviteCrumb,
+                  },
+                ],
+              },
             ],
           },
           {
@@ -31,13 +66,19 @@ export const router = createBrowserRouter([
             children: [
               {
                 path: "admin",
+                handle: adminCrumb,
                 children: [
                   { index: true, Component: AdminDashboard },
                   {
                     path: "organizations",
+                    handle: orgsCrumb,
                     children: [
                       { index: true, Component: AllOrganizations },
-                      { path: "new", Component: CreateOrganization },
+                      {
+                        path: "new",
+                        Component: CreateOrganization,
+                        handle: newOrgCrumb,
+                      },
                     ],
                   },
                 ],
