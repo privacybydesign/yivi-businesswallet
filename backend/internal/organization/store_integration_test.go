@@ -1,0 +1,128 @@
+//go:build integration
+
+package organization_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+)
+
+func TestStoreCreateRoundTrip(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool)
+	ctx := context.Background()
+
+	created, err := store.Create(ctx, "Acme", "acme")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	bySlug, err := store.GetBySlug(ctx, "acme")
+	if err != nil {
+		t.Fatalf("GetBySlug: %v", err)
+	}
+	if bySlug != created {
+		t.Errorf("GetBySlug = %+v, want %+v", bySlug, created)
+	}
+
+	byID, err := store.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if byID != created {
+		t.Errorf("GetByID = %+v, want %+v", byID, created)
+	}
+}
+
+func TestStoreCreateDuplicateSlug(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool)
+	ctx := context.Background()
+
+	if _, err := store.Create(ctx, "Acme", "acme"); err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+	_, err := store.Create(ctx, "Acme Two", "acme")
+	if !errors.Is(err, organization.ErrSlugTaken) {
+		t.Errorf("err = %v, want ErrSlugTaken", err)
+	}
+}
+
+func TestStoreGetBySlugNotFound(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool)
+
+	_, err := store.GetBySlug(context.Background(), "ghost")
+	if !errors.Is(err, organization.ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStoreGetMembershipNotMember(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool)
+	ctx := context.Background()
+
+	org, err := store.Create(ctx, "Acme", "acme")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	_, err = store.GetMembership(ctx, uuid.New(), org.ID)
+	if !errors.Is(err, organization.ErrNotMember) {
+		t.Errorf("err = %v, want ErrNotMember", err)
+	}
+}
+
+func TestStoreMembershipsReflectInsertedRows(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool)
+	ctx := context.Background()
+
+	org, err := store.Create(ctx, "Acme", "acme")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	u, err := user.NewStore(pool).FindOrCreateByEmail(ctx, "alice@example.test")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO memberships (user_id, organization_id, role) VALUES ($1, $2, $3)",
+		u.ID, org.ID, organization.RoleAdmin,
+	); err != nil {
+		t.Fatalf("insert membership: %v", err)
+	}
+
+	membership, err := store.GetMembership(ctx, u.ID, org.ID)
+	if err != nil {
+		t.Fatalf("GetMembership: %v", err)
+	}
+	if membership.Role != organization.RoleAdmin {
+		t.Errorf("role = %q, want %q", membership.Role, organization.RoleAdmin)
+	}
+
+	orgs, err := store.ListForUser(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("ListForUser: %v", err)
+	}
+	if len(orgs) != 1 || orgs[0].ID != org.ID {
+		t.Errorf("ListForUser = %+v, want [%s]", orgs, org.ID)
+	}
+
+	members, err := store.ListMembers(ctx, org.ID)
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	if len(members) != 1 || members[0].UserID != u.ID || members[0].Email != u.Email {
+		t.Errorf("ListMembers = %+v, want one member %s/%s", members, u.ID, u.Email)
+	}
+}
