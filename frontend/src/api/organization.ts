@@ -1,6 +1,16 @@
 import { z } from "zod";
 import { request } from "./http";
 
+export const departmentSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  name: z.string(),
+});
+
+export type Department = z.infer<typeof departmentSchema>;
+
+const departmentListSchema = z.array(departmentSchema);
+
 export const organizationSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -25,6 +35,9 @@ export const memberSchema = z.object({
   namePrefix: z.string().nullable(),
   lastName: z.string(),
   role: z.string(),
+  jobTitle: z.string().nullable(),
+  departmentId: z.string().nullable(),
+  departmentName: z.string().nullable(),
 });
 
 export type Member = z.infer<typeof memberSchema>;
@@ -79,4 +92,76 @@ export function getOrganizationMembers(
     schema: memberListSchema,
     signal,
   });
+}
+
+export function updateOrganizationMember(
+  slug: string,
+  userId: string,
+  input: { jobTitle: string | null; departmentId: string | null },
+  signal?: AbortSignal,
+): Promise<Member> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`,
+    {
+      schema: memberSchema,
+      method: "PATCH",
+      body: input,
+      signal,
+    },
+  );
+}
+
+export function getOrganizationDepartments(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<Department[]> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/departments`, {
+    schema: departmentListSchema,
+    signal,
+  });
+}
+
+export function createDepartment(
+  slug: string,
+  input: { name: string },
+  signal?: AbortSignal,
+): Promise<Department> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/departments`, {
+    schema: departmentSchema,
+    method: "POST",
+    body: input,
+    signal,
+  });
+}
+
+export function updateDepartment(
+  slug: string,
+  departmentId: string,
+  input: { name: string },
+  signal?: AbortSignal,
+): Promise<Department> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/departments/${encodeURIComponent(departmentId)}`,
+    {
+      schema: departmentSchema,
+      method: "PATCH",
+      body: input,
+      signal,
+    },
+  );
+}
+
+export function deleteDepartment(
+  slug: string,
+  departmentId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/departments/${encodeURIComponent(departmentId)}`,
+    {
+      schema: z.void(),
+      method: "DELETE",
+      signal,
+    },
+  );
 }

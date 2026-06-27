@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
   useOrganizationMembersQuery,
@@ -59,18 +59,43 @@ export default function Members(): React.JSX.Element {
         ) : (
           <Card className="overflow-hidden">
             <table className="w-full border-collapse text-[13.5px]">
+              <thead>
+                <tr className="text-ink-soft text-left text-[12px]">
+                  <th className="border-line border-b px-6 py-2.5 font-medium">
+                    {t("members.columnMember")}
+                  </th>
+                  <th className="border-line border-b px-6 py-2.5 font-medium">
+                    {t("members.columnJobTitle")}
+                  </th>
+                  <th className="border-line border-b px-6 py-2.5 font-medium">
+                    {t("members.columnDepartment")}
+                  </th>
+                  <th className="border-line border-b px-6 py-2.5 text-right font-medium">
+                    {t("members.columnRole")}
+                  </th>
+                </tr>
+              </thead>
               <tbody>
                 {org.isPending || members.isPending ? (
                   <tr>
-                    <td className="text-ink-soft px-6 py-3" colSpan={2}>
+                    <td className="text-ink-soft px-6 py-3" colSpan={4}>
                       {t("common.loading")}
                     </td>
                   </tr>
                 ) : (
                   members.data.map((member) => (
-                    <tr key={member.userId}>
+                    <tr
+                      key={member.userId}
+                      onClick={() =>
+                        void navigate(`/${slug}/members/${member.userId}`)
+                      }
+                      className="hover:bg-surface-3 cursor-pointer transition-colors"
+                    >
                       <td className="border-line border-b px-6 py-3">
-                        <div className="flex items-center gap-2.5">
+                        <Link
+                          to={`/${slug}/members/${member.userId}`}
+                          className="flex items-center gap-2.5"
+                        >
                           <Avatar initials={personInitials(member)} />
                           <div className="min-w-0">
                             <div className="text-ink truncate">
@@ -80,7 +105,13 @@ export default function Members(): React.JSX.Element {
                               {member.email}
                             </div>
                           </div>
-                        </div>
+                        </Link>
+                      </td>
+                      <td className="border-line text-ink-soft border-b px-6 py-3">
+                        {member.jobTitle ?? t("members.unassigned")}
+                      </td>
+                      <td className="border-line text-ink-soft border-b px-6 py-3">
+                        {member.departmentName ?? t("members.unassigned")}
                       </td>
                       <td className="border-line border-b px-6 py-3 text-right">
                         <Tag

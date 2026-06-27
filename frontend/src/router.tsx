@@ -1,7 +1,11 @@
 import { createBrowserRouter } from "react-router";
 import type { CrumbContext, RouteHandle } from "./ui";
-import type { OrganizationDetail } from "./api/organization";
-import { organizationQueryKey } from "./api/organization.queries";
+import type { Member, OrganizationDetail } from "./api/organization";
+import {
+  organizationMembersQueryKey,
+  organizationQueryKey,
+} from "./api/organization.queries";
+import { fullName } from "./lib/name";
 import Root from "./routes/root";
 import RootRedirect from "./routes/root-redirect";
 import ProtectedRoute from "./routes/protected-route";
@@ -10,6 +14,8 @@ import Login from "./routes/login";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
 import MemberInvite from "./routes/member-invite";
+import MemberDetail from "./routes/member-detail";
+import MemberEdit from "./routes/member-edit";
 import Settings from "./routes/settings";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
@@ -28,6 +34,18 @@ const orgCrumb: RouteHandle = {
 };
 const membersCrumb: RouteHandle = { crumb: ({ t }) => t("members.title") };
 const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
+const memberCrumb: RouteHandle = {
+  crumb: ({ params, queryClient, t }: CrumbContext) => {
+    const members = queryClient.getQueryData<Member[]>(
+      organizationMembersQueryKey(params.orgSlug ?? ""),
+    );
+    const member = members?.find((m) => m.userId === params.userId);
+    return member ? fullName(member) : t("memberDetail.title");
+  },
+};
+const memberEditCrumb: RouteHandle = {
+  crumb: ({ t }) => t("memberEdit.crumb"),
+};
 const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
 const adminCrumb: RouteHandle = { crumb: ({ t }) => t("adminDashboard.title") };
 const orgsCrumb: RouteHandle = {
@@ -58,6 +76,18 @@ export const router = createBrowserRouter([
                     path: "invite",
                     Component: MemberInvite,
                     handle: inviteCrumb,
+                  },
+                  {
+                    path: ":userId",
+                    handle: memberCrumb,
+                    children: [
+                      { index: true, Component: MemberDetail },
+                      {
+                        path: "edit",
+                        Component: MemberEdit,
+                        handle: memberEditCrumb,
+                      },
+                    ],
                   },
                 ],
               },

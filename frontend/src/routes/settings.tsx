@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { Button, Card, TopBar } from "../ui";
+import { DepartmentSettings } from "./department-settings";
 import * as React from "react";
 
 const TABS = [
@@ -68,25 +69,29 @@ export default function Settings(): React.JSX.Element {
             </p>
           </Card>
         ) : tab === "org" ? (
-          <Card className="max-w-2xl p-7">
-            <h2 className="text-[16px] font-semibold">
-              {t("settings.orgProfile")}
-            </h2>
-            <div className="mt-4 grid grid-cols-[180px_1fr] items-center gap-x-5 gap-y-3.5">
-              <span className={EYEBROW}>{t("settings.name")}</span>
-              <input className={CONTROL} defaultValue={org.data.name} />
-              <span className={EYEBROW}>{t("common.slug")}</span>
-              <input
-                className={`${CONTROL} font-mono`}
-                defaultValue={org.data.slug}
-                readOnly
-              />
-            </div>
-            <div className="mt-5 flex gap-2">
-              <Button>{t("settings.save")}</Button>
-              <Button variant="ghost">{t("settings.discard")}</Button>
-            </div>
-          </Card>
+          <div className="flex flex-col gap-6">
+            <Card className="max-w-2xl p-7">
+              <h2 className="text-[16px] font-semibold">
+                {t("settings.orgProfile")}
+              </h2>
+              <div className="mt-4 grid grid-cols-[180px_1fr] items-center gap-x-5 gap-y-3.5">
+                <span className={EYEBROW}>{t("settings.name")}</span>
+                <input className={CONTROL} defaultValue={org.data.name} />
+                <span className={EYEBROW}>{t("common.slug")}</span>
+                <input
+                  className={`${CONTROL} font-mono`}
+                  defaultValue={org.data.slug}
+                  readOnly
+                />
+              </div>
+              <div className="mt-5 flex gap-2">
+                <Button>{t("settings.save")}</Button>
+                <Button variant="ghost">{t("settings.discard")}</Button>
+              </div>
+            </Card>
+
+            <DepartmentSettings slug={slug} />
+          </div>
         ) : (
           <Card className="p-6">
             <p className="text-ink-soft text-[14px]">
