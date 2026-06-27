@@ -7,9 +7,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
+
+const uniqueViolation = "23505"
 
 type Store struct {
 	db database.DB
@@ -29,6 +32,24 @@ func (s *Store) FindByEmail(ctx context.Context, email string) (User, error) {
 		return User{}, fmt.Errorf("user: find by email: %w", err)
 	}
 	return u, nil
+}
+
+func (s *Store) Create(ctx context.Context, u User) (User, error) {
+	const q = `
+		INSERT INTO users (email, preferred_name, given_names, name_prefix, last_name)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, email, preferred_name, given_names, name_prefix, last_name`
+	var created User
+	err := s.db.QueryRow(ctx, q, u.Email, u.PreferredName, u.GivenNames, u.NamePrefix, u.LastName).
+		Scan(&created.ID, &created.Email, &created.PreferredName, &created.GivenNames, &created.NamePrefix, &created.LastName)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+		return User{}, ErrEmailTaken
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("user: create %q: %w", u.Email, err)
+	}
+	return created, nil
 }
 
 func (s *Store) GetByID(ctx context.Context, id uuid.UUID) (User, error) {

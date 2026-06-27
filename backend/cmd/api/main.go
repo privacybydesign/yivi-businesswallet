@@ -88,7 +88,9 @@ func run() error {
 	startSessionPruner(ctx, sessionStore, cfg.SessionPruneEvery)
 
 	requireUser := auth.RequireUser(sessionStore)
-	orgHandler := organization.NewHandler(organization.NewStore(pool), requireUser, platformAdmins)
+	orgStore := organization.NewStore(pool)
+	orgService := organization.NewService(userStore, orgStore)
+	orgHandler := organization.NewHandler(orgStore, orgService, requireUser, platformAdmins)
 
 	handler := server.New(
 		pool,

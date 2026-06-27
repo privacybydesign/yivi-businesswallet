@@ -23,6 +23,10 @@ func Run(ctx context.Context, dsn string) error {
 		return err
 	}
 
+	if err := seedDepartments(ctx, pool); err != nil {
+		return err
+	}
+
 	if err := seedMemberships(ctx, pool); err != nil {
 		return err
 	}
@@ -43,11 +47,20 @@ type demoUser struct {
 	lastName      string
 }
 
+// demoDepartment belongs to a demoOrganization (by slug).
+type demoDepartment struct {
+	slug string
+	name string
+}
+
 // demoMembership links a demoUser (by email) to a demoOrganization (by slug).
+// department is a demoDepartment name within that org, or empty for none.
 type demoMembership struct {
-	email string
-	slug  string
-	role  string
+	email      string
+	slug       string
+	role       string
+	jobTitle   string
+	department string
 }
 
 var demoOrganizations = []demoOrganization{
@@ -61,9 +74,15 @@ var demoUsers = []demoUser{
 	{email: "user@yivi.app", givenNames: "Thijs Adriaan", namePrefix: "de", lastName: "Vries"},
 }
 
+var demoDepartments = []demoDepartment{
+	{slug: "yivi", name: "Engineering"},
+	{slug: "yivi", name: "Operations"},
+	{slug: "firsty", name: "Sales"},
+}
+
 var demoMemberships = []demoMembership{
-	{email: "user@yivi.app", slug: "yivi", role: "admin"},
-	{email: "user@yivi.app", slug: "firsty", role: "member"},
+	{email: "user@yivi.app", slug: "yivi", role: "admin", jobTitle: "Chief Technology Officer", department: "Engineering"},
+	{email: "user@yivi.app", slug: "firsty", role: "member", jobTitle: "Account Manager", department: "Sales"},
 }
 
 func seedOrganizations(ctx context.Context, pool *pgxpool.Pool) error {
@@ -108,16 +127,38 @@ func seedUsers(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
+func seedDepartments(ctx context.Context, pool *pgxpool.Pool) error {
+	var inserted int64
+	for _, d := range demoDepartments {
+		result, err := pool.Exec(ctx, `
+			INSERT INTO departments (organization_id, name)
+			SELECT o.id, $2
+			FROM organizations o
+			WHERE o.slug = $1
+			ON CONFLICT (organization_id, name) DO NOTHING
+		`, d.slug, d.name)
+		if err != nil {
+			return fmt.Errorf("seed: departments: %w", err)
+		}
+		inserted += result.RowsAffected()
+	}
+
+	slog.Info("seeded departments", slog.Int64("inserted", inserted))
+
+	return nil
+}
+
 func seedMemberships(ctx context.Context, pool *pgxpool.Pool) error {
 	var inserted int64
 	for _, m := range demoMemberships {
 		result, err := pool.Exec(ctx, `
-			INSERT INTO memberships (user_id, organization_id, role)
-			SELECT u.id, o.id, $3
+			INSERT INTO memberships (user_id, organization_id, role, job_title, department_id)
+			SELECT u.id, o.id, $3, NULLIF($4, ''), d.id
 			FROM users u, organizations o
+			LEFT JOIN departments d ON d.organization_id = o.id AND d.name = NULLIF($5, '')
 			WHERE u.email = $1 AND o.slug = $2
 			ON CONFLICT (user_id, organization_id) DO NOTHING
-		`, m.email, m.slug, m.role)
+		`, m.email, m.slug, m.role, m.jobTitle, m.department)
 		if err != nil {
 			return fmt.Errorf("seed: memberships: %w", err)
 		}

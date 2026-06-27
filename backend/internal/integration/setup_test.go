@@ -101,7 +101,9 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	authService := auth.NewService(fake, userStore, sessionStore, emailAttr)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, admins)
 	requireUser := auth.RequireUser(sessionStore)
-	orgHandler := organization.NewHandler(organization.NewStore(pool), requireUser, admins)
+	orgStore := organization.NewStore(pool)
+	orgService := organization.NewService(userStore, orgStore)
+	orgHandler := organization.NewHandler(orgStore, orgService, requireUser, admins)
 
 	srv := httptest.NewServer(server.New(pool, authHandler, orgHandler))
 	t.Cleanup(srv.Close)
@@ -133,10 +135,27 @@ func (e *testEnv) do(method, path string, body io.Reader) *http.Response {
 	return resp
 }
 
-// login completes a /claim as the given email and returns the authenticated
-// identity. The session cookie is stored in the client's jar.
+// createUser provisions a user so they can be authenticated. Login now requires
+// the user to already exist (the invitation model), so tests must provision
+// before claiming. Idempotent on email.
+func (e *testEnv) createUser(email string) uuid.UUID {
+	e.t.Helper()
+	var id uuid.UUID
+	err := e.pool.QueryRow(context.Background(),
+		`INSERT INTO users (email, given_names, last_name) VALUES ($1, 'Test', 'User')
+		 ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id`, email,
+	).Scan(&id)
+	if err != nil {
+		e.t.Fatalf("create user %q: %v", email, err)
+	}
+	return id
+}
+
+// login provisions the user, then completes a /claim as them and returns the
+// authenticated identity. The session cookie is stored in the client's jar.
 func (e *testEnv) login(email string) meBody {
 	e.t.Helper()
+	e.createUser(email)
 	e.fake.email = email
 
 	resp := e.do(http.MethodPost, "/api/v1/auth/session/test-token/claim", nil)

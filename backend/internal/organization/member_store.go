@@ -1,0 +1,110 @@
+package organization
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+func (s *Store) AddMembership(ctx context.Context, orgID, userID uuid.UUID, role string, jobTitle *string, departmentID *uuid.UUID) (Member, error) {
+	const q = `INSERT INTO memberships (organization_id, user_id, role, job_title, department_id) VALUES ($1, $2, $3, $4, $5)`
+	_, err := s.db.Exec(ctx, q, orgID, userID, role, jobTitle, departmentID)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case uniqueViolation:
+			return Member{}, ErrAlreadyMember
+		case foreignKeyViolation:
+			return Member{}, ErrDepartmentNotFound
+		}
+	}
+	if err != nil {
+		return Member{}, fmt.Errorf("organization: add membership user %s org %s: %w", userID, orgID, err)
+	}
+	return s.getMember(ctx, orgID, userID)
+}
+
+func (s *Store) GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error) {
+	const q = `SELECT user_id, organization_id, role, job_title, department_id FROM memberships WHERE user_id = $1 AND organization_id = $2`
+	var m Membership
+	err := s.db.QueryRow(ctx, q, userID, orgID).Scan(&m.UserID, &m.OrganizationID, &m.Role, &m.JobTitle, &m.DepartmentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Membership{}, ErrNotMember
+	}
+	if err != nil {
+		return Membership{}, fmt.Errorf("organization: get membership user %s org %s: %w", userID, orgID, err)
+	}
+	return m, nil
+}
+
+func (s *Store) ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, error) {
+	const q = `
+		SELECT u.id, u.email, u.preferred_name, u.given_names, u.name_prefix, u.last_name,
+		       m.role, m.job_title, m.department_id, d.name
+		FROM memberships m
+		JOIN users u ON u.id = m.user_id
+		LEFT JOIN departments d ON d.id = m.department_id
+		WHERE m.organization_id = $1
+		ORDER BY u.last_name, u.given_names`
+	rows, err := s.db.Query(ctx, q, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("organization: list members org %s: %w", orgID, err)
+	}
+	defer rows.Close()
+
+	members := []Member{}
+	for rows.Next() {
+		var m Member
+		if err := rows.Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.NamePrefix, &m.LastName,
+			&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName); err != nil {
+			return nil, fmt.Errorf("organization: list members scan: %w", err)
+		}
+		members = append(members, m)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("organization: list members rows: %w", err)
+	}
+
+	return members, nil
+}
+
+func (s *Store) getMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error) {
+	const q = `
+		SELECT u.id, u.email, u.preferred_name, u.given_names, u.name_prefix, u.last_name,
+		       m.role, m.job_title, m.department_id, d.name
+		FROM memberships m
+		JOIN users u ON u.id = m.user_id
+		LEFT JOIN departments d ON d.id = m.department_id
+		WHERE m.organization_id = $1 AND m.user_id = $2`
+	var m Member
+	err := s.db.QueryRow(ctx, q, orgID, userID).Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.NamePrefix, &m.LastName,
+		&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Member{}, ErrNotMember
+	}
+	if err != nil {
+		return Member{}, fmt.Errorf("organization: get member user %s org %s: %w", userID, orgID, err)
+	}
+	return m, nil
+}
+
+func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, jobTitle *string, departmentID *uuid.UUID) (Member, error) {
+	const q = `UPDATE memberships SET job_title = $3, department_id = $4 WHERE organization_id = $1 AND user_id = $2`
+	tag, err := s.db.Exec(ctx, q, orgID, userID, jobTitle, departmentID)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
+		return Member{}, ErrDepartmentNotFound
+	}
+	if err != nil {
+		return Member{}, fmt.Errorf("organization: update membership user %s org %s: %w", userID, orgID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return Member{}, ErrNotMember
+	}
+	return s.getMember(ctx, orgID, userID)
+}

@@ -22,16 +22,26 @@ type repository interface {
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, error)
+	UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, jobTitle *string, departmentID *uuid.UUID) (Member, error)
+	ListDepartments(ctx context.Context, orgID uuid.UUID) ([]Department, error)
+	CreateDepartment(ctx context.Context, orgID uuid.UUID, name string) (Department, error)
+	UpdateDepartment(ctx context.Context, orgID, deptID uuid.UUID, name string) (Department, error)
+	DeleteDepartment(ctx context.Context, orgID, deptID uuid.UUID) error
+}
+
+type inviter interface {
+	InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) (Member, error)
 }
 
 type Handler struct {
 	store       repository
+	service     inviter
 	requireUser func(http.Handler) http.Handler
 	admins      auth.PlatformAdmins
 }
 
-func NewHandler(store repository, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
-	return &Handler{store: store, requireUser: requireUser, admins: admins}
+func NewHandler(store repository, service inviter, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
+	return &Handler{store: store, service: service, requireUser: requireUser, admins: admins}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -50,6 +60,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
 	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
+	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.addMember))))
+	mux.Handle("PATCH /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMember))))
+
+	mux.Handle("GET /orgs/{slug}/departments", orgScoped(respond.HandlerFunc(h.listDepartments)))
+	mux.Handle("POST /orgs/{slug}/departments", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.createDepartment))))
+	mux.Handle("PATCH /orgs/{slug}/departments/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateDepartment))))
+	mux.Handle("DELETE /orgs/{slug}/departments/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.deleteDepartment))))
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {
@@ -134,16 +151,6 @@ func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
 		Organization: OrgFromContext(ctx),
 		Role:         roleFromContext(ctx),
 	})
-	return nil
-}
-
-func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
-	org := OrgFromContext(r.Context())
-	members, err := h.store.ListMembers(r.Context(), org.ID)
-	if err != nil {
-		return fmt.Errorf("listing members: %w", err)
-	}
-	respond.JSON(w, r, http.StatusOK, members)
 	return nil
 }
 

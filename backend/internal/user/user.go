@@ -6,7 +6,10 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrNotFound = errors.New("user: not found")
+var (
+	ErrNotFound   = errors.New("user: not found")
+	ErrEmailTaken = errors.New("user: email already taken")
+)
 
 type User struct {
 	ID            uuid.UUID `json:"id"`
