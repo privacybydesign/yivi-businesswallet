@@ -129,11 +129,11 @@ func (s *Store) GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Mem
 
 func (s *Store) ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, error) {
 	const q = `
-		SELECT u.id, u.email, m.role
+		SELECT u.id, u.email, u.preferred_name, u.given_names, u.name_prefix, u.last_name, m.role
 		FROM memberships m
 		JOIN users u ON u.id = m.user_id
 		WHERE m.organization_id = $1
-		ORDER BY u.email`
+		ORDER BY u.last_name, u.given_names`
 	rows, err := s.db.Query(ctx, q, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("organization: list members org %s: %w", orgID, err)
@@ -143,7 +143,7 @@ func (s *Store) ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, err
 	members := []Member{}
 	for rows.Next() {
 		var m Member
-		if err := rows.Scan(&m.UserID, &m.Email, &m.Role); err != nil {
+		if err := rows.Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.NamePrefix, &m.LastName, &m.Role); err != nil {
 			return nil, fmt.Errorf("organization: list members scan: %w", err)
 		}
 		members = append(members, m)

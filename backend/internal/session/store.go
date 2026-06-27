@@ -52,12 +52,12 @@ func (s *Store) Lookup(ctx context.Context, rawToken string) (user.User, error) 
 	hash := hashToken(rawToken)
 
 	const q = `
-		SELECT u.id, u.email
+		SELECT u.id, u.email, u.preferred_name, u.given_names, u.name_prefix, u.last_name
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1 AND s.expires_at > now()`
 	var u user.User
-	if err := s.db.QueryRow(ctx, q, hash[:]).Scan(&u.ID, &u.Email); err != nil {
+	if err := s.db.QueryRow(ctx, q, hash[:]).Scan(&u.ID, &u.Email, &u.PreferredName, &u.GivenNames, &u.NamePrefix, &u.LastName); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return user.User{}, ErrInvalidSession
 		}

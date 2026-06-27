@@ -11,7 +11,6 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 func TestStoreCreateRoundTrip(t *testing.T) {
@@ -90,19 +89,23 @@ func TestStoreMembershipsReflectInsertedRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	u, err := user.NewStore(pool).FindOrCreateByEmail(ctx, "alice@example.test")
-	if err != nil {
+	const userEmail = "alice@example.test"
+	var userID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO users (email, given_names, last_name) VALUES ($1, $2, $3) RETURNING id",
+		userEmail, "Test", "User",
+	).Scan(&userID); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 
 	if _, err := pool.Exec(ctx,
 		"INSERT INTO memberships (user_id, organization_id, role) VALUES ($1, $2, $3)",
-		u.ID, org.ID, organization.RoleAdmin,
+		userID, org.ID, organization.RoleAdmin,
 	); err != nil {
 		t.Fatalf("insert membership: %v", err)
 	}
 
-	membership, err := store.GetMembership(ctx, u.ID, org.ID)
+	membership, err := store.GetMembership(ctx, userID, org.ID)
 	if err != nil {
 		t.Fatalf("GetMembership: %v", err)
 	}
@@ -110,7 +113,7 @@ func TestStoreMembershipsReflectInsertedRows(t *testing.T) {
 		t.Errorf("role = %q, want %q", membership.Role, organization.RoleAdmin)
 	}
 
-	orgs, err := store.ListForUser(ctx, u.ID)
+	orgs, err := store.ListForUser(ctx, userID)
 	if err != nil {
 		t.Fatalf("ListForUser: %v", err)
 	}
@@ -122,7 +125,7 @@ func TestStoreMembershipsReflectInsertedRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}
-	if len(members) != 1 || members[0].UserID != u.ID || members[0].Email != u.Email {
-		t.Errorf("ListMembers = %+v, want one member %s/%s", members, u.ID, u.Email)
+	if len(members) != 1 || members[0].UserID != userID || members[0].Email != userEmail {
+		t.Errorf("ListMembers = %+v, want one member %s/%s", members, userID, userEmail)
 	}
 }

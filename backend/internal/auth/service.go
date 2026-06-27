@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 
 	irma "github.com/privacybydesign/irmago/irma"
@@ -66,9 +67,11 @@ func (s *Service) Authenticate(ctx context.Context, token irma.RequestorToken) (
 		return user.User{}, "", err
 	}
 
-	// TODO: users have to be invited by an organization
-	u, err := s.users.FindOrCreateByEmail(ctx, email)
+	u, err := s.users.FindByEmail(ctx, email)
 	if err != nil {
+		if errors.Is(err, user.ErrNotFound) {
+			return user.User{}, "", errUserNotInvited
+		}
 		return user.User{}, "", err
 	}
 

@@ -84,6 +84,10 @@ func (h *Handler) meResponse(u user.User) meResponse {
 	return meResponse{
 		ID:              u.ID,
 		Email:           u.Email,
+		PreferredName:   u.PreferredName,
+		GivenNames:      u.GivenNames,
+		NamePrefix:      u.NamePrefix,
+		LastName:        u.LastName,
 		IsPlatformAdmin: h.admins.Has(u.Email),
 	}
 }
@@ -114,7 +118,7 @@ func mapAuthError(err error) error {
 	switch {
 	case errors.Is(err, irmarequestor.ErrUnknownSession):
 		return unknownSessionOr(err)
-	case errors.Is(err, errSessionNotFinished), errors.Is(err, errDisclosureInvalid):
+	case errors.Is(err, errSessionNotFinished), errors.Is(err, errDisclosureInvalid), errors.Is(err, errUserNotInvited):
 		return mapClaimError(err)
 	default:
 		return err
@@ -128,5 +132,9 @@ type statusResponse struct {
 type meResponse struct {
 	ID              uuid.UUID `json:"id"`
 	Email           string    `json:"email"`
+	PreferredName   *string   `json:"preferredName"`
+	GivenNames      string    `json:"givenNames"`
+	NamePrefix      *string   `json:"namePrefix"`
+	LastName        string    `json:"lastName"`
 	IsPlatformAdmin bool      `json:"isPlatformAdmin"`
 }

@@ -30,7 +30,11 @@ type Membership struct {
 }
 
 type Member struct {
-	UserID uuid.UUID `json:"userId"`
-	Email  string    `json:"email"`
-	Role   string    `json:"role"`
+	UserID        uuid.UUID `json:"userId"`
+	Email         string    `json:"email"`
+	PreferredName *string   `json:"preferredName"`
+	GivenNames    string    `json:"givenNames"`
+	NamePrefix    *string   `json:"namePrefix"`
+	LastName      string    `json:"lastName"`
+	Role          string    `json:"role"`
 }

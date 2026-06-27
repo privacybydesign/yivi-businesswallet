@@ -142,6 +142,7 @@ func TestMapClaimError(t *testing.T) {
 	}{
 		{"not finished -> 409", errSessionNotFinished, http.StatusConflict, "session_not_finished", true},
 		{"invalid -> 422", errDisclosureInvalid, http.StatusUnprocessableEntity, "disclosure_invalid", true},
+		{"not invited -> 403", errUserNotInvited, http.StatusForbidden, "user_not_invited", true},
 		{"unexpected -> passthrough (not APIError)", errors.New("boom"), 0, "", false},
 	}
 

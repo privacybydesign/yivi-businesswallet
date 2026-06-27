@@ -19,24 +19,22 @@ func NewStore(db database.DB) *Store {
 	return &Store{db: db}
 }
 
-func (s *Store) FindOrCreateByEmail(ctx context.Context, email string) (User, error) {
-	const q = `
-		INSERT INTO users (email)
-		VALUES ($1)
-		ON CONFLICT (email)
-		DO UPDATE SET email = EXCLUDED.email
-		RETURNING id, email`
+func (s *Store) FindByEmail(ctx context.Context, email string) (User, error) {
+	const q = `SELECT id, email, preferred_name, given_names, name_prefix, last_name FROM users WHERE email = $1`
 	var u User
-	if err := s.db.QueryRow(ctx, q, email).Scan(&u.ID, &u.Email); err != nil {
-		return User{}, fmt.Errorf("user: find or create by email: %w", err)
+	if err := s.db.QueryRow(ctx, q, email).Scan(&u.ID, &u.Email, &u.PreferredName, &u.GivenNames, &u.NamePrefix, &u.LastName); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return User{}, ErrNotFound
+		}
+		return User{}, fmt.Errorf("user: find by email: %w", err)
 	}
 	return u, nil
 }
 
 func (s *Store) GetByID(ctx context.Context, id uuid.UUID) (User, error) {
-	const q = `SELECT id, email FROM users WHERE id = $1`
+	const q = `SELECT id, email, preferred_name, given_names, name_prefix, last_name FROM users WHERE id = $1`
 	var u User
-	if err := s.db.QueryRow(ctx, q, id).Scan(&u.ID, &u.Email); err != nil {
+	if err := s.db.QueryRow(ctx, q, id).Scan(&u.ID, &u.Email, &u.PreferredName, &u.GivenNames, &u.NamePrefix, &u.LastName); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return User{}, ErrNotFound
 		}

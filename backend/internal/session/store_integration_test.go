@@ -14,19 +14,22 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 const sessionTTL = time.Hour
 
-// createUser inserts a user via the user store and returns its id.
+// createUser inserts a user and returns its id.
 func createUser(t *testing.T, pool *pgxpool.Pool, email string) uuid.UUID {
 	t.Helper()
-	u, err := user.NewStore(pool).FindOrCreateByEmail(context.Background(), email)
+	var id uuid.UUID
+	err := pool.QueryRow(context.Background(),
+		"INSERT INTO users (email, given_names, last_name) VALUES ($1, $2, $3) RETURNING id",
+		email, "Test", "User",
+	).Scan(&id)
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	return u.ID
+	return id
 }
 
 func TestStoreMintLookupRoundTrip(t *testing.T) {

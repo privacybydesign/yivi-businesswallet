@@ -13,6 +13,7 @@ import (
 var (
 	errSessionNotFinished = errors.New("session not finished")
 	errDisclosureInvalid  = errors.New("disclosure invalid")
+	errUserNotInvited     = errors.New("user not invited")
 )
 
 func extractEmail(res *irmaserver.SessionResult, want irma.AttributeTypeIdentifier) (string, error) {
@@ -49,6 +50,12 @@ func mapClaimError(err error) error {
 			Status:  http.StatusUnprocessableEntity,
 			Code:    "disclosure_invalid",
 			Message: "disclosure invalid",
+		}
+	case errors.Is(err, errUserNotInvited):
+		return &respond.APIError{
+			Status:  http.StatusForbidden,
+			Code:    "user_not_invited",
+			Message: "you have not been invited",
 		}
 	default:
 		return err

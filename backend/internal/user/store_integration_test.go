@@ -5,6 +5,7 @@ package user_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
@@ -13,32 +14,47 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
-func TestStoreFindOrCreateByEmailIsIdempotent(t *testing.T) {
+func TestStoreFindByEmailReturnsUser(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := user.NewStore(pool)
 	ctx := context.Background()
 
 	const email = "alice@example.test"
+	var id uuid.UUID
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO users (email, preferred_name, given_names, name_prefix, last_name) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+		email, "Ally", "Alice Maria", "van", "Doorn",
+	).Scan(&id); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
 
-	first, err := store.FindOrCreateByEmail(ctx, email)
+	got, err := store.FindByEmail(ctx, email)
 	if err != nil {
-		t.Fatalf("first FindOrCreateByEmail: %v", err)
-	}
-	second, err := store.FindOrCreateByEmail(ctx, email)
-	if err != nil {
-		t.Fatalf("second FindOrCreateByEmail: %v", err)
+		t.Fatalf("FindByEmail: %v", err)
 	}
 
-	if first.ID != second.ID {
-		t.Errorf("ID changed across calls: %s != %s", first.ID, second.ID)
+	prefix := "van"
+	preferred := "Ally"
+	want := user.User{
+		ID:            id,
+		Email:         email,
+		PreferredName: &preferred,
+		GivenNames:    "Alice Maria",
+		NamePrefix:    &prefix,
+		LastName:      "Doorn",
 	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("FindByEmail = %+v, want %+v", got, want)
+	}
+}
 
-	var count int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM users WHERE email = $1", email).Scan(&count); err != nil {
-		t.Fatalf("count users: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("user rows = %d, want 1", count)
+func TestStoreFindByEmailNotFound(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := user.NewStore(pool)
+
+	_, err := store.FindByEmail(context.Background(), "nobody@example.test")
+	if !errors.Is(err, user.ErrNotFound) {
+		t.Errorf("err = %v, want user.ErrNotFound", err)
 	}
 }
 
@@ -47,17 +63,23 @@ func TestStoreGetByIDReturnsCreatedUser(t *testing.T) {
 	store := user.NewStore(pool)
 	ctx := context.Background()
 
-	created, err := store.FindOrCreateByEmail(ctx, "bob@example.test")
-	if err != nil {
-		t.Fatalf("FindOrCreateByEmail: %v", err)
+	const email = "bob@example.test"
+	var id uuid.UUID
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO users (email, given_names, last_name) VALUES ($1, $2, $3) RETURNING id",
+		email, "Bob", "Bouwer",
+	).Scan(&id); err != nil {
+		t.Fatalf("insert user: %v", err)
 	}
 
-	got, err := store.GetByID(ctx, created.ID)
+	got, err := store.GetByID(ctx, id)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if got != created {
-		t.Errorf("GetByID = %+v, want %+v", got, created)
+
+	want := user.User{ID: id, Email: email, GivenNames: "Bob", LastName: "Bouwer"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GetByID = %+v, want %+v", got, want)
 	}
 }
 
