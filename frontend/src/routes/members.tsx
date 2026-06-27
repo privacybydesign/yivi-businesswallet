@@ -24,7 +24,13 @@ export default function Members(): React.JSX.Element {
     <>
       <TopBar
         title={t("members.title")}
-        subtitle={org.data?.name ?? t("members.subtitle")}
+        subtitle={
+          org.isPending || (isAdmin && members.isPending)
+            ? t("common.loading")
+            : members.data
+              ? t("members.count", { count: members.data.length })
+              : t("members.subtitle")
+        }
         actions={
           isAdmin ? (
             <Button
@@ -60,17 +66,17 @@ export default function Members(): React.JSX.Element {
           <Card className="overflow-hidden">
             <table className="w-full border-collapse text-[13.5px]">
               <thead>
-                <tr className="text-ink-soft text-left text-[12px]">
-                  <th className="border-line border-b px-6 py-2.5 font-medium">
+                <tr>
+                  <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
                     {t("members.columnMember")}
                   </th>
-                  <th className="border-line border-b px-6 py-2.5 font-medium">
+                  <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
                     {t("members.columnJobTitle")}
                   </th>
-                  <th className="border-line border-b px-6 py-2.5 font-medium">
+                  <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
                     {t("members.columnDepartment")}
                   </th>
-                  <th className="border-line border-b px-6 py-2.5 text-right font-medium">
+                  <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-right font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
                     {t("members.columnRole")}
                   </th>
                 </tr>
@@ -78,7 +84,7 @@ export default function Members(): React.JSX.Element {
               <tbody>
                 {org.isPending || members.isPending ? (
                   <tr>
-                    <td className="text-ink-soft px-6 py-3" colSpan={4}>
+                    <td className="text-ink-soft px-3.5 py-3" colSpan={4}>
                       {t("common.loading")}
                     </td>
                   </tr>
@@ -91,7 +97,7 @@ export default function Members(): React.JSX.Element {
                       }
                       className="hover:bg-surface-3 cursor-pointer transition-colors"
                     >
-                      <td className="border-line border-b px-6 py-3">
+                      <td className="border-line border-b px-3.5 py-3">
                         <Link
                           to={`/${slug}/members/${member.userId}`}
                           className="flex items-center gap-2.5"
@@ -107,13 +113,13 @@ export default function Members(): React.JSX.Element {
                           </div>
                         </Link>
                       </td>
-                      <td className="border-line text-ink-soft border-b px-6 py-3">
+                      <td className="border-line text-ink-soft border-b px-3.5 py-3">
                         {member.jobTitle ?? t("members.unassigned")}
                       </td>
-                      <td className="border-line text-ink-soft border-b px-6 py-3">
+                      <td className="border-line text-ink-soft border-b px-3.5 py-3">
                         {member.departmentName ?? t("members.unassigned")}
                       </td>
-                      <td className="border-line border-b px-6 py-3 text-right">
+                      <td className="border-line border-b px-3.5 py-3 text-right">
                         <Tag
                           tone={member.role === "admin" ? "blue" : "default"}
                         >

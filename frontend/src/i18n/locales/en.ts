@@ -49,6 +49,8 @@ export const en = {
   members: {
     title: "Members",
     subtitle: "Organization members",
+    count_one: "{{count}} member",
+    count_other: "{{count}} members",
     invite: "Invite member",
     adminOnly: "Only organization admins can view members.",
     loadError: "Could not load members: {{message}}",
