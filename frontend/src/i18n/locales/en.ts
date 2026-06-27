@@ -56,7 +56,7 @@ export const en = {
   memberInvite: {
     title: "Invite member",
     subtitle:
-      "Send a Yivi onboarding link. The member binds their personal Yivi wallet to the organisation.",
+      "Send a Yivi onboarding link. The member binds their personal Yivi wallet to the organization.",
     cancel: "Cancel",
     send: "Send invitation",
     howTo: "How to invite",

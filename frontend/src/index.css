@@ -159,6 +159,12 @@
     color: var(--yb-ink);
   }
 
+  /* Tailwind's reset drops the pointer from buttons; restore it for any
+     enabled button across the app (disabled ones keep the default cursor). */
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
   /* Inlined IrmaIcons SVGs: fill follows the surrounding text colour. */
   .yivi-icon {
     display: inline-flex;
