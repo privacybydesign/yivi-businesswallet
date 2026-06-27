@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend-lint:
     runs-on: ubuntu-latest
@@ -50,8 +54,8 @@ jobs:
         with:
           go-version: "1.26"
           cache-dependency-path: backend/go.sum
-      - name: Check gofmt
-        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - name: Check formatting
+        run: go tool golangci-lint fmt --diff
       - run: go tool golangci-lint run ./...
 
   backend-test:

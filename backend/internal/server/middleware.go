@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )

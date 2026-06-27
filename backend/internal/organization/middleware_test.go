@@ -24,9 +24,11 @@ func (f fakeRepo) List(context.Context) ([]Organization, error) { return nil, ni
 func (f fakeRepo) Create(context.Context, string, string) (Organization, error) {
 	return Organization{}, nil
 }
+
 func (f fakeRepo) GetByID(context.Context, uuid.UUID) (Organization, error) {
 	return Organization{}, nil
 }
+
 func (f fakeRepo) GetBySlug(context.Context, string) (Organization, error) {
 	return f.org, f.getBySlugErr
 }
