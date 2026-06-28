@@ -55,13 +55,13 @@ export default function Dashboard(): React.JSX.Element {
           <Stat
             label={t("dashboard.statAttestations")}
             value="0"
-            hint={t("dashboard.comingSoon")}
+            hint={t("common.comingSoon")}
             icon="valid"
           />
           <Stat
             label={t("dashboard.statDocuments")}
             value="0"
-            hint={t("dashboard.comingSoon")}
+            hint={t("common.comingSoon")}
             icon="edit"
           />
         </div>
@@ -71,7 +71,7 @@ export default function Dashboard(): React.JSX.Element {
             {t("dashboard.details")}
           </h2>
           <dl className="mt-3 grid grid-cols-[120px_1fr] gap-y-2 text-[13.5px]">
-            <dt className="text-muted">{t("dashboard.name")}</dt>
+            <dt className="text-muted">{t("common.name")}</dt>
             <dd className="text-ink">{org.data?.name ?? "—"}</dd>
             <dt className="text-muted">{t("common.slug")}</dt>
             <dd className="text-ink-soft font-mono">{org.data?.slug ?? "—"}</dd>

@@ -61,7 +61,7 @@ export default function CreateOrganization(): React.JSX.Element {
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <label className="flex flex-col gap-1.5">
               <span className="text-ink text-[13px] font-semibold">
-                {t("createOrg.nameLabel")}
+                {t("common.name")}
               </span>
               <Input
                 value={name}
@@ -73,7 +73,7 @@ export default function CreateOrganization(): React.JSX.Element {
 
             <label className="flex flex-col gap-1.5">
               <span className="text-ink text-[13px] font-semibold">
-                {t("createOrg.slugLabel")}
+                {t("common.slug")}
               </span>
               <Input
                 value={slug}
@@ -103,7 +103,7 @@ export default function CreateOrganization(): React.JSX.Element {
                 variant="ghost"
                 onClick={() => void navigate("/admin/organizations")}
               >
-                {t("createOrg.cancel")}
+                {t("common.cancel")}
               </Button>
             </div>
           </form>

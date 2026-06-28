@@ -98,7 +98,7 @@ export default function MemberDetail(): React.JSX.Element {
               variant="secondary"
               onClick={() => void navigate(`/${slug}/members/${id}/edit`)}
             >
-              {t("memberDetail.edit")}
+              {t("common.edit")}
             </Button>
             <Button icon="add">{t("memberDetail.issue")}</Button>
           </>
@@ -140,16 +140,16 @@ export default function MemberDetail(): React.JSX.Element {
           </div>
           <div className="flex flex-col gap-2.5 p-5">
             <DetailRow
-              label={t("memberDetail.role")}
+              label={t("common.role")}
               value={member.role}
               capitalize
             />
             <DetailRow
-              label={t("memberDetail.jobTitle")}
+              label={t("common.jobTitle")}
               value={member.jobTitle ?? "—"}
             />
             <DetailRow
-              label={t("memberDetail.department")}
+              label={t("common.department")}
               value={member.departmentName ?? "—"}
             />
           </div>

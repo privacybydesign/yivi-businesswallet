@@ -56,10 +56,10 @@ function EditForm({
         actions={
           <>
             <Button variant="secondary" onClick={backToMember}>
-              {t("memberEdit.cancel")}
+              {t("common.cancel")}
             </Button>
             <Button type="submit" form={FORM_ID} disabled={update.isPending}>
-              {update.isPending ? t("memberEdit.saving") : t("memberEdit.save")}
+              {update.isPending ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
@@ -73,7 +73,7 @@ function EditForm({
             className="flex flex-col gap-4"
           >
             <label className="flex flex-col gap-1.5">
-              <span className={FIELD_LABEL}>{t("memberEdit.jobTitle")}</span>
+              <span className={FIELD_LABEL}>{t("common.jobTitle")}</span>
               <input
                 className={CONTROL}
                 value={jobTitle}
@@ -84,7 +84,7 @@ function EditForm({
             </label>
 
             <label className="flex flex-col gap-1.5">
-              <span className={FIELD_LABEL}>{t("memberEdit.department")}</span>
+              <span className={FIELD_LABEL}>{t("common.department")}</span>
               <select
                 className={CONTROL}
                 value={departmentId}
@@ -104,7 +104,7 @@ function EditForm({
                 role="alert"
                 className="rounded-yivi bg-error-bg text-error px-3 py-2 text-[13px]"
               >
-                {t("memberEdit.error", { message: update.error.message })}
+                {t("common.saveError", { message: update.error.message })}
               </p>
             )}
           </form>

@@ -50,7 +50,7 @@ export default function RootRedirect(): React.JSX.Element | null {
               onClick={() => logout.mutate()}
               disabled={logout.isPending}
             >
-              {t("rootEmpty.logOut")}
+              {t("common.logOut")}
             </Button>
           </div>
         </Card>

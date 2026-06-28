@@ -210,7 +210,7 @@ export default function MemberInvite(): React.JSX.Element | null {
         actions={
           <>
             <Button variant="secondary" onClick={backToMembers}>
-              {t("memberInvite.cancel")}
+              {t("common.cancel")}
             </Button>
             <Button
               type="submit"
@@ -244,7 +244,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                     type="button"
                     disabled={!m.enabled}
                     aria-disabled={!m.enabled}
-                    title={m.enabled ? undefined : t("memberInvite.comingSoon")}
+                    title={m.enabled ? undefined : t("common.comingSoon")}
                     onClick={() => m.enabled && setMode(m.key)}
                     className={[
                       "rounded-yivi flex flex-1 items-center gap-2.5 border px-3 py-3.5 text-[13.5px] font-semibold transition-colors",
@@ -267,7 +267,7 @@ export default function MemberInvite(): React.JSX.Element | null {
             <div className={EYEBROW}>{t("memberInvite.recipient")}</div>
             <div className="mt-3 flex flex-col gap-5">
               <div className="flex flex-col gap-2">
-                <div className={SUBHEAD}>{t("memberInvite.groupName")}</div>
+                <div className={SUBHEAD}>{t("common.name")}</div>
                 <div className="grid grid-cols-12 gap-3">
                   <Field
                     id="invite-given-names"
@@ -363,7 +363,7 @@ export default function MemberInvite(): React.JSX.Element | null {
               <div className="flex flex-col gap-2">
                 <div className={SUBHEAD}>{t("memberInvite.groupRoleDept")}</div>
                 <div className="grid grid-cols-3 gap-3">
-                  <Field id="invite-role" label={t("memberInvite.role")}>
+                  <Field id="invite-role" label={t("common.role")}>
                     <select
                       id="invite-role"
                       className={control(false)}
@@ -378,10 +378,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                       </option>
                     </select>
                   </Field>
-                  <Field
-                    id="invite-department"
-                    label={t("memberInvite.department")}
-                  >
+                  <Field id="invite-department" label={t("common.department")}>
                     <select
                       id="invite-department"
                       className={control(false)}
@@ -398,10 +395,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                       ))}
                     </select>
                   </Field>
-                  <Field
-                    id="invite-job-title"
-                    label={t("memberInvite.jobTitle")}
-                  >
+                  <Field id="invite-job-title" label={t("common.jobTitle")}>
                     <input
                       id="invite-job-title"
                       className={control(false)}
@@ -432,7 +426,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                 size="sm"
                 icon="add"
                 disabled
-                title={t("memberInvite.comingSoon")}
+                title={t("common.comingSoon")}
               >
                 {t("memberInvite.addMore")}
               </Button>

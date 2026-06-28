@@ -129,7 +129,7 @@ export function Sidebar({
           type="button"
           onClick={onLogout}
           disabled={loggingOut}
-          aria-label={t("nav.logOut")}
+          aria-label={t("common.logOut")}
           className="text-ink-soft hover:text-ink transition-colors disabled:opacity-50"
         >
           <Icon name="logout" size={NAV_ICON_SIZE} />

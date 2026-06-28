@@ -38,7 +38,7 @@ export function OrgProfileSettings({
     <Card className="max-w-2xl p-7">
       <h2 className="text-[16px] font-semibold">{t("settings.orgProfile")}</h2>
       <div className="mt-4 grid grid-cols-[180px_1fr] items-center gap-x-5 gap-y-3.5">
-        <span className={EYEBROW}>{t("settings.name")}</span>
+        <span className={EYEBROW}>{t("common.name")}</span>
         <input
           className={CONTROL}
           value={name}
@@ -56,7 +56,7 @@ export function OrgProfileSettings({
           onClick={handleSave}
           disabled={trimmed === "" || !dirty || update.isPending}
         >
-          {update.isPending ? t("settings.saving") : t("settings.save")}
+          {update.isPending ? t("common.saving") : t("common.save")}
         </Button>
         <Button
           variant="ghost"
@@ -68,7 +68,7 @@ export function OrgProfileSettings({
       </div>
       {update.isError && (
         <p role="alert" className="text-error mt-2 text-[13px]">
-          {t("settings.error", { message: update.error.message })}
+          {t("common.saveError", { message: update.error.message })}
         </p>
       )}
     </Card>

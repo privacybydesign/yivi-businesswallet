@@ -71,13 +71,13 @@ export default function Members(): React.JSX.Element {
                     {t("members.columnMember")}
                   </th>
                   <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
-                    {t("members.columnJobTitle")}
+                    {t("common.jobTitle")}
                   </th>
                   <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
-                    {t("members.columnDepartment")}
+                    {t("common.department")}
                   </th>
                   <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-right font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
-                    {t("members.columnRole")}
+                    {t("common.role")}
                   </th>
                 </tr>
               </thead>

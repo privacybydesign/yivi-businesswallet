@@ -44,7 +44,7 @@ const memberCrumb: RouteHandle = {
   },
 };
 const memberEditCrumb: RouteHandle = {
-  crumb: ({ t }) => t("memberEdit.crumb"),
+  crumb: ({ t }) => t("common.edit"),
 };
 const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
 const adminCrumb: RouteHandle = { crumb: ({ t }) => t("adminDashboard.title") };

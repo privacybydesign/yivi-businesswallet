@@ -150,7 +150,7 @@ export function DepartmentSettings({
                       variant="ghost"
                       onClick={() => setEditingId(null)}
                     >
-                      {t("departments.cancel")}
+                      {t("common.cancel")}
                     </Button>
                   </>
                 ) : (
