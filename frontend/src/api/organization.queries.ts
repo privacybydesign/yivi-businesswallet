@@ -21,6 +21,8 @@ import {
   getOrganizationMembers,
   getOrganizations,
   inviteMember,
+  resendInvitation,
+  revokeInvitation,
   updateDepartment,
   updateOrganization,
   updateOrganizationMember,
@@ -211,6 +213,34 @@ export function useInviteMemberMutation(slug: string): UseMutationResult<
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input) => inviteMember(slug, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useResendInvitationMutation(
+  slug: string,
+): UseMutationResult<void, Error, { invitationId: string }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ invitationId }) => resendInvitation(slug, invitationId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useRevokeInvitationMutation(
+  slug: string,
+): UseMutationResult<void, Error, { invitationId: string }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ invitationId }) => revokeInvitation(slug, invitationId),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),

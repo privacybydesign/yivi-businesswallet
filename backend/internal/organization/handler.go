@@ -25,6 +25,8 @@ type repository interface {
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, error)
 	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
+	RevokeInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error
+	ResendInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error
 	UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, role *string, jobTitle *string, departmentID *uuid.UUID) (Member, error)
 	ListDepartments(ctx context.Context, orgID uuid.UUID) ([]Department, error)
 	CreateDepartment(ctx context.Context, orgID uuid.UUID, name string) (Department, error)
@@ -71,6 +73,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
 	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.invite))))
 	mux.Handle("PATCH /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMember))))
+
+	mux.Handle("POST /orgs/{slug}/invitations/{id}/resend", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.resendInvitation))))
+	mux.Handle("DELETE /orgs/{slug}/invitations/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.revokeInvitation))))
 
 	mux.Handle("GET /orgs/{slug}/departments", orgScoped(respond.HandlerFunc(h.listDepartments)))
 	mux.Handle("POST /orgs/{slug}/departments", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.createDepartment))))

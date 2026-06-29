@@ -166,6 +166,28 @@ export function updateOrganizationMember(
   );
 }
 
+export function resendInvitation(
+  slug: string,
+  invitationId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/invitations/${encodeURIComponent(invitationId)}/resend`,
+    { schema: z.void(), method: "POST", signal },
+  );
+}
+
+export function revokeInvitation(
+  slug: string,
+  invitationId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/invitations/${encodeURIComponent(invitationId)}`,
+    { schema: z.void(), method: "DELETE", signal },
+  );
+}
+
 export function getOrganizationDepartments(
   slug: string,
   signal?: AbortSignal,

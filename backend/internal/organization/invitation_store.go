@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
@@ -21,6 +22,14 @@ const (
 	inviteTokenBytes       = 32
 	invitationDepartmentFK = "invitations_department_fkey"
 )
+
+func newInviteTokenHash() ([sha256.Size]byte, error) {
+	b := make([]byte, inviteTokenBytes)
+	if _, err := rand.Read(b); err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("organization: invite token: %w", err)
+	}
+	return sha256.Sum256([]byte(base64.RawURLEncoding.EncodeToString(b))), nil
+}
 
 func (s *Store) ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error) {
 	const q = `
@@ -54,13 +63,12 @@ func (s *Store) ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitat
 }
 
 func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation, error) {
-	b := make([]byte, inviteTokenBytes)
-	if _, err := rand.Read(b); err != nil {
-		return Invitation{}, fmt.Errorf("organization: invite token: %w", err)
+	tokenHash, err := newInviteTokenHash()
+	if err != nil {
+		return Invitation{}, err
 	}
-	tokenHash := sha256.Sum256([]byte(base64.RawURLEncoding.EncodeToString(b)))
 
-	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `
 			INSERT INTO invitations
 				(organization_id, email, invited_by, role, job_title, department_id,
@@ -88,4 +96,45 @@ func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation
 			map[string]any{"email": in.Email, "role": in.Role})
 	})
 	return in, err
+}
+
+func (s *Store) RevokeInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const del = `DELETE FROM invitations WHERE id = $1 AND organization_id = $2 RETURNING email`
+		var email string
+		err := q.QueryRow(ctx, del, invitationID, orgID).Scan(&email)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvitationNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("organization: revoke invitation %s org %s: %w", invitationID, orgID, err)
+		}
+		return s.audit.Record(ctx, q, audit.MembershipRevoked,
+			audit.Target{Type: audit.TargetMembership, ID: email, OrgID: &orgID},
+			map[string]any{"email": email})
+	})
+}
+
+func (s *Store) ResendInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error {
+	tokenHash, err := newInviteTokenHash()
+	if err != nil {
+		return err
+	}
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const update = `
+			UPDATE invitations SET invite_token_hash = $3, expires_at = $4
+			WHERE id = $1 AND organization_id = $2
+			RETURNING email`
+		var email string
+		err := q.QueryRow(ctx, update, invitationID, orgID, tokenHash[:], time.Now().Add(inviteTTL)).Scan(&email)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvitationNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("organization: resend invitation %s org %s: %w", invitationID, orgID, err)
+		}
+		return s.audit.Record(ctx, q, audit.MembershipInviteResent,
+			audit.Target{Type: audit.TargetMembership, ID: email, OrgID: &orgID},
+			map[string]any{"email": email})
+	})
 }

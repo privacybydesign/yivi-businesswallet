@@ -160,6 +160,38 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+func (h *Handler) resendInvitation(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid invitation id")
+	}
+	org := OrgFromContext(r.Context())
+	switch err := h.store.ResendInvitation(r.Context(), org.ID, id); {
+	case errors.Is(err, ErrInvitationNotFound):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "invitation_not_found", Message: "invitation not found"}
+	case err != nil:
+		return fmt.Errorf("resending invitation: %w", err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (h *Handler) revokeInvitation(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid invitation id")
+	}
+	org := OrgFromContext(r.Context())
+	switch err := h.store.RevokeInvitation(r.Context(), org.ID, id); {
+	case errors.Is(err, ErrInvitationNotFound):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "invitation_not_found", Message: "invitation not found"}
+	case err != nil:
+		return fmt.Errorf("revoking invitation: %w", err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 type updateMemberRequest struct {
 	Role         *string `json:"role"`
 	JobTitle     *string `json:"jobTitle"`

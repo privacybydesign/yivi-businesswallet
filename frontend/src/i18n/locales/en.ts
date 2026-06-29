@@ -65,9 +65,12 @@ export const en = {
     loadError: "Could not load members: {{message}}",
     columnMember: "Member",
     columnStatus: "Status",
+    columnActions: "Actions",
     unassigned: "—",
     active: "Active",
     pending: "Pending",
+    resend: "Resend",
+    revoke: "Revoke",
   },
   auditLog: {
     title: "Audit log",

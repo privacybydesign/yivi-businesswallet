@@ -21,6 +21,7 @@ var (
 	ErrNotMember           = errors.New("user is not a member of the organization")
 	ErrAlreadyMember       = errors.New("user is already a member of the organization")
 	ErrAlreadyInvited      = errors.New("user is already invited to the organization")
+	ErrInvitationNotFound  = errors.New("invitation not found")
 	ErrLastAdmin           = errors.New("cannot demote the last admin of the organization")
 	ErrDepartmentNotFound  = errors.New("department not found")
 	ErrDepartmentNameTaken = errors.New("department name already taken")
