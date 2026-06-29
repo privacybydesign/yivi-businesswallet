@@ -34,6 +34,9 @@ services:
   backend:
     build:
       dockerfile: docker/development/Dockerfile
+    healthcheck:
+      start_period: 180s
+      start_interval: 2s
     environment:
       IRMA_REQUESTOR_URL: ${IRMA_REQUESTOR_URL:-http://irma:8088}
       IRMA_REQUESTOR_TOKEN: ${IRMA_REQUESTOR_TOKEN:-}
