@@ -46,15 +46,28 @@ const DEFAULT_VISUAL: { icon: IconName; tone: Tone } = {
   tone: "slate",
 };
 
-function fieldValue(value: unknown): string {
+function fieldValue(
+  value: unknown,
+  dateFormatter: Intl.DateTimeFormat,
+): string {
   if (value === null || value === undefined) return "—";
-  return typeof value === "string" ? value : JSON.stringify(value);
+  if (typeof value === "string") {
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
+      const date = new Date(value);
+      if (!Number.isNaN(date.getTime())) return dateFormatter.format(date);
+    }
+    return value;
+  }
+  return JSON.stringify(value);
 }
 
 // The human-readable detail for a row, derived from the uniform {before, after}
 // metadata: an update diffs changed fields ("old → new"); a create/delete shows
 // the snapshot's identifying field.
-function subjectOf(event: AuditEvent): string | null {
+function subjectOf(
+  event: AuditEvent,
+  dateFormatter: Intl.DateTimeFormat,
+): string | null {
   const { before, after } = event.metadata as {
     before?: Record<string, unknown> | null;
     after?: Record<string, unknown> | null;
@@ -64,7 +77,10 @@ function subjectOf(event: AuditEvent): string | null {
     const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
     const changes = keys
       .filter((key) => before[key] !== after[key])
-      .map((key) => `${fieldValue(before[key])} → ${fieldValue(after[key])}`);
+      .map(
+        (key) =>
+          `${fieldValue(before[key], dateFormatter)} → ${fieldValue(after[key], dateFormatter)}`,
+      );
     return changes.length > 0 ? changes.join(", ") : null;
   }
 
@@ -235,7 +251,7 @@ export default function AuditLog(): React.JSX.Element {
                     events.map((event) => {
                       const visual =
                         ACTION_VISUAL[event.action] ?? DEFAULT_VISUAL;
-                      const subject = subjectOf(event);
+                      const subject = subjectOf(event, dateFormatter);
                       return (
                         <tr key={event.id}>
                           <td className={TD_CLASS}>
