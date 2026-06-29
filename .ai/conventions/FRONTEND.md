@@ -49,6 +49,7 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 
 - **No user-facing string literals in components** — every label/placeholder/`aria-label`/message goes through `t()`. Brand tokens (`"Yivi"`, the `"Business"` wordmark in `logo.tsx`) are the only exception.
 - `src/i18n/locales/en.ts` is the typed source of truth (`as const`); `i18next.d.ts` augments `i18next` so `t("...")` **keys** are compile-time checked. Caveat: interpolation **variable presence** (`{{email}}`) is *not* type-enforced — pass them by hand.
+- **Group related keys into sub-objects, not flat prefixes**: keys that share a prefix because they belong together (`columns`, `modes`, `preview`, `stats`, `greeting`) nest as a sub-object (`auditLog.columns.when`), not flat (`auditLog.columnWhen`). Keep a key flat only when it is genuinely standalone (a one-member group is over-nesting) or when a suffix carries the meaning (the `*Required` validation messages). Renaming a key moves every `t()` call site, but typecheck flags each one.
 - Init is bundled & synchronous (`src/i18n/index.ts`, imported once in `main.tsx`); no Suspense, no async loading.
 - Plurals via `key_one`/`key_other` + `t(key, { count })`; interpolation via `{{var}}` + `t(key, { var })`.
 - Presentational `ui/` components stay translation-free — they take already-translated strings as props; `t()` is called at the route/feature level. (`sidebar.tsx` is the exception: it owns its own nav copy.)

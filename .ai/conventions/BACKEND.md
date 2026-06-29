@@ -2,7 +2,7 @@
 
 Load when editing `backend/`. General rules (magic values, formatter, scoped changes, no silent error swallowing) live in `AGENTS.md`.
 
-Layout: entry points in `cmd/api` + `cmd/migrate` + `cmd/seed`, packages under `internal/`. Two domain templates: `internal/organization` is the no-orchestration example (handler → store), `internal/auth` is the with-service example (handler → service → stores/client) — anchor new domains on whichever fits (see Layering). `internal/respond` provides JSON response helpers, `HandlerFunc` adapter, and `ApiError`. `internal/seed` populates dev data (runs via the Compose `seed` service).
+Layout: entry points in `cmd/api` + `cmd/migrate` + `cmd/seed`, packages under `internal/`. Two domain templates: `internal/organization` is the no-orchestration example (handler → store), `internal/auth` is the with-service example (handler → service → stores/client) — anchor new domains on whichever fits (see Layering). `internal/respond` provides JSON response helpers, `HandlerFunc` adapter, and `ApiError`. `internal/seed` populates dev data (runs via the Compose `seed` service) — it seeds through the real stores (so seeded writes are audited like production) and uses `gofakeit` with a fixed seed for deterministic randomized data; CSPRNG is reserved for secrets, never demo data.
 
 ## Toolchain
 
@@ -51,6 +51,24 @@ handler → store / client                (pure CRUD — no service)
 - Translate storage errors to package sentinels (`organization.ErrNotFound`, `ErrSlugTaken`) so handlers branch without importing the database driver. Use `%w` wrapping to preserve `errors.Is` matching.
 - Accepted cross-domain seam: `session.Lookup` runs one `sessions JOIN users` query and returns `user.User`. Keep this single-query seam; do not split it behind the service.
 - **Tenant access seam:** org-scoped routes (`/orgs/{slug}/...`) compose `auth.RequireUser` → `organization.Handler.Authorize` (resolves the org, platform-admin-or-member check, stashes org + role in context) → optional `organization.RequireOrgAdmin`. New org-scoped slices read the org via `organization.OrgFromContext` and register their routes the same way; identity (users/sessions) stays central and slug-free.
+
+## Auditing
+
+Mutations that change organization-visible state are recorded as audit events through the `internal/audit` seam.
+
+- **Write inside the same transaction as the mutation.** Wrap the change in `database.InTx(ctx, s.db, func(q database.Querier) error { ... })` and call `s.audit.Record(ctx, q, action, target, metadata)` on the same `q` — the event and the change commit or roll back together. Stores hold an `audit.Recorder` (inject `audit.NewDBRecorder()`; tests use `audit.NopRecorder`).
+- **Action + target are typed constants** in `audit.go` (`audit.MembershipInvited`, `audit.TargetMembership`, …). Add a constant rather than a string literal; keep distinct actions distinct (`membership.invite_revoked` ≠ `membership.revoked`).
+- **Metadata is a uniform `{before, after}` envelope** built with `audit.Created(after)` / `audit.Updated(before, after)` / `audit.Deleted(before)`. The frontend renders any event generically from this shape (a create/delete shows the snapshot, an update diffs changed fields) — don't invent per-action shapes.
+- **Store readable values, not ids.** Resolve a department to its name, a role to its label, etc. in the same query (e.g. a `RETURNING (SELECT name …)` subquery) so the log is meaningful without joins. Use `camelCase` keys (they reach the frontend as JSON).
+- **Don't audit security internals** (token hashes, session material). The actor comes from `audit.ContextWithActor` and the request id from the logging context — never put them in metadata.
+- The read side (`audit.Reader`, `audit.NewReader(pool)`) backs the audit-log API; it projects events for display (`EventActor`), separate from the write-side `Actor`.
+
+## Migrations
+
+- **Author via the goose CLI**, `go tool goose -dir internal/migrate/migrations create <name> sql`. Files are embedded and applied by `cmd/migrate` (and the Compose `migrate` service) — never on API startup.
+- **One logical table per migration.** Don't pile multiple `CREATE TABLE`s into one file; don't split a single table's columns across files.
+- **Pre-production: edit migrations in place.** We are not in prod, so amend the existing migration for a table rather than stacking `ALTER` migrations on top — keep the schema history clean. (This changes once there is data to preserve.)
+- PKs are uuidv7 (Postgres 18 native, time-ordered). Always include `down` so `goose down` works.
 
 ## Errors & Logging
 

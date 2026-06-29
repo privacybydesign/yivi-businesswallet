@@ -13,7 +13,8 @@ backend/      Go HTTP API (stdlib net/http, Go 1.22+ pattern routing)
   internal/database/     pgx/v5 Postgres pool lifecycle
   internal/logging/      slog setup + context-aware handler (request ID injection)
   internal/migrate/      embedded goose migrations/*.sql
-  internal/organization/ domain slice (orgs + memberships + org-scoped authz)
+  internal/audit/        transactional audit-event seam (Recorder write side, Reader read side)
+  internal/organization/ domain slice (orgs + memberships + invitations + audit log + org-scoped authz)
   internal/respond/      JSON response helpers, HandlerFunc adapter, ApiError
   internal/seed/         dev seed logic
   internal/server/       router assembly, middleware, lifecycle
@@ -52,6 +53,7 @@ go tool golangci-lint run ./...
 go test -race ./...
 ```
 
+- `go test -race ./...` is DB-free (the integration suite is tag-gated and skips without a database). CI also runs the integration job: `go test -tags=integration -race ./...` against a real Postgres — run it when touching stores, migrations, or the audit seam. See `.ai/conventions/BACKEND.md` for the `TEST_DATABASE_URL` setup.
 - `golangci-lint`, `air`, and `goose` are pinned `tool` directives in `backend/go.mod` — invoke via `go tool <name>`, never assume a global install.
 
 ## Assumptions & Validation

@@ -1,7 +1,9 @@
 # Yivi Business Wallet
 
 SaaS business wallet based on [Yivi](https://yivi.app). Multi-tenant
-(organizations), with authentication via Yivi.
+(organizations), with authentication via Yivi. Organizations manage members
+through an invitation lifecycle, and every mutation is recorded in a per-org
+audit log.
 
 ## Repository layout
 
@@ -129,12 +131,22 @@ surfacing at first login instead.
 | `gofmt -l .`                 | List unformatted files                 |
 | `go tool air -c .air.toml`   | Run with live-reload                   |
 | `go tool golangci-lint run`  | Lint (pinned version via `go.mod`)     |
-| `go test -race ./...`        | Run tests with race detector           |
+| `go test -race ./...`        | Run unit tests (DB-free)               |
+| `go test -tags=integration -race ./...` | Run integration tests (needs `TEST_DATABASE_URL`) |
 
 Dev tools (`air`, `golangci-lint`, `goose`) are managed as Go
 [tool directives](https://go.dev/doc/modules/managing-dependencies#tools) in
 `backend/go.mod`. Running `go tool <name>` fetches and builds the pinned version
 automatically on first use — no separate install step required.
+
+Integration tests are tag-gated and skip unless `TEST_DATABASE_URL` points at a
+real Postgres. For a throwaway one:
+
+```sh
+docker run --rm -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:18-alpine
+TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable \
+  go test -tags=integration -race ./...
+```
 
 ## Environment variables
 
