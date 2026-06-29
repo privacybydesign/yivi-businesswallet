@@ -14,14 +14,16 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
 
-type memberBody struct {
-	UserID       uuid.UUID  `json:"userId"`
-	Email        string     `json:"email"`
-	GivenNames   string     `json:"givenNames"`
-	LastName     string     `json:"lastName"`
-	Role         string     `json:"role"`
-	JobTitle     *string    `json:"jobTitle"`
-	DepartmentID *uuid.UUID `json:"departmentId"`
+type invitationBody struct {
+	ID             uuid.UUID  `json:"id"`
+	OrganizationID uuid.UUID  `json:"organizationId"`
+	Email          string     `json:"email"`
+	InvitedBy      *uuid.UUID `json:"invitedBy"`
+	GivenNames     string     `json:"givenNames"`
+	LastName       string     `json:"lastName"`
+	Role           string     `json:"role"`
+	JobTitle       *string    `json:"jobTitle"`
+	DepartmentID   *uuid.UUID `json:"departmentId"`
 }
 
 func (e *testEnv) invite(slug, body string) *http.Response {
@@ -47,32 +49,46 @@ func TestAdminInvitesNewMember(t *testing.T) {
 		t.Fatalf("invite = %d, want 201", resp.StatusCode)
 	}
 
-	var m memberBody
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		t.Fatalf("decode member: %v", err)
+	var inv invitationBody
+	if err := json.NewDecoder(resp.Body).Decode(&inv); err != nil {
+		t.Fatalf("decode invitation: %v", err)
 	}
-	if m.Email != "newhire@example.test" {
-		t.Errorf("email = %q, want lowercased newhire@example.test", m.Email)
+	if inv.Email != "newhire@example.test" {
+		t.Errorf("email = %q, want lowercased newhire@example.test", inv.Email)
 	}
-	if m.GivenNames != "New" || m.LastName != "Hire" {
-		t.Errorf("name = %q %q, want New Hire", m.GivenNames, m.LastName)
+	if inv.GivenNames != "New" || inv.LastName != "Hire" {
+		t.Errorf("name = %q %q, want New Hire", inv.GivenNames, inv.LastName)
 	}
-	if m.Role != organization.RoleMember {
-		t.Errorf("role = %q, want member", m.Role)
+	if inv.Role != organization.RoleMember {
+		t.Errorf("role = %q, want member", inv.Role)
 	}
-	if m.JobTitle != nil || m.DepartmentID != nil {
-		t.Errorf("jobTitle/department = %v/%v, want nil/nil", m.JobTitle, m.DepartmentID)
+	if inv.JobTitle != nil || inv.DepartmentID != nil {
+		t.Errorf("jobTitle/department = %v/%v, want nil/nil", inv.JobTitle, inv.DepartmentID)
+	}
+	if inv.InvitedBy == nil {
+		t.Error("invitedBy = nil, want the inviting admin")
+	}
+
+	// No users row is created at invite time — the user is minted on accept.
+	var users int
+	if err := env.pool.QueryRow(context.Background(),
+		"SELECT count(*) FROM users WHERE email = $1", "newhire@example.test").Scan(&users); err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	if users != 0 {
+		t.Errorf("users for invitee = %d, want 0 (no shell on invite)", users)
 	}
 }
 
-func TestInviteReusesExistingUser(t *testing.T) {
+func TestInviteSameEmailDifferentOrgs(t *testing.T) {
 	env := setup(t)
 	env.adminOf("acme", "Acme", "boss@example.test")
 	env.adminOf("globex", "Globex", "boss@example.test")
 
 	first := env.invite("acme", `{"email":"shared@example.test","givenNames":"Sam","lastName":"Shared"}`)
-	var a memberBody
-	_ = json.NewDecoder(first.Body).Decode(&a)
+	if first.StatusCode != http.StatusCreated {
+		t.Fatalf("first invite = %d, want 201", first.StatusCode)
+	}
 	_ = first.Body.Close()
 
 	second := env.invite("globex", `{"email":"shared@example.test","givenNames":"Different","lastName":"Typed"}`)
@@ -80,20 +96,17 @@ func TestInviteReusesExistingUser(t *testing.T) {
 	if second.StatusCode != http.StatusCreated {
 		t.Fatalf("second invite = %d, want 201", second.StatusCode)
 	}
-	var b memberBody
+	var b invitationBody
 	if err := json.NewDecoder(second.Body).Decode(&b); err != nil {
-		t.Fatalf("decode member: %v", err)
+		t.Fatalf("decode invitation: %v", err)
 	}
-	if b.UserID != a.UserID {
-		t.Errorf("reused userId = %s, want %s", b.UserID, a.UserID)
-	}
-	// The existing user keeps their stored name; the second invite's typed name is ignored.
-	if b.GivenNames != "Sam" {
-		t.Errorf("givenNames = %q, want Sam (existing name preserved)", b.GivenNames)
+	// Each invitation carries the name that org's admin typed; nothing is shared.
+	if b.GivenNames != "Different" {
+		t.Errorf("givenNames = %q, want Different (per-invitation, not a shared profile)", b.GivenNames)
 	}
 }
 
-func TestInviteAlreadyMemberConflict(t *testing.T) {
+func TestReInvitePendingConflict(t *testing.T) {
 	env := setup(t)
 	env.adminOf("acme", "Acme", "boss@example.test")
 
@@ -103,7 +116,21 @@ func TestInviteAlreadyMemberConflict(t *testing.T) {
 	second := env.invite("acme", `{"email":"dup@example.test","givenNames":"Dup","lastName":"Licate"}`)
 	defer func() { _ = second.Body.Close() }()
 	if second.StatusCode != http.StatusConflict {
-		t.Errorf("re-invite = %d, want 409", second.StatusCode)
+		t.Errorf("re-invite pending = %d, want 409", second.StatusCode)
+	}
+}
+
+func TestInviteAlreadyActiveMemberConflict(t *testing.T) {
+	env := setup(t)
+	orgID := env.adminOf("acme", "Acme", "boss@example.test")
+
+	alice := env.createUser("alice@example.test")
+	env.addMembership(alice, orgID, organization.RoleMember)
+
+	resp := env.invite("acme", `{"email":"alice@example.test","givenNames":"Alice","lastName":"Active"}`)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("invite active member = %d, want 409", resp.StatusCode)
 	}
 }
 
@@ -159,15 +186,15 @@ func TestInviteWithJobTitleAndDepartment(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("invite with department = %d, want 201", resp.StatusCode)
 	}
-	var m memberBody
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		t.Fatalf("decode member: %v", err)
+	var inv invitationBody
+	if err := json.NewDecoder(resp.Body).Decode(&inv); err != nil {
+		t.Fatalf("decode invitation: %v", err)
 	}
-	if m.JobTitle == nil || *m.JobTitle != "Developer" {
-		t.Errorf("jobTitle = %v, want Developer", m.JobTitle)
+	if inv.JobTitle == nil || *inv.JobTitle != "Developer" {
+		t.Errorf("jobTitle = %v, want Developer", inv.JobTitle)
 	}
-	if m.DepartmentID == nil || *m.DepartmentID != deptID {
-		t.Errorf("departmentId = %v, want %s", m.DepartmentID, deptID)
+	if inv.DepartmentID == nil || *inv.DepartmentID != deptID {
+		t.Errorf("departmentId = %v, want %s", inv.DepartmentID, deptID)
 	}
 }
 
@@ -180,12 +207,12 @@ func TestInviteAsAdminRole(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("invite admin = %d, want 201", resp.StatusCode)
 	}
-	var m memberBody
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		t.Fatalf("decode member: %v", err)
+	var inv invitationBody
+	if err := json.NewDecoder(resp.Body).Decode(&inv); err != nil {
+		t.Fatalf("decode invitation: %v", err)
 	}
-	if m.Role != organization.RoleAdmin {
-		t.Errorf("role = %q, want admin", m.Role)
+	if inv.Role != organization.RoleAdmin {
+		t.Errorf("role = %q, want admin", inv.Role)
 	}
 }
 

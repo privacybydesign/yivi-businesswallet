@@ -2,7 +2,7 @@
 -- SET NULL (not cascade): deleting a user/org must never erase the audit trail.
 CREATE TABLE audit_events
 (
-    id              UUID PRIMARY KEY     DEFAULT gen_random_uuid(),
+    id              UUID PRIMARY KEY     DEFAULT uuidv7(),
     occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     actor_user_id   UUID REFERENCES users (id) ON DELETE SET NULL,
     organization_id UUID REFERENCES organizations (id) ON DELETE SET NULL,
@@ -13,7 +13,7 @@ CREATE TABLE audit_events
     request_id      TEXT
 );
 
-CREATE INDEX idx_audit_events_organization_id_occurred_at ON audit_events (organization_id, occurred_at);
+CREATE INDEX idx_audit_events_organization_id_occurred_at ON audit_events (organization_id, occurred_at, id);
 CREATE INDEX idx_audit_events_actor_user_id_occurred_at ON audit_events (actor_user_id, occurred_at);
 
 -- +goose Down

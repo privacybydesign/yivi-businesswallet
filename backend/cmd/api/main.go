@@ -91,7 +91,7 @@ func run() error {
 	requireUser := auth.RequireUser(sessionStore)
 	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
 	orgService := organization.NewService(userStore, orgStore)
-	orgHandler := organization.NewHandler(orgStore, orgService, requireUser, platformAdmins)
+	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), requireUser, platformAdmins)
 
 	handler := server.New(
 		pool,

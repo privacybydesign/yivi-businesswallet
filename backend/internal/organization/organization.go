@@ -2,6 +2,7 @@ package organization
 
 import (
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -16,6 +17,7 @@ var (
 	ErrSlugTaken           = errors.New("organization slug already taken")
 	ErrNotMember           = errors.New("user is not a member of the organization")
 	ErrAlreadyMember       = errors.New("user is already a member of the organization")
+	ErrAlreadyInvited      = errors.New("user is already invited to the organization")
 	ErrLastAdmin           = errors.New("cannot demote the last admin of the organization")
 	ErrDepartmentNotFound  = errors.New("department not found")
 	ErrDepartmentNameTaken = errors.New("department name already taken")
@@ -40,6 +42,20 @@ type Membership struct {
 	Role           string     `json:"role"`
 	JobTitle       *string    `json:"jobTitle"`
 	DepartmentID   *uuid.UUID `json:"departmentId"`
+}
+
+type Invitation struct {
+	ID             uuid.UUID  `json:"id"`
+	OrganizationID uuid.UUID  `json:"organizationId"`
+	Email          string     `json:"email"`
+	InvitedBy      *uuid.UUID `json:"invitedBy"`
+	Role           string     `json:"role"`
+	JobTitle       *string    `json:"jobTitle"`
+	DepartmentID   *uuid.UUID `json:"departmentId"`
+	GivenNames     string     `json:"givenNames"`
+	LastName       string     `json:"lastName"`
+	ExpiresAt      time.Time  `json:"expiresAt"`
+	CreatedAt      time.Time  `json:"createdAt"`
 }
 
 type Member struct {

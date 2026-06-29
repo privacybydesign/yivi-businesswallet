@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
@@ -31,18 +32,23 @@ type repository interface {
 }
 
 type inviter interface {
-	InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) (Member, error)
+	InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) (Invitation, error)
+}
+
+type auditReader interface {
+	ListForOrganization(ctx context.Context, orgID uuid.UUID, after *audit.Cursor, limit int) (audit.Page, error)
 }
 
 type Handler struct {
 	store       repository
 	service     inviter
+	reader      auditReader
 	requireUser func(http.Handler) http.Handler
 	admins      auth.PlatformAdmins
 }
 
-func NewHandler(store repository, service inviter, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
-	return &Handler{store: store, service: service, requireUser: requireUser, admins: admins}
+func NewHandler(store repository, service inviter, reader auditReader, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
+	return &Handler{store: store, service: service, reader: reader, requireUser: requireUser, admins: admins}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -62,13 +68,15 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
 	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))
 	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
-	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.addMember))))
+	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.invite))))
 	mux.Handle("PATCH /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMember))))
 
 	mux.Handle("GET /orgs/{slug}/departments", orgScoped(respond.HandlerFunc(h.listDepartments)))
 	mux.Handle("POST /orgs/{slug}/departments", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.createDepartment))))
 	mux.Handle("PATCH /orgs/{slug}/departments/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateDepartment))))
 	mux.Handle("DELETE /orgs/{slug}/departments/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.deleteDepartment))))
+
+	mux.Handle("GET /orgs/{slug}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.auditEvents))))
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {

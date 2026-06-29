@@ -27,7 +27,7 @@ func createUser(t *testing.T, pool *pgxpool.Pool, email string) uuid.UUID {
 	return id
 }
 
-func addMember(t *testing.T, pool *pgxpool.Pool, userID, orgID uuid.UUID, deptID *uuid.UUID) {
+func addMembership(t *testing.T, pool *pgxpool.Pool, userID, orgID uuid.UUID, deptID *uuid.UUID) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
 		"INSERT INTO memberships (user_id, organization_id, role, department_id) VALUES ($1, $2, $3, $4)",
@@ -116,7 +116,7 @@ func TestStoreUpdateMembership(t *testing.T) {
 		t.Fatalf("CreateDepartment: %v", err)
 	}
 	userID := createUser(t, pool, "alice@example.test")
-	addMember(t, pool, userID, org.ID, nil)
+	addMembership(t, pool, userID, org.ID, nil)
 
 	title := "Engineer"
 	member, err := store.UpdateMembership(ctx, org.ID, userID, nil, &title, &dept.ID)
@@ -149,7 +149,7 @@ func TestStoreUpdateMembershipUnknownDepartment(t *testing.T) {
 
 	org, _ := store.Create(ctx, "Acme", "acme")
 	userID := createUser(t, pool, "alice@example.test")
-	addMember(t, pool, userID, org.ID, nil)
+	addMembership(t, pool, userID, org.ID, nil)
 
 	unknown := uuid.New()
 	if _, err := store.UpdateMembership(ctx, org.ID, userID, nil, nil, &unknown); !errors.Is(err, organization.ErrDepartmentNotFound) {
@@ -169,7 +169,7 @@ func TestStoreUpdateMembershipRejectsForeignOrgDepartment(t *testing.T) {
 		t.Fatalf("CreateDepartment: %v", err)
 	}
 	userID := createUser(t, pool, "alice@example.test")
-	addMember(t, pool, userID, orgA.ID, nil)
+	addMembership(t, pool, userID, orgA.ID, nil)
 
 	if _, err := store.UpdateMembership(ctx, orgA.ID, userID, nil, nil, &deptB.ID); !errors.Is(err, organization.ErrDepartmentNotFound) {
 		t.Errorf("cross-org dept err = %v, want ErrDepartmentNotFound", err)
@@ -187,7 +187,7 @@ func TestStoreDeleteDepartmentInUse(t *testing.T) {
 		t.Fatalf("CreateDepartment: %v", err)
 	}
 	userID := createUser(t, pool, "alice@example.test")
-	addMember(t, pool, userID, org.ID, &dept.ID)
+	addMembership(t, pool, userID, org.ID, &dept.ID)
 
 	if err := store.DeleteDepartment(ctx, org.ID, dept.ID); !errors.Is(err, organization.ErrDepartmentInUse) {
 		t.Errorf("err = %v, want ErrDepartmentInUse", err)
@@ -208,7 +208,7 @@ func TestStoreOrgDeleteCascadesWithAssignedDepartment(t *testing.T) {
 		t.Fatalf("CreateDepartment: %v", err)
 	}
 	userID := createUser(t, pool, "alice@example.test")
-	addMember(t, pool, userID, org.ID, &dept.ID)
+	addMembership(t, pool, userID, org.ID, &dept.ID)
 
 	if _, err := pool.Exec(ctx, "DELETE FROM organizations WHERE id = $1", org.ID); err != nil {
 		t.Fatalf("delete org with assigned department: %v", err)

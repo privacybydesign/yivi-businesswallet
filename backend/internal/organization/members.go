@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
@@ -23,19 +24,17 @@ func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-type addMemberRequest struct {
-	Email         string  `json:"email"`
-	PreferredName *string `json:"preferredName"`
-	GivenNames    string  `json:"givenNames"`
-	NamePrefix    *string `json:"namePrefix"`
-	LastName      string  `json:"lastName"`
-	Role          string  `json:"role"`
-	JobTitle      *string `json:"jobTitle"`
-	DepartmentID  *string `json:"departmentId"`
+type inviteRequest struct {
+	Email        string  `json:"email"`
+	GivenNames   string  `json:"givenNames"`
+	LastName     string  `json:"lastName"`
+	Role         string  `json:"role"`
+	JobTitle     *string `json:"jobTitle"`
+	DepartmentID *string `json:"departmentId"`
 }
 
-func (h *Handler) addMember(w http.ResponseWriter, r *http.Request) error {
-	var req addMemberRequest
+func (h *Handler) invite(w http.ResponseWriter, r *http.Request) error {
+	var req inviteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return badRequest("invalid_body", "invalid request body")
 	}
@@ -68,26 +67,27 @@ func (h *Handler) addMember(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := OrgFromContext(r.Context())
-	member, err := h.service.InviteMember(r.Context(), org.ID, Invite{
-		Email:         email,
-		PreferredName: normalize(req.PreferredName),
-		GivenNames:    givenNames,
-		NamePrefix:    normalize(req.NamePrefix),
-		LastName:      lastName,
-		Role:          role,
-		JobTitle:      normalize(req.JobTitle),
-		DepartmentID:  deptID,
+	invitation, err := h.service.InviteMember(r.Context(), org.ID, Invite{
+		Email:        email,
+		GivenNames:   givenNames,
+		LastName:     lastName,
+		Role:         role,
+		JobTitle:     normalize(req.JobTitle),
+		DepartmentID: deptID,
+		InvitedBy:    auth.UserFromContext(r.Context()).ID,
 	})
 	switch {
 	case errors.Is(err, ErrAlreadyMember):
 		return &respond.APIError{Status: http.StatusConflict, Code: "already_member", Message: "user is already a member of this organization"}
+	case errors.Is(err, ErrAlreadyInvited):
+		return &respond.APIError{Status: http.StatusConflict, Code: "already_invited", Message: "user is already invited to this organization"}
 	case errors.Is(err, ErrDepartmentNotFound):
 		return badRequest("department_not_found", "department not found")
 	case err != nil:
 		return fmt.Errorf("inviting member: %w", err)
 	}
 
-	respond.JSON(w, r, http.StatusCreated, member)
+	respond.JSON(w, r, http.StatusCreated, invitation)
 	return nil
 }
 

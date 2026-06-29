@@ -12,63 +12,54 @@ import (
 
 type userStore interface {
 	FindByEmail(ctx context.Context, email user.Email) (user.User, error)
-	Create(ctx context.Context, u user.User) (user.User, error)
 }
 
-type membershipStore interface {
-	AddMembership(ctx context.Context, orgID, userID uuid.UUID, role string, jobTitle *string, departmentID *uuid.UUID) (Member, error)
+type invitationStore interface {
+	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
+	CreateInvitation(ctx context.Context, in Invitation) (Invitation, error)
 }
 
 type Service struct {
-	users       userStore
-	memberships membershipStore
+	users userStore
+	store invitationStore
 }
 
-func NewService(users userStore, memberships membershipStore) *Service {
-	return &Service{users: users, memberships: memberships}
+func NewService(users userStore, store invitationStore) *Service {
+	return &Service{users: users, store: store}
 }
 
 type Invite struct {
-	Email         user.Email
-	PreferredName *string
-	GivenNames    string
-	NamePrefix    *string
-	LastName      string
-	Role          string
-	JobTitle      *string
-	DepartmentID  *uuid.UUID
+	Email        user.Email
+	GivenNames   string
+	LastName     string
+	Role         string
+	JobTitle     *string
+	DepartmentID *uuid.UUID
+	InvitedBy    uuid.UUID
 }
 
-func (s *Service) InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) (Member, error) {
-	u, err := s.findOrCreateUser(ctx, in)
-	if err != nil {
-		return Member{}, err
-	}
-	return s.memberships.AddMembership(ctx, orgID, u.ID, in.Role, in.JobTitle, in.DepartmentID)
-}
-
-func (s *Service) findOrCreateUser(ctx context.Context, in Invite) (user.User, error) {
-	u, err := s.users.FindByEmail(ctx, in.Email)
-	if err == nil {
-		return u, nil
-	}
-	if !errors.Is(err, user.ErrNotFound) {
-		return user.User{}, fmt.Errorf("invite: find user: %w", err)
+func (s *Service) InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) (Invitation, error) {
+	switch u, err := s.users.FindByEmail(ctx, in.Email); {
+	case err == nil:
+		switch _, mErr := s.store.GetMembership(ctx, u.ID, orgID); {
+		case mErr == nil:
+			return Invitation{}, ErrAlreadyMember
+		case !errors.Is(mErr, ErrNotMember):
+			return Invitation{}, fmt.Errorf("invite: check membership: %w", mErr)
+		}
+	case !errors.Is(err, user.ErrNotFound):
+		return Invitation{}, fmt.Errorf("invite: find user: %w", err)
 	}
 
-	created, err := s.users.Create(ctx, user.User{
-		Email:         in.Email,
-		PreferredName: in.PreferredName,
-		GivenNames:    in.GivenNames,
-		NamePrefix:    in.NamePrefix,
-		LastName:      in.LastName,
+	invitedBy := in.InvitedBy
+	return s.store.CreateInvitation(ctx, Invitation{
+		OrganizationID: orgID,
+		Email:          string(in.Email),
+		InvitedBy:      &invitedBy,
+		Role:           in.Role,
+		JobTitle:       in.JobTitle,
+		DepartmentID:   in.DepartmentID,
+		GivenNames:     in.GivenNames,
+		LastName:       in.LastName,
 	})
-	if errors.Is(err, user.ErrEmailTaken) {
-		// Lost a race with a concurrent invite of the same new email; reuse it.
-		return s.users.FindByEmail(ctx, in.Email)
-	}
-	if err != nil {
-		return user.User{}, fmt.Errorf("invite: create user: %w", err)
-	}
-	return created, nil
 }

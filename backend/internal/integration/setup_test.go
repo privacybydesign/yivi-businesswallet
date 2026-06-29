@@ -104,7 +104,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	requireUser := auth.RequireUser(sessionStore)
 	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
 	orgService := organization.NewService(userStore, orgStore)
-	orgHandler := organization.NewHandler(orgStore, orgService, requireUser, admins)
+	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), requireUser, admins)
 
 	srv := httptest.NewServer(server.New(pool, authHandler, orgHandler))
 	t.Cleanup(srv.Close)

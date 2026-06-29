@@ -14,6 +14,16 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
 
+type memberBody struct {
+	UserID       uuid.UUID  `json:"userId"`
+	Email        string     `json:"email"`
+	GivenNames   string     `json:"givenNames"`
+	LastName     string     `json:"lastName"`
+	Role         string     `json:"role"`
+	JobTitle     *string    `json:"jobTitle"`
+	DepartmentID *uuid.UUID `json:"departmentId"`
+}
+
 func (e *testEnv) updateMember(slug string, userID uuid.UUID, body string) *http.Response {
 	e.t.Helper()
 	return e.do(
@@ -23,19 +33,20 @@ func (e *testEnv) updateMember(slug string, userID uuid.UUID, body string) *http
 	)
 }
 
-// inviteMember invites a member and returns the decoded response body.
-func (e *testEnv) inviteMember(slug, body string) memberBody {
+// activeMember provisions a user and an active membership directly, so the
+// update tests have a member to PATCH (the invite endpoint only yields a
+// pending invitation now).
+func (e *testEnv) activeMember(orgID uuid.UUID, email, role string, jobTitle *string, deptID *uuid.UUID) uuid.UUID {
 	e.t.Helper()
-	resp := e.invite(slug, body)
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		e.t.Fatalf("invite = %d, want 201", resp.StatusCode)
+	userID := e.createUser(email)
+	if _, err := e.pool.Exec(context.Background(),
+		`INSERT INTO memberships (user_id, organization_id, role, job_title, department_id)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		userID, orgID, role, jobTitle, deptID,
+	); err != nil {
+		e.t.Fatalf("active member %q: %v", email, err)
 	}
-	var m memberBody
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		e.t.Fatalf("decode member: %v", err)
-	}
-	return m
+	return userID
 }
 
 func (e *testEnv) createDepartment(orgID uuid.UUID, name string) uuid.UUID {
@@ -53,10 +64,10 @@ func (e *testEnv) createDepartment(orgID uuid.UUID, name string) uuid.UUID {
 func TestAdminUpdatesMember(t *testing.T) {
 	env := setup(t)
 	orgID := env.adminOf("acme", "Acme", "boss@example.test")
-	member := env.inviteMember("acme", `{"email":"eng@example.test","givenNames":"Engi","lastName":"Neer"}`)
+	userID := env.activeMember(orgID, "eng@example.test", organization.RoleMember, nil, nil)
 	deptID := env.createDepartment(orgID, "Platform")
 
-	resp := env.updateMember("acme", member.UserID,
+	resp := env.updateMember("acme", userID,
 		`{"jobTitle":"Engineering Lead","departmentId":"`+deptID.String()+`"}`)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -79,10 +90,10 @@ func TestUpdateMemberClearsFields(t *testing.T) {
 	env := setup(t)
 	orgID := env.adminOf("acme", "Acme", "boss@example.test")
 	deptID := env.createDepartment(orgID, "Engineering")
-	member := env.inviteMember("acme",
-		`{"email":"eng@example.test","givenNames":"Engi","lastName":"Neer","jobTitle":"Dev","departmentId":"`+deptID.String()+`"}`)
+	jobTitle := "Dev"
+	userID := env.activeMember(orgID, "eng@example.test", organization.RoleMember, &jobTitle, &deptID)
 
-	resp := env.updateMember("acme", member.UserID, `{"jobTitle":null,"departmentId":null}`)
+	resp := env.updateMember("acme", userID, `{"jobTitle":null,"departmentId":null}`)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("update = %d, want 200", resp.StatusCode)
@@ -123,10 +134,10 @@ func TestUpdateUnknownMemberNotFound(t *testing.T) {
 
 func TestUpdateMemberUnknownDepartment(t *testing.T) {
 	env := setup(t)
-	env.adminOf("acme", "Acme", "boss@example.test")
-	member := env.inviteMember("acme", `{"email":"eng@example.test","givenNames":"Engi","lastName":"Neer"}`)
+	orgID := env.adminOf("acme", "Acme", "boss@example.test")
+	userID := env.activeMember(orgID, "eng@example.test", organization.RoleMember, nil, nil)
 
-	resp := env.updateMember("acme", member.UserID, `{"departmentId":"`+uuid.NewString()+`"}`)
+	resp := env.updateMember("acme", userID, `{"departmentId":"`+uuid.NewString()+`"}`)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("update unknown department = %d, want 400", resp.StatusCode)
@@ -137,10 +148,10 @@ func TestAdminPromotesMemberPreservingProfile(t *testing.T) {
 	env := setup(t)
 	orgID := env.adminOf("acme", "Acme", "boss@example.test")
 	deptID := env.createDepartment(orgID, "Platform")
-	member := env.inviteMember("acme",
-		`{"email":"eng@example.test","givenNames":"Engi","lastName":"Neer","jobTitle":"Dev","departmentId":"`+deptID.String()+`"}`)
+	jobTitle := "Dev"
+	userID := env.activeMember(orgID, "eng@example.test", organization.RoleMember, &jobTitle, &deptID)
 
-	resp := env.updateMember("acme", member.UserID,
+	resp := env.updateMember("acme", userID,
 		`{"role":"admin","jobTitle":"Dev","departmentId":"`+deptID.String()+`"}`)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -164,11 +175,10 @@ func TestAdminPromotesMemberPreservingProfile(t *testing.T) {
 
 func TestAdminDemotesAdminWithCoAdmin(t *testing.T) {
 	env := setup(t)
-	env.adminOf("acme", "Acme", "boss@example.test")
-	other := env.inviteMember("acme",
-		`{"email":"co@example.test","givenNames":"Co","lastName":"Admin","role":"admin"}`)
+	orgID := env.adminOf("acme", "Acme", "boss@example.test")
+	other := env.activeMember(orgID, "co@example.test", organization.RoleAdmin, nil, nil)
 
-	resp := env.updateMember("acme", other.UserID, `{"role":"member"}`)
+	resp := env.updateMember("acme", other, `{"role":"member"}`)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("demote = %d, want 200", resp.StatusCode)
@@ -209,10 +219,10 @@ func TestDemoteLastAdminConflict(t *testing.T) {
 
 func TestUpdateMemberInvalidRole(t *testing.T) {
 	env := setup(t)
-	env.adminOf("acme", "Acme", "boss@example.test")
-	member := env.inviteMember("acme", `{"email":"eng@example.test","givenNames":"Engi","lastName":"Neer"}`)
+	orgID := env.adminOf("acme", "Acme", "boss@example.test")
+	userID := env.activeMember(orgID, "eng@example.test", organization.RoleMember, nil, nil)
 
-	resp := env.updateMember("acme", member.UserID, `{"role":"superuser"}`)
+	resp := env.updateMember("acme", userID, `{"role":"superuser"}`)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("invalid role = %d, want 400", resp.StatusCode)
