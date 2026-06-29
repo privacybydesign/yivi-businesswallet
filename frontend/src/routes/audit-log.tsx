@@ -269,7 +269,10 @@ export default function AuditLog(): React.JSX.Element {
                             {targetLabel(event.targetType)}
                           </td>
                           <td className={TD_CLASS}>
-                            <span className="text-ink-soft text-[12.5px]">
+                            <span
+                              className="text-ink-soft block max-w-[24rem] truncate text-[12.5px]"
+                              title={subject ?? undefined}
+                            >
                               {subject ?? t("auditLog.noSubject")}
                             </span>
                           </td>

@@ -74,11 +74,13 @@ func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation
 				(organization_id, email, invited_by, role, job_title, department_id,
 				 invited_given_names, invited_last_name, invite_token_hash, expires_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-			RETURNING id, expires_at, created_at`
+			RETURNING id, expires_at, created_at,
+			          (SELECT name FROM departments WHERE id = $6 AND organization_id = $1)`
+		var deptName *string
 		err := q.QueryRow(ctx, insert,
 			in.OrganizationID, in.Email, in.InvitedBy, in.Role, in.JobTitle, in.DepartmentID,
 			in.GivenNames, in.LastName, tokenHash[:], time.Now().Add(inviteTTL),
-		).Scan(&in.ID, &in.ExpiresAt, &in.CreatedAt)
+		).Scan(&in.ID, &in.ExpiresAt, &in.CreatedAt, &deptName)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
 			switch {
@@ -94,12 +96,12 @@ func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation
 		return s.audit.Record(ctx, q, audit.MembershipInvited,
 			audit.Target{Type: audit.TargetMembership, ID: in.Email, OrgID: &in.OrganizationID},
 			audit.Created(map[string]any{
-				"email":        in.Email,
-				"role":         in.Role,
-				"givenNames":   in.GivenNames,
-				"lastName":     in.LastName,
-				"jobTitle":     in.JobTitle,
-				"departmentId": in.DepartmentID,
+				"email":      in.Email,
+				"role":       in.Role,
+				"givenNames": in.GivenNames,
+				"lastName":   in.LastName,
+				"jobTitle":   in.JobTitle,
+				"department": deptName,
 			}))
 	})
 	return in, err

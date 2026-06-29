@@ -103,10 +103,13 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var current string
-	var oldJobTitle *string
-	var oldDeptID *uuid.UUID
-	err = tx.QueryRow(ctx, `SELECT role, job_title, department_id FROM memberships WHERE organization_id = $1 AND user_id = $2`, orgID, userID).
-		Scan(&current, &oldJobTitle, &oldDeptID)
+	var oldJobTitle, oldDeptName *string
+	err = tx.QueryRow(ctx, `
+		SELECT m.role, m.job_title, d.name
+		FROM memberships m
+		LEFT JOIN departments d ON d.id = m.department_id
+		WHERE m.organization_id = $1 AND m.user_id = $2`, orgID, userID).
+		Scan(&current, &oldJobTitle, &oldDeptName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Member{}, ErrNotMember
 	}
@@ -124,17 +127,20 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 		}
 	}
 
-	const q = `UPDATE memberships SET role = COALESCE($3, role), job_title = $4, department_id = $5 WHERE organization_id = $1 AND user_id = $2`
-	tag, err := tx.Exec(ctx, q, orgID, userID, role, jobTitle, departmentID)
+	const q = `UPDATE memberships SET role = COALESCE($3, role), job_title = $4, department_id = $5
+		WHERE organization_id = $1 AND user_id = $2
+		RETURNING (SELECT name FROM departments WHERE id = $5 AND organization_id = $1)`
+	var newDeptName *string
+	err = tx.QueryRow(ctx, q, orgID, userID, role, jobTitle, departmentID).Scan(&newDeptName)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation && pgErr.ConstraintName == membershipDepartmentFK {
 		return Member{}, ErrDepartmentNotFound
 	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Member{}, ErrNotMember
+	}
 	if err != nil {
 		return Member{}, fmt.Errorf("organization: update membership user %s org %s: %w", userID, orgID, err)
-	}
-	if tag.RowsAffected() == 0 {
-		return Member{}, ErrNotMember
 	}
 
 	newRole := current
@@ -144,8 +150,8 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 	if err := s.audit.Record(ctx, tx, audit.MembershipRoleChanged,
 		audit.Target{Type: audit.TargetMembership, ID: userID.String(), OrgID: &orgID},
 		audit.Updated(
-			map[string]any{"role": current, "jobTitle": oldJobTitle, "departmentId": oldDeptID},
-			map[string]any{"role": newRole, "jobTitle": jobTitle, "departmentId": departmentID})); err != nil {
+			map[string]any{"role": current, "jobTitle": oldJobTitle, "department": oldDeptName},
+			map[string]any{"role": newRole, "jobTitle": jobTitle, "department": newDeptName})); err != nil {
 		return Member{}, err
 	}
 
