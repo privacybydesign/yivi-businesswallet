@@ -27,6 +27,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: Tone }> = {
   "organization.updated": { icon: "edit", tone: "blue" },
   "membership.invited": { icon: "email", tone: "amber" },
   "membership.invite_resent": { icon: "email", tone: "amber" },
+  "membership.invite_revoked": { icon: "close", tone: "red" },
   "membership.accepted": { icon: "valid", tone: "green" },
   "membership.declined": { icon: "close", tone: "slate" },
   "membership.revoked": { icon: "close", tone: "red" },
@@ -125,6 +126,8 @@ export default function AuditLog(): React.JSX.Element {
         return t("auditLog.actions.memberInvited");
       case "membership.invite_resent":
         return t("auditLog.actions.inviteResent");
+      case "membership.invite_revoked":
+        return t("auditLog.actions.inviteRevoked");
       case "membership.accepted":
         return t("auditLog.actions.inviteAccepted");
       case "membership.declined":

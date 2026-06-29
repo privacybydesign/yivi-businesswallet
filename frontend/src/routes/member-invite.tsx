@@ -85,8 +85,19 @@ function validate(values: Values): FieldErrors {
   return errors;
 }
 
+function errorCode(error: ApiError): string | null {
+  if (error.body && typeof error.body === "object" && "code" in error.body) {
+    const { code } = error.body;
+    return typeof code === "string" ? code : null;
+  }
+  return null;
+}
+
 function errorMessage(error: Error, t: TFunction): string {
   if (error instanceof ApiError && error.status === CONFLICT_STATUS) {
+    if (errorCode(error) === "already_invited") {
+      return t("memberInvite.alreadyInvited");
+    }
     return t("memberInvite.alreadyMember");
   }
   return t("memberInvite.error", { message: error.message });

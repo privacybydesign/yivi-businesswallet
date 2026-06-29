@@ -49,8 +49,8 @@ func TestRevokeInvitation(t *testing.T) {
 	if got := env.listMembers("acme", organization.StatusInvited); len(got) != 0 {
 		t.Errorf("invited after revoke = %d, want 0", len(got))
 	}
-	if n := env.auditCount(orgID, audit.MembershipRevoked); n != 1 {
-		t.Errorf("membership.revoked events = %d, want 1", n)
+	if n := env.auditCount(orgID, audit.MembershipInviteRevoked); n != 1 {
+		t.Errorf("membership.invite_revoked events = %d, want 1", n)
 	}
 }
 

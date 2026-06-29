@@ -119,7 +119,7 @@ func (s *Store) RevokeInvitation(ctx context.Context, orgID, invitationID uuid.U
 		if err != nil {
 			return fmt.Errorf("organization: revoke invitation %s org %s: %w", invitationID, orgID, err)
 		}
-		return s.audit.Record(ctx, q, audit.MembershipRevoked,
+		return s.audit.Record(ctx, q, audit.MembershipInviteRevoked,
 			audit.Target{Type: audit.TargetMembership, ID: email, OrgID: &orgID},
 			audit.Deleted(map[string]any{
 				"email":      email,

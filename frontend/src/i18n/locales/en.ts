@@ -100,6 +100,7 @@ export const en = {
       orgUpdated: "Updated organization",
       memberInvited: "Invited member",
       inviteResent: "Resent invitation",
+      inviteRevoked: "Revoked invitation",
       inviteAccepted: "Accepted invitation",
       inviteDeclined: "Declined invitation",
       memberRevoked: "Revoked membership",
@@ -121,6 +122,8 @@ export const en = {
     send: "Send invitation",
     sending: "Sending…",
     alreadyMember: "That person is already a member of this organization.",
+    alreadyInvited:
+      "That person has already been invited to this organization.",
     error: "Could not invite member: {{message}}",
     givenNamesRequired: "Enter the member's first names.",
     lastNameRequired: "Enter the member's last name.",
