@@ -54,7 +54,7 @@ func (f fakeRepo) UpdateDepartment(context.Context, uuid.UUID, uuid.UUID, string
 }
 func (f fakeRepo) DeleteDepartment(context.Context, uuid.UUID, uuid.UUID) error { return nil }
 
-func authorizeWith(repo repository, admins auth.PlatformAdmins, email string) *httptest.ResponseRecorder {
+func authorizeWith(repo repository, admins auth.PlatformAdmins, email user.Email) *httptest.ResponseRecorder {
 	h := &Handler{store: repo, admins: admins}
 	var gotRole string
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

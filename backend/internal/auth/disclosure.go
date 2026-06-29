@@ -8,6 +8,7 @@ import (
 	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 var (
@@ -16,7 +17,7 @@ var (
 	errUserNotInvited     = errors.New("user not invited")
 )
 
-func extractEmail(res *irmaserver.SessionResult, want irma.AttributeTypeIdentifier) (string, error) {
+func extractEmail(res *irmaserver.SessionResult, want irma.AttributeTypeIdentifier) (user.Email, error) {
 	if res.Status != irma.ServerStatusDone {
 		return "", errSessionNotFinished
 	}
@@ -34,7 +35,11 @@ func extractEmail(res *irmaserver.SessionResult, want irma.AttributeTypeIdentifi
 	if attr.RawValue == nil || *attr.RawValue == "" {
 		return "", errDisclosureInvalid
 	}
-	return *attr.RawValue, nil
+	email, err := user.ParseEmail(*attr.RawValue)
+	if err != nil {
+		return "", errDisclosureInvalid
+	}
+	return email, nil
 }
 
 func mapClaimError(err error) error {

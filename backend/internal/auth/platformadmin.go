@@ -2,9 +2,9 @@ package auth
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 const (
@@ -12,23 +12,23 @@ const (
 	forbiddenMsg  = "forbidden"
 )
 
-type PlatformAdmins map[string]struct{}
+type PlatformAdmins map[user.Email]struct{}
 
 func NewPlatformAdmins(emails []string) PlatformAdmins {
 	set := make(PlatformAdmins, len(emails))
 	for _, e := range emails {
-		set[normalizeEmail(e)] = struct{}{}
+		email, err := user.ParseEmail(e)
+		if err != nil {
+			continue
+		}
+		set[email] = struct{}{}
 	}
 	return set
 }
 
-func (p PlatformAdmins) Has(email string) bool {
-	_, ok := p[normalizeEmail(email)]
+func (p PlatformAdmins) Has(email user.Email) bool {
+	_, ok := p[email]
 	return ok
-}
-
-func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
 }
 
 // RequirePlatformAdmin gates a handler behind platform-admin status. It must be

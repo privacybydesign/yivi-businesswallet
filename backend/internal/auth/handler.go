@@ -83,7 +83,7 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) error {
 func (h *Handler) meResponse(u user.User) meResponse {
 	return meResponse{
 		ID:              u.ID,
-		Email:           u.Email,
+		Email:           string(u.Email),
 		PreferredName:   u.PreferredName,
 		GivenNames:      u.GivenNames,
 		NamePrefix:      u.NamePrefix,

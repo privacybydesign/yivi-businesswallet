@@ -13,7 +13,7 @@ var (
 
 type User struct {
 	ID            uuid.UUID `json:"id"`
-	Email         string    `json:"email"`
+	Email         Email     `json:"email"`
 	PreferredName *string   `json:"preferredName"`
 	GivenNames    string    `json:"givenNames"`
 	NamePrefix    *string   `json:"namePrefix"`

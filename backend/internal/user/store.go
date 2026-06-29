@@ -22,7 +22,7 @@ func NewStore(db database.DB) *Store {
 	return &Store{db: db}
 }
 
-func (s *Store) FindByEmail(ctx context.Context, email string) (User, error) {
+func (s *Store) FindByEmail(ctx context.Context, email Email) (User, error) {
 	const q = `SELECT id, email, preferred_name, given_names, name_prefix, last_name FROM users WHERE email = $1`
 	var u User
 	if err := s.db.QueryRow(ctx, q, email).Scan(&u.ID, &u.Email, &u.PreferredName, &u.GivenNames, &u.NamePrefix, &u.LastName); err != nil {

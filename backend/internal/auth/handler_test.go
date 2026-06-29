@@ -52,7 +52,7 @@ func TestMeReportsPlatformAdminStatus(t *testing.T) {
 	admins := NewPlatformAdmins([]string{"admin@yivi.app"})
 	tests := []struct {
 		name  string
-		email string
+		email user.Email
 		want  bool
 	}{
 		{name: "platform admin", email: "admin@yivi.app", want: true},
@@ -76,7 +76,7 @@ func TestMeReportsPlatformAdminStatus(t *testing.T) {
 			if body.IsPlatformAdmin != tc.want {
 				t.Errorf("isPlatformAdmin = %v, want %v", body.IsPlatformAdmin, tc.want)
 			}
-			if body.Email != tc.email {
+			if body.Email != string(tc.email) {
 				t.Errorf("email = %q, want %q", body.Email, tc.email)
 			}
 		})

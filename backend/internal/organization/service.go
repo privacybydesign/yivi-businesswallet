@@ -11,7 +11,7 @@ import (
 )
 
 type userStore interface {
-	FindByEmail(ctx context.Context, email string) (user.User, error)
+	FindByEmail(ctx context.Context, email user.Email) (user.User, error)
 	Create(ctx context.Context, u user.User) (user.User, error)
 }
 
@@ -29,7 +29,7 @@ func NewService(users userStore, memberships membershipStore) *Service {
 }
 
 type Invite struct {
-	Email         string
+	Email         user.Email
 	PreferredName *string
 	GivenNames    string
 	NamePrefix    *string

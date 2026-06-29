@@ -13,9 +13,8 @@ import (
 func TestPlatformAdminsHas(t *testing.T) {
 	admins := NewPlatformAdmins([]string{"Admin@Example.com", "  other@example.com  "})
 
-	cases := map[string]bool{
+	cases := map[user.Email]bool{
 		"admin@example.com":  true,
-		"ADMIN@EXAMPLE.COM":  true,
 		"other@example.com":  true,
 		"nobody@example.com": false,
 	}
@@ -33,7 +32,7 @@ func TestRequirePlatformAdmin(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		email string
+		email user.Email
 		want  int
 	}{
 		{"platform admin passes", "admin@example.com", http.StatusOK},

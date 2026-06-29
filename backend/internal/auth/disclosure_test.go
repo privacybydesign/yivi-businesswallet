@@ -9,6 +9,7 @@ import (
 	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 const testEmailAttr = "irma-demo.sidn-pbdf.email.email"
@@ -30,7 +31,7 @@ func TestExtractEmail(t *testing.T) {
 	tests := []struct {
 		name      string
 		result    *irmaserver.SessionResult
-		wantEmail string
+		wantEmail user.Email
 		wantErr   error
 	}{
 		{
@@ -39,6 +40,15 @@ func TestExtractEmail(t *testing.T) {
 				Status:      irma.ServerStatusDone,
 				ProofStatus: irma.ProofStatusValid,
 				Disclosed:   disclosed(want, irma.AttributeProofStatusPresent, strptr("user@example.test")),
+			},
+			wantEmail: "user@example.test",
+		},
+		{
+			name: "mixed-case disclosure is normalized",
+			result: &irmaserver.SessionResult{
+				Status:      irma.ServerStatusDone,
+				ProofStatus: irma.ProofStatusValid,
+				Disclosed:   disclosed(want, irma.AttributeProofStatusPresent, strptr("  User@Example.TEST  ")),
 			},
 			wantEmail: "user@example.test",
 		},

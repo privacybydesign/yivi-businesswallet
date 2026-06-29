@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
@@ -39,13 +40,13 @@ func (h *Handler) addMember(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_body", "invalid request body")
 	}
 
-	email := strings.ToLower(strings.TrimSpace(req.Email))
 	givenNames := strings.TrimSpace(req.GivenNames)
 	lastName := strings.TrimSpace(req.LastName)
-	if email == "" || givenNames == "" || lastName == "" {
+	if strings.TrimSpace(req.Email) == "" || givenNames == "" || lastName == "" {
 		return badRequest("invalid_input", "email, givenNames, and lastName are required")
 	}
-	if !strings.Contains(email, "@") {
+	email, err := user.ParseEmail(req.Email)
+	if err != nil {
 		return badRequest("invalid_email", "email is not valid")
 	}
 
