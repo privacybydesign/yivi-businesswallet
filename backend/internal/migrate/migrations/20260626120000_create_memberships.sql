@@ -10,7 +10,8 @@ CREATE TABLE memberships
     PRIMARY KEY (user_id, organization_id),
     -- NO ACTION (not RESTRICT) defers to end-of-statement so an org delete cascades
     -- departments and memberships together without colliding.
-    FOREIGN KEY (department_id, organization_id) REFERENCES departments (id, organization_id)
+    -- Named so AddMembership can tell this apart from the other 23503 FK violations.
+    CONSTRAINT memberships_department_fkey FOREIGN KEY (department_id, organization_id) REFERENCES departments (id, organization_id)
 );
 
 CREATE INDEX idx_memberships_organization_id ON memberships (organization_id);

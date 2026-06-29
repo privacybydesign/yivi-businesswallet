@@ -15,10 +15,10 @@ func (s *Store) AddMembership(ctx context.Context, orgID, userID uuid.UUID, role
 	_, err := s.db.Exec(ctx, q, orgID, userID, role, jobTitle, departmentID)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
-		switch pgErr.Code {
-		case uniqueViolation:
+		switch {
+		case pgErr.Code == uniqueViolation:
 			return Member{}, ErrAlreadyMember
-		case foreignKeyViolation:
+		case pgErr.Code == foreignKeyViolation && pgErr.ConstraintName == membershipDepartmentFK:
 			return Member{}, ErrDepartmentNotFound
 		}
 	}
@@ -122,7 +122,7 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 	const q = `UPDATE memberships SET role = COALESCE($3, role), job_title = $4, department_id = $5 WHERE organization_id = $1 AND user_id = $2`
 	tag, err := tx.Exec(ctx, q, orgID, userID, role, jobTitle, departmentID)
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
+	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation && pgErr.ConstraintName == membershipDepartmentFK {
 		return Member{}, ErrDepartmentNotFound
 	}
 	if err != nil {
