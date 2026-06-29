@@ -24,6 +24,7 @@ type repository interface {
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, error)
+	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
 	UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, role *string, jobTitle *string, departmentID *uuid.UUID) (Member, error)
 	ListDepartments(ctx context.Context, orgID uuid.UUID) ([]Department, error)
 	CreateDepartment(ctx context.Context, orgID uuid.UUID, name string) (Department, error)
@@ -179,15 +180,13 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := OrgFromContext(r.Context())
-	updated, err := h.store.Update(r.Context(), org.ID, req.Name)
-	if errors.Is(err, ErrNotFound) {
+	if _, err := h.store.Update(r.Context(), org.ID, req.Name); errors.Is(err, ErrNotFound) {
 		return &respond.APIError{Status: http.StatusNotFound, Code: "org_not_found", Message: "organization not found"}
-	}
-	if err != nil {
+	} else if err != nil {
 		return fmt.Errorf("updating organization: %w", err)
 	}
 
-	respond.JSON(w, r, http.StatusOK, updated)
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

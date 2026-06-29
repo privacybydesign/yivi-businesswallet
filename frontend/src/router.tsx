@@ -16,6 +16,7 @@ import Members from "./routes/members";
 import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
 import MemberEdit from "./routes/member-edit";
+import AuditLog from "./routes/audit-log";
 import Settings from "./routes/settings";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
@@ -46,6 +47,7 @@ const memberCrumb: RouteHandle = {
 const memberEditCrumb: RouteHandle = {
   crumb: ({ t }) => t("common.edit"),
 };
+const auditLogCrumb: RouteHandle = { crumb: ({ t }) => t("auditLog.title") };
 const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
 const adminCrumb: RouteHandle = { crumb: ({ t }) => t("adminDashboard.title") };
 const orgsCrumb: RouteHandle = {
@@ -90,6 +92,11 @@ export const router = createBrowserRouter([
                     ],
                   },
                 ],
+              },
+              {
+                path: "audit-log",
+                Component: AuditLog,
+                handle: auditLogCrumb,
               },
               { path: "settings", Component: Settings, handle: settingsCrumb },
             ],

@@ -37,15 +37,13 @@ func (h *Handler) createDepartment(w http.ResponseWriter, r *http.Request) error
 	}
 
 	org := OrgFromContext(r.Context())
-	dept, err := h.store.CreateDepartment(r.Context(), org.ID, req.Name)
-	if errors.Is(err, ErrDepartmentNameTaken) {
+	if _, err := h.store.CreateDepartment(r.Context(), org.ID, req.Name); errors.Is(err, ErrDepartmentNameTaken) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "name_taken", Message: "department name already taken"}
-	}
-	if err != nil {
+	} else if err != nil {
 		return fmt.Errorf("creating department: %w", err)
 	}
 
-	respond.JSON(w, r, http.StatusCreated, dept)
+	w.WriteHeader(http.StatusCreated)
 	return nil
 }
 
@@ -65,7 +63,7 @@ func (h *Handler) updateDepartment(w http.ResponseWriter, r *http.Request) error
 	}
 
 	org := OrgFromContext(r.Context())
-	dept, err := h.store.UpdateDepartment(r.Context(), org.ID, deptID, req.Name)
+	_, err = h.store.UpdateDepartment(r.Context(), org.ID, deptID, req.Name)
 	switch {
 	case errors.Is(err, ErrDepartmentNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "department_not_found", Message: "department not found"}
@@ -75,7 +73,7 @@ func (h *Handler) updateDepartment(w http.ResponseWriter, r *http.Request) error
 		return fmt.Errorf("updating department: %w", err)
 	}
 
-	respond.JSON(w, r, http.StatusOK, dept)
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

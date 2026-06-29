@@ -1,11 +1,22 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import type {
+  InfiniteData,
+  UseInfiniteQueryResult,
+  UseMutationResult,
+  UseQueryResult,
+} from "@tanstack/react-query";
 import {
   createDepartment,
   createOrganization,
   deleteDepartment,
   getMyOrganizations,
   getOrganization,
+  getOrganizationAuditEvents,
   getOrganizationDepartments,
   getOrganizationMembers,
   getOrganizations,
@@ -15,8 +26,9 @@ import {
   updateOrganizationMember,
 } from "./organization";
 import type {
+  AuditEventsPage,
   Department,
-  Member,
+  MemberListEntry,
   Organization,
   OrganizationDetail,
 } from "./organization";
@@ -36,6 +48,26 @@ export function organizationDepartmentsQueryKey(
   slug: string,
 ): readonly string[] {
   return ["organizations", "detail", slug, "departments"];
+}
+
+export function organizationAuditEventsQueryKey(
+  slug: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "audit-events"];
+}
+
+export function useOrganizationAuditEventsQuery(
+  slug: string,
+  enabled: boolean,
+): UseInfiniteQueryResult<InfiniteData<AuditEventsPage>, Error> {
+  return useInfiniteQuery({
+    queryKey: organizationAuditEventsQueryKey(slug),
+    queryFn: ({ pageParam, signal }) =>
+      getOrganizationAuditEvents(slug, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: enabled && slug !== "",
+  });
 }
 
 export function useOrganizationsQuery(
@@ -65,7 +97,7 @@ export function useCreateOrganizationMutation(): UseMutationResult<
 
 export function useUpdateOrganizationMutation(
   slug: string,
-): UseMutationResult<Organization, Error, { name: string }> {
+): UseMutationResult<void, Error, { name: string }> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input) => updateOrganization(slug, input),
@@ -98,7 +130,7 @@ export function useOrganizationQuery(
 export function useOrganizationMembersQuery(
   slug: string,
   enabled: boolean,
-): UseQueryResult<Member[], Error> {
+): UseQueryResult<MemberListEntry[], Error> {
   return useQuery({
     queryKey: organizationMembersQueryKey(slug),
     queryFn: ({ signal }) => getOrganizationMembers(slug, signal),
@@ -119,7 +151,7 @@ export function useOrganizationDepartmentsQuery(
 
 export function useCreateDepartmentMutation(
   slug: string,
-): UseMutationResult<Department, Error, { name: string }> {
+): UseMutationResult<void, Error, { name: string }> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input) => createDepartment(slug, input),
@@ -133,11 +165,7 @@ export function useCreateDepartmentMutation(
 
 export function useUpdateDepartmentMutation(
   slug: string,
-): UseMutationResult<
-  Department,
-  Error,
-  { departmentId: string; name: string }
-> {
+): UseMutationResult<void, Error, { departmentId: string; name: string }> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ departmentId, name }) =>
@@ -169,14 +197,12 @@ export function useDeleteDepartmentMutation(
 }
 
 export function useInviteMemberMutation(slug: string): UseMutationResult<
-  Member,
+  void,
   Error,
   {
     email: string;
     givenNames: string;
     lastName: string;
-    preferredName?: string;
-    namePrefix?: string;
     role?: string;
     jobTitle?: string;
     departmentId?: string;
@@ -194,7 +220,7 @@ export function useInviteMemberMutation(slug: string): UseMutationResult<
 }
 
 export function useUpdateMemberMutation(slug: string): UseMutationResult<
-  Member,
+  void,
   Error,
   {
     userId: string;

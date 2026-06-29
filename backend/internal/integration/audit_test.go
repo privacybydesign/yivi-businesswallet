@@ -22,8 +22,8 @@ func TestOrgUpdateRecordsAuditEvent(t *testing.T) {
 
 	resp := env.do(http.MethodPatch, "/api/v1/orgs/acme", strings.NewReader(`{"name":"Acme Renamed"}`))
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("PATCH /orgs/acme = %d, want 200", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("PATCH /orgs/acme = %d, want 204", resp.StatusCode)
 	}
 
 	var (

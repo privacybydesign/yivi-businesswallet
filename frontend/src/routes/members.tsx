@@ -76,6 +76,9 @@ export default function Members(): React.JSX.Element {
                   <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
                     {t("common.department")}
                   </th>
+                  <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
+                    {t("members.columnStatus")}
+                  </th>
                   <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-right font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
                     {t("common.role")}
                   </th>
@@ -84,50 +87,81 @@ export default function Members(): React.JSX.Element {
               <tbody>
                 {org.isPending || members.isPending ? (
                   <tr>
-                    <td className="text-ink-soft px-3.5 py-3" colSpan={4}>
+                    <td className="text-ink-soft px-3.5 py-3" colSpan={5}>
                       {t("common.loading")}
                     </td>
                   </tr>
                 ) : (
-                  members.data.map((member) => (
-                    <tr
-                      key={member.userId}
-                      onClick={() =>
-                        void navigate(`/${slug}/members/${member.userId}`)
-                      }
-                      className="hover:bg-surface-3 cursor-pointer transition-colors"
-                    >
-                      <td className="border-line border-b px-3.5 py-3">
-                        <Link
-                          to={`/${slug}/members/${member.userId}`}
-                          className="flex items-center gap-2.5"
-                        >
-                          <Avatar initials={personInitials(member)} />
-                          <div className="min-w-0">
-                            <div className="text-ink truncate">
-                              {fullName(member)}
-                            </div>
-                            <div className="text-ink-soft truncate text-[12px]">
-                              {member.email}
+                  members.data.map((member) => {
+                    const pending = member.status === "invited";
+                    return (
+                      <tr
+                        key={
+                          member.userId ?? member.invitationId ?? member.email
+                        }
+                        onClick={
+                          pending
+                            ? undefined
+                            : () =>
+                                void navigate(
+                                  `/${slug}/members/${member.userId}`,
+                                )
+                        }
+                        className={
+                          pending
+                            ? ""
+                            : "hover:bg-surface-3 cursor-pointer transition-colors"
+                        }
+                      >
+                        <td className="border-line border-b px-3.5 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <Avatar initials={personInitials(member)} />
+                            <div className="min-w-0">
+                              {pending ? (
+                                <span className="text-ink truncate">
+                                  {fullName(member)}
+                                </span>
+                              ) : (
+                                <Link
+                                  to={`/${slug}/members/${member.userId}`}
+                                  className="text-ink truncate"
+                                >
+                                  {fullName(member)}
+                                </Link>
+                              )}
+                              <div className="text-ink-soft truncate text-[12px]">
+                                {member.email}
+                              </div>
                             </div>
                           </div>
-                        </Link>
-                      </td>
-                      <td className="border-line text-ink-soft border-b px-3.5 py-3">
-                        {member.jobTitle ?? t("members.unassigned")}
-                      </td>
-                      <td className="border-line text-ink-soft border-b px-3.5 py-3">
-                        {member.departmentName ?? t("members.unassigned")}
-                      </td>
-                      <td className="border-line border-b px-3.5 py-3 text-right">
-                        <Tag
-                          tone={member.role === "admin" ? "blue" : "default"}
-                        >
-                          {member.role}
-                        </Tag>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="border-line text-ink-soft border-b px-3.5 py-3">
+                          {member.jobTitle ?? t("members.unassigned")}
+                        </td>
+                        <td className="border-line text-ink-soft border-b px-3.5 py-3">
+                          {member.departmentName ?? t("members.unassigned")}
+                        </td>
+                        <td className="border-line border-b px-3.5 py-3">
+                          {pending ? (
+                            <Tag tone="amber" dot>
+                              {t("members.pending")}
+                            </Tag>
+                          ) : (
+                            <Tag tone="green" dot>
+                              {t("members.active")}
+                            </Tag>
+                          )}
+                        </td>
+                        <td className="border-line border-b px-3.5 py-3 text-right">
+                          <Tag
+                            tone={member.role === "admin" ? "blue" : "default"}
+                          >
+                            {member.role}
+                          </Tag>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

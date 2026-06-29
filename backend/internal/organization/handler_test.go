@@ -113,8 +113,8 @@ func TestUpdateRenamesOrg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204", rec.Code)
 	}
 	if repo.gotName != "Acme Renamed" {
 		t.Errorf("stored name = %q, want %q", repo.gotName, "Acme Renamed")

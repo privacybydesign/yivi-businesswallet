@@ -150,9 +150,7 @@ export default function MemberInvite(): React.JSX.Element | null {
   const invite = useInviteMemberMutation(slug);
   const [mode, setMode] = useState("email");
   const [givenNames, setGivenNames] = useState("");
-  const [namePrefix, setNamePrefix] = useState("");
   const [lastName, setLastName] = useState("");
-  const [preferredName, setPreferredName] = useState("");
   const [email, setEmail] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [departmentId, setDepartmentId] = useState("");
@@ -192,8 +190,6 @@ export default function MemberInvite(): React.JSX.Element | null {
         email: email.trim(),
         givenNames: givenNames.trim(),
         lastName: lastName.trim(),
-        preferredName: optional(preferredName),
-        namePrefix: optional(namePrefix),
         role,
         jobTitle: optional(jobTitle),
         departmentId: departmentId === "" ? undefined : departmentId,
@@ -274,7 +270,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                     label={t("memberInvite.givenNames")}
                     required
                     error={errors.givenNames && t(errors.givenNames)}
-                    className="col-span-5"
+                    className="col-span-6"
                   >
                     <input
                       id="invite-given-names"
@@ -292,23 +288,11 @@ export default function MemberInvite(): React.JSX.Element | null {
                     />
                   </Field>
                   <Field
-                    id="invite-prefix"
-                    label={t("memberInvite.prefix")}
-                    className="col-span-3"
-                  >
-                    <input
-                      id="invite-prefix"
-                      className={control(false)}
-                      value={namePrefix}
-                      onChange={(e) => setNamePrefix(e.target.value)}
-                    />
-                  </Field>
-                  <Field
                     id="invite-last-name"
                     label={t("memberInvite.lastName")}
                     required
                     error={errors.lastName && t(errors.lastName)}
-                    className="col-span-4"
+                    className="col-span-6"
                   >
                     <input
                       id="invite-last-name"
@@ -320,18 +304,6 @@ export default function MemberInvite(): React.JSX.Element | null {
                       aria-describedby={
                         errors.lastName ? "invite-last-name-error" : undefined
                       }
-                    />
-                  </Field>
-                  <Field
-                    id="invite-preferred-name"
-                    label={t("memberInvite.preferredName")}
-                    className="col-span-12"
-                  >
-                    <input
-                      id="invite-preferred-name"
-                      className={control(false)}
-                      value={preferredName}
-                      onChange={(e) => setPreferredName(e.target.value)}
                     />
                   </Field>
                 </div>

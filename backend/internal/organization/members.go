@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -14,13 +15,81 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
+type memberListEntry struct {
+	Status         string     `json:"status"`
+	UserID         *uuid.UUID `json:"userId"`
+	InvitationID   *uuid.UUID `json:"invitationId"`
+	Email          string     `json:"email"`
+	PreferredName  *string    `json:"preferredName"`
+	GivenNames     string     `json:"givenNames"`
+	NamePrefix     *string    `json:"namePrefix"`
+	LastName       string     `json:"lastName"`
+	Role           string     `json:"role"`
+	JobTitle       *string    `json:"jobTitle"`
+	DepartmentID   *uuid.UUID `json:"departmentId"`
+	DepartmentName *string    `json:"departmentName"`
+	ExpiresAt      *time.Time `json:"expiresAt"`
+	InvitedBy      *uuid.UUID `json:"invitedBy"`
+}
+
 func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
-	org := OrgFromContext(r.Context())
-	members, err := h.store.ListMembers(r.Context(), org.ID)
-	if err != nil {
-		return fmt.Errorf("listing members: %w", err)
+	status := r.URL.Query().Get("status")
+	if status != "" && status != StatusActive && status != StatusInvited {
+		return badRequest("invalid_status", `status must be "active" or "invited"`)
 	}
-	respond.JSON(w, r, http.StatusOK, members)
+
+	ctx := r.Context()
+	org := OrgFromContext(ctx)
+	entries := []memberListEntry{}
+
+	if status == "" || status == StatusActive {
+		members, err := h.store.ListMembers(ctx, org.ID)
+		if err != nil {
+			return fmt.Errorf("listing members: %w", err)
+		}
+		for _, m := range members {
+			userID := m.UserID
+			entries = append(entries, memberListEntry{
+				Status:         StatusActive,
+				UserID:         &userID,
+				Email:          m.Email,
+				PreferredName:  m.PreferredName,
+				GivenNames:     m.GivenNames,
+				NamePrefix:     m.NamePrefix,
+				LastName:       m.LastName,
+				Role:           m.Role,
+				JobTitle:       m.JobTitle,
+				DepartmentID:   m.DepartmentID,
+				DepartmentName: m.DepartmentName,
+			})
+		}
+	}
+
+	if status == "" || status == StatusInvited {
+		invitations, err := h.store.ListInvitations(ctx, org.ID)
+		if err != nil {
+			return fmt.Errorf("listing invitations: %w", err)
+		}
+		for _, inv := range invitations {
+			id := inv.ID
+			expiresAt := inv.ExpiresAt
+			entries = append(entries, memberListEntry{
+				Status:         StatusInvited,
+				InvitationID:   &id,
+				Email:          inv.Email,
+				GivenNames:     inv.GivenNames,
+				LastName:       inv.LastName,
+				Role:           inv.Role,
+				JobTitle:       inv.JobTitle,
+				DepartmentID:   inv.DepartmentID,
+				DepartmentName: inv.DepartmentName,
+				ExpiresAt:      &expiresAt,
+				InvitedBy:      inv.InvitedBy,
+			})
+		}
+	}
+
+	respond.JSON(w, r, http.StatusOK, entries)
 	return nil
 }
 
@@ -67,7 +136,7 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := OrgFromContext(r.Context())
-	invitation, err := h.service.InviteMember(r.Context(), org.ID, Invite{
+	_, err = h.service.InviteMember(r.Context(), org.ID, Invite{
 		Email:        email,
 		GivenNames:   givenNames,
 		LastName:     lastName,
@@ -87,7 +156,7 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("inviting member: %w", err)
 	}
 
-	respond.JSON(w, r, http.StatusCreated, invitation)
+	w.WriteHeader(http.StatusCreated)
 	return nil
 }
 
@@ -122,7 +191,7 @@ func (h *Handler) updateMember(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := OrgFromContext(r.Context())
-	member, err := h.store.UpdateMembership(r.Context(), org.ID, userID, req.Role, normalize(req.JobTitle), deptID)
+	_, err = h.store.UpdateMembership(r.Context(), org.ID, userID, req.Role, normalize(req.JobTitle), deptID)
 	switch {
 	case errors.Is(err, ErrNotMember):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "member_not_found", Message: "member not found"}
@@ -134,7 +203,7 @@ func (h *Handler) updateMember(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("updating member: %w", err)
 	}
 
-	respond.JSON(w, r, http.StatusOK, member)
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

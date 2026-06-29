@@ -10,6 +10,9 @@ import (
 const (
 	RoleAdmin  = "admin"
 	RoleMember = "member"
+
+	StatusActive  = "active"
+	StatusInvited = "invited"
 )
 
 var (
@@ -52,6 +55,7 @@ type Invitation struct {
 	Role           string     `json:"role"`
 	JobTitle       *string    `json:"jobTitle"`
 	DepartmentID   *uuid.UUID `json:"departmentId"`
+	DepartmentName *string    `json:"departmentName"`
 	GivenNames     string     `json:"givenNames"`
 	LastName       string     `json:"lastName"`
 	ExpiresAt      time.Time  `json:"expiresAt"`

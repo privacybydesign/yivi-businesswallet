@@ -4,7 +4,6 @@ package integration
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -13,18 +12,6 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
-
-type invitationBody struct {
-	ID             uuid.UUID  `json:"id"`
-	OrganizationID uuid.UUID  `json:"organizationId"`
-	Email          string     `json:"email"`
-	InvitedBy      *uuid.UUID `json:"invitedBy"`
-	GivenNames     string     `json:"givenNames"`
-	LastName       string     `json:"lastName"`
-	Role           string     `json:"role"`
-	JobTitle       *string    `json:"jobTitle"`
-	DepartmentID   *uuid.UUID `json:"departmentId"`
-}
 
 func (e *testEnv) invite(slug, body string) *http.Response {
 	e.t.Helper()
@@ -49,26 +36,6 @@ func TestAdminInvitesNewMember(t *testing.T) {
 		t.Fatalf("invite = %d, want 201", resp.StatusCode)
 	}
 
-	var inv invitationBody
-	if err := json.NewDecoder(resp.Body).Decode(&inv); err != nil {
-		t.Fatalf("decode invitation: %v", err)
-	}
-	if inv.Email != "newhire@example.test" {
-		t.Errorf("email = %q, want lowercased newhire@example.test", inv.Email)
-	}
-	if inv.GivenNames != "New" || inv.LastName != "Hire" {
-		t.Errorf("name = %q %q, want New Hire", inv.GivenNames, inv.LastName)
-	}
-	if inv.Role != organization.RoleMember {
-		t.Errorf("role = %q, want member", inv.Role)
-	}
-	if inv.JobTitle != nil || inv.DepartmentID != nil {
-		t.Errorf("jobTitle/department = %v/%v, want nil/nil", inv.JobTitle, inv.DepartmentID)
-	}
-	if inv.InvitedBy == nil {
-		t.Error("invitedBy = nil, want the inviting admin")
-	}
-
 	// No users row is created at invite time — the user is minted on accept.
 	var users int
 	if err := env.pool.QueryRow(context.Background(),
@@ -78,6 +45,17 @@ func TestAdminInvitesNewMember(t *testing.T) {
 	if users != 0 {
 		t.Errorf("users for invitee = %d, want 0 (no shell on invite)", users)
 	}
+
+	pending := byEmail(env.listMembers("acme", organization.StatusInvited), "newhire@example.test")
+	if pending == nil {
+		t.Fatal("invited entry missing (email should be lowercased)")
+	}
+	if pending.GivenNames != "New" || pending.LastName != "Hire" {
+		t.Errorf("name = %q %q, want New Hire", pending.GivenNames, pending.LastName)
+	}
+	if pending.Role != organization.RoleMember {
+		t.Errorf("role = %q, want member", pending.Role)
+	}
 }
 
 func TestInviteSameEmailDifferentOrgs(t *testing.T) {
@@ -86,23 +64,20 @@ func TestInviteSameEmailDifferentOrgs(t *testing.T) {
 	env.adminOf("globex", "Globex", "boss@example.test")
 
 	first := env.invite("acme", `{"email":"shared@example.test","givenNames":"Sam","lastName":"Shared"}`)
+	_ = first.Body.Close()
 	if first.StatusCode != http.StatusCreated {
 		t.Fatalf("first invite = %d, want 201", first.StatusCode)
 	}
-	_ = first.Body.Close()
-
 	second := env.invite("globex", `{"email":"shared@example.test","givenNames":"Different","lastName":"Typed"}`)
-	defer func() { _ = second.Body.Close() }()
+	_ = second.Body.Close()
 	if second.StatusCode != http.StatusCreated {
 		t.Fatalf("second invite = %d, want 201", second.StatusCode)
 	}
-	var b invitationBody
-	if err := json.NewDecoder(second.Body).Decode(&b); err != nil {
-		t.Fatalf("decode invitation: %v", err)
-	}
+
 	// Each invitation carries the name that org's admin typed; nothing is shared.
-	if b.GivenNames != "Different" {
-		t.Errorf("givenNames = %q, want Different (per-invitation, not a shared profile)", b.GivenNames)
+	pending := byEmail(env.listMembers("globex", organization.StatusInvited), "shared@example.test")
+	if pending == nil || pending.GivenNames != "Different" {
+		t.Errorf("globex invited name = %+v, want Different (per-invitation, not shared)", pending)
 	}
 }
 
@@ -182,19 +157,20 @@ func TestInviteWithJobTitleAndDepartment(t *testing.T) {
 
 	body := `{"email":"eng@example.test","givenNames":"Engi","lastName":"Neer","jobTitle":"Developer","departmentId":"` + deptID.String() + `"}`
 	resp := env.invite("acme", body)
-	defer func() { _ = resp.Body.Close() }()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("invite with department = %d, want 201", resp.StatusCode)
 	}
-	var inv invitationBody
-	if err := json.NewDecoder(resp.Body).Decode(&inv); err != nil {
-		t.Fatalf("decode invitation: %v", err)
+
+	pending := byEmail(env.listMembers("acme", organization.StatusInvited), "eng@example.test")
+	if pending == nil {
+		t.Fatal("invited entry missing")
 	}
-	if inv.JobTitle == nil || *inv.JobTitle != "Developer" {
-		t.Errorf("jobTitle = %v, want Developer", inv.JobTitle)
+	if pending.JobTitle == nil || *pending.JobTitle != "Developer" {
+		t.Errorf("jobTitle = %v, want Developer", pending.JobTitle)
 	}
-	if inv.DepartmentID == nil || *inv.DepartmentID != deptID {
-		t.Errorf("departmentId = %v, want %s", inv.DepartmentID, deptID)
+	if pending.DepartmentID == nil || *pending.DepartmentID != deptID {
+		t.Errorf("departmentId = %v, want %s", pending.DepartmentID, deptID)
 	}
 }
 
@@ -203,16 +179,14 @@ func TestInviteAsAdminRole(t *testing.T) {
 	env.adminOf("acme", "Acme", "boss@example.test")
 
 	resp := env.invite("acme", `{"email":"co@example.test","givenNames":"Co","lastName":"Admin","role":"admin"}`)
-	defer func() { _ = resp.Body.Close() }()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("invite admin = %d, want 201", resp.StatusCode)
 	}
-	var inv invitationBody
-	if err := json.NewDecoder(resp.Body).Decode(&inv); err != nil {
-		t.Fatalf("decode invitation: %v", err)
-	}
-	if inv.Role != organization.RoleAdmin {
-		t.Errorf("role = %q, want admin", inv.Role)
+
+	pending := byEmail(env.listMembers("acme", organization.StatusInvited), "co@example.test")
+	if pending == nil || pending.Role != organization.RoleAdmin {
+		t.Errorf("invited role = %+v, want admin", pending)
 	}
 }
 

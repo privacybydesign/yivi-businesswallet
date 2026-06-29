@@ -145,7 +145,7 @@ export default function MemberEdit(): React.JSX.Element {
   const isAdmin = org.data?.role === "admin";
   const members = useOrganizationMembersQuery(slug, isAdmin);
   const departments = useOrganizationDepartmentsQuery(slug, isAdmin);
-  const member = members.data?.find((m) => m.userId === id);
+  const entry = members.data?.find((m) => m.userId === id);
 
   const shell = (body: React.ReactNode): React.JSX.Element => (
     <>
@@ -176,10 +176,12 @@ export default function MemberEdit(): React.JSX.Element {
   if (members.isPending || departments.isPending) {
     return shell(message(t("common.loading")));
   }
-  if (!member) {
+  if (!entry) {
     return shell(message(t("memberDetail.notFound")));
   }
 
+  // Found by userId, so it's an active member with a real userId.
+  const member: Member = { ...entry, userId: id };
   return (
     <EditForm
       slug={slug}
