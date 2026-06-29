@@ -1,8 +1,10 @@
-import React, { StrictMode } from "react";
+import { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { router } from "./router";
+import { setUnauthorizedHandler } from "./api/http";
+import { meQueryKey } from "./api/auth.queries";
 
 const STALE_TIME_MS = 30_000;
 
@@ -15,6 +17,13 @@ const queryClient = new QueryClient({
       staleTime: STALE_TIME_MS,
     },
   },
+});
+
+// On any 401, mark the session logged-out. We set the cache to null rather than
+// invalidating: invalidating would refetch `me`, whose own 401 would re-fire
+// this handler in an endless loop.
+setUnauthorizedHandler(() => {
+  queryClient.setQueryData(meQueryKey, null);
 });
 
 const root = document.getElementById("root");

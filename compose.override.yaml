@@ -3,12 +3,46 @@ services:
     ports:
       - "5432:5432"
 
+  cloudflared:
+    image: cloudflare/cloudflared:2026.6.1
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --url=http://irma:8088
+      # Expose the metrics API so dev-setup can read the assigned quick-tunnel URL
+      # from http://localhost:2000/quicktunnel deterministically
+      - --metrics=0.0.0.0:2000
+    ports:
+      - "2000:2000"
+    depends_on:
+      irma:
+        condition: service_started
+
+  irma:
+    image: ghcr.io/privacybydesign/yivi:v1.0.0
+    ports:
+      - "8088:8088"
+    command:
+      - irma
+      - server
+      - --port=8088
+      - --listen-addr=0.0.0.0
+      - --url=${IRMA_CLIENT_URL:-http://localhost:8088}
+      - --no-auth=true
+      - --disclose-perms=${IRMA_EMAIL_ATTRIBUTE:-irma-demo.sidn-pbdf.email.email}
+
   backend:
     build:
       dockerfile: docker/development/Dockerfile
+    environment:
+      IRMA_REQUESTOR_URL: ${IRMA_REQUESTOR_URL:-http://irma:8088}
+      IRMA_REQUESTOR_TOKEN: ${IRMA_REQUESTOR_TOKEN:-}
+      IRMA_EMAIL_ATTRIBUTE: ${IRMA_EMAIL_ATTRIBUTE:-irma-demo.sidn-pbdf.email.email}
     depends_on:
       seed:
         condition: service_completed_successfully
+      irma:
+        condition: service_started
     volumes:
       - ./backend:/app
       - backend-go-build:/root/.cache/go-build
