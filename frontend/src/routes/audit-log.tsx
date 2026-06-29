@@ -224,11 +224,13 @@ export default function AuditLog(): React.JSX.Element {
               <table className="w-full border-collapse text-[13.5px]">
                 <thead>
                   <tr>
-                    <th className={TH_CLASS}>{t("auditLog.columnWhen")}</th>
-                    <th className={TH_CLASS}>{t("auditLog.columnActor")}</th>
-                    <th className={TH_CLASS}>{t("auditLog.columnAction")}</th>
-                    <th className={TH_CLASS}>{t("auditLog.columnTarget")}</th>
-                    <th className={TH_CLASS}>{t("auditLog.columnSubject")}</th>
+                    <th className={TH_CLASS}>{t("auditLog.columns.when")}</th>
+                    <th className={TH_CLASS}>{t("auditLog.columns.actor")}</th>
+                    <th className={TH_CLASS}>{t("auditLog.columns.action")}</th>
+                    <th className={TH_CLASS}>{t("auditLog.columns.target")}</th>
+                    <th className={TH_CLASS}>
+                      {t("auditLog.columns.subject")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>

@@ -72,7 +72,7 @@ export default function Members(): React.JSX.Element {
               <thead>
                 <tr>
                   <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
-                    {t("members.columnMember")}
+                    {t("members.columns.member")}
                   </th>
                   <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
                     {t("common.jobTitle")}
@@ -81,14 +81,14 @@ export default function Members(): React.JSX.Element {
                     {t("common.department")}
                   </th>
                   <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
-                    {t("members.columnStatus")}
+                    {t("members.columns.status")}
                   </th>
                   <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
                     {t("common.role")}
                   </th>
                   <th className="border-line bg-surface-2 border-b px-3.5 py-2.5">
                     <span className="sr-only">
-                      {t("members.columnActions")}
+                      {t("members.columns.actions")}
                     </span>
                   </th>
                 </tr>

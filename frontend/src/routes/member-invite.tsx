@@ -14,19 +14,19 @@ import * as React from "react";
 const INVITE_MODES = [
   {
     key: "email",
-    labelKey: "memberInvite.modeEmail",
+    labelKey: "memberInvite.modes.email",
     icon: "email",
     enabled: true,
   },
   {
     key: "link",
-    labelKey: "memberInvite.modeLink",
+    labelKey: "memberInvite.modes.link",
     icon: "arrow_front",
     enabled: false,
   },
   {
     key: "bulk",
-    labelKey: "memberInvite.modeBulk",
+    labelKey: "memberInvite.modes.bulk",
     icon: "add",
     enabled: false,
   },
@@ -425,20 +425,20 @@ export default function MemberInvite(): React.JSX.Element | null {
 
         <div className="flex flex-col gap-4">
           <Card className="p-5">
-            <div className={EYEBROW}>{t("memberInvite.previewEmail")}</div>
+            <div className={EYEBROW}>{t("memberInvite.preview.open")}</div>
             <div className="border-line bg-surface-2 mt-2.5 rounded-md border p-3.5 text-[13px] leading-relaxed">
               <div className="mb-2 font-semibold">
-                {t("memberInvite.previewTitle", { org: orgName })}
+                {t("memberInvite.preview.title", { org: orgName })}
               </div>
               <div className="text-ink-soft">
-                <p>{t("memberInvite.previewGreeting")}</p>
+                <p>{t("memberInvite.preview.greeting")}</p>
                 <p className="mt-2">
-                  {t("memberInvite.previewBody", { org: orgName })}
+                  {t("memberInvite.preview.body", { org: orgName })}
                 </p>
                 <p className="mt-2 font-mono text-[11px]">
                   https://{slug}.yivi.app/onboard/…
                 </p>
-                <p className="mt-2">{t("memberInvite.previewExpiry")}</p>
+                <p className="mt-2">{t("memberInvite.preview.expiry")}</p>
               </div>
             </div>
           </Card>

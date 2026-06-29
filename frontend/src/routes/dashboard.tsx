@@ -53,13 +53,13 @@ export default function Dashboard(): React.JSX.Element {
       <div className="flex flex-col gap-6 p-8">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Stat
-            label={t("dashboard.statAttestations")}
+            label={t("dashboard.stats.attestations")}
             value="0"
             hint={t("common.comingSoon")}
             icon="valid"
           />
           <Stat
-            label={t("dashboard.statDocuments")}
+            label={t("dashboard.stats.documents")}
             value="0"
             hint={t("common.comingSoon")}
             icon="edit"
