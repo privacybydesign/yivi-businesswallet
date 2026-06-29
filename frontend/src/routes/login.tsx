@@ -107,7 +107,7 @@ export default function Login(): React.JSX.Element {
           </p>
         )}
 
-        <div className="mt-6 flex justify-center">
+        <div className={showMessage ? "hidden" : "mt-6 flex justify-center"}>
           <div id={YIVI_ELEMENT_ID} />
         </div>
       </Card>
