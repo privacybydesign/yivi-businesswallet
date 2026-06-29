@@ -3,6 +3,7 @@ module github.com/privacybydesign/yivi-businesswallet/backend
 go 1.26.4
 
 require (
+	github.com/brianvoe/gofakeit/v7 v7.15.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/pressly/goose/v3 v3.27.1
