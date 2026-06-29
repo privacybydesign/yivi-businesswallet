@@ -93,16 +93,24 @@ func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation
 		}
 		return s.audit.Record(ctx, q, audit.MembershipInvited,
 			audit.Target{Type: audit.TargetMembership, ID: in.Email, OrgID: &in.OrganizationID},
-			map[string]any{"email": in.Email, "role": in.Role})
+			audit.Created(map[string]any{
+				"email":        in.Email,
+				"role":         in.Role,
+				"givenNames":   in.GivenNames,
+				"lastName":     in.LastName,
+				"jobTitle":     in.JobTitle,
+				"departmentId": in.DepartmentID,
+			}))
 	})
 	return in, err
 }
 
 func (s *Store) RevokeInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		const del = `DELETE FROM invitations WHERE id = $1 AND organization_id = $2 RETURNING email`
-		var email string
-		err := q.QueryRow(ctx, del, invitationID, orgID).Scan(&email)
+		const del = `DELETE FROM invitations WHERE id = $1 AND organization_id = $2
+			RETURNING email, role, invited_given_names, invited_last_name`
+		var email, role, givenNames, lastName string
+		err := q.QueryRow(ctx, del, invitationID, orgID).Scan(&email, &role, &givenNames, &lastName)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrInvitationNotFound
 		}
@@ -111,7 +119,12 @@ func (s *Store) RevokeInvitation(ctx context.Context, orgID, invitationID uuid.U
 		}
 		return s.audit.Record(ctx, q, audit.MembershipRevoked,
 			audit.Target{Type: audit.TargetMembership, ID: email, OrgID: &orgID},
-			map[string]any{"email": email})
+			audit.Deleted(map[string]any{
+				"email":      email,
+				"role":       role,
+				"givenNames": givenNames,
+				"lastName":   lastName,
+			}))
 	})
 }
 
@@ -120,13 +133,16 @@ func (s *Store) ResendInvitation(ctx context.Context, orgID, invitationID uuid.U
 	if err != nil {
 		return err
 	}
+	newExpiry := time.Now().Add(inviteTTL)
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `
-			UPDATE invitations SET invite_token_hash = $3, expires_at = $4
-			WHERE id = $1 AND organization_id = $2
-			RETURNING email`
+			WITH old AS (SELECT expires_at FROM invitations WHERE id = $1 AND organization_id = $2)
+			UPDATE invitations i SET invite_token_hash = $3, expires_at = $4
+			FROM old WHERE i.id = $1 AND i.organization_id = $2
+			RETURNING i.email, old.expires_at`
 		var email string
-		err := q.QueryRow(ctx, update, invitationID, orgID, tokenHash[:], time.Now().Add(inviteTTL)).Scan(&email)
+		var oldExpiry time.Time
+		err := q.QueryRow(ctx, update, invitationID, orgID, tokenHash[:], newExpiry).Scan(&email, &oldExpiry)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrInvitationNotFound
 		}
@@ -135,6 +151,8 @@ func (s *Store) ResendInvitation(ctx context.Context, orgID, invitationID uuid.U
 		}
 		return s.audit.Record(ctx, q, audit.MembershipInviteResent,
 			audit.Target{Type: audit.TargetMembership, ID: email, OrgID: &orgID},
-			map[string]any{"email": email})
+			audit.Updated(
+				map[string]any{"expiresAt": oldExpiry},
+				map[string]any{"expiresAt": newExpiry}))
 	})
 }

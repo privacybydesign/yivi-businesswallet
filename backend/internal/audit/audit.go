@@ -61,6 +61,20 @@ type Target struct {
 	OrgID *uuid.UUID
 }
 
+// Created, Updated and Deleted build the uniform {before, after} metadata
+// envelope: a create has no before, a delete has no after, an update has both.
+func Created(after map[string]any) map[string]any {
+	return map[string]any{"after": after}
+}
+
+func Updated(before, after map[string]any) map[string]any {
+	return map[string]any{"before": before, "after": after}
+}
+
+func Deleted(before map[string]any) map[string]any {
+	return map[string]any{"before": before}
+}
+
 type Recorder interface {
 	Record(ctx context.Context, q database.Querier, action string, target Target, metadata map[string]any) error
 }

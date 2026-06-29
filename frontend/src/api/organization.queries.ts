@@ -105,6 +105,9 @@ export function useUpdateOrganizationMutation(
     mutationFn: (input) => updateOrganization(slug, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
     },
   });
 }
@@ -161,6 +164,9 @@ export function useCreateDepartmentMutation(
       void queryClient.invalidateQueries({
         queryKey: organizationDepartmentsQueryKey(slug),
       });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
     },
   });
 }
@@ -180,6 +186,9 @@ export function useUpdateDepartmentMutation(
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),
       });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
     },
   });
 }
@@ -193,6 +202,9 @@ export function useDeleteDepartmentMutation(
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: organizationDepartmentsQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
       });
     },
   });
@@ -217,6 +229,9 @@ export function useInviteMemberMutation(slug: string): UseMutationResult<
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),
       });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
     },
   });
 }
@@ -231,6 +246,9 @@ export function useResendInvitationMutation(
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),
       });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
     },
   });
 }
@@ -244,6 +262,9 @@ export function useRevokeInvitationMutation(
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
       });
     },
   });
@@ -266,6 +287,9 @@ export function useUpdateMemberMutation(slug: string): UseMutationResult<
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
       });
     },
   });

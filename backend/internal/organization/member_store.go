@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 )
 
 func (s *Store) AddMembership(ctx context.Context, orgID, userID uuid.UUID, role string, jobTitle *string, departmentID *uuid.UUID) (Member, error) {
@@ -101,7 +103,10 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var current string
-	err = tx.QueryRow(ctx, `SELECT role FROM memberships WHERE organization_id = $1 AND user_id = $2`, orgID, userID).Scan(&current)
+	var oldJobTitle *string
+	var oldDeptID *uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT role, job_title, department_id FROM memberships WHERE organization_id = $1 AND user_id = $2`, orgID, userID).
+		Scan(&current, &oldJobTitle, &oldDeptID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Member{}, ErrNotMember
 	}
@@ -130,6 +135,18 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 	}
 	if tag.RowsAffected() == 0 {
 		return Member{}, ErrNotMember
+	}
+
+	newRole := current
+	if role != nil {
+		newRole = *role
+	}
+	if err := s.audit.Record(ctx, tx, audit.MembershipRoleChanged,
+		audit.Target{Type: audit.TargetMembership, ID: userID.String(), OrgID: &orgID},
+		audit.Updated(
+			map[string]any{"role": current, "jobTitle": oldJobTitle, "departmentId": oldDeptID},
+			map[string]any{"role": newRole, "jobTitle": jobTitle, "departmentId": departmentID})); err != nil {
+		return Member{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

@@ -27,7 +27,7 @@ func (s *Store) CreateDepartment(ctx context.Context, orgID uuid.UUID, name stri
 		}
 		return s.audit.Record(ctx, q, audit.DepartmentCreated,
 			audit.Target{Type: audit.TargetDepartment, ID: d.ID.String(), OrgID: &orgID},
-			map[string]any{"name": name})
+			audit.Created(map[string]any{"name": name}))
 	})
 	return d, err
 }
@@ -78,7 +78,7 @@ func (s *Store) UpdateDepartment(ctx context.Context, orgID, deptID uuid.UUID, n
 		}
 		return s.audit.Record(ctx, q, audit.DepartmentUpdated,
 			audit.Target{Type: audit.TargetDepartment, ID: deptID.String(), OrgID: &orgID},
-			map[string]any{"oldName": oldName, "newName": name})
+			audit.Updated(map[string]any{"name": oldName}, map[string]any{"name": name}))
 	})
 	return d, err
 }
@@ -100,6 +100,6 @@ func (s *Store) DeleteDepartment(ctx context.Context, orgID, deptID uuid.UUID) e
 		}
 		return s.audit.Record(ctx, q, audit.DepartmentDeleted,
 			audit.Target{Type: audit.TargetDepartment, ID: deptID.String(), OrgID: &orgID},
-			map[string]any{"name": name})
+			audit.Deleted(map[string]any{"name": name}))
 	})
 }

@@ -69,7 +69,7 @@ func (s *Store) Create(ctx context.Context, name, slug string) (Organization, er
 		}
 		return s.audit.Record(ctx, q, audit.OrganizationCreated,
 			audit.Target{Type: audit.TargetOrganization, ID: org.ID.String(), OrgID: &org.ID},
-			map[string]any{"name": name, "slug": slug})
+			audit.Created(map[string]any{"name": name, "slug": slug}))
 	})
 	return org, err
 }
@@ -92,7 +92,7 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, name string) (Organiza
 		}
 		return s.audit.Record(ctx, q, audit.OrganizationUpdated,
 			audit.Target{Type: audit.TargetOrganization, ID: id.String(), OrgID: &id},
-			map[string]any{"oldName": oldName, "newName": name})
+			audit.Updated(map[string]any{"name": oldName}, map[string]any{"name": name}))
 	})
 	return org, err
 }

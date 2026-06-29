@@ -46,32 +46,32 @@ const DEFAULT_VISUAL: { icon: IconName; tone: Tone } = {
   tone: "slate",
 };
 
-function metaString(meta: Record<string, unknown>, key: string): string | null {
-  const value = meta[key];
-  return typeof value === "string" ? value : null;
+function fieldValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-// The human-readable detail for a row, derived from the recorder's metadata,
-// whose shape varies per action.
+// The human-readable detail for a row, derived from the uniform {before, after}
+// metadata: an update diffs changed fields ("old → new"); a create/delete shows
+// the snapshot's identifying field.
 function subjectOf(event: AuditEvent): string | null {
-  const m = event.metadata;
-  switch (event.action) {
-    case "organization.created":
-    case "department.created":
-    case "department.deleted":
-      return metaString(m, "name");
-    case "organization.updated":
-    case "department.updated": {
-      const before = metaString(m, "oldName");
-      const after = metaString(m, "newName");
-      if (before && after) {
-        return `${before} → ${after}`;
-      }
-      return after ?? before;
-    }
-    default:
-      return null;
+  const { before, after } = event.metadata as {
+    before?: Record<string, unknown> | null;
+    after?: Record<string, unknown> | null;
+  };
+
+  if (before && after) {
+    const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
+    const changes = keys
+      .filter((key) => before[key] !== after[key])
+      .map((key) => `${fieldValue(before[key])} → ${fieldValue(after[key])}`);
+    return changes.length > 0 ? changes.join(", ") : null;
   }
+
+  const snapshot = after ?? before;
+  if (!snapshot) return null;
+  const id = snapshot.name ?? snapshot.email ?? snapshot.role;
+  return typeof id === "string" ? id : null;
 }
 
 const TH_CLASS =

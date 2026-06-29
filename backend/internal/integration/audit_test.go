@@ -33,7 +33,7 @@ func TestOrgUpdateRecordsAuditEvent(t *testing.T) {
 		newName string
 	)
 	err := env.pool.QueryRow(context.Background(),
-		`SELECT actor_user_id, organization_id, metadata->>'oldName', metadata->>'newName'
+		`SELECT actor_user_id, organization_id, metadata->'before'->>'name', metadata->'after'->>'name'
 		 FROM audit_events WHERE action = $1 AND organization_id = $2`,
 		audit.OrganizationUpdated, orgID,
 	).Scan(&actorID, &orgCol, &oldName, &newName)
