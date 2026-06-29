@@ -118,7 +118,7 @@ func TestStoreUpdateMembership(t *testing.T) {
 	addMember(t, pool, userID, org.ID, nil)
 
 	title := "Engineer"
-	member, err := store.UpdateMembership(ctx, org.ID, userID, &title, &dept.ID)
+	member, err := store.UpdateMembership(ctx, org.ID, userID, nil, &title, &dept.ID)
 	if err != nil {
 		t.Fatalf("UpdateMembership: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestStoreUpdateMembership(t *testing.T) {
 		t.Errorf("departmentName = %v, want Engineering", member.DepartmentName)
 	}
 
-	cleared, err := store.UpdateMembership(ctx, org.ID, userID, nil, nil)
+	cleared, err := store.UpdateMembership(ctx, org.ID, userID, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateMembership clear: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestStoreUpdateMembershipUnknownDepartment(t *testing.T) {
 	addMember(t, pool, userID, org.ID, nil)
 
 	unknown := uuid.New()
-	if _, err := store.UpdateMembership(ctx, org.ID, userID, nil, &unknown); !errors.Is(err, organization.ErrDepartmentNotFound) {
+	if _, err := store.UpdateMembership(ctx, org.ID, userID, nil, nil, &unknown); !errors.Is(err, organization.ErrDepartmentNotFound) {
 		t.Errorf("err = %v, want ErrDepartmentNotFound", err)
 	}
 }
@@ -170,7 +170,7 @@ func TestStoreUpdateMembershipRejectsForeignOrgDepartment(t *testing.T) {
 	userID := createUser(t, pool, "alice@example.test")
 	addMember(t, pool, userID, orgA.ID, nil)
 
-	if _, err := store.UpdateMembership(ctx, orgA.ID, userID, nil, &deptB.ID); !errors.Is(err, organization.ErrDepartmentNotFound) {
+	if _, err := store.UpdateMembership(ctx, orgA.ID, userID, nil, nil, &deptB.ID); !errors.Is(err, organization.ErrDepartmentNotFound) {
 		t.Errorf("cross-org dept err = %v, want ErrDepartmentNotFound", err)
 	}
 }

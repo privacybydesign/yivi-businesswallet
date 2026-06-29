@@ -132,7 +132,7 @@ export function inviteMember(
 export function updateOrganizationMember(
   slug: string,
   userId: string,
-  input: { jobTitle: string | null; departmentId: string | null },
+  input: { role: string; jobTitle: string | null; departmentId: string | null },
   signal?: AbortSignal,
 ): Promise<Member> {
   return request(

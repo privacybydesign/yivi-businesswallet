@@ -16,6 +16,7 @@ var (
 	ErrSlugTaken           = errors.New("organization slug already taken")
 	ErrNotMember           = errors.New("user is not a member of the organization")
 	ErrAlreadyMember       = errors.New("user is already a member of the organization")
+	ErrLastAdmin           = errors.New("cannot demote the last admin of the organization")
 	ErrDepartmentNotFound  = errors.New("department not found")
 	ErrDepartmentNameTaken = errors.New("department name already taken")
 	ErrDepartmentInUse     = errors.New("department still has members")

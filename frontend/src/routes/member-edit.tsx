@@ -10,10 +10,12 @@ import {
 } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { fullName } from "../lib/name";
+import { ApiError } from "../api/http";
 import { Button, Card, TopBar } from "../ui";
 import * as React from "react";
 
 const FORM_ID = "member-edit-form";
+const CONFLICT_STATUS = 409;
 const FIELD_LABEL = "text-ink text-[13px] font-semibold";
 const CONTROL =
   "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
@@ -30,6 +32,7 @@ function EditForm({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const update = useUpdateMemberMutation(slug);
+  const [role, setRole] = useState(member.role);
   const [jobTitle, setJobTitle] = useState(member.jobTitle ?? "");
   const [departmentId, setDepartmentId] = useState(member.departmentId ?? "");
 
@@ -41,12 +44,18 @@ function EditForm({
     update.mutate(
       {
         userId: member.userId,
+        role,
         jobTitle: jobTitle.trim() === "" ? null : jobTitle.trim(),
         departmentId: departmentId === "" ? null : departmentId,
       },
       { onSuccess: backToMember },
     );
   }
+
+  const errorText =
+    update.error instanceof ApiError && update.error.status === CONFLICT_STATUS
+      ? t("memberEdit.lastAdmin")
+      : t("common.saveError", { message: update.error?.message ?? "" });
 
   return (
     <>
@@ -72,6 +81,18 @@ function EditForm({
             onSubmit={handleSubmit}
             className="flex flex-col gap-4"
           >
+            <label className="flex flex-col gap-1.5">
+              <span className={FIELD_LABEL}>{t("common.role")}</span>
+              <select
+                className={CONTROL}
+                value={role}
+                onChange={(event) => setRole(event.target.value)}
+              >
+                <option value="member">{t("memberInvite.roleMember")}</option>
+                <option value="admin">{t("memberInvite.roleAdmin")}</option>
+              </select>
+            </label>
+
             <label className="flex flex-col gap-1.5">
               <span className={FIELD_LABEL}>{t("common.jobTitle")}</span>
               <input
@@ -104,7 +125,7 @@ function EditForm({
                 role="alert"
                 className="rounded-yivi bg-error-bg text-error px-3 py-2 text-[13px]"
               >
-                {t("common.saveError", { message: update.error.message })}
+                {errorText}
               </p>
             )}
           </form>

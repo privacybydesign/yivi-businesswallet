@@ -93,9 +93,34 @@ func (s *Store) getMember(ctx context.Context, orgID, userID uuid.UUID) (Member,
 	return m, nil
 }
 
-func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, jobTitle *string, departmentID *uuid.UUID) (Member, error) {
-	const q = `UPDATE memberships SET job_title = $3, department_id = $4 WHERE organization_id = $1 AND user_id = $2`
-	tag, err := s.db.Exec(ctx, q, orgID, userID, jobTitle, departmentID)
+func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, role *string, jobTitle *string, departmentID *uuid.UUID) (Member, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return Member{}, fmt.Errorf("organization: begin update membership user %s org %s: %w", userID, orgID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var current string
+	err = tx.QueryRow(ctx, `SELECT role FROM memberships WHERE organization_id = $1 AND user_id = $2`, orgID, userID).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Member{}, ErrNotMember
+	}
+	if err != nil {
+		return Member{}, fmt.Errorf("organization: read membership user %s org %s: %w", userID, orgID, err)
+	}
+
+	if role != nil && *role == RoleMember && current == RoleAdmin {
+		admins, err := lockAndCountAdmins(ctx, tx, orgID)
+		if err != nil {
+			return Member{}, err
+		}
+		if admins <= 1 {
+			return Member{}, ErrLastAdmin
+		}
+	}
+
+	const q = `UPDATE memberships SET role = COALESCE($3, role), job_title = $4, department_id = $5 WHERE organization_id = $1 AND user_id = $2`
+	tag, err := tx.Exec(ctx, q, orgID, userID, role, jobTitle, departmentID)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
 		return Member{}, ErrDepartmentNotFound
@@ -106,5 +131,28 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, j
 	if tag.RowsAffected() == 0 {
 		return Member{}, ErrNotMember
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Member{}, fmt.Errorf("organization: commit update membership user %s org %s: %w", userID, orgID, err)
+	}
 	return s.getMember(ctx, orgID, userID)
+}
+
+// ORDER BY user_id is load-bearing: it makes concurrent demotions take the row
+// locks in the same order, so they serialize instead of deadlocking.
+func lockAndCountAdmins(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) (int, error) {
+	rows, err := tx.Query(ctx, `SELECT user_id FROM memberships WHERE organization_id = $1 AND role = $2 ORDER BY user_id FOR UPDATE`, orgID, RoleAdmin)
+	if err != nil {
+		return 0, fmt.Errorf("organization: lock admins org %s: %w", orgID, err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("organization: count admins org %s: %w", orgID, err)
+	}
+	return count, nil
 }

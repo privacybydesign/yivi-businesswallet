@@ -193,17 +193,20 @@ export function useInviteMemberMutation(slug: string): UseMutationResult<
   });
 }
 
-export function useUpdateMemberMutation(
-  slug: string,
-): UseMutationResult<
+export function useUpdateMemberMutation(slug: string): UseMutationResult<
   Member,
   Error,
-  { userId: string; jobTitle: string | null; departmentId: string | null }
+  {
+    userId: string;
+    role: string;
+    jobTitle: string | null;
+    departmentId: string | null;
+  }
 > {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ userId, jobTitle, departmentId }) =>
-      updateOrganizationMember(slug, userId, { jobTitle, departmentId }),
+    mutationFn: ({ userId, role, jobTitle, departmentId }) =>
+      updateOrganizationMember(slug, userId, { role, jobTitle, departmentId }),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),

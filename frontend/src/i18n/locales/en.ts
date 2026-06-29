@@ -121,6 +121,8 @@ export const en = {
     title: "Edit member",
     jobTitlePlaceholder: "e.g. Engineering Lead",
     noDepartment: "No department",
+    lastAdmin:
+      "This is the organization's only admin. Promote another member to admin first.",
   },
   settings: {
     title: "Settings",

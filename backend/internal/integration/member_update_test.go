@@ -132,3 +132,89 @@ func TestUpdateMemberUnknownDepartment(t *testing.T) {
 		t.Errorf("update unknown department = %d, want 400", resp.StatusCode)
 	}
 }
+
+func TestAdminPromotesMemberPreservingProfile(t *testing.T) {
+	env := setup(t)
+	orgID := env.adminOf("acme", "Acme", "boss@example.test")
+	deptID := env.createDepartment(orgID, "Platform")
+	member := env.inviteMember("acme",
+		`{"email":"eng@example.test","givenNames":"Engi","lastName":"Neer","jobTitle":"Dev","departmentId":"`+deptID.String()+`"}`)
+
+	resp := env.updateMember("acme", member.UserID,
+		`{"role":"admin","jobTitle":"Dev","departmentId":"`+deptID.String()+`"}`)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("promote = %d, want 200", resp.StatusCode)
+	}
+
+	var m memberBody
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if m.Role != organization.RoleAdmin {
+		t.Errorf("role = %q, want admin", m.Role)
+	}
+	if m.JobTitle == nil || *m.JobTitle != "Dev" {
+		t.Errorf("jobTitle = %v, want Dev (must survive role change)", m.JobTitle)
+	}
+	if m.DepartmentID == nil || *m.DepartmentID != deptID {
+		t.Errorf("departmentId = %v, want %s", m.DepartmentID, deptID)
+	}
+}
+
+func TestAdminDemotesAdminWithCoAdmin(t *testing.T) {
+	env := setup(t)
+	env.adminOf("acme", "Acme", "boss@example.test")
+	other := env.inviteMember("acme",
+		`{"email":"co@example.test","givenNames":"Co","lastName":"Admin","role":"admin"}`)
+
+	resp := env.updateMember("acme", other.UserID, `{"role":"member"}`)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("demote = %d, want 200", resp.StatusCode)
+	}
+
+	var m memberBody
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if m.Role != organization.RoleMember {
+		t.Errorf("role = %q, want member", m.Role)
+	}
+}
+
+func TestDemoteLastAdminConflict(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	boss := env.login("boss@example.test")
+	env.addMembership(boss.ID, orgID, organization.RoleAdmin)
+
+	resp := env.updateMember("acme", boss.ID, `{"role":"member"}`)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("demote last admin = %d, want 409", resp.StatusCode)
+	}
+
+	var role string
+	if err := env.pool.QueryRow(context.Background(),
+		"SELECT role FROM memberships WHERE user_id = $1 AND organization_id = $2",
+		boss.ID, orgID,
+	).Scan(&role); err != nil {
+		t.Fatalf("read role: %v", err)
+	}
+	if role != organization.RoleAdmin {
+		t.Errorf("role after blocked demotion = %q, want admin", role)
+	}
+}
+
+func TestUpdateMemberInvalidRole(t *testing.T) {
+	env := setup(t)
+	env.adminOf("acme", "Acme", "boss@example.test")
+	member := env.inviteMember("acme", `{"email":"eng@example.test","givenNames":"Engi","lastName":"Neer"}`)
+
+	resp := env.updateMember("acme", member.UserID, `{"role":"superuser"}`)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("invalid role = %d, want 400", resp.StatusCode)
+	}
+}

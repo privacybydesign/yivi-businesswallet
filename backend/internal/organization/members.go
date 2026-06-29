@@ -92,6 +92,7 @@ func (h *Handler) addMember(w http.ResponseWriter, r *http.Request) error {
 }
 
 type updateMemberRequest struct {
+	Role         *string `json:"role"`
 	JobTitle     *string `json:"jobTitle"`
 	DepartmentID *string `json:"departmentId"`
 }
@@ -107,6 +108,10 @@ func (h *Handler) updateMember(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_body", "invalid request body")
 	}
 
+	if req.Role != nil && *req.Role != RoleMember && *req.Role != RoleAdmin {
+		return badRequest("invalid_role", "role must be member or admin")
+	}
+
 	var deptID *uuid.UUID
 	if req.DepartmentID != nil {
 		id, err := uuid.Parse(*req.DepartmentID)
@@ -117,10 +122,12 @@ func (h *Handler) updateMember(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := OrgFromContext(r.Context())
-	member, err := h.store.UpdateMembership(r.Context(), org.ID, userID, normalize(req.JobTitle), deptID)
+	member, err := h.store.UpdateMembership(r.Context(), org.ID, userID, req.Role, normalize(req.JobTitle), deptID)
 	switch {
 	case errors.Is(err, ErrNotMember):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "member_not_found", Message: "member not found"}
+	case errors.Is(err, ErrLastAdmin):
+		return &respond.APIError{Status: http.StatusConflict, Code: "last_admin", Message: "cannot demote the last admin of the organization"}
 	case errors.Is(err, ErrDepartmentNotFound):
 		return badRequest("department_not_found", "department not found")
 	case err != nil:

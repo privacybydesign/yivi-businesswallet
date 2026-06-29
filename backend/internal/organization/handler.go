@@ -23,7 +23,7 @@ type repository interface {
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, error)
-	UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, jobTitle *string, departmentID *uuid.UUID) (Member, error)
+	UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, role *string, jobTitle *string, departmentID *uuid.UUID) (Member, error)
 	ListDepartments(ctx context.Context, orgID uuid.UUID) ([]Department, error)
 	CreateDepartment(ctx context.Context, orgID uuid.UUID, name string) (Department, error)
 	UpdateDepartment(ctx context.Context, orgID, deptID uuid.UUID, name string) (Department, error)
