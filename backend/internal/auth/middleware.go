@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
@@ -36,7 +37,9 @@ func RequireUser(sessions sessionLookuper) func(http.Handler) http.Handler {
 				return
 			}
 
-			next.ServeHTTP(w, r.WithContext(ContextWithUser(r.Context(), u)))
+			ctx := ContextWithUser(r.Context(), u)
+			ctx = audit.ContextWithActor(ctx, audit.Actor{UserID: u.ID})
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

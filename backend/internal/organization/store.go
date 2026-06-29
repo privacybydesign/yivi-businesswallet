@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
@@ -20,11 +21,12 @@ const (
 )
 
 type Store struct {
-	db database.DB
+	db    database.DB
+	audit audit.Recorder
 }
 
-func NewStore(db database.DB) *Store {
-	return &Store{db: db}
+func NewStore(db database.DB, recorder audit.Recorder) *Store {
+	return &Store{db: db, audit: recorder}
 }
 
 func (s *Store) GetByID(ctx context.Context, id uuid.UUID) (Organization, error) {
@@ -54,30 +56,45 @@ func (s *Store) GetBySlug(ctx context.Context, slug string) (Organization, error
 }
 
 func (s *Store) Create(ctx context.Context, name, slug string) (Organization, error) {
-	const q = `INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id, name, slug`
 	var org Organization
-	err := s.db.QueryRow(ctx, q, name, slug).Scan(&org.ID, &org.Name, &org.Slug)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
-		return Organization{}, ErrSlugTaken
-	}
-	if err != nil {
-		return Organization{}, fmt.Errorf("organization: create %q: %w", slug, err)
-	}
-	return org, nil
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		const insert = `INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id, name, slug`
+		err := q.QueryRow(ctx, insert, name, slug).Scan(&org.ID, &org.Name, &org.Slug)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+			return ErrSlugTaken
+		}
+		if err != nil {
+			return fmt.Errorf("organization: create %q: %w", slug, err)
+		}
+		return s.audit.Record(ctx, q, audit.OrganizationCreated,
+			audit.Target{Type: audit.TargetOrganization, ID: org.ID.String(), OrgID: &org.ID},
+			map[string]any{"name": name, "slug": slug})
+	})
+	return org, err
 }
 
 func (s *Store) Update(ctx context.Context, id uuid.UUID, name string) (Organization, error) {
-	const q = `UPDATE organizations SET name = $2, updated_at = now() WHERE id = $1 RETURNING id, name, slug`
 	var org Organization
-	err := s.db.QueryRow(ctx, q, id, name).Scan(&org.ID, &org.Name, &org.Slug)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Organization{}, ErrNotFound
-	}
-	if err != nil {
-		return Organization{}, fmt.Errorf("organization: update %s: %w", id, err)
-	}
-	return org, nil
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		const update = `
+			WITH old AS (SELECT name FROM organizations WHERE id = $1 FOR UPDATE)
+			UPDATE organizations o SET name = $2, updated_at = now()
+			FROM old WHERE o.id = $1
+			RETURNING o.id, o.name, o.slug, old.name`
+		var oldName string
+		err := q.QueryRow(ctx, update, id, name).Scan(&org.ID, &org.Name, &org.Slug, &oldName)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("organization: update %s: %w", id, err)
+		}
+		return s.audit.Record(ctx, q, audit.OrganizationUpdated,
+			audit.Target{Type: audit.TargetOrganization, ID: id.String(), OrgID: &id},
+			map[string]any{"oldName": oldName, "newName": name})
+	})
+	return org, err
 }
 
 func (s *Store) List(ctx context.Context) ([]Organization, error) {

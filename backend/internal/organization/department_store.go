@@ -8,20 +8,28 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
 func (s *Store) CreateDepartment(ctx context.Context, orgID uuid.UUID, name string) (Department, error) {
-	const q = `INSERT INTO departments (organization_id, name) VALUES ($1, $2) RETURNING id, organization_id, name`
 	var d Department
-	err := s.db.QueryRow(ctx, q, orgID, name).Scan(&d.ID, &d.OrganizationID, &d.Name)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
-		return Department{}, ErrDepartmentNameTaken
-	}
-	if err != nil {
-		return Department{}, fmt.Errorf("organization: create department org %s: %w", orgID, err)
-	}
-	return d, nil
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		const insert = `INSERT INTO departments (organization_id, name) VALUES ($1, $2) RETURNING id, organization_id, name`
+		err := q.QueryRow(ctx, insert, orgID, name).Scan(&d.ID, &d.OrganizationID, &d.Name)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+			return ErrDepartmentNameTaken
+		}
+		if err != nil {
+			return fmt.Errorf("organization: create department org %s: %w", orgID, err)
+		}
+		return s.audit.Record(ctx, q, audit.DepartmentCreated,
+			audit.Target{Type: audit.TargetDepartment, ID: d.ID.String(), OrgID: &orgID},
+			map[string]any{"name": name})
+	})
+	return d, err
 }
 
 func (s *Store) ListDepartments(ctx context.Context, orgID uuid.UUID) ([]Department, error) {
@@ -49,34 +57,49 @@ func (s *Store) ListDepartments(ctx context.Context, orgID uuid.UUID) ([]Departm
 }
 
 func (s *Store) UpdateDepartment(ctx context.Context, orgID, deptID uuid.UUID, name string) (Department, error) {
-	const q = `UPDATE departments SET name = $3, updated_at = now() WHERE id = $1 AND organization_id = $2 RETURNING id, organization_id, name`
 	var d Department
-	err := s.db.QueryRow(ctx, q, deptID, orgID, name).Scan(&d.ID, &d.OrganizationID, &d.Name)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
-		return Department{}, ErrDepartmentNameTaken
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Department{}, ErrDepartmentNotFound
-	}
-	if err != nil {
-		return Department{}, fmt.Errorf("organization: update department %s org %s: %w", deptID, orgID, err)
-	}
-	return d, nil
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		const update = `
+			WITH old AS (SELECT name FROM departments WHERE id = $1 AND organization_id = $2 FOR UPDATE)
+			UPDATE departments d SET name = $3, updated_at = now()
+			FROM old WHERE d.id = $1 AND d.organization_id = $2
+			RETURNING d.id, d.organization_id, d.name, old.name`
+		var oldName string
+		err := q.QueryRow(ctx, update, deptID, orgID, name).Scan(&d.ID, &d.OrganizationID, &d.Name, &oldName)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+			return ErrDepartmentNameTaken
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDepartmentNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("organization: update department %s org %s: %w", deptID, orgID, err)
+		}
+		return s.audit.Record(ctx, q, audit.DepartmentUpdated,
+			audit.Target{Type: audit.TargetDepartment, ID: deptID.String(), OrgID: &orgID},
+			map[string]any{"oldName": oldName, "newName": name})
+	})
+	return d, err
 }
 
 func (s *Store) DeleteDepartment(ctx context.Context, orgID, deptID uuid.UUID) error {
-	const q = `DELETE FROM departments WHERE id = $1 AND organization_id = $2`
-	tag, err := s.db.Exec(ctx, q, deptID, orgID)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
-		return ErrDepartmentInUse
-	}
-	if err != nil {
-		return fmt.Errorf("organization: delete department %s org %s: %w", deptID, orgID, err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrDepartmentNotFound
-	}
-	return nil
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const del = `DELETE FROM departments WHERE id = $1 AND organization_id = $2 RETURNING name`
+		var name string
+		err := q.QueryRow(ctx, del, deptID, orgID).Scan(&name)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
+			return ErrDepartmentInUse
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDepartmentNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("organization: delete department %s org %s: %w", deptID, orgID, err)
+		}
+		return s.audit.Record(ctx, q, audit.DepartmentDeleted,
+			audit.Target{Type: audit.TargetDepartment, ID: deptID.String(), OrgID: &orgID},
+			map[string]any{"name": name})
+	})
 }

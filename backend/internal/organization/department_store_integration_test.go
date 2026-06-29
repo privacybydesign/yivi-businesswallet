@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
@@ -38,7 +39,7 @@ func addMember(t *testing.T, pool *pgxpool.Pool, userID, orgID uuid.UUID, deptID
 
 func TestStoreDepartmentCRUD(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	org, err := store.Create(ctx, "Acme", "acme")
@@ -88,7 +89,7 @@ func TestStoreDepartmentCRUD(t *testing.T) {
 
 func TestStoreDepartmentNotFound(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	org, err := store.Create(ctx, "Acme", "acme")
@@ -106,7 +107,7 @@ func TestStoreDepartmentNotFound(t *testing.T) {
 
 func TestStoreUpdateMembership(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	org, _ := store.Create(ctx, "Acme", "acme")
@@ -143,7 +144,7 @@ func TestStoreUpdateMembership(t *testing.T) {
 
 func TestStoreUpdateMembershipUnknownDepartment(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	org, _ := store.Create(ctx, "Acme", "acme")
@@ -158,7 +159,7 @@ func TestStoreUpdateMembershipUnknownDepartment(t *testing.T) {
 
 func TestStoreUpdateMembershipRejectsForeignOrgDepartment(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	orgA, _ := store.Create(ctx, "A", "a")
@@ -177,7 +178,7 @@ func TestStoreUpdateMembershipRejectsForeignOrgDepartment(t *testing.T) {
 
 func TestStoreDeleteDepartmentInUse(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	org, _ := store.Create(ctx, "Acme", "acme")
@@ -198,7 +199,7 @@ func TestStoreDeleteDepartmentInUse(t *testing.T) {
 // department and membership deletes don't collide.
 func TestStoreOrgDeleteCascadesWithAssignedDepartment(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	org, _ := store.Create(ctx, "Acme", "acme")

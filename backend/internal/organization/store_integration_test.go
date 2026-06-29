@@ -9,13 +9,21 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
 
+type failingRecorder struct{}
+
+func (failingRecorder) Record(context.Context, database.Querier, string, audit.Target, map[string]any) error {
+	return errors.New("audit boom")
+}
+
 func TestStoreCreateRoundTrip(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	created, err := store.Create(ctx, "Acme", "acme")
@@ -42,7 +50,7 @@ func TestStoreCreateRoundTrip(t *testing.T) {
 
 func TestStoreUpdateRenamesOrg(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	created, err := store.Create(ctx, "Acme", "acme")
@@ -64,7 +72,7 @@ func TestStoreUpdateRenamesOrg(t *testing.T) {
 
 func TestStoreUpdateNotFound(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 
 	_, err := store.Update(context.Background(), uuid.New(), "Ghost")
 	if !errors.Is(err, organization.ErrNotFound) {
@@ -72,9 +80,32 @@ func TestStoreUpdateNotFound(t *testing.T) {
 	}
 }
 
+func TestStoreUpdateRollsBackWhenAuditFails(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+	store := organization.NewStore(pool, failingRecorder{})
+
+	created, err := store.Create(ctx, "Acme", "acme")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if _, err := store.Update(ctx, created.ID, "Acme Renamed"); err == nil {
+		t.Fatal("Update succeeded, want error from failing audit")
+	}
+
+	got, err := store.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Name != "Acme" {
+		t.Errorf("Name = %q, want Acme (update must roll back when audit fails)", got.Name)
+	}
+}
+
 func TestStoreCreateDuplicateSlug(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	if _, err := store.Create(ctx, "Acme", "acme"); err != nil {
@@ -88,7 +119,7 @@ func TestStoreCreateDuplicateSlug(t *testing.T) {
 
 func TestStoreGetBySlugNotFound(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 
 	_, err := store.GetBySlug(context.Background(), "ghost")
 	if !errors.Is(err, organization.ErrNotFound) {
@@ -98,7 +129,7 @@ func TestStoreGetBySlugNotFound(t *testing.T) {
 
 func TestStoreGetMembershipNotMember(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	org, err := store.Create(ctx, "Acme", "acme")
@@ -114,7 +145,7 @@ func TestStoreGetMembershipNotMember(t *testing.T) {
 
 func TestStoreMembershipsReflectInsertedRows(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := organization.NewStore(pool)
+	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
 	org, err := store.Create(ctx, "Acme", "acme")

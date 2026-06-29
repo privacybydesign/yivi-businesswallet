@@ -20,6 +20,7 @@ import (
 	irma "github.com/privacybydesign/irmago/irma"
 	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
@@ -101,7 +102,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	authService := auth.NewService(fake, userStore, sessionStore, emailAttr)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, admins)
 	requireUser := auth.RequireUser(sessionStore)
-	orgStore := organization.NewStore(pool)
+	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
 	orgService := organization.NewService(userStore, orgStore)
 	orgHandler := organization.NewHandler(orgStore, orgService, requireUser, admins)
 

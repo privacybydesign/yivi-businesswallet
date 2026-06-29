@@ -12,6 +12,7 @@ import (
 
 	irma "github.com/privacybydesign/irmago/irma"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/config"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
@@ -88,7 +89,7 @@ func run() error {
 	startSessionPruner(ctx, sessionStore, cfg.SessionPruneEvery)
 
 	requireUser := auth.RequireUser(sessionStore)
-	orgStore := organization.NewStore(pool)
+	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
 	orgService := organization.NewService(userStore, orgStore)
 	orgHandler := organization.NewHandler(orgStore, orgService, requireUser, platformAdmins)
 

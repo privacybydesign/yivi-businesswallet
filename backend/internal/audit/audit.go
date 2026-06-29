@@ -1,0 +1,105 @@
+package audit
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
+)
+
+const (
+	OrganizationCreated = "organization.created"
+	OrganizationUpdated = "organization.updated"
+
+	MembershipInvited      = "membership.invited"
+	MembershipInviteResent = "membership.invite_resent"
+	MembershipAccepted     = "membership.accepted"
+	MembershipDeclined     = "membership.declined"
+	MembershipRevoked      = "membership.revoked"
+	MembershipRoleChanged  = "membership.role_changed"
+	MembershipExpired      = "membership.expired"
+
+	DepartmentCreated = "department.created"
+	DepartmentUpdated = "department.updated"
+	DepartmentDeleted = "department.deleted"
+
+	UserIdentityChanged        = "user.identity_changed"
+	UserIdentityReviewRequired = "user.identity_review_required"
+	UserIdentityReviewResolved = "user.identity_review_resolved"
+	UserPurged                 = "user.purged"
+)
+
+const (
+	TargetOrganization = "organization"
+	TargetMembership   = "membership"
+	TargetDepartment   = "department"
+	TargetUser         = "user"
+)
+
+type Actor struct {
+	UserID uuid.UUID
+}
+
+type ctxKey struct{}
+
+func ContextWithActor(ctx context.Context, a Actor) context.Context {
+	return context.WithValue(ctx, ctxKey{}, a)
+}
+
+func actorFromContext(ctx context.Context) (Actor, bool) {
+	a, ok := ctx.Value(ctxKey{}).(Actor)
+	return a, ok
+}
+
+type Target struct {
+	Type  string
+	ID    string
+	OrgID *uuid.UUID
+}
+
+type Recorder interface {
+	Record(ctx context.Context, q database.Querier, action string, target Target, metadata map[string]any) error
+}
+
+type DBRecorder struct{}
+
+func NewDBRecorder() DBRecorder { return DBRecorder{} }
+
+func (DBRecorder) Record(ctx context.Context, q database.Querier, action string, target Target, metadata map[string]any) error {
+	meta := []byte("{}")
+	if metadata != nil {
+		m, err := json.Marshal(metadata)
+		if err != nil {
+			return fmt.Errorf("audit: marshal metadata for %s: %w", action, err)
+		}
+		meta = m
+	}
+
+	var actorID *uuid.UUID
+	if a, ok := actorFromContext(ctx); ok {
+		actorID = &a.UserID
+	}
+
+	var requestID *string
+	if id := logging.RequestIDFromContext(ctx); id != "" {
+		requestID = &id
+	}
+
+	const insert = `INSERT INTO audit_events
+		(actor_user_id, organization_id, action, target_type, target_id, metadata, request_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	if _, err := q.Exec(ctx, insert, actorID, target.OrgID, action, target.Type, target.ID, meta, requestID); err != nil {
+		return fmt.Errorf("audit: record %s: %w", action, err)
+	}
+	return nil
+}
+
+type NopRecorder struct{}
+
+func (NopRecorder) Record(context.Context, database.Querier, string, Target, map[string]any) error {
+	return nil
+}
