@@ -2,12 +2,10 @@ package seed
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
 	"github.com/google/uuid"
@@ -24,10 +22,10 @@ const fakerSeed = 1
 
 const (
 	demoOrgSlug      = "yivi"
-	demoInviterEmail = "user@yivi.app"
 	fakerMemberCount = 15
-	fakerInviteCount = 3
-	auditEventCount  = 60
+	inviteCount      = 35
+	revokeCount      = 22
+	roleChangeCount  = 8
 )
 
 type demoOrganization struct {
@@ -77,6 +75,7 @@ var demoDepartments = []demoDepartment{
 
 var demoMemberships = []demoMembership{
 	{email: "user@yivi.app", slug: "yivi", role: "admin", jobTitle: "Chief Technology Officer", department: "Engineering"},
+	{email: "admin@yivi.app", slug: "yivi", role: "admin", jobTitle: "Chief Executive Officer", department: "Operations"},
 	{email: "user@yivi.app", slug: "firsty", role: "member", jobTitle: "Account Manager", department: "Sales"},
 }
 
@@ -134,19 +133,26 @@ func Run(ctx context.Context, dsn string) error {
 		deptsByOrgName[demoOrgSlug+"/Operations"].ID,
 	}
 
-	if err := seedFakerMembers(ctx, faker, users, orgs, demoOrg.ID, demoDeptIDs); err != nil {
+	members, admins, err := seedFakerMembers(ctx, faker, users, orgs, demoOrg.ID, demoDeptIDs)
+	if err != nil {
 		return err
 	}
+	admins = append(admins, usersByEmail["user@yivi.app"].ID, usersByEmail["admin@yivi.app"].ID)
 
-	if err := seedInvitations(ctx, faker, orgs, demoOrg.ID, usersByEmail[demoInviterEmail].ID, demoDeptIDs[0]); err != nil {
+	// The activity is the audited history; guard on it so re-runs (which can't
+	// recreate already-revoked invitations) don't pile up duplicate events.
+	seeded, err := hasInvitedEvents(ctx, pool, demoOrg.ID)
+	if err != nil {
 		return err
 	}
-
-	if err := seedAuditEvents(ctx, pool, faker, demoOrg.ID, usersByEmail[demoInviterEmail].ID); err != nil {
+	if seeded {
+		slog.Info("activity already seeded")
+		return nil
+	}
+	if err := seedActivity(ctx, faker, orgs, demoOrg.ID, admins, members, demoDeptIDs); err != nil {
 		return err
 	}
-
-	return nil
+	return spreadAuditTimestamps(ctx, pool, demoOrg.ID)
 }
 
 func ensureOrg(ctx context.Context, orgs *organization.Store, name, slug string) (organization.Organization, error) {
@@ -210,106 +216,145 @@ func ensureMembership(ctx context.Context, orgs *organization.Store, orgID, user
 	return nil
 }
 
-func seedFakerMembers(ctx context.Context, faker *gofakeit.Faker, users *user.Store, orgs *organization.Store, orgID uuid.UUID, deptIDs []uuid.UUID) error {
+// seedFakerMembers provisions active members for the demo org and returns the
+// member and admin user ids, so the activity below can attribute actions to a
+// realistic spread of actors.
+func seedFakerMembers(ctx context.Context, faker *gofakeit.Faker, users *user.Store, orgs *organization.Store, orgID uuid.UUID, deptIDs []uuid.UUID) (members, admins []uuid.UUID, err error) {
 	for i := 0; i < fakerMemberCount; i++ {
 		first, last := faker.FirstName(), faker.LastName()
 		email := fmt.Sprintf("%s.%s%d@example.test", slugify(first), slugify(last), i)
 
 		u, err := ensureUser(ctx, users, email, first, "", last, "")
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 
 		role := organization.RoleMember
 		if i%6 == 0 {
 			role = organization.RoleAdmin
 		}
-		// Round-robin the org's departments, leaving every (len+1)th unassigned.
+		// Round-robin the departments, leaving every (len+1)th unassigned.
 		var deptID *uuid.UUID
 		if slot := i % (len(deptIDs) + 1); slot < len(deptIDs) {
 			deptID = &deptIDs[slot]
 		}
 		if err := ensureMembership(ctx, orgs, orgID, u.ID, role, faker.JobTitle(), deptID); err != nil {
-			return err
+			return nil, nil, err
+		}
+		if role == organization.RoleAdmin {
+			admins = append(admins, u.ID)
+		} else {
+			members = append(members, u.ID)
 		}
 	}
 	slog.Info("seeded faker members", slog.Int("count", fakerMemberCount))
-	return nil
+	return members, admins, nil
 }
 
-func seedInvitations(ctx context.Context, faker *gofakeit.Faker, orgs *organization.Store, orgID, invitedBy, deptID uuid.UUID) error {
-	invitations := []organization.Invitation{
-		{Email: "invited@yivi.app", Role: organization.RoleMember, JobTitle: optional("Software Engineer"), DepartmentID: &deptID, GivenNames: "Robin", LastName: "Bakker"},
+// seedActivity performs real, audited operations — invitations, revocations and
+// role changes — each attributed to a random admin, so the audit log reflects
+// genuine history (every entry corresponds to real data) with varied actors.
+func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization.Store, orgID uuid.UUID, admins, members, deptIDs []uuid.UUID) error {
+	actorCtx := func(actor uuid.UUID) context.Context {
+		return audit.ContextWithActor(ctx, audit.Actor{UserID: actor})
 	}
-	for i := 0; i < fakerInviteCount; i++ {
-		first, last := faker.FirstName(), faker.LastName()
-		invitations = append(invitations, organization.Invitation{
-			Email:      fmt.Sprintf("invite.%s.%s%d@example.test", slugify(first), slugify(last), i),
-			Role:       organization.RoleMember,
-			JobTitle:   optional(faker.JobTitle()),
-			GivenNames: first,
-			LastName:   last,
-		})
-	}
-
-	var inserted int
-	for _, inv := range invitations {
-		inv.OrganizationID = orgID
-		inv.InvitedBy = &invitedBy
-		if _, err := orgs.CreateInvitation(ctx, inv); err != nil {
-			if errors.Is(err, organization.ErrAlreadyInvited) {
-				continue
-			}
-			return fmt.Errorf("seed: create invitation %q: %w", inv.Email, err)
+	pickAdmin := func() uuid.UUID { return admins[faker.Number(0, len(admins)-1)] }
+	pickDept := func() *uuid.UUID {
+		if slot := faker.Number(0, len(deptIDs)); slot < len(deptIDs) {
+			return &deptIDs[slot]
 		}
-		inserted++
-	}
-	slog.Info("seeded invitations", slog.Int("inserted", inserted))
-	return nil
-}
-
-// seedAuditEvents fabricates events on the demo org so the audit log's cursor
-// pagination (page size 50) has more than one page. Guarded by request_id =
-// 'seed' so re-running the seeder doesn't pile up duplicates.
-func seedAuditEvents(ctx context.Context, pool *pgxpool.Pool, faker *gofakeit.Faker, orgID, actorID uuid.UUID) error {
-	var existing int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE request_id = 'seed'`).Scan(&existing); err != nil {
-		return fmt.Errorf("seed: count audit events: %w", err)
-	}
-	if existing > 0 {
-		slog.Info("audit events already seeded", slog.Int("count", existing))
 		return nil
 	}
 
-	const insert = `
-		INSERT INTO audit_events (actor_user_id, organization_id, action, target_type, target_id, metadata, request_id, occurred_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'seed', $7)`
-	for i := 0; i < auditEventCount; i++ {
-		email := faker.Email()
-		var action string
-		var metadata map[string]any
-		switch i % 3 {
-		case 0:
-			action = audit.MembershipInvited
-			metadata = audit.Created(map[string]any{"email": email, "role": organization.RoleMember})
-		case 1:
-			action = audit.MembershipRoleChanged
-			metadata = audit.Updated(map[string]any{"role": organization.RoleMember}, map[string]any{"role": organization.RoleAdmin})
-		default:
-			action = audit.MembershipRevoked
-			metadata = audit.Deleted(map[string]any{"email": email, "role": organization.RoleMember})
-		}
-		raw, err := json.Marshal(metadata)
+	invitationIDs := make([]uuid.UUID, 0, inviteCount)
+	for i := 0; i < inviteCount; i++ {
+		first, last := faker.FirstName(), faker.LastName()
+		inviter := pickAdmin()
+		inv, err := orgs.CreateInvitation(actorCtx(inviter), organization.Invitation{
+			OrganizationID: orgID,
+			Email:          fmt.Sprintf("invite.%s.%s%d@example.test", slugify(first), slugify(last), i),
+			InvitedBy:      &inviter,
+			Role:           organization.RoleMember,
+			JobTitle:       optional(faker.JobTitle()),
+			DepartmentID:   pickDept(),
+			GivenNames:     first,
+			LastName:       last,
+		})
 		if err != nil {
-			return fmt.Errorf("seed: marshal audit metadata: %w", err)
+			return fmt.Errorf("seed: invite: %w", err)
 		}
-		occurredAt := time.Now().Add(-time.Duration(i) * time.Minute)
-		if _, err := pool.Exec(ctx, insert, actorID, orgID, action, audit.TargetMembership, email, raw, occurredAt); err != nil {
-			return fmt.Errorf("seed: insert audit event: %w", err)
+		invitationIDs = append(invitationIDs, inv.ID)
+	}
+
+	// Revoke a subset — these become 'gone' history, correctly absent from the list.
+	for i := 0; i < revokeCount && i < len(invitationIDs); i++ {
+		if err := orgs.RevokeInvitation(actorCtx(pickAdmin()), orgID, invitationIDs[i]); err != nil {
+			return fmt.Errorf("seed: revoke: %w", err)
 		}
 	}
-	slog.Info("seeded audit events", slog.Int("inserted", auditEventCount))
+
+	// A recognizable, always-pending invitation.
+	anchorInviter := pickAdmin()
+	if _, err := orgs.CreateInvitation(actorCtx(anchorInviter), organization.Invitation{
+		OrganizationID: orgID,
+		Email:          "invited@yivi.app",
+		InvitedBy:      &anchorInviter,
+		Role:           organization.RoleMember,
+		JobTitle:       optional("Software Engineer"),
+		DepartmentID:   &deptIDs[0],
+		GivenNames:     "Robin",
+		LastName:       "Bakker",
+	}); err != nil && !errors.Is(err, organization.ErrAlreadyInvited) {
+		return fmt.Errorf("seed: anchor invite: %w", err)
+	}
+
+	// Role changes on existing members (promote some, retitle others) — always
+	// member->admin so the last-admin guard can never trip.
+	for i := 0; i < roleChangeCount && i < len(members); i++ {
+		role := organization.RoleMember
+		if i%2 == 0 {
+			role = organization.RoleAdmin
+		}
+		dept := deptIDs[faker.Number(0, len(deptIDs)-1)]
+		if _, err := orgs.UpdateMembership(actorCtx(pickAdmin()), orgID, members[i], &role, optional(faker.JobTitle()), &dept); err != nil {
+			return fmt.Errorf("seed: role change: %w", err)
+		}
+	}
+
+	slog.Info("seeded activity",
+		slog.Int("invited", inviteCount+1), slog.Int("revoked", revokeCount), slog.Int("roleChanged", roleChangeCount))
 	return nil
+}
+
+func hasInvitedEvents(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) (bool, error) {
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM audit_events WHERE organization_id = $1 AND action = $2`,
+		orgID, audit.MembershipInvited).Scan(&n); err != nil {
+		return false, fmt.Errorf("seed: count invited events: %w", err)
+	}
+	return n > 0, nil
+}
+
+// spreadAuditTimestamps backdates the org's audit events across the last two
+// weeks so the log reads like real history rather than one bulk import. setseed
+// keeps random() deterministic; it must share the transaction with the update.
+func spreadAuditTimestamps(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("seed: spread timestamps: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT setseed(0.4242)`); err != nil {
+		return fmt.Errorf("seed: setseed: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE audit_events SET occurred_at = now() - (random() * interval '14 days') WHERE organization_id = $1`,
+		orgID); err != nil {
+		return fmt.Errorf("seed: spread timestamps: %w", err)
+	}
+	return tx.Commit(ctx)
 }
 
 func optional(s string) *string {
