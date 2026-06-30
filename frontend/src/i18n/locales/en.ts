@@ -67,6 +67,12 @@ export const en = {
     home: "Back to home",
     back: "Go back",
   },
+  error: {
+    title: "Something went wrong",
+    body: "An unexpected error occurred. Try reloading the page, or head back home.",
+    reload: "Reload page",
+    home: "Back to home",
+  },
   members: {
     title: "Members",
     subtitle: "Organization members",

@@ -22,6 +22,7 @@ import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
 import CreateOrganization from "./routes/create-organization";
 import NotFound from "./routes/not-found";
+import ErrorBoundary from "./routes/error-boundary";
 
 // Breadcrumb labels live on the routes themselves; the trail is assembled
 // automatically from the matched chain (see ui/breadcrumb.tsx).
@@ -57,69 +58,78 @@ const orgsCrumb: RouteHandle = {
 const newOrgCrumb: RouteHandle = { crumb: ({ t }) => t("createOrg.title") };
 
 export const router = createBrowserRouter([
-  { path: "/login", Component: Login },
-  { path: "*", Component: NotFound },
   {
-    Component: ProtectedRoute,
+    ErrorBoundary,
     children: [
-      { index: true, Component: RootRedirect },
+      { path: "/login", Component: Login },
+      { path: "*", Component: NotFound },
       {
-        Component: Root,
+        Component: ProtectedRoute,
         children: [
+          { index: true, Component: RootRedirect },
           {
-            path: ":orgSlug",
-            handle: orgCrumb,
+            Component: Root,
             children: [
-              { index: true, Component: Dashboard },
               {
-                path: "members",
-                handle: membersCrumb,
+                path: ":orgSlug",
+                handle: orgCrumb,
                 children: [
-                  { index: true, Component: Members },
+                  { index: true, Component: Dashboard },
                   {
-                    path: "invite",
-                    Component: MemberInvite,
-                    handle: inviteCrumb,
-                  },
-                  {
-                    path: ":userId",
-                    handle: memberCrumb,
+                    path: "members",
+                    handle: membersCrumb,
                     children: [
-                      { index: true, Component: MemberDetail },
+                      { index: true, Component: Members },
                       {
-                        path: "edit",
-                        Component: MemberEdit,
-                        handle: memberEditCrumb,
+                        path: "invite",
+                        Component: MemberInvite,
+                        handle: inviteCrumb,
+                      },
+                      {
+                        path: ":userId",
+                        handle: memberCrumb,
+                        children: [
+                          { index: true, Component: MemberDetail },
+                          {
+                            path: "edit",
+                            Component: MemberEdit,
+                            handle: memberEditCrumb,
+                          },
+                        ],
                       },
                     ],
+                  },
+                  {
+                    path: "audit-log",
+                    Component: AuditLog,
+                    handle: auditLogCrumb,
+                  },
+                  {
+                    path: "settings",
+                    Component: Settings,
+                    handle: settingsCrumb,
                   },
                 ],
               },
               {
-                path: "audit-log",
-                Component: AuditLog,
-                handle: auditLogCrumb,
-              },
-              { path: "settings", Component: Settings, handle: settingsCrumb },
-            ],
-          },
-          {
-            Component: AdminRoute,
-            children: [
-              {
-                path: "admin",
-                handle: adminCrumb,
+                Component: AdminRoute,
                 children: [
-                  { index: true, Component: AdminDashboard },
                   {
-                    path: "organizations",
-                    handle: orgsCrumb,
+                    path: "admin",
+                    handle: adminCrumb,
                     children: [
-                      { index: true, Component: AllOrganizations },
+                      { index: true, Component: AdminDashboard },
                       {
-                        path: "new",
-                        Component: CreateOrganization,
-                        handle: newOrgCrumb,
+                        path: "organizations",
+                        handle: orgsCrumb,
+                        children: [
+                          { index: true, Component: AllOrganizations },
+                          {
+                            path: "new",
+                            Component: CreateOrganization,
+                            handle: newOrgCrumb,
+                          },
+                        ],
                       },
                     ],
                   },
