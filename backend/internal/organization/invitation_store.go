@@ -15,6 +15,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
 )
 
 const (
@@ -23,16 +24,21 @@ const (
 	invitationDepartmentFK = "invitations_department_fkey"
 )
 
-func newInviteTokenHash() ([sha256.Size]byte, error) {
+func newInviteToken() (string, [sha256.Size]byte, error) {
 	b := make([]byte, inviteTokenBytes)
 	if _, err := rand.Read(b); err != nil {
-		return [sha256.Size]byte{}, fmt.Errorf("organization: invite token: %w", err)
+		return "", [sha256.Size]byte{}, fmt.Errorf("organization: invite token: %w", err)
 	}
-	return sha256.Sum256([]byte(base64.RawURLEncoding.EncodeToString(b))), nil
+	raw := base64.RawURLEncoding.EncodeToString(b)
+	return raw, sha256.Sum256([]byte(raw)), nil
+}
+
+func hashInviteToken(raw string) [sha256.Size]byte {
+	return sha256.Sum256([]byte(raw))
 }
 
 func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation, error) {
-	tokenHash, err := newInviteTokenHash()
+	rawToken, tokenHash, err := newInviteToken()
 	if err != nil {
 		return Invitation{}, err
 	}
@@ -73,7 +79,87 @@ func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation
 				"department": deptName,
 			}))
 	})
-	return in, err
+	if err != nil {
+		return Invitation{}, err
+	}
+	in.Token = rawToken
+	return in, nil
+}
+
+func (s *Store) InvitationByToken(ctx context.Context, rawToken string) (Invitation, error) {
+	hash := hashInviteToken(rawToken)
+	const q = `
+		SELECT i.id, i.organization_id, o.name, o.slug, i.email, i.invited_by, i.role, i.job_title,
+		       i.department_id, d.name, i.invited_given_names, i.invited_last_name, i.expires_at, i.created_at
+		FROM invitations i
+		JOIN organizations o ON o.id = i.organization_id
+		LEFT JOIN departments d ON d.id = i.department_id
+		WHERE i.invite_token_hash = $1`
+	var inv Invitation
+	err := s.db.QueryRow(ctx, q, hash[:]).Scan(&inv.ID, &inv.OrganizationID, &inv.OrganizationName, &inv.OrganizationSlug,
+		&inv.Email, &inv.InvitedBy, &inv.Role, &inv.JobTitle, &inv.DepartmentID, &inv.DepartmentName,
+		&inv.GivenNames, &inv.LastName, &inv.ExpiresAt, &inv.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Invitation{}, ErrInvitationNotFound
+	}
+	if err != nil {
+		return Invitation{}, fmt.Errorf("organization: invitation by token: %w", err)
+	}
+	return inv, nil
+}
+
+func (s *Store) AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const insert = `
+			INSERT INTO memberships (organization_id, user_id, role, job_title, department_id)
+			VALUES ($1, $2, $3, $4, (SELECT id FROM departments WHERE id = $5 AND organization_id = $1))`
+		_, err := q.Exec(ctx, insert, inv.OrganizationID, userID, inv.Role, inv.JobTitle, inv.DepartmentID)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+			return ErrAlreadyMember
+		}
+		if err != nil {
+			return fmt.Errorf("organization: accept membership user %s org %s: %w", userID, inv.OrganizationID, err)
+		}
+		if _, err := q.Exec(ctx, `DELETE FROM invitations WHERE id = $1`, inv.ID); err != nil {
+			return fmt.Errorf("organization: accept delete invitation %s: %w", inv.ID, err)
+		}
+		return s.audit.Record(ctx, q, audit.MembershipAccepted,
+			audit.Target{Type: audit.TargetMembership, ID: userID.String(), OrgID: &inv.OrganizationID},
+			audit.Created(map[string]any{
+				"email":      inv.Email,
+				"role":       inv.Role,
+				"jobTitle":   inv.JobTitle,
+				"department": inv.DepartmentName,
+				"givenNames": disclosed.GivenNames,
+				"lastName":   disclosed.LastName,
+			}))
+	})
+}
+
+func (s *Store) DeclineInvitation(ctx context.Context, rawToken string) error {
+	hash := hashInviteToken(rawToken)
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const del = `DELETE FROM invitations WHERE invite_token_hash = $1
+			RETURNING organization_id, email, role, invited_given_names, invited_last_name`
+		var orgID uuid.UUID
+		var email, role, givenNames, lastName string
+		err := q.QueryRow(ctx, del, hash[:]).Scan(&orgID, &email, &role, &givenNames, &lastName)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvitationNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("organization: decline invitation: %w", err)
+		}
+		return s.audit.Record(ctx, q, audit.MembershipDeclined,
+			audit.Target{Type: audit.TargetMembership, ID: email, OrgID: &orgID},
+			audit.Deleted(map[string]any{
+				"email":      email,
+				"role":       role,
+				"givenNames": givenNames,
+				"lastName":   lastName,
+			}))
+	})
 }
 
 func (s *Store) RevokeInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error {
@@ -100,7 +186,7 @@ func (s *Store) RevokeInvitation(ctx context.Context, orgID, invitationID uuid.U
 }
 
 func (s *Store) ResendInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error {
-	tokenHash, err := newInviteTokenHash()
+	_, tokenHash, err := newInviteToken()
 	if err != nil {
 		return err
 	}

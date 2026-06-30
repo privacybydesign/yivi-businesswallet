@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -145,7 +146,7 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := OrgFromContext(r.Context())
-	_, err = h.service.InviteMember(r.Context(), org.ID, Invite{
+	inv, err := h.service.InviteMember(r.Context(), org.ID, Invite{
 		Email:        email,
 		GivenNames:   givenNames,
 		LastName:     lastName,
@@ -164,6 +165,10 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) error {
 	case err != nil:
 		return fmt.Errorf("inviting member: %w", err)
 	}
+
+	// The invite e-mail is not built yet; surface the accept token at debug level
+	// (silent in production) so the flow is testable in dev until delivery lands.
+	slog.DebugContext(r.Context(), "invitation created", slog.String("email", string(email)), slog.String("acceptToken", inv.Token))
 
 	w.WriteHeader(http.StatusCreated)
 	return nil

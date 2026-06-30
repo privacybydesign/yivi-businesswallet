@@ -25,6 +25,11 @@ var (
 	ErrAlreadyMember       = errors.New("user is already a member of the organization")
 	ErrAlreadyInvited      = errors.New("user is already invited to the organization")
 	ErrInvitationNotFound  = errors.New("invitation not found")
+	ErrInvitationExpired   = errors.New("invitation expired")
+	ErrEmailMismatch       = errors.New("disclosed email does not match the invitation")
+	ErrNameMismatch        = errors.New("disclosed name does not match the invitation")
+	ErrIdentityReview      = errors.New("disclosed identity needs review")
+	ErrDisclosureFailed    = errors.New("identity disclosure failed")
 	ErrLastAdmin           = errors.New("cannot demote the last admin of the organization")
 	ErrDepartmentNotFound  = errors.New("department not found")
 	ErrDepartmentNameTaken = errors.New("department name already taken")
@@ -52,18 +57,21 @@ type Membership struct {
 }
 
 type Invitation struct {
-	ID             uuid.UUID  `json:"id"`
-	OrganizationID uuid.UUID  `json:"organizationId"`
-	Email          string     `json:"email"`
-	InvitedBy      *uuid.UUID `json:"invitedBy"`
-	Role           string     `json:"role"`
-	JobTitle       *string    `json:"jobTitle"`
-	DepartmentID   *uuid.UUID `json:"departmentId"`
-	DepartmentName *string    `json:"departmentName"`
-	GivenNames     string     `json:"givenNames"`
-	LastName       string     `json:"lastName"`
-	ExpiresAt      time.Time  `json:"expiresAt"`
-	CreatedAt      time.Time  `json:"createdAt"`
+	ID               uuid.UUID  `json:"id"`
+	OrganizationID   uuid.UUID  `json:"organizationId"`
+	OrganizationName string     `json:"organizationName,omitempty"`
+	OrganizationSlug string     `json:"organizationSlug,omitempty"`
+	Token            string     `json:"-"`
+	Email            string     `json:"email"`
+	InvitedBy        *uuid.UUID `json:"invitedBy"`
+	Role             string     `json:"role"`
+	JobTitle         *string    `json:"jobTitle"`
+	DepartmentID     *uuid.UUID `json:"departmentId"`
+	DepartmentName   *string    `json:"departmentName"`
+	GivenNames       string     `json:"givenNames"`
+	LastName         string     `json:"lastName"`
+	ExpiresAt        time.Time  `json:"expiresAt"`
+	CreatedAt        time.Time  `json:"createdAt"`
 }
 
 type Member struct {

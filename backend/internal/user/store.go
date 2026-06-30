@@ -52,6 +52,18 @@ func (s *Store) Create(ctx context.Context, u User) (User, error) {
 	return created, nil
 }
 
+func (s *Store) UpdateName(ctx context.Context, id uuid.UUID, givenNames, lastName string) error {
+	const q = `UPDATE users SET given_names = $2, last_name = $3, updated_at = now() WHERE id = $1`
+	tag, err := s.db.Exec(ctx, q, id, givenNames, lastName)
+	if err != nil {
+		return fmt.Errorf("user: update name %s: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) GetByID(ctx context.Context, id uuid.UUID) (User, error) {
 	const q = `SELECT id, email, preferred_name, given_names, last_name FROM users WHERE id = $1`
 	var u User

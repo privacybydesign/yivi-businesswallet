@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
@@ -36,6 +37,10 @@ type repository interface {
 
 type inviter interface {
 	InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) (Invitation, error)
+	PendingInvitation(ctx context.Context, rawToken string) (Invitation, error)
+	StartAcceptSession(ctx context.Context, rawToken string) (*irmaserver.SessionPackage, error)
+	AcceptInvitation(ctx context.Context, rawToken, disclosureToken string) (AcceptOutcome, error)
+	DeclineInvitation(ctx context.Context, rawToken string) error
 }
 
 type auditReader interface {
@@ -68,6 +73,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /organizations/{id}", platform(respond.HandlerFunc(h.get)))
 
 	mux.Handle("GET /me/organizations", h.requireUser(respond.HandlerFunc(h.listForUser)))
+
+	mux.Handle("GET /invite/{token}", respond.HandlerFunc(h.invitePreview))
+	mux.Handle("POST /invite/{token}/session", respond.HandlerFunc(h.startAccept))
+	mux.Handle("POST /invite/{token}/accept", respond.HandlerFunc(h.acceptInvite))
+	mux.Handle("POST /invite/{token}/decline", respond.HandlerFunc(h.declineInvite))
 
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
 	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))

@@ -50,7 +50,10 @@ var (
 // email, so a /claim logs in as that user. The disclosure shape mirrors the one
 // proven against extractEmail in internal/auth/disclosure_test.go.
 type fakeRequestor struct {
-	email string
+	email        string
+	givenNames   string
+	familyName   string
+	proofInvalid bool
 }
 
 func (f *fakeRequestor) StartSession(_ context.Context, _ *irma.DisclosureRequest) (*irmaserver.SessionPackage, error) {
@@ -65,16 +68,24 @@ func (f *fakeRequestor) Status(_ context.Context, _ irma.RequestorToken) (irma.S
 }
 
 func (f *fakeRequestor) Result(_ context.Context, _ irma.RequestorToken) (*irmaserver.SessionResult, error) {
+	proof := irma.ProofStatusValid
+	if f.proofInvalid {
+		proof = irma.ProofStatusInvalid
+	}
 	email := f.email
-	return &irmaserver.SessionResult{
-		Status:      irma.ServerStatusDone,
-		ProofStatus: irma.ProofStatusValid,
-		Disclosed: [][]*irma.DisclosedAttribute{{{
-			Identifier: emailAttr,
-			Status:     irma.AttributeProofStatusPresent,
-			RawValue:   &email,
-		}}},
-	}, nil
+	disclosed := [][]*irma.DisclosedAttribute{{{
+		Identifier: emailAttr,
+		Status:     irma.AttributeProofStatusPresent,
+		RawValue:   &email,
+	}}}
+	if f.givenNames != "" || f.familyName != "" {
+		given, family := f.givenNames, f.familyName
+		disclosed = append(disclosed,
+			[]*irma.DisclosedAttribute{{Identifier: identityAttrs.GivenNames, Status: irma.AttributeProofStatusPresent, RawValue: &given}},
+			[]*irma.DisclosedAttribute{{Identifier: identityAttrs.FamilyName, Status: irma.AttributeProofStatusPresent, RawValue: &family}},
+		)
+	}
+	return &irmaserver.SessionResult{Status: irma.ServerStatusDone, ProofStatus: proof, Disclosed: disclosed}, nil
 }
 
 type meBody struct {
@@ -111,7 +122,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, admins)
 	requireUser := auth.RequireUser(sessionStore)
 	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
-	orgService := organization.NewService(userStore, orgStore)
+	orgService := organization.NewService(userStore, orgStore, authService)
 	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), requireUser, admins)
 
 	srv := httptest.NewServer(server.New(pool, authHandler, orgHandler))
