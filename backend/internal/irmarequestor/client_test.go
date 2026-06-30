@@ -129,17 +129,17 @@ func TestStatusReturnsServerStatus(t *testing.T) {
 	}
 }
 
-func TestPingStartsThenCancels(t *testing.T) {
+func TestPingStartsThenCancelsEachRequest(t *testing.T) {
 	const probeToken = "probe-tok"
-	var started, cancelled bool
+	var starts, cancels int
 
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/session":
-			started = true
+			starts++
 			_ = json.NewEncoder(w).Encode(irmaserver.SessionPackage{Token: irma.RequestorToken(probeToken)})
 		case r.Method == http.MethodDelete && r.URL.Path == "/session/"+probeToken:
-			cancelled = true
+			cancels++
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -147,14 +147,16 @@ func TestPingStartsThenCancels(t *testing.T) {
 		}
 	}, "")
 
-	if err := c.Ping(context.Background(), irma.NewAttributeTypeIdentifier(testAttr)); err != nil {
+	login := irma.NewDisclosureRequest(irma.NewAttributeTypeIdentifier(testAttr))
+	identity := irma.NewDisclosureRequest(irma.NewAttributeTypeIdentifier(testAttr))
+	if err := c.Ping(context.Background(), login, identity); err != nil {
 		t.Fatalf("Ping: %v", err)
 	}
-	if !started {
-		t.Error("Ping did not start a session")
+	if starts != 2 {
+		t.Errorf("starts = %d, want 2 (one per request)", starts)
 	}
-	if !cancelled {
-		t.Error("Ping did not cancel the probe session")
+	if cancels != 2 {
+		t.Errorf("cancels = %d, want 2", cancels)
 	}
 }
 
@@ -168,7 +170,7 @@ func TestPingFailsWhenStartRejected(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	}, "")
 
-	if err := c.Ping(context.Background(), irma.NewAttributeTypeIdentifier(testAttr)); err == nil {
+	if err := c.Ping(context.Background(), irma.NewDisclosureRequest(irma.NewAttributeTypeIdentifier(testAttr))); err == nil {
 		t.Fatal("Ping succeeded despite the daemon rejecting the session start")
 	}
 }
@@ -184,7 +186,7 @@ func TestPingSucceedsWhenCancelFails(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError) // cancel fails
 	}, "")
 
-	if err := c.Ping(context.Background(), irma.NewAttributeTypeIdentifier(testAttr)); err != nil {
+	if err := c.Ping(context.Background(), irma.NewDisclosureRequest(irma.NewAttributeTypeIdentifier(testAttr))); err != nil {
 		t.Fatalf("Ping failed on a best-effort cancel error: %v", err)
 	}
 }

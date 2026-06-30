@@ -71,24 +71,23 @@ func (c *Client) CancelSession(ctx context.Context, token irma.RequestorToken) e
 	return c.do(ctx, http.MethodDelete, path, nil, nil, nil)
 }
 
-// Ping is the one-shot startup readiness gate: it starts a disclosure session
-// with the configured attribute, then cancels it. This catches what
-// depends_on:healthy cannot — not "is the daemon up" but "will it accept the
-// request we'll send" (auth reaches it, disclose_perms allows the attribute, the
-// scheme resolves), the seam that differs between dev irma-demo and prod pbdf.
-// Callers treat failure as fatal; self-heal is the orchestrator's restart policy.
-func (c *Client) Ping(ctx context.Context, emailAttr irma.AttributeTypeIdentifier) error {
-	req := irma.NewDisclosureRequest(emailAttr)
-
-	pkg, err := c.StartSession(ctx, req)
-	if err != nil {
-		return fmt.Errorf("irmarequestor: ping: start session: %w", err)
-	}
-
-	// Best-effort cleanup: a cancel failure is not a readiness failure, since
-	// the start succeeded, which is what Ping asserts.
-	if err := c.CancelSession(ctx, pkg.Token); err != nil {
-		return nil //nolint:nilerr // cancel is best-effort; start success is the gate
+// Ping is the one-shot startup readiness gate: it starts (and cancels) each of
+// the given disclosure requests. This catches what depends_on:healthy cannot —
+// not "is the daemon up" but "will it accept the requests we'll send" (auth
+// reaches it, disclose_perms allows the attributes, the scheme resolves), the
+// seam that differs between dev irma-demo and prod pbdf. Pass every shape the
+// app discloses (login email-only and accept identity) so a perms gap on either
+// fails the deploy, not the first user. Failure is fatal; self-heal is the
+// orchestrator's restart policy.
+func (c *Client) Ping(ctx context.Context, requests ...*irma.DisclosureRequest) error {
+	for _, req := range requests {
+		pkg, err := c.StartSession(ctx, req)
+		if err != nil {
+			return fmt.Errorf("irmarequestor: ping: start session: %w", err)
+		}
+		// Best-effort cleanup: a cancel failure is not a readiness failure, since
+		// the start succeeded, which is what Ping asserts.
+		_ = c.CancelSession(ctx, pkg.Token)
 	}
 	return nil
 }

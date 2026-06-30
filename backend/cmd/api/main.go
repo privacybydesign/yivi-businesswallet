@@ -73,10 +73,13 @@ func run() error {
 	)
 
 	// Fatal startup readiness gate: fail the process at boot rather than let a
-	// misconfigured daemon silently fail a user's first login (see Ping).
+	// misconfigured daemon silently fail a user's first login or accept (see Ping).
+	// Probe both shapes the app discloses: email-only login and identity accept.
 	probeCtx, probeCancel := context.WithTimeout(ctx, irmaProbeTimeout)
 	defer probeCancel()
-	if err := requestor.Ping(probeCtx, emailAttr); err != nil {
+	loginProbe := irma.NewDisclosureRequest(emailAttr)
+	acceptProbe := irma.NewDisclosureRequest(identityAttrs.GivenNames, identityAttrs.FamilyName, emailAttr)
+	if err := requestor.Ping(probeCtx, loginProbe, acceptProbe); err != nil {
 		return err
 	}
 
