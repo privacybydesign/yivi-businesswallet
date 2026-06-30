@@ -26,8 +26,11 @@ type invitationStore interface {
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	CreateInvitation(ctx context.Context, in Invitation) (Invitation, error)
 	InvitationByToken(ctx context.Context, rawToken string) (Invitation, error)
+	InvitationByID(ctx context.Context, invitationID uuid.UUID) (Invitation, error)
+	ListInvitationsForEmail(ctx context.Context, email string) ([]Invitation, error)
 	AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name) error
 	DeclineInvitation(ctx context.Context, rawToken string) error
+	DeclineInvitationByID(ctx context.Context, invitationID uuid.UUID) error
 	CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name) error
 	ListIdentityReviews(ctx context.Context) ([]IdentityReview, error)
 	ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error)
@@ -120,7 +123,10 @@ func (s *Service) AcceptInvitation(ctx context.Context, rawToken, disclosureToke
 	if err != nil {
 		return AcceptOutcome{}, err
 	}
+	return s.acceptResolved(ctx, inv, disclosureToken)
+}
 
+func (s *Service) acceptResolved(ctx context.Context, inv Invitation, disclosureToken string) (AcceptOutcome, error) {
 	disclosed, err := s.discloser.DiscloseIdentity(ctx, irma.RequestorToken(disclosureToken))
 	if err != nil {
 		return AcceptOutcome{}, ErrDisclosureFailed
@@ -182,6 +188,42 @@ func (s *Service) resolveUser(ctx context.Context, email user.Email, disclosed i
 
 func (s *Service) DeclineInvitation(ctx context.Context, rawToken string) error {
 	return s.store.DeclineInvitation(ctx, rawToken)
+}
+
+func (s *Service) MyInvitations(ctx context.Context, email user.Email) ([]Invitation, error) {
+	return s.store.ListInvitationsForEmail(ctx, string(email))
+}
+
+func (s *Service) AcceptInvitationForUser(ctx context.Context, invitationID uuid.UUID, email user.Email, disclosureToken string) (AcceptOutcome, error) {
+	inv, err := s.myInvitation(ctx, invitationID, email)
+	if err != nil {
+		return AcceptOutcome{}, err
+	}
+	if time.Now().After(inv.ExpiresAt) {
+		return AcceptOutcome{}, ErrInvitationExpired
+	}
+	return s.acceptResolved(ctx, inv, disclosureToken)
+}
+
+func (s *Service) DeclineInvitationForUser(ctx context.Context, invitationID uuid.UUID, email user.Email) error {
+	if _, err := s.myInvitation(ctx, invitationID, email); err != nil {
+		return err
+	}
+	return s.store.DeclineInvitationByID(ctx, invitationID)
+}
+
+// myInvitation loads an invitation by id and confirms it was addressed to the
+// caller, returning ErrInvitationNotFound otherwise so one user cannot probe or
+// act on another's invitation.
+func (s *Service) myInvitation(ctx context.Context, invitationID uuid.UUID, email user.Email) (Invitation, error) {
+	inv, err := s.store.InvitationByID(ctx, invitationID)
+	if err != nil {
+		return Invitation{}, err
+	}
+	if !strings.EqualFold(inv.Email, string(email)) {
+		return Invitation{}, ErrInvitationNotFound
+	}
+	return inv, nil
 }
 
 func (s *Service) ListIdentityReviews(ctx context.Context) ([]IdentityReview, error) {

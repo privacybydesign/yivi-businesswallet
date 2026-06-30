@@ -63,17 +63,7 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	outcome, err := h.service.AcceptInvitation(r.Context(), r.PathValue("token"), req.DisclosureToken)
-	switch {
-	case errors.Is(err, ErrDisclosureFailed):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "disclosure_failed", Message: "identity disclosure was not completed"}
-	case errors.Is(err, ErrEmailMismatch):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "email_mismatch", Message: "the disclosed e-mail does not match the invitation"}
-	case errors.Is(err, ErrNameMismatch):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "name_mismatch", Message: "the disclosed name does not match the invitation"}
-	case errors.Is(err, ErrAlreadyMember):
-		return &respond.APIError{Status: http.StatusConflict, Code: "already_member", Message: "you are already a member of this organization"}
-	}
-	if err := mapInviteError(err); err != nil {
+	if err := mapAcceptError(err); err != nil {
 		return err
 	}
 	respond.JSON(w, r, http.StatusOK, acceptResponse{

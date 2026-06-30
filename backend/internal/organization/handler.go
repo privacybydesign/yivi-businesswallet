@@ -14,6 +14,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 type repository interface {
@@ -41,6 +42,9 @@ type inviter interface {
 	StartAcceptSession(ctx context.Context, rawToken string) (*irmaserver.SessionPackage, error)
 	AcceptInvitation(ctx context.Context, rawToken, disclosureToken string) (AcceptOutcome, error)
 	DeclineInvitation(ctx context.Context, rawToken string) error
+	MyInvitations(ctx context.Context, email user.Email) ([]Invitation, error)
+	AcceptInvitationForUser(ctx context.Context, invitationID uuid.UUID, email user.Email, disclosureToken string) (AcceptOutcome, error)
+	DeclineInvitationForUser(ctx context.Context, invitationID uuid.UUID, email user.Email) error
 	ListIdentityReviews(ctx context.Context) ([]IdentityReview, error)
 	ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error)
 }
@@ -79,6 +83,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /admin/identity-reviews/{id}/reject", platform(respond.HandlerFunc(h.rejectIdentityReview)))
 
 	mux.Handle("GET /me/organizations", h.requireUser(respond.HandlerFunc(h.listForUser)))
+	mux.Handle("GET /me/invitations", h.requireUser(respond.HandlerFunc(h.myInvitations)))
+	mux.Handle("POST /me/invitations/{id}/accept", h.requireUser(respond.HandlerFunc(h.acceptMyInvitation)))
+	mux.Handle("POST /me/invitations/{id}/decline", h.requireUser(respond.HandlerFunc(h.declineMyInvitation)))
 
 	mux.Handle("GET /invite/{token}", respond.HandlerFunc(h.invitePreview))
 	mux.Handle("POST /invite/{token}/session", respond.HandlerFunc(h.startAccept))

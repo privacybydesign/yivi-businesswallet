@@ -86,19 +86,24 @@ func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation
 	return in, nil
 }
 
-func (s *Store) InvitationByToken(ctx context.Context, rawToken string) (Invitation, error) {
-	hash := hashInviteToken(rawToken)
-	const q = `
-		SELECT i.id, i.organization_id, o.name, o.slug, i.email, i.invited_by, i.role, i.job_title,
-		       i.department_id, d.name, i.invited_given_names, i.invited_last_name, i.expires_at, i.created_at
-		FROM invitations i
-		JOIN organizations o ON o.id = i.organization_id
-		LEFT JOIN departments d ON d.id = i.department_id
-		WHERE i.invite_token_hash = $1`
+const invitationSelect = `
+	SELECT i.id, i.organization_id, o.name, o.slug, i.email, i.invited_by, i.role, i.job_title,
+	       i.department_id, d.name, i.invited_given_names, i.invited_last_name, i.expires_at, i.created_at
+	FROM invitations i
+	JOIN organizations o ON o.id = i.organization_id
+	LEFT JOIN departments d ON d.id = i.department_id`
+
+func scanInvitation(row pgx.Row) (Invitation, error) {
 	var inv Invitation
-	err := s.db.QueryRow(ctx, q, hash[:]).Scan(&inv.ID, &inv.OrganizationID, &inv.OrganizationName, &inv.OrganizationSlug,
+	err := row.Scan(&inv.ID, &inv.OrganizationID, &inv.OrganizationName, &inv.OrganizationSlug,
 		&inv.Email, &inv.InvitedBy, &inv.Role, &inv.JobTitle, &inv.DepartmentID, &inv.DepartmentName,
 		&inv.GivenNames, &inv.LastName, &inv.ExpiresAt, &inv.CreatedAt)
+	return inv, err
+}
+
+func (s *Store) InvitationByToken(ctx context.Context, rawToken string) (Invitation, error) {
+	hash := hashInviteToken(rawToken)
+	inv, err := scanInvitation(s.db.QueryRow(ctx, invitationSelect+" WHERE i.invite_token_hash = $1", hash[:]))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Invitation{}, ErrInvitationNotFound
 	}
@@ -106,6 +111,38 @@ func (s *Store) InvitationByToken(ctx context.Context, rawToken string) (Invitat
 		return Invitation{}, fmt.Errorf("organization: invitation by token: %w", err)
 	}
 	return inv, nil
+}
+
+func (s *Store) InvitationByID(ctx context.Context, invitationID uuid.UUID) (Invitation, error) {
+	inv, err := scanInvitation(s.db.QueryRow(ctx, invitationSelect+" WHERE i.id = $1", invitationID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Invitation{}, ErrInvitationNotFound
+	}
+	if err != nil {
+		return Invitation{}, fmt.Errorf("organization: invitation by id %s: %w", invitationID, err)
+	}
+	return inv, nil
+}
+
+func (s *Store) ListInvitationsForEmail(ctx context.Context, email string) ([]Invitation, error) {
+	rows, err := s.db.Query(ctx, invitationSelect+" WHERE lower(i.email) = lower($1) ORDER BY i.created_at", email)
+	if err != nil {
+		return nil, fmt.Errorf("organization: list invitations for email: %w", err)
+	}
+	defer rows.Close()
+
+	invitations := []Invitation{}
+	for rows.Next() {
+		inv, err := scanInvitation(rows)
+		if err != nil {
+			return nil, fmt.Errorf("organization: list invitations for email scan: %w", err)
+		}
+		invitations = append(invitations, inv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("organization: list invitations for email rows: %w", err)
+	}
+	return invitations, nil
 }
 
 func (s *Store) AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name) error {
@@ -139,12 +176,20 @@ func (s *Store) AcceptInvitation(ctx context.Context, inv Invitation, userID uui
 
 func (s *Store) DeclineInvitation(ctx context.Context, rawToken string) error {
 	hash := hashInviteToken(rawToken)
+	return s.declineInvitation(ctx, "invite_token_hash = $1", hash[:])
+}
+
+func (s *Store) DeclineInvitationByID(ctx context.Context, invitationID uuid.UUID) error {
+	return s.declineInvitation(ctx, "id = $1", invitationID)
+}
+
+func (s *Store) declineInvitation(ctx context.Context, where string, arg any) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		const del = `DELETE FROM invitations WHERE invite_token_hash = $1
+		del := `DELETE FROM invitations WHERE ` + where + `
 			RETURNING organization_id, email, role, invited_given_names, invited_last_name`
 		var orgID uuid.UUID
 		var email, role, givenNames, lastName string
-		err := q.QueryRow(ctx, del, hash[:]).Scan(&orgID, &email, &role, &givenNames, &lastName)
+		err := q.QueryRow(ctx, del, arg).Scan(&orgID, &email, &role, &givenNames, &lastName)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrInvitationNotFound
 		}
