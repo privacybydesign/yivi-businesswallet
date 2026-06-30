@@ -30,6 +30,8 @@ services:
       - --url=${IRMA_CLIENT_URL:-http://localhost:8088}
       - --no-auth=true
       - --disclose-perms=${IRMA_EMAIL_ATTRIBUTE:-irma-demo.sidn-pbdf.email.email}
+      - --disclose-perms=${IRMA_IDENTITY_GIVEN_NAMES_ATTRIBUTE:-irma-demo.MijnOverheid.drivinglicense.firstnames}
+      - --disclose-perms=${IRMA_IDENTITY_FAMILY_NAME_ATTRIBUTE:-irma-demo.MijnOverheid.drivinglicense.familyname}
 
   backend:
     build:
