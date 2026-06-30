@@ -179,15 +179,21 @@ export default function MyInvitations(): React.JSX.Element {
                   >
                     {t("myInvitations.decline")}
                   </Button>
-                  <Button
-                    variant="primary"
-                    onClick={() => {
-                      setActive(invite);
-                      setPhase("disclosing");
-                    }}
-                  >
-                    {t("myInvitations.accept")}
-                  </Button>
+                  {invite.underReview ? (
+                    <span className="bg-warning-bg text-warning-fg rounded-full px-3 py-1.5 text-[12.5px] font-medium">
+                      {t("myInvitations.underReview")}
+                    </span>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      onClick={() => {
+                        setActive(invite);
+                        setPhase("disclosing");
+                      }}
+                    >
+                      {t("myInvitations.accept")}
+                    </Button>
+                  )}
                 </div>
               </Card>
             ))}

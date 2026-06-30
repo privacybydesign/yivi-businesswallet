@@ -17,7 +17,8 @@ type NavLabelKey =
   | "nav.auditLog"
   | "nav.settings"
   | "nav.adminDashboard"
-  | "nav.allOrganizations";
+  | "nav.allOrganizations"
+  | "nav.identityReviews";
 
 interface NavItem {
   to: string;
@@ -41,6 +42,11 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     to: "/admin/organizations",
     labelKey: "nav.allOrganizations",
     icon: "personal",
+  },
+  {
+    to: "/admin/identity-reviews",
+    labelKey: "nav.identityReviews",
+    icon: "warning",
   },
 ];
 

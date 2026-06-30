@@ -154,7 +154,17 @@ func (s *Store) PendingInvitationsForEmail(ctx context.Context, email user.Email
 }
 
 func (s *Store) ListInvitationsForEmail(ctx context.Context, email string) ([]Invitation, error) {
-	rows, err := s.db.Query(ctx, invitationSelect+" WHERE lower(i.email) = lower($1) ORDER BY i.created_at", email)
+	const q = `
+		SELECT i.id, i.organization_id, o.name, o.slug, i.email, i.invited_by, i.role, i.job_title,
+		       i.department_id, d.name, i.invited_given_names, i.invited_last_name, i.expires_at, i.created_at,
+		       (rev.id IS NOT NULL) AS under_review
+		FROM invitations i
+		JOIN organizations o ON o.id = i.organization_id
+		LEFT JOIN departments d ON d.id = i.department_id
+		LEFT JOIN identity_reviews rev ON rev.invitation_id = i.id AND rev.status = 'pending'
+		WHERE lower(i.email) = lower($1)
+		ORDER BY i.created_at`
+	rows, err := s.db.Query(ctx, q, email)
 	if err != nil {
 		return nil, fmt.Errorf("organization: list invitations for email: %w", err)
 	}
@@ -162,8 +172,10 @@ func (s *Store) ListInvitationsForEmail(ctx context.Context, email string) ([]In
 
 	invitations := []Invitation{}
 	for rows.Next() {
-		inv, err := scanInvitation(rows)
-		if err != nil {
+		var inv Invitation
+		if err := rows.Scan(&inv.ID, &inv.OrganizationID, &inv.OrganizationName, &inv.OrganizationSlug,
+			&inv.Email, &inv.InvitedBy, &inv.Role, &inv.JobTitle, &inv.DepartmentID, &inv.DepartmentName,
+			&inv.GivenNames, &inv.LastName, &inv.ExpiresAt, &inv.CreatedAt, &inv.UnderReview); err != nil {
 			return nil, fmt.Errorf("organization: list invitations for email scan: %w", err)
 		}
 		invitations = append(invitations, inv)

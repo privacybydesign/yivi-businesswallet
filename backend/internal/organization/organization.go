@@ -73,6 +73,7 @@ type Invitation struct {
 	LastName         string     `json:"lastName"`
 	ExpiresAt        time.Time  `json:"expiresAt"`
 	CreatedAt        time.Time  `json:"createdAt"`
+	UnderReview      bool       `json:"-"`
 }
 
 type Member struct {

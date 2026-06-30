@@ -20,6 +20,7 @@ type myInvitationResponse struct {
 	LastName         string    `json:"lastName"`
 	Email            string    `json:"email"`
 	ExpiresAt        time.Time `json:"expiresAt"`
+	UnderReview      bool      `json:"underReview"`
 }
 
 func (h *Handler) myInvitations(w http.ResponseWriter, r *http.Request) error {
@@ -38,6 +39,7 @@ func (h *Handler) myInvitations(w http.ResponseWriter, r *http.Request) error {
 			LastName:         inv.LastName,
 			Email:            inv.Email,
 			ExpiresAt:        inv.ExpiresAt,
+			UnderReview:      inv.UnderReview,
 		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)

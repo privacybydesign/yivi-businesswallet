@@ -13,6 +13,7 @@ import AdminRoute from "./routes/admin-route";
 import Login from "./routes/login";
 import InviteAccept from "./routes/invite-accept";
 import MyInvitations from "./routes/my-invitations";
+import IdentityReviews from "./routes/identity-reviews";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
 import MemberInvite from "./routes/member-invite";
@@ -56,6 +57,9 @@ const invitationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("myInvitations.title"),
 };
 const adminCrumb: RouteHandle = { crumb: ({ t }) => t("adminDashboard.title") };
+const reviewsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityReviews.title"),
+};
 const orgsCrumb: RouteHandle = {
   crumb: ({ t }) => t("allOrganizations.title"),
 };
@@ -129,6 +133,11 @@ export const router = createBrowserRouter([
                     handle: adminCrumb,
                     children: [
                       { index: true, Component: AdminDashboard },
+                      {
+                        path: "identity-reviews",
+                        Component: IdentityReviews,
+                        handle: reviewsCrumb,
+                      },
                       {
                         path: "organizations",
                         handle: orgsCrumb,

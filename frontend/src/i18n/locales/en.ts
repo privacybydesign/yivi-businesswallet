@@ -22,6 +22,7 @@ export const en = {
     auditLog: "Audit log",
     adminDashboard: "Overview",
     allOrganizations: "Organizations",
+    identityReviews: "Identity reviews",
     admin: "Admin",
     platformAdmin: "Platform Admin",
     settings: "Settings",
@@ -43,6 +44,25 @@ export const en = {
     accept: "Accept",
     decline: "Decline",
     back: "Back to invitations",
+    underReview: "Under review",
+  },
+  identityReviews: {
+    title: "Identity reviews",
+    subtitle:
+      "Accept attempts where the disclosed legal name differs from the stored profile.",
+    empty: "No identity reviews are pending.",
+    loadError: "Could not load identity reviews: {{message}}",
+    approve: "Approve",
+    reject: "Reject",
+    approved: "Identity approved",
+    rejected: "Identity rejected",
+    columns: {
+      person: "Person",
+      organization: "Organization",
+      nameChange: "Stored → disclosed",
+      requested: "Requested",
+      actions: "Actions",
+    },
   },
   login: {
     title: "Sign in",

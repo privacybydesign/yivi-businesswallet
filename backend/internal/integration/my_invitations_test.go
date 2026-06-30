@@ -16,6 +16,7 @@ type myInviteBody struct {
 	OrganizationSlug string    `json:"organizationSlug"`
 	GivenNames       string    `json:"givenNames"`
 	Email            string    `json:"email"`
+	UnderReview      bool      `json:"underReview"`
 }
 
 func (e *testEnv) myInvitations() []myInviteBody {
@@ -111,6 +112,21 @@ func TestAcceptByIDRejectsWrongEmail(t *testing.T) {
 	}
 	if n := env.membershipCount(orgID, "someone-else@example.test"); n != 0 {
 		t.Errorf("membership = %d, want 0", n)
+	}
+}
+
+func TestMyInvitationsFlagsUnderReview(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	env.seedPendingReview(orgID, "changed@example.test")
+	env.login("changed@example.test")
+
+	list := env.myInvitations()
+	if len(list) != 1 {
+		t.Fatalf("invitations = %d, want 1", len(list))
+	}
+	if !list[0].UnderReview {
+		t.Error("invitation underReview = false, want true (a review is pending)")
 	}
 }
 

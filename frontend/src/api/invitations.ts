@@ -33,6 +33,7 @@ export const myInvitationSchema = z.object({
   lastName: z.string(),
   email: z.string(),
   expiresAt: z.string(),
+  underReview: z.boolean(),
 });
 export type MyInvitation = z.infer<typeof myInvitationSchema>;
 const myInvitationListSchema = z.array(myInvitationSchema);
