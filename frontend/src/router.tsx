@@ -2,7 +2,7 @@ import { createBrowserRouter } from "react-router";
 import type { CrumbContext, RouteHandle } from "./ui";
 import type { Member, OrganizationDetail } from "./api/organization";
 import {
-  organizationMembersQueryKey,
+  organizationMemberQueryKey,
   organizationQueryKey,
 } from "./api/organization.queries";
 import { fullName } from "./lib/name";
@@ -39,10 +39,9 @@ const membersCrumb: RouteHandle = { crumb: ({ t }) => t("members.title") };
 const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
 const memberCrumb: RouteHandle = {
   crumb: ({ params, queryClient, t }: CrumbContext) => {
-    const members = queryClient.getQueryData<Member[]>(
-      organizationMembersQueryKey(params.orgSlug ?? ""),
+    const member = queryClient.getQueryData<Member>(
+      organizationMemberQueryKey(params.orgSlug ?? "", params.userId ?? ""),
     );
-    const member = members?.find((m) => m.userId === params.userId);
     return member ? fullName(member) : t("memberDetail.title");
   },
 };
