@@ -13,6 +13,8 @@ export const en = {
     saveError: "Could not save changes: {{message}}",
     saving: "Saving…",
     slug: "Slug",
+    todayAt: "Today, {{time}}",
+    yesterdayAt: "Yesterday, {{time}}",
   },
   nav: {
     dashboard: "Dashboard",

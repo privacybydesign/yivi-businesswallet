@@ -13,6 +13,7 @@ import {
   AUDIT_TONE_CLASSES,
 } from "../lib/audit-event";
 import { fullName } from "../lib/name";
+import { useWhenFormatter } from "../lib/format-when";
 import { Button, Card, Icon, Table, TopBar } from "../ui";
 import * as React from "react";
 
@@ -34,9 +35,11 @@ export default function AuditLog(): React.JSX.Element {
       new Intl.DateTimeFormat(i18n.language, {
         dateStyle: "medium",
         timeStyle: "short",
+        hour12: false,
       }),
     [i18n.language],
   );
+  const formatWhen = useWhenFormatter();
 
   return (
     <>
@@ -122,7 +125,7 @@ export default function AuditLog(): React.JSX.Element {
                         <Table.Row key={event.id}>
                           <Table.Cell>
                             <span className="text-ink-soft text-[12.5px]">
-                              {dateFormatter.format(new Date(event.occurredAt))}
+                              {formatWhen(event.occurredAt)}
                             </span>
                           </Table.Cell>
                           <Table.Cell>

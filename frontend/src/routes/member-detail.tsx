@@ -16,6 +16,7 @@ import {
   AUDIT_TONE_CLASSES,
 } from "../lib/audit-event";
 import { fullName, personInitials } from "../lib/name";
+import { useWhenFormatter } from "../lib/format-when";
 import { Avatar, Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
 
@@ -49,11 +50,13 @@ function DetailRow({
 function TimelineItem({
   event,
   dateFormatter,
+  formatWhen,
   t,
   isLast,
 }: {
   event: AuditEvent;
   dateFormatter: Intl.DateTimeFormat;
+  formatWhen: (iso: string) => string;
   t: TFunction;
   isLast: boolean;
 }): React.JSX.Element {
@@ -82,7 +85,7 @@ function TimelineItem({
           <div className="text-ink-soft mt-0.5 text-[12.5px]">{subject}</div>
         )}
         <div className="text-muted mt-1 text-[11.5px]">
-          {dateFormatter.format(new Date(event.occurredAt))}
+          {formatWhen(event.occurredAt)}
           {event.actor
             ? ` · ${t("memberDetail.timeline.by", { actor: fullName(event.actor) })}`
             : ""}
@@ -113,9 +116,11 @@ export default function MemberDetail(): React.JSX.Element {
       new Intl.DateTimeFormat(i18n.language, {
         dateStyle: "medium",
         timeStyle: "short",
+        hour12: false,
       }),
     [i18n.language],
   );
+  const formatWhen = useWhenFormatter();
 
   const shell = (body: React.ReactNode): React.JSX.Element => (
     <>
@@ -213,6 +218,7 @@ export default function MemberDetail(): React.JSX.Element {
                       key={event.id}
                       event={event}
                       dateFormatter={dateFormatter}
+                      formatWhen={formatWhen}
                       t={t}
                       isLast={index === events.length - 1}
                     />
