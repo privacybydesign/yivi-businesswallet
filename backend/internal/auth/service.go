@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	irma "github.com/privacybydesign/irmago/irma"
 	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
@@ -13,6 +14,29 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
+
+type PendingInvite struct {
+	ID               uuid.UUID
+	OrganizationName string
+	OrganizationSlug string
+}
+
+// invitationLookup lets login surface pending invitations for an email that has
+// no account yet, so a brand-new invitee is routed to accept instead of a
+// dead-end. Implemented by the organization store, injected to avoid a cycle.
+type invitationLookup interface {
+	PendingInvitationsForEmail(ctx context.Context, email user.Email) ([]PendingInvite, error)
+}
+
+// PendingInvitesError signals a successful email disclosure for someone with no
+// account but open invitations: not an error to the caller, a routing signal.
+type PendingInvitesError struct {
+	Invites []PendingInvite
+}
+
+func (e *PendingInvitesError) Error() string {
+	return "auth: no account for this email, but pending invitations exist"
+}
 
 type IdentityAttributes struct {
 	GivenNames irma.AttributeTypeIdentifier
@@ -38,6 +62,7 @@ type Service struct {
 	sessions      *session.Store
 	emailAttr     irma.AttributeTypeIdentifier
 	identityAttrs IdentityAttributes
+	invites       invitationLookup
 }
 
 func NewService(
@@ -46,6 +71,7 @@ func NewService(
 	sessions *session.Store,
 	emailAttr irma.AttributeTypeIdentifier,
 	identityAttrs IdentityAttributes,
+	invites invitationLookup,
 ) *Service {
 	return &Service{
 		irma:          requestor,
@@ -53,6 +79,7 @@ func NewService(
 		sessions:      sessions,
 		emailAttr:     emailAttr,
 		identityAttrs: identityAttrs,
+		invites:       invites,
 	}
 }
 
@@ -102,7 +129,7 @@ func (s *Service) Authenticate(ctx context.Context, token irma.RequestorToken) (
 	u, err := s.users.FindByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, user.ErrNotFound) {
-			return user.User{}, "", errUserNotInvited
+			return user.User{}, "", s.invitedOrNotFound(ctx, email)
 		}
 		return user.User{}, "", err
 	}
@@ -113,6 +140,20 @@ func (s *Service) Authenticate(ctx context.Context, token irma.RequestorToken) (
 		return user.User{}, "", err
 	}
 	return u, raw, nil
+}
+
+func (s *Service) invitedOrNotFound(ctx context.Context, email user.Email) error {
+	if s.invites == nil {
+		return errUserNotInvited
+	}
+	invites, err := s.invites.PendingInvitationsForEmail(ctx, email)
+	if err != nil {
+		return fmt.Errorf("auth: lookup pending invitations: %w", err)
+	}
+	if len(invites) == 0 {
+		return errUserNotInvited
+	}
+	return &PendingInvitesError{Invites: invites}
 }
 
 func (s *Service) Logout(ctx context.Context, rawToken string) error {

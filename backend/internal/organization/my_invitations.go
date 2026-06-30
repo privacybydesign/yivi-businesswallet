@@ -1,7 +1,6 @@
 package organization
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -42,32 +41,6 @@ func (h *Handler) myInvitations(w http.ResponseWriter, r *http.Request) error {
 		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)
-	return nil
-}
-
-func (h *Handler) acceptMyInvitation(w http.ResponseWriter, r *http.Request) error {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		return badRequest("invalid_id", "invalid invitation id")
-	}
-	var req acceptRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return badRequest("invalid_body", "invalid request body")
-	}
-	if req.DisclosureToken == "" {
-		return badRequest("invalid_input", "disclosureToken is required")
-	}
-
-	email := auth.UserFromContext(r.Context()).Email
-	outcome, err := h.service.AcceptInvitationForUser(r.Context(), id, email, req.DisclosureToken)
-	if err := mapAcceptError(err); err != nil {
-		return err
-	}
-	respond.JSON(w, r, http.StatusOK, acceptResponse{
-		Status:           string(outcome.Status),
-		OrganizationName: outcome.OrganizationName,
-		OrganizationSlug: outcome.OrganizationSlug,
-	})
 	return nil
 }
 

@@ -118,10 +118,10 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	// drops Secure cookies, which would silently break the cookie round-trip.
 	cookieCfg := auth.CookieConfig{Secure: false, MaxAge: int(sessionTTL.Seconds())}
 
-	authService := auth.NewService(fake, userStore, sessionStore, emailAttr, identityAttrs)
+	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
+	authService := auth.NewService(fake, userStore, sessionStore, emailAttr, identityAttrs, orgStore)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, admins)
 	requireUser := auth.RequireUser(sessionStore)
-	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
 	orgService := organization.NewService(userStore, orgStore, authService)
 	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), requireUser, admins)
 

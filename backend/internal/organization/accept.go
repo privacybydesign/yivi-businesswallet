@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
@@ -63,6 +65,31 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	outcome, err := h.service.AcceptInvitation(r.Context(), r.PathValue("token"), req.DisclosureToken)
+	if err := mapAcceptError(err); err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, acceptResponse{
+		Status:           string(outcome.Status),
+		OrganizationName: outcome.OrganizationName,
+		OrganizationSlug: outcome.OrganizationSlug,
+	})
+	return nil
+}
+
+func (h *Handler) acceptInvitationByID(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid invitation id")
+	}
+	var req acceptRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return badRequest("invalid_body", "invalid request body")
+	}
+	if req.DisclosureToken == "" {
+		return badRequest("invalid_input", "disclosureToken is required")
+	}
+
+	outcome, err := h.service.AcceptInvitationByID(r.Context(), id, req.DisclosureToken)
 	if err := mapAcceptError(err); err != nil {
 		return err
 	}

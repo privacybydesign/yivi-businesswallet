@@ -43,7 +43,7 @@ func (f *fakeRequestor) Status(_ context.Context, _ irma.RequestorToken) (irma.S
 
 func newTestHandler(r irmaRequestor) *Handler {
 	return &Handler{
-		svc:    NewService(r, nil, nil, irma.NewAttributeTypeIdentifier(testEmailAttr), IdentityAttributes{}),
+		svc:    NewService(r, nil, nil, irma.NewAttributeTypeIdentifier(testEmailAttr), IdentityAttributes{}, nil),
 		cookie: CookieConfig{},
 	}
 }

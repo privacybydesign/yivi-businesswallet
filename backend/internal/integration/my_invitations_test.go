@@ -59,7 +59,7 @@ func TestMyInvitationsListAndAccept(t *testing.T) {
 	}
 
 	env.discloses("member@example.test", "Test", "User")
-	resp := env.do(http.MethodPost, "/api/v1/me/invitations/"+list[0].ID.String()+"/accept",
+	resp := env.do(http.MethodPost, "/api/v1/invitations/"+list[0].ID.String()+"/accept",
 		jsonBody(`{"disclosureToken":"test-token"}`))
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -94,19 +94,20 @@ func TestDeclineMyInvitation(t *testing.T) {
 	}
 }
 
-func TestAcceptOthersInvitationNotFound(t *testing.T) {
+// Accept-by-id is public, so the disclosure's email-match is the gate: you can
+// only accept an invitation whose e-mail you can disclose.
+func TestAcceptByIDRejectsWrongEmail(t *testing.T) {
 	env := setup(t)
-	env.login("member@example.test")
 	orgID := env.createOrg("Acme", "acme")
 	env.createInvitation(orgID, "someone-else@example.test", "Other", "Person")
 	othersID := env.invitationID(orgID, "someone-else@example.test")
 
-	env.discloses("member@example.test", "Test", "User")
-	resp := env.do(http.MethodPost, "/api/v1/me/invitations/"+othersID.String()+"/accept",
+	env.discloses("intruder@example.test", "In", "Truder")
+	resp := env.do(http.MethodPost, "/api/v1/invitations/"+othersID.String()+"/accept",
 		jsonBody(`{"disclosureToken":"test-token"}`))
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("accept other's invitation = %d, want 404", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("accept with non-matching disclosure = %d, want 422", resp.StatusCode)
 	}
 	if n := env.membershipCount(orgID, "someone-else@example.test"); n != 0 {
 		t.Errorf("membership = %d, want 0", n)

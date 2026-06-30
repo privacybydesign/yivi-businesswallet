@@ -14,8 +14,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 const (
@@ -122,6 +124,33 @@ func (s *Store) InvitationByID(ctx context.Context, invitationID uuid.UUID) (Inv
 		return Invitation{}, fmt.Errorf("organization: invitation by id %s: %w", invitationID, err)
 	}
 	return inv, nil
+}
+
+func (s *Store) PendingInvitationsForEmail(ctx context.Context, email user.Email) ([]auth.PendingInvite, error) {
+	const q = `
+		SELECT i.id, o.name, o.slug
+		FROM invitations i
+		JOIN organizations o ON o.id = i.organization_id
+		WHERE lower(i.email) = lower($1) AND i.expires_at > now()
+		ORDER BY i.created_at`
+	rows, err := s.db.Query(ctx, q, string(email))
+	if err != nil {
+		return nil, fmt.Errorf("organization: pending invitations for email: %w", err)
+	}
+	defer rows.Close()
+
+	invites := []auth.PendingInvite{}
+	for rows.Next() {
+		var pi auth.PendingInvite
+		if err := rows.Scan(&pi.ID, &pi.OrganizationName, &pi.OrganizationSlug); err != nil {
+			return nil, fmt.Errorf("organization: pending invitations for email scan: %w", err)
+		}
+		invites = append(invites, pi)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("organization: pending invitations for email rows: %w", err)
+	}
+	return invites, nil
 }
 
 func (s *Store) ListInvitationsForEmail(ctx context.Context, email string) ([]Invitation, error) {

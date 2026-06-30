@@ -66,12 +66,35 @@ func (h *Handler) claim(w http.ResponseWriter, r *http.Request) error {
 
 	u, raw, err := h.svc.Authenticate(r.Context(), token)
 	if err != nil {
+		var invited *PendingInvitesError
+		if errors.As(err, &invited) {
+			respond.JSON(w, r, http.StatusOK, toPendingInvitationsResponse(invited.Invites))
+			return nil
+		}
 		return mapAuthError(err)
 	}
 	setSessionCookie(w, raw, h.cookie)
 
 	respond.JSON(w, r, http.StatusOK, h.meResponse(u))
 	return nil
+}
+
+type pendingInvitationsResponse struct {
+	PendingInvitations []pendingInvitation `json:"pendingInvitations"`
+}
+
+type pendingInvitation struct {
+	ID               uuid.UUID `json:"id"`
+	OrganizationName string    `json:"organizationName"`
+	OrganizationSlug string    `json:"organizationSlug"`
+}
+
+func toPendingInvitationsResponse(invites []PendingInvite) pendingInvitationsResponse {
+	out := pendingInvitationsResponse{PendingInvitations: make([]pendingInvitation, 0, len(invites))}
+	for _, inv := range invites {
+		out.PendingInvitations = append(out.PendingInvitations, pendingInvitation(inv))
+	}
+	return out
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) error {

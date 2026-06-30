@@ -87,13 +87,13 @@ func run() error {
 		MaxAge: int(cfg.SessionTTL.Seconds()),
 	}
 	platformAdmins := auth.NewPlatformAdmins(cfg.PlatformAdminEmails)
-	authService := auth.NewService(requestor, userStore, sessionStore, emailAttr, identityAttrs)
+	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
+	authService := auth.NewService(requestor, userStore, sessionStore, emailAttr, identityAttrs, orgStore)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, platformAdmins)
 
 	startSessionPruner(ctx, sessionStore, cfg.SessionPruneEvery)
 
 	requireUser := auth.RequireUser(sessionStore)
-	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
 	orgService := organization.NewService(userStore, orgStore, authService)
 	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), requireUser, platformAdmins)
 

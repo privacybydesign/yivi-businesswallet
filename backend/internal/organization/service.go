@@ -194,8 +194,8 @@ func (s *Service) MyInvitations(ctx context.Context, email user.Email) ([]Invita
 	return s.store.ListInvitationsForEmail(ctx, string(email))
 }
 
-func (s *Service) AcceptInvitationForUser(ctx context.Context, invitationID uuid.UUID, email user.Email, disclosureToken string) (AcceptOutcome, error) {
-	inv, err := s.myInvitation(ctx, invitationID, email)
+func (s *Service) AcceptInvitationByID(ctx context.Context, invitationID uuid.UUID, disclosureToken string) (AcceptOutcome, error) {
+	inv, err := s.store.InvitationByID(ctx, invitationID)
 	if err != nil {
 		return AcceptOutcome{}, err
 	}
