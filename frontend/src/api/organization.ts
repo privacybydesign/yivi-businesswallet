@@ -60,7 +60,24 @@ export const memberListEntrySchema = z.object({
 
 export type MemberListEntry = z.infer<typeof memberListEntrySchema>;
 
-const memberListSchema = z.array(memberListEntrySchema);
+export const memberListPageSchema = z.object({
+  entries: z.array(memberListEntrySchema),
+  total: z.number(),
+});
+
+export type MemberListPage = z.infer<typeof memberListPageSchema>;
+
+export type MemberSort = "name" | "email" | "role" | "department" | "status";
+export type SortDir = "asc" | "desc";
+
+export interface MemberListParams {
+  status?: "active" | "invited";
+  q?: string;
+  sort?: MemberSort;
+  dir?: SortDir;
+  limit?: number;
+  offset?: number;
+}
 
 export function getOrganizations(
   signal?: AbortSignal,
@@ -117,12 +134,38 @@ export function updateOrganization(
 
 export function getOrganizationMembers(
   slug: string,
+  params: MemberListParams = {},
   signal?: AbortSignal,
-): Promise<MemberListEntry[]> {
-  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/members`, {
-    schema: memberListSchema,
-    signal,
-  });
+): Promise<MemberListPage> {
+  const search = new URLSearchParams();
+  if (params.status) search.set("status", params.status);
+  if (params.q) search.set("q", params.q);
+  if (params.sort) search.set("sort", params.sort);
+  if (params.dir) search.set("dir", params.dir);
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  if (params.offset !== undefined) search.set("offset", String(params.offset));
+  const query = search.toString();
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/members${query ? `?${query}` : ""}`,
+    {
+      schema: memberListPageSchema,
+      signal,
+    },
+  );
+}
+
+export function getOrganizationMember(
+  slug: string,
+  userId: string,
+  signal?: AbortSignal,
+): Promise<Member> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`,
+    {
+      schema: memberSchema,
+      signal,
+    },
+  );
 }
 
 // Inviting creates a pending invitation server-side and returns no body (201),
@@ -281,6 +324,26 @@ export function getOrganizationAuditEvents(
   const query = params.toString();
   return request(
     `/api/v1/orgs/${encodeURIComponent(slug)}/audit-events${query ? `?${query}` : ""}`,
+    {
+      schema: auditEventsPageSchema,
+      signal,
+    },
+  );
+}
+
+export function getMemberAuditEvents(
+  slug: string,
+  userId: string,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<AuditEventsPage> {
+  const params = new URLSearchParams();
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  const query = params.toString();
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}/audit-events${query ? `?${query}` : ""}`,
     {
       schema: auditEventsPageSchema,
       signal,

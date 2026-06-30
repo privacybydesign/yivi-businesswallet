@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -27,7 +28,7 @@ func (s *Store) AddMembership(ctx context.Context, orgID, userID uuid.UUID, role
 	if err != nil {
 		return Member{}, fmt.Errorf("organization: add membership user %s org %s: %w", userID, orgID, err)
 	}
-	return s.getMember(ctx, orgID, userID)
+	return s.GetMember(ctx, orgID, userID)
 }
 
 func (s *Store) GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error) {
@@ -75,7 +76,109 @@ func (s *Store) ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, err
 	return members, nil
 }
 
-func (s *Store) getMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error) {
+const defaultMemberSort = "name"
+
+var memberSortColumns = map[string][]string{
+	"name":       {"last_name", "given_names"},
+	"email":      {"email"},
+	"role":       {"role"},
+	"department": {"department_name"},
+	"status":     {"status"},
+}
+
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// The per-branch status guard ($2 empty, or matching that branch) lets a status
+// filter prune the excluded source instead of scanning and discarding it.
+var memberEntriesCTE = fmt.Sprintf(`
+WITH entries AS (
+	SELECT '%[1]s'::text AS status, u.id AS user_id, NULL::uuid AS invitation_id,
+	       u.email, u.preferred_name, u.given_names, u.last_name,
+	       m.role, m.job_title, m.department_id, d.name AS department_name,
+	       NULL::timestamptz AS expires_at, NULL::uuid AS invited_by
+	FROM memberships m
+	JOIN users u ON u.id = m.user_id
+	LEFT JOIN departments d ON d.id = m.department_id
+	WHERE m.organization_id = $1 AND ($2 = '' OR $2 = '%[1]s')
+	UNION ALL
+	SELECT '%[2]s'::text AS status, NULL::uuid AS user_id, i.id AS invitation_id,
+	       i.email, NULL::text AS preferred_name, i.invited_given_names, i.invited_last_name,
+	       i.role, i.job_title, i.department_id, d.name AS department_name,
+	       i.expires_at, i.invited_by
+	FROM invitations i
+	LEFT JOIN departments d ON d.id = i.department_id
+	WHERE i.organization_id = $1 AND ($2 = '' OR $2 = '%[2]s')
+)`, StatusActive, StatusInvited)
+
+const memberSearchWhere = `
+WHERE $3::text IS NULL OR (
+	   email ILIKE $3 ESCAPE '\'
+	OR given_names ILIKE $3 ESCAPE '\'
+	OR last_name ILIKE $3 ESCAPE '\'
+	OR coalesce(job_title, '') ILIKE $3 ESCAPE '\'
+	OR coalesce(department_name, '') ILIKE $3 ESCAPE '\'
+)`
+
+func memberOrderBy(sort string, desc bool) string {
+	cols, ok := memberSortColumns[sort]
+	if !ok {
+		cols = memberSortColumns[defaultMemberSort]
+	}
+	dir := "ASC"
+	if desc {
+		dir = "DESC"
+	}
+	parts := make([]string, 0, len(cols)+2)
+	for _, c := range cols {
+		parts = append(parts, c+" "+dir+" NULLS LAST")
+	}
+	parts = append(parts, "email ASC", "status ASC")
+	return strings.Join(parts, ", ")
+}
+
+func (s *Store) ListMemberEntries(ctx context.Context, orgID uuid.UUID, p MemberListParams) ([]MemberEntry, int, error) {
+	var pattern *string
+	if p.Search != "" {
+		like := "%" + likeEscaper.Replace(p.Search) + "%"
+		pattern = &like
+	}
+
+	// count(*) OVER() drops the total on an empty page (offset past the end), so
+	// the total comes from a separate count that the paged select can't distort.
+	var total int
+	if err := s.db.QueryRow(ctx, memberEntriesCTE+"\nSELECT count(*) FROM entries"+memberSearchWhere, orgID, p.Status, pattern).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("organization: count member entries org %s: %w", orgID, err)
+	}
+
+	q := memberEntriesCTE + `
+SELECT status, user_id, invitation_id, email, preferred_name, given_names, last_name,
+       role, job_title, department_id, department_name, expires_at, invited_by
+FROM entries` + memberSearchWhere + "\nORDER BY " + memberOrderBy(p.Sort, p.Desc) + "\nLIMIT $4 OFFSET $5"
+
+	rows, err := s.db.Query(ctx, q, orgID, p.Status, pattern, p.Limit, p.Offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("organization: list member entries org %s: %w", orgID, err)
+	}
+	defer rows.Close()
+
+	entries := []MemberEntry{}
+	for rows.Next() {
+		var e MemberEntry
+		if err := rows.Scan(&e.Status, &e.UserID, &e.InvitationID, &e.Email, &e.PreferredName,
+			&e.GivenNames, &e.LastName, &e.Role, &e.JobTitle, &e.DepartmentID, &e.DepartmentName,
+			&e.ExpiresAt, &e.InvitedBy); err != nil {
+			return nil, 0, fmt.Errorf("organization: list member entries scan: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("organization: list member entries rows: %w", err)
+	}
+
+	return entries, total, nil
+}
+
+func (s *Store) GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error) {
 	const q = `
 		SELECT u.id, u.email, u.preferred_name, u.given_names, u.last_name,
 		       m.role, m.job_title, m.department_id, d.name
@@ -158,7 +261,7 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 	if err := tx.Commit(ctx); err != nil {
 		return Member{}, fmt.Errorf("organization: commit update membership user %s org %s: %w", userID, orgID, err)
 	}
-	return s.getMember(ctx, orgID, userID)
+	return s.GetMember(ctx, orgID, userID)
 }
 
 // ORDER BY user_id is load-bearing: it makes concurrent demotions take the row

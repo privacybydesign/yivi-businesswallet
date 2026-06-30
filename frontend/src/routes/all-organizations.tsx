@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useOrganizationsQuery } from "../api/organization.queries";
-import { Avatar, Button, Card, Input, TopBar } from "../ui";
+import { Avatar, Button, Card, Input, Table, TopBar } from "../ui";
 import * as React from "react";
 
 export default function AllOrganizations(): React.JSX.Element {
@@ -61,39 +61,29 @@ export default function AllOrganizations(): React.JSX.Element {
           </Card>
         ) : (
           <Card className="overflow-hidden">
-            <table className="w-full border-collapse text-[13.5px]">
-              <thead>
-                <tr>
-                  <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
-                    {t("allOrganizations.columnOrganization")}
-                  </th>
-                  <th className="border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase">
-                    {t("common.slug")}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <Table.Head>
+                <Table.HeaderCell>
+                  {t("allOrganizations.columnOrganization")}
+                </Table.HeaderCell>
+                <Table.HeaderCell>{t("common.slug")}</Table.HeaderCell>
+              </Table.Head>
+              <Table.Body>
                 {isPending ? (
-                  <tr>
-                    <td className="text-ink-soft px-3.5 py-3" colSpan={2}>
-                      {t("common.loading")}
-                    </td>
-                  </tr>
+                  <Table.State colSpan={2}>{t("common.loading")}</Table.State>
                 ) : filtered.length === 0 ? (
-                  <tr>
-                    <td className="text-ink-soft px-3.5 py-3" colSpan={2}>
-                      {data && data.length > 0
-                        ? t("allOrganizations.noMatch")
-                        : t("allOrganizations.none")}
-                    </td>
-                  </tr>
+                  <Table.State colSpan={2}>
+                    {data && data.length > 0
+                      ? t("allOrganizations.noMatch")
+                      : t("allOrganizations.none")}
+                  </Table.State>
                 ) : (
                   filtered.map((org) => (
-                    <tr
+                    <Table.Row
                       key={org.id}
                       className="hover:bg-surface-3 transition-colors"
                     >
-                      <td className="border-line border-b px-3.5 py-3">
+                      <Table.Cell>
                         <Link
                           to={`/${org.slug}`}
                           className="flex items-center gap-2.5"
@@ -103,15 +93,15 @@ export default function AllOrganizations(): React.JSX.Element {
                             {org.name}
                           </span>
                         </Link>
-                      </td>
-                      <td className="border-line text-ink-soft border-b px-3.5 py-3 font-mono text-[12px]">
+                      </Table.Cell>
+                      <Table.Cell className="text-ink-soft font-mono text-[12px]">
                         {org.slug}
-                      </td>
-                    </tr>
+                      </Table.Cell>
+                    </Table.Row>
                   ))
                 )}
-              </tbody>
-            </table>
+              </Table.Body>
+            </Table>
           </Card>
         )}
       </div>

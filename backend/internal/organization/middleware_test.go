@@ -41,6 +41,10 @@ func (f fakeRepo) GetMembership(context.Context, uuid.UUID, uuid.UUID) (Membersh
 	return f.membership, f.membershipErr
 }
 
+func (f fakeRepo) GetMember(context.Context, uuid.UUID, uuid.UUID) (Member, error) {
+	return Member{}, nil
+}
+
 func (f fakeRepo) ListMemberEntries(context.Context, uuid.UUID, MemberListParams) ([]MemberEntry, int, error) {
 	return nil, 0, nil
 }

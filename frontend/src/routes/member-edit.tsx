@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { Department, Member } from "../api/organization";
 import {
   useOrganizationDepartmentsQuery,
-  useOrganizationMembersQuery,
+  useOrganizationMemberQuery,
   useOrganizationQuery,
   useUpdateMemberMutation,
 } from "../api/organization.queries";
@@ -143,9 +143,11 @@ export default function MemberEdit(): React.JSX.Element {
   const id = userId!;
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
-  const members = useOrganizationMembersQuery(slug, isAdmin);
+  const memberQuery = useOrganizationMemberQuery(slug, id, isAdmin);
   const departments = useOrganizationDepartmentsQuery(slug, isAdmin);
-  const entry = members.data?.find((m) => m.userId === id);
+  const member = memberQuery.data;
+  const notFound =
+    memberQuery.error instanceof ApiError && memberQuery.error.status === 404;
 
   const shell = (body: React.ReactNode): React.JSX.Element => (
     <>
@@ -170,18 +172,19 @@ export default function MemberEdit(): React.JSX.Element {
   if (!isAdmin) {
     return shell(message(t("members.adminOnly")));
   }
-  if (members.isError) {
-    return shell(message(accessMessage(members.error, t), true));
+  if (notFound) {
+    return shell(message(t("memberDetail.notFound")));
   }
-  if (members.isPending || departments.isPending) {
+  if (memberQuery.isError) {
+    return shell(message(accessMessage(memberQuery.error, t), true));
+  }
+  if (memberQuery.isPending || departments.isPending) {
     return shell(message(t("common.loading")));
   }
-  if (!entry) {
+  if (!member) {
     return shell(message(t("memberDetail.notFound")));
   }
 
-  // Found by userId, so it's an active member with a real userId.
-  const member: Member = { ...entry, userId: id };
   return (
     <EditForm
       slug={slug}

@@ -84,6 +84,20 @@ func NewReader(db database.DB) *Reader { return &Reader{db: db} }
 // after starts from the newest event; otherwise it returns events strictly older
 // than the cursor. limit is clamped to [1, MaxListLimit].
 func (r *Reader) ListForOrganization(ctx context.Context, orgID uuid.UUID, after *Cursor, limit int) (Page, error) {
+	return r.page(ctx, "a.organization_id = $1", []any{orgID}, after, limit)
+}
+
+// ListForMember matches both target_id keys a member's events use: email (for
+// invitations, before a user row exists) and the user id (everything after).
+func (r *Reader) ListForMember(ctx context.Context, orgID, userID uuid.UUID, after *Cursor, limit int) (Page, error) {
+	filter := `a.organization_id = $1 AND (
+		(a.target_type = 'user' AND a.target_id = $2)
+		OR (a.target_type = 'membership'
+			AND a.target_id IN ($2, (SELECT email FROM users WHERE id = $3))))`
+	return r.page(ctx, filter, []any{orgID, userID.String(), userID}, after, limit)
+}
+
+func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, after *Cursor, limit int) (Page, error) {
 	switch {
 	case limit <= 0:
 		limit = DefaultListLimit
@@ -99,18 +113,21 @@ func (r *Reader) ListForOrganization(ctx context.Context, orgID uuid.UUID, after
 	}
 
 	// Fetch one extra row to detect whether a further page exists.
-	const q = `
+	args := append(append([]any{}, filterArgs...), cursorTime, cursorID, limit+1)
+	c := len(filterArgs) + 1
+
+	q := fmt.Sprintf(`
 		SELECT a.id, a.occurred_at, a.action, a.target_type, a.target_id, a.metadata,
 		       u.id, u.preferred_name, u.given_names, u.last_name
 		FROM audit_events a
 		LEFT JOIN users u ON u.id = a.actor_user_id
-		WHERE a.organization_id = $1
-		  AND ($2::timestamptz IS NULL OR (a.occurred_at, a.id) < ($2, $3::uuid))
+		WHERE %s
+		  AND ($%d::timestamptz IS NULL OR (a.occurred_at, a.id) < ($%d, $%d::uuid))
 		ORDER BY a.occurred_at DESC, a.id DESC
-		LIMIT $4`
-	rows, err := r.db.Query(ctx, q, orgID, cursorTime, cursorID, limit+1)
+		LIMIT $%d`, filter, c, c, c+1, c+2)
+	rows, err := r.db.Query(ctx, q, args...)
 	if err != nil {
-		return Page{}, fmt.Errorf("audit: list events org %s: %w", orgID, err)
+		return Page{}, fmt.Errorf("audit: list events: %w", err)
 	}
 	defer rows.Close()
 

@@ -4,96 +4,18 @@ import {
   useOrganizationAuditEventsQuery,
   useOrganizationQuery,
 } from "../api/organization.queries";
-import type { AuditEvent } from "../api/organization";
 import { accessMessage } from "../lib/access-message";
+import {
+  auditActionLabel,
+  auditSubject,
+  auditTargetLabel,
+  auditVisual,
+  AUDIT_TONE_CLASSES,
+} from "../lib/audit-event";
 import { fullName } from "../lib/name";
-import { Button, Card, Icon, TopBar } from "../ui";
-import type { IconName } from "../ui";
+import { Button, Card, Icon, Table, TopBar } from "../ui";
 import * as React from "react";
 
-type Tone = "green" | "blue" | "red" | "amber" | "violet" | "slate";
-
-const TONE_CLASSES: Record<Tone, string> = {
-  green: "bg-success-bg text-success",
-  blue: "bg-highlight text-link",
-  red: "bg-error-bg text-error",
-  amber: "bg-warning-bg text-warning-fg",
-  violet: "bg-[#ECE3F4] text-[#5B3B85]",
-  slate: "bg-[#E4E2DF] text-ink",
-};
-
-const ACTION_VISUAL: Record<string, { icon: IconName; tone: Tone }> = {
-  "organization.created": { icon: "add", tone: "green" },
-  "organization.updated": { icon: "edit", tone: "blue" },
-  "membership.invited": { icon: "email", tone: "amber" },
-  "membership.invite_resent": { icon: "email", tone: "amber" },
-  "membership.invite_revoked": { icon: "close", tone: "red" },
-  "membership.accepted": { icon: "valid", tone: "green" },
-  "membership.declined": { icon: "close", tone: "slate" },
-  "membership.revoked": { icon: "close", tone: "red" },
-  "membership.role_changed": { icon: "settings", tone: "blue" },
-  "membership.expired": { icon: "time", tone: "slate" },
-  "department.created": { icon: "add", tone: "green" },
-  "department.updated": { icon: "edit", tone: "blue" },
-  "department.deleted": { icon: "delete", tone: "red" },
-  "user.identity_changed": { icon: "personal", tone: "blue" },
-  "user.identity_review_required": { icon: "warning", tone: "amber" },
-  "user.identity_review_resolved": { icon: "valid", tone: "green" },
-  "user.purged": { icon: "delete", tone: "red" },
-};
-
-const DEFAULT_VISUAL: { icon: IconName; tone: Tone } = {
-  icon: "info",
-  tone: "slate",
-};
-
-function fieldValue(
-  value: unknown,
-  dateFormatter: Intl.DateTimeFormat,
-): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "string") {
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
-      const date = new Date(value);
-      if (!Number.isNaN(date.getTime())) return dateFormatter.format(date);
-    }
-    return value;
-  }
-  return JSON.stringify(value);
-}
-
-// The human-readable detail for a row, derived from the uniform {before, after}
-// metadata: an update diffs changed fields ("old → new"); a create/delete shows
-// the snapshot's identifying field.
-function subjectOf(
-  event: AuditEvent,
-  dateFormatter: Intl.DateTimeFormat,
-): string | null {
-  const { before, after } = event.metadata as {
-    before?: Record<string, unknown> | null;
-    after?: Record<string, unknown> | null;
-  };
-
-  if (before && after) {
-    const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
-    const changes = keys
-      .filter((key) => before[key] !== after[key])
-      .map(
-        (key) =>
-          `${fieldValue(before[key], dateFormatter)} → ${fieldValue(after[key], dateFormatter)}`,
-      );
-    return changes.length > 0 ? changes.join(", ") : null;
-  }
-
-  const snapshot = after ?? before;
-  if (!snapshot) return null;
-  const id = snapshot.name ?? snapshot.email ?? snapshot.role;
-  return typeof id === "string" ? id : null;
-}
-
-const TH_CLASS =
-  "border-line bg-surface-2 text-muted border-b px-3.5 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
-const TD_CLASS = "border-line border-b px-3.5 py-3";
 const COLUMN_COUNT = 5;
 
 export default function AuditLog(): React.JSX.Element {
@@ -115,62 +37,6 @@ export default function AuditLog(): React.JSX.Element {
       }),
     [i18n.language],
   );
-
-  const actionLabel = (action: string): string => {
-    switch (action) {
-      case "organization.created":
-        return t("auditLog.actions.orgCreated");
-      case "organization.updated":
-        return t("auditLog.actions.orgUpdated");
-      case "membership.invited":
-        return t("auditLog.actions.memberInvited");
-      case "membership.invite_resent":
-        return t("auditLog.actions.inviteResent");
-      case "membership.invite_revoked":
-        return t("auditLog.actions.inviteRevoked");
-      case "membership.accepted":
-        return t("auditLog.actions.inviteAccepted");
-      case "membership.declined":
-        return t("auditLog.actions.inviteDeclined");
-      case "membership.revoked":
-        return t("auditLog.actions.memberRevoked");
-      case "membership.role_changed":
-        return t("auditLog.actions.roleChanged");
-      case "membership.expired":
-        return t("auditLog.actions.inviteExpired");
-      case "department.created":
-        return t("auditLog.actions.deptCreated");
-      case "department.updated":
-        return t("auditLog.actions.deptUpdated");
-      case "department.deleted":
-        return t("auditLog.actions.deptDeleted");
-      case "user.identity_changed":
-        return t("auditLog.actions.identityChanged");
-      case "user.identity_review_required":
-        return t("auditLog.actions.identityReviewRequired");
-      case "user.identity_review_resolved":
-        return t("auditLog.actions.identityReviewResolved");
-      case "user.purged":
-        return t("auditLog.actions.userPurged");
-      default:
-        return action;
-    }
-  };
-
-  const targetLabel = (targetType: string): string => {
-    switch (targetType) {
-      case "organization":
-        return t("auditLog.targets.organization");
-      case "membership":
-        return t("auditLog.targets.member");
-      case "department":
-        return t("auditLog.targets.department");
-      case "user":
-        return t("auditLog.targets.user");
-      default:
-        return targetType;
-    }
-  };
 
   return (
     <>
@@ -221,55 +87,50 @@ export default function AuditLog(): React.JSX.Element {
         ) : (
           <>
             <Card className="overflow-hidden">
-              <table className="w-full border-collapse text-[13.5px]">
-                <thead>
-                  <tr>
-                    <th className={TH_CLASS}>{t("auditLog.columns.when")}</th>
-                    <th className={TH_CLASS}>{t("auditLog.columns.actor")}</th>
-                    <th className={TH_CLASS}>{t("auditLog.columns.action")}</th>
-                    <th className={TH_CLASS}>{t("auditLog.columns.target")}</th>
-                    <th className={TH_CLASS}>
-                      {t("auditLog.columns.subject")}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table>
+                <Table.Head>
+                  <Table.HeaderCell>
+                    {t("auditLog.columns.when")}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t("auditLog.columns.actor")}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t("auditLog.columns.action")}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t("auditLog.columns.target")}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t("auditLog.columns.subject")}
+                  </Table.HeaderCell>
+                </Table.Head>
+                <Table.Body>
                   {org.isPending || audit.isPending ? (
-                    <tr>
-                      <td
-                        className="text-ink-soft px-3.5 py-3"
-                        colSpan={COLUMN_COUNT}
-                      >
-                        {t("common.loading")}
-                      </td>
-                    </tr>
+                    <Table.State colSpan={COLUMN_COUNT}>
+                      {t("common.loading")}
+                    </Table.State>
                   ) : events.length === 0 ? (
-                    <tr>
-                      <td
-                        className="text-ink-soft px-3.5 py-3"
-                        colSpan={COLUMN_COUNT}
-                      >
-                        {t("auditLog.empty")}
-                      </td>
-                    </tr>
+                    <Table.State colSpan={COLUMN_COUNT}>
+                      {t("auditLog.empty")}
+                    </Table.State>
                   ) : (
                     events.map((event) => {
-                      const visual =
-                        ACTION_VISUAL[event.action] ?? DEFAULT_VISUAL;
-                      const subject = subjectOf(event, dateFormatter);
+                      const visual = auditVisual(event.action);
+                      const subject = auditSubject(event, dateFormatter);
                       return (
-                        <tr key={event.id}>
-                          <td className={TD_CLASS}>
+                        <Table.Row key={event.id}>
+                          <Table.Cell>
                             <span className="text-ink-soft text-[12.5px]">
                               {dateFormatter.format(new Date(event.occurredAt))}
                             </span>
-                          </td>
-                          <td className={TD_CLASS}>
+                          </Table.Cell>
+                          <Table.Cell>
                             <div className="flex items-center gap-2.5">
                               <span
                                 className={[
                                   "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-                                  TONE_CLASSES[visual.tone],
+                                  AUDIT_TONE_CLASSES[visual.tone],
                                 ].join(" ")}
                               >
                                 <Icon name={visual.icon} size={14} />
@@ -280,29 +141,29 @@ export default function AuditLog(): React.JSX.Element {
                                   : t("auditLog.system")}
                               </span>
                             </div>
-                          </td>
-                          <td className={TD_CLASS}>
+                          </Table.Cell>
+                          <Table.Cell>
                             <span className="font-semibold">
-                              {actionLabel(event.action)}
+                              {auditActionLabel(event.action, t)}
                             </span>
-                          </td>
-                          <td className={`${TD_CLASS} text-ink-soft`}>
-                            {targetLabel(event.targetType)}
-                          </td>
-                          <td className={TD_CLASS}>
+                          </Table.Cell>
+                          <Table.Cell className="text-ink-soft">
+                            {auditTargetLabel(event.targetType, t)}
+                          </Table.Cell>
+                          <Table.Cell>
                             <span
                               className="text-ink-soft block max-w-[24rem] truncate text-[12.5px]"
                               title={subject ?? undefined}
                             >
                               {subject ?? t("auditLog.noSubject")}
                             </span>
-                          </td>
-                        </tr>
+                          </Table.Cell>
+                        </Table.Row>
                       );
                     })
                   )}
-                </tbody>
-              </table>
+                </Table.Body>
+              </Table>
             </Card>
 
             {audit.hasNextPage && (

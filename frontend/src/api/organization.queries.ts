@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -14,10 +15,12 @@ import {
   createDepartment,
   createOrganization,
   deleteDepartment,
+  getMemberAuditEvents,
   getMyOrganizations,
   getOrganization,
   getOrganizationAuditEvents,
   getOrganizationDepartments,
+  getOrganizationMember,
   getOrganizationMembers,
   getOrganizations,
   inviteMember,
@@ -30,7 +33,9 @@ import {
 import type {
   AuditEventsPage,
   Department,
-  MemberListEntry,
+  Member,
+  MemberListPage,
+  MemberListParams,
   Organization,
   OrganizationDetail,
 } from "./organization";
@@ -56,6 +61,28 @@ export function organizationAuditEventsQueryKey(
   slug: string,
 ): readonly string[] {
   return ["organizations", "detail", slug, "audit-events"];
+}
+
+export function memberAuditEventsQueryKey(
+  slug: string,
+  userId: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "members", userId, "audit-events"];
+}
+
+export function useMemberAuditEventsQuery(
+  slug: string,
+  userId: string,
+  enabled: boolean,
+): UseInfiniteQueryResult<InfiniteData<AuditEventsPage>, Error> {
+  return useInfiniteQuery({
+    queryKey: memberAuditEventsQueryKey(slug, userId),
+    queryFn: ({ pageParam, signal }) =>
+      getMemberAuditEvents(slug, userId, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: enabled && slug !== "" && userId !== "",
+  });
 }
 
 export function useOrganizationAuditEventsQuery(
@@ -134,12 +161,33 @@ export function useOrganizationQuery(
 
 export function useOrganizationMembersQuery(
   slug: string,
+  params: MemberListParams,
   enabled: boolean,
-): UseQueryResult<MemberListEntry[], Error> {
+): UseQueryResult<MemberListPage, Error> {
   return useQuery({
-    queryKey: organizationMembersQueryKey(slug),
-    queryFn: ({ signal }) => getOrganizationMembers(slug, signal),
+    queryKey: [...organizationMembersQueryKey(slug), params],
+    queryFn: ({ signal }) => getOrganizationMembers(slug, params, signal),
     enabled: enabled && slug !== "",
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function organizationMemberQueryKey(
+  slug: string,
+  userId: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "member", userId];
+}
+
+export function useOrganizationMemberQuery(
+  slug: string,
+  userId: string,
+  enabled: boolean,
+): UseQueryResult<Member, Error> {
+  return useQuery({
+    queryKey: organizationMemberQueryKey(slug, userId),
+    queryFn: ({ signal }) => getOrganizationMember(slug, userId, signal),
+    enabled: enabled && slug !== "" && userId !== "",
   });
 }
 
@@ -284,12 +332,18 @@ export function useUpdateMemberMutation(slug: string): UseMutationResult<
   return useMutation({
     mutationFn: ({ userId, role, jobTitle, departmentId }) =>
       updateOrganizationMember(slug, userId, { role, jobTitle, departmentId }),
-    onSuccess: () => {
+    onSuccess: (_data, { userId }) => {
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),
       });
       void queryClient.invalidateQueries({
+        queryKey: organizationMemberQueryKey(slug, userId),
+      });
+      void queryClient.invalidateQueries({
         queryKey: organizationAuditEventsQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: memberAuditEventsQueryKey(slug, userId),
       });
     },
   });

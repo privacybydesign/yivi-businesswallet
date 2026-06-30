@@ -3,6 +3,8 @@ export type { IconName } from "./icon";
 export { Button } from "./button";
 export { Card } from "./card";
 export { Tag } from "./tag";
+export { Table } from "./table";
+export type { SortDir } from "./table";
 export { Breadcrumbs } from "./breadcrumb";
 export type { CrumbContext, RouteHandle } from "./breadcrumb";
 export { Input } from "./input";

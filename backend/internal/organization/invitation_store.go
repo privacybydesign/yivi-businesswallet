@@ -31,37 +31,6 @@ func newInviteTokenHash() ([sha256.Size]byte, error) {
 	return sha256.Sum256([]byte(base64.RawURLEncoding.EncodeToString(b))), nil
 }
 
-func (s *Store) ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error) {
-	const q = `
-		SELECT i.id, i.organization_id, i.email, i.invited_by, i.role, i.job_title,
-		       i.department_id, d.name, i.invited_given_names, i.invited_last_name,
-		       i.expires_at, i.created_at
-		FROM invitations i
-		LEFT JOIN departments d ON d.id = i.department_id
-		WHERE i.organization_id = $1
-		ORDER BY i.invited_last_name, i.invited_given_names`
-	rows, err := s.db.Query(ctx, q, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("organization: list invitations org %s: %w", orgID, err)
-	}
-	defer rows.Close()
-
-	invitations := []Invitation{}
-	for rows.Next() {
-		var inv Invitation
-		if err := rows.Scan(&inv.ID, &inv.OrganizationID, &inv.Email, &inv.InvitedBy, &inv.Role,
-			&inv.JobTitle, &inv.DepartmentID, &inv.DepartmentName, &inv.GivenNames, &inv.LastName,
-			&inv.ExpiresAt, &inv.CreatedAt); err != nil {
-			return nil, fmt.Errorf("organization: list invitations scan: %w", err)
-		}
-		invitations = append(invitations, inv)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("organization: list invitations rows: %w", err)
-	}
-	return invitations, nil
-}
-
 func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation, error) {
 	tokenHash, err := newInviteTokenHash()
 	if err != nil {

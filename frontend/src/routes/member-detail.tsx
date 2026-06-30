@@ -1,12 +1,22 @@
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
-  useOrganizationMembersQuery,
+  useMemberAuditEventsQuery,
+  useOrganizationMemberQuery,
   useOrganizationQuery,
 } from "../api/organization.queries";
+import type { AuditEvent } from "../api/organization";
+import { ApiError } from "../api/http";
 import { accessMessage } from "../lib/access-message";
+import {
+  auditActionLabel,
+  auditSubject,
+  auditVisual,
+  AUDIT_TONE_CLASSES,
+} from "../lib/audit-event";
 import { fullName, personInitials } from "../lib/name";
-import { Avatar, Button, Card, Tag, TopBar } from "../ui";
+import { Avatar, Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const EYEBROW =
@@ -36,8 +46,54 @@ function DetailRow({
   );
 }
 
+function TimelineItem({
+  event,
+  dateFormatter,
+  t,
+  isLast,
+}: {
+  event: AuditEvent;
+  dateFormatter: Intl.DateTimeFormat;
+  t: TFunction;
+  isLast: boolean;
+}): React.JSX.Element {
+  const visual = auditVisual(event.action);
+  const subject = auditSubject(event, dateFormatter);
+  return (
+    <li className="flex gap-3">
+      <div className="flex flex-col items-center">
+        <span
+          className={[
+            "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+            AUDIT_TONE_CLASSES[visual.tone],
+          ].join(" ")}
+        >
+          <Icon name={visual.icon} size={15} />
+        </span>
+        {!isLast && (
+          <span className="bg-line mt-1 w-px flex-1" aria-hidden="true" />
+        )}
+      </div>
+      <div className="flex-1 pb-5">
+        <div className="text-ink text-[13.5px] font-semibold">
+          {auditActionLabel(event.action, t)}
+        </div>
+        {subject && (
+          <div className="text-ink-soft mt-0.5 text-[12.5px]">{subject}</div>
+        )}
+        <div className="text-muted mt-1 text-[11.5px]">
+          {dateFormatter.format(new Date(event.occurredAt))}
+          {event.actor
+            ? ` · ${t("memberDetail.timeline.by", { actor: fullName(event.actor) })}`
+            : ""}
+        </div>
+      </div>
+    </li>
+  );
+}
+
 export default function MemberDetail(): React.JSX.Element {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { orgSlug, userId } = useParams();
   // Both are guaranteed by the ":orgSlug/members/:userId" route.
@@ -45,8 +101,21 @@ export default function MemberDetail(): React.JSX.Element {
   const id = userId!;
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
-  const members = useOrganizationMembersQuery(slug, isAdmin);
-  const member = members.data?.find((m) => m.userId === id);
+  const memberQuery = useOrganizationMemberQuery(slug, id, isAdmin);
+  const member = memberQuery.data;
+  const notFound =
+    memberQuery.error instanceof ApiError && memberQuery.error.status === 404;
+
+  const timeline = useMemberAuditEventsQuery(slug, id, isAdmin);
+  const events = timeline.data?.pages.flatMap((page) => page.events) ?? [];
+  const dateFormatter = React.useMemo(
+    () =>
+      new Intl.DateTimeFormat(i18n.language, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    [i18n.language],
+  );
 
   const shell = (body: React.ReactNode): React.JSX.Element => (
     <>
@@ -71,10 +140,13 @@ export default function MemberDetail(): React.JSX.Element {
   if (!isAdmin) {
     return shell(message(t("members.adminOnly")));
   }
-  if (members.isError) {
-    return shell(message(accessMessage(members.error, t), true));
+  if (notFound) {
+    return shell(message(t("memberDetail.notFound")));
   }
-  if (members.isPending) {
+  if (memberQuery.isError) {
+    return shell(message(accessMessage(memberQuery.error, t), true));
+  }
+  if (memberQuery.isPending) {
     return shell(message(t("common.loading")));
   }
   if (!member) {
@@ -117,11 +189,50 @@ export default function MemberDetail(): React.JSX.Element {
           </Card>
           <Card className="p-6">
             <h2 className="text-[16px] font-semibold">
-              {t("memberDetail.timeline")}
+              {t("memberDetail.timeline.title")}
             </h2>
-            <p className="text-ink-soft mt-2 text-[14px]">
-              {t("memberDetail.timelinePlaceholder")}
-            </p>
+            {timeline.isError ? (
+              <p className="text-error mt-2 text-[14px]">
+                {t("memberDetail.timeline.error", {
+                  message: timeline.error.message,
+                })}
+              </p>
+            ) : timeline.isPending ? (
+              <p className="text-ink-soft mt-2 text-[14px]">
+                {t("common.loading")}
+              </p>
+            ) : events.length === 0 ? (
+              <p className="text-ink-soft mt-2 text-[14px]">
+                {t("memberDetail.timeline.empty")}
+              </p>
+            ) : (
+              <>
+                <ul className="mt-5">
+                  {events.map((event, index) => (
+                    <TimelineItem
+                      key={event.id}
+                      event={event}
+                      dateFormatter={dateFormatter}
+                      t={t}
+                      isLast={index === events.length - 1}
+                    />
+                  ))}
+                </ul>
+                {timeline.hasNextPage && (
+                  <div className="flex justify-center">
+                    <Button
+                      variant="secondary"
+                      onClick={() => void timeline.fetchNextPage()}
+                      disabled={timeline.isFetchingNextPage}
+                    >
+                      {timeline.isFetchingNextPage
+                        ? t("common.loading")
+                        : t("memberDetail.timeline.loadMore")}
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
           </Card>
         </div>
 

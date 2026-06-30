@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -15,79 +15,90 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
-type memberListEntry struct {
-	Status         string     `json:"status"`
-	UserID         *uuid.UUID `json:"userId"`
-	InvitationID   *uuid.UUID `json:"invitationId"`
-	Email          string     `json:"email"`
-	PreferredName  *string    `json:"preferredName"`
-	GivenNames     string     `json:"givenNames"`
-	LastName       string     `json:"lastName"`
-	Role           string     `json:"role"`
-	JobTitle       *string    `json:"jobTitle"`
-	DepartmentID   *uuid.UUID `json:"departmentId"`
-	DepartmentName *string    `json:"departmentName"`
-	ExpiresAt      *time.Time `json:"expiresAt"`
-	InvitedBy      *uuid.UUID `json:"invitedBy"`
+type memberListPage struct {
+	Entries []MemberEntry `json:"entries"`
+	Total   int           `json:"total"`
 }
 
 func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
-	status := r.URL.Query().Get("status")
+	q := r.URL.Query()
+
+	status := q.Get("status")
 	if status != "" && status != StatusActive && status != StatusInvited {
 		return badRequest("invalid_status", `status must be "active" or "invited"`)
 	}
 
-	ctx := r.Context()
-	org := OrgFromContext(ctx)
-	entries := []memberListEntry{}
-
-	if status == "" || status == StatusActive {
-		members, err := h.store.ListMembers(ctx, org.ID)
-		if err != nil {
-			return fmt.Errorf("listing members: %w", err)
-		}
-		for _, m := range members {
-			userID := m.UserID
-			entries = append(entries, memberListEntry{
-				Status:         StatusActive,
-				UserID:         &userID,
-				Email:          m.Email,
-				PreferredName:  m.PreferredName,
-				GivenNames:     m.GivenNames,
-				LastName:       m.LastName,
-				Role:           m.Role,
-				JobTitle:       m.JobTitle,
-				DepartmentID:   m.DepartmentID,
-				DepartmentName: m.DepartmentName,
-			})
-		}
+	sort := q.Get("sort")
+	if sort == "" {
+		sort = defaultMemberSort
+	} else if _, ok := memberSortColumns[sort]; !ok {
+		return badRequest("invalid_sort", "invalid sort column")
 	}
 
-	if status == "" || status == StatusInvited {
-		invitations, err := h.store.ListInvitations(ctx, org.ID)
-		if err != nil {
-			return fmt.Errorf("listing invitations: %w", err)
-		}
-		for _, inv := range invitations {
-			id := inv.ID
-			expiresAt := inv.ExpiresAt
-			entries = append(entries, memberListEntry{
-				Status:         StatusInvited,
-				InvitationID:   &id,
-				Email:          inv.Email,
-				GivenNames:     inv.GivenNames,
-				LastName:       inv.LastName,
-				Role:           inv.Role,
-				JobTitle:       inv.JobTitle,
-				DepartmentID:   inv.DepartmentID,
-				DepartmentName: inv.DepartmentName,
-				ExpiresAt:      &expiresAt,
-				InvitedBy:      inv.InvitedBy,
-			})
-		}
+	var desc bool
+	switch q.Get("dir") {
+	case "", "asc":
+		desc = false
+	case "desc":
+		desc = true
+	default:
+		return badRequest("invalid_dir", `dir must be "asc" or "desc"`)
 	}
 
-	respond.JSON(w, r, http.StatusOK, entries)
+	limit := DefaultMemberListLimit
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			return badRequest("invalid_limit", "limit must be a positive integer")
+		}
+		if n > MaxMemberListLimit {
+			n = MaxMemberListLimit
+		}
+		limit = n
+	}
+
+	offset := 0
+	if raw := q.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			return badRequest("invalid_offset", "offset must be a non-negative integer")
+		}
+		offset = n
+	}
+
+	org := OrgFromContext(r.Context())
+	entries, total, err := h.store.ListMemberEntries(r.Context(), org.ID, MemberListParams{
+		Status: status,
+		Search: strings.TrimSpace(q.Get("q")),
+		Sort:   sort,
+		Desc:   desc,
+		Limit:  limit,
+		Offset: offset,
+	})
+	if err != nil {
+		return fmt.Errorf("listing members: %w", err)
+	}
+
+	respond.JSON(w, r, http.StatusOK, memberListPage{Entries: entries, Total: total})
+	return nil
+}
+
+func (h *Handler) member(w http.ResponseWriter, r *http.Request) error {
+	userID, err := uuid.Parse(r.PathValue("userId"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid user id")
+	}
+
+	org := OrgFromContext(r.Context())
+	member, err := h.store.GetMember(r.Context(), org.ID, userID)
+	switch {
+	case errors.Is(err, ErrNotMember):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "member_not_found", Message: "member not found"}
+	case err != nil:
+		return fmt.Errorf("getting member: %w", err)
+	}
+
+	respond.JSON(w, r, http.StatusOK, member)
 	return nil
 }
 

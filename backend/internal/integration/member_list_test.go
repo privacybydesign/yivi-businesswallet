@@ -40,11 +40,14 @@ func (e *testEnv) listMembers(slug, status string) []memberEntry {
 	if resp.StatusCode != http.StatusOK {
 		e.t.Fatalf("list members = %d, want 200", resp.StatusCode)
 	}
-	var entries []memberEntry
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+	var page struct {
+		Entries []memberEntry `json:"entries"`
+		Total   int           `json:"total"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
 		e.t.Fatalf("decode member list: %v", err)
 	}
-	return entries
+	return page.Entries
 }
 
 func byEmail(entries []memberEntry, email string) *memberEntry {

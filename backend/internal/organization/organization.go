@@ -13,6 +13,9 @@ const (
 
 	StatusActive  = "active"
 	StatusInvited = "invited"
+
+	DefaultMemberListLimit = 25
+	MaxMemberListLimit     = 100
 )
 
 var (
@@ -73,4 +76,29 @@ type Member struct {
 	JobTitle       *string    `json:"jobTitle"`
 	DepartmentID   *uuid.UUID `json:"departmentId"`
 	DepartmentName *string    `json:"departmentName"`
+}
+
+type MemberEntry struct {
+	Status         string     `json:"status"`
+	UserID         *uuid.UUID `json:"userId"`
+	InvitationID   *uuid.UUID `json:"invitationId"`
+	Email          string     `json:"email"`
+	PreferredName  *string    `json:"preferredName"`
+	GivenNames     string     `json:"givenNames"`
+	LastName       string     `json:"lastName"`
+	Role           string     `json:"role"`
+	JobTitle       *string    `json:"jobTitle"`
+	DepartmentID   *uuid.UUID `json:"departmentId"`
+	DepartmentName *string    `json:"departmentName"`
+	ExpiresAt      *time.Time `json:"expiresAt"`
+	InvitedBy      *uuid.UUID `json:"invitedBy"`
+}
+
+type MemberListParams struct {
+	Status string
+	Search string
+	Sort   string
+	Desc   bool
+	Limit  int
+	Offset int
 }

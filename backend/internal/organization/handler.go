@@ -23,8 +23,8 @@ type repository interface {
 	Update(ctx context.Context, id uuid.UUID, name string) (Organization, error)
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
-	ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, error)
-	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
+	GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
+	ListMemberEntries(ctx context.Context, orgID uuid.UUID, p MemberListParams) ([]MemberEntry, int, error)
 	RevokeInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error
 	ResendInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error
 	UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, role *string, jobTitle *string, departmentID *uuid.UUID) (Member, error)
@@ -40,6 +40,7 @@ type inviter interface {
 
 type auditReader interface {
 	ListForOrganization(ctx context.Context, orgID uuid.UUID, after *audit.Cursor, limit int) (audit.Page, error)
+	ListForMember(ctx context.Context, orgID, userID uuid.UUID, after *audit.Cursor, limit int) (audit.Page, error)
 }
 
 type Handler struct {
@@ -71,8 +72,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
 	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))
 	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
+	mux.Handle("GET /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.member))))
 	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.invite))))
 	mux.Handle("PATCH /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMember))))
+	mux.Handle("GET /orgs/{slug}/members/{userId}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberAuditEvents))))
 
 	mux.Handle("POST /orgs/{slug}/invitations/{id}/resend", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.resendInvitation))))
 	mux.Handle("DELETE /orgs/{slug}/invitations/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.revokeInvitation))))
