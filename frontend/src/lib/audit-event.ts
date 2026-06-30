@@ -29,7 +29,8 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "department.deleted": { icon: "delete", tone: "red" },
   "user.identity_changed": { icon: "personal", tone: "blue" },
   "user.identity_review_required": { icon: "warning", tone: "amber" },
-  "user.identity_review_resolved": { icon: "valid", tone: "green" },
+  "user.identity_review_approved": { icon: "valid", tone: "green" },
+  "user.identity_review_rejected": { icon: "close", tone: "red" },
   "user.purged": { icon: "delete", tone: "red" },
 };
 
@@ -77,8 +78,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityChanged");
     case "user.identity_review_required":
       return t("auditLog.actions.identityReviewRequired");
-    case "user.identity_review_resolved":
-      return t("auditLog.actions.identityReviewResolved");
+    case "user.identity_review_approved":
+      return t("auditLog.actions.identityReviewApproved");
+    case "user.identity_review_rejected":
+      return t("auditLog.actions.identityReviewRejected");
     case "user.purged":
       return t("auditLog.actions.userPurged");
     default:
