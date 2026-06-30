@@ -55,16 +55,23 @@ type auditReader interface {
 	ListForMember(ctx context.Context, orgID, userID uuid.UUID, after *audit.Cursor, limit int) (audit.Page, error)
 }
 
+// sessionIssuer logs a member in after they accept an invitation: the accept's
+// identity disclosure already proves email ownership, so re-login is redundant.
+type sessionIssuer interface {
+	Issue(ctx context.Context, w http.ResponseWriter, userID uuid.UUID, idempotencyToken string) error
+}
+
 type Handler struct {
 	store       repository
 	service     inviter
 	reader      auditReader
+	issuer      sessionIssuer
 	requireUser func(http.Handler) http.Handler
 	admins      auth.PlatformAdmins
 }
 
-func NewHandler(store repository, service inviter, reader auditReader, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
-	return &Handler{store: store, service: service, reader: reader, requireUser: requireUser, admins: admins}
+func NewHandler(store repository, service inviter, reader auditReader, issuer sessionIssuer, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
+	return &Handler{store: store, service: service, reader: reader, issuer: issuer, requireUser: requireUser, admins: admins}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {

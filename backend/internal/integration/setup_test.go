@@ -123,7 +123,8 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, admins)
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
-	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), requireUser, admins)
+	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)
+	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, requireUser, admins)
 
 	srv := httptest.NewServer(server.New(pool, authHandler, orgHandler))
 	t.Cleanup(srv.Close)

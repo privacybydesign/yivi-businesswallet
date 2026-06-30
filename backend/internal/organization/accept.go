@@ -69,6 +69,18 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) error {
 	if err := mapAcceptError(err); err != nil {
 		return err
 	}
+	return h.respondAccept(w, r, outcome, req.DisclosureToken)
+}
+
+// respondAccept logs the member in when the accept completed (the identity
+// disclosure proves email ownership), then returns the outcome. A held review
+// grants no session.
+func (h *Handler) respondAccept(w http.ResponseWriter, r *http.Request, outcome AcceptOutcome, disclosureToken string) error {
+	if outcome.Status == AcceptAccepted {
+		if err := h.issuer.Issue(r.Context(), w, outcome.UserID, disclosureToken); err != nil {
+			return fmt.Errorf("issuing session on accept: %w", err)
+		}
+	}
 	respond.JSON(w, r, http.StatusOK, acceptResponse{
 		Status:           string(outcome.Status),
 		OrganizationName: outcome.OrganizationName,
@@ -103,12 +115,7 @@ func (h *Handler) acceptInvitationByID(w http.ResponseWriter, r *http.Request) e
 	if err := mapAcceptError(err); err != nil {
 		return err
 	}
-	respond.JSON(w, r, http.StatusOK, acceptResponse{
-		Status:           string(outcome.Status),
-		OrganizationName: outcome.OrganizationName,
-		OrganizationSlug: outcome.OrganizationSlug,
-	})
-	return nil
+	return h.respondAccept(w, r, outcome, req.DisclosureToken)
 }
 
 func (h *Handler) declineInvite(w http.ResponseWriter, r *http.Request) error {

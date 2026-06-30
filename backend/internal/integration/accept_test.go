@@ -122,6 +122,47 @@ func TestAcceptInvitationMintsNewUser(t *testing.T) {
 	}
 }
 
+func TestAcceptLogsInOnSuccess(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	token := env.createInvitation(orgID, "newbie@example.test", "New", "Comer")
+	env.discloses("newbie@example.test", "New", "Comer")
+
+	resp := env.acceptInvite(token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("accept = %d, want 200", resp.StatusCode)
+	}
+
+	// The accept disclosure proves email ownership, so it mints a session: /me
+	// is now authenticated via the cookie jar without a separate login.
+	me := env.getMe(t)
+	if me.Email != "newbie@example.test" {
+		t.Errorf("me.email = %q, want newbie@example.test", me.Email)
+	}
+}
+
+func TestPendingReviewDoesNotLogIn(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	env.createUserNamed("changed@example.test", "Anna", "Berg")
+	token := env.createInvitation(orgID, "changed@example.test", "José", "Berg")
+	env.discloses("changed@example.test", "José", "Berg")
+
+	resp := env.acceptInvite(token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("accept = %d, want 200 (pending review)", resp.StatusCode)
+	}
+
+	// A held review grants no membership and no session.
+	me := env.do(http.MethodGet, "/api/v1/me", nil)
+	_ = me.Body.Close()
+	if me.StatusCode != http.StatusUnauthorized {
+		t.Errorf("GET /me after held review = %d, want 401 (not logged in)", me.StatusCode)
+	}
+}
+
 func TestStartInvitationSession(t *testing.T) {
 	env := setup(t)
 	resp := env.do(http.MethodPost, "/api/v1/invitations/session", nil)

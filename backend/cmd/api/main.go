@@ -98,7 +98,8 @@ func run() error {
 
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
-	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), requireUser, platformAdmins)
+	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)
+	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, requireUser, platformAdmins)
 
 	handler := server.New(
 		pool,

@@ -121,6 +121,7 @@ const (
 
 type AcceptOutcome struct {
 	Status           AcceptStatus
+	UserID           uuid.UUID
 	OrganizationSlug string
 	OrganizationName string
 }
@@ -151,7 +152,7 @@ func (s *Service) acceptResolved(ctx context.Context, inv Invitation, disclosure
 	if err != nil {
 		return AcceptOutcome{}, err
 	}
-	at := AcceptOutcome{OrganizationSlug: inv.OrganizationSlug, OrganizationName: inv.OrganizationName}
+	at := AcceptOutcome{UserID: u.ID, OrganizationSlug: inv.OrganizationSlug, OrganizationName: inv.OrganizationName}
 
 	if needsReview {
 		stored := identity.Name{GivenNames: u.GivenNames, LastName: u.LastName}
