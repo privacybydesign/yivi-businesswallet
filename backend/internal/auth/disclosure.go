@@ -3,10 +3,12 @@ package auth
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	irma "github.com/privacybydesign/irmago/irma"
 	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
@@ -17,12 +19,19 @@ var (
 	errUserNotInvited     = errors.New("user not invited")
 )
 
-func extractEmail(res *irmaserver.SessionResult, want irma.AttributeTypeIdentifier) (user.Email, error) {
+func disclosureValid(res *irmaserver.SessionResult) error {
 	if res.Status != irma.ServerStatusDone {
-		return "", errSessionNotFinished
+		return errSessionNotFinished
 	}
 	if res.ProofStatus != irma.ProofStatusValid {
-		return "", errDisclosureInvalid
+		return errDisclosureInvalid
+	}
+	return nil
+}
+
+func extractEmail(res *irmaserver.SessionResult, want irma.AttributeTypeIdentifier) (user.Email, error) {
+	if err := disclosureValid(res); err != nil {
+		return "", err
 	}
 	if len(res.Disclosed) == 0 || len(res.Disclosed[0]) == 0 {
 		return "", errDisclosureInvalid
@@ -40,6 +49,38 @@ func extractEmail(res *irmaserver.SessionResult, want irma.AttributeTypeIdentifi
 		return "", errDisclosureInvalid
 	}
 	return email, nil
+}
+
+// disclosedValues flattens a multi-attribute disclosure into a lookup of the
+// present, non-null raw values by attribute identifier.
+func disclosedValues(res *irmaserver.SessionResult) map[irma.AttributeTypeIdentifier]string {
+	values := map[irma.AttributeTypeIdentifier]string{}
+	for _, con := range res.Disclosed {
+		for _, attr := range con {
+			if attr.Status == irma.AttributeProofStatusPresent && attr.RawValue != nil {
+				values[attr.Identifier] = *attr.RawValue
+			}
+		}
+	}
+	return values
+}
+
+func extractIdentity(res *irmaserver.SessionResult, attrs IdentityAttributes, emailAttr irma.AttributeTypeIdentifier) (DisclosedIdentity, error) {
+	if err := disclosureValid(res); err != nil {
+		return DisclosedIdentity{}, err
+	}
+	values := disclosedValues(res)
+
+	email, err := user.ParseEmail(values[emailAttr])
+	if err != nil {
+		return DisclosedIdentity{}, errDisclosureInvalid
+	}
+	given := strings.TrimSpace(values[attrs.GivenNames])
+	family := strings.TrimSpace(values[attrs.FamilyName])
+	if given == "" || family == "" {
+		return DisclosedIdentity{}, errDisclosureInvalid
+	}
+	return DisclosedIdentity{Email: email, Name: identity.Name{GivenNames: given, LastName: family}}, nil
 }
 
 func mapClaimError(err error) error {

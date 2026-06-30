@@ -8,6 +8,7 @@ import (
 	irma "github.com/privacybydesign/irmago/irma"
 	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
@@ -137,6 +138,99 @@ func TestExtractEmail(t *testing.T) {
 			}
 			if email != tt.wantEmail {
 				t.Fatalf("email = %q, want %q", email, tt.wantEmail)
+			}
+		})
+	}
+}
+
+func TestExtractIdentity(t *testing.T) {
+	email := irma.NewAttributeTypeIdentifier("irma-demo.sidn-pbdf.email.email")
+	attrs := IdentityAttributes{
+		GivenNames: irma.NewAttributeTypeIdentifier("irma-demo.MijnOverheid.drivinglicense.firstnames"),
+		FamilyName: irma.NewAttributeTypeIdentifier("irma-demo.MijnOverheid.drivinglicense.familyname"),
+	}
+	present := func(id irma.AttributeTypeIdentifier, raw string) *irma.DisclosedAttribute {
+		return &irma.DisclosedAttribute{Identifier: id, Status: irma.AttributeProofStatusPresent, RawValue: strptr(raw)}
+	}
+	valid := func(disc [][]*irma.DisclosedAttribute) *irmaserver.SessionResult {
+		return &irmaserver.SessionResult{Status: irma.ServerStatusDone, ProofStatus: irma.ProofStatusValid, Disclosed: disc}
+	}
+
+	tests := []struct {
+		name    string
+		result  *irmaserver.SessionResult
+		want    DisclosedIdentity
+		wantErr error
+	}{
+		{
+			name: "full disclosure yields identity",
+			result: valid([][]*irma.DisclosedAttribute{
+				{present(attrs.GivenNames, "José")},
+				{present(attrs.FamilyName, "van der Berg")},
+				{present(email, "user@example.test")},
+			}),
+			want: DisclosedIdentity{Email: "user@example.test", Name: identity.Name{GivenNames: "José", LastName: "van der Berg"}},
+		},
+		{
+			name: "name is kept literal, only trimmed",
+			result: valid([][]*irma.DisclosedAttribute{
+				{present(attrs.GivenNames, "  JOSE ")},
+				{present(attrs.FamilyName, "VAN DER BERG")},
+				{present(email, "user@example.test")},
+			}),
+			want: DisclosedIdentity{Email: "user@example.test", Name: identity.Name{GivenNames: "JOSE", LastName: "VAN DER BERG"}},
+		},
+		{
+			name: "missing family name -> invalid",
+			result: valid([][]*irma.DisclosedAttribute{
+				{present(attrs.GivenNames, "José")},
+				{present(email, "user@example.test")},
+			}),
+			wantErr: errDisclosureInvalid,
+		},
+		{
+			name: "missing given names -> invalid",
+			result: valid([][]*irma.DisclosedAttribute{
+				{present(attrs.FamilyName, "Berg")},
+				{present(email, "user@example.test")},
+			}),
+			wantErr: errDisclosureInvalid,
+		},
+		{
+			name: "invalid email -> invalid",
+			result: valid([][]*irma.DisclosedAttribute{
+				{present(attrs.GivenNames, "José")},
+				{present(attrs.FamilyName, "Berg")},
+				{present(email, "nope")},
+			}),
+			wantErr: errDisclosureInvalid,
+		},
+		{
+			name:    "proof invalid -> invalid",
+			result:  &irmaserver.SessionResult{Status: irma.ServerStatusDone, ProofStatus: irma.ProofStatusInvalid},
+			wantErr: errDisclosureInvalid,
+		},
+		{
+			name:    "not done -> not finished",
+			result:  &irmaserver.SessionResult{Status: irma.ServerStatusCancelled},
+			wantErr: errSessionNotFinished,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := extractIdentity(tt.result, attrs, email)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("identity = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

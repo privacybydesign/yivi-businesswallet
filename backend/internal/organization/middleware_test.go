@@ -40,9 +40,9 @@ func (f fakeRepo) ListForUser(context.Context, uuid.UUID) ([]Organization, error
 func (f fakeRepo) GetMembership(context.Context, uuid.UUID, uuid.UUID) (Membership, error) {
 	return f.membership, f.membershipErr
 }
-func (f fakeRepo) ListMembers(context.Context, uuid.UUID) ([]Member, error) { return nil, nil }
-func (f fakeRepo) ListInvitations(context.Context, uuid.UUID) ([]Invitation, error) {
-	return nil, nil
+
+func (f fakeRepo) ListMemberEntries(context.Context, uuid.UUID, MemberListParams) ([]MemberEntry, int, error) {
+	return nil, 0, nil
 }
 func (f fakeRepo) RevokeInvitation(context.Context, uuid.UUID, uuid.UUID) error { return nil }
 func (f fakeRepo) ResendInvitation(context.Context, uuid.UUID, uuid.UUID) error { return nil }

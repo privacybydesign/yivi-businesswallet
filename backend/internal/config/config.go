@@ -17,6 +17,8 @@ const (
 	envIrmaRequestorToken  = "IRMA_REQUESTOR_TOKEN"
 	envIrmaClientURL       = "IRMA_CLIENT_URL"
 	envIrmaEmailAttribute  = "IRMA_EMAIL_ATTRIBUTE"
+	envIrmaGivenNamesAttr  = "IRMA_IDENTITY_GIVEN_NAMES_ATTRIBUTE"
+	envIrmaFamilyNameAttr  = "IRMA_IDENTITY_FAMILY_NAME_ATTRIBUTE"
 	envSessionCookieSecure = "SESSION_COOKIE_SECURE"
 	envSessionTTL          = "SESSION_TTL"
 	envSessionPruneEvery   = "SESSION_PRUNE_INTERVAL"
@@ -31,6 +33,8 @@ const (
 	defaultIrmaRequestorToken  = ""
 	defaultIrmaClientURL       = ""
 	defaultIrmaEmailAttribute  = "irma-demo.sidn-pbdf.email.email"
+	defaultIrmaGivenNamesAttr  = "irma-demo.MijnOverheid.drivinglicense.firstnames"
+	defaultIrmaFamilyNameAttr  = "irma-demo.MijnOverheid.drivinglicense.familyname"
 	defaultSessionCookieSecure = "false"
 	defaultSessionTTL          = "24h"
 	defaultSessionPruneEvery   = "1h"
@@ -42,13 +46,15 @@ type Config struct {
 	LogFormat   string
 	LogSource   bool
 
-	IrmaRequestorURL    string
-	IrmaRequestorToken  string
-	IrmaClientURL       string
-	IrmaEmailAttribute  string
-	SessionCookieSecure bool
-	SessionTTL          time.Duration
-	SessionPruneEvery   time.Duration
+	IrmaRequestorURL        string
+	IrmaRequestorToken      string
+	IrmaClientURL           string
+	IrmaEmailAttribute      string
+	IrmaGivenNamesAttribute string
+	IrmaFamilyNameAttribute string
+	SessionCookieSecure     bool
+	SessionTTL              time.Duration
+	SessionPruneEvery       time.Duration
 
 	PlatformAdminEmails []string
 }
@@ -82,13 +88,15 @@ func Load() (Config, error) {
 		LogFormat:   envOrDefault(envLogFormat, defaultLogFormat),
 		LogSource:   strings.EqualFold(envOrDefault(envLogSource, defaultLogSource), "true"),
 
-		IrmaRequestorURL:    requestorURL,
-		IrmaRequestorToken:  envOrDefault(envIrmaRequestorToken, defaultIrmaRequestorToken),
-		IrmaClientURL:       envOrDefault(envIrmaClientURL, defaultIrmaClientURL),
-		IrmaEmailAttribute:  envOrDefault(envIrmaEmailAttribute, defaultIrmaEmailAttribute),
-		SessionCookieSecure: cookieSecure,
-		SessionTTL:          sessionTTL,
-		SessionPruneEvery:   sessionPruneEvery,
+		IrmaRequestorURL:        requestorURL,
+		IrmaRequestorToken:      envOrDefault(envIrmaRequestorToken, defaultIrmaRequestorToken),
+		IrmaClientURL:           envOrDefault(envIrmaClientURL, defaultIrmaClientURL),
+		IrmaEmailAttribute:      envOrDefault(envIrmaEmailAttribute, defaultIrmaEmailAttribute),
+		IrmaGivenNamesAttribute: envOrDefault(envIrmaGivenNamesAttr, defaultIrmaGivenNamesAttr),
+		IrmaFamilyNameAttribute: envOrDefault(envIrmaFamilyNameAttr, defaultIrmaFamilyNameAttr),
+		SessionCookieSecure:     cookieSecure,
+		SessionTTL:              sessionTTL,
+		SessionPruneEvery:       sessionPruneEvery,
 
 		PlatformAdminEmails: parseList(os.Getenv(envPlatformAdminEmails)),
 	}, nil

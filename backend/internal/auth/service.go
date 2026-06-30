@@ -9,9 +9,20 @@ import (
 	irma "github.com/privacybydesign/irmago/irma"
 	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
+
+type IdentityAttributes struct {
+	GivenNames irma.AttributeTypeIdentifier
+	FamilyName irma.AttributeTypeIdentifier
+}
+
+type DisclosedIdentity struct {
+	Email user.Email
+	Name  identity.Name
+}
 
 // irmaRequestor is the slice of irmarequestor.Client the service needs, defined
 // in the consumer so the service is testable without a live daemon.
@@ -22,10 +33,11 @@ type irmaRequestor interface {
 }
 
 type Service struct {
-	irma      irmaRequestor
-	users     *user.Store
-	sessions  *session.Store
-	emailAttr irma.AttributeTypeIdentifier
+	irma          irmaRequestor
+	users         *user.Store
+	sessions      *session.Store
+	emailAttr     irma.AttributeTypeIdentifier
+	identityAttrs IdentityAttributes
 }
 
 func NewService(
@@ -33,12 +45,14 @@ func NewService(
 	users *user.Store,
 	sessions *session.Store,
 	emailAttr irma.AttributeTypeIdentifier,
+	identityAttrs IdentityAttributes,
 ) *Service {
 	return &Service{
-		irma:      requestor,
-		users:     users,
-		sessions:  sessions,
-		emailAttr: emailAttr,
+		irma:          requestor,
+		users:         users,
+		sessions:      sessions,
+		emailAttr:     emailAttr,
+		identityAttrs: identityAttrs,
 	}
 }
 
@@ -50,6 +64,24 @@ func (s *Service) StartSession(ctx context.Context) (*irmaserver.SessionPackage,
 		return nil, fmt.Errorf("auth: start session: %w", err)
 	}
 	return pkg, nil
+}
+
+func (s *Service) StartIdentitySession(ctx context.Context) (*irmaserver.SessionPackage, error) {
+	req := irma.NewDisclosureRequest(s.identityAttrs.GivenNames, s.identityAttrs.FamilyName, s.emailAttr)
+
+	pkg, err := s.irma.StartSession(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("auth: start identity session: %w", err)
+	}
+	return pkg, nil
+}
+
+func (s *Service) DiscloseIdentity(ctx context.Context, token irma.RequestorToken) (DisclosedIdentity, error) {
+	res, err := s.irma.Result(ctx, token)
+	if err != nil {
+		return DisclosedIdentity{}, err
+	}
+	return extractIdentity(res, s.identityAttrs, s.emailAttr)
 }
 
 func (s *Service) Status(ctx context.Context, token irma.RequestorToken) (irma.ServerStatus, error) {

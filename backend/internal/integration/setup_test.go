@@ -30,13 +30,21 @@ import (
 )
 
 const (
-	testEmailAttr = "irma-demo.sidn-pbdf.email.email"
-	sessionTTL    = time.Hour
+	testEmailAttr      = "irma-demo.sidn-pbdf.email.email"
+	testGivenNamesAttr = "irma-demo.MijnOverheid.drivinglicense.firstnames"
+	testFamilyNameAttr = "irma-demo.MijnOverheid.drivinglicense.familyname"
+	sessionTTL         = time.Hour
 )
 
 // emailAttr is the disclosed attribute the fake daemon returns and the service
 // expects, matching the dev/default config.
-var emailAttr = irma.NewAttributeTypeIdentifier(testEmailAttr)
+var (
+	emailAttr     = irma.NewAttributeTypeIdentifier(testEmailAttr)
+	identityAttrs = auth.IdentityAttributes{
+		GivenNames: irma.NewAttributeTypeIdentifier(testGivenNamesAttr),
+		FamilyName: irma.NewAttributeTypeIdentifier(testFamilyNameAttr),
+	}
+)
 
 // fakeRequestor stands in for the IRMA daemon: Result discloses the configured
 // email, so a /claim logs in as that user. The disclosure shape mirrors the one
@@ -99,7 +107,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	// drops Secure cookies, which would silently break the cookie round-trip.
 	cookieCfg := auth.CookieConfig{Secure: false, MaxAge: int(sessionTTL.Seconds())}
 
-	authService := auth.NewService(fake, userStore, sessionStore, emailAttr)
+	authService := auth.NewService(fake, userStore, sessionStore, emailAttr, identityAttrs)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, admins)
 	requireUser := auth.RequireUser(sessionStore)
 	orgStore := organization.NewStore(pool, audit.NewDBRecorder())

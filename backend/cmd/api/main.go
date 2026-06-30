@@ -62,6 +62,10 @@ func run() error {
 	defer pool.Close()
 
 	emailAttr := irma.NewAttributeTypeIdentifier(cfg.IrmaEmailAttribute)
+	identityAttrs := auth.IdentityAttributes{
+		GivenNames: irma.NewAttributeTypeIdentifier(cfg.IrmaGivenNamesAttribute),
+		FamilyName: irma.NewAttributeTypeIdentifier(cfg.IrmaFamilyNameAttribute),
+	}
 	requestor := irmarequestor.New(
 		cfg.IrmaRequestorURL,
 		irmarequestor.NewTokenAuthenticator(cfg.IrmaRequestorToken),
@@ -83,7 +87,7 @@ func run() error {
 		MaxAge: int(cfg.SessionTTL.Seconds()),
 	}
 	platformAdmins := auth.NewPlatformAdmins(cfg.PlatformAdminEmails)
-	authService := auth.NewService(requestor, userStore, sessionStore, emailAttr)
+	authService := auth.NewService(requestor, userStore, sessionStore, emailAttr, identityAttrs)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, platformAdmins)
 
 	startSessionPruner(ctx, sessionStore, cfg.SessionPruneEvery)
