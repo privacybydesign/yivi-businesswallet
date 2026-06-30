@@ -13,7 +13,15 @@ import {
   acceptInvitationById,
   INVITATION_SESSION_URL,
 } from "../api/invitations";
-import { Button, Card, IdentityDisclosure, Logo, Outcome } from "../ui";
+import {
+  Avatar,
+  Button,
+  Card,
+  Icon,
+  IdentityDisclosure,
+  Logo,
+  Outcome,
+} from "../ui";
 import * as React from "react";
 
 const YIVI_ELEMENT_ID = "yivi-web-form";
@@ -172,16 +180,30 @@ export default function Login(): React.JSX.Element {
             </p>
             <div className="mt-5 flex flex-col gap-2">
               {invites.map((invite) => (
-                <Button
+                <button
                   key={invite.id}
-                  variant="primary"
+                  type="button"
                   onClick={() => {
                     setChosen(invite);
                     setPhase("disclosing");
                   }}
+                  className="border-line-strong hover:bg-surface-3 rounded-yivi bg-surface flex w-full cursor-pointer items-center gap-3 border px-3 py-2.5 text-left transition-colors"
                 >
-                  {t("inviteAccept.join", { org: invite.organizationName })}
-                </Button>
+                  <Avatar name={invite.organizationName} tone="rose" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-ink truncate text-[14px] font-semibold">
+                      {invite.organizationName}
+                    </div>
+                    <div className="text-muted truncate font-mono text-[12px]">
+                      {invite.organizationSlug}
+                    </div>
+                  </div>
+                  <Icon
+                    name="chevron_right"
+                    size={16}
+                    className="text-muted shrink-0"
+                  />
+                </button>
               ))}
             </div>
           </>

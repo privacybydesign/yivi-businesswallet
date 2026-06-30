@@ -9,7 +9,7 @@ import {
   inviteSessionUrl,
 } from "../api/invitations";
 import { useInvitePreviewQuery } from "../api/invitations.queries";
-import { Button, Card, IdentityDisclosure, Logo, Outcome } from "../ui";
+import { Avatar, Button, Card, IdentityDisclosure, Logo, Outcome } from "../ui";
 
 type Phase =
   | "preview"
@@ -174,13 +174,17 @@ export default function InviteAccept(): React.JSX.Element {
           </>
         ) : (
           <>
-            <h1 className="mt-6 text-center text-[22px] font-bold">
-              {t("inviteAccept.title")}
-            </h1>
-            <p className="text-ink-soft mt-2 text-center text-[14px]">
-              {t("inviteAccept.invitedTo", { org: orgName })}
-            </p>
-            <div className="rounded-yivi bg-surface-2 mt-5 px-4 py-3 text-center text-[13.5px]">
+            <div className="mt-6 flex flex-col items-center text-center">
+              <Avatar name={orgName} tone="rose" size="lg" />
+              <h1 className="text-ink mt-4 text-[22px] font-bold">
+                {t("inviteAccept.title")}
+              </h1>
+              <p className="text-ink-soft mt-1 text-[14px]">
+                {t("inviteAccept.invitedTo", { org: orgName })}
+              </p>
+            </div>
+
+            <div className="rounded-yivi bg-surface-2 mt-6 px-4 py-3 text-center text-[13.5px]">
               <div className="text-ink font-semibold">
                 {t("inviteAccept.invitedAs", {
                   name: `${preview.data.givenNames} ${preview.data.lastName}`,
@@ -195,22 +199,26 @@ export default function InviteAccept(): React.JSX.Element {
                 })}
               </div>
             </div>
-            <div className="mt-6 flex flex-col gap-2">
-              <Button
-                variant="primary"
-                onClick={() => setPhase("disclosing")}
-                loading={phase === "accepting"}
-              >
-                {t("inviteAccept.accept")}
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={onDecline}
-                loading={phase === "declining"}
-              >
-                {t("inviteAccept.decline")}
-              </Button>
-            </div>
+
+            <Button
+              variant="primary"
+              className="mt-6 w-full"
+              onClick={() => setPhase("disclosing")}
+              loading={phase === "accepting"}
+              disabled={phase === "declining"}
+            >
+              {t("inviteAccept.join", { org: orgName })}
+            </Button>
+            <button
+              type="button"
+              onClick={onDecline}
+              disabled={phase === "declining" || phase === "accepting"}
+              className="text-muted hover:text-ink mx-auto mt-4 block cursor-pointer text-[13px] underline-offset-2 transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {phase === "declining"
+                ? t("inviteAccept.declining")
+                : t("inviteAccept.decline")}
+            </button>
           </>
         )}
       </Card>
