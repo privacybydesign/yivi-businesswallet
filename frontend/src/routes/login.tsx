@@ -115,10 +115,11 @@ export default function Login(): React.JSX.Element {
       });
   };
 
-  // Accept already minted a session; refresh `me` (cached as null) before
-  // entering so the protected routes see the authenticated user.
+  // Accept already minted a session; force-refetch `me` (cached as null from the
+  // pre-login 401, with no active observer here) before entering, so the
+  // protected routes see the authenticated user instead of the stale null.
   const enterApp = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: meQueryKey });
+    await queryClient.refetchQueries({ queryKey: meQueryKey });
     void navigate("/");
   };
 

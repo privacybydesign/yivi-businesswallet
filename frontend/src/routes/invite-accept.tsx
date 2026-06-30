@@ -36,10 +36,10 @@ export default function InviteAccept(): React.JSX.Element {
     inviteError(null, t),
   );
 
-  // Accept already minted a session; refresh `me` (cached as null) before
-  // entering so the protected routes see the authenticated user.
+  // Accept already minted a session; force-refetch `me` before entering so the
+  // protected routes see the authenticated user instead of a stale null.
   const enterApp = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: meQueryKey });
+    await queryClient.refetchQueries({ queryKey: meQueryKey });
     void navigate("/");
   };
 
