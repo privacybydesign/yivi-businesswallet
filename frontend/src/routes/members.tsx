@@ -108,6 +108,21 @@ export default function Members(): React.JSX.Element {
     isAdmin,
   );
 
+  // Per-status counts for the subtitle breakdown, independent of the active
+  // filter/search (which only narrow the toolbar's result count).
+  const activeCount = useOrganizationMembersQuery(
+    slug,
+    { status: "active", limit: 1 },
+    isAdmin,
+  );
+  const pendingCount = useOrganizationMembersQuery(
+    slug,
+    { status: "invited", limit: 1 },
+    isAdmin,
+  );
+  const activeTotal = activeCount.data?.total;
+  const pendingTotal = pendingCount.data?.total;
+
   const resend = useResendInvitationMutation(slug);
   const revoke = useRevokeInvitationMutation(slug);
 
@@ -165,10 +180,14 @@ export default function Members(): React.JSX.Element {
       <TopBar
         title={t("members.title")}
         subtitle={
-          org.isPending || (isAdmin && members.isPending)
+          org.isPending ||
+          (isAdmin && (activeCount.isPending || pendingCount.isPending))
             ? t("common.loading")
-            : members.data
-              ? t("members.count", { count: total })
+            : activeTotal !== undefined && pendingTotal !== undefined
+              ? t("members.summary", {
+                  active: activeTotal,
+                  pending: pendingTotal,
+                })
               : t("members.subtitle")
         }
         actions={
@@ -236,14 +255,14 @@ export default function Members(): React.JSX.Element {
                 ))}
               </div>
               {isModified && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto"
-                  onClick={resetView}
-                >
+                <Button variant="ghost" size="sm" onClick={resetView}>
                   {t("members.reset")}
                 </Button>
+              )}
+              {members.data && (
+                <span className="text-muted ml-auto shrink-0 text-[12px] whitespace-nowrap">
+                  {t("members.results", { count: total })}
+                </span>
               )}
             </div>
 

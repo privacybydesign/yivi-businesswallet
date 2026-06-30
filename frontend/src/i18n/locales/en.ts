@@ -79,6 +79,9 @@ export const en = {
     revoke: "Revoke",
     search: "Search by name, email, role, department…",
     reset: "Reset",
+    summary: "{{active}} active · {{pending}} pending",
+    results_one: "{{count}} result",
+    results_other: "{{count}} results",
     filters: {
       all: "All",
       active: "Active",
