@@ -1,4 +1,4 @@
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
   useOrganizationMembersQuery,
@@ -22,6 +22,25 @@ type StatusFilter = "" | "active" | "invited";
 
 const STATUS_FILTERS: readonly StatusFilter[] = ["", "active", "invited"];
 
+const SORT_VALUES: readonly MemberSort[] = [
+  "name",
+  "email",
+  "jobtitle",
+  "role",
+  "department",
+  "status",
+];
+
+function readStatus(params: URLSearchParams): StatusFilter {
+  const raw = params.get("status");
+  return raw === "active" || raw === "invited" ? raw : "";
+}
+
+function readSort(params: URLSearchParams): MemberSort {
+  const raw = params.get("sort") as MemberSort | null;
+  return raw && SORT_VALUES.includes(raw) ? raw : "name";
+}
+
 export default function Members(): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -32,19 +51,55 @@ export default function Members(): React.JSX.Element {
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
 
-  const [status, setStatus] = React.useState<StatusFilter>("");
-  const [searchInput, setSearchInput] = React.useState("");
-  const [sort, setSort] = React.useState<MemberSort>("name");
-  const [dir, setDir] = React.useState<SortDir>("asc");
-  const [page, setPage] = React.useState(0);
+  // Sort, filter, search, and page live in the URL so the view survives a
+  // refresh and can be bookmarked or shared.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const status = readStatus(searchParams);
+  const sort = readSort(searchParams);
+  const dir: SortDir = searchParams.get("dir") === "desc" ? "desc" : "asc";
+  const page = Math.max(
+    0,
+    Number.parseInt(searchParams.get("page") ?? "", 10) || 0,
+  );
+  const q = searchParams.get("q")?.trim() ?? "";
 
-  const search = useDebouncedValue(searchInput.trim(), SEARCH_DEBOUNCE_MS);
+  const [searchInput, setSearchInput] = React.useState(
+    () => searchParams.get("q") ?? "",
+  );
+  const debouncedSearch = useDebouncedValue(
+    searchInput.trim(),
+    SEARCH_DEBOUNCE_MS,
+  );
+
+  // The debounced search term is pushed to the URL (history-replaced so typing
+  // doesn't flood Back); the guard avoids rewriting the URL it just read.
+  React.useEffect(() => {
+    if (debouncedSearch === q) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (debouncedSearch) next.set("q", debouncedSearch);
+        else next.delete("q");
+        next.delete("page");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [debouncedSearch, q, setSearchParams]);
+
+  const updateParams = (mutate: (params: URLSearchParams) => void): void => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      mutate(next);
+      return next;
+    });
+  };
 
   const members = useOrganizationMembersQuery(
     slug,
     {
       status: status || undefined,
-      q: search || undefined,
+      q: q || undefined,
       sort,
       dir,
       limit: PAGE_SIZE,
@@ -59,16 +114,47 @@ export default function Members(): React.JSX.Element {
   const entries = members.data?.entries ?? [];
   const total = members.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const filtered = status !== "" || search !== "";
+  const filtered = status !== "" || q !== "";
 
   const toggleSort = (column: MemberSort): void => {
-    if (sort === column) {
-      setDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSort(column);
-      setDir("asc");
-    }
-    setPage(0);
+    updateParams((params) => {
+      if (sort === column && dir === "asc") {
+        params.set("sort", column);
+        params.set("dir", "desc");
+      } else if (sort === column && dir === "desc") {
+        // Third click clears the sort, returning to the default order.
+        params.delete("sort");
+        params.delete("dir");
+      } else {
+        params.set("sort", column);
+        params.set("dir", "asc");
+      }
+      params.delete("page");
+    });
+  };
+
+  const setStatus = (value: StatusFilter): void => {
+    updateParams((params) => {
+      if (value) params.set("status", value);
+      else params.delete("status");
+      params.delete("page");
+    });
+  };
+
+  const goToPage = (next: number): void => {
+    updateParams((params) => params.set("page", String(next)));
+  };
+
+  const isModified =
+    status !== "" || q !== "" || sort !== "name" || dir !== "asc" || page !== 0;
+
+  const resetView = (): void => {
+    setSearchInput("");
+    updateParams((params) => {
+      for (const key of ["status", "q", "sort", "dir", "page"]) {
+        params.delete(key);
+      }
+    });
   };
 
   const sortDirOf = (column: MemberSort): SortDir | null =>
@@ -124,10 +210,7 @@ export default function Members(): React.JSX.Element {
                   icon="search"
                   placeholder={t("members.search")}
                   value={searchInput}
-                  onChange={(event) => {
-                    setSearchInput(event.target.value);
-                    setPage(0);
-                  }}
+                  onChange={(event) => setSearchInput(event.target.value)}
                   aria-label={t("members.search")}
                 />
               </div>
@@ -136,10 +219,7 @@ export default function Members(): React.JSX.Element {
                   <button
                     key={value || "all"}
                     type="button"
-                    onClick={() => {
-                      setStatus(value);
-                      setPage(0);
-                    }}
+                    onClick={() => setStatus(value)}
                     className={[
                       "h-[26px] cursor-pointer rounded-md px-2.5 text-[12.5px] font-semibold transition-colors",
                       status === value
@@ -155,36 +235,56 @@ export default function Members(): React.JSX.Element {
                   </button>
                 ))}
               </div>
+              {isModified && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={resetView}
+                >
+                  {t("members.reset")}
+                </Button>
+              )}
             </div>
 
-            <Table>
+            <Table className="table-fixed">
               <Table.Head>
                 <Table.HeaderCell
+                  className="w-[26%]"
                   sortDir={sortDirOf("name")}
                   onSort={() => toggleSort("name")}
                 >
                   {t("members.columns.member")}
                 </Table.HeaderCell>
-                <Table.HeaderCell>{t("common.jobTitle")}</Table.HeaderCell>
                 <Table.HeaderCell
+                  className="w-[15%]"
+                  sortDir={sortDirOf("jobtitle")}
+                  onSort={() => toggleSort("jobtitle")}
+                >
+                  {t("common.jobTitle")}
+                </Table.HeaderCell>
+                <Table.HeaderCell
+                  className="w-[15%]"
                   sortDir={sortDirOf("department")}
                   onSort={() => toggleSort("department")}
                 >
                   {t("common.department")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
+                  className="w-[12%]"
                   sortDir={sortDirOf("status")}
                   onSort={() => toggleSort("status")}
                 >
                   {t("members.columns.status")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
+                  className="w-[12%]"
                   sortDir={sortDirOf("role")}
                   onSort={() => toggleSort("role")}
                 >
                   {t("common.role")}
                 </Table.HeaderCell>
-                <Table.HeaderCell srOnly>
+                <Table.HeaderCell className="w-[20%]" srOnly>
                   {t("members.columns.actions")}
                 </Table.HeaderCell>
               </Table.Head>
@@ -224,13 +324,13 @@ export default function Members(): React.JSX.Element {
                             <Avatar initials={personInitials(member)} />
                             <div className="min-w-0">
                               {pending ? (
-                                <span className="text-ink truncate">
+                                <span className="text-ink block truncate">
                                   {fullName(member)}
                                 </span>
                               ) : (
                                 <Link
                                   to={`/${slug}/members/${member.userId}`}
-                                  className="text-ink truncate"
+                                  className="text-ink block truncate"
                                 >
                                   {fullName(member)}
                                 </Link>
@@ -241,10 +341,10 @@ export default function Members(): React.JSX.Element {
                             </div>
                           </div>
                         </Table.Cell>
-                        <Table.Cell className="text-ink-soft">
+                        <Table.Cell className="text-ink-soft truncate">
                           {member.jobTitle ?? t("members.unassigned")}
                         </Table.Cell>
-                        <Table.Cell className="text-ink-soft">
+                        <Table.Cell className="text-ink-soft truncate">
                           {member.departmentName ?? t("members.unassigned")}
                         </Table.Cell>
                         <Table.Cell>
@@ -316,7 +416,7 @@ export default function Members(): React.JSX.Element {
                     variant="ghost"
                     size="sm"
                     disabled={page === 0}
-                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    onClick={() => goToPage(Math.max(0, page - 1))}
                   >
                     <Icon name="chevron_left" size={14} />
                     {t("members.pager.previous")}
@@ -325,7 +425,7 @@ export default function Members(): React.JSX.Element {
                     variant="ghost"
                     size="sm"
                     disabled={page >= pages - 1}
-                    onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}
+                    onClick={() => goToPage(Math.min(pages - 1, page + 1))}
                   >
                     {t("members.pager.next")}
                     <Icon name="chevron_right" size={14} />

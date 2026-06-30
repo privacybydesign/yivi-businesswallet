@@ -203,6 +203,17 @@ func TestListMemberEntriesSort(t *testing.T) {
 	if got := lastNames(desc); !equalStrings(got, []string{"Clark", "Brown", "Anderson"}) {
 		t.Errorf("name desc = %v, want [Clark Brown Anderson]", got)
 	}
+
+	// Job titles: CTO (Anderson) < Designer (Clark) < Sales Rep (Brown).
+	byJob, _, err := store.ListMemberEntries(ctx, orgID, organization.MemberListParams{
+		Sort: "jobtitle", Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("sort jobtitle: %v", err)
+	}
+	if got := lastNames(byJob); !equalStrings(got, []string{"Anderson", "Clark", "Brown"}) {
+		t.Errorf("jobtitle asc = %v, want [Anderson Clark Brown]", got)
+	}
 }
 
 func TestListMemberEntriesPaging(t *testing.T) {

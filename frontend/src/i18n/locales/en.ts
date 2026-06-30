@@ -78,6 +78,7 @@ export const en = {
     resend: "Resend",
     revoke: "Revoke",
     search: "Search by name, email, role, department…",
+    reset: "Reset",
     filters: {
       all: "All",
       active: "Active",

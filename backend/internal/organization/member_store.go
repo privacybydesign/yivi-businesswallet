@@ -81,6 +81,7 @@ const defaultMemberSort = "name"
 var memberSortColumns = map[string][]string{
 	"name":       {"last_name", "given_names"},
 	"email":      {"email"},
+	"jobtitle":   {"job_title"},
 	"role":       {"role"},
 	"department": {"department_name"},
 	"status":     {"status"},

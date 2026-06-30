@@ -67,7 +67,13 @@ export const memberListPageSchema = z.object({
 
 export type MemberListPage = z.infer<typeof memberListPageSchema>;
 
-export type MemberSort = "name" | "email" | "role" | "department" | "status";
+export type MemberSort =
+  | "name"
+  | "email"
+  | "jobtitle"
+  | "role"
+  | "department"
+  | "status";
 export type SortDir = "asc" | "desc";
 
 export interface MemberListParams {
