@@ -110,6 +110,13 @@ export default function Login(): React.JSX.Element {
       });
   };
 
+  // Accept already minted a session; refresh `me` (cached as null) before
+  // entering so the protected routes see the authenticated user.
+  const enterApp = async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: meQueryKey });
+    void navigate("/");
+  };
+
   const showMessage = phase === "idle" && message !== "";
 
   return (
@@ -128,7 +135,7 @@ export default function Login(): React.JSX.Element {
             })}
             message={t("inviteAccept.acceptedHint")}
             action={
-              <Button variant="primary" onClick={() => void navigate(0)}>
+              <Button variant="primary" onClick={() => void enterApp()}>
                 {t("inviteAccept.goToApp")}
               </Button>
             }

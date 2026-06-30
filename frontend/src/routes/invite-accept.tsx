@@ -1,8 +1,10 @@
 import * as React from "react";
 import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../api/http";
+import { meQueryKey } from "../api/auth.queries";
 import {
   acceptInviteByToken,
   declineInviteByToken,
@@ -46,10 +48,19 @@ function errorCode(error: unknown): string | null {
 export default function InviteAccept(): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const { token } = useParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const inviteToken = token ?? "";
   const preview = useInvitePreviewQuery(inviteToken);
   const [phase, setPhase] = useState<Phase>("preview");
   const [errorKey, setErrorKey] = useState<ErrorKey>("inviteAccept.failed");
+
+  // Accept already minted a session; refresh `me` (cached as null) before
+  // entering so the protected routes see the authenticated user.
+  const enterApp = async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: meQueryKey });
+    void navigate("/");
+  };
 
   const dateFormatter = React.useMemo(
     () => new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium" }),
@@ -125,9 +136,9 @@ export default function InviteAccept(): React.JSX.Element {
             title={t("inviteAccept.accepted", { org: orgName })}
             message={t("inviteAccept.acceptedHint")}
             action={
-              <Link to="/login">
-                <Button variant="primary">{t("inviteAccept.goToApp")}</Button>
-              </Link>
+              <Button variant="primary" onClick={() => void enterApp()}>
+                {t("inviteAccept.goToApp")}
+              </Button>
             }
           />
         ) : phase === "pendingReview" ? (
