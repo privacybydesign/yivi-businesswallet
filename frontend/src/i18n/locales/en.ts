@@ -59,6 +59,12 @@ export const en = {
     notMember: "You are not a member of this organization.",
     notExist: "This organization does not exist.",
   },
+  notFound: {
+    title: "Page not found",
+    body: "The page you're looking for doesn't exist or may have moved.",
+    home: "Back to home",
+    back: "Go back",
+  },
   members: {
     title: "Members",
     subtitle: "Organization members",

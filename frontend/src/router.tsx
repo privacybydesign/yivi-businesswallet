@@ -21,6 +21,7 @@ import Settings from "./routes/settings";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
 import CreateOrganization from "./routes/create-organization";
+import NotFound from "./routes/not-found";
 
 // Breadcrumb labels live on the routes themselves; the trail is assembled
 // automatically from the matched chain (see ui/breadcrumb.tsx).
@@ -57,6 +58,7 @@ const newOrgCrumb: RouteHandle = { crumb: ({ t }) => t("createOrg.title") };
 
 export const router = createBrowserRouter([
   { path: "/login", Component: Login },
+  { path: "*", Component: NotFound },
   {
     Component: ProtectedRoute,
     children: [
