@@ -262,6 +262,9 @@ func TestAcceptEmailMismatch(t *testing.T) {
 	if n := env.membershipCount(orgID, "invited@example.test"); n != 0 {
 		t.Errorf("membership after mismatch = %d, want 0", n)
 	}
+	if n := env.auditCount(orgID, audit.MembershipAcceptRejected); n != 1 {
+		t.Errorf("accept_rejected events = %d, want 1", n)
+	}
 }
 
 func TestAcceptNameMismatch(t *testing.T) {
@@ -277,6 +280,9 @@ func TestAcceptNameMismatch(t *testing.T) {
 	}
 	if n := env.invitationCount(orgID, "newbie@example.test"); n != 1 {
 		t.Errorf("invitation after mismatch = %d, want 1 (still pending)", n)
+	}
+	if n := env.auditCount(orgID, audit.MembershipAcceptRejected); n != 1 {
+		t.Errorf("accept_rejected events = %d, want 1", n)
 	}
 }
 

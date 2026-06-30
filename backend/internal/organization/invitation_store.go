@@ -186,6 +186,16 @@ func (s *Store) ListInvitationsForEmail(ctx context.Context, email string) ([]In
 	return invitations, nil
 }
 
+// RecordRejectedAccept logs a failed accept attempt (valid disclosure, but the
+// email or name did not match the invitation) so a rejected legal-identity
+// verification leaves a trail. It is not a state change, so it writes outside a
+// transaction; before/after describe what was expected vs. disclosed.
+func (s *Store) RecordRejectedAccept(ctx context.Context, orgID uuid.UUID, email string, before, after map[string]any) error {
+	return s.audit.Record(ctx, s.db, audit.MembershipAcceptRejected,
+		audit.Target{Type: audit.TargetMembership, ID: email, OrgID: &orgID},
+		audit.Updated(before, after))
+}
+
 func (s *Store) AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `

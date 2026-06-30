@@ -20,6 +20,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "membership.invite_resent": { icon: "email", tone: "amber" },
   "membership.invite_revoked": { icon: "close", tone: "red" },
   "membership.accepted": { icon: "valid", tone: "green" },
+  "membership.accept_rejected": { icon: "warning", tone: "amber" },
   "membership.declined": { icon: "close", tone: "slate" },
   "membership.revoked": { icon: "close", tone: "red" },
   "membership.role_changed": { icon: "settings", tone: "blue" },
@@ -60,6 +61,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.inviteRevoked");
     case "membership.accepted":
       return t("auditLog.actions.inviteAccepted");
+    case "membership.accept_rejected":
+      return t("auditLog.actions.acceptRejected");
     case "membership.declined":
       return t("auditLog.actions.inviteDeclined");
     case "membership.revoked":

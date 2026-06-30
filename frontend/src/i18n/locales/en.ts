@@ -239,6 +239,7 @@ export const en = {
       inviteResent: "Resent invitation",
       inviteRevoked: "Revoked invitation",
       inviteAccepted: "Accepted invitation",
+      acceptRejected: "Rejected accept attempt",
       inviteDeclined: "Declined invitation",
       memberRevoked: "Revoked membership",
       roleChanged: "Changed role",

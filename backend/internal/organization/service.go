@@ -29,6 +29,7 @@ type invitationStore interface {
 	InvitationByID(ctx context.Context, invitationID uuid.UUID) (Invitation, error)
 	ListInvitationsForEmail(ctx context.Context, email string) ([]Invitation, error)
 	AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name) error
+	RecordRejectedAccept(ctx context.Context, orgID uuid.UUID, email string, before, after map[string]any) error
 	DeclineInvitation(ctx context.Context, rawToken string) error
 	DeclineInvitationByID(ctx context.Context, invitationID uuid.UUID) error
 	CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name) error
@@ -141,10 +142,16 @@ func (s *Service) acceptResolved(ctx context.Context, inv Invitation, disclosure
 	}
 
 	if !strings.EqualFold(string(disclosed.Email), inv.Email) {
+		_ = s.store.RecordRejectedAccept(ctx, inv.OrganizationID, inv.Email,
+			map[string]any{"email": inv.Email},
+			map[string]any{"email": string(disclosed.Email)})
 		return AcceptOutcome{}, ErrEmailMismatch
 	}
 	invited := identity.Name{GivenNames: inv.GivenNames, LastName: inv.LastName}
 	if disclosed.Name.Key() != invited.Key() {
+		_ = s.store.RecordRejectedAccept(ctx, inv.OrganizationID, inv.Email,
+			map[string]any{"givenNames": inv.GivenNames, "lastName": inv.LastName},
+			map[string]any{"givenNames": disclosed.Name.GivenNames, "lastName": disclosed.Name.LastName})
 		return AcceptOutcome{}, ErrNameMismatch
 	}
 
