@@ -34,8 +34,20 @@ type ResolveOutcome struct {
 	OrganizationName string
 }
 
-func (s *Store) CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name) error {
-	return database.InTx(ctx, s.db, func(q database.Querier) error {
+type ReviewState string
+
+const (
+	ReviewPending  ReviewState = "pending"
+	ReviewRejected ReviewState = "rejected"
+)
+
+// CreateIdentityReview holds an accept for review, returning the effective state
+// of the review for this invitation. A fresh hold is "pending"; if a review
+// already exists its current status is returned, so a re-accept after a
+// rejection is reported as rejected rather than mistaken for a new pending hold.
+func (s *Store) CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name) (ReviewState, error) {
+	var state ReviewState
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `
 			INSERT INTO identity_reviews
 				(user_id, invitation_id, stored_given_names, stored_last_name, disclosed_given_names, disclosed_last_name)
@@ -45,18 +57,27 @@ func (s *Store) CreateIdentityReview(ctx context.Context, inv Invitation, userID
 		var id uuid.UUID
 		err := q.QueryRow(ctx, insert, userID, inv.ID,
 			stored.GivenNames, stored.LastName, disclosed.GivenNames, disclosed.LastName).Scan(&id)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
+		if err == nil {
+			state = ReviewPending
+			return s.audit.Record(ctx, q, audit.UserIdentityReviewRequired,
+				audit.Target{Type: audit.TargetUser, ID: userID.String(), OrgID: &inv.OrganizationID},
+				audit.Updated(
+					map[string]any{"givenNames": stored.GivenNames, "lastName": stored.LastName},
+					map[string]any{"givenNames": disclosed.GivenNames, "lastName": disclosed.LastName}))
 		}
-		if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("organization: create identity review: %w", err)
 		}
-		return s.audit.Record(ctx, q, audit.UserIdentityReviewRequired,
-			audit.Target{Type: audit.TargetUser, ID: userID.String(), OrgID: &inv.OrganizationID},
-			audit.Updated(
-				map[string]any{"givenNames": stored.GivenNames, "lastName": stored.LastName},
-				map[string]any{"givenNames": disclosed.GivenNames, "lastName": disclosed.LastName}))
+
+		var existing string
+		if err := q.QueryRow(ctx,
+			`SELECT status FROM identity_reviews WHERE invitation_id = $1`, inv.ID).Scan(&existing); err != nil {
+			return fmt.Errorf("organization: read existing identity review: %w", err)
+		}
+		state = ReviewState(existing)
+		return nil
 	})
+	return state, err
 }
 
 func (s *Store) ListIdentityReviews(ctx context.Context) ([]IdentityReview, error) {

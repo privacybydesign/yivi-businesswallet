@@ -32,7 +32,7 @@ type invitationStore interface {
 	RecordRejectedAccept(ctx context.Context, orgID uuid.UUID, email string, before, after map[string]any) error
 	DeclineInvitation(ctx context.Context, rawToken string) error
 	DeclineInvitationByID(ctx context.Context, invitationID uuid.UUID) error
-	CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name) error
+	CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name) (ReviewState, error)
 	ListIdentityReviews(ctx context.Context) ([]IdentityReview, error)
 	ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error)
 }
@@ -163,8 +163,12 @@ func (s *Service) acceptResolved(ctx context.Context, inv Invitation, disclosure
 
 	if needsReview {
 		stored := identity.Name{GivenNames: u.GivenNames, LastName: u.LastName}
-		if err := s.store.CreateIdentityReview(ctx, inv, u.ID, stored, disclosed.Name); err != nil {
+		state, err := s.store.CreateIdentityReview(ctx, inv, u.ID, stored, disclosed.Name)
+		if err != nil {
 			return AcceptOutcome{}, err
+		}
+		if state == ReviewRejected {
+			return AcceptOutcome{}, ErrIdentityRejected
 		}
 		at.Status = AcceptPendingReview
 		return at, nil

@@ -20,7 +20,7 @@ type myInvitationResponse struct {
 	LastName         string    `json:"lastName"`
 	Email            string    `json:"email"`
 	ExpiresAt        time.Time `json:"expiresAt"`
-	UnderReview      bool      `json:"underReview"`
+	ReviewStatus     string    `json:"reviewStatus"`
 }
 
 func (h *Handler) myInvitations(w http.ResponseWriter, r *http.Request) error {
@@ -39,7 +39,7 @@ func (h *Handler) myInvitations(w http.ResponseWriter, r *http.Request) error {
 			LastName:         inv.LastName,
 			Email:            inv.Email,
 			ExpiresAt:        inv.ExpiresAt,
-			UnderReview:      inv.UnderReview,
+			ReviewStatus:     inv.ReviewStatus,
 		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)
@@ -69,6 +69,8 @@ func mapAcceptError(err error) error {
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "name_mismatch", Message: "the disclosed name does not match the invitation"}
 	case errors.Is(err, ErrAlreadyMember):
 		return &respond.APIError{Status: http.StatusConflict, Code: "already_member", Message: "you are already a member of this organization"}
+	case errors.Is(err, ErrIdentityRejected):
+		return &respond.APIError{Status: http.StatusForbidden, Code: "identity_rejected", Message: "an administrator could not verify your identity for this invitation"}
 	default:
 		return mapInviteError(err)
 	}

@@ -16,7 +16,7 @@ type myInviteBody struct {
 	OrganizationSlug string    `json:"organizationSlug"`
 	GivenNames       string    `json:"givenNames"`
 	Email            string    `json:"email"`
-	UnderReview      bool      `json:"underReview"`
+	ReviewStatus     string    `json:"reviewStatus"`
 }
 
 func (e *testEnv) myInvitations() []myInviteBody {
@@ -125,8 +125,8 @@ func TestMyInvitationsFlagsUnderReview(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("invitations = %d, want 1", len(list))
 	}
-	if !list[0].UnderReview {
-		t.Error("invitation underReview = false, want true (a review is pending)")
+	if list[0].ReviewStatus != "pending" {
+		t.Errorf("reviewStatus = %q, want pending", list[0].ReviewStatus)
 	}
 }
 

@@ -29,6 +29,7 @@ var (
 	ErrEmailMismatch       = errors.New("disclosed email does not match the invitation")
 	ErrNameMismatch        = errors.New("disclosed name does not match the invitation")
 	ErrDisclosureFailed    = errors.New("identity disclosure failed")
+	ErrIdentityRejected    = errors.New("identity was rejected for this invitation")
 	ErrReviewNotFound      = errors.New("identity review not found")
 	ErrReviewResolved      = errors.New("identity review already resolved")
 	ErrLastAdmin           = errors.New("cannot demote the last admin of the organization")
@@ -73,7 +74,7 @@ type Invitation struct {
 	LastName         string     `json:"lastName"`
 	ExpiresAt        time.Time  `json:"expiresAt"`
 	CreatedAt        time.Time  `json:"createdAt"`
-	UnderReview      bool       `json:"-"`
+	ReviewStatus     string     `json:"-"`
 }
 
 type Member struct {

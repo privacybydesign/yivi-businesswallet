@@ -45,6 +45,7 @@ export const en = {
     decline: "Decline",
     back: "Back to invitations",
     underReview: "Under review",
+    rejected: "Rejected",
   },
   identityReviews: {
     title: "Identity reviews",
@@ -116,6 +117,10 @@ export const en = {
       alreadyMember: {
         title: "Already a member",
         body: "You're already a member of this organization.",
+      },
+      identityRejected: {
+        title: "Identity not approved",
+        body: "An administrator could not verify your identity for this invitation. Please contact the organization.",
       },
       disclosureFailed: {
         title: "Identity not confirmed",

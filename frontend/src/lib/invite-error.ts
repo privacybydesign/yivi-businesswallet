@@ -10,6 +10,7 @@ type InviteErrorKind =
   | "nameMismatch"
   | "emailMismatch"
   | "alreadyMember"
+  | "identityRejected"
   | "disclosureFailed"
   | "expired"
   | "notFound"
@@ -36,6 +37,8 @@ function kindOf(error: unknown): InviteErrorKind {
       return "emailMismatch";
     case "already_member":
       return "alreadyMember";
+    case "identity_rejected":
+      return "identityRejected";
     case "disclosure_failed":
       return "disclosureFailed";
     case "invitation_expired":
@@ -65,6 +68,11 @@ export function inviteError(error: unknown, t: TFunction): InviteErrorContent {
       return {
         title: t("inviteAccept.errors.alreadyMember.title"),
         body: t("inviteAccept.errors.alreadyMember.body"),
+      };
+    case "identityRejected":
+      return {
+        title: t("inviteAccept.errors.identityRejected.title"),
+        body: t("inviteAccept.errors.identityRejected.body"),
       };
     case "disclosureFailed":
       return {

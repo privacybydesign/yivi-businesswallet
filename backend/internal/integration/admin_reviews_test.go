@@ -146,6 +146,38 @@ func TestAcceptReReviewIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestAcceptAfterRejectionIsRejected(t *testing.T) {
+	env := setup(t, "boss@example.test")
+	orgID := env.createOrg("Acme", "acme")
+	env.seedPendingReview(orgID, "changed@example.test")
+
+	env.login("boss@example.test")
+	reviewID := env.listReviews()[0].ID
+	rej := env.do(http.MethodPost, "/api/v1/admin/identity-reviews/"+reviewID.String()+"/reject", nil)
+	_ = rej.Body.Close()
+	if rej.StatusCode != http.StatusOK {
+		t.Fatalf("reject = %d, want 200", rej.StatusCode)
+	}
+
+	// Re-accepting the still-pending invitation must report the rejection, not a
+	// fresh "pending review".
+	invID := env.invitationID(orgID, "changed@example.test")
+	env.discloses("changed@example.test", "José", "Berg")
+	acc := env.do(http.MethodPost, "/api/v1/invitations/"+invID.String()+"/accept",
+		jsonBody(`{"disclosureToken":"test-token"}`))
+	if acc.StatusCode != http.StatusForbidden {
+		t.Errorf("re-accept after rejection = %d, want 403", acc.StatusCode)
+	}
+	var body struct{ Code string }
+	decode(t, acc, &body)
+	if body.Code != "identity_rejected" {
+		t.Errorf("error code = %q, want identity_rejected", body.Code)
+	}
+	if n := env.membershipCount(orgID, "changed@example.test"); n != 0 {
+		t.Errorf("membership = %d, want 0", n)
+	}
+}
+
 func TestResolveUnknownReview(t *testing.T) {
 	env := setup(t, "boss@example.test")
 	env.login("boss@example.test")

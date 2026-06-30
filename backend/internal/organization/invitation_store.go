@@ -157,11 +157,11 @@ func (s *Store) ListInvitationsForEmail(ctx context.Context, email string) ([]In
 	const q = `
 		SELECT i.id, i.organization_id, o.name, o.slug, i.email, i.invited_by, i.role, i.job_title,
 		       i.department_id, d.name, i.invited_given_names, i.invited_last_name, i.expires_at, i.created_at,
-		       (rev.id IS NOT NULL) AS under_review
+		       coalesce(rev.status, '') AS review_status
 		FROM invitations i
 		JOIN organizations o ON o.id = i.organization_id
 		LEFT JOIN departments d ON d.id = i.department_id
-		LEFT JOIN identity_reviews rev ON rev.invitation_id = i.id AND rev.status = 'pending'
+		LEFT JOIN identity_reviews rev ON rev.invitation_id = i.id
 		WHERE lower(i.email) = lower($1)
 		ORDER BY i.created_at`
 	rows, err := s.db.Query(ctx, q, email)
@@ -175,7 +175,7 @@ func (s *Store) ListInvitationsForEmail(ctx context.Context, email string) ([]In
 		var inv Invitation
 		if err := rows.Scan(&inv.ID, &inv.OrganizationID, &inv.OrganizationName, &inv.OrganizationSlug,
 			&inv.Email, &inv.InvitedBy, &inv.Role, &inv.JobTitle, &inv.DepartmentID, &inv.DepartmentName,
-			&inv.GivenNames, &inv.LastName, &inv.ExpiresAt, &inv.CreatedAt, &inv.UnderReview); err != nil {
+			&inv.GivenNames, &inv.LastName, &inv.ExpiresAt, &inv.CreatedAt, &inv.ReviewStatus); err != nil {
 			return nil, fmt.Errorf("organization: list invitations for email scan: %w", err)
 		}
 		invitations = append(invitations, inv)
