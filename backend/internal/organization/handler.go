@@ -41,6 +41,8 @@ type inviter interface {
 	StartAcceptSession(ctx context.Context, rawToken string) (*irmaserver.SessionPackage, error)
 	AcceptInvitation(ctx context.Context, rawToken, disclosureToken string) (AcceptOutcome, error)
 	DeclineInvitation(ctx context.Context, rawToken string) error
+	ListIdentityReviews(ctx context.Context) ([]IdentityReview, error)
+	ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error)
 }
 
 type auditReader interface {
@@ -71,6 +73,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /organizations", platform(respond.HandlerFunc(h.list)))
 	mux.Handle("POST /organizations", platform(respond.HandlerFunc(h.create)))
 	mux.Handle("GET /organizations/{id}", platform(respond.HandlerFunc(h.get)))
+
+	mux.Handle("GET /admin/identity-reviews", platform(respond.HandlerFunc(h.listIdentityReviews)))
+	mux.Handle("POST /admin/identity-reviews/{id}/approve", platform(respond.HandlerFunc(h.approveIdentityReview)))
+	mux.Handle("POST /admin/identity-reviews/{id}/reject", platform(respond.HandlerFunc(h.rejectIdentityReview)))
 
 	mux.Handle("GET /me/organizations", h.requireUser(respond.HandlerFunc(h.listForUser)))
 

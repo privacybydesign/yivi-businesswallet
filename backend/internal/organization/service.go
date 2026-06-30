@@ -28,6 +28,9 @@ type invitationStore interface {
 	InvitationByToken(ctx context.Context, rawToken string) (Invitation, error)
 	AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name) error
 	DeclineInvitation(ctx context.Context, rawToken string) error
+	CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name) error
+	ListIdentityReviews(ctx context.Context) ([]IdentityReview, error)
+	ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error)
 }
 
 type identityDiscloser interface {
@@ -99,7 +102,15 @@ func (s *Service) StartAcceptSession(ctx context.Context, rawToken string) (*irm
 	return s.discloser.StartIdentitySession(ctx)
 }
 
+type AcceptStatus string
+
+const (
+	AcceptAccepted      AcceptStatus = "accepted"
+	AcceptPendingReview AcceptStatus = "pending_review"
+)
+
 type AcceptOutcome struct {
+	Status           AcceptStatus
 	OrganizationSlug string
 	OrganizationName string
 }
@@ -123,40 +134,60 @@ func (s *Service) AcceptInvitation(ctx context.Context, rawToken, disclosureToke
 		return AcceptOutcome{}, ErrNameMismatch
 	}
 
-	u, err := s.resolveUser(ctx, disclosed.Email, disclosed.Name)
+	u, needsReview, err := s.resolveUser(ctx, disclosed.Email, disclosed.Name)
 	if err != nil {
 		return AcceptOutcome{}, err
+	}
+	at := AcceptOutcome{OrganizationSlug: inv.OrganizationSlug, OrganizationName: inv.OrganizationName}
+
+	if needsReview {
+		stored := identity.Name{GivenNames: u.GivenNames, LastName: u.LastName}
+		if err := s.store.CreateIdentityReview(ctx, inv, u.ID, stored, disclosed.Name); err != nil {
+			return AcceptOutcome{}, err
+		}
+		at.Status = AcceptPendingReview
+		return at, nil
 	}
 
 	if err := s.store.AcceptInvitation(ctx, inv, u.ID, disclosed.Name); err != nil {
 		return AcceptOutcome{}, err
 	}
-	return AcceptOutcome{OrganizationSlug: inv.OrganizationSlug, OrganizationName: inv.OrganizationName}, nil
+	at.Status = AcceptAccepted
+	return at, nil
 }
 
-func (s *Service) resolveUser(ctx context.Context, email user.Email, disclosed identity.Name) (user.User, error) {
+func (s *Service) resolveUser(ctx context.Context, email user.Email, disclosed identity.Name) (user.User, bool, error) {
 	u, err := s.users.FindByEmail(ctx, email)
 	if errors.Is(err, user.ErrNotFound) {
 		cleaned := disclosed.Clean()
-		return s.users.Create(ctx, user.User{Email: email, GivenNames: cleaned.GivenNames, LastName: cleaned.LastName})
+		minted, err := s.users.Create(ctx, user.User{Email: email, GivenNames: cleaned.GivenNames, LastName: cleaned.LastName})
+		return minted, false, err
 	}
 	if err != nil {
-		return user.User{}, fmt.Errorf("accept: find user: %w", err)
+		return user.User{}, false, fmt.Errorf("accept: find user: %w", err)
 	}
 
 	stored := identity.Name{GivenNames: u.GivenNames, LastName: u.LastName}
 	switch identity.Reconcile(disclosed, &stored) {
 	case identity.Review:
-		return user.User{}, ErrIdentityReview
+		return u, true, nil
 	case identity.Upgrade:
 		cleaned := disclosed.Clean()
 		if err := s.users.UpdateName(ctx, u.ID, cleaned.GivenNames, cleaned.LastName); err != nil {
-			return user.User{}, fmt.Errorf("accept: upgrade name: %w", err)
+			return user.User{}, false, fmt.Errorf("accept: upgrade name: %w", err)
 		}
 	}
-	return u, nil
+	return u, false, nil
 }
 
 func (s *Service) DeclineInvitation(ctx context.Context, rawToken string) error {
 	return s.store.DeclineInvitation(ctx, rawToken)
+}
+
+func (s *Service) ListIdentityReviews(ctx context.Context) ([]IdentityReview, error) {
+	return s.store.ListIdentityReviews(ctx)
+}
+
+func (s *Service) ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error) {
+	return s.store.ResolveIdentityReview(ctx, reviewID, reviewerID, approve)
 }

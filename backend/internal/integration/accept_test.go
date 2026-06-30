@@ -268,14 +268,24 @@ func TestAcceptProfileMismatchNeedsReview(t *testing.T) {
 	env.discloses("changed@example.test", "José", "Berg")
 
 	resp := env.acceptInvite(token)
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict {
-		t.Errorf("profile mismatch = %d, want 409", resp.StatusCode)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("profile mismatch = %d, want 200", resp.StatusCode)
+	}
+	var body struct{ Status string }
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Status != "pending_review" {
+		t.Errorf("status = %q, want pending_review", body.Status)
 	}
 	if n := env.membershipCount(orgID, "changed@example.test"); n != 0 {
-		t.Errorf("membership after review block = %d, want 0", n)
+		t.Errorf("membership after review hold = %d, want 0", n)
 	}
 	if n := env.invitationCount(orgID, "changed@example.test"); n != 1 {
-		t.Errorf("invitation after review block = %d, want 1 (still pending)", n)
+		t.Errorf("invitation after review hold = %d, want 1 (still pending)", n)
+	}
+	if n := env.reviewCount("pending"); n != 1 {
+		t.Errorf("pending reviews = %d, want 1", n)
 	}
 }

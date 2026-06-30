@@ -30,7 +30,8 @@ const (
 
 	UserIdentityChanged        = "user.identity_changed"
 	UserIdentityReviewRequired = "user.identity_review_required"
-	UserIdentityReviewResolved = "user.identity_review_resolved"
+	UserIdentityReviewApproved = "user.identity_review_approved"
+	UserIdentityReviewRejected = "user.identity_review_rejected"
 	UserPurged                 = "user.purged"
 )
 

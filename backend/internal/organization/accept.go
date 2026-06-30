@@ -23,6 +23,7 @@ type acceptRequest struct {
 }
 
 type acceptResponse struct {
+	Status           string `json:"status"`
 	OrganizationName string `json:"organizationName"`
 	OrganizationSlug string `json:"organizationSlug"`
 }
@@ -69,8 +70,6 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) error {
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "email_mismatch", Message: "the disclosed e-mail does not match the invitation"}
 	case errors.Is(err, ErrNameMismatch):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "name_mismatch", Message: "the disclosed name does not match the invitation"}
-	case errors.Is(err, ErrIdentityReview):
-		return &respond.APIError{Status: http.StatusConflict, Code: "identity_review_required", Message: "this identity needs review before you can join"}
 	case errors.Is(err, ErrAlreadyMember):
 		return &respond.APIError{Status: http.StatusConflict, Code: "already_member", Message: "you are already a member of this organization"}
 	}
@@ -78,6 +77,7 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	respond.JSON(w, r, http.StatusOK, acceptResponse{
+		Status:           string(outcome.Status),
 		OrganizationName: outcome.OrganizationName,
 		OrganizationSlug: outcome.OrganizationSlug,
 	})
