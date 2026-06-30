@@ -11,6 +11,7 @@ import RootRedirect from "./routes/root-redirect";
 import ProtectedRoute from "./routes/protected-route";
 import AdminRoute from "./routes/admin-route";
 import Login from "./routes/login";
+import InviteAccept from "./routes/invite-accept";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
 import MemberInvite from "./routes/member-invite";
@@ -61,6 +62,7 @@ export const router = createBrowserRouter([
     ErrorBoundary,
     children: [
       { path: "/login", Component: Login },
+      { path: "/invite/:token", Component: InviteAccept },
       { path: "*", Component: NotFound },
       {
         Component: ProtectedRoute,

@@ -15,3 +15,4 @@ export { Logo } from "./logo";
 export { Sidebar } from "./sidebar";
 export { OrgSwitcher } from "./org-switcher";
 export { TopBar } from "./top-bar";
+export { IdentityDisclosure } from "./identity-disclosure";

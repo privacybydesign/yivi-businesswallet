@@ -42,6 +42,39 @@ export const en = {
     credentialRejected: "This credential can't be used to sign in.",
     failed: "Sign-in could not be completed. Please try again.",
   },
+  inviteAccept: {
+    title: "You're invited",
+    invitedTo: "You've been invited to join {{org}}.",
+    invitedAs: "Invited as {{name}}",
+    forEmail: "For {{email}}",
+    expires: "Expires {{date}}",
+    accept: "Accept invitation",
+    decline: "Decline",
+    scanPrompt:
+      "Scan with your Yivi app to confirm your identity and join {{org}}.",
+    accepting: "Joining {{org}}…",
+    declining: "Declining…",
+    accepted: "Welcome to {{org}}",
+    acceptedHint: "Your membership is active. You can now sign in with Yivi.",
+    pendingReview: "Your identity needs review",
+    pendingReviewHint:
+      "An administrator will confirm your details before you join. You can close this page.",
+    declined: "Invitation declined",
+    declinedHint: "You can close this page.",
+    goToApp: "Continue to sign in",
+    retry: "Try again",
+    loading: "Loading invitation…",
+    notFound: "This invitation link is not valid.",
+    expired:
+      "This invitation has expired. Ask the organization to send a new one.",
+    nameMismatch:
+      "The name on your credential doesn't match the invitation. Ask the organization to re-send it with your correct name.",
+    emailMismatch: "This invitation was sent to a different e-mail address.",
+    alreadyMember: "You're already a member of this organization.",
+    disclosureFailed:
+      "Identity confirmation wasn't completed. Please try again.",
+    failed: "Something went wrong. Please try again.",
+  },
   dashboard: {
     greeting: {
       morning: "Good morning, {{name}}",
