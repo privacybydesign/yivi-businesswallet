@@ -37,7 +37,6 @@ type demoUser struct {
 	email         string
 	preferredName string
 	givenNames    string
-	namePrefix    string
 	lastName      string
 }
 
@@ -64,7 +63,7 @@ var demoOrganizations = []demoOrganization{
 
 var demoUsers = []demoUser{
 	{email: "admin@yivi.app", givenNames: "Johannes Hendrik", preferredName: "Jan", lastName: "Janssen"},
-	{email: "user@yivi.app", givenNames: "Thijs Adriaan", namePrefix: "de", lastName: "Vries"},
+	{email: "user@yivi.app", givenNames: "Thijs Adriaan", lastName: "de Vries"},
 }
 
 var demoDepartments = []demoDepartment{
@@ -101,7 +100,7 @@ func Run(ctx context.Context, dsn string) error {
 
 	usersByEmail := map[string]user.User{}
 	for _, u := range demoUsers {
-		seeded, err := ensureUser(ctx, users, u.email, u.givenNames, u.namePrefix, u.lastName, u.preferredName)
+		seeded, err := ensureUser(ctx, users, u.email, u.givenNames, u.lastName, u.preferredName)
 		if err != nil {
 			return err
 		}
@@ -168,7 +167,7 @@ func ensureOrg(ctx context.Context, orgs *organization.Store, name, slug string)
 	return org, nil
 }
 
-func ensureUser(ctx context.Context, users *user.Store, email, givenNames, namePrefix, lastName, preferredName string) (user.User, error) {
+func ensureUser(ctx context.Context, users *user.Store, email, givenNames, lastName, preferredName string) (user.User, error) {
 	parsed, err := user.ParseEmail(email)
 	if err != nil {
 		return user.User{}, fmt.Errorf("seed: parse email %q: %w", email, err)
@@ -181,7 +180,6 @@ func ensureUser(ctx context.Context, users *user.Store, email, givenNames, nameP
 	created, err := users.Create(ctx, user.User{
 		Email:         parsed,
 		GivenNames:    givenNames,
-		NamePrefix:    optional(namePrefix),
 		LastName:      lastName,
 		PreferredName: optional(preferredName),
 	})
@@ -224,7 +222,7 @@ func seedFakerMembers(ctx context.Context, faker *gofakeit.Faker, users *user.St
 		first, last := faker.FirstName(), faker.LastName()
 		email := fmt.Sprintf("%s.%s%d@example.test", slugify(first), slugify(last), i)
 
-		u, err := ensureUser(ctx, users, email, first, "", last, "")
+		u, err := ensureUser(ctx, users, email, first, last, "")
 		if err != nil {
 			return nil, nil, err
 		}

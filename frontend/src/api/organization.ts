@@ -32,7 +32,6 @@ export const memberSchema = z.object({
   email: z.string(),
   preferredName: z.string().nullable(),
   givenNames: z.string(),
-  namePrefix: z.string().nullable(),
   lastName: z.string(),
   role: z.string(),
   jobTitle: z.string().nullable(),
@@ -50,7 +49,6 @@ export const memberListEntrySchema = z.object({
   email: z.string(),
   preferredName: z.string().nullable(),
   givenNames: z.string(),
-  namePrefix: z.string().nullable(),
   lastName: z.string(),
   role: z.string(),
   jobTitle: z.string().nullable(),
@@ -247,7 +245,6 @@ export const auditActorSchema = z.object({
   userId: z.string(),
   preferredName: z.string().nullable(),
   givenNames: z.string(),
-  namePrefix: z.string().nullable(),
   lastName: z.string(),
 });
 

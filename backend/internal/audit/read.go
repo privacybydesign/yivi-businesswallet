@@ -24,7 +24,6 @@ type EventActor struct {
 	UserID        uuid.UUID `json:"userId"`
 	PreferredName *string   `json:"preferredName"`
 	GivenNames    string    `json:"givenNames"`
-	NamePrefix    *string   `json:"namePrefix"`
 	LastName      string    `json:"lastName"`
 }
 
@@ -102,7 +101,7 @@ func (r *Reader) ListForOrganization(ctx context.Context, orgID uuid.UUID, after
 	// Fetch one extra row to detect whether a further page exists.
 	const q = `
 		SELECT a.id, a.occurred_at, a.action, a.target_type, a.target_id, a.metadata,
-		       u.id, u.preferred_name, u.given_names, u.name_prefix, u.last_name
+		       u.id, u.preferred_name, u.given_names, u.last_name
 		FROM audit_events a
 		LEFT JOIN users u ON u.id = a.actor_user_id
 		WHERE a.organization_id = $1
@@ -123,16 +122,15 @@ func (r *Reader) ListForOrganization(ctx context.Context, orgID uuid.UUID, after
 			actorID   *uuid.UUID
 			preferred *string
 			given     *string
-			prefix    *string
 			last      *string
 		)
 		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.Action, &e.TargetType, &e.TargetID, &meta,
-			&actorID, &preferred, &given, &prefix, &last); err != nil {
+			&actorID, &preferred, &given, &last); err != nil {
 			return Page{}, fmt.Errorf("audit: list events scan: %w", err)
 		}
 		e.Metadata = meta
 		if actorID != nil {
-			e.Actor = &EventActor{UserID: *actorID, PreferredName: preferred, NamePrefix: prefix}
+			e.Actor = &EventActor{UserID: *actorID, PreferredName: preferred}
 			if given != nil {
 				e.Actor.GivenNames = *given
 			}

@@ -22,7 +22,6 @@ type memberListEntry struct {
 	Email          string     `json:"email"`
 	PreferredName  *string    `json:"preferredName"`
 	GivenNames     string     `json:"givenNames"`
-	NamePrefix     *string    `json:"namePrefix"`
 	LastName       string     `json:"lastName"`
 	Role           string     `json:"role"`
 	JobTitle       *string    `json:"jobTitle"`
@@ -55,7 +54,6 @@ func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
 				Email:          m.Email,
 				PreferredName:  m.PreferredName,
 				GivenNames:     m.GivenNames,
-				NamePrefix:     m.NamePrefix,
 				LastName:       m.LastName,
 				Role:           m.Role,
 				JobTitle:       m.JobTitle,

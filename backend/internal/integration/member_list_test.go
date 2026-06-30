@@ -20,7 +20,6 @@ type memberEntry struct {
 	Email          string     `json:"email"`
 	PreferredName  *string    `json:"preferredName"`
 	GivenNames     string     `json:"givenNames"`
-	NamePrefix     *string    `json:"namePrefix"`
 	LastName       string     `json:"lastName"`
 	Role           string     `json:"role"`
 	JobTitle       *string    `json:"jobTitle"`
@@ -124,7 +123,7 @@ func TestMemberListPendingShowsInvitedNameNotProfile(t *testing.T) {
 	if pending.GivenNames != "Robert" || pending.LastName != "Asserted" {
 		t.Errorf("invited name = %q %q, want the admin-typed Robert Asserted (not the profile)", pending.GivenNames, pending.LastName)
 	}
-	if pending.PreferredName != nil || pending.NamePrefix != nil {
-		t.Errorf("invited entry leaked profile fields: preferred=%v prefix=%v", pending.PreferredName, pending.NamePrefix)
+	if pending.PreferredName != nil {
+		t.Errorf("invited entry leaked profile field: preferred=%v", pending.PreferredName)
 	}
 }

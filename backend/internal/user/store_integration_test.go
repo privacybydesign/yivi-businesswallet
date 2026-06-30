@@ -22,8 +22,8 @@ func TestStoreFindByEmailReturnsUser(t *testing.T) {
 	const email = "alice@example.test"
 	var id uuid.UUID
 	if err := pool.QueryRow(ctx,
-		"INSERT INTO users (email, preferred_name, given_names, name_prefix, last_name) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-		email, "Ally", "Alice Maria", "van", "Doorn",
+		"INSERT INTO users (email, preferred_name, given_names, last_name) VALUES ($1, $2, $3, $4) RETURNING id",
+		email, "Ally", "Alice Maria", "van Doorn",
 	).Scan(&id); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
@@ -33,15 +33,13 @@ func TestStoreFindByEmailReturnsUser(t *testing.T) {
 		t.Fatalf("FindByEmail: %v", err)
 	}
 
-	prefix := "van"
 	preferred := "Ally"
 	want := user.User{
 		ID:            id,
 		Email:         email,
 		PreferredName: &preferred,
 		GivenNames:    "Alice Maria",
-		NamePrefix:    &prefix,
-		LastName:      "Doorn",
+		LastName:      "van Doorn",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("FindByEmail = %+v, want %+v", got, want)

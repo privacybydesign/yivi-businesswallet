@@ -45,7 +45,7 @@ func (s *Store) GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Mem
 
 func (s *Store) ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, error) {
 	const q = `
-		SELECT u.id, u.email, u.preferred_name, u.given_names, u.name_prefix, u.last_name,
+		SELECT u.id, u.email, u.preferred_name, u.given_names, u.last_name,
 		       m.role, m.job_title, m.department_id, d.name
 		FROM memberships m
 		JOIN users u ON u.id = m.user_id
@@ -61,7 +61,7 @@ func (s *Store) ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, err
 	members := []Member{}
 	for rows.Next() {
 		var m Member
-		if err := rows.Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.NamePrefix, &m.LastName,
+		if err := rows.Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.LastName,
 			&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName); err != nil {
 			return nil, fmt.Errorf("organization: list members scan: %w", err)
 		}
@@ -77,14 +77,14 @@ func (s *Store) ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, err
 
 func (s *Store) getMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error) {
 	const q = `
-		SELECT u.id, u.email, u.preferred_name, u.given_names, u.name_prefix, u.last_name,
+		SELECT u.id, u.email, u.preferred_name, u.given_names, u.last_name,
 		       m.role, m.job_title, m.department_id, d.name
 		FROM memberships m
 		JOIN users u ON u.id = m.user_id
 		LEFT JOIN departments d ON d.id = m.department_id
 		WHERE m.organization_id = $1 AND m.user_id = $2`
 	var m Member
-	err := s.db.QueryRow(ctx, q, orgID, userID).Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.NamePrefix, &m.LastName,
+	err := s.db.QueryRow(ctx, q, orgID, userID).Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.LastName,
 		&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Member{}, ErrNotMember

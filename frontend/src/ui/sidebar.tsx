@@ -4,7 +4,7 @@ import type { IconName } from "./icon";
 import type { Me } from "../api/auth";
 import type { Organization } from "../api/organization";
 import { useOrganizationQuery } from "../api/organization.queries";
-import { personInitials, shortName } from "../lib/name";
+import { personInitials, fullName } from "../lib/name";
 import { Icon } from "./icon";
 import { Avatar } from "./avatar";
 import { Logo } from "./logo";
@@ -121,7 +121,7 @@ export function Sidebar({
         <Avatar initials={personInitials(me)} />
         <div className="min-w-0 flex-1">
           <div className="text-ink truncate text-[12.5px] font-semibold">
-            {shortName(me)}
+            {fullName(me)}
           </div>
           <div className="text-ink-soft text-[10.5px] capitalize">
             {roleLabel}

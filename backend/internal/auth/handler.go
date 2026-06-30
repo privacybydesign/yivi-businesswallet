@@ -86,7 +86,6 @@ func (h *Handler) meResponse(u user.User) meResponse {
 		Email:           string(u.Email),
 		PreferredName:   u.PreferredName,
 		GivenNames:      u.GivenNames,
-		NamePrefix:      u.NamePrefix,
 		LastName:        u.LastName,
 		IsPlatformAdmin: h.admins.Has(u.Email),
 	}
@@ -134,7 +133,6 @@ type meResponse struct {
 	Email           string    `json:"email"`
 	PreferredName   *string   `json:"preferredName"`
 	GivenNames      string    `json:"givenNames"`
-	NamePrefix      *string   `json:"namePrefix"`
 	LastName        string    `json:"lastName"`
 	IsPlatformAdmin bool      `json:"isPlatformAdmin"`
 }

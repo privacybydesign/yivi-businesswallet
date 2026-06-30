@@ -16,6 +16,5 @@ type User struct {
 	Email         Email     `json:"email"`
 	PreferredName *string   `json:"preferredName"`
 	GivenNames    string    `json:"givenNames"`
-	NamePrefix    *string   `json:"namePrefix"`
 	LastName      string    `json:"lastName"`
 }

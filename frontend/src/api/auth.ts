@@ -6,7 +6,6 @@ export const meSchema = z.object({
   email: z.string(),
   preferredName: z.string().nullable(),
   givenNames: z.string(),
-  namePrefix: z.string().nullable(),
   lastName: z.string(),
   isPlatformAdmin: z.boolean(),
 });

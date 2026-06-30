@@ -68,7 +68,6 @@ type Member struct {
 	Email          string     `json:"email"`
 	PreferredName  *string    `json:"preferredName"`
 	GivenNames     string     `json:"givenNames"`
-	NamePrefix     *string    `json:"namePrefix"`
 	LastName       string     `json:"lastName"`
 	Role           string     `json:"role"`
 	JobTitle       *string    `json:"jobTitle"`
