@@ -83,14 +83,15 @@ func TestStoreUpdateNotFound(t *testing.T) {
 func TestStoreUpdateRollsBackWhenAuditFails(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
-	store := organization.NewStore(pool, failingRecorder{})
+	store := organization.NewStore(pool, audit.NopRecorder{})
 
 	created, err := store.Create(ctx, "Acme", "acme")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if _, err := store.Update(ctx, created.ID, "Acme Renamed"); err == nil {
+	failing := organization.NewStore(pool, failingRecorder{})
+	if _, err := failing.Update(ctx, created.ID, "Acme Renamed"); err == nil {
 		t.Fatal("Update succeeded, want error from failing audit")
 	}
 

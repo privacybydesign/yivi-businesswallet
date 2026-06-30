@@ -4,7 +4,6 @@ package integration
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -13,16 +12,6 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
-
-type memberBody struct {
-	UserID       uuid.UUID  `json:"userId"`
-	Email        string     `json:"email"`
-	GivenNames   string     `json:"givenNames"`
-	LastName     string     `json:"lastName"`
-	Role         string     `json:"role"`
-	JobTitle     *string    `json:"jobTitle"`
-	DepartmentID *uuid.UUID `json:"departmentId"`
-}
 
 func (e *testEnv) updateMember(slug string, userID uuid.UUID, body string) *http.Response {
 	e.t.Helper()
@@ -69,14 +58,14 @@ func TestAdminUpdatesMember(t *testing.T) {
 
 	resp := env.updateMember("acme", userID,
 		`{"jobTitle":"Engineering Lead","departmentId":"`+deptID.String()+`"}`)
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("update = %d, want 200", resp.StatusCode)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("update = %d, want 204", resp.StatusCode)
 	}
 
-	var m memberBody
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		t.Fatalf("decode: %v", err)
+	m := byEmail(env.listMembers("acme", organization.StatusActive), "eng@example.test")
+	if m == nil {
+		t.Fatal("member not found after update")
 	}
 	if m.JobTitle == nil || *m.JobTitle != "Engineering Lead" {
 		t.Errorf("jobTitle = %v, want Engineering Lead", m.JobTitle)
@@ -94,14 +83,14 @@ func TestUpdateMemberClearsFields(t *testing.T) {
 	userID := env.activeMember(orgID, "eng@example.test", organization.RoleMember, &jobTitle, &deptID)
 
 	resp := env.updateMember("acme", userID, `{"jobTitle":null,"departmentId":null}`)
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("update = %d, want 200", resp.StatusCode)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("update = %d, want 204", resp.StatusCode)
 	}
 
-	var m memberBody
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		t.Fatalf("decode: %v", err)
+	m := byEmail(env.listMembers("acme", organization.StatusActive), "eng@example.test")
+	if m == nil {
+		t.Fatal("member not found after update")
 	}
 	if m.JobTitle != nil || m.DepartmentID != nil {
 		t.Errorf("jobTitle/department = %v/%v, want nil/nil", m.JobTitle, m.DepartmentID)
@@ -153,14 +142,14 @@ func TestAdminPromotesMemberPreservingProfile(t *testing.T) {
 
 	resp := env.updateMember("acme", userID,
 		`{"role":"admin","jobTitle":"Dev","departmentId":"`+deptID.String()+`"}`)
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("promote = %d, want 200", resp.StatusCode)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("promote = %d, want 204", resp.StatusCode)
 	}
 
-	var m memberBody
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		t.Fatalf("decode: %v", err)
+	m := byEmail(env.listMembers("acme", organization.StatusActive), "eng@example.test")
+	if m == nil {
+		t.Fatal("member not found after promote")
 	}
 	if m.Role != organization.RoleAdmin {
 		t.Errorf("role = %q, want admin", m.Role)
@@ -179,14 +168,14 @@ func TestAdminDemotesAdminWithCoAdmin(t *testing.T) {
 	other := env.activeMember(orgID, "co@example.test", organization.RoleAdmin, nil, nil)
 
 	resp := env.updateMember("acme", other, `{"role":"member"}`)
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("demote = %d, want 200", resp.StatusCode)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("demote = %d, want 204", resp.StatusCode)
 	}
 
-	var m memberBody
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		t.Fatalf("decode: %v", err)
+	m := byEmail(env.listMembers("acme", organization.StatusActive), "co@example.test")
+	if m == nil {
+		t.Fatal("member not found after demote")
 	}
 	if m.Role != organization.RoleMember {
 		t.Errorf("role = %q, want member", m.Role)

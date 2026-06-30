@@ -22,6 +22,21 @@ func decode(t *testing.T, resp *http.Response, v any) {
 	}
 }
 
+func (e *testEnv) departmentByName(slug, name string) organization.Department {
+	e.t.Helper()
+	resp := e.do(http.MethodGet, "/api/v1/orgs/"+slug+"/departments", nil)
+	defer func() { _ = resp.Body.Close() }()
+	var depts []organization.Department
+	decode(e.t, resp, &depts)
+	for _, d := range depts {
+		if d.Name == name {
+			return d
+		}
+	}
+	e.t.Fatalf("department %q not found", name)
+	return organization.Department{}
+}
+
 func TestDepartmentMemberCanList(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
@@ -55,21 +70,19 @@ func TestDepartmentAdminCRUD(t *testing.T) {
 	env.addMembership(me.ID, orgID, organization.RoleAdmin)
 
 	resp := env.do(http.MethodPost, "/api/v1/orgs/acme/departments", jsonBody(`{"name":"Engineering"}`))
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
-		_ = resp.Body.Close()
 		t.Fatalf("POST department = %d, want 201", resp.StatusCode)
 	}
-	var dept organization.Department
-	decode(t, resp, &dept)
-	_ = resp.Body.Close()
-	if dept.Name != "Engineering" {
-		t.Fatalf("created department name = %q, want Engineering", dept.Name)
-	}
+	dept := env.departmentByName("acme", "Engineering")
 
 	resp = env.do(http.MethodPatch, "/api/v1/orgs/acme/departments/"+dept.ID.String(), jsonBody(`{"name":"Platform"}`))
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("PATCH department = %d, want 200", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("PATCH department = %d, want 204", resp.StatusCode)
+	}
+	if got := env.departmentByName("acme", "Platform"); got.ID != dept.ID {
+		t.Errorf("renamed department id = %s, want %s", got.ID, dept.ID)
 	}
 
 	resp = env.do(http.MethodDelete, "/api/v1/orgs/acme/departments/"+dept.ID.String(), nil)
@@ -105,20 +118,23 @@ func TestUpdateMemberAssignsJobTitleAndDepartment(t *testing.T) {
 	env.addMembership(admin.ID, orgID, organization.RoleAdmin)
 
 	resp := env.do(http.MethodPost, "/api/v1/orgs/acme/departments", jsonBody(`{"name":"Engineering"}`))
-	var dept organization.Department
-	decode(t, resp, &dept)
 	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST department = %d, want 201", resp.StatusCode)
+	}
+	dept := env.departmentByName("acme", "Engineering")
 
 	payload := `{"jobTitle":"CTO","departmentId":"` + dept.ID.String() + `"}`
 	resp = env.do(http.MethodPatch, "/api/v1/orgs/acme/members/"+admin.ID.String(), jsonBody(payload))
-	if resp.StatusCode != http.StatusOK {
-		_ = resp.Body.Close()
-		t.Fatalf("PATCH member = %d, want 200", resp.StatusCode)
-	}
-	var member organization.Member
-	decode(t, resp, &member)
 	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("PATCH member = %d, want 204", resp.StatusCode)
+	}
 
+	member := byEmail(env.listMembers("acme", organization.StatusActive), "boss@example.test")
+	if member == nil {
+		t.Fatal("member not found after update")
+	}
 	if member.JobTitle == nil || *member.JobTitle != "CTO" {
 		t.Errorf("jobTitle = %v, want CTO", member.JobTitle)
 	}
