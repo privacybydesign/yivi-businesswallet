@@ -32,7 +32,17 @@ export const en = {
     select: "Select organization",
     allOrganizations: "All organizations",
     manageAll: "Manage all organizations",
+    invitations: "Pending invitations",
     empty: "No organizations yet",
+  },
+  myInvitations: {
+    title: "Invitations",
+    subtitle: "Organizations that have invited you to join",
+    empty: "You have no pending invitations.",
+    loadError: "Could not load your invitations: {{message}}",
+    accept: "Accept",
+    decline: "Decline",
+    back: "Back to invitations",
   },
   login: {
     title: "Sign in",

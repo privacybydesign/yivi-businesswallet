@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMatches, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { Organization } from "../api/organization";
+import { useMyInvitationsQuery } from "../api/invitations.queries";
 import { Avatar } from "./avatar";
 import { Icon } from "./icon";
 import * as React from "react";
@@ -9,6 +10,7 @@ import * as React from "react";
 const CHEVRON_SIZE = 14;
 const GLYPH_SIZE = 14;
 const ALL_ORGS_PATH = "/admin/organizations";
+const INVITATIONS_PATH = "/invitations";
 
 interface OrgSwitcherProps {
   organizations: Organization[];
@@ -26,6 +28,7 @@ export function OrgSwitcher({
   const matches = useMatches();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pendingInvites = useMyInvitationsQuery().data?.length ?? 0;
 
   const activeSlug = matches.find(
     (match) => (match.params as { orgSlug?: string }).orgSlug !== undefined,
@@ -141,6 +144,21 @@ export function OrgSwitcher({
                 );
               })}
             </ul>
+          )}
+
+          {pendingInvites > 0 && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => go(INVITATIONS_PATH)}
+              className="border-line text-ink-soft hover:bg-surface-3 hover:text-ink flex w-full items-center gap-2 border-t px-3 py-2.5 text-left text-[12.5px] font-medium transition-colors"
+            >
+              <Icon name="email" size={GLYPH_SIZE} />
+              <span className="flex-1">{t("orgSwitcher.invitations")}</span>
+              <span className="bg-primary inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[10.5px] font-semibold text-white">
+                {pendingInvites}
+              </span>
+            </button>
           )}
 
           {isPlatformAdmin && (

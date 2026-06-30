@@ -68,7 +68,11 @@ export function Sidebar({
   const activeSlug = matches.find(
     (match) => (match.params as { orgSlug?: string }).orgSlug !== undefined,
   )?.params.orgSlug;
-  const navItems = activeSlug ? orgNavItems(activeSlug) : ADMIN_NAV_ITEMS;
+  const navItems = activeSlug
+    ? orgNavItems(activeSlug)
+    : me.isPlatformAdmin
+      ? ADMIN_NAV_ITEMS
+      : [];
 
   // Platform admins outrank any single org; otherwise show the membership role
   // for the org currently in the URL.

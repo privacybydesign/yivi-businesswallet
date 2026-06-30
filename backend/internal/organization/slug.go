@@ -13,8 +13,10 @@ var (
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 var reservedSlugs = map[string]struct{}{
-	"login": {},
-	"admin": {},
+	"login":       {},
+	"admin":       {},
+	"invite":      {},
+	"invitations": {},
 }
 
 func ValidateSlug(slug string) error {
