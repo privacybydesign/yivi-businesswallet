@@ -9,7 +9,7 @@ import {
   inviteSessionUrl,
 } from "../api/invitations";
 import { useInvitePreviewQuery } from "../api/invitations.queries";
-import { Button, Card, IdentityDisclosure, Icon, Logo } from "../ui";
+import { Button, Card, IdentityDisclosure, Logo, Outcome } from "../ui";
 
 type Phase =
   | "preview"
@@ -214,44 +214,6 @@ export default function InviteAccept(): React.JSX.Element {
           </>
         )}
       </Card>
-    </div>
-  );
-}
-
-type Tone = "success" | "info" | "error";
-
-const TONE_CLASS: Record<Tone, string> = {
-  success: "bg-success-bg text-success",
-  info: "bg-highlight text-link",
-  error: "bg-error-bg text-error",
-};
-
-function Outcome({
-  tone,
-  icon,
-  title,
-  message,
-  action,
-}: {
-  tone: Tone;
-  icon: React.ComponentProps<typeof Icon>["name"];
-  title: string;
-  message: string;
-  action?: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <div className="mt-6 flex flex-col items-center text-center">
-      <span
-        className={[
-          "inline-flex h-12 w-12 items-center justify-center rounded-full",
-          TONE_CLASS[tone],
-        ].join(" ")}
-      >
-        <Icon name={icon} size={24} />
-      </span>
-      <h1 className="mt-4 text-[20px] font-bold">{title}</h1>
-      <p className="text-ink-soft mt-1 text-[14px]">{message}</p>
-      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }

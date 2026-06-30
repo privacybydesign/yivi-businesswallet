@@ -12,12 +12,31 @@ export const meSchema = z.object({
 
 export type Me = z.infer<typeof meSchema>;
 
+export const pendingInvitationSchema = z.object({
+  id: z.string(),
+  organizationName: z.string(),
+  organizationSlug: z.string(),
+});
+export type PendingInvitation = z.infer<typeof pendingInvitationSchema>;
+
+const pendingInvitationsClaimSchema = z.object({
+  pendingInvitations: z.array(pendingInvitationSchema),
+});
+
+// A claim either authenticates an existing user (meSchema) or, for a brand-new
+// invitee with no account, returns their pending invitations to route to accept.
+export const claimResultSchema = z.union([
+  meSchema,
+  pendingInvitationsClaimSchema,
+]);
+export type ClaimResult = z.infer<typeof claimResultSchema>;
+
 export function claimAuthSession(
   token: string,
   signal?: AbortSignal,
-): Promise<Me> {
+): Promise<ClaimResult> {
   return request(`/api/v1/auth/session/${encodeURIComponent(token)}/claim`, {
-    schema: meSchema,
+    schema: claimResultSchema,
     method: "POST",
     signal,
   });

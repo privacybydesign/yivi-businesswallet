@@ -49,6 +49,8 @@ export const en = {
     forEmail: "For {{email}}",
     expires: "Expires {{date}}",
     accept: "Accept invitation",
+    join: "Join {{org}}",
+    invitedIntro: "You've been invited to join:",
     decline: "Decline",
     scanPrompt:
       "Scan with your Yivi app to confirm your identity and join {{org}}.",
