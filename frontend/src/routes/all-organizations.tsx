@@ -81,7 +81,8 @@ export default function AllOrganizations(): React.JSX.Element {
                   filtered.map((org) => (
                     <Table.Row
                       key={org.id}
-                      className="hover:bg-surface-3 transition-colors"
+                      onClick={() => void navigate(`/${org.slug}`)}
+                      className="hover:bg-surface-3 cursor-pointer transition-colors"
                     >
                       <Table.Cell>
                         <Link
