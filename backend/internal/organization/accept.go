@@ -3,6 +3,7 @@ package organization
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -73,6 +74,15 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) error {
 		OrganizationName: outcome.OrganizationName,
 		OrganizationSlug: outcome.OrganizationSlug,
 	})
+	return nil
+}
+
+func (h *Handler) startInvitationSession(w http.ResponseWriter, r *http.Request) error {
+	pkg, err := h.service.StartIdentitySession(r.Context())
+	if err != nil {
+		return fmt.Errorf("starting identity session: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, pkg)
 	return nil
 }
 

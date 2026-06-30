@@ -40,6 +40,7 @@ type inviter interface {
 	InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) (Invitation, error)
 	PendingInvitation(ctx context.Context, rawToken string) (Invitation, error)
 	StartAcceptSession(ctx context.Context, rawToken string) (*irmaserver.SessionPackage, error)
+	StartIdentitySession(ctx context.Context) (*irmaserver.SessionPackage, error)
 	AcceptInvitation(ctx context.Context, rawToken, disclosureToken string) (AcceptOutcome, error)
 	DeclineInvitation(ctx context.Context, rawToken string) error
 	MyInvitations(ctx context.Context, email user.Email) ([]Invitation, error)
@@ -86,6 +87,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /me/invitations", h.requireUser(respond.HandlerFunc(h.myInvitations)))
 	mux.Handle("POST /me/invitations/{id}/decline", h.requireUser(respond.HandlerFunc(h.declineMyInvitation)))
 
+	mux.Handle("POST /invitations/session", respond.HandlerFunc(h.startInvitationSession))
 	mux.Handle("POST /invitations/{id}/accept", respond.HandlerFunc(h.acceptInvitationByID))
 
 	mux.Handle("GET /invite/{token}", respond.HandlerFunc(h.invitePreview))

@@ -105,6 +105,13 @@ func (s *Service) StartAcceptSession(ctx context.Context, rawToken string) (*irm
 	return s.discloser.StartIdentitySession(ctx)
 }
 
+// StartIdentitySession begins an identity disclosure not bound to a specific
+// invitation, for the by-id accept flows (in-app and login-routed). The
+// invitation is selected at accept time and the disclosure's email-match gates it.
+func (s *Service) StartIdentitySession(ctx context.Context) (*irmaserver.SessionPackage, error) {
+	return s.discloser.StartIdentitySession(ctx)
+}
+
 type AcceptStatus string
 
 const (

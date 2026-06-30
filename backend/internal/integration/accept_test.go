@@ -122,6 +122,22 @@ func TestAcceptInvitationMintsNewUser(t *testing.T) {
 	}
 }
 
+func TestStartInvitationSession(t *testing.T) {
+	env := setup(t)
+	resp := env.do(http.MethodPost, "/api/v1/invitations/session", nil)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("start session = %d, want 200", resp.StatusCode)
+	}
+	var body struct{ Token string }
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Token == "" {
+		t.Error("session token is empty, want the daemon requestor token")
+	}
+}
+
 func TestAcceptInvitationPreview(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
