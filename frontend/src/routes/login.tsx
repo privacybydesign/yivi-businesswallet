@@ -13,6 +13,8 @@ import {
   acceptInvitationById,
   INVITATION_SESSION_URL,
 } from "../api/invitations";
+import { inviteError } from "../lib/invite-error";
+import type { InviteErrorContent } from "../lib/invite-error";
 import {
   Avatar,
   Button,
@@ -46,6 +48,9 @@ export default function Login(): React.JSX.Element {
   const [message, setMessage] = useState<string>("");
   const [invites, setInvites] = useState<PendingInvitation[]>([]);
   const [chosen, setChosen] = useState<PendingInvitation | null>(null);
+  const [errorContent, setErrorContent] = useState<InviteErrorContent>(() =>
+    inviteError(null, t),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -105,8 +110,8 @@ export default function Login(): React.JSX.Element {
         setPhase(result.status === "accepted" ? "accepted" : "pendingReview");
       })
       .catch((error: unknown) => {
+        setErrorContent(inviteError(error, t));
         setPhase("acceptError");
-        setMessage(acceptErrorMessage(error, t));
       });
   };
 
@@ -151,8 +156,8 @@ export default function Login(): React.JSX.Element {
           <Outcome
             tone="error"
             icon="warning"
-            title={t("inviteAccept.title")}
-            message={message}
+            title={errorContent.title}
+            message={errorContent.body}
             action={
               <Button variant="secondary" onClick={() => setPhase("invited")}>
                 {t("inviteAccept.retry")}
@@ -261,27 +266,4 @@ function handleClaimError(
     return;
   }
   setMessage(t("login.failed"));
-}
-
-function acceptErrorMessage(error: unknown, t: TFunction): string {
-  const code =
-    error instanceof ApiError &&
-    typeof error.body === "object" &&
-    error.body !== null &&
-    "code" in error.body &&
-    typeof error.body.code === "string"
-      ? error.body.code
-      : null;
-  switch (code) {
-    case "name_mismatch":
-      return t("inviteAccept.nameMismatch");
-    case "email_mismatch":
-      return t("inviteAccept.emailMismatch");
-    case "already_member":
-      return t("inviteAccept.alreadyMember");
-    case "disclosure_failed":
-      return t("inviteAccept.disclosureFailed");
-    default:
-      return t("inviteAccept.failed");
-  }
 }

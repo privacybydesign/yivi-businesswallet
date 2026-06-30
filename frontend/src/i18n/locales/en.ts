@@ -66,16 +66,36 @@ export const en = {
     goToApp: "Continue",
     retry: "Try again",
     loading: "Loading invitation…",
-    notFound: "This invitation link is not valid.",
-    expired:
-      "This invitation has expired. Ask the organization to send a new one.",
-    nameMismatch:
-      "The name on your credential doesn't match the invitation. Ask the organization to re-send it with your correct name.",
-    emailMismatch: "This invitation was sent to a different e-mail address.",
-    alreadyMember: "You're already a member of this organization.",
-    disclosureFailed:
-      "Identity confirmation wasn't completed. Please try again.",
-    failed: "Something went wrong. Please try again.",
+    errors: {
+      notFound: {
+        title: "Invitation not found",
+        body: "This invitation link is not valid.",
+      },
+      expired: {
+        title: "Invitation expired",
+        body: "This invitation has expired. Ask the organization to send a new one.",
+      },
+      nameMismatch: {
+        title: "Name doesn't match",
+        body: "The name on your credential doesn't match the invitation. Ask the organization to re-send it with your correct name.",
+      },
+      emailMismatch: {
+        title: "Different e-mail address",
+        body: "This invitation was sent to a different e-mail address.",
+      },
+      alreadyMember: {
+        title: "Already a member",
+        body: "You're already a member of this organization.",
+      },
+      disclosureFailed: {
+        title: "Identity not confirmed",
+        body: "Identity confirmation wasn't completed. Please try again.",
+      },
+      failed: {
+        title: "Something went wrong",
+        body: "Something went wrong. Please try again.",
+      },
+    },
   },
   dashboard: {
     greeting: {

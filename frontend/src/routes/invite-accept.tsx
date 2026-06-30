@@ -3,8 +3,9 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { ApiError } from "../api/http";
 import { meQueryKey } from "../api/auth.queries";
+import { inviteError } from "../lib/invite-error";
+import type { InviteErrorContent } from "../lib/invite-error";
 import {
   acceptInviteByToken,
   declineInviteByToken,
@@ -23,28 +24,6 @@ type Phase =
   | "declined"
   | "error";
 
-type ErrorKey =
-  | "inviteAccept.failed"
-  | "inviteAccept.nameMismatch"
-  | "inviteAccept.emailMismatch"
-  | "inviteAccept.alreadyMember"
-  | "inviteAccept.disclosureFailed"
-  | "inviteAccept.expired"
-  | "inviteAccept.notFound";
-
-function errorCode(error: unknown): string | null {
-  if (
-    error instanceof ApiError &&
-    typeof error.body === "object" &&
-    error.body !== null &&
-    "code" in error.body &&
-    typeof error.body.code === "string"
-  ) {
-    return error.body.code;
-  }
-  return null;
-}
-
 export default function InviteAccept(): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const { token } = useParams();
@@ -53,7 +32,9 @@ export default function InviteAccept(): React.JSX.Element {
   const inviteToken = token ?? "";
   const preview = useInvitePreviewQuery(inviteToken);
   const [phase, setPhase] = useState<Phase>("preview");
-  const [errorKey, setErrorKey] = useState<ErrorKey>("inviteAccept.failed");
+  const [errorContent, setErrorContent] = useState<InviteErrorContent>(() =>
+    inviteError(null, t),
+  );
 
   // Accept already minted a session; refresh `me` (cached as null) before
   // entering so the protected routes see the authenticated user.
@@ -68,9 +49,10 @@ export default function InviteAccept(): React.JSX.Element {
   );
 
   const orgName = preview.data?.organizationName ?? "";
+  const loadError = inviteError(preview.error, t);
 
-  const fail = (key: ErrorKey): void => {
-    setErrorKey(key);
+  const fail = (error: unknown): void => {
+    setErrorContent(inviteError(error, t));
     setPhase("error");
   };
 
@@ -80,31 +62,14 @@ export default function InviteAccept(): React.JSX.Element {
       .then((result) => {
         setPhase(result.status === "accepted" ? "accepted" : "pendingReview");
       })
-      .catch((error: unknown) => {
-        switch (errorCode(error)) {
-          case "name_mismatch":
-            return fail("inviteAccept.nameMismatch");
-          case "email_mismatch":
-            return fail("inviteAccept.emailMismatch");
-          case "already_member":
-            return fail("inviteAccept.alreadyMember");
-          case "disclosure_failed":
-            return fail("inviteAccept.disclosureFailed");
-          case "invitation_expired":
-            return fail("inviteAccept.expired");
-          case "invitation_not_found":
-            return fail("inviteAccept.notFound");
-          default:
-            return fail("inviteAccept.failed");
-        }
-      });
+      .catch((error: unknown) => fail(error));
   };
 
   const onDecline = (): void => {
     setPhase("declining");
     declineInviteByToken(inviteToken)
       .then(() => setPhase("declined"))
-      .catch(() => fail("inviteAccept.failed"));
+      .catch((error: unknown) => fail(error));
   };
 
   return (
@@ -122,12 +87,8 @@ export default function InviteAccept(): React.JSX.Element {
           <Outcome
             tone="error"
             icon="warning"
-            title={t("inviteAccept.title")}
-            message={t(
-              errorCode(preview.error) === "invitation_expired"
-                ? "inviteAccept.expired"
-                : "inviteAccept.notFound",
-            )}
+            title={loadError.title}
+            message={loadError.body}
           />
         ) : phase === "accepted" ? (
           <Outcome
@@ -159,8 +120,8 @@ export default function InviteAccept(): React.JSX.Element {
           <Outcome
             tone="error"
             icon="warning"
-            title={t("inviteAccept.title")}
-            message={t(errorKey)}
+            title={errorContent.title}
+            message={errorContent.body}
             action={
               <Button variant="secondary" onClick={() => setPhase("preview")}>
                 {t("inviteAccept.retry")}
