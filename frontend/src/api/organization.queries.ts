@@ -11,6 +11,7 @@ import type {
   UseMutationResult,
   UseQueryResult,
 } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import {
   createDepartment,
   createOrganization,
@@ -39,6 +40,7 @@ import type {
   Organization,
   OrganizationDetail,
 } from "./organization";
+import { toast } from "../lib/toast";
 
 export const organizationsQueryKey = ["organizations"] as const;
 export const myOrganizationsQueryKey = ["organizations", "mine"] as const;
@@ -115,9 +117,12 @@ export function useCreateOrganizationMutation(): UseMutationResult<
   { name: string; slug: string }
 > {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: (input) => createOrganization(input),
+    meta: { suppressErrorToast: true },
     onSuccess: () => {
+      toast.success(t("toasts.organizationCreated"));
       void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
       void queryClient.invalidateQueries({ queryKey: myOrganizationsQueryKey });
     },
@@ -128,9 +133,12 @@ export function useUpdateOrganizationMutation(
   slug: string,
 ): UseMutationResult<void, Error, { name: string }> {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: (input) => updateOrganization(slug, input),
+    meta: { suppressErrorToast: true },
     onSuccess: () => {
+      toast.success(t("toasts.organizationUpdated"));
       void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
       void queryClient.invalidateQueries({
         queryKey: organizationAuditEventsQueryKey(slug),
@@ -206,9 +214,12 @@ export function useCreateDepartmentMutation(
   slug: string,
 ): UseMutationResult<void, Error, { name: string }> {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: (input) => createDepartment(slug, input),
+    meta: { suppressErrorToast: true },
     onSuccess: () => {
+      toast.success(t("toasts.departmentAdded"));
       void queryClient.invalidateQueries({
         queryKey: organizationDepartmentsQueryKey(slug),
       });
@@ -223,10 +234,13 @@ export function useUpdateDepartmentMutation(
   slug: string,
 ): UseMutationResult<void, Error, { departmentId: string; name: string }> {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: ({ departmentId, name }) =>
       updateDepartment(slug, departmentId, { name }),
+    meta: { suppressErrorToast: true },
     onSuccess: () => {
+      toast.success(t("toasts.departmentRenamed"));
       void queryClient.invalidateQueries({
         queryKey: organizationDepartmentsQueryKey(slug),
       });
@@ -245,9 +259,12 @@ export function useDeleteDepartmentMutation(
   slug: string,
 ): UseMutationResult<void, Error, { departmentId: string }> {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: ({ departmentId }) => deleteDepartment(slug, departmentId),
+    meta: { suppressErrorToast: true },
     onSuccess: () => {
+      toast.success(t("toasts.departmentDeleted"));
       void queryClient.invalidateQueries({
         queryKey: organizationDepartmentsQueryKey(slug),
       });
@@ -271,9 +288,12 @@ export function useInviteMemberMutation(slug: string): UseMutationResult<
   }
 > {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: (input) => inviteMember(slug, input),
+    meta: { suppressErrorToast: true },
     onSuccess: () => {
+      toast.success(t("toasts.invitationSent"));
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),
       });
@@ -288,9 +308,11 @@ export function useResendInvitationMutation(
   slug: string,
 ): UseMutationResult<void, Error, { invitationId: string }> {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: ({ invitationId }) => resendInvitation(slug, invitationId),
     onSuccess: () => {
+      toast.success(t("toasts.invitationResent"));
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),
       });
@@ -305,9 +327,11 @@ export function useRevokeInvitationMutation(
   slug: string,
 ): UseMutationResult<void, Error, { invitationId: string }> {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: ({ invitationId }) => revokeInvitation(slug, invitationId),
     onSuccess: () => {
+      toast.success(t("toasts.invitationRevoked"));
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),
       });
@@ -329,10 +353,13 @@ export function useUpdateMemberMutation(slug: string): UseMutationResult<
   }
 > {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: ({ userId, role, jobTitle, departmentId }) =>
       updateOrganizationMember(slug, userId, { role, jobTitle, departmentId }),
+    meta: { suppressErrorToast: true },
     onSuccess: (_data, { userId }) => {
+      toast.success(t("toasts.memberUpdated"));
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),
       });

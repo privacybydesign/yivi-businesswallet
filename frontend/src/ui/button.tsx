@@ -24,6 +24,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   icon?: IconName;
+  loading?: boolean;
   children?: ReactNode;
 }
 
@@ -31,14 +32,18 @@ export function Button({
   variant = "primary",
   size = "md",
   icon,
+  loading = false,
   children,
   className,
   type = "button",
+  disabled,
   ...rest
 }: ButtonProps): React.JSX.Element {
   return (
     <button
       type={type}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
       className={[
         "rounded-yivi font-display inline-flex items-center justify-center gap-2 font-semibold whitespace-nowrap",
         "cursor-pointer transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50",
@@ -48,7 +53,14 @@ export function Button({
       ].join(" ")}
       {...rest}
     >
-      {icon && <Icon name={icon} size={ICON_SIZE} />}
+      {loading ? (
+        <span
+          aria-hidden="true"
+          className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+        />
+      ) : (
+        icon && <Icon name={icon} size={ICON_SIZE} />
+      )}
       {children}
     </button>
   );
