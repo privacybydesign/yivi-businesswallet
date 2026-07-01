@@ -105,5 +105,7 @@ Load only when relevant:
 | Frontend conventions | editing `frontend/` (React / TS / Vite) | `.ai/conventions/FRONTEND.md` |
 | Backend conventions | editing `backend/` (Go) | `.ai/conventions/BACKEND.md` |
 | Feature / compliance scope | feature planning, regulatory requirements | `regulation/FEATURE_LIST.md` |
+| Planning & review | writing a plan or reviewing a branch | `.ai/plans/README.md` |
+| Feature docs      | working on an existing capability    | `.ai/features/<name>.md` |
 
 If the user makes significant corrections or conventions change, update the relevant file. Keep this file lean.

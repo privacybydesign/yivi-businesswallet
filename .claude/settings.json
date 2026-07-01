@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git diff:*)",
+      "Bash(git status)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(gofmt:*)",
+      "Bash(go vet:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go tool golangci-lint:*)",
+      "Bash(npm run format)",
+      "Bash(npm run lint)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run build)"
+    ]
+  }
+}

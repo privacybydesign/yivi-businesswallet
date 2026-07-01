@@ -37,3 +37,8 @@ frontend/.eslintcache
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# ---- AI / Claude ----
+.claude/worktrees/
+.ai/plans/*
+!.ai/plans/README.md
