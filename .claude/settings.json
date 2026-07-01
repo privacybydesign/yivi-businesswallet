@@ -15,10 +15,5 @@
       "Bash(npm run typecheck)",
       "Bash(npm run build)"
     ]
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "bash .claude/statusline.sh",
-    "padding": 0
   }
 }
