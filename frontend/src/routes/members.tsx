@@ -386,11 +386,14 @@ export default function Members(): React.JSX.Element {
                         </Table.Cell>
                         <Table.Cell className="text-right">
                           {pending && member.invitationId && (
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-end gap-1">
                               <Button
                                 size="sm"
                                 variant="ghost"
+                                iconOnly
                                 icon="email"
+                                aria-label={t("members.resend")}
+                                title={t("members.resend")}
                                 disabled={resend.isPending}
                                 onClick={(event) => {
                                   event.stopPropagation();
@@ -398,13 +401,14 @@ export default function Members(): React.JSX.Element {
                                     invitationId: member.invitationId!,
                                   });
                                 }}
-                              >
-                                {t("members.resend")}
-                              </Button>
+                              />
                               <Button
                                 size="sm"
-                                variant="danger"
+                                variant="dangerGhost"
+                                iconOnly
                                 icon="delete"
+                                aria-label={t("members.revoke")}
+                                title={t("members.revoke")}
                                 disabled={revoke.isPending}
                                 onClick={(event) => {
                                   event.stopPropagation();
@@ -412,9 +416,7 @@ export default function Members(): React.JSX.Element {
                                     invitationId: member.invitationId!,
                                   });
                                 }}
-                              >
-                                {t("members.revoke")}
-                              </Button>
+                              />
                             </div>
                           )}
                         </Table.Cell>

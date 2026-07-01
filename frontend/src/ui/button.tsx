@@ -2,7 +2,12 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 import type { IconName } from "./icon";
 import { Icon } from "./icon";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant =
+  | "primary"
+  | "secondary"
+  | "ghost"
+  | "danger"
+  | "dangerGhost";
 type ButtonSize = "sm" | "md" | "lg";
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
@@ -10,6 +15,8 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   secondary: "bg-surface text-ink border border-line-strong hover:bg-surface-3",
   ghost: "bg-transparent text-ink hover:bg-surface-3",
   danger: "bg-transparent text-error border border-error hover:bg-error-bg",
+  dangerGhost:
+    "bg-transparent text-ink-soft hover:bg-error-bg hover:text-error focus-visible:bg-error-bg focus-visible:text-error",
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
@@ -18,12 +25,19 @@ const SIZE_CLASSES: Record<ButtonSize, string> = {
   lg: "h-11 px-[18px] text-[15px]",
 };
 
+const ICON_ONLY_SIZE_CLASSES: Record<ButtonSize, string> = {
+  sm: "h-7 w-7",
+  md: "h-9 w-9",
+  lg: "h-11 w-11",
+};
+
 const ICON_SIZE = 16;
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   icon?: IconName;
+  iconOnly?: boolean;
   loading?: boolean;
   children?: ReactNode;
 }
@@ -32,6 +46,7 @@ export function Button({
   variant = "primary",
   size = "md",
   icon,
+  iconOnly = false,
   loading = false,
   children,
   className,
@@ -48,7 +63,7 @@ export function Button({
         "rounded-yivi font-display inline-flex items-center justify-center gap-2 font-semibold whitespace-nowrap",
         "cursor-pointer transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50",
         VARIANT_CLASSES[variant],
-        SIZE_CLASSES[size],
+        iconOnly ? ICON_ONLY_SIZE_CLASSES[size] : SIZE_CLASSES[size],
         className ?? "",
       ].join(" ")}
       {...rest}
