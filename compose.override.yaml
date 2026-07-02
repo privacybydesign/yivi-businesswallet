@@ -69,7 +69,7 @@ services:
       dockerfile: docker/development/Dockerfile
     entrypoint: ["go", "run", "./cmd/seed"]
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
     depends_on:
       migrate:
         condition: service_completed_successfully
