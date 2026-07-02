@@ -5,7 +5,7 @@ services:
     image: postgres:18-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: ${POSTGRES_DB:-yivi_business_wallet}
     volumes:
       - pgdata:/var/lib/postgresql
@@ -23,7 +23,7 @@ services:
     entrypoint: ["/migrate"]
     command: ["up"]
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
     depends_on:
       db:
         condition: service_healthy
@@ -35,7 +35,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
     depends_on:
       db:
         condition: service_healthy
