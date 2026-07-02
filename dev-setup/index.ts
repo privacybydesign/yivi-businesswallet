@@ -74,6 +74,20 @@ function ensureEnvLocalFile(reset: boolean): void {
     }
 }
 
+// Compose now *requires* POSTGRES_PASSWORD (no weak fallback), so a fresh clone
+// with no root .env would abort with "required variable POSTGRES_PASSWORD is
+// missing a value". Seed it from .env.example so `npm run dev` stays zero-config.
+// The example's CHANGE_ME placeholder is fine for a throwaway local dev DB; only
+// existing files are left untouched (never overwritten unless --reset).
+function ensureRootEnvFile(reset: boolean): void {
+    const rootEnvPath = join(REPO_ROOT_PATH, '.env');
+    const rootEnvExamplePath = join(REPO_ROOT_PATH, '.env.example');
+    if (reset || !existsSync(rootEnvPath)) {
+        console.log(`${reset ? "Resetting" : "Creating"} .env from .env.example`);
+        copyFileSync(rootEnvExamplePath, rootEnvPath);
+    }
+}
+
 async function checkDocker(): Promise<void> {
     try {
         await execAsync("docker info");
@@ -181,7 +195,8 @@ async function main() {
         await withTiming("Reset PostgreSQL database", resetDatabase);
     }
 
-    await withTiming("Ensure .env.local file exists", () => {
+    await withTiming("Ensure .env files exist", () => {
+        ensureRootEnvFile(reset);
         ensureEnvLocalFile(reset);
     });
 
