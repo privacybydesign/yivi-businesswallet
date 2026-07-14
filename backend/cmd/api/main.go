@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,6 +20,8 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/irmarequestor"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
@@ -31,8 +34,28 @@ const (
 	irmaProbeTimeout = 10 * time.Second
 	irmaHTTPTimeout  = 15 * time.Second
 
+	qerdsProbeTimeout = 10 * time.Second
+
 	serverAddr = ":8080"
 )
+
+// qerdsProvider is the boot-time provider surface: the readiness probe plus the
+// operations the qerds service uses. The concrete provider is chosen by config.
+type qerdsProvider interface {
+	Ping(context.Context) error
+	Send(context.Context, qerdsprovider.OutboundMessage) (qerdsprovider.SendReceipt, error)
+	Fetch(context.Context, qerdsprovider.Address) ([]qerdsprovider.InboundMessage, error)
+	ResolveAddress(context.Context, string) (qerdsprovider.Address, error)
+}
+
+func newQerdsProvider(cfg config.Config) (qerdsProvider, error) {
+	switch cfg.QerdsProvider {
+	case config.ProviderStub:
+		return qerdsprovider.NewStubProvider(), nil
+	default:
+		return nil, fmt.Errorf("qerds provider %q is not implemented", cfg.QerdsProvider)
+	}
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -101,10 +124,26 @@ func run() error {
 	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)
 	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, requireUser, platformAdmins)
 
+	qerdsProv, err := newQerdsProvider(cfg)
+	if err != nil {
+		return err
+	}
+	// Fatal readiness gate, mirroring the IRMA probe: fail at boot if the QERDS
+	// provider will not accept our requests.
+	qerdsProbeCtx, qerdsProbeCancel := context.WithTimeout(ctx, qerdsProbeTimeout)
+	defer qerdsProbeCancel()
+	if err := qerdsProv.Ping(qerdsProbeCtx); err != nil {
+		return fmt.Errorf("qerds provider ping: %w", err)
+	}
+	qerdsStore := qerds.NewStore(pool, audit.NewDBRecorder())
+	qerdsService := qerds.NewService(qerdsStore, qerdsStore, qerdsProv)
+	qerdsHandler := qerds.NewHandler(qerdsService, qerdsStore, qerdsStore, requireUser, orgHandler.Authorize, cfg.QerdsWebhookSecret, cfg.QerdsDefaultAddressDomain)
+
 	handler := server.New(
 		pool,
 		authHandler,
 		orgHandler,
+		qerdsHandler,
 	)
 
 	httpServer := &http.Server{

@@ -25,6 +25,12 @@ const (
 
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
+	envQerdsProvider             = "QERDS_PROVIDER"
+	envQerdsProviderURL          = "QERDS_PROVIDER_URL"
+	envQerdsAuthToken            = "QERDS_AUTH_TOKEN"
+	envQerdsWebhookSecret        = "QERDS_WEBHOOK_SECRET"
+	envQerdsDefaultAddressDomain = "QERDS_DEFAULT_ADDRESS_DOMAIN"
+
 	defaultLogLevel  = "info"
 	defaultLogFormat = "text"
 	defaultLogSource = "true"
@@ -38,6 +44,13 @@ const (
 	defaultSessionCookieSecure = "false"
 	defaultSessionTTL          = "24h"
 	defaultSessionPruneEvery   = "1h"
+
+	// ProviderStub selects the in-process StubProvider (local dev / CI). Any
+	// other value names a real provider driver and requires QERDS_PROVIDER_URL.
+	ProviderStub = "stub"
+
+	defaultQerdsProvider             = ProviderStub
+	defaultQerdsDefaultAddressDomain = "qerds.localhost"
 )
 
 type Config struct {
@@ -55,6 +68,12 @@ type Config struct {
 	SessionCookieSecure     bool
 	SessionTTL              time.Duration
 	SessionPruneEvery       time.Duration
+
+	QerdsProvider             string
+	QerdsProviderURL          string
+	QerdsAuthToken            string
+	QerdsWebhookSecret        string
+	QerdsDefaultAddressDomain string
 
 	PlatformAdminEmails []string
 }
@@ -82,6 +101,12 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	qerdsProvider := envOrDefault(envQerdsProvider, defaultQerdsProvider)
+	qerdsProviderURL := os.Getenv(envQerdsProviderURL)
+	if qerdsProvider != ProviderStub && qerdsProviderURL == "" {
+		return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envQerdsProviderURL, envQerdsProvider, ProviderStub)
+	}
+
 	return Config{
 		DatabaseDSN: dsn,
 		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
@@ -97,6 +122,12 @@ func Load() (Config, error) {
 		SessionCookieSecure:     cookieSecure,
 		SessionTTL:              sessionTTL,
 		SessionPruneEvery:       sessionPruneEvery,
+
+		QerdsProvider:             qerdsProvider,
+		QerdsProviderURL:          qerdsProviderURL,
+		QerdsAuthToken:            os.Getenv(envQerdsAuthToken),
+		QerdsWebhookSecret:        os.Getenv(envQerdsWebhookSecret),
+		QerdsDefaultAddressDomain: envOrDefault(envQerdsDefaultAddressDomain, defaultQerdsDefaultAddressDomain),
 
 		PlatformAdminEmails: parseList(os.Getenv(envPlatformAdminEmails)),
 	}, nil
