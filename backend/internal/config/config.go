@@ -31,6 +31,15 @@ const (
 	envQerdsWebhookSecret        = "QERDS_WEBHOOK_SECRET"
 	envQerdsDefaultAddressDomain = "QERDS_DEFAULT_ADDRESS_DOMAIN"
 
+	// Domibus WS-plugin ebMS3 addressing. Defaults match the parties in the
+	// Domibus sample PMode so a blue -> red self-send works out of the box.
+	envQerdsDomibusFromParty   = "QERDS_DOMIBUS_FROM_PARTY"
+	envQerdsDomibusToParty     = "QERDS_DOMIBUS_TO_PARTY"
+	envQerdsDomibusPartyType   = "QERDS_DOMIBUS_PARTY_ID_TYPE"
+	envQerdsDomibusService     = "QERDS_DOMIBUS_SERVICE"
+	envQerdsDomibusServiceType = "QERDS_DOMIBUS_SERVICE_TYPE"
+	envQerdsDomibusAction      = "QERDS_DOMIBUS_ACTION"
+
 	defaultLogLevel  = "info"
 	defaultLogFormat = "text"
 	defaultLogSource = "true"
@@ -45,12 +54,21 @@ const (
 	defaultSessionTTL          = "24h"
 	defaultSessionPruneEvery   = "1h"
 
-	// ProviderStub selects the in-process StubProvider (local dev / CI). Any
-	// other value names a real provider driver and requires QERDS_PROVIDER_URL.
+	// ProviderStub selects the in-process StubProvider (local dev / CI).
 	ProviderStub = "stub"
+	// ProviderDomibus selects the Domibus AS4 access-point driver. Requires
+	// QERDS_PROVIDER_URL (the WS-plugin endpoint).
+	ProviderDomibus = "domibus"
 
 	defaultQerdsProvider             = ProviderStub
 	defaultQerdsDefaultAddressDomain = "qerds.localhost"
+
+	defaultQerdsDomibusFromParty   = "domibus-blue"
+	defaultQerdsDomibusToParty     = "domibus-red"
+	defaultQerdsDomibusPartyType   = "urn:oasis:names:tc:ebcore:partyid-type:unregistered"
+	defaultQerdsDomibusService     = "bdx:noprocess"
+	defaultQerdsDomibusServiceType = "tc1"
+	defaultQerdsDomibusAction      = "TC1Leg1"
 )
 
 type Config struct {
@@ -74,6 +92,13 @@ type Config struct {
 	QerdsAuthToken            string
 	QerdsWebhookSecret        string
 	QerdsDefaultAddressDomain string
+
+	QerdsDomibusFromParty   string
+	QerdsDomibusToParty     string
+	QerdsDomibusPartyType   string
+	QerdsDomibusService     string
+	QerdsDomibusServiceType string
+	QerdsDomibusAction      string
 
 	PlatformAdminEmails []string
 }
@@ -128,6 +153,13 @@ func Load() (Config, error) {
 		QerdsAuthToken:            os.Getenv(envQerdsAuthToken),
 		QerdsWebhookSecret:        os.Getenv(envQerdsWebhookSecret),
 		QerdsDefaultAddressDomain: envOrDefault(envQerdsDefaultAddressDomain, defaultQerdsDefaultAddressDomain),
+
+		QerdsDomibusFromParty:   envOrDefault(envQerdsDomibusFromParty, defaultQerdsDomibusFromParty),
+		QerdsDomibusToParty:     envOrDefault(envQerdsDomibusToParty, defaultQerdsDomibusToParty),
+		QerdsDomibusPartyType:   envOrDefault(envQerdsDomibusPartyType, defaultQerdsDomibusPartyType),
+		QerdsDomibusService:     envOrDefault(envQerdsDomibusService, defaultQerdsDomibusService),
+		QerdsDomibusServiceType: envOrDefault(envQerdsDomibusServiceType, defaultQerdsDomibusServiceType),
+		QerdsDomibusAction:      envOrDefault(envQerdsDomibusAction, defaultQerdsDomibusAction),
 
 		PlatformAdminEmails: parseList(os.Getenv(envPlatformAdminEmails)),
 	}, nil

@@ -35,6 +35,7 @@ const (
 	irmaHTTPTimeout  = 15 * time.Second
 
 	qerdsProbeTimeout = 10 * time.Second
+	qerdsHTTPTimeout  = 30 * time.Second
 
 	serverAddr = ":8080"
 )
@@ -52,6 +53,20 @@ func newQerdsProvider(cfg config.Config) (qerdsProvider, error) {
 	switch cfg.QerdsProvider {
 	case config.ProviderStub:
 		return qerdsprovider.NewStubProvider(), nil
+	case config.ProviderDomibus:
+		return qerdsprovider.NewDomibusProvider(
+			cfg.QerdsProviderURL,
+			qerdsprovider.NewTokenAuthenticator(cfg.QerdsAuthToken),
+			qerdsprovider.DomibusConfig{
+				FromParty:   cfg.QerdsDomibusFromParty,
+				ToParty:     cfg.QerdsDomibusToParty,
+				PartyType:   cfg.QerdsDomibusPartyType,
+				Service:     cfg.QerdsDomibusService,
+				ServiceType: cfg.QerdsDomibusServiceType,
+				Action:      cfg.QerdsDomibusAction,
+			},
+			&http.Client{Timeout: qerdsHTTPTimeout},
+		), nil
 	default:
 		return nil, fmt.Errorf("qerds provider %q is not implemented", cfg.QerdsProvider)
 	}

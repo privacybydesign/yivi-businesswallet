@@ -221,8 +221,8 @@ bench:
 ### Tiered strategy
 
 ```
-Dev/CI:   qerdsprovider StubProvider (in-process)   ← offline, deterministic, exercisable now
-   ↕      (optional) Domibus in Compose (AS4)        ← proves transport plumbing
+Dev/CI:   qerdsprovider StubProvider (in-process)   ← offline, deterministic, default
+   ↕      Domibus in Compose (AS4, `domibus` profile) ← proves transport plumbing
 Staging:  partner QTSP sandbox                        ← real ERDS evidence + qualified timestamps
 Prod:     partner QTSP production
 ```
@@ -233,12 +233,49 @@ Same three-tier shape as `irma-demo.*` → `pbdf.*`.
 read as "QERDS done" — the evidence store and qualified-timestamp capture are only truly exercised
 against a real QTSP sandbox.
 
+### Domibus AS4 bench (opt-in dev Compose)
+
+`compose.override.yaml` defines `domibus` + `domibus-mysql` (the EC/FIWARE reference images,
+Domibus 4.0) behind a `domibus` **profile** so the default `npm run dev` is unaffected. Bring it up
+with:
+
+```
+docker compose --profile domibus up -d       # Tomcat is slow under arm64 emulation
+```
+
+Admin console: `http://localhost:8090/domibus` (`admin` / `123456`). Point the backend at it with:
+
+```
+QERDS_PROVIDER=domibus
+QERDS_PROVIDER_URL=http://domibus:8080/domibus/services/backend
+```
+
+The `qerdsprovider.DomibusProvider` driver speaks the WS-plugin SOAP (submitMessage /
+listPendingMessages / retrieveMessage) and boot-probes the endpoint's WSDL. Its ebMS3 addressing
+(`QERDS_DOMIBUS_*`) defaults to the Domibus **sample PMode** parties (`domibus-blue` → `domibus-red`,
+service `bdx:noprocess`, action `TC1Leg1`). A different Domibus deployment needs those vars aligned
+to its PMode.
+
+**Live verification (manual, against this bench):** `Ping` succeeds against the real WS-plugin WSDL,
+and `submitMessage` is **structurally accepted** by Domibus 4.0 — the envelope unmarshals fully
+(this shook out a real bug: the WS-plugin `payload`/`value` elements are `elementFormDefault`
+unqualified and must reset to the empty namespace inside `submitRequest`, now covered by a
+regression test). A fully-*accepted* submission additionally requires a **PMode uploaded to the
+Domibus instance** (a fresh Domibus answers `EBMS:0010 PMode could not be found`); that is a
+Domibus-admin step (upload the sample PMode via the `:8090` console), not driver work. CI exercises
+only the envelope construction + response parsing (unit tests); the **stub remains the verified
+default** provider.
+
 ### What this branch implements
 
-The **Dev/CI tier only**: `qerdsprovider` interface + `StubProvider`, the `qerds` domain slice,
-migrations, org-scoped routes, boot `Ping`, and the inbound webhook. Enough to send, receive,
-persist evidence, and drive the dashboard end-to-end offline. Domibus, the partner drivers, and the
-frontend are follow-ups.
+- **Backend:** `qerdsprovider` interface + `StubProvider` + `DomibusProvider`, the `qerds` domain
+  slice, migrations, org-scoped routes, boot `Ping`, and the inbound webhook.
+- **Frontend:** inbox/outbox list, message detail with the delivery-evidence panel, compose flow,
+  and digital-address management (`src/api/qerds*`, `src/routes/qerds*`).
+- **Dev bench:** the Domibus `domibus`-profile Compose services above.
+
+Follow-ups: the partner QTSP driver + sandbox integration, attachment/blob storage, and the
+European Digital Directory (SMP/SML) lookup.
 
 ---
 
