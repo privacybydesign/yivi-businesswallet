@@ -110,12 +110,15 @@ func (p *DomibusProvider) Send(ctx context.Context, msg OutboundMessage) (SendRe
 	return SendReceipt{ProviderRef: ref, Status: StatusSubmitted}, nil
 }
 
-// Fetch pulls pending inbound messages for an address: it lists pending message
-// ids, then retrieves and acknowledges each. Parsing is best-effort against the
-// WS-plugin retrieveMessage response.
+// Fetch pulls pending inbound messages for a single address. The WS-plugin
+// queue is shared across the whole access point, so it MUST be scoped by
+// finalRecipient: listPendingMessages is filtered to addr (otherwise every
+// address would drain the whole queue, since retrieveMessage acknowledges and
+// consumes each message), and each retrieved message is attributed to the
+// finalRecipient carried in its own message properties, not to addr.
 func (p *DomibusProvider) Fetch(ctx context.Context, addr Address) ([]InboundMessage, error) {
 	var pending listPendingResponse
-	if err := p.call(ctx, "listPendingMessages", newListPendingEnvelope(), &pending); err != nil {
+	if err := p.call(ctx, "listPendingMessages", newListPendingEnvelope(string(addr)), &pending); err != nil {
 		return nil, err
 	}
 
@@ -313,12 +316,16 @@ type xmlValue struct {
 	Value   string `xml:",chardata"`
 }
 
-func newListPendingEnvelope() listPendingEnvelope {
+func newListPendingEnvelope(finalRecipient string) listPendingEnvelope {
+	req := listPendingRequest{XMLName: xml.Name{Space: backendNS, Local: "listPendingMessagesRequest"}}
+	if finalRecipient != "" {
+		// Unqualified (empty namespace), like the submitRequest payload — the
+		// backend schema is elementFormDefault="unqualified".
+		req.FinalRecipient = &xmlValue{XMLName: xml.Name{Local: "finalRecipient"}, Value: finalRecipient}
+	}
 	return listPendingEnvelope{
 		XMLName: xml.Name{Space: soapNS, Local: "Envelope"},
-		Body: listPendingBody{
-			Request: emptyRequest{XMLName: xml.Name{Space: backendNS, Local: "listPendingMessagesRequest"}},
-		},
+		Body:    listPendingBody{Request: req},
 	}
 }
 
@@ -328,11 +335,13 @@ type listPendingEnvelope struct {
 }
 
 type listPendingBody struct {
-	Request emptyRequest
+	Request listPendingRequest
 }
 
-type emptyRequest struct {
+type listPendingRequest struct {
 	XMLName xml.Name
+	// Filters the shared queue to one recipient. Omitted (whole queue) when empty.
+	FinalRecipient *xmlValue
 }
 
 func newRetrieveEnvelope(messageID string) retrieveEnvelope {
@@ -380,13 +389,22 @@ type retrieveResponse struct {
 	Payload string `xml:"Body>retrieveMessageResponse>payload>value"`
 }
 
-func (r retrieveResponse) toInbound(messageID string, recipient Address) InboundMessage {
+// toInbound maps a retrieved message to an InboundMessage. The recipient comes
+// from the message's own finalRecipient property; fallbackRecipient (the address
+// that was polled) is used only when the property is absent, so a message is
+// never misattributed to the poller.
+func (r retrieveResponse) toInbound(messageID string, fallbackRecipient Address) InboundMessage {
 	sender := r.FromParty
+	recipient := fallbackRecipient
 	subject := ""
 	for _, prop := range r.Properties {
 		switch prop.Name {
 		case propOriginalSender:
 			sender = prop.Value
+		case propFinalRecipient:
+			if prop.Value != "" {
+				recipient = Address(prop.Value)
+			}
 		case "subject":
 			subject = prop.Value
 		}

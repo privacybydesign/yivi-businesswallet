@@ -118,6 +118,7 @@ func TestDomibusRetrieveToInbound(t *testing.T) {
         <eb:PartyInfo><eb:From><eb:PartyId>domibus-red</eb:PartyId></eb:From></eb:PartyInfo>
         <eb:MessageProperties>
           <eb:Property name="originalSender">alice@qerds.localhost</eb:Property>
+          <eb:Property name="finalRecipient">bob@qerds.localhost</eb:Property>
           <eb:Property name="subject">Quarterly filing</eb:Property>
         </eb:MessageProperties>
       </eb:UserMessage>
@@ -134,7 +135,9 @@ func TestDomibusRetrieveToInbound(t *testing.T) {
 	if err := xml.Unmarshal([]byte(body), &out); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	inbound := out.toInbound("m1@domibus.eu", "bob@qerds.localhost")
+	// Pass a deliberately-wrong fallback: the recipient must come from the
+	// message's finalRecipient property, not the polled address.
+	inbound := out.toInbound("m1@domibus.eu", "poller@qerds.localhost")
 	if inbound.ProviderRef != "m1@domibus.eu" {
 		t.Errorf("providerRef = %q", inbound.ProviderRef)
 	}
@@ -148,6 +151,29 @@ func TestDomibusRetrieveToInbound(t *testing.T) {
 		t.Errorf("body = %q", inbound.Body)
 	}
 	if inbound.Recipient != "bob@qerds.localhost" {
-		t.Errorf("recipient = %q", inbound.Recipient)
+		t.Errorf("recipient = %q, want the finalRecipient property, not the poller", inbound.Recipient)
+	}
+}
+
+func TestDomibusListPendingFiltersByRecipient(t *testing.T) {
+	filtered, err := xml.Marshal(newListPendingEnvelope("bob@qerds.localhost"))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	doc := string(filtered)
+	if !strings.Contains(doc, "finalRecipient") || !strings.Contains(doc, "bob@qerds.localhost") {
+		t.Errorf("listPending must filter by recipient\n%s", doc)
+	}
+	if !strings.Contains(doc, `xmlns=""`) {
+		t.Errorf("finalRecipient must be unqualified (xmlns=\"\")\n%s", doc)
+	}
+
+	// No recipient → whole-queue request, no filter element.
+	whole, err := xml.Marshal(newListPendingEnvelope(""))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(whole), "finalRecipient") {
+		t.Errorf("empty recipient must omit the filter\n%s", string(whole))
 	}
 }
