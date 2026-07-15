@@ -34,6 +34,10 @@ const (
 	UserIdentityReviewApproved = "user.identity_review_approved"
 	UserIdentityReviewRejected = "user.identity_review_rejected"
 	UserPurged                 = "user.purged"
+
+	QerdsMessageSent        = "qerds.message_sent"
+	QerdsMessageReceived    = "qerds.message_received"
+	QerdsAddressProvisioned = "qerds.address_provisioned"
 )
 
 const (
@@ -41,6 +45,8 @@ const (
 	TargetMembership   = "membership"
 	TargetDepartment   = "department"
 	TargetUser         = "user"
+	TargetQerdsMessage = "qerds_message"
+	TargetQerdsAddress = "qerds_address"
 )
 
 type Actor struct {

@@ -91,6 +91,46 @@ services:
       backend:
         condition: service_healthy
 
+  # QERDS transport bench (AS4 / eDelivery). Opt-in — heavy and only needed when
+  # exercising the real `domibus` provider driver instead of the in-process stub:
+  #   docker compose --profile domibus up
+  # then run the backend with QERDS_PROVIDER=domibus and
+  # QERDS_PROVIDER_URL=http://domibus:8080/domibus/services/backend.
+  # Admin console: http://localhost:8090/domibus (admin / 123456).
+  # NOTE: proves AS4 plumbing, not qualified compliance — see .ai/features/qerds.md.
+  domibus-mysql:
+    image: fiware/domibus-mysql:latest
+    # Published only for linux/amd64; runs under emulation on arm64 hosts.
+    platform: linux/amd64
+    profiles: ["domibus"]
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: domibus
+      MYSQL_USER: edelivery
+      MYSQL_PASSWORD: edelivery
+    networks:
+      # The Domibus Tomcat image resolves its datasource host as "mysql".
+      default:
+        aliases:
+          - mysql
+
+  domibus:
+    image: fiware/domibus-tomcat:latest
+    platform: linux/amd64
+    profiles: ["domibus"]
+    environment:
+      # The image requires exactly "MySQL" or "Oracle" (case-sensitive).
+      DB_TYPE: MySQL
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: domibus
+      DB_USER: edelivery
+      DB_PASS: edelivery
+    ports:
+      - "8090:8080"
+    depends_on:
+      - domibus-mysql
+
 volumes:
   backend-go-build:
   backend-go-mod:

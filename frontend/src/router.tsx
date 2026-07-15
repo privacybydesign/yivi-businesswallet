@@ -1,10 +1,12 @@
 import { createBrowserRouter } from "react-router";
 import type { CrumbContext, RouteHandle } from "./ui";
 import type { Member, OrganizationDetail } from "./api/organization";
+import type { QerdsMessageWithEvidence } from "./api/qerds";
 import {
   organizationMemberQueryKey,
   organizationQueryKey,
 } from "./api/organization.queries";
+import { qerdsMessageQueryKey } from "./api/qerds.queries";
 import { fullName } from "./lib/name";
 import Root from "./routes/root";
 import RootRedirect from "./routes/root-redirect";
@@ -20,6 +22,10 @@ import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
 import MemberEdit from "./routes/member-edit";
 import AuditLog from "./routes/audit-log";
+import Qerds from "./routes/qerds";
+import QerdsCompose from "./routes/qerds-compose";
+import QerdsAddresses from "./routes/qerds-addresses";
+import QerdsMessage from "./routes/qerds-message";
 import Settings from "./routes/settings";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
@@ -52,6 +58,21 @@ const memberEditCrumb: RouteHandle = {
   crumb: ({ t }) => t("common.edit"),
 };
 const auditLogCrumb: RouteHandle = { crumb: ({ t }) => t("auditLog.title") };
+const qerdsCrumb: RouteHandle = { crumb: ({ t }) => t("qerds.title") };
+const qerdsComposeCrumb: RouteHandle = {
+  crumb: ({ t }) => t("qerds.compose.title"),
+};
+const qerdsAddressesCrumb: RouteHandle = {
+  crumb: ({ t }) => t("qerds.addresses.title"),
+};
+const qerdsMessageCrumb: RouteHandle = {
+  crumb: ({ params, queryClient, t }: CrumbContext) => {
+    const message = queryClient.getQueryData<QerdsMessageWithEvidence>(
+      qerdsMessageQueryKey(params.orgSlug ?? "", params.messageId ?? ""),
+    );
+    return message ? message.subject : t("qerds.message.title");
+  },
+};
 const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
 const invitationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("myInvitations.title"),
@@ -110,6 +131,28 @@ export const router = createBrowserRouter([
                             handle: memberEditCrumb,
                           },
                         ],
+                      },
+                    ],
+                  },
+                  {
+                    path: "qerds",
+                    handle: qerdsCrumb,
+                    children: [
+                      { index: true, Component: Qerds },
+                      {
+                        path: "compose",
+                        Component: QerdsCompose,
+                        handle: qerdsComposeCrumb,
+                      },
+                      {
+                        path: "addresses",
+                        Component: QerdsAddresses,
+                        handle: qerdsAddressesCrumb,
+                      },
+                      {
+                        path: ":messageId",
+                        Component: QerdsMessage,
+                        handle: qerdsMessageCrumb,
                       },
                     ],
                   },

@@ -25,6 +25,21 @@ const (
 
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
+	envQerdsProvider             = "QERDS_PROVIDER"
+	envQerdsProviderURL          = "QERDS_PROVIDER_URL"
+	envQerdsAuthToken            = "QERDS_AUTH_TOKEN"
+	envQerdsWebhookSecret        = "QERDS_WEBHOOK_SECRET"
+	envQerdsDefaultAddressDomain = "QERDS_DEFAULT_ADDRESS_DOMAIN"
+
+	// Domibus WS-plugin ebMS3 addressing. Defaults match the parties in the
+	// Domibus sample PMode so a blue -> red self-send works out of the box.
+	envQerdsDomibusFromParty   = "QERDS_DOMIBUS_FROM_PARTY"
+	envQerdsDomibusToParty     = "QERDS_DOMIBUS_TO_PARTY"
+	envQerdsDomibusPartyType   = "QERDS_DOMIBUS_PARTY_ID_TYPE"
+	envQerdsDomibusService     = "QERDS_DOMIBUS_SERVICE"
+	envQerdsDomibusServiceType = "QERDS_DOMIBUS_SERVICE_TYPE"
+	envQerdsDomibusAction      = "QERDS_DOMIBUS_ACTION"
+
 	defaultLogLevel  = "info"
 	defaultLogFormat = "text"
 	defaultLogSource = "true"
@@ -38,6 +53,22 @@ const (
 	defaultSessionCookieSecure = "false"
 	defaultSessionTTL          = "24h"
 	defaultSessionPruneEvery   = "1h"
+
+	// ProviderStub selects the in-process StubProvider (local dev / CI).
+	ProviderStub = "stub"
+	// ProviderDomibus selects the Domibus AS4 access-point driver. Requires
+	// QERDS_PROVIDER_URL (the WS-plugin endpoint).
+	ProviderDomibus = "domibus"
+
+	defaultQerdsProvider             = ProviderStub
+	defaultQerdsDefaultAddressDomain = "qerds.localhost"
+
+	defaultQerdsDomibusFromParty   = "domibus-blue"
+	defaultQerdsDomibusToParty     = "domibus-red"
+	defaultQerdsDomibusPartyType   = "urn:oasis:names:tc:ebcore:partyid-type:unregistered"
+	defaultQerdsDomibusService     = "bdx:noprocess"
+	defaultQerdsDomibusServiceType = "tc1"
+	defaultQerdsDomibusAction      = "TC1Leg1"
 )
 
 type Config struct {
@@ -55,6 +86,19 @@ type Config struct {
 	SessionCookieSecure     bool
 	SessionTTL              time.Duration
 	SessionPruneEvery       time.Duration
+
+	QerdsProvider             string
+	QerdsProviderURL          string
+	QerdsAuthToken            string
+	QerdsWebhookSecret        string
+	QerdsDefaultAddressDomain string
+
+	QerdsDomibusFromParty   string
+	QerdsDomibusToParty     string
+	QerdsDomibusPartyType   string
+	QerdsDomibusService     string
+	QerdsDomibusServiceType string
+	QerdsDomibusAction      string
 
 	PlatformAdminEmails []string
 }
@@ -82,6 +126,12 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	qerdsProvider := envOrDefault(envQerdsProvider, defaultQerdsProvider)
+	qerdsProviderURL := os.Getenv(envQerdsProviderURL)
+	if qerdsProvider != ProviderStub && qerdsProviderURL == "" {
+		return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envQerdsProviderURL, envQerdsProvider, ProviderStub)
+	}
+
 	return Config{
 		DatabaseDSN: dsn,
 		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
@@ -97,6 +147,19 @@ func Load() (Config, error) {
 		SessionCookieSecure:     cookieSecure,
 		SessionTTL:              sessionTTL,
 		SessionPruneEvery:       sessionPruneEvery,
+
+		QerdsProvider:             qerdsProvider,
+		QerdsProviderURL:          qerdsProviderURL,
+		QerdsAuthToken:            os.Getenv(envQerdsAuthToken),
+		QerdsWebhookSecret:        os.Getenv(envQerdsWebhookSecret),
+		QerdsDefaultAddressDomain: envOrDefault(envQerdsDefaultAddressDomain, defaultQerdsDefaultAddressDomain),
+
+		QerdsDomibusFromParty:   envOrDefault(envQerdsDomibusFromParty, defaultQerdsDomibusFromParty),
+		QerdsDomibusToParty:     envOrDefault(envQerdsDomibusToParty, defaultQerdsDomibusToParty),
+		QerdsDomibusPartyType:   envOrDefault(envQerdsDomibusPartyType, defaultQerdsDomibusPartyType),
+		QerdsDomibusService:     envOrDefault(envQerdsDomibusService, defaultQerdsDomibusService),
+		QerdsDomibusServiceType: envOrDefault(envQerdsDomibusServiceType, defaultQerdsDomibusServiceType),
+		QerdsDomibusAction:      envOrDefault(envQerdsDomibusAction, defaultQerdsDomibusAction),
 
 		PlatformAdminEmails: parseList(os.Getenv(envPlatformAdminEmails)),
 	}, nil

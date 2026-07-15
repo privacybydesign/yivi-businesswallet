@@ -19,6 +19,7 @@ export const en = {
   nav: {
     dashboard: "Dashboard",
     members: "Members",
+    qerds: "Secure delivery",
     auditLog: "Audit log",
     adminDashboard: "Overview",
     allOrganizations: "Organizations",
@@ -175,6 +176,10 @@ export const en = {
     departmentAdded: "Department added",
     departmentRenamed: "Department renamed",
     departmentDeleted: "Department deleted",
+    qerdsMessageSent: "Message sent",
+    qerdsInboxChecked_one: "{{count}} new message received",
+    qerdsInboxChecked_other: "{{count}} new messages received",
+    qerdsAddressAdded: "Digital address added",
   },
   members: {
     title: "Members",
@@ -388,5 +393,92 @@ export const en = {
   rootEmpty: {
     title: "No organizations yet",
     body: "You are not a member of any organization. Contact your administrator to get access.",
+  },
+  qerds: {
+    title: "Secure delivery",
+    subtitle:
+      "Legally-binding messages via the qualified electronic registered delivery service",
+    newMessage: "New message",
+    checkInbox: "Check inbox",
+    checking: "Checking…",
+    loadError: "Could not load messages: {{message}}",
+    emptyInbox: "No messages received yet.",
+    emptyOutbox: "No messages sent yet.",
+    tabs: {
+      inbox: "Inbox",
+      outbox: "Sent",
+    },
+    columns: {
+      subject: "Subject",
+      from: "From",
+      to: "To",
+      status: "Status",
+      when: "When",
+    },
+    direction: {
+      inbound: "Received",
+      outbound: "Sent",
+    },
+    message: {
+      title: "Message",
+      notFound: "This message could not be found.",
+      fromLine: "From {{address}}",
+      toLine: "To {{address}}",
+      content: "Message",
+      noBody: "This message has no body text.",
+      providerRef: "Provider reference",
+      sentAt: "Sent",
+      deliveredAt: "Delivered",
+    },
+    evidence: {
+      title: "Delivery evidence",
+      description:
+        "Tamper-evident proof of sending and receipt, each carrying a qualified timestamp.",
+      empty: "No evidence has been recorded for this message yet.",
+      stampedAt: "Qualified timestamp: {{when}}",
+      raw: "Raw evidence",
+      types: {
+        submission: "Submission accepted",
+        relay: "Relayed",
+        delivery: "Delivered",
+        nonDelivery: "Non-delivery",
+      },
+    },
+    compose: {
+      title: "New message",
+      subtitle:
+        "Send a legally-binding message through the registered delivery service.",
+      send: "Send",
+      sending: "Sending…",
+      from: "From",
+      noAddressPlaceholder: "No digital address provisioned",
+      recipient: "Recipient",
+      recipientPlaceholder: "recipient@example.eu",
+      subjectLabel: "Subject",
+      bodyLabel: "Message",
+      note: "Delivery is asynchronous: once accepted, evidence and delivery receipts arrive over time.",
+      recipientRequired: "Enter a recipient address.",
+      recipientInvalid: "Enter a valid recipient address.",
+      subjectRequired: "Enter a subject.",
+      noSenderAddress:
+        "Your organization has no default digital address. Provision one first.",
+      error: "Could not send message: {{message}}",
+    },
+    addresses: {
+      title: "Digital addresses",
+      subtitle:
+        "The registered-delivery addresses assigned to your organization",
+      heading: "Digital addresses",
+      description:
+        "Each organization is assigned at least one unique digital address for registered delivery.",
+      localPartPlaceholder: "e.g. legal (defaults to the org slug)",
+      add: "Add address",
+      adding: "Adding…",
+      empty: "No digital addresses provisioned yet.",
+      default: "Default",
+      loadError: "Could not load addresses: {{message}}",
+      taken: "That digital address is already taken.",
+      error: "Something went wrong: {{message}}",
+    },
   },
 } as const;
