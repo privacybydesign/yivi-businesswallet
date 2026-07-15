@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
   useQerdsAddressesQuery,
+  useQerdsContactsQuery,
   useSendQerdsMessageMutation,
 } from "../api/qerds.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
@@ -127,6 +128,7 @@ export default function QerdsCompose(): React.JSX.Element {
 
   const org = useOrganizationQuery(slug);
   const addresses = useQerdsAddressesQuery(slug, !org.isError);
+  const contacts = useQerdsContactsQuery(slug, !org.isError);
   const send = useSendQerdsMessageMutation(slug);
 
   const [recipient, setRecipient] = useState("");
@@ -266,6 +268,7 @@ export default function QerdsCompose(): React.JSX.Element {
               value={recipient}
               onChange={(event) => setRecipient(event.target.value)}
               placeholder={t("qerds.compose.recipientPlaceholder")}
+              list="qerds-contacts"
               aria-required
               aria-invalid={errors.recipient ? true : undefined}
               aria-describedby={
@@ -273,6 +276,15 @@ export default function QerdsCompose(): React.JSX.Element {
               }
               autoFocus
             />
+            {/* Interim address book (until the European Digital Directory): pick
+                a saved contact or type an address. */}
+            <datalist id="qerds-contacts">
+              {contacts.data?.map((contact) => (
+                <option key={contact.id} value={contact.address}>
+                  {contact.name}
+                </option>
+              ))}
+            </datalist>
           </Field>
 
           <Field

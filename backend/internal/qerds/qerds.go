@@ -18,7 +18,21 @@ var (
 	ErrNoSenderAddress    = errors.New("qerds: organization has no default digital address")
 	ErrAddressNotFound    = errors.New("qerds: digital address not found")
 	ErrAddressTaken       = errors.New("qerds: digital address already taken")
+
+	ErrContactNotFound     = errors.New("qerds: contact not found")
+	ErrContactAddressTaken = errors.New("qerds: contact address already saved")
 )
+
+// Contact is a saved recipient in an organization's address book — the interim
+// stand-in for the European Digital Directory (name -> digital address).
+type Contact struct {
+	ID             uuid.UUID `json:"id"`
+	OrganizationID uuid.UUID `json:"organizationId"`
+	Name           string    `json:"name"`
+	Address        string    `json:"address"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
 
 // Message is a QERDS communication owned by an organization.
 type Message struct {

@@ -74,6 +74,19 @@ const qerdsPollResultSchema = z.object({ received: z.number() });
 
 export type QerdsPollResult = z.infer<typeof qerdsPollResultSchema>;
 
+export const qerdsContactSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  name: z.string(),
+  address: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type QerdsContact = z.infer<typeof qerdsContactSchema>;
+
+const qerdsContactListSchema = z.array(qerdsContactSchema);
+
 export function getQerdsMessages(
   slug: string,
   signal?: AbortSignal,
@@ -181,4 +194,42 @@ export function createQerdsAddress(
     body: input,
     signal,
   });
+}
+
+export function getQerdsContacts(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<QerdsContact[]> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/qerds/contacts`, {
+    schema: qerdsContactListSchema,
+    signal,
+  });
+}
+
+export function createQerdsContact(
+  slug: string,
+  input: { name: string; address: string },
+  signal?: AbortSignal,
+): Promise<QerdsContact> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/qerds/contacts`, {
+    schema: qerdsContactSchema,
+    method: "POST",
+    body: input,
+    signal,
+  });
+}
+
+export function deleteQerdsContact(
+  slug: string,
+  contactId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/qerds/contacts/${encodeURIComponent(contactId)}`,
+    {
+      schema: z.void(),
+      method: "DELETE",
+      signal,
+    },
+  );
 }

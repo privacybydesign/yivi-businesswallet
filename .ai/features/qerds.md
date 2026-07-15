@@ -289,11 +289,29 @@ Digital Directory (SMP/SML) lookup.
 
 ---
 
-## 10. Open questions / follow-ups
+## 10. Address resolution & the interim address book
+
+The recipient's digital address is discovered, in the target state, via the **European
+Digital Directory** (COM(2025) 838 Art 10) — a Commission-run registry keyed on the owner's
+**EUID** (BRIS / Company Law Directive 2017/1132), resolved through eDelivery-style dynamic discovery
+(SMP/SML). That directory does not exist yet (specs pending implementing acts), so `ResolveAddress`
+stays an abstract seam and, in the meantime, the wallet uses:
+
+- **A per-org address book (`qerds_contacts`)** — save recipients (name → digital address) and reuse
+  them in Compose via a datalist picker. This is the interim stand-in for the directory.
+- **The partner QTSP's own addressing + REM/eDelivery interoperability** for actual routing.
+
+When the European Digital Directory arrives it becomes one more resolver behind `ResolveAddress`
+(explicit address → contacts → directory), with no domain/UI churn. Reachability during the
+transition is limited to recipients already on an interoperating registered-delivery network — the
+UI must not imply EU-wide coverage that doesn't exist yet.
+
+## 11. Open questions / follow-ups
 
 - Which NL QTSP to partner with (drives the concrete `qerdsprovider` driver + auth shape).
 - Attachment storage backend: shipped as a blob column (MVP); revisit object storage (`storage_ref`)
   once real payloads / E2E ciphertext land and the inline-BYTEA footprint becomes a concern.
-- Directory (SMP/SML) integration for cross-border address resolution.
+- European Digital Directory (SMP/SML) integration for cross-border address resolution (replaces the
+  interim contacts address book as the primary resolver).
 - Multi-replica inbound: webhook idempotency store vs the daemon-style single-replica assumption.
 - Frontend evidence-verification UX (validate qualified timestamps client-side vs server-side).
