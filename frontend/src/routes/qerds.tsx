@@ -61,6 +61,13 @@ export default function Qerds(): React.JSX.Element {
           <>
             <Button
               variant="secondary"
+              icon="lock"
+              onClick={() => void navigate(`/${slug}/qerds/addresses`)}
+            >
+              {t("qerds.addresses.title")}
+            </Button>
+            <Button
+              variant="secondary"
               icon="time"
               onClick={() => poll.mutate()}
               disabled={poll.isPending}
@@ -111,16 +118,6 @@ export default function Qerds(): React.JSX.Element {
                       : t("qerds.tabs.outbox")}
                   </button>
                 ))}
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon="lock"
-                  onClick={() => void navigate(`/${slug}/qerds/addresses`)}
-                >
-                  {t("qerds.addresses.title")}
-                </Button>
               </div>
             </div>
 
