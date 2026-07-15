@@ -31,6 +31,17 @@ npm run dev:reset     # same, but wipes DB volumes first (clean slate)
 - Frontend: http://localhost:5173
 - Backend: http://localhost:8080
 
+On first run `npm run dev` creates a root `.env` from `.env.example` if one does
+not exist. Compose **requires** `POSTGRES_PASSWORD` (there is no weak default), so
+without this file it would abort with `required variable POSTGRES_PASSWORD is
+missing a value`. The seeded `CHANGE_ME` placeholder is fine for a throwaway local
+dev database; set a strong value before exposing the stack anywhere. If you run
+`docker compose` directly (without `npm run dev`), create the file yourself first:
+
+```sh
+cp .env.example .env      # then edit POSTGRES_PASSWORD to a strong, unique value
+```
+
 The Vite dev server proxies health probes and `/api` to the backend container, so
 the frontend talks to the backend out of the box. (There is no `/irma` proxy —
 see below; the phone talks to the IRMA daemon directly.)
@@ -153,7 +164,10 @@ TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=d
 The backend requires `DATABASE_URL` and reads optional `LOG_LEVEL`, `LOG_FORMAT`,
 and `LOG_SOURCE` (sensible defaults when unset). Compose builds `DATABASE_URL`
 from root `.env` `POSTGRES_*` variables; in production it is supplied by the
-deployment (e.g. a Kubernetes secret).
+deployment (e.g. a Kubernetes secret). `POSTGRES_PASSWORD` is **required** — Compose
+refuses to start without it (no weak default). `npm run dev` seeds a root `.env`
+from `.env.example` on first run; for direct `docker compose` use, run
+`cp .env.example .env` and set a strong, unique `POSTGRES_PASSWORD` first.
 
 Yivi auth adds:
 
