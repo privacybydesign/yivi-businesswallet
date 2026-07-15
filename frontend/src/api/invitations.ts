@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { request } from "./http";
 
-// Session-start URLs are consumed by the Yivi frontend library (not request()),
-// which posts to them to begin an identity disclosure and render the QR.
+// Session-start URLs are POSTed by the IdentityDisclosure component to begin an
+// OpenID4VP presentation; the response carries the transaction id and wallet link.
 export const INVITATION_SESSION_URL = "/api/v1/invitations/session";
 export function inviteSessionUrl(token: string): string {
   return `/api/v1/invite/${encodeURIComponent(token)}/session`;

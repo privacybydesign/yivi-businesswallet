@@ -170,12 +170,18 @@ func TestStartInvitationSession(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("start session = %d, want 200", resp.StatusCode)
 	}
-	var body struct{ Token string }
+	var body struct {
+		ID         string `json:"id"`
+		WalletLink string `json:"walletLink"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.Token == "" {
-		t.Error("session token is empty, want the daemon requestor token")
+	if body.ID == "" {
+		t.Error("session id is empty, want the verifier transaction id")
+	}
+	if body.WalletLink == "" {
+		t.Error("walletLink is empty, want the OpenID4VP deeplink")
 	}
 }
 

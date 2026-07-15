@@ -1,8 +1,8 @@
 //go:build integration
 
 // Package integration exercises the fully assembled router (server.New) against
-// a real PostgreSQL database, with the IRMA daemon replaced by an in-process
-// fake. It is compiled only under the `integration` build tag.
+// a real PostgreSQL database, with the EUDI OpenID4VP verifier replaced by an
+// in-process fake. It is compiled only under the `integration` build tag.
 package integration
 
 import (
@@ -17,11 +17,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	irma "github.com/privacybydesign/irmago/irma"
-	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
@@ -29,63 +28,32 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
-const (
-	testEmailAttr      = "irma-demo.sidn-pbdf.email.email"
-	testGivenNamesAttr = "irma-demo.MijnOverheid.drivinglicense.firstnames"
-	testFamilyNameAttr = "irma-demo.MijnOverheid.drivinglicense.familyname"
-	sessionTTL         = time.Hour
-)
+const sessionTTL = time.Hour
 
-// emailAttr is the disclosed attribute the fake daemon returns and the service
-// expects, matching the dev/default config.
-var (
-	emailAttr     = irma.NewAttributeTypeIdentifier(testEmailAttr)
-	identityAttrs = auth.IdentityAttributes{
-		GivenNames: irma.NewAttributeTypeIdentifier(testGivenNamesAttr),
-		FamilyName: irma.NewAttributeTypeIdentifier(testFamilyNameAttr),
-	}
-)
-
-// fakeRequestor stands in for the IRMA daemon: Result discloses the configured
-// email, so a /claim logs in as that user. The disclosure shape mirrors the one
-// proven against extractEmail in internal/auth/disclosure_test.go.
-type fakeRequestor struct {
-	email        string
-	givenNames   string
-	familyName   string
-	proofInvalid bool
+// fakeVerifier stands in for the EUDI verifier: Result discloses the configured
+// email (and optionally name), so a /claim logs in as that user. The claim shape
+// mirrors the one proven against extractEmail in internal/auth/disclosure_test.go.
+type fakeVerifier struct {
+	email      string
+	givenNames string
+	familyName string
 }
 
-func (f *fakeRequestor) StartSession(_ context.Context, _ *irma.DisclosureRequest) (*irmaserver.SessionPackage, error) {
-	return &irmaserver.SessionPackage{
-		SessionPtr: &irma.Qr{URL: "https://daemon.test/irma", Type: irma.ActionDisclosing},
-		Token:      "test-token",
-	}, nil
+func (f *fakeVerifier) StartPresentation(_ context.Context) (openid4vpverifier.Session, error) {
+	return openid4vpverifier.Session{ID: "test-token", WalletLink: "openid4vp://?request_uri=https%3A%2F%2Fverifier.test"}, nil
 }
 
-func (f *fakeRequestor) Status(_ context.Context, _ irma.RequestorToken) (irma.ServerStatus, error) {
-	return irma.ServerStatusDone, nil
-}
-
-func (f *fakeRequestor) Result(_ context.Context, _ irma.RequestorToken) (*irmaserver.SessionResult, error) {
-	proof := irma.ProofStatusValid
-	if f.proofInvalid {
-		proof = irma.ProofStatusInvalid
-	}
-	email := f.email
-	disclosed := [][]*irma.DisclosedAttribute{{{
-		Identifier: emailAttr,
-		Status:     irma.AttributeProofStatusPresent,
-		RawValue:   &email,
-	}}}
+func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Presentation, error) {
+	claims := map[string]string{openid4vpverifier.ClaimEmail: f.email}
 	if f.givenNames != "" || f.familyName != "" {
-		given, family := f.givenNames, f.familyName
-		disclosed = append(disclosed,
-			[]*irma.DisclosedAttribute{{Identifier: identityAttrs.GivenNames, Status: irma.AttributeProofStatusPresent, RawValue: &given}},
-			[]*irma.DisclosedAttribute{{Identifier: identityAttrs.FamilyName, Status: irma.AttributeProofStatusPresent, RawValue: &family}},
-		)
+		claims[openid4vpverifier.ClaimGivenNames] = f.givenNames
+		claims[openid4vpverifier.ClaimFamilyName] = f.familyName
 	}
-	return &irmaserver.SessionResult{Status: irma.ServerStatusDone, ProofStatus: proof, Disclosed: disclosed}, nil
+	return openid4vpverifier.Presentation{Claims: claims}, nil
+}
+
+func (f *fakeVerifier) Status(_ context.Context, _ string) (string, error) {
+	return "DONE", nil
 }
 
 type meBody struct {
@@ -99,7 +67,7 @@ type testEnv struct {
 	server *httptest.Server
 	client *http.Client
 	pool   *pgxpool.Pool
-	fake   *fakeRequestor
+	fake   *fakeVerifier
 }
 
 // setup assembles the real router exactly as cmd/api does (minus the IRMA boot
@@ -109,7 +77,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	t.Helper()
 	pool, _ := testdb.Fresh(t)
 
-	fake := &fakeRequestor{}
+	fake := &fakeVerifier{}
 	userStore := user.NewStore(pool)
 	sessionStore := session.NewStore(pool, sessionTTL)
 	admins := auth.NewPlatformAdmins(platformAdmins)
@@ -119,7 +87,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	cookieCfg := auth.CookieConfig{Secure: false, MaxAge: int(sessionTTL.Seconds())}
 
 	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
-	authService := auth.NewService(fake, userStore, sessionStore, emailAttr, identityAttrs, orgStore)
+	authService := auth.NewService(fake, userStore, sessionStore, orgStore)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, admins)
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)

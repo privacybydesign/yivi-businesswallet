@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
@@ -39,8 +38,8 @@ type repository interface {
 type inviter interface {
 	InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) (Invitation, error)
 	PendingInvitation(ctx context.Context, rawToken string) (Invitation, error)
-	StartAcceptSession(ctx context.Context, rawToken string) (*irmaserver.SessionPackage, error)
-	StartIdentitySession(ctx context.Context) (*irmaserver.SessionPackage, error)
+	StartAcceptSession(ctx context.Context, rawToken string) (auth.Session, error)
+	StartIdentitySession(ctx context.Context) (auth.Session, error)
 	AcceptInvitation(ctx context.Context, rawToken, disclosureToken string) (AcceptOutcome, error)
 	DeclineInvitation(ctx context.Context, rawToken string) error
 	MyInvitations(ctx context.Context, email user.Email) ([]Invitation, error)

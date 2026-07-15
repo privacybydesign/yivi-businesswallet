@@ -6,9 +6,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	irma "github.com/privacybydesign/irmago/irma"
 
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/irmarequestor"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
@@ -31,8 +29,8 @@ func NewHandler(svc *Service, sessions sessionLookuper, cookie CookieConfig, adm
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /auth/session", respond.HandlerFunc(h.startSession))
-	mux.Handle("GET /auth/session/{token}/status", respond.HandlerFunc(h.status))
-	mux.Handle("POST /auth/session/{token}/claim", respond.HandlerFunc(h.claim))
+	mux.Handle("GET /auth/session/{id}/status", respond.HandlerFunc(h.status))
+	mux.Handle("POST /auth/session/{id}/claim", respond.HandlerFunc(h.claim))
 	mux.Handle("POST /auth/logout", respond.HandlerFunc(h.logout))
 
 	authed := RequireUser(h.sessions)
@@ -40,31 +38,27 @@ func (h *Handler) Register(mux *http.ServeMux) {
 }
 
 func (h *Handler) startSession(w http.ResponseWriter, r *http.Request) error {
-	pkg, err := h.svc.StartSession(r.Context())
+	sess, err := h.svc.StartSession(r.Context())
 	if err != nil {
 		return err
 	}
 
-	respond.JSON(w, r, http.StatusOK, pkg)
+	respond.JSON(w, r, http.StatusOK, sess)
 	return nil
 }
 
 func (h *Handler) status(w http.ResponseWriter, r *http.Request) error {
-	token := irma.RequestorToken(r.PathValue("token"))
-
-	st, err := h.svc.Status(r.Context(), token)
+	st, err := h.svc.Status(r.Context(), r.PathValue("id"))
 	if err != nil {
-		return unknownSessionOr(err)
+		return fmt.Errorf("auth: session status: %w", err)
 	}
 
-	respond.JSON(w, r, http.StatusOK, statusResponse{Status: string(st)})
+	respond.JSON(w, r, http.StatusOK, statusResponse{Status: st})
 	return nil
 }
 
 func (h *Handler) claim(w http.ResponseWriter, r *http.Request) error {
-	token := irma.RequestorToken(r.PathValue("token"))
-
-	u, raw, err := h.svc.Authenticate(r.Context(), token)
+	u, raw, err := h.svc.Authenticate(r.Context(), r.PathValue("id"))
 	if err != nil {
 		var invited *PendingInvitesError
 		if errors.As(err, &invited) {
@@ -125,21 +119,8 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func unknownSessionOr(err error) error {
-	if errors.Is(err, irmarequestor.ErrUnknownSession) {
-		return &respond.APIError{
-			Status:  http.StatusNotFound,
-			Code:    "unknown_session",
-			Message: "session not found",
-		}
-	}
-	return fmt.Errorf("auth: session lookup: %w", err)
-}
-
 func mapAuthError(err error) error {
 	switch {
-	case errors.Is(err, irmarequestor.ErrUnknownSession):
-		return unknownSessionOr(err)
 	case errors.Is(err, errSessionNotFinished), errors.Is(err, errDisclosureInvalid), errors.Is(err, errUserNotInvited):
 		return mapClaimError(err)
 	default:

@@ -38,6 +38,13 @@ const (
 	QerdsMessageSent        = "qerds.message_sent"
 	QerdsMessageReceived    = "qerds.message_received"
 	QerdsAddressProvisioned = "qerds.address_provisioned"
+
+	WalletOpened          = "wallet.opened"
+	WalletBootstrapped    = "wallet.bootstrapped"
+	WalletSuspended       = "wallet.suspended"
+	WalletRevoked         = "wallet.revoked"
+	RepresentationClaimed = "wallet.representation_claimed"
+	RepresentationRevoked = "wallet.representation_revoked"
 )
 
 const (
@@ -47,6 +54,9 @@ const (
 	TargetUser         = "user"
 	TargetQerdsMessage = "qerds_message"
 	TargetQerdsAddress = "qerds_address"
+
+	TargetWalletInstance = "wallet_instance"
+	TargetRepresentation = "wallet_representation"
 )
 
 type Actor struct {

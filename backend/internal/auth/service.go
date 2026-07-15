@@ -7,10 +7,9 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	irma "github.com/privacybydesign/irmago/irma"
-	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
@@ -38,9 +37,11 @@ func (e *PendingInvitesError) Error() string {
 	return "auth: no account for this email, but pending invitations exist"
 }
 
-type IdentityAttributes struct {
-	GivenNames irma.AttributeTypeIdentifier
-	FamilyName irma.AttributeTypeIdentifier
+// Session is a started OpenID4VP presentation returned to the client: an opaque
+// id to poll plus the wallet deeplink to render as a QR / universal link.
+type Session struct {
+	ID         string `json:"id"`
+	WalletLink string `json:"walletLink"`
 }
 
 type DisclosedIdentity struct {
@@ -48,80 +49,69 @@ type DisclosedIdentity struct {
 	Name  identity.Name
 }
 
-// irmaRequestor is the slice of irmarequestor.Client the service needs, defined
-// in the consumer so the service is testable without a live daemon.
-type irmaRequestor interface {
-	StartSession(ctx context.Context, req *irma.DisclosureRequest) (*irmaserver.SessionPackage, error)
-	Result(ctx context.Context, token irma.RequestorToken) (*irmaserver.SessionResult, error)
-	Status(ctx context.Context, token irma.RequestorToken) (irma.ServerStatus, error)
+// verifier is the slice of openid4vpverifier.Client the service needs, defined in
+// the consumer so the service is testable without a live verifier.
+type verifier interface {
+	StartPresentation(ctx context.Context) (openid4vpverifier.Session, error)
+	Result(ctx context.Context, id string) (openid4vpverifier.Presentation, error)
+	Status(ctx context.Context, id string) (string, error)
 }
 
 type Service struct {
-	irma          irmaRequestor
-	users         *user.Store
-	sessions      *session.Store
-	emailAttr     irma.AttributeTypeIdentifier
-	identityAttrs IdentityAttributes
-	invites       invitationLookup
+	verifier verifier
+	users    *user.Store
+	sessions *session.Store
+	invites  invitationLookup
 }
 
 func NewService(
-	requestor irmaRequestor,
+	verifier verifier,
 	users *user.Store,
 	sessions *session.Store,
-	emailAttr irma.AttributeTypeIdentifier,
-	identityAttrs IdentityAttributes,
 	invites invitationLookup,
 ) *Service {
 	return &Service{
-		irma:          requestor,
-		users:         users,
-		sessions:      sessions,
-		emailAttr:     emailAttr,
-		identityAttrs: identityAttrs,
-		invites:       invites,
+		verifier: verifier,
+		users:    users,
+		sessions: sessions,
+		invites:  invites,
 	}
 }
 
-func (s *Service) StartSession(ctx context.Context) (*irmaserver.SessionPackage, error) {
-	req := irma.NewDisclosureRequest(s.emailAttr)
-
-	pkg, err := s.irma.StartSession(ctx, req)
+func (s *Service) StartSession(ctx context.Context) (Session, error) {
+	sess, err := s.verifier.StartPresentation(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("auth: start session: %w", err)
+		return Session{}, fmt.Errorf("auth: start session: %w", err)
 	}
-	return pkg, nil
+	return Session{ID: sess.ID, WalletLink: sess.WalletLink}, nil
 }
 
-func (s *Service) StartIdentitySession(ctx context.Context) (*irmaserver.SessionPackage, error) {
-	req := irma.NewDisclosureRequest(s.identityAttrs.GivenNames, s.identityAttrs.FamilyName, s.emailAttr)
-
-	pkg, err := s.irma.StartSession(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("auth: start identity session: %w", err)
-	}
-	return pkg, nil
+// StartIdentitySession begins a disclosure for the invite-accept flow. With
+// OpenID4VP a login already discloses identity (passport/id-card) plus email, so
+// login and identity-accept use the same presentation request.
+func (s *Service) StartIdentitySession(ctx context.Context) (Session, error) {
+	return s.StartSession(ctx)
 }
 
-func (s *Service) DiscloseIdentity(ctx context.Context, token irma.RequestorToken) (DisclosedIdentity, error) {
-	res, err := s.irma.Result(ctx, token)
+func (s *Service) DiscloseIdentity(ctx context.Context, id string) (DisclosedIdentity, error) {
+	res, err := s.result(ctx, id)
 	if err != nil {
 		return DisclosedIdentity{}, err
 	}
-	return extractIdentity(res, s.identityAttrs, s.emailAttr)
+	return extractIdentity(res)
 }
 
-func (s *Service) Status(ctx context.Context, token irma.RequestorToken) (irma.ServerStatus, error) {
-	return s.irma.Status(ctx, token)
+func (s *Service) Status(ctx context.Context, id string) (string, error) {
+	return s.verifier.Status(ctx, id)
 }
 
-func (s *Service) Authenticate(ctx context.Context, token irma.RequestorToken) (user.User, string, error) {
-	res, err := s.irma.Result(ctx, token)
+func (s *Service) Authenticate(ctx context.Context, id string) (user.User, string, error) {
+	res, err := s.result(ctx, id)
 	if err != nil {
 		return user.User{}, "", err
 	}
 
-	email, err := extractEmail(res, s.emailAttr)
+	email, err := extractEmail(res)
 	if err != nil {
 		return user.User{}, "", err
 	}
@@ -134,12 +124,26 @@ func (s *Service) Authenticate(ctx context.Context, token irma.RequestorToken) (
 		return user.User{}, "", err
 	}
 
-	// idempotencyKey = sha256(requestorToken) makes a replayed /claim rotate this user's session row rather than mint a second one.
-	raw, err := s.sessions.Mint(ctx, u.ID, sha256.Sum256([]byte(token)))
+	// idempotencyKey = sha256(sessionID) makes a replayed /claim rotate this
+	// user's session row rather than mint a second one.
+	raw, err := s.sessions.Mint(ctx, u.ID, sha256.Sum256([]byte(id)))
 	if err != nil {
 		return user.User{}, "", err
 	}
 	return u, raw, nil
+}
+
+// result fetches the presentation, translating a not-yet-complete presentation
+// (ErrPending) into errSessionNotFinished so the handler maps it to 409.
+func (s *Service) result(ctx context.Context, id string) (openid4vpverifier.Presentation, error) {
+	res, err := s.verifier.Result(ctx, id)
+	if errors.Is(err, openid4vpverifier.ErrPending) {
+		return openid4vpverifier.Presentation{}, errSessionNotFinished
+	}
+	if err != nil {
+		return openid4vpverifier.Presentation{}, err
+	}
+	return res, nil
 }
 
 func (s *Service) invitedOrNotFound(ctx context.Context, email user.Email) error {

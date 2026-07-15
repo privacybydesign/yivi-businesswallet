@@ -13,12 +13,8 @@ const (
 	envLogFormat   = "LOG_FORMAT"
 	envLogSource   = "LOG_SOURCE"
 
-	envIrmaRequestorURL    = "IRMA_REQUESTOR_URL"
-	envIrmaRequestorToken  = "IRMA_REQUESTOR_TOKEN"
-	envIrmaClientURL       = "IRMA_CLIENT_URL"
-	envIrmaEmailAttribute  = "IRMA_EMAIL_ATTRIBUTE"
-	envIrmaGivenNamesAttr  = "IRMA_IDENTITY_GIVEN_NAMES_ATTRIBUTE"
-	envIrmaFamilyNameAttr  = "IRMA_IDENTITY_FAMILY_NAME_ATTRIBUTE"
+	envEudiVerifierURL     = "EUDI_VERIFIER_URL"
+	envEudiIssuerChain     = "EUDI_ISSUER_CHAIN"
 	envSessionCookieSecure = "SESSION_COOKIE_SECURE"
 	envSessionTTL          = "SESSION_TTL"
 	envSessionPruneEvery   = "SESSION_PRUNE_INTERVAL"
@@ -30,6 +26,8 @@ const (
 	envQerdsAuthToken            = "QERDS_AUTH_TOKEN"
 	envQerdsWebhookSecret        = "QERDS_WEBHOOK_SECRET"
 	envQerdsDefaultAddressDomain = "QERDS_DEFAULT_ADDRESS_DOMAIN"
+
+	envWalletRegistryProvider = "WALLET_REGISTRY_PROVIDER"
 
 	// Domibus WS-plugin ebMS3 addressing. Defaults match the parties in the
 	// Domibus sample PMode so a blue -> red self-send works out of the box.
@@ -44,12 +42,9 @@ const (
 	defaultLogFormat = "text"
 	defaultLogSource = "true"
 
-	defaultIrmaRequestorURL    = "http://irma:8088"
-	defaultIrmaRequestorToken  = ""
-	defaultIrmaClientURL       = ""
-	defaultIrmaEmailAttribute  = "irma-demo.sidn-pbdf.email.email"
-	defaultIrmaGivenNamesAttr  = "irma-demo.MijnOverheid.drivinglicense.firstnames"
-	defaultIrmaFamilyNameAttr  = "irma-demo.MijnOverheid.drivinglicense.familyname"
+	// The hosted EUDI reference Verifier Endpoint (Yivi staging). Overridable so a
+	// deployment can point at its own verifier.
+	defaultEudiVerifierURL     = "https://verifierapi.openid4vc.staging.yivi.app"
 	defaultSessionCookieSecure = "false"
 	defaultSessionTTL          = "24h"
 	defaultSessionPruneEvery   = "1h"
@@ -62,6 +57,9 @@ const (
 
 	defaultQerdsProvider             = ProviderStub
 	defaultQerdsDefaultAddressDomain = "qerds.localhost"
+
+	// The wallet-bootstrap registry (KVK) provider. Reuses ProviderStub ("stub").
+	defaultWalletRegistryProvider = ProviderStub
 
 	defaultQerdsDomibusFromParty   = "domibus-blue"
 	defaultQerdsDomibusToParty     = "domibus-red"
@@ -77,15 +75,11 @@ type Config struct {
 	LogFormat   string
 	LogSource   bool
 
-	IrmaRequestorURL        string
-	IrmaRequestorToken      string
-	IrmaClientURL           string
-	IrmaEmailAttribute      string
-	IrmaGivenNamesAttribute string
-	IrmaFamilyNameAttribute string
-	SessionCookieSecure     bool
-	SessionTTL              time.Duration
-	SessionPruneEvery       time.Duration
+	EudiVerifierURL     string
+	EudiIssuerChain     string
+	SessionCookieSecure bool
+	SessionTTL          time.Duration
+	SessionPruneEvery   time.Duration
 
 	QerdsProvider             string
 	QerdsProviderURL          string
@@ -100,6 +94,8 @@ type Config struct {
 	QerdsDomibusServiceType string
 	QerdsDomibusAction      string
 
+	WalletRegistryProvider string
+
 	PlatformAdminEmails []string
 }
 
@@ -111,9 +107,9 @@ func Load() (Config, error) {
 
 	cookieSecure := strings.EqualFold(envOrDefault(envSessionCookieSecure, defaultSessionCookieSecure), "true")
 
-	requestorURL := envOrDefault(envIrmaRequestorURL, defaultIrmaRequestorURL)
-	if cookieSecure && os.Getenv(envIrmaRequestorURL) == "" {
-		return Config{}, fmt.Errorf("config: %s must be set when %s is true", envIrmaRequestorURL, envSessionCookieSecure)
+	verifierURL := envOrDefault(envEudiVerifierURL, defaultEudiVerifierURL)
+	if cookieSecure && os.Getenv(envEudiVerifierURL) == "" {
+		return Config{}, fmt.Errorf("config: %s must be set when %s is true", envEudiVerifierURL, envSessionCookieSecure)
 	}
 
 	sessionTTL, err := parseDuration(envSessionTTL, defaultSessionTTL)
@@ -138,15 +134,11 @@ func Load() (Config, error) {
 		LogFormat:   envOrDefault(envLogFormat, defaultLogFormat),
 		LogSource:   strings.EqualFold(envOrDefault(envLogSource, defaultLogSource), "true"),
 
-		IrmaRequestorURL:        requestorURL,
-		IrmaRequestorToken:      envOrDefault(envIrmaRequestorToken, defaultIrmaRequestorToken),
-		IrmaClientURL:           envOrDefault(envIrmaClientURL, defaultIrmaClientURL),
-		IrmaEmailAttribute:      envOrDefault(envIrmaEmailAttribute, defaultIrmaEmailAttribute),
-		IrmaGivenNamesAttribute: envOrDefault(envIrmaGivenNamesAttr, defaultIrmaGivenNamesAttr),
-		IrmaFamilyNameAttribute: envOrDefault(envIrmaFamilyNameAttr, defaultIrmaFamilyNameAttr),
-		SessionCookieSecure:     cookieSecure,
-		SessionTTL:              sessionTTL,
-		SessionPruneEvery:       sessionPruneEvery,
+		EudiVerifierURL:     verifierURL,
+		EudiIssuerChain:     os.Getenv(envEudiIssuerChain),
+		SessionCookieSecure: cookieSecure,
+		SessionTTL:          sessionTTL,
+		SessionPruneEvery:   sessionPruneEvery,
 
 		QerdsProvider:             qerdsProvider,
 		QerdsProviderURL:          qerdsProviderURL,
@@ -160,6 +152,8 @@ func Load() (Config, error) {
 		QerdsDomibusService:     envOrDefault(envQerdsDomibusService, defaultQerdsDomibusService),
 		QerdsDomibusServiceType: envOrDefault(envQerdsDomibusServiceType, defaultQerdsDomibusServiceType),
 		QerdsDomibusAction:      envOrDefault(envQerdsDomibusAction, defaultQerdsDomibusAction),
+
+		WalletRegistryProvider: envOrDefault(envWalletRegistryProvider, defaultWalletRegistryProvider),
 
 		PlatformAdminEmails: parseList(os.Getenv(envPlatformAdminEmails)),
 	}, nil

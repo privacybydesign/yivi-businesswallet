@@ -66,9 +66,14 @@ export const en = {
       actions: "Actions",
     },
   },
+  disclosure: {
+    openWallet: "Open your wallet",
+    scanHint: "Scan the QR with your wallet, or open it on this device.",
+  },
   login: {
     title: "Sign in",
-    subtitle: "Use your Yivi app to sign in to the business wallet.",
+    subtitle:
+      "Use your EU Digital Identity wallet to sign in to the business wallet.",
     completing: "Completing sign-in…",
     notCompleted: "Login was not completed. Please try again.",
     credentialRejected: "This credential can't be used to sign in.",
@@ -85,7 +90,7 @@ export const en = {
     invitedIntro: "You've been invited to join:",
     decline: "Decline",
     scanPrompt:
-      "Scan with your Yivi app to confirm your identity and join {{org}}.",
+      "Scan with your wallet to confirm your identity and join {{org}}.",
     accepting: "Joining {{org}}…",
     declining: "Declining…",
     accepted: "Welcome to {{org}}",
