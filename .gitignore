@@ -42,3 +42,5 @@ yarn-error.log*
 .claude/worktrees/
 .ai/plans/*
 !.ai/plans/README.md
+
+Yivi Design System/
