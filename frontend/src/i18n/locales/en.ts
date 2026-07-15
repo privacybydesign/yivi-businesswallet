@@ -398,7 +398,7 @@ export const en = {
     title: "Secure delivery",
     subtitle:
       "Legally-binding messages via the qualified electronic registered delivery service",
-    newMessage: "Compose",
+    newMessage: "New message",
     checkInbox: "Check inbox",
     checking: "Checking…",
     loadError: "Could not load messages: {{message}}",
@@ -445,7 +445,7 @@ export const en = {
       },
     },
     compose: {
-      title: "Compose message",
+      title: "New message",
       subtitle:
         "Send a legally-binding message through the registered delivery service.",
       send: "Send",
