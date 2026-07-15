@@ -84,7 +84,7 @@ func (h *Handler) webhook(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_input", "providerRef and recipient are required")
 	}
 
-	if err := h.service.ReceiveInbound(r.Context(), payload.toMessage()); errors.Is(err, ErrNoSenderAddress) {
+	if err := h.service.ReceiveInbound(r.Context(), payload.toMessage()); errors.Is(err, ErrAddressNotFound) {
 		// Unknown recipient address — accepted-but-dropped so the provider does
 		// not retry forever; logged for investigation.
 		slog.WarnContext(r.Context(), "qerds webhook for unknown recipient",

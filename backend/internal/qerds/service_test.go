@@ -79,7 +79,7 @@ func (f *fakeStore) ListAddresses(_ context.Context, _ uuid.UUID) ([]Address, er
 }
 
 func (f *fakeStore) OrgByAddress(_ context.Context, _ string) (uuid.UUID, error) {
-	return uuid.Nil, ErrNoSenderAddress
+	return uuid.Nil, ErrAddressNotFound
 }
 
 func TestServiceSendAndPollRoundTrip(t *testing.T) {

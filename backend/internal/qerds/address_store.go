@@ -94,7 +94,7 @@ func (s *Store) OrgByAddress(ctx context.Context, address string) (uuid.UUID, er
 	var orgID uuid.UUID
 	err := s.db.QueryRow(ctx, query, address).Scan(&orgID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, ErrNoSenderAddress
+		return uuid.Nil, ErrAddressNotFound
 	}
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("qerds: org by address %q: %w", address, err)

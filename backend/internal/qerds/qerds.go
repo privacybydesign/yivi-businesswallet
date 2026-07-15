@@ -15,6 +15,7 @@ import (
 var (
 	ErrMessageNotFound = errors.New("qerds: message not found")
 	ErrNoSenderAddress = errors.New("qerds: organization has no default digital address")
+	ErrAddressNotFound = errors.New("qerds: digital address not found")
 	ErrAddressTaken    = errors.New("qerds: digital address already taken")
 )
 
