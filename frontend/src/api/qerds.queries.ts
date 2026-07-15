@@ -3,7 +3,10 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   createQerdsAddress,
+  createQerdsContact,
+  deleteQerdsContact,
   getQerdsAddresses,
+  getQerdsContacts,
   getQerdsMessage,
   getQerdsMessages,
   pollQerdsInbox,
@@ -11,6 +14,7 @@ import {
 } from "./qerds";
 import type {
   QerdsAddress,
+  QerdsContact,
   QerdsMessage,
   QerdsMessageWithEvidence,
   QerdsPollResult,
@@ -119,6 +123,54 @@ export function useCreateQerdsAddressMutation(
       toast.success(t("toasts.qerdsAddressAdded"));
       void queryClient.invalidateQueries({
         queryKey: qerdsAddressesQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function qerdsContactsQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "qerds", "contacts"];
+}
+
+export function useQerdsContactsQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<QerdsContact[], Error> {
+  return useQuery({
+    queryKey: qerdsContactsQueryKey(slug),
+    queryFn: ({ signal }) => getQerdsContacts(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+export function useCreateQerdsContactMutation(
+  slug: string,
+): UseMutationResult<QerdsContact, Error, { name: string; address: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (input) => createQerdsContact(slug, input),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.qerdsContactAdded"));
+      void queryClient.invalidateQueries({
+        queryKey: qerdsContactsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useDeleteQerdsContactMutation(
+  slug: string,
+): UseMutationResult<void, Error, { contactId: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ contactId }) => deleteQerdsContact(slug, contactId),
+    onSuccess: () => {
+      toast.success(t("toasts.qerdsContactDeleted"));
+      void queryClient.invalidateQueries({
+        queryKey: qerdsContactsQueryKey(slug),
       });
     },
   });
