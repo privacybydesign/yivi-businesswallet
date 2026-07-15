@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -8,6 +8,7 @@ import {
 } from "../api/qerds.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { ApiError } from "../api/http";
+import { formatBytes } from "../lib/qerds";
 import { Button, Card, Icon, TopBar } from "../ui";
 import * as React from "react";
 
@@ -15,6 +16,12 @@ const FORM_ID = "qerds-compose-form";
 const CONFLICT_STATUS = 409;
 // Plausible address check only; the provider/directory is the authority.
 const ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Client-side attachment limits, mirroring the backend handler. The server
+// re-enforces them; these are for immediate feedback only.
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MiB per file
+const MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024; // 50 MiB per message
+const MAX_ATTACHMENT_COUNT = 20;
 
 const FIELD_LABEL = "text-ink-soft text-[12px] font-semibold";
 const CONTROL =
@@ -125,12 +132,62 @@ export default function QerdsCompose(): React.JSX.Element {
   const [recipient, setRecipient] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [attempted, setAttempted] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const defaultAddress = addresses.data?.find((address) => address.isDefault);
   const backToList = (): void => void navigate(`/${slug}/qerds`);
 
   const errors = attempted ? validate({ recipient, subject }) : {};
+
+  function addFiles(selected: FileList | null): void {
+    if (!selected || selected.length === 0) {
+      return;
+    }
+    const key = (f: File): string => `${f.name}:${f.size}:${f.lastModified}`;
+    const seen = new Set(files.map(key));
+    const merged = [...files];
+    for (const file of Array.from(selected)) {
+      if (!seen.has(key(file))) {
+        seen.add(key(file));
+        merged.push(file);
+      }
+    }
+
+    if (merged.length > MAX_ATTACHMENT_COUNT) {
+      setFileError(
+        t("qerds.compose.tooManyAttachments", { max: MAX_ATTACHMENT_COUNT }),
+      );
+      return;
+    }
+    if (merged.some((file) => file.size > MAX_ATTACHMENT_BYTES)) {
+      setFileError(
+        t("qerds.compose.attachmentTooLarge", {
+          size: formatBytes(MAX_ATTACHMENT_BYTES),
+        }),
+      );
+      return;
+    }
+    const total = merged.reduce((sum, file) => sum + file.size, 0);
+    if (total > MAX_ATTACHMENT_TOTAL_BYTES) {
+      setFileError(
+        t("qerds.compose.attachmentsTooLarge", {
+          size: formatBytes(MAX_ATTACHMENT_TOTAL_BYTES),
+        }),
+      );
+      return;
+    }
+
+    setFileError(null);
+    setFiles(merged);
+  }
+
+  function removeFile(index: number): void {
+    setFiles((current) => current.filter((_, i) => i !== index));
+    setFileError(null);
+  }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -147,6 +204,7 @@ export default function QerdsCompose(): React.JSX.Element {
         recipient: recipient.trim(),
         subject: subject.trim(),
         body,
+        attachments: files,
       },
       {
         onSuccess: (message) => void navigate(`/${slug}/qerds/${message.id}`),
@@ -243,6 +301,73 @@ export default function QerdsCompose(): React.JSX.Element {
               value={body}
               onChange={(event) => setBody(event.target.value)}
             />
+          </Field>
+
+          <Field
+            id="qerds-attachments"
+            label={t("qerds.compose.attachmentsLabel")}
+          >
+            <input
+              ref={fileInputRef}
+              id="qerds-attachments"
+              type="file"
+              multiple
+              className="sr-only"
+              onChange={(event) => {
+                addFiles(event.target.files);
+                // Reset so re-selecting the same file fires onChange again.
+                event.target.value = "";
+              }}
+            />
+            <div className="flex flex-col gap-2">
+              <div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon="add"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {t("qerds.compose.addAttachment")}
+                </Button>
+              </div>
+              {files.length > 0 && (
+                <ul className="flex flex-col gap-1.5">
+                  {files.map((file, index) => (
+                    <li
+                      key={`${file.name}:${file.size}:${file.lastModified}`}
+                      className="border-line bg-surface-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5"
+                    >
+                      <Icon
+                        name="lock"
+                        size={14}
+                        className="text-ink-soft shrink-0"
+                      />
+                      <span className="text-ink flex-1 truncate text-[13px]">
+                        {file.name}
+                      </span>
+                      <span className="text-muted shrink-0 text-[11.5px]">
+                        {formatBytes(file.size)}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon="close"
+                        iconOnly
+                        onClick={() => removeFile(index)}
+                        aria-label={t("qerds.compose.removeAttachment", {
+                          name: file.name,
+                        })}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {fileError && (
+                <span role="alert" className="text-error text-[12px]">
+                  {fileError}
+                </span>
+              )}
+            </div>
           </Field>
 
           {send.isError && (

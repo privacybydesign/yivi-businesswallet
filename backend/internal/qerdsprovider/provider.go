@@ -29,12 +29,22 @@ const (
 // Address is a QERDS unique digital address (eIDAS Art 6(1)(j)).
 type Address string
 
+// Attachment is a message payload handed to (or received from) the provider.
+// Content is opaque bytes — possibly E2E-encrypted ciphertext — carried
+// verbatim; the provider treats it as an ERDS payload part.
+type Attachment struct {
+	Filename    string
+	ContentType string
+	Content     []byte
+}
+
 // OutboundMessage is a message handed to the provider for delivery.
 type OutboundMessage struct {
-	Sender    Address
-	Recipient Address
-	Subject   string
-	Body      string
+	Sender      Address
+	Recipient   Address
+	Subject     string
+	Body        string
+	Attachments []Attachment
 }
 
 // SendReceipt is what the provider returns for an accepted submission.
@@ -51,6 +61,7 @@ type InboundMessage struct {
 	Recipient   Address
 	Subject     string
 	Body        string
+	Attachments []Attachment
 	Evidence    []Evidence
 }
 

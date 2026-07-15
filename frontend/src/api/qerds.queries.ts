@@ -71,7 +71,7 @@ export function useSendQerdsMessageMutation(
 ): UseMutationResult<
   QerdsMessage,
   Error,
-  { recipient: string; subject: string; body: string }
+  { recipient: string; subject: string; body: string; attachments?: File[] }
 > {
   const queryClient = useQueryClient();
   const { t } = useTranslation();

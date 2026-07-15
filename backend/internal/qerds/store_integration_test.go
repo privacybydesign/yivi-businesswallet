@@ -3,9 +3,15 @@
 package qerds_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
@@ -33,7 +39,9 @@ func TestSelfSendReachesInbox(t *testing.T) {
 	const ref = "stub-selfsend"
 	ts := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
 
-	out, err := store.CreateOutbound(ctx, org.ID, addr, addr, "hello", "world")
+	out, err := store.CreateOutbound(ctx, org.ID, addr, addr, "hello", "world", []qerdsprovider.Attachment{
+		{Filename: "filing.pdf", ContentType: "application/pdf", Content: []byte("%PDF-1.4 stub")},
+	})
 	if err != nil {
 		t.Fatalf("CreateOutbound: %v", err)
 	}
@@ -92,5 +100,75 @@ func TestSelfSendReachesInbox(t *testing.T) {
 	}
 	if inboundCount != 1 || outboundCount != 1 {
 		t.Fatalf("got inbound=%d outbound=%d, want 1 and 1", inboundCount, outboundCount)
+	}
+}
+
+// TestAttachmentPersistenceAndScoping covers attachment storage: the outbound
+// message carries its payload metadata, the bytes are downloadable, and the
+// download is scoped to the owning organization.
+func TestAttachmentPersistenceAndScoping(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+
+	orgStore := organization.NewStore(pool, audit.NopRecorder{})
+	org, err := orgStore.Create(ctx, "Acme", "acme")
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	other, err := orgStore.Create(ctx, "Other", "other")
+	if err != nil {
+		t.Fatalf("create other org: %v", err)
+	}
+
+	store := qerds.NewStore(pool, audit.NopRecorder{})
+	const addr = "acme@qerds.localhost"
+	content := []byte("%PDF-1.4 quarterly filing")
+	sum := sha256.Sum256(content)
+	wantHash := hex.EncodeToString(sum[:])
+
+	out, err := store.CreateOutbound(ctx, org.ID, addr, "bob@qerds.localhost", "filing", "see attached", []qerdsprovider.Attachment{
+		{Filename: "filing.pdf", ContentType: "application/pdf", Content: content},
+	})
+	if err != nil {
+		t.Fatalf("CreateOutbound: %v", err)
+	}
+
+	detail, err := store.GetWithEvidence(ctx, org.ID, out.ID)
+	if err != nil {
+		t.Fatalf("GetWithEvidence: %v", err)
+	}
+	if len(detail.Attachments) != 1 {
+		t.Fatalf("attachments = %d, want 1", len(detail.Attachments))
+	}
+	att := detail.Attachments[0]
+	if att.Filename != "filing.pdf" || att.ContentType != "application/pdf" {
+		t.Errorf("attachment metadata = %+v", att)
+	}
+	if att.ContentHash != wantHash {
+		t.Errorf("content hash = %q, want %q", att.ContentHash, wantHash)
+	}
+	if att.SizeBytes != int64(len(content)) {
+		t.Errorf("size = %d, want %d", att.SizeBytes, len(content))
+	}
+
+	got, err := store.GetAttachmentContent(ctx, org.ID, out.ID, att.ID)
+	if err != nil {
+		t.Fatalf("GetAttachmentContent: %v", err)
+	}
+	if !bytes.Equal(got.Content, content) {
+		t.Errorf("downloaded content mismatch")
+	}
+	if got.Filename != "filing.pdf" || got.ContentType != "application/pdf" {
+		t.Errorf("download metadata = %+v", got)
+	}
+
+	// Another organization must not be able to read the payload by id.
+	if _, err := store.GetAttachmentContent(ctx, other.ID, out.ID, att.ID); !errors.Is(err, qerds.ErrAttachmentNotFound) {
+		t.Fatalf("cross-org download err = %v, want ErrAttachmentNotFound", err)
+	}
+
+	// An unknown attachment id is a not-found, not a server error.
+	if _, err := store.GetAttachmentContent(ctx, org.ID, out.ID, uuid.New()); !errors.Is(err, qerds.ErrAttachmentNotFound) {
+		t.Fatalf("unknown attachment err = %v, want ErrAttachmentNotFound", err)
 	}
 }

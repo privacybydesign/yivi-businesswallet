@@ -12,10 +12,12 @@ import (
 
 // fakeStore is an in-memory messageStore + addressStore for DB-free service tests.
 type fakeStore struct {
-	defaultAddr Address
-	messages    []Message
-	sent        map[uuid.UUID]qerdsprovider.SendReceipt
-	seenRefs    map[string]bool
+	defaultAddr         Address
+	messages            []Message
+	sent                map[uuid.UUID]qerdsprovider.SendReceipt
+	seenRefs            map[string]bool
+	outboundAttachments []qerdsprovider.Attachment
+	inboundAttachments  []qerdsprovider.Attachment
 }
 
 func newFakeStore(defaultAddress string) *fakeStore {
@@ -26,7 +28,8 @@ func newFakeStore(defaultAddress string) *fakeStore {
 	return f
 }
 
-func (f *fakeStore) CreateOutbound(_ context.Context, orgID uuid.UUID, sender, recipient, subject, body string) (Message, error) {
+func (f *fakeStore) CreateOutbound(_ context.Context, orgID uuid.UUID, sender, recipient, subject, body string, attachments []qerdsprovider.Attachment) (Message, error) {
+	f.outboundAttachments = attachments
 	m := Message{
 		ID:               uuid.New(),
 		OrganizationID:   orgID,
@@ -51,6 +54,7 @@ func (f *fakeStore) CreateInbound(_ context.Context, orgID uuid.UUID, in qerdspr
 		return Message{}, false, nil
 	}
 	f.seenRefs[in.ProviderRef] = true
+	f.inboundAttachments = in.Attachments
 	m := Message{
 		ID:               uuid.New(),
 		OrganizationID:   orgID,
@@ -93,7 +97,10 @@ func TestServiceSendAndPollRoundTrip(t *testing.T) {
 	svcA := NewService(storeA, storeA, prov)
 	svcB := NewService(storeB, storeB, prov)
 
-	msg, err := svcA.Send(ctx, orgA, "bob@qerds.localhost", "hello", "world")
+	attachments := []qerdsprovider.Attachment{
+		{Filename: "filing.pdf", ContentType: "application/pdf", Content: []byte("%PDF-1.4 stub")},
+	}
+	msg, err := svcA.Send(ctx, orgA, "bob@qerds.localhost", "hello", "world", attachments)
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -106,6 +113,9 @@ func TestServiceSendAndPollRoundTrip(t *testing.T) {
 	if _, ok := storeA.sent[msg.ID]; !ok {
 		t.Fatal("expected RecordSent to be called for the message")
 	}
+	if len(storeA.outboundAttachments) != 1 || storeA.outboundAttachments[0].Filename != "filing.pdf" {
+		t.Fatalf("outbound attachments = %+v, want the filing.pdf attachment persisted", storeA.outboundAttachments)
+	}
 
 	received, err := svcB.Poll(ctx, orgB)
 	if err != nil {
@@ -113,6 +123,10 @@ func TestServiceSendAndPollRoundTrip(t *testing.T) {
 	}
 	if received != 1 {
 		t.Fatalf("received = %d, want 1", received)
+	}
+	// The stub loops the attachment through to the recipient's inbox.
+	if len(storeB.inboundAttachments) != 1 || storeB.inboundAttachments[0].Filename != "filing.pdf" {
+		t.Fatalf("inbound attachments = %+v, want the looped-back attachment", storeB.inboundAttachments)
 	}
 
 	// Stub inbox is drained; a second poll yields nothing new.
@@ -131,7 +145,7 @@ func TestServiceSendWithoutSenderAddress(t *testing.T) {
 	store := newFakeStore("") // no default address
 	svc := NewService(store, store, prov)
 
-	_, err := svc.Send(ctx, uuid.New(), "bob@qerds.localhost", "hi", "")
+	_, err := svc.Send(ctx, uuid.New(), "bob@qerds.localhost", "hi", "", nil)
 	if !errors.Is(err, ErrNoSenderAddress) {
 		t.Fatalf("err = %v, want ErrNoSenderAddress", err)
 	}

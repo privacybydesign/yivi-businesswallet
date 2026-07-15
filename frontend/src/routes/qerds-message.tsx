@@ -3,11 +3,13 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQerdsMessageQuery } from "../api/qerds.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
-import type { QerdsEvidence } from "../api/qerds";
+import { downloadQerdsAttachment } from "../api/qerds";
+import type { QerdsAttachment, QerdsEvidence } from "../api/qerds";
 import { ApiError } from "../api/http";
 import { accessMessage } from "../lib/access-message";
-import { decodeEvidence, qerdsStatusTone } from "../lib/qerds";
-import { Card, Icon, Tag, TopBar } from "../ui";
+import { decodeEvidence, formatBytes, qerdsStatusTone } from "../lib/qerds";
+import { toast } from "../lib/toast";
+import { Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const EYEBROW =
@@ -94,6 +96,65 @@ function EvidenceItem({
   );
 }
 
+function AttachmentsCard({
+  slug,
+  messageId,
+  attachments,
+  t,
+}: {
+  slug: string;
+  messageId: string;
+  attachments: QerdsAttachment[];
+  t: TFunction;
+}): React.JSX.Element {
+  const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
+
+  async function download(attachment: QerdsAttachment): Promise<void> {
+    setDownloadingId(attachment.id);
+    try {
+      await downloadQerdsAttachment(slug, messageId, attachment);
+    } catch {
+      toast.error(t("qerds.attachments.downloadError"));
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
+  return (
+    <Card className="p-6">
+      <h2 className="text-[16px] font-semibold">
+        {t("qerds.attachments.title")}
+      </h2>
+      <ul className="mt-4 flex flex-col gap-2">
+        {attachments.map((attachment) => (
+          <li
+            key={attachment.id}
+            className="border-line bg-surface-2 flex items-center gap-2.5 rounded-md border px-3 py-2"
+          >
+            <Icon name="lock" size={15} className="text-ink-soft shrink-0" />
+            <span className="text-ink flex-1 truncate text-[13.5px]">
+              {attachment.filename}
+            </span>
+            <span className="text-muted shrink-0 text-[11.5px]">
+              {formatBytes(attachment.sizeBytes)}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="arrow_front"
+              loading={downloadingId === attachment.id}
+              disabled={downloadingId !== null}
+              onClick={() => void download(attachment)}
+            >
+              {t("qerds.attachments.download")}
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 export default function QerdsMessage(): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const { orgSlug, messageId } = useParams();
@@ -176,6 +237,15 @@ export default function QerdsMessage(): React.JSX.Element {
               </p>
             )}
           </Card>
+
+          {message.attachments.length > 0 && (
+            <AttachmentsCard
+              slug={slug}
+              messageId={id}
+              attachments={message.attachments}
+              t={t}
+            />
+          )}
 
           <Card className="p-6">
             <h2 className="text-[16px] font-semibold">

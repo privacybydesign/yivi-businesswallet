@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { request } from "./http";
+import { request, requestBlob } from "./http";
 
 export const qerdsMessageSchema = z.object({
   id: z.string(),
@@ -35,7 +35,21 @@ export const qerdsEvidenceSchema = z.object({
 
 export type QerdsEvidence = z.infer<typeof qerdsEvidenceSchema>;
 
+// Attachment metadata only; the bytes are fetched via the download endpoint.
+export const qerdsAttachmentSchema = z.object({
+  id: z.string(),
+  messageId: z.string(),
+  filename: z.string(),
+  contentType: z.string(),
+  contentHash: z.string(),
+  sizeBytes: z.number(),
+  createdAt: z.string(),
+});
+
+export type QerdsAttachment = z.infer<typeof qerdsAttachmentSchema>;
+
 export const qerdsMessageWithEvidenceSchema = qerdsMessageSchema.extend({
+  attachments: z.array(qerdsAttachmentSchema),
   evidence: z.array(qerdsEvidenceSchema),
 });
 
@@ -86,15 +100,53 @@ export function getQerdsMessage(
 
 export function sendQerdsMessage(
   slug: string,
-  input: { recipient: string; subject: string; body: string },
+  input: {
+    recipient: string;
+    subject: string;
+    body: string;
+    attachments?: File[];
+  },
   signal?: AbortSignal,
 ): Promise<QerdsMessage> {
+  const form = new FormData();
+  form.set("recipient", input.recipient);
+  form.set("subject", input.subject);
+  form.set("body", input.body);
+  for (const file of input.attachments ?? []) {
+    form.append("attachments", file, file.name);
+  }
   return request(`/api/v1/orgs/${encodeURIComponent(slug)}/qerds/messages`, {
     schema: qerdsMessageSchema,
     method: "POST",
-    body: input,
+    body: form,
     signal,
   });
+}
+
+// Fetches an attachment's bytes and triggers a browser download. Content is
+// fetched with credentials (matching the rest of the API) rather than via a
+// plain link, so the session cookie is always sent.
+export async function downloadQerdsAttachment(
+  slug: string,
+  messageId: string,
+  attachment: QerdsAttachment,
+  signal?: AbortSignal,
+): Promise<void> {
+  const { blob, filename } = await requestBlob(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/qerds/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.id)}`,
+    { signal },
+  );
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = filename ?? attachment.filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 export function pollQerdsInbox(
