@@ -31,6 +31,12 @@ type addressManager interface {
 	ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, error)
 }
 
+type contactManager interface {
+	ListContacts(ctx context.Context, orgID uuid.UUID) ([]Contact, error)
+	CreateContact(ctx context.Context, orgID uuid.UUID, name, address string) (Contact, error)
+	DeleteContact(ctx context.Context, orgID, id uuid.UUID) error
+}
+
 // Handler serves the org-scoped QERDS API plus the machine-to-machine inbound
 // webhook. Org routes compose the injected requireUser + authorize middleware
 // (auth.RequireUser -> organization.Authorize); the webhook sits outside that
@@ -39,17 +45,19 @@ type Handler struct {
 	service       sender
 	messages      reader
 	addresses     addressManager
+	contacts      contactManager
 	requireUser   func(http.Handler) http.Handler
 	authorize     func(http.Handler) http.Handler
 	webhookSecret string
 	addressDomain string
 }
 
-func NewHandler(service sender, messages reader, addresses addressManager, requireUser, authorize func(http.Handler) http.Handler, webhookSecret, addressDomain string) *Handler {
+func NewHandler(service sender, messages reader, addresses addressManager, contacts contactManager, requireUser, authorize func(http.Handler) http.Handler, webhookSecret, addressDomain string) *Handler {
 	return &Handler{
 		service:       service,
 		messages:      messages,
 		addresses:     addresses,
+		contacts:      contacts,
 		requireUser:   requireUser,
 		authorize:     authorize,
 		webhookSecret: webhookSecret,
@@ -69,6 +77,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.Handle("GET /orgs/{slug}/qerds/addresses", orgScoped(respond.HandlerFunc(h.listAddresses)))
 	mux.Handle("POST /orgs/{slug}/qerds/addresses", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.provisionAddress))))
+
+	mux.Handle("GET /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.listContacts)))
+	mux.Handle("POST /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.createContact)))
+	mux.Handle("DELETE /orgs/{slug}/qerds/contacts/{id}", orgScoped(respond.HandlerFunc(h.deleteContact)))
 
 	// Machine-to-machine inbound push (Art 6(1)(d)); no session, out-of-band auth.
 	mux.Handle("POST /qerds/webhook", respond.HandlerFunc(h.webhook))
@@ -190,6 +202,65 @@ func (h *Handler) provisionAddress(w http.ResponseWriter, r *http.Request) error
 	}
 
 	respond.JSON(w, r, http.StatusCreated, addr)
+	return nil
+}
+
+func (h *Handler) listContacts(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	contacts, err := h.contacts.ListContacts(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("listing qerds contacts: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, contacts)
+	return nil
+}
+
+type createContactRequest struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+}
+
+func (h *Handler) createContact(w http.ResponseWriter, r *http.Request) error {
+	var req createContactRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return badRequest("invalid_body", "invalid request body")
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.Address = strings.TrimSpace(req.Address)
+	if req.Name == "" {
+		return badRequest("invalid_input", "name is required")
+	}
+	if req.Address == "" {
+		return badRequest("invalid_input", "address is required")
+	}
+
+	org := organization.OrgFromContext(r.Context())
+	contact, err := h.contacts.CreateContact(r.Context(), org.ID, req.Name, req.Address)
+	if errors.Is(err, ErrContactAddressTaken) {
+		return &respond.APIError{Status: http.StatusConflict, Code: "address_taken", Message: "a contact with that address already exists"}
+	}
+	if err != nil {
+		return fmt.Errorf("creating qerds contact: %w", err)
+	}
+
+	respond.JSON(w, r, http.StatusCreated, contact)
+	return nil
+}
+
+func (h *Handler) deleteContact(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid contact id")
+	}
+
+	org := organization.OrgFromContext(r.Context())
+	if err := h.contacts.DeleteContact(r.Context(), org.ID, id); errors.Is(err, ErrContactNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "contact_not_found", Message: "contact not found"}
+	} else if err != nil {
+		return fmt.Errorf("deleting qerds contact: %w", err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

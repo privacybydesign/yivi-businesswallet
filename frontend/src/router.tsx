@@ -25,6 +25,7 @@ import AuditLog from "./routes/audit-log";
 import Qerds from "./routes/qerds";
 import QerdsCompose from "./routes/qerds-compose";
 import QerdsAddresses from "./routes/qerds-addresses";
+import QerdsContacts from "./routes/qerds-contacts";
 import QerdsMessage from "./routes/qerds-message";
 import Settings from "./routes/settings";
 import AdminDashboard from "./routes/admin-dashboard";
@@ -61,6 +62,9 @@ const auditLogCrumb: RouteHandle = { crumb: ({ t }) => t("auditLog.title") };
 const qerdsCrumb: RouteHandle = { crumb: ({ t }) => t("qerds.title") };
 const qerdsComposeCrumb: RouteHandle = {
   crumb: ({ t }) => t("qerds.compose.title"),
+};
+const qerdsContactsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("qerds.contacts.title"),
 };
 const qerdsAddressesCrumb: RouteHandle = {
   crumb: ({ t }) => t("qerds.addresses.title"),
@@ -148,6 +152,11 @@ export const router = createBrowserRouter([
                         path: "addresses",
                         Component: QerdsAddresses,
                         handle: qerdsAddressesCrumb,
+                      },
+                      {
+                        path: "contacts",
+                        Component: QerdsContacts,
+                        handle: qerdsContactsCrumb,
                       },
                       {
                         path: ":messageId",
