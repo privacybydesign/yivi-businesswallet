@@ -167,6 +167,7 @@ export function useDeleteQerdsContactMutation(
   const { t } = useTranslation();
   return useMutation({
     mutationFn: ({ contactId }) => deleteQerdsContact(slug, contactId),
+    meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.qerdsContactDeleted"));
       void queryClient.invalidateQueries({
