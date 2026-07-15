@@ -107,7 +107,7 @@ func (s *Store) CreateInbound(ctx context.Context, orgID uuid.UUID, in qerdsprov
 		const insert = `INSERT INTO qerds_messages
 			(organization_id, direction, sender_address, recipient_address, subject, body, provider_ref, status, delivered_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-			ON CONFLICT (provider_ref) DO NOTHING
+			ON CONFLICT (direction, provider_ref) DO NOTHING
 			RETURNING ` + messageColumns
 		var err error
 		m, err = scanMessage(q.QueryRow(ctx, insert, orgID, DirectionInbound,
