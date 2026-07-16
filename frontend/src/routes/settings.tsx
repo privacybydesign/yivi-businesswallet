@@ -5,11 +5,13 @@ import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { Card, TopBar } from "../ui";
 import { DepartmentSettings } from "./department-settings";
+import { EmailSettingsPanel } from "./email-settings";
 import { OrgProfileSettings } from "./org-profile-settings";
 import * as React from "react";
 
 const TABS = [
   { key: "org", labelKey: "settings.tabOrg" },
+  { key: "email", labelKey: "settings.tabEmail" },
   { key: "wallets", labelKey: "settings.tabWallets" },
 ] as const;
 
@@ -69,6 +71,8 @@ export default function Settings(): React.JSX.Element {
             <OrgProfileSettings org={org.data} />
             <DepartmentSettings slug={slug} />
           </div>
+        ) : tab === "email" ? (
+          <EmailSettingsPanel slug={slug} />
         ) : (
           <Card className="p-6">
             <p className="text-ink-soft text-[14px]">

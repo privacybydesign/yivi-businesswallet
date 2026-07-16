@@ -52,6 +52,9 @@ type Session struct {
 type DisclosedIdentity struct {
 	Email user.Email
 	Name  identity.Name
+	// Phone is the disclosed mobile number (identity scope). Best-effort: empty
+	// when the presentation carried no phone claim.
+	Phone string
 }
 
 // verifier is the slice of openid4vpverifier.Client the service needs, defined in

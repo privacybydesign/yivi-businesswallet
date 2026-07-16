@@ -45,18 +45,19 @@ const (
 // of the review for this invitation. A fresh hold is "pending"; if a review
 // already exists its current status is returned, so a re-accept after a
 // rejection is reported as rejected rather than mistaken for a new pending hold.
-func (s *Store) CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name) (ReviewState, error) {
+func (s *Store) CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name, phone string) (ReviewState, error) {
 	var state ReviewState
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		// phone is held on the review so an admin-approved member (below) keeps it.
 		const insert = `
 			INSERT INTO identity_reviews
-				(user_id, invitation_id, stored_given_names, stored_last_name, disclosed_given_names, disclosed_last_name)
-			VALUES ($1, $2, $3, $4, $5, $6)
+				(user_id, invitation_id, stored_given_names, stored_last_name, disclosed_given_names, disclosed_last_name, phone)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (invitation_id) DO NOTHING
 			RETURNING id`
 		var id uuid.UUID
 		err := q.QueryRow(ctx, insert, userID, inv.ID,
-			stored.GivenNames, stored.LastName, disclosed.GivenNames, disclosed.LastName).Scan(&id)
+			stored.GivenNames, stored.LastName, disclosed.GivenNames, disclosed.LastName, nullIfEmpty(phone)).Scan(&id)
 		if err == nil {
 			state = ReviewPending
 			return s.audit.Record(ctx, q, audit.UserIdentityReviewRequired,
@@ -116,10 +117,11 @@ func (s *Store) ResolveIdentityReview(ctx context.Context, reviewID, reviewerID 
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		var userID, invitationID uuid.UUID
 		var disclosedGiven, disclosedLast, storedGiven, storedLast, status string
+		var phone *string
 		err := q.QueryRow(ctx, `
-			SELECT user_id, invitation_id, disclosed_given_names, disclosed_last_name, stored_given_names, stored_last_name, status
+			SELECT user_id, invitation_id, disclosed_given_names, disclosed_last_name, stored_given_names, stored_last_name, status, phone
 			FROM identity_reviews WHERE id = $1 FOR UPDATE`, reviewID).
-			Scan(&userID, &invitationID, &disclosedGiven, &disclosedLast, &storedGiven, &storedLast, &status)
+			Scan(&userID, &invitationID, &disclosedGiven, &disclosedLast, &storedGiven, &storedLast, &status, &phone)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrReviewNotFound
 		}
@@ -156,10 +158,12 @@ func (s *Store) ResolveIdentityReview(ctx context.Context, reviewID, reviewerID 
 			return fmt.Errorf("organization: approve update user %s: %w", userID, err)
 		}
 
+		// identity_verified is true: the review only gates a name mismatch — the
+		// person still proved a passport/id-card identity. phone was held on the review.
 		const insertMembership = `
-			INSERT INTO memberships (organization_id, user_id, role, job_title, department_id)
-			VALUES ($1, $2, $3, $4, (SELECT id FROM departments WHERE id = $5 AND organization_id = $1))`
-		_, err = q.Exec(ctx, insertMembership, inv.OrganizationID, userID, inv.Role, inv.JobTitle, inv.DepartmentID)
+			INSERT INTO memberships (organization_id, user_id, role, job_title, department_id, phone, identity_verified)
+			VALUES ($1, $2, $3, $4, (SELECT id FROM departments WHERE id = $5 AND organization_id = $1), $6, true)`
+		_, err = q.Exec(ctx, insertMembership, inv.OrganizationID, userID, inv.Role, inv.JobTitle, inv.DepartmentID, phone)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			return ErrAlreadyMember

@@ -47,7 +47,9 @@ func (f fakeRepo) ListMemberEntries(context.Context, uuid.UUID, MemberListParams
 	return nil, 0, nil
 }
 func (f fakeRepo) RevokeInvitation(context.Context, uuid.UUID, uuid.UUID) error { return nil }
-func (f fakeRepo) ResendInvitation(context.Context, uuid.UUID, uuid.UUID) error { return nil }
+func (f fakeRepo) ResendInvitation(context.Context, uuid.UUID, uuid.UUID) (Invitation, error) {
+	return Invitation{}, nil
+}
 
 func (f fakeRepo) UpdateMembership(context.Context, uuid.UUID, uuid.UUID, *string, *string, *uuid.UUID) (Member, error) {
 	return Member{}, nil

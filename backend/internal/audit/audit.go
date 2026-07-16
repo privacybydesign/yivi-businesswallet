@@ -55,6 +55,21 @@ const (
 	WalletRevoked         = "wallet.revoked"
 	RepresentationClaimed = "wallet.representation_claimed"
 	RepresentationRevoked = "wallet.representation_revoked"
+
+	AttestationSchemaCreated   = "attestation.schema_created"
+	AttestationSchemaUpdated   = "attestation.schema_updated"
+	AttestationSchemaDeleted   = "attestation.schema_deleted"
+	AttestationTemplateCreated = "attestation.template_created"
+	AttestationTemplateUpdated = "attestation.template_updated"
+	AttestationTemplateDeleted = "attestation.template_deleted"
+	AttestationIssued          = "attestation.issued"
+	AttestationClaimed         = "attestation.claimed"
+	AttestationRevoked         = "attestation.revoked"
+	AttestationKeyAdded        = "attestation.key_added"
+	AttestationKeySuspended    = "attestation.key_suspended"
+	AttestationKeyRevoked      = "attestation.key_revoked"
+
+	EmailSettingsUpdated = "email.settings_updated"
 )
 
 const (
@@ -72,6 +87,13 @@ const (
 	TargetPostGuardKey           = "postguard_key"
 	TargetPostGuardEncryptionKey = "postguard_encryption_key"
 	TargetPostGuardFile          = "postguard_file"
+
+	TargetAttestationSchema   = "attestation_schema"
+	TargetAttestationTemplate = "attestation_template"
+	TargetIssuedAttestation   = "issued_attestation"
+	TargetAttestationKey      = "attestation_key"
+
+	TargetEmailSettings = "org_email_settings"
 )
 
 type Actor struct {

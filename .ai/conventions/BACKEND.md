@@ -24,6 +24,7 @@ Layout: entry points in `cmd/api` + `cmd/migrate` + `cmd/seed`, packages under `
 
 - `cmd/api/main.go` owns it: builds the `*http.Server`, serves, and shuts down gracefully (traps `SIGINT`/`SIGTERM`, `Shutdown(ctx)` with timeout).
 - Startup, shutdown start, and shutdown completion are all logged.
+- **External-provider seam (uniform shape):** every external trust/service dependency is a thin typed client behind a consumer-defined interface, chosen by config with an in-process **stub** as the dev/CI default and a **fatal boot `Ping`** at startup (a misconfigured provider fails the deploy, not the first user action). `main.go` has a `new<Provider>` switch per dependency. Instances: `openid4vpverifier` (verify), `openid4vciissuer` (issue — `VeramoIssuer`/`StubIssuer`), `qerdsprovider` (QERDS), `registryprovider` (KVK). `/readyz` stays DB-only — provider health is a boot gate, not a readiness component.
 
 ## Structured Logging & Request Correlation
 

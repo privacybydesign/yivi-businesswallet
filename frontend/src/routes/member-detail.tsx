@@ -251,9 +251,16 @@ export default function MemberDetail(): React.JSX.Element {
               </div>
               <div className="text-ink-soft text-[12.5px]">{member.email}</div>
             </div>
-            <Tag tone="green" dot>
-              {t("memberDetail.active")}
-            </Tag>
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              <Tag tone="green" dot>
+                {t("memberDetail.active")}
+              </Tag>
+              {member.verified && (
+                <Tag tone="blue" dot>
+                  {t("memberDetail.verified")}
+                </Tag>
+              )}
+            </div>
           </div>
           <div className="flex flex-col gap-2.5 p-5">
             <DetailRow
@@ -269,6 +276,7 @@ export default function MemberDetail(): React.JSX.Element {
               label={t("common.department")}
               value={member.departmentName ?? "—"}
             />
+            <DetailRow label={t("common.phone")} value={member.phone ?? "—"} />
           </div>
           <div className="border-line flex flex-col gap-2 border-t p-4">
             <Button variant="secondary" icon="email" className="w-full">

@@ -31,6 +31,8 @@ import QerdsContacts from "./routes/qerds-contacts";
 import QerdsMessage from "./routes/qerds-message";
 import Postguard from "./routes/postguard";
 import PostguardSend from "./routes/postguard-send";
+import Attestations from "./routes/attestations";
+import Claim from "./routes/claim";
 import Settings from "./routes/settings";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
@@ -80,6 +82,9 @@ const qerdsMessageCrumb: RouteHandle = {
     return message ? message.subject : t("qerds.message.title");
   },
 };
+const attestationsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("attestations.title"),
+};
 const postguardCrumb: RouteHandle = { crumb: ({ t }) => t("postguard.title") };
 const postguardSendCrumb: RouteHandle = {
   crumb: ({ t }) => t("postguard.send.title"),
@@ -104,6 +109,7 @@ export const router = createBrowserRouter([
       { path: "/login", Component: Login },
       { path: "/register", Component: Register },
       { path: "/invite/:token", Component: InviteAccept },
+      { path: "/claim/:token", Component: Claim },
       { path: "*", Component: NotFound },
       {
         Component: ProtectedRoute,
@@ -177,6 +183,11 @@ export const router = createBrowserRouter([
                         handle: qerdsMessageCrumb,
                       },
                     ],
+                  },
+                  {
+                    path: "attestations",
+                    Component: Attestations,
+                    handle: attestationsCrumb,
                   },
                   {
                     path: "postguard",

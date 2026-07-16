@@ -196,12 +196,14 @@ func (s *Store) RecordRejectedAccept(ctx context.Context, orgID uuid.UUID, email
 		audit.Updated(before, after))
 }
 
-func (s *Store) AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name) error {
+func (s *Store) AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name, phone string) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		// identity_verified is true: acceptance always proves a passport/id-card
+		// identity via the disclosure flow. phone is best-effort (empty => NULL).
 		const insert = `
-			INSERT INTO memberships (organization_id, user_id, role, job_title, department_id)
-			VALUES ($1, $2, $3, $4, (SELECT id FROM departments WHERE id = $5 AND organization_id = $1))`
-		_, err := q.Exec(ctx, insert, inv.OrganizationID, userID, inv.Role, inv.JobTitle, inv.DepartmentID)
+			INSERT INTO memberships (organization_id, user_id, role, job_title, department_id, phone, identity_verified)
+			VALUES ($1, $2, $3, $4, (SELECT id FROM departments WHERE id = $5 AND organization_id = $1), $6, true)`
+		_, err := q.Exec(ctx, insert, inv.OrganizationID, userID, inv.Role, inv.JobTitle, inv.DepartmentID, nullIfEmpty(phone))
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			return ErrAlreadyMember
@@ -281,19 +283,19 @@ func (s *Store) RevokeInvitation(ctx context.Context, orgID, invitationID uuid.U
 	})
 }
 
-func (s *Store) ResendInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error {
-	_, tokenHash, err := newInviteToken()
+func (s *Store) ResendInvitation(ctx context.Context, orgID, invitationID uuid.UUID) (Invitation, error) {
+	rawToken, tokenHash, err := newInviteToken()
 	if err != nil {
-		return err
+		return Invitation{}, err
 	}
 	newExpiry := time.Now().Add(inviteTTL)
-	return database.InTx(ctx, s.db, func(q database.Querier) error {
+	var email string
+	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `
 			WITH old AS (SELECT expires_at FROM invitations WHERE id = $1 AND organization_id = $2)
 			UPDATE invitations i SET invite_token_hash = $3, expires_at = $4
 			FROM old WHERE i.id = $1 AND i.organization_id = $2
 			RETURNING i.email, old.expires_at`
-		var email string
 		var oldExpiry time.Time
 		err := q.QueryRow(ctx, update, invitationID, orgID, tokenHash[:], newExpiry).Scan(&email, &oldExpiry)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -308,4 +310,14 @@ func (s *Store) ResendInvitation(ctx context.Context, orgID, invitationID uuid.U
 				map[string]any{"expiresAt": oldExpiry},
 				map[string]any{"expiresAt": newExpiry}))
 	})
+	if err != nil {
+		return Invitation{}, err
+	}
+	return Invitation{
+		ID:             invitationID,
+		OrganizationID: orgID,
+		Email:          email,
+		Token:          rawToken,
+		ExpiresAt:      newExpiry,
+	}, nil
 }

@@ -30,6 +30,23 @@ const (
 
 	envWalletRegistryProvider = "WALLET_REGISTRY_PROVIDER"
 
+	// Attestation issuance (OpenID4VCI). The hosted Veramo issuer is addressed per
+	// instance and authenticated with a Bearer admin token; the ping credential is
+	// offered by the boot probe to validate URL + token + a configured credential.
+	envAttestationIssuer         = "ATTESTATION_ISSUER"
+	envAttestationIssuerURL      = "ATTESTATION_ISSUER_URL"
+	envAttestationIssuerToken    = "ATTESTATION_ISSUER_ADMIN_TOKEN"
+	envAttestationIssuerInstance = "ATTESTATION_ISSUER_INSTANCE"
+	envAttestationPingCredential = "ATTESTATION_ISSUER_PING_CREDENTIAL"
+
+	// APP_BASE_URL is the public base URL of the frontend, used to build links in
+	// outbound e-mail / QERDS messages (e.g. the credential claim page).
+	envAppBaseURL = "APP_BASE_URL"
+	// EMAIL_ENCRYPTION_KEY (hex 32 bytes) encrypts per-org SMTP passwords at rest.
+	envEmailEncryptionKey = "EMAIL_ENCRYPTION_KEY"
+
+	defaultAppBaseURL = "http://localhost:5173"
+
 	// PostGuard: the internal sidecar that performs encrypt-and-upload, the shared
 	// secret the backend presents to it, and the deployment master key that wraps
 	// each org's own (owner-configured) encryption key at rest (envelope
@@ -66,6 +83,12 @@ const (
 	// ProviderDomibus selects the Domibus AS4 access-point driver. Requires
 	// QERDS_PROVIDER_URL (the WS-plugin endpoint).
 	ProviderDomibus = "domibus"
+	// IssuerStub selects the in-process StubIssuer (local dev / CI); IssuerVeramo
+	// selects the hosted Veramo OpenID4VCI issuer.
+	IssuerStub   = "stub"
+	IssuerVeramo = "veramo"
+
+	defaultAttestationIssuer = IssuerStub
 
 	defaultQerdsProvider             = ProviderStub
 	defaultQerdsDefaultAddressDomain = "qerds.localhost"
@@ -109,6 +132,15 @@ type Config struct {
 
 	WalletRegistryProvider string
 
+	AttestationIssuer         string
+	AttestationIssuerURL      string
+	AttestationIssuerToken    string
+	AttestationIssuerInstance string
+	AttestationPingCredential string
+
+	AppBaseURL         string
+	EmailEncryptionKey string
+
 	PostGuardSidecarURL    string
 	PostGuardSharedSecret  string
 	PostGuardEncryptionKey string
@@ -150,6 +182,18 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envQerdsProviderURL, envQerdsProvider, ProviderStub)
 	}
 
+	attestationIssuer := envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
+	attestationIssuerURL := os.Getenv(envAttestationIssuerURL)
+	attestationIssuerInstance := os.Getenv(envAttestationIssuerInstance)
+	if attestationIssuer != IssuerStub {
+		if attestationIssuerURL == "" {
+			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerURL, envAttestationIssuer, IssuerStub)
+		}
+		if attestationIssuerInstance == "" {
+			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerInstance, envAttestationIssuer, IssuerStub)
+		}
+	}
+
 	return Config{
 		DatabaseDSN: dsn,
 		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
@@ -177,6 +221,15 @@ func Load() (Config, error) {
 		QerdsDomibusAction:      envOrDefault(envQerdsDomibusAction, defaultQerdsDomibusAction),
 
 		WalletRegistryProvider: envOrDefault(envWalletRegistryProvider, defaultWalletRegistryProvider),
+
+		AttestationIssuer:         attestationIssuer,
+		AttestationIssuerURL:      attestationIssuerURL,
+		AttestationIssuerToken:    os.Getenv(envAttestationIssuerToken),
+		AttestationIssuerInstance: attestationIssuerInstance,
+		AttestationPingCredential: os.Getenv(envAttestationPingCredential),
+
+		AppBaseURL:         envOrDefault(envAppBaseURL, defaultAppBaseURL),
+		EmailEncryptionKey: os.Getenv(envEmailEncryptionKey),
 
 		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
 		PostGuardSharedSecret:  os.Getenv(envPostGuardSharedSecret),

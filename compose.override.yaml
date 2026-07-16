@@ -15,6 +15,16 @@ services:
       EUDI_VERIFIER_URL: ${EUDI_VERIFIER_URL:-}
       EUDI_ISSUER_CHAIN: ${EUDI_ISSUER_CHAIN:-}
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-admin@yivi.app}
+      # Claim links in dev point at the local frontend.
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
+      # Attestation issuer: stub by default. Set ATTESTATION_ISSUER=veramo (+ token)
+      # in .env to issue against the hosted Veramo staging issuer.
+      ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}
+      ATTESTATION_ISSUER_URL: ${ATTESTATION_ISSUER_URL:-https://veramo-issuer.openid4vc.staging.yivi.app}
+      ATTESTATION_ISSUER_INSTANCE: ${ATTESTATION_ISSUER_INSTANCE:-test-issuer}
+      ATTESTATION_ISSUER_ADMIN_TOKEN: ${ATTESTATION_ISSUER_ADMIN_TOKEN:-}
+      ATTESTATION_ISSUER_PING_CREDENTIAL: ${ATTESTATION_ISSUER_PING_CREDENTIAL:-}
+      EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY:-}
     depends_on:
       seed:
         condition: service_completed_successfully
@@ -46,6 +56,18 @@ services:
       - ./backend:/app
       - backend-go-build:/root/.cache/go-build
       - backend-go-mod:/go/pkg/mod
+
+  # Dev SMTP catch-all: Mailpit (a maintained MailHog) captures all outbound mail
+  # so credential-offer notifications are viewable without a real mail server.
+  # Web UI: http://localhost:8025 . Per-org SMTP settings in dev point at
+  # host "mailpit", port 1025 (no auth) — the seeder configures the demo org.
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
 
   frontend:
     build:

@@ -26,11 +26,11 @@ type invitationStore interface {
 	InvitationByToken(ctx context.Context, rawToken string) (Invitation, error)
 	InvitationByID(ctx context.Context, invitationID uuid.UUID) (Invitation, error)
 	ListInvitationsForEmail(ctx context.Context, email string) ([]Invitation, error)
-	AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name) error
+	AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name, phone string) error
 	RecordRejectedAccept(ctx context.Context, orgID uuid.UUID, email string, before, after map[string]any) error
 	DeclineInvitation(ctx context.Context, rawToken string) error
 	DeclineInvitationByID(ctx context.Context, invitationID uuid.UUID) error
-	CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name) (ReviewState, error)
+	CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name, phone string) (ReviewState, error)
 	ListIdentityReviews(ctx context.Context) ([]IdentityReview, error)
 	ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error)
 }
@@ -161,7 +161,7 @@ func (s *Service) acceptResolved(ctx context.Context, inv Invitation, disclosure
 
 	if needsReview {
 		stored := identity.Name{GivenNames: u.GivenNames, LastName: u.LastName}
-		state, err := s.store.CreateIdentityReview(ctx, inv, u.ID, stored, disclosed.Name)
+		state, err := s.store.CreateIdentityReview(ctx, inv, u.ID, stored, disclosed.Name, disclosed.Phone)
 		if err != nil {
 			return AcceptOutcome{}, err
 		}
@@ -172,7 +172,7 @@ func (s *Service) acceptResolved(ctx context.Context, inv Invitation, disclosure
 		return at, nil
 	}
 
-	if err := s.store.AcceptInvitation(ctx, inv, u.ID, disclosed.Name); err != nil {
+	if err := s.store.AcceptInvitation(ctx, inv, u.ID, disclosed.Name, disclosed.Phone); err != nil {
 		return AcceptOutcome{}, err
 	}
 	at.Status = AcceptAccepted

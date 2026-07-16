@@ -57,6 +57,19 @@ services:
       POSTGUARD_SIDECAR_URL: http://postguard-sidecar:8090
       POSTGUARD_SHARED_SECRET: ${POSTGUARD_SHARED_SECRET:?POSTGUARD_SHARED_SECRET must be set}
       POSTGUARD_KEY_ENCRYPTION_KEY: ${POSTGUARD_KEY_ENCRYPTION_KEY:?POSTGUARD_KEY_ENCRYPTION_KEY must be set}
+      # Public base URL of the frontend, used to build claim links in outbound
+      # e-mail / QERDS credential-offer messages.
+      APP_BASE_URL: ${APP_BASE_URL:-}
+      # Encrypts per-org SMTP passwords at rest (hex 32 bytes). Optional: without
+      # it, orgs can only configure passwordless (e.g. relay) SMTP.
+      EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY:-}
+      # Attestation issuer (OpenID4VCI). Defaults to the in-process stub; set to
+      # `veramo` with a URL/instance/token to issue real credentials.
+      ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}
+      ATTESTATION_ISSUER_URL: ${ATTESTATION_ISSUER_URL:-}
+      ATTESTATION_ISSUER_INSTANCE: ${ATTESTATION_ISSUER_INSTANCE:-}
+      ATTESTATION_ISSUER_ADMIN_TOKEN: ${ATTESTATION_ISSUER_ADMIN_TOKEN:-}
+      ATTESTATION_ISSUER_PING_CREDENTIAL: ${ATTESTATION_ISSUER_PING_CREDENTIAL:-}
     depends_on:
       db:
         condition: service_healthy

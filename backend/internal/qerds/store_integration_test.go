@@ -114,15 +114,8 @@ func TestAttachmentPersistenceAndScoping(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
 
-	orgStore := organization.NewStore(pool, audit.NopRecorder{})
-	org, err := orgStore.Create(ctx, "Acme", "acme")
-	if err != nil {
-		t.Fatalf("create org: %v", err)
-	}
-	other, err := orgStore.Create(ctx, "Other", "other")
-	if err != nil {
-		t.Fatalf("create other org: %v", err)
-	}
+	orgID := seedOrg(t, ctx, pool, "acme")
+	otherID := seedOrg(t, ctx, pool, "other")
 
 	store := qerds.NewStore(pool, audit.NopRecorder{})
 	const addr = "acme@qerds.localhost"
@@ -130,14 +123,14 @@ func TestAttachmentPersistenceAndScoping(t *testing.T) {
 	sum := sha256.Sum256(content)
 	wantHash := hex.EncodeToString(sum[:])
 
-	out, err := store.CreateOutbound(ctx, org.ID, addr, "bob@qerds.localhost", "filing", "see attached", []qerdsprovider.Attachment{
+	out, err := store.CreateOutbound(ctx, orgID, addr, "bob@qerds.localhost", "filing", "see attached", []qerdsprovider.Attachment{
 		{Filename: "filing.pdf", ContentType: "application/pdf", Content: content},
 	})
 	if err != nil {
 		t.Fatalf("CreateOutbound: %v", err)
 	}
 
-	detail, err := store.GetWithEvidence(ctx, org.ID, out.ID)
+	detail, err := store.GetWithEvidence(ctx, orgID, out.ID)
 	if err != nil {
 		t.Fatalf("GetWithEvidence: %v", err)
 	}
@@ -155,7 +148,7 @@ func TestAttachmentPersistenceAndScoping(t *testing.T) {
 		t.Errorf("size = %d, want %d", att.SizeBytes, len(content))
 	}
 
-	got, err := store.GetAttachmentContent(ctx, org.ID, out.ID, att.ID)
+	got, err := store.GetAttachmentContent(ctx, orgID, out.ID, att.ID)
 	if err != nil {
 		t.Fatalf("GetAttachmentContent: %v", err)
 	}
@@ -167,12 +160,12 @@ func TestAttachmentPersistenceAndScoping(t *testing.T) {
 	}
 
 	// Another organization must not be able to read the payload by id.
-	if _, err := store.GetAttachmentContent(ctx, other.ID, out.ID, att.ID); !errors.Is(err, qerds.ErrAttachmentNotFound) {
+	if _, err := store.GetAttachmentContent(ctx, otherID, out.ID, att.ID); !errors.Is(err, qerds.ErrAttachmentNotFound) {
 		t.Fatalf("cross-org download err = %v, want ErrAttachmentNotFound", err)
 	}
 
 	// An unknown attachment id is a not-found, not a server error.
-	if _, err := store.GetAttachmentContent(ctx, org.ID, out.ID, uuid.New()); !errors.Is(err, qerds.ErrAttachmentNotFound) {
+	if _, err := store.GetAttachmentContent(ctx, orgID, out.ID, uuid.New()); !errors.Is(err, qerds.ErrAttachmentNotFound) {
 		t.Fatalf("unknown attachment err = %v, want ErrAttachmentNotFound", err)
 	}
 }
