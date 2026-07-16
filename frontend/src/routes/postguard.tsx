@@ -134,7 +134,7 @@ export default function Postguard(): React.JSX.Element {
         <div className="flex flex-col gap-4">
           <Card className="p-5">
             <div className="mb-2.5 flex items-center gap-2.5">
-              <span className="flex h-8.5 w-8.5 items-center justify-center rounded-lg bg-[#F5DDE4] text-[#9A2744]">
+              <span className="bg-brand/10 text-brand-600 flex h-8.5 w-8.5 items-center justify-center rounded-lg">
                 <Icon name="lock" size={17} />
               </span>
               <div>
