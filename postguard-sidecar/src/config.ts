@@ -2,7 +2,7 @@
 //
 // The sidecar is an internal service: it is reachable only from the Go backend
 // over the private Compose network and every request must carry the shared
-// secret. `SIDECAR_TOKEN` is therefore mandatory — the process refuses to start
+// secret. `PG_SIDECAR_TOKEN` is therefore mandatory — the process refuses to start
 // without it (fail closed) so a misconfiguration can never expose an
 // unauthenticated encrypt-and-send endpoint.
 
