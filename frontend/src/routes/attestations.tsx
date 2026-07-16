@@ -6,6 +6,7 @@ import type {
   AttestationKey,
   AttestationSchema,
   AttestationTemplate,
+  HeldAttestation,
   IssuedAttestation,
 } from "../api/attestations";
 import {
@@ -15,6 +16,8 @@ import {
   useCreateAttestationKeyMutation,
   useDeleteAttestationSchemaMutation,
   useDeleteAttestationTemplateMutation,
+  useDeleteHeldAttestationMutation,
+  useHeldAttestationsQuery,
   useIssuedAttestationsQuery,
   useRevokeAttestationKeyMutation,
   useRevokeIssuedAttestationMutation,
@@ -56,10 +59,16 @@ function issuedTone(status: string): IssuedTone {
   }
 }
 
-type Tab = "templates" | "issued" | "schemas" | "keys";
+type Tab = "templates" | "issued" | "held" | "schemas" | "keys";
 
-const ADMIN_TABS: readonly Tab[] = ["templates", "issued", "schemas", "keys"];
-const MEMBER_TABS: readonly Tab[] = ["issued"];
+const ADMIN_TABS: readonly Tab[] = [
+  "templates",
+  "issued",
+  "held",
+  "schemas",
+  "keys",
+];
+const MEMBER_TABS: readonly Tab[] = ["issued", "held"];
 
 function readTab(params: URLSearchParams, tabs: readonly Tab[]): Tab {
   const value = params.get("tab");
@@ -89,6 +98,7 @@ export default function Attestations(): React.JSX.Element {
 
   const enabled = !org.isError;
   const issued = useIssuedAttestationsQuery(slug, enabled);
+  const held = useHeldAttestationsQuery(slug, enabled);
   const templates = useAttestationTemplatesQuery(slug, enabled && isAdmin);
   const schemas = useAttestationSchemasQuery(slug, enabled && isAdmin);
   const keys = useAttestationKeysQuery(slug, enabled && isAdmin);
@@ -176,6 +186,17 @@ export default function Attestations(): React.JSX.Element {
               />
             )}
 
+            {tab === "held" && (
+              <HeldTab
+                slug={slug}
+                rows={held.data ?? []}
+                pending={held.isPending}
+                error={held.error}
+                isAdmin={isAdmin}
+                formatWhen={formatWhen}
+              />
+            )}
+
             {tab === "schemas" && (
               <SchemasTab
                 slug={slug}
@@ -230,6 +251,7 @@ export default function Attestations(): React.JSX.Element {
 const TAB_LABEL_KEYS = {
   templates: "attestations.tabs.templates",
   issued: "attestations.tabs.issued",
+  held: "attestations.tabs.held",
   schemas: "attestations.tabs.schemas",
   keys: "attestations.tabs.keys",
 } as const;
@@ -456,6 +478,103 @@ function IssuedTab({
                         {t("attestations.issued.revoke")}
                       </Button>
                     )}
+                  </Table.Cell>
+                )}
+              </Table.Row>
+            ))
+          )}
+        </Table.Body>
+      </Table>
+    </Card>
+  );
+}
+
+const HELD_COLUMN_COUNT = 5;
+
+function HeldTab({
+  slug,
+  rows,
+  pending,
+  error,
+  isAdmin,
+  formatWhen,
+}: {
+  slug: string;
+  rows: HeldAttestation[];
+  pending: boolean;
+  error: Error | null;
+  isAdmin: boolean;
+  formatWhen: (iso: string) => string;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const remove = useDeleteHeldAttestationMutation(slug);
+  const columnCount = isAdmin ? HELD_COLUMN_COUNT : HELD_COLUMN_COUNT - 1;
+
+  if (error) {
+    return (
+      <ErrorCard
+        message={t("attestations.loadError", { message: error.message })}
+      />
+    );
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <Table className="table-fixed">
+        <Table.Head>
+          <Table.HeaderCell className="w-[32%]">
+            {t("attestations.held.columns.credential")}
+          </Table.HeaderCell>
+          <Table.HeaderCell className="w-[24%]">
+            {t("attestations.held.columns.issuer")}
+          </Table.HeaderCell>
+          <Table.HeaderCell className="w-[16%]">
+            {t("attestations.held.columns.source")}
+          </Table.HeaderCell>
+          <Table.HeaderCell className="w-[16%]">
+            {t("attestations.held.columns.received")}
+          </Table.HeaderCell>
+          {isAdmin && (
+            <Table.HeaderCell className="w-[12%]" srOnly>
+              {t("attestations.held.columns.actions")}
+            </Table.HeaderCell>
+          )}
+        </Table.Head>
+        <Table.Body>
+          {pending ? (
+            <Table.State colSpan={columnCount}>
+              {t("common.loading")}
+            </Table.State>
+          ) : rows.length === 0 ? (
+            <Table.State colSpan={columnCount}>
+              {t("attestations.held.empty")}
+            </Table.State>
+          ) : (
+            rows.map((row) => (
+              <Table.Row key={row.id}>
+                <Table.Cell className="text-ink truncate font-mono text-[12.5px]">
+                  {row.vct}
+                </Table.Cell>
+                <Table.Cell className="text-ink-soft truncate">
+                  {row.issuer}
+                </Table.Cell>
+                <Table.Cell>
+                  <Tag tone="default">
+                    <span className="capitalize">{row.source}</span>
+                  </Tag>
+                </Table.Cell>
+                <Table.Cell className="text-ink-soft text-[12.5px]">
+                  {formatWhen(row.receivedAt)}
+                </Table.Cell>
+                {isAdmin && (
+                  <Table.Cell className="text-right">
+                    <Button
+                      variant="dangerGhost"
+                      size="sm"
+                      onClick={() => remove.mutate({ heldId: row.id })}
+                    >
+                      {t("attestations.held.delete")}
+                    </Button>
                   </Table.Cell>
                 )}
               </Table.Row>

@@ -52,22 +52,31 @@ type issuanceService interface {
 // Handler serves the org-scoped attestations API (Schemas / Templates / Issued
 // tabs + key material). Org routes compose the injected requireUser + authorize
 // middleware; write/manage routes additionally require org admin.
+// heldStore is the read/delete surface over the org's held-credential index
+// (the credential material itself lives in the holder engine, §6.5).
+type heldStore interface {
+	ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error)
+	SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
+}
+
 type Handler struct {
 	schemas     schemaStore
 	templates   templateStore
 	keys        keyStore
 	issued      issuedReader
+	held        heldStore
 	service     issuanceService
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
 }
 
-func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, service issuanceService, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, held heldStore, service issuanceService, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		schemas:     schemas,
 		templates:   templates,
 		keys:        keys,
 		issued:      issued,
+		held:        held,
 		service:     service,
 		requireUser: requireUser,
 		authorize:   authorize,
@@ -108,6 +117,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/attestations/{id}", member(respond.HandlerFunc(h.getIssued)))
 	mux.Handle("POST /orgs/{slug}/attestations/{id}/revoke", admin(respond.HandlerFunc(h.revoke)))
 
+	// Held credentials (member read; admin delete). Art 5(1)(a) "store, select".
+	mux.Handle("GET /orgs/{slug}/attestations/held", member(respond.HandlerFunc(h.listHeld)))
+	mux.Handle("DELETE /orgs/{slug}/attestations/held/{id}", admin(respond.HandlerFunc(h.deleteHeld)))
+
 	// Public, unauthenticated claim view (keyed on an opaque claim token, never the
 	// row id). The offer link e-mailed / QERDS-delivered to a recipient points here.
 	mux.Handle("GET /attestations/claim/{token}", respond.HandlerFunc(h.claim))
@@ -126,6 +139,34 @@ func (h *Handler) claim(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("resolving claim: %w", err)
 	}
 	respond.JSON(w, r, http.StatusOK, view)
+	return nil
+}
+
+// --- Held credentials ---
+
+func (h *Handler) listHeld(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	held, err := h.held.ListHeld(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("listing held attestations: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, held)
+	return nil
+}
+
+func (h *Handler) deleteHeld(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid held attestation id")
+	}
+	org := organization.OrgFromContext(r.Context())
+	switch err := h.held.SoftDeleteHeld(r.Context(), org.ID, id); {
+	case errors.Is(err, ErrHeldNotFound):
+		return notFound("held_not_found", "held attestation not found")
+	case err != nil:
+		return fmt.Errorf("deleting held attestation: %w", err)
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

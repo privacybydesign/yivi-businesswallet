@@ -68,6 +68,7 @@ const (
 	AttestationKeyAdded        = "attestation.key_added"
 	AttestationKeySuspended    = "attestation.key_suspended"
 	AttestationKeyRevoked      = "attestation.key_revoked"
+	AttestationHeldDeleted     = "attestation.held_deleted"
 
 	EmailSettingsUpdated = "email.settings_updated"
 )
@@ -92,6 +93,7 @@ const (
 	TargetAttestationTemplate = "attestation_template"
 	TargetIssuedAttestation   = "issued_attestation"
 	TargetAttestationKey      = "attestation_key"
+	TargetHeldAttestation     = "held_attestation"
 
 	TargetEmailSettings = "org_email_settings"
 )

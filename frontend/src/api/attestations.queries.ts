@@ -7,10 +7,12 @@ import {
   createAttestationTemplate,
   deleteAttestationSchema,
   deleteAttestationTemplate,
+  deleteHeldAttestation,
   getAttestationClaim,
   getAttestationKeys,
   getAttestationSchemas,
   getAttestationTemplates,
+  getHeldAttestations,
   getIssuedAttestation,
   getIssuedAttestations,
   issueAttestation,
@@ -30,6 +32,7 @@ import type {
   AttestationTemplate,
   AttestationTemplateInput,
   AttestationTemplateUpdate,
+  HeldAttestation,
   IssuedAttestation,
   IssueAttestationInput,
   IssueResult,
@@ -66,6 +69,10 @@ export function issuedAttestationQueryKey(
 
 export function attestationClaimQueryKey(token: string): readonly string[] {
   return ["attestations", "claim", token];
+}
+
+export function heldAttestationsQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "held"];
 }
 
 // Public claim polling: re-fetches while the attestation is still offered so the
@@ -349,6 +356,34 @@ export function useRevokeIssuedAttestationMutation(
       });
       void queryClient.invalidateQueries({
         queryKey: issuedAttestationQueryKey(slug, issuedId),
+      });
+    },
+  });
+}
+
+export function useHeldAttestationsQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<HeldAttestation[], Error> {
+  return useQuery({
+    queryKey: heldAttestationsQueryKey(slug),
+    queryFn: ({ signal }) => getHeldAttestations(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+export function useDeleteHeldAttestationMutation(
+  slug: string,
+): UseMutationResult<void, Error, { heldId: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ heldId }) => deleteHeldAttestation(slug, heldId),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.attestationHeldDeleted"));
+      void queryClient.invalidateQueries({
+        queryKey: heldAttestationsQueryKey(slug),
       });
     },
   });

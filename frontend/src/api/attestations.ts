@@ -110,6 +110,24 @@ export type IssuedAttestation = z.infer<typeof issuedAttestationSchema>;
 
 const issuedAttestationListSchema = z.array(issuedAttestationSchema);
 
+// A credential the organization HOLDS (the "Received" facet). The claims live in
+// the holder engine; this is the thin org-scoped index over it.
+export const heldAttestationSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  credentialRef: z.string(),
+  vct: z.string(),
+  issuer: z.string(),
+  source: z.enum(["qerds", "openid4vci", "bootstrap"]),
+  sourceMessageId: z.string().optional(),
+  receivedAt: z.string(),
+  createdAt: z.string(),
+});
+
+export type HeldAttestation = z.infer<typeof heldAttestationSchema>;
+
+const heldAttestationListSchema = z.array(heldAttestationSchema);
+
 // The response to a POST issue: the ledger entry plus the wallet offer link
 // (and an optional transaction code the recipient must enter).
 export const issueResultSchema = issuedAttestationSchema.extend({
@@ -176,6 +194,28 @@ export interface IssueAttestationInput {
   templateId: string;
   recipient: { kind: string; userId?: string; ref: string };
   attributes: Record<string, string>;
+}
+
+export function getHeldAttestations(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<HeldAttestation[]> {
+  return request(`${base(slug)}/held`, {
+    schema: heldAttestationListSchema,
+    signal,
+  });
+}
+
+export function deleteHeldAttestation(
+  slug: string,
+  heldId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(`${base(slug)}/held/${encodeURIComponent(heldId)}`, {
+    schema: z.void(),
+    method: "DELETE",
+    signal,
+  });
 }
 
 function base(slug: string): string {

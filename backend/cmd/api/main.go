@@ -281,7 +281,7 @@ func run() error {
 	attestationService := attestation.NewService(
 		attestationStore, attIssuer, emailService, qerdsOfferSender{qerdsService}, cfg.AppBaseURL,
 	)
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, requireUser, orgHandler.Authorize)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, requireUser, orgHandler.Authorize)
 
 	handler := server.New(
 		pool,

@@ -126,7 +126,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 		attestationStore, openid4vciissuer.NewStubIssuer(),
 		stubEmailNotifier{}, stubQerdsNotifier{}, "http://app.test",
 	)
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, requireUser, orgHandler.Authorize)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, requireUser, orgHandler.Authorize)
 
 	srv := httptest.NewServer(server.New(pool, authHandler, orgHandler, attestationHandler))
 	t.Cleanup(srv.Close)
