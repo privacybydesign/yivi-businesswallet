@@ -244,7 +244,6 @@ export const en = {
     invitationResent: "Invitation resent",
     invitationRevoked: "Invitation revoked",
     memberUpdated: "Member updated",
-    organizationCreated: "Organization created",
     organizationUpdated: "Organization updated",
     organizationDeleted: "Organization deleted",
     departmentAdded: "Department added",
