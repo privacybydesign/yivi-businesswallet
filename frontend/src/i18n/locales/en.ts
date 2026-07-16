@@ -34,8 +34,39 @@ export const en = {
     select: "Select organization",
     allOrganizations: "All organizations",
     manageAll: "Manage all organizations",
+    registerWallet: "Register a business wallet",
     invitations: "Pending invitations",
     empty: "No organizations yet",
+  },
+  enroll: {
+    title: "Register a business wallet",
+    subtitle:
+      "Register your organization's wallet via the Chamber of Commerce.",
+    intro:
+      "Enter your organization's KVK number. We securely consult the KVK (Kamer van Koophandel) to confirm the company and to check that you are registered as an authorized representative. Only then is the wallet created and you become an owner.",
+    kvkNumber: "KVK number",
+    kvkPlaceholder: "e.g. 94861412",
+    submit: "Consult KVK & register",
+    consulting: "Consulting KVK…",
+    registeredAt: "Wallet registered for {{org}}",
+    yourRole: "The KVK lists you as: {{role}}",
+    continue: "Go to {{org}}",
+    notRepresentative:
+      "The KVK does not list you as a representative of this company, so you can't register its wallet.",
+    alreadyRegistered:
+      "This company already has a business wallet. Ask an owner to invite you instead.",
+    error: "Could not register the wallet: {{message}}",
+    kind: {
+      bestuurder: "Director (bestuurder)",
+      gevolmachtigde: "Authorised representative (gevolmachtigde)",
+      overig: "Representative",
+    },
+    authority: {
+      sole: "acting alone",
+      jointly: "acting jointly",
+      beperkt: "beperkt (limited authority)",
+      volledig: "volledig (full authority)",
+    },
   },
   myInvitations: {
     title: "Invitations",
@@ -78,6 +109,29 @@ export const en = {
     notCompleted: "Login was not completed. Please try again.",
     credentialRejected: "This credential can't be used to sign in.",
     failed: "Sign-in could not be completed. Please try again.",
+    registerLink: "Registering a new business? Register here",
+  },
+  register: {
+    title: "Register a business wallet",
+    subtitle: "New here? Register your company — no account needed yet.",
+    intro:
+      "Enter your organization's KVK number. You'll confirm your identity with your wallet, and we securely consult the KVK (Kamer van Koophandel) to check that you're a registered representative. If so, we create the wallet and log you in as an owner.",
+    kvkNumber: "KVK number",
+    kvkPlaceholder: "e.g. 94861412",
+    continue: "Continue",
+    scanTitle: "Confirm your identity",
+    scanPrompt: "Scan with your wallet to register KVK {{kvk}}.",
+    registering: "Consulting KVK…",
+    registeredAt: "Wallet registered for {{org}}",
+    yourRole: "The KVK lists you as: {{role}}",
+    enter: "Continue to {{org}}",
+    notRepresentative:
+      "The KVK does not list you as a representative of this company, so you can't register its wallet.",
+    alreadyRegistered:
+      "This company already has a business wallet. Ask an owner to invite you instead.",
+    error: "Registration could not be completed. Please try again.",
+    back: "Back",
+    haveAccount: "Already have an account? Sign in",
   },
   inviteAccept: {
     title: "You're invited",

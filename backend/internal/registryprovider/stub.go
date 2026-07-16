@@ -2,15 +2,17 @@ package registryprovider
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 )
 
-// StubRegistry is an in-process KVK stand-in for local dev and tests. It accepts
-// a registration request and returns a receipt; in a full run the synthetic
-// attestation (BuildStubAttestation) is delivered back over the QERDS inbound
-// path. It proves plumbing, NOT compliance. See .ai/features/wallet-bootstrap.md.
+// The demo entry: Yivi B.V. in the Dutch Handelsregister, with Dibran Mulder
+// listed as a beperkt volmacht (limited power of attorney).
+const yiviKVKNumber = "94861412"
+
+// StubRegistry is an in-process KVK stand-in for local dev and tests. Consult
+// returns a synthetic attestation synchronously — it proves the flow, NOT
+// compliance (a real KVK integration would deliver the attestation over QERDS).
+// See .ai/features/wallet-bootstrap.md.
 type StubRegistry struct{}
 
 // NewStubRegistry returns an in-process registry stub.
@@ -19,38 +21,42 @@ func NewStubRegistry() *StubRegistry { return &StubRegistry{} }
 // Ping is the boot readiness probe. The in-process stub is always ready.
 func (*StubRegistry) Ping(context.Context) error { return nil }
 
-// RequestRegistration accepts the {PID, KVK number} and returns a receipt. The
-// attestation is delivered asynchronously; see BuildStubAttestation.
-func (*StubRegistry) RequestRegistration(_ context.Context, req RegistrationRequest) (RequestReceipt, error) {
-	sum := sha256.Sum256([]byte("kvk|" + req.KVKNumber + "|" + req.PID.FamilyName))
-	return RequestReceipt{ProviderRef: "kvk-stub-" + hex.EncodeToString(sum[:8])}, nil
+// Consult looks up a company by KVK number and returns its registration
+// attestation. It hard-codes a realistic entry for Yivi B.V. and falls back to a
+// generic company for any other number, so the flow is always demoable.
+func (*StubRegistry) Consult(_ context.Context, kvkNumber string) (RegistrationAttestation, error) {
+	if kvkNumber == yiviKVKNumber {
+		return yiviAttestation(), nil
+	}
+	return genericAttestation(kvkNumber), nil
 }
 
-// BuildStubAttestation synthesises a deterministic attestation for dev: the
-// requester is always a bestuurder, plus one extra claimable co-director. This
-// is the payload the QERDS inbound dispatch will hand to wallet.HandleAttestation
-// once that wiring lands.
-func BuildStubAttestation(req RegistrationRequest) RegistrationAttestation {
+// yiviAttestation is the demo fixture: Yivi B.V., with the requester (Dibran
+// Mulder) as a gevolmachtigde holding a beperkt volmacht.
+func yiviAttestation() RegistrationAttestation {
 	return RegistrationAttestation{
-		KVKNumber:                    req.KVKNumber,
-		LegalName:                    fmt.Sprintf("Stub Company %s B.V.", req.KVKNumber),
-		EUID:                         "NL.KVK." + req.KVKNumber,
+		KVKNumber:                    yiviKVKNumber,
+		LegalName:                    "Yivi B.V.",
+		EUID:                         "NL.KVK." + yiviKVKNumber,
 		RequesterIsRepresentative:    true,
 		RequesterRepresentativeIndex: 0,
 		Representatives: []Representative{
-			{
-				Kind:        KindBestuurder,
-				GivenNames:  req.PID.GivenNames,
-				FamilyName:  req.PID.FamilyName,
-				DateOfBirth: req.PID.DateOfBirth,
-				Authority:   AuthoritySole,
-			},
-			{
-				Kind:       KindBestuurder,
-				GivenNames: "Sam",
-				FamilyName: "Voorbeeld",
-				Authority:  AuthorityJointly,
-			},
+			{Kind: KindGevolmachtigde, GivenNames: "Dibran", FamilyName: "Mulder", Authority: AuthorityBeperkt},
+		},
+	}
+}
+
+// genericAttestation lets any other KVK number activate a wallet in dev, with the
+// requester as a sole bestuurder.
+func genericAttestation(kvkNumber string) RegistrationAttestation {
+	return RegistrationAttestation{
+		KVKNumber:                    kvkNumber,
+		LegalName:                    fmt.Sprintf("Stub Company %s B.V.", kvkNumber),
+		EUID:                         "NL.KVK." + kvkNumber,
+		RequesterIsRepresentative:    true,
+		RequesterRepresentativeIndex: 0,
+		Representatives: []Representative{
+			{Kind: KindBestuurder, GivenNames: "Sam", FamilyName: "Voorbeeld", Authority: AuthoritySole},
 		},
 	}
 }

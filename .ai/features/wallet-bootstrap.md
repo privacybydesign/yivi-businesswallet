@@ -1,11 +1,40 @@
 # Feature: Business Wallet Bootstrap (KVK attestation over QERDS)
 
-**Status:** Partially implemented. Built + tested: data model (migrations), the
-`registryprovider` (KVK) seam, the open-wallet flow, and the atomic
-`ActivateFromAttestation` (org + address + owner membership + representations +
-activation, one tx; integration-tested). Pending: owner-claim matching and the
-QERDS inbound dispatch that calls `HandleAttestation` (both marked
-`TODO(wallet-bootstrap)`).
+**Status:** Implemented end-to-end (demo). A logged-in user enrolls at `/enroll`
+by entering a KVK number; the backend **synchronously consults the registry**
+(`registryprovider.Consult`, mocked) and, if the caller is a listed
+representative, atomically creates the org + address + owner membership +
+representations and activates the wallet (`ActivateFromAttestation`,
+integration-tested). Frontend enrollment screen + org-switcher entry.
+
+Mock: `WALLET_REGISTRY_PROVIDER=stub` returns **Yivi B.V. (KVK 94861412)** with
+Dibran Mulder as a **gevolmachtigde / beperkt** (beperkt volmacht); any other
+number returns a generic company so the flow always demoes.
+
+Divergences from the async design below (deliberate, for this iteration):
+- **Consult is synchronous**, not a two-legged QERDS request+attestation. The
+  faithful async path (outbound over QERDS, inbound webhook →
+  `HandleAttestation`) remains the target; `HandleAttestation` is reused by the
+  sync path.
+- **No PID disclosure at enrollment** — the mock keys on the KVK number, and
+  login is email-only, so the requester's verified identity is not sent to KVK
+  yet. A real integration would present the PID (see `auth-openid4vp.md`
+  `ScopeIdentity`).
+- The requester is granted **admin** regardless of representation kind (they
+  bootstrap the wallet). Role-by-kind (bestuurder→admin, gevolmachtigde→scoped)
+  is a refinement.
+
+Entry points: a **public `/register`** page (no account needed — the registrant
+authenticates via an OpenID4VP identity disclosure, the account is created if new,
+and they're logged in on success), and an authenticated `/enroll` for a logged-in
+user. Both go through `OpenWallet`. On activation the KVK attestation is also
+**deposited into the new org's QERDS inbox** as an inbound message with delivery
+evidence (`registratie@kvk.nl`). One wallet per company: re-registering an
+already-active KVK returns `409 already_registered` (a second representative should
+join via a claim, not a duplicate).
+
+Still pending: owner-claim matching (`ClaimRepresentation`, 501); a shared strong
+identifier for matching; the async QERDS request→attestation transport.
 **Depends on:** the `qerds` slice (messages/addresses/evidence/provider); **OpenID4VP/EUDI
 login** (`.ai/features/auth-openid4vp.md`) for the PID/identity seam; `organization`
 (orgs/memberships/audit); `identity` (name reconciliation).

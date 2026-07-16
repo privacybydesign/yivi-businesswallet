@@ -13,8 +13,10 @@ import RootRedirect from "./routes/root-redirect";
 import ProtectedRoute from "./routes/protected-route";
 import AdminRoute from "./routes/admin-route";
 import Login from "./routes/login";
+import Register from "./routes/register";
 import InviteAccept from "./routes/invite-accept";
 import MyInvitations from "./routes/my-invitations";
+import Enroll from "./routes/enroll";
 import IdentityReviews from "./routes/identity-reviews";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
@@ -77,6 +79,7 @@ const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
 const invitationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("myInvitations.title"),
 };
+const enrollCrumb: RouteHandle = { crumb: ({ t }) => t("enroll.title") };
 const adminCrumb: RouteHandle = { crumb: ({ t }) => t("adminDashboard.title") };
 const reviewsCrumb: RouteHandle = {
   crumb: ({ t }) => t("identityReviews.title"),
@@ -91,6 +94,7 @@ export const router = createBrowserRouter([
     ErrorBoundary,
     children: [
       { path: "/login", Component: Login },
+      { path: "/register", Component: Register },
       { path: "/invite/:token", Component: InviteAccept },
       { path: "*", Component: NotFound },
       {
@@ -104,6 +108,11 @@ export const router = createBrowserRouter([
                 path: "invitations",
                 Component: MyInvitations,
                 handle: invitationsCrumb,
+              },
+              {
+                path: "enroll",
+                Component: Enroll,
+                handle: enrollCrumb,
               },
               {
                 path: ":orgSlug",

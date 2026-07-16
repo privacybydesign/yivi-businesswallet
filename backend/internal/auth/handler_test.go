@@ -24,7 +24,7 @@ type fakeVerifier struct {
 	started      bool
 }
 
-func (f *fakeVerifier) StartPresentation(_ context.Context) (openid4vpverifier.Session, error) {
+func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.Scope) (openid4vpverifier.Session, error) {
 	f.started = true
 	return f.startSession, f.startErr
 }

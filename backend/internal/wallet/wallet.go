@@ -30,6 +30,7 @@ const (
 var (
 	ErrInstanceNotFound       = errors.New("wallet: instance not found")
 	ErrRegistrationInProgress = errors.New("wallet: a registration is already in progress for this company")
+	ErrAlreadyRegistered      = errors.New("wallet: this company already has a business wallet")
 	ErrRepresentationNotFound = errors.New("wallet: representation not found")
 	// ErrNotImplemented marks scaffold seams not yet wired. Handlers map it to a
 	// 501 so the API surface is discoverable while the flow is built out.
@@ -46,12 +47,24 @@ type Instance struct {
 	KVKNumber      string     `json:"kvkNumber"`
 	DigitalAddress string     `json:"digitalAddress"`
 	OrganizationID *uuid.UUID `json:"organizationId,omitempty"`
-	LegalName      string     `json:"legalName,omitempty"`
-	EUID           string     `json:"euid,omitempty"`
-	RejectReason   string     `json:"rejectReason,omitempty"`
-	BootstrappedAt *time.Time `json:"bootstrappedAt,omitempty"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	// OrganizationSlug is set on the enrollment response so the frontend can
+	// redirect into the new org. It is not persisted on the instance row.
+	OrganizationSlug string     `json:"organizationSlug,omitempty"`
+	LegalName        string     `json:"legalName,omitempty"`
+	EUID             string     `json:"euid,omitempty"`
+	RejectReason     string     `json:"rejectReason,omitempty"`
+	BootstrappedAt   *time.Time `json:"bootstrappedAt,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+}
+
+// EnrollmentResult is the outcome of opening (and synchronously bootstrapping) a
+// wallet: the instance plus the requester's own representation, so the UI can
+// show, e.g., "you are registered as a beperkt volmacht".
+type EnrollmentResult struct {
+	Instance                Instance
+	RepresentationKind      string
+	RepresentationAuthority string
 }
 
 // Representation is one authorised representative from the KVK attestation — the

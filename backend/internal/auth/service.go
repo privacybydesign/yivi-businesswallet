@@ -52,7 +52,7 @@ type DisclosedIdentity struct {
 // verifier is the slice of openid4vpverifier.Client the service needs, defined in
 // the consumer so the service is testable without a live verifier.
 type verifier interface {
-	StartPresentation(ctx context.Context) (openid4vpverifier.Session, error)
+	StartPresentation(ctx context.Context, scope openid4vpverifier.Scope) (openid4vpverifier.Session, error)
 	Result(ctx context.Context, id string) (openid4vpverifier.Presentation, error)
 	Status(ctx context.Context, id string) (string, error)
 }
@@ -79,18 +79,22 @@ func NewService(
 }
 
 func (s *Service) StartSession(ctx context.Context) (Session, error) {
-	sess, err := s.verifier.StartPresentation(ctx)
+	return s.startPresentation(ctx, openid4vpverifier.ScopeLogin)
+}
+
+// StartIdentitySession begins a disclosure for the invite-accept flow, which must
+// match a real person, so it discloses a verified identity (passport/id-card) in
+// addition to the email.
+func (s *Service) StartIdentitySession(ctx context.Context) (Session, error) {
+	return s.startPresentation(ctx, openid4vpverifier.ScopeIdentity)
+}
+
+func (s *Service) startPresentation(ctx context.Context, scope openid4vpverifier.Scope) (Session, error) {
+	sess, err := s.verifier.StartPresentation(ctx, scope)
 	if err != nil {
 		return Session{}, fmt.Errorf("auth: start session: %w", err)
 	}
 	return Session{ID: sess.ID, WalletLink: sess.WalletLink}, nil
-}
-
-// StartIdentitySession begins a disclosure for the invite-accept flow. With
-// OpenID4VP a login already discloses identity (passport/id-card) plus email, so
-// login and identity-accept use the same presentation request.
-func (s *Service) StartIdentitySession(ctx context.Context) (Session, error) {
-	return s.StartSession(ctx)
 }
 
 func (s *Service) DiscloseIdentity(ctx context.Context, id string) (DisclosedIdentity, error) {

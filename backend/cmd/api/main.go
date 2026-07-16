@@ -53,7 +53,7 @@ type qerdsProvider interface {
 // plus the request operation the wallet service uses. Chosen by config.
 type registryProvider interface {
 	Ping(context.Context) error
-	RequestRegistration(context.Context, registryprovider.RegistrationRequest) (registryprovider.RequestReceipt, error)
+	Consult(context.Context, string) (registryprovider.RegistrationAttestation, error)
 }
 
 func newRegistryProvider(cfg config.Config) (registryProvider, error) {
@@ -175,8 +175,8 @@ func run() error {
 		return fmt.Errorf("wallet registry ping: %w", err)
 	}
 	walletStore := wallet.NewStore(pool, audit.NewDBRecorder())
-	walletService := wallet.NewService(walletStore, registry, cfg.QerdsDefaultAddressDomain)
-	walletHandler := wallet.NewHandler(walletService, requireUser, orgHandler.Authorize)
+	walletService := wallet.NewService(walletStore, registry, authService, userStore, qerdsStore, cfg.QerdsDefaultAddressDomain)
+	walletHandler := wallet.NewHandler(walletService, sessionIssuer, requireUser, orgHandler.Authorize)
 
 	handler := server.New(
 		pool,

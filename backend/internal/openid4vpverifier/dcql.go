@@ -43,11 +43,41 @@ func claimPaths(names ...string) []dcqlClaim {
 	return cs
 }
 
-// loginQuery discloses a verified identity (passport OR id-card) plus email and
-// phone. It is used for both login and identity-accept — with OpenID4VP the name
-// is always available, unlike the former email-only IRMA login. See §3 of
-// .ai/features/auth-openid4vp.md.
+// Scope selects which credentials a presentation requests.
+type Scope int
+
+const (
+	// ScopeLogin discloses only the email — enough to identify the account.
+	ScopeLogin Scope = iota
+	// ScopeIdentity additionally discloses a verified identity (passport OR
+	// id-card) and phone, for flows that must match a real person (invitation
+	// accept, and — later — the KVK-facing wallet bootstrap).
+	ScopeIdentity
+)
+
+func queryFor(scope Scope) dcqlQuery {
+	if scope == ScopeIdentity {
+		return identityQuery()
+	}
+	return loginQuery()
+}
+
+// loginQuery discloses only the email address (data minimisation): login just
+// needs to identify the account. See §3 of .ai/features/auth-openid4vp.md.
 func loginQuery() dcqlQuery {
+	return dcqlQuery{
+		Credentials: []dcqlCredential{
+			{ID: "email", Format: formatSDJWT, Meta: dcqlMeta{[]string{vctEmail}}, Claims: claimPaths(ClaimEmail)},
+		},
+		CredentialSets: []dcqlCredentialSet{
+			{Options: [][]string{{"email"}}},
+		},
+	}
+}
+
+// identityQuery discloses a verified identity (passport OR id-card) plus email
+// and phone, for flows that must match a real person.
+func identityQuery() dcqlQuery {
 	return dcqlQuery{
 		Credentials: []dcqlCredential{
 			{ID: "passport", Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPassport}}, Claims: claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality)},

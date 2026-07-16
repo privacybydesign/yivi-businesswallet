@@ -96,21 +96,16 @@ func (s *Store) CreateInstance(ctx context.Context, requestorUserID uuid.UUID, k
 	return in, err
 }
 
-// MarkRequested moves a provisioning instance to awaiting_attestation once the
-// outbound KVK request has been sent.
-//
-// TODO(wallet-bootstrap): also persist request_message_id once the outbound
-// {PID, KVK} QERDS message is created through the qerds slice (see §6.1).
-func (s *Store) MarkRequested(ctx context.Context, id uuid.UUID) error {
-	const update = `UPDATE wallet_instances SET status = $1, updated_at = now() WHERE id = $2 AND status = $3`
-	tag, err := s.db.Exec(ctx, update, StatusAwaitingAttestation, id, StatusProvisioning)
-	if err != nil {
-		return fmt.Errorf("wallet: mark requested %s: %w", id, err)
+// ActiveWalletExists reports whether a company (KVK number) already has an active
+// wallet — one wallet per company; a second person joins via a claim, not a
+// duplicate registration.
+func (s *Store) ActiveWalletExists(ctx context.Context, kvkNumber string) (bool, error) {
+	const query = `SELECT EXISTS (SELECT 1 FROM wallet_instances WHERE kvk_number = $1 AND status = $2)`
+	var exists bool
+	if err := s.db.QueryRow(ctx, query, kvkNumber, StatusActive).Scan(&exists); err != nil {
+		return false, fmt.Errorf("wallet: active wallet exists %s: %w", kvkNumber, err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrInstanceNotFound
-	}
-	return nil
+	return exists, nil
 }
 
 // GetInstanceByID loads an instance by its id (central poll path).
@@ -279,6 +274,7 @@ func (s *Store) ActivateFromAttestation(ctx context.Context, instanceID uuid.UUI
 		if err != nil {
 			return fmt.Errorf("wallet: activate instance %s: %w", instanceID, err)
 		}
+		out.OrganizationSlug = slug
 
 		return s.audit.Record(ctx, q, audit.WalletBootstrapped,
 			audit.Target{Type: audit.TargetWalletInstance, ID: instanceID.String(), OrgID: &orgID},
@@ -293,13 +289,13 @@ func (s *Store) ActivateFromAttestation(ctx context.Context, instanceID uuid.UUI
 	return out, err
 }
 
-// RejectInstance marks an awaiting instance rejected (e.g. the requester was not
-// a listed representative). No organization is created, so there is nothing to
+// RejectInstance marks a pending instance rejected (e.g. the requester was not a
+// listed representative). No organization is created, so there is nothing to
 // audit under an org scope; the reason is retained on the instance row.
 func (s *Store) RejectInstance(ctx context.Context, instanceID uuid.UUID, reason string) (Instance, error) {
 	const upd = `UPDATE wallet_instances SET status = $2, reject_reason = $3, updated_at = now()
-		WHERE id = $1 AND status = $4 RETURNING ` + instanceColumns
-	out, err := scanInstance(s.db.QueryRow(ctx, upd, instanceID, StatusRejected, reason, StatusAwaitingAttestation))
+		WHERE id = $1 AND status IN ($4, $5) RETURNING ` + instanceColumns
+	out, err := scanInstance(s.db.QueryRow(ctx, upd, instanceID, StatusRejected, reason, StatusProvisioning, StatusAwaitingAttestation))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Instance{}, ErrInstanceNotFound
 	}

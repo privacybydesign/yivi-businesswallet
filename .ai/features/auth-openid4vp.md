@@ -1,8 +1,10 @@
 # Feature: OpenID4VP / EUDI login (replacing IRMA/Yivi disclosure)
 
-**Status:** Implemented (backend + frontend). Login discloses passport/id-card +
-email + phone via the hosted EUDI verifier; IRMA/`irmago` removed. Frontend renders
-the OpenID4VP QR via `qrcode` and polls the backend session by id.
+**Status:** Implemented (backend + frontend). **Login discloses email only** (data
+minimisation); the **identity** scope (passport/id-card + email + phone) is used
+for invitation-accept. Scope is chosen per flow via `openid4vpverifier.Scope`
+(`ScopeLogin` / `ScopeIdentity`). Verified by the hosted EUDI verifier; IRMA/`irmago`
+removed. Frontend renders the OpenID4VP QR via `qrcode` and polls the backend session by id.
 **Supersedes:** the IRMA/Yivi disclosure login (`irmarequestor`, `auth/disclosure.go`, the
 `yivi.newWeb` frontend widget). This is a **protocol swap**, not a new auth model — the
 user/session/cookie/invite logic below the seam is unchanged.

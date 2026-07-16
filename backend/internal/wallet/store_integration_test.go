@@ -43,14 +43,10 @@ func TestActivateFromAttestation(t *testing.T) {
 	if inst.Status != wallet.StatusProvisioning {
 		t.Fatalf("status = %q, want provisioning", inst.Status)
 	}
-	if err := store.MarkRequested(ctx, inst.ID); err != nil {
-		t.Fatalf("MarkRequested: %v", err)
+	att, err := registryprovider.NewStubRegistry().Consult(ctx, stubKVK)
+	if err != nil {
+		t.Fatalf("Consult: %v", err)
 	}
-
-	att := registryprovider.BuildStubAttestation(registryprovider.RegistrationRequest{
-		PID:       registryprovider.PID{GivenNames: "Alice", FamilyName: "Owner", DateOfBirth: "1980-01-02"},
-		KVKNumber: stubKVK,
-	})
 
 	active, err := store.ActivateFromAttestation(ctx, inst.ID, att)
 	if err != nil {
@@ -127,10 +123,6 @@ func TestRejectInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
-	if err := store.MarkRequested(ctx, inst.ID); err != nil {
-		t.Fatalf("MarkRequested: %v", err)
-	}
-
 	rejected, err := store.RejectInstance(ctx, inst.ID, wallet.RejectNotRepresentative)
 	if err != nil {
 		t.Fatalf("RejectInstance: %v", err)

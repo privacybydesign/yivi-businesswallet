@@ -45,17 +45,17 @@ type startRequest struct {
 	IssuerChain      string    `json:"issuer_chain,omitempty"`
 }
 
-// StartPresentation creates a presentation request at the verifier and returns
-// the wallet deeplink plus the transaction id to poll. The nonce is random per
-// request (never a fixed value).
-func (c *Client) StartPresentation(ctx context.Context) (Session, error) {
+// StartPresentation creates a presentation request at the verifier for the given
+// scope and returns the wallet deeplink plus the transaction id to poll. The
+// nonce is random per request (never a fixed value).
+func (c *Client) StartPresentation(ctx context.Context, scope Scope) (Session, error) {
 	nonce, err := randomNonce()
 	if err != nil {
 		return Session{}, err
 	}
 	body, err := json.Marshal(startRequest{
 		Type:             "vp_token",
-		DCQLQuery:        loginQuery(),
+		DCQLQuery:        queryFor(scope),
 		Nonce:            nonce,
 		JARMode:          "by_reference",
 		RequestURIMethod: "post",
@@ -143,7 +143,7 @@ func (c *Client) Status(ctx context.Context, id string) (string, error) {
 // Ping is the boot readiness probe: it verifies the verifier will accept a
 // presentation request of the shape we send. Failure is fatal at startup.
 func (c *Client) Ping(ctx context.Context) error {
-	_, err := c.StartPresentation(ctx)
+	_, err := c.StartPresentation(ctx, ScopeLogin)
 	return err
 }
 

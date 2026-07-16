@@ -39,7 +39,7 @@ type fakeVerifier struct {
 	familyName string
 }
 
-func (f *fakeVerifier) StartPresentation(_ context.Context) (openid4vpverifier.Session, error) {
+func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.Scope) (openid4vpverifier.Session, error) {
 	return openid4vpverifier.Session{ID: "test-token", WalletLink: "openid4vp://?request_uri=https%3A%2F%2Fverifier.test"}, nil
 }
 

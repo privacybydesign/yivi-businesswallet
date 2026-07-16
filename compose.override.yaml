@@ -3,36 +3,6 @@ services:
     ports:
       - "5432:5432"
 
-  cloudflared:
-    image: cloudflare/cloudflared:2026.6.1
-    command:
-      - tunnel
-      - --no-autoupdate
-      - --url=http://irma:8088
-      # Expose the metrics API so dev-setup can read the assigned quick-tunnel URL
-      # from http://localhost:2000/quicktunnel deterministically
-      - --metrics=0.0.0.0:2000
-    ports:
-      - "2000:2000"
-    depends_on:
-      irma:
-        condition: service_started
-
-  irma:
-    image: ghcr.io/privacybydesign/yivi:v1.0.0
-    ports:
-      - "8088:8088"
-    command:
-      - irma
-      - server
-      - --port=8088
-      - --listen-addr=0.0.0.0
-      - --url=${IRMA_CLIENT_URL:-http://localhost:8088}
-      - --no-auth=true
-      - --disclose-perms=${IRMA_EMAIL_ATTRIBUTE:-irma-demo.sidn-pbdf.email.email}
-      - --disclose-perms=${IRMA_IDENTITY_GIVEN_NAMES_ATTRIBUTE:-irma-demo.MijnOverheid.drivinglicense.firstnames}
-      - --disclose-perms=${IRMA_IDENTITY_FAMILY_NAME_ATTRIBUTE:-irma-demo.MijnOverheid.drivinglicense.familyname}
-
   backend:
     build:
       dockerfile: docker/development/Dockerfile
@@ -40,15 +10,14 @@ services:
       start_period: 180s
       start_interval: 2s
     environment:
-      IRMA_REQUESTOR_URL: ${IRMA_REQUESTOR_URL:-http://irma:8088}
-      IRMA_REQUESTOR_TOKEN: ${IRMA_REQUESTOR_TOKEN:-}
-      IRMA_EMAIL_ATTRIBUTE: ${IRMA_EMAIL_ATTRIBUTE:-irma-demo.sidn-pbdf.email.email}
+      # Login/disclosure runs over OpenID4VP against a hosted EUDI verifier.
+      # Empty falls back to the config default (Yivi staging verifier).
+      EUDI_VERIFIER_URL: ${EUDI_VERIFIER_URL:-}
+      EUDI_ISSUER_CHAIN: ${EUDI_ISSUER_CHAIN:-}
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-admin@yivi.app}
     depends_on:
       seed:
         condition: service_completed_successfully
-      irma:
-        condition: service_started
     volumes:
       - ./backend:/app
       - backend-go-build:/root/.cache/go-build

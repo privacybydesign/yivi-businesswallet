@@ -230,6 +230,16 @@ export default function Login(): React.JSX.Element {
                 />
               </div>
             )}
+
+            <p className="text-ink-soft mt-6 text-center text-[13px]">
+              <button
+                type="button"
+                onClick={() => void navigate("/register")}
+                className="text-primary font-medium hover:underline"
+              >
+                {t("login.registerLink")}
+              </button>
+            </p>
           </>
         )}
       </Card>

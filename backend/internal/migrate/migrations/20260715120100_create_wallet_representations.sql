@@ -19,7 +19,8 @@ CREATE TABLE wallet_representations
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- bestuurder = director (owner-grade), gevolmachtigde = proxy (scoped).
     CONSTRAINT wallet_representations_kind_check CHECK (kind IN ('bestuurder', 'gevolmachtigde', 'overig')),
-    CONSTRAINT wallet_representations_authority_check CHECK (authority IN ('sole', 'jointly'))
+    -- sole/jointly: bestuurder authority; beperkt/volledig: volmacht scope.
+    CONSTRAINT wallet_representations_authority_check CHECK (authority IN ('sole', 'jointly', 'beperkt', 'volledig'))
 );
 
 CREATE INDEX idx_wallet_representations_instance ON wallet_representations (wallet_instance_id);

@@ -71,13 +71,29 @@ func TestStringifyNonStringClaim(t *testing.T) {
 	}
 }
 
-func TestLoginQueryOffersPassportOrIDCard(t *testing.T) {
+func TestLoginQueryIsEmailOnly(t *testing.T) {
 	q := loginQuery()
+	if len(q.Credentials) != 1 || q.Credentials[0].ID != "email" {
+		t.Fatalf("login query should request only email, got %+v", q.Credentials)
+	}
+}
+
+func TestIdentityQueryOffersPassportOrIDCard(t *testing.T) {
+	q := identityQuery()
 	if len(q.Credentials) != 4 {
 		t.Fatalf("credentials = %d, want 4 (passport, idcard, email, phone)", len(q.Credentials))
 	}
 	// The first credential_set must be the passport-OR-idcard choice.
 	if len(q.CredentialSets) == 0 || len(q.CredentialSets[0].Options) != 2 {
 		t.Fatalf("first credential set is not a 2-way choice: %+v", q.CredentialSets)
+	}
+}
+
+func TestQueryForScope(t *testing.T) {
+	if got := len(queryFor(ScopeLogin).Credentials); got != 1 {
+		t.Errorf("ScopeLogin credentials = %d, want 1", got)
+	}
+	if got := len(queryFor(ScopeIdentity).Credentials); got != 4 {
+		t.Errorf("ScopeIdentity credentials = %d, want 4", got)
 	}
 }
