@@ -43,6 +43,15 @@ const (
 	postguardHTTPTimeout = 60 * time.Second
 
 	serverAddr = ":8080"
+
+	// Server-level ingest bounds. ReadHeaderTimeout caps the slowloris header
+	// phase and IdleTimeout reclaims idle keep-alives; neither bounds body
+	// transfer time, so large attachment uploads/downloads are unaffected (a
+	// blanket ReadTimeout/WriteTimeout would truncate those). Per-request body
+	// size is bounded in the handlers via http.MaxBytesReader.
+	serverReadHeaderTimeout = 10 * time.Second
+	serverIdleTimeout       = 120 * time.Second
+	serverMaxHeaderBytes    = 1 << 20 // 1 MiB
 )
 
 // qerdsProvider is the boot-time provider surface: the readiness probe plus the
@@ -207,8 +216,11 @@ func run() error {
 	)
 
 	httpServer := &http.Server{
-		Addr:    serverAddr,
-		Handler: handler,
+		Addr:              serverAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		IdleTimeout:       serverIdleTimeout,
+		MaxHeaderBytes:    serverMaxHeaderBytes,
 	}
 
 	shutdownErr := make(chan error, 1)
