@@ -99,7 +99,7 @@ export function getQerdsMessage(
 
 export function sendQerdsMessage(
   slug: string,
-  input: { recipient: string; subject: string; body: string },
+  input: { sender?: string; recipient: string; subject: string; body: string },
   signal?: AbortSignal,
 ): Promise<QerdsMessage> {
   return request(`/api/v1/orgs/${encodeURIComponent(slug)}/qerds/messages`, {
@@ -142,6 +142,21 @@ export function createQerdsAddress(
     body: input,
     signal,
   });
+}
+
+export function setDefaultQerdsAddress(
+  slug: string,
+  addressId: string,
+  signal?: AbortSignal,
+): Promise<QerdsAddress> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/qerds/addresses/${encodeURIComponent(addressId)}/default`,
+    {
+      schema: qerdsAddressSchema,
+      method: "POST",
+      signal,
+    },
+  );
 }
 
 export function getQerdsContacts(

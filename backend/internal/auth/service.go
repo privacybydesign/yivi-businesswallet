@@ -10,9 +10,14 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
+	presentationstore "github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
+
+// statusPending is the poll status for a not-yet-completed (or unknown/expired)
+// presentation; it mirrors openid4vpverifier's pending status.
+const statusPending = openid4vpverifier.StatusPending
 
 type PendingInvite struct {
 	ID               uuid.UUID
@@ -50,31 +55,43 @@ type DisclosedIdentity struct {
 }
 
 // verifier is the slice of openid4vpverifier.Client the service needs, defined in
-// the consumer so the service is testable without a live verifier.
+// the consumer so the service is testable without a live verifier. Its id
+// argument is the verifier's transaction_id, never the client-facing session id.
 type verifier interface {
 	StartPresentation(ctx context.Context, scope openid4vpverifier.Scope) (openid4vpverifier.Session, error)
-	Result(ctx context.Context, id string) (openid4vpverifier.Presentation, error)
-	Status(ctx context.Context, id string) (string, error)
+	Result(ctx context.Context, transactionID string) (openid4vpverifier.Presentation, error)
+	Status(ctx context.Context, transactionID string) (string, error)
+}
+
+// presentations maps our opaque, client-facing session id to the verifier's
+// transaction_id, so the externally-minted transaction_id never becomes the
+// bearer the client presents to /claim. Defined in the consumer for testability.
+type presentations interface {
+	Create(ctx context.Context, transactionID string) (id string, err error)
+	TransactionID(ctx context.Context, id string) (string, error)
 }
 
 type Service struct {
-	verifier verifier
-	users    *user.Store
-	sessions *session.Store
-	invites  invitationLookup
+	verifier      verifier
+	presentations presentations
+	users         *user.Store
+	sessions      *session.Store
+	invites       invitationLookup
 }
 
 func NewService(
 	verifier verifier,
+	presentations presentations,
 	users *user.Store,
 	sessions *session.Store,
 	invites invitationLookup,
 ) *Service {
 	return &Service{
-		verifier: verifier,
-		users:    users,
-		sessions: sessions,
-		invites:  invites,
+		verifier:      verifier,
+		presentations: presentations,
+		users:         users,
+		sessions:      sessions,
+		invites:       invites,
 	}
 }
 
@@ -94,7 +111,13 @@ func (s *Service) startPresentation(ctx context.Context, scope openid4vpverifier
 	if err != nil {
 		return Session{}, fmt.Errorf("auth: start session: %w", err)
 	}
-	return Session{ID: sess.ID, WalletLink: sess.WalletLink}, nil
+	// The client polls / claims with this opaque id; the verifier's
+	// transaction_id stays server-side, resolved via the presentation store.
+	id, err := s.presentations.Create(ctx, sess.TransactionID)
+	if err != nil {
+		return Session{}, fmt.Errorf("auth: start session: %w", err)
+	}
+	return Session{ID: id, WalletLink: sess.WalletLink}, nil
 }
 
 func (s *Service) DiscloseIdentity(ctx context.Context, id string) (DisclosedIdentity, error) {
@@ -106,7 +129,17 @@ func (s *Service) DiscloseIdentity(ctx context.Context, id string) (DisclosedIde
 }
 
 func (s *Service) Status(ctx context.Context, id string) (string, error) {
-	return s.verifier.Status(ctx, id)
+	transactionID, err := s.presentations.TransactionID(ctx, id)
+	if err != nil {
+		// An unknown/expired id is indistinguishable from a not-yet-finished
+		// presentation here; report PENDING and let the frontend's timeout bound
+		// the wait (mirrors the verifier's own pending/unknown conflation).
+		if errors.Is(err, presentationstore.ErrNotFound) {
+			return statusPending, nil
+		}
+		return "", err
+	}
+	return s.verifier.Status(ctx, transactionID)
 }
 
 func (s *Service) Authenticate(ctx context.Context, id string) (user.User, string, error) {
@@ -138,9 +171,18 @@ func (s *Service) Authenticate(ctx context.Context, id string) (user.User, strin
 }
 
 // result fetches the presentation, translating a not-yet-complete presentation
-// (ErrPending) into errSessionNotFinished so the handler maps it to 409.
+// (ErrPending) into errSessionNotFinished so the handler maps it to 409. An
+// unknown/expired client id is likewise not-yet-finished from the caller's view.
 func (s *Service) result(ctx context.Context, id string) (openid4vpverifier.Presentation, error) {
-	res, err := s.verifier.Result(ctx, id)
+	transactionID, err := s.presentations.TransactionID(ctx, id)
+	if err != nil {
+		if errors.Is(err, presentationstore.ErrNotFound) {
+			return openid4vpverifier.Presentation{}, errSessionNotFinished
+		}
+		return openid4vpverifier.Presentation{}, err
+	}
+
+	res, err := s.verifier.Result(ctx, transactionID)
 	if errors.Is(err, openid4vpverifier.ErrPending) {
 		return openid4vpverifier.Presentation{}, errSessionNotFinished
 	}

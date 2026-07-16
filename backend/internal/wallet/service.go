@@ -150,11 +150,12 @@ func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, kvk
 		return RegistrationResult{}, ErrNotRepresentative
 	}
 
-	// The org's own default (sending) address is slug-based; the KVK-derived
-	// address is saved as a recipient in the address book, not used as sender.
+	// The org's own default (sending) address is slug-based. KVK is saved as a
+	// recipient in the address book at the address it delivers the attestation
+	// from (kvkSenderAddress) — so the contact matches the message's "from" and
+	// replies reach KVK, rather than a synthetic org-derived address.
 	digitalAddress := fmt.Sprintf("%s@%s", slug, s.addressDomain)
-	kvkContactAddress := fmt.Sprintf("kvk-%s@%s", kvkNumber, s.addressDomain)
-	org, err := s.store.RegisterOrganization(ctx, requestorUserID, slug, digitalAddress, kvkContactAddress, att)
+	org, err := s.store.RegisterOrganization(ctx, requestorUserID, slug, digitalAddress, kvkSenderAddress, att)
 	if err != nil {
 		return RegistrationResult{}, err
 	}

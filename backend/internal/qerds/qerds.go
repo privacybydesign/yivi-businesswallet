@@ -17,6 +17,7 @@ var (
 	ErrNoSenderAddress = errors.New("qerds: organization has no default digital address")
 	ErrAddressNotFound = errors.New("qerds: digital address not found")
 	ErrAddressTaken    = errors.New("qerds: digital address already taken")
+	ErrSenderNotOwned  = errors.New("qerds: sender address not owned by organization")
 
 	ErrContactNotFound     = errors.New("qerds: contact not found")
 	ErrContactAddressTaken = errors.New("qerds: contact address already saved")

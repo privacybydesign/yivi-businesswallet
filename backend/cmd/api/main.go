@@ -19,6 +19,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/postguard"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
@@ -142,10 +143,12 @@ func run() error {
 	}
 	platformAdmins := auth.NewPlatformAdmins(cfg.PlatformAdminEmails)
 	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
-	authService := auth.NewService(verifier, userStore, sessionStore, orgStore)
+	presentationStore := presentation.NewStore(pool, cfg.PresentationTTL)
+	authService := auth.NewService(verifier, presentationStore, userStore, sessionStore, orgStore)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, platformAdmins)
 
-	startSessionPruner(ctx, sessionStore, cfg.SessionPruneEvery)
+	startPruner(ctx, "sessions", cfg.SessionPruneEvery, sessionStore.DeleteExpired)
+	startPruner(ctx, "presentation_sessions", cfg.SessionPruneEvery, presentationStore.DeleteExpired)
 
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)

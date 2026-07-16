@@ -97,7 +97,7 @@ func (c *Client) StartPresentation(ctx context.Context, scope Scope) (Session, e
 		}
 		q.Set(k, fmt.Sprint(v))
 	}
-	return Session{ID: txID, WalletLink: "openid4vp://?" + q.Encode()}, nil
+	return Session{TransactionID: txID, WalletLink: "openid4vp://?" + q.Encode()}, nil
 }
 
 // Result fetches and decodes the disclosed claims for a transaction. It returns
@@ -128,13 +128,13 @@ func (c *Client) Result(ctx context.Context, id string) (Presentation, error) {
 	return Presentation{Claims: parseDisclosures(vt.VPToken)}, nil
 }
 
-// Status reports "PENDING" until the presentation completes, then "DONE".
+// Status reports StatusPending until the presentation completes, then StatusDone.
 func (c *Client) Status(ctx context.Context, id string) (string, error) {
 	switch _, err := c.Result(ctx, id); {
 	case err == nil:
-		return "DONE", nil
+		return StatusDone, nil
 	case errors.Is(err, ErrPending):
-		return "PENDING", nil
+		return StatusPending, nil
 	default:
 		return "", err
 	}

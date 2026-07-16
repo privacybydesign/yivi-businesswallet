@@ -36,11 +36,12 @@ const (
 	UserIdentityReviewRejected = "user.identity_review_rejected"
 	UserPurged                 = "user.purged"
 
-	QerdsMessageSent        = "qerds.message_sent"
-	QerdsMessageReceived    = "qerds.message_received"
-	QerdsAddressProvisioned = "qerds.address_provisioned"
-	QerdsContactAdded       = "qerds.contact_added"
-	QerdsContactDeleted     = "qerds.contact_deleted"
+	QerdsMessageSent           = "qerds.message_sent"
+	QerdsMessageReceived       = "qerds.message_received"
+	QerdsAddressProvisioned    = "qerds.address_provisioned"
+	QerdsAddressDefaultChanged = "qerds.address_default_changed"
+	QerdsContactAdded          = "qerds.contact_added"
+	QerdsContactDeleted        = "qerds.contact_deleted"
 
 	PostGuardKeySet     = "postguard.key_set"
 	PostGuardKeyRemoved = "postguard.key_removed"

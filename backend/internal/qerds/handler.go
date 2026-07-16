@@ -16,7 +16,7 @@ import (
 )
 
 type sender interface {
-	Send(ctx context.Context, orgID uuid.UUID, recipient, subject, body string) (Message, error)
+	Send(ctx context.Context, orgID uuid.UUID, from, recipient, subject, body string) (Message, error)
 	Poll(ctx context.Context, orgID uuid.UUID) (int, error)
 	ReceiveInbound(ctx context.Context, in qerdsprovider.InboundMessage) error
 }
@@ -29,6 +29,7 @@ type reader interface {
 type addressManager interface {
 	ProvisionAddress(ctx context.Context, orgID uuid.UUID, address string, makeDefault bool, providerRef string) (Address, error)
 	ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, error)
+	SetDefaultAddress(ctx context.Context, orgID, addressID uuid.UUID) (Address, error)
 }
 
 type contactManager interface {
@@ -77,6 +78,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.Handle("GET /orgs/{slug}/qerds/addresses", orgScoped(respond.HandlerFunc(h.listAddresses)))
 	mux.Handle("POST /orgs/{slug}/qerds/addresses", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.provisionAddress))))
+	mux.Handle("POST /orgs/{slug}/qerds/addresses/{id}/default", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.setDefaultAddress))))
 
 	mux.Handle("GET /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.listContacts)))
 	mux.Handle("POST /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.createContact)))
@@ -97,6 +99,8 @@ func (h *Handler) listMessages(w http.ResponseWriter, r *http.Request) error {
 }
 
 type sendMessageRequest struct {
+	// Sender is the chosen "from" address; empty means the org default.
+	Sender    string `json:"sender"`
 	Recipient string `json:"recipient"`
 	Subject   string `json:"subject"`
 	Body      string `json:"body"`
@@ -107,6 +111,7 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request) error {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return badRequest("invalid_body", "invalid request body")
 	}
+	req.Sender = strings.TrimSpace(req.Sender)
 	req.Recipient = strings.TrimSpace(req.Recipient)
 	req.Subject = strings.TrimSpace(req.Subject)
 	if req.Recipient == "" {
@@ -117,9 +122,12 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := organization.OrgFromContext(r.Context())
-	msg, err := h.service.Send(r.Context(), org.ID, req.Recipient, req.Subject, req.Body)
+	msg, err := h.service.Send(r.Context(), org.ID, req.Sender, req.Recipient, req.Subject, req.Body)
 	if errors.Is(err, ErrNoSenderAddress) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "no_sender_address", Message: "organization has no default digital address"}
+	}
+	if errors.Is(err, ErrSenderNotOwned) {
+		return badRequest("invalid_sender", "sender is not one of your organization's addresses")
 	}
 	if err != nil {
 		return fmt.Errorf("sending qerds message: %w", err)
@@ -202,6 +210,25 @@ func (h *Handler) provisionAddress(w http.ResponseWriter, r *http.Request) error
 	}
 
 	respond.JSON(w, r, http.StatusCreated, addr)
+	return nil
+}
+
+func (h *Handler) setDefaultAddress(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid address id")
+	}
+
+	org := organization.OrgFromContext(r.Context())
+	addr, err := h.addresses.SetDefaultAddress(r.Context(), org.ID, id)
+	if errors.Is(err, ErrAddressNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "address_not_found", Message: "digital address not found"}
+	}
+	if err != nil {
+		return fmt.Errorf("setting default qerds address: %w", err)
+	}
+
+	respond.JSON(w, r, http.StatusOK, addr)
 	return nil
 }
 
