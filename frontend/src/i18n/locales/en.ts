@@ -440,7 +440,6 @@ export const en = {
       organizationsHint: "Total in this deployment",
     },
     viewAll: "View all organizations",
-    create: "Create organization",
   },
   allOrganizations: {
     title: "Organizations",
@@ -457,19 +456,6 @@ export const en = {
     delete: "Delete organization",
     confirmDelete:
       "Delete “{{name}}”? This permanently removes the organization and all its members, invitations, wallet and messages.",
-  },
-  createOrg: {
-    title: "Create organization",
-    subtitle: "Add a new organization to the platform.",
-    namePlaceholder: "Acme Corporation",
-    slugPlaceholder: "acme",
-    submit: "Create organization",
-    creating: "Creating…",
-    slugTaken: "That slug is already taken.",
-    slugReserved: "That slug is reserved. Choose a different one.",
-    slugInvalid:
-      "Slug can only contain letters, numbers, and hyphens (e.g. acme-corp).",
-    error: "Could not create organization: {{message}}",
   },
   rootEmpty: {
     title: "No organizations yet",
