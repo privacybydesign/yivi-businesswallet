@@ -18,6 +18,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/postguard"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
@@ -36,6 +37,9 @@ const (
 
 	qerdsProbeTimeout = 10 * time.Second
 	qerdsHTTPTimeout  = 30 * time.Second
+
+	// PostGuard uploads can be large; allow a generous client timeout.
+	postguardHTTPTimeout = 60 * time.Second
 
 	serverAddr = ":8080"
 )
@@ -178,12 +182,25 @@ func run() error {
 	walletService := wallet.NewService(walletStore, registry, authService, userStore, qerdsStore, cfg.QerdsDefaultAddressDomain)
 	walletHandler := wallet.NewHandler(walletService, sessionIssuer, requireUser, orgHandler.Authorize)
 
+	// PostGuard is an optional org capability; unlike the verifier/QERDS/registry
+	// it has no fatal boot gate (a send surfaces a clear error if unconfigured).
+	// A present-but-malformed key-encryption key is still a real misconfiguration.
+	postguardCipher, err := postguard.NewCipher(cfg.PostGuardEncryptionKey)
+	if err != nil {
+		return err
+	}
+	postguardStore := postguard.NewStore(pool, audit.NewDBRecorder(), postguardCipher)
+	postguardClient := postguard.NewClient(cfg.PostGuardSidecarURL, cfg.PostGuardSharedSecret, &http.Client{Timeout: postguardHTTPTimeout})
+	postguardService := postguard.NewService(postguardStore, postguardClient)
+	postguardHandler := postguard.NewHandler(postguardService, requireUser, orgHandler.Authorize)
+
 	handler := server.New(
 		pool,
 		authHandler,
 		orgHandler,
 		qerdsHandler,
 		walletHandler,
+		postguardHandler,
 	)
 
 	httpServer := &http.Server{

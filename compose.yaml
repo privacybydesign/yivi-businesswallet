@@ -28,6 +28,21 @@ services:
       db:
         condition: service_healthy
 
+  # Internal PostGuard encrypt-and-upload service. NOT published to the host:
+  # only the backend reaches it, over this private network, with the shared
+  # secret. See postguard-sidecar/README.md.
+  postguard-sidecar:
+    build:
+      context: postguard-sidecar
+    environment:
+      PG_SIDECAR_TOKEN: ${POSTGUARD_SHARED_SECRET:?POSTGUARD_SHARED_SECRET must be set}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8090/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   backend:
     build:
       context: backend
@@ -36,11 +51,16 @@ services:
       - "8080:8080"
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
+      POSTGUARD_SIDECAR_URL: http://postguard-sidecar:8090
+      POSTGUARD_SHARED_SECRET: ${POSTGUARD_SHARED_SECRET:?POSTGUARD_SHARED_SECRET must be set}
+      POSTGUARD_KEY_ENCRYPTION_KEY: ${POSTGUARD_KEY_ENCRYPTION_KEY:?POSTGUARD_KEY_ENCRYPTION_KEY must be set}
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      postguard-sidecar:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/livez"]
       interval: 10s

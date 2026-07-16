@@ -18,7 +18,10 @@ export interface RequestOptions<T> {
   /** Zod schema used to validate and type the JSON response body. */
   schema: z.ZodType<T>;
   method?: HttpMethod;
-  /** Plain object serialized as a JSON request body. */
+  /**
+   * Request body. A `FormData` value is sent as-is (multipart/form-data, with
+   * the browser setting the boundary); any other value is JSON-serialized.
+   */
   body?: unknown;
   headers?: Record<string, string>;
   /** Caller-supplied abort signal, merged with the internal timeout. */
@@ -116,11 +119,13 @@ async function performFetch<T>(
   options.signal?.addEventListener("abort", onExternalAbort, { once: true });
 
   const hasBody = options.body !== undefined;
+  const isFormData = options.body instanceof FormData;
   const headers: Record<string, string> = {
     Accept: "application/json",
     ...options.headers,
   };
-  if (hasBody) {
+  // Let the browser set multipart's Content-Type (with boundary) for FormData.
+  if (hasBody && !isFormData) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -128,7 +133,11 @@ async function performFetch<T>(
     const res = await fetch(url, {
       method,
       headers,
-      body: hasBody ? JSON.stringify(options.body) : undefined,
+      body: hasBody
+        ? isFormData
+          ? (options.body as FormData)
+          : JSON.stringify(options.body)
+        : undefined,
       signal: controller.signal,
       credentials: "include",
     });

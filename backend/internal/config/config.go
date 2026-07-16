@@ -29,6 +29,13 @@ const (
 
 	envWalletRegistryProvider = "WALLET_REGISTRY_PROVIDER"
 
+	// PostGuard: the internal sidecar that performs encrypt-and-upload, the shared
+	// secret the backend presents to it, and the key-encryption key used to store
+	// each org's PostGuard for Business API key at rest.
+	envPostGuardSidecarURL    = "POSTGUARD_SIDECAR_URL"
+	envPostGuardSharedSecret  = "POSTGUARD_SHARED_SECRET"
+	envPostGuardEncryptionKey = "POSTGUARD_KEY_ENCRYPTION_KEY"
+
 	// Domibus WS-plugin ebMS3 addressing. Defaults match the parties in the
 	// Domibus sample PMode so a blue -> red self-send works out of the box.
 	envQerdsDomibusFromParty   = "QERDS_DOMIBUS_FROM_PARTY"
@@ -96,6 +103,10 @@ type Config struct {
 
 	WalletRegistryProvider string
 
+	PostGuardSidecarURL    string
+	PostGuardSharedSecret  string
+	PostGuardEncryptionKey string
+
 	PlatformAdminEmails []string
 }
 
@@ -154,6 +165,10 @@ func Load() (Config, error) {
 		QerdsDomibusAction:      envOrDefault(envQerdsDomibusAction, defaultQerdsDomibusAction),
 
 		WalletRegistryProvider: envOrDefault(envWalletRegistryProvider, defaultWalletRegistryProvider),
+
+		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
+		PostGuardSharedSecret:  os.Getenv(envPostGuardSharedSecret),
+		PostGuardEncryptionKey: os.Getenv(envPostGuardEncryptionKey),
 
 		PlatformAdminEmails: parseList(os.Getenv(envPlatformAdminEmails)),
 	}, nil

@@ -15,6 +15,7 @@ type NavLabelKey =
   | "nav.dashboard"
   | "nav.members"
   | "nav.qerds"
+  | "nav.postguard"
   | "nav.auditLog"
   | "nav.settings"
   | "nav.adminDashboard"
@@ -33,6 +34,7 @@ function orgNavItems(slug: string): NavItem[] {
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
     { to: `/${slug}/qerds`, labelKey: "nav.qerds", icon: "email" },
+    { to: `/${slug}/postguard`, labelKey: "nav.postguard", icon: "lock" },
     { to: `/${slug}/audit-log`, labelKey: "nav.auditLog", icon: "time" },
     { to: `/${slug}/settings`, labelKey: "nav.settings", icon: "settings" },
   ];

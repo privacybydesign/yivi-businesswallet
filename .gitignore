@@ -28,6 +28,9 @@ coverage.*
 # ---- Node (root tooling: husky, lint-staged) ----
 node_modules/
 
+# ---- PostGuard sidecar (Node / tsc) ----
+postguard-sidecar/dist/
+
 # ---- Frontend (Node / Vite) ----
 frontend/node_modules/
 frontend/dist/
