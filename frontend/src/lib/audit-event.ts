@@ -33,6 +33,19 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "user.identity_review_approved": { icon: "valid", tone: "green" },
   "user.identity_review_rejected": { icon: "close", tone: "red" },
   "user.purged": { icon: "delete", tone: "red" },
+  "attestation.schema_created": { icon: "add", tone: "green" },
+  "attestation.schema_updated": { icon: "edit", tone: "blue" },
+  "attestation.schema_deleted": { icon: "delete", tone: "red" },
+  "attestation.template_created": { icon: "add", tone: "green" },
+  "attestation.template_updated": { icon: "edit", tone: "blue" },
+  "attestation.template_deleted": { icon: "delete", tone: "red" },
+  "attestation.issued": { icon: "valid", tone: "violet" },
+  "attestation.claimed": { icon: "valid", tone: "green" },
+  "attestation.revoked": { icon: "close", tone: "red" },
+  "attestation.key_added": { icon: "add", tone: "green" },
+  "attestation.key_suspended": { icon: "warning", tone: "amber" },
+  "attestation.key_revoked": { icon: "close", tone: "red" },
+  "email.settings_updated": { icon: "settings", tone: "blue" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -87,6 +100,32 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityReviewRejected");
     case "user.purged":
       return t("auditLog.actions.userPurged");
+    case "attestation.schema_created":
+      return t("auditLog.actions.attestationSchemaCreated");
+    case "attestation.schema_updated":
+      return t("auditLog.actions.attestationSchemaUpdated");
+    case "attestation.schema_deleted":
+      return t("auditLog.actions.attestationSchemaDeleted");
+    case "attestation.template_created":
+      return t("auditLog.actions.attestationTemplateCreated");
+    case "attestation.template_updated":
+      return t("auditLog.actions.attestationTemplateUpdated");
+    case "attestation.template_deleted":
+      return t("auditLog.actions.attestationTemplateDeleted");
+    case "attestation.issued":
+      return t("auditLog.actions.attestationIssued");
+    case "attestation.claimed":
+      return t("auditLog.actions.attestationClaimed");
+    case "attestation.revoked":
+      return t("auditLog.actions.attestationRevoked");
+    case "attestation.key_added":
+      return t("auditLog.actions.attestationKeyAdded");
+    case "attestation.key_suspended":
+      return t("auditLog.actions.attestationKeySuspended");
+    case "attestation.key_revoked":
+      return t("auditLog.actions.attestationKeyRevoked");
+    case "email.settings_updated":
+      return t("auditLog.actions.emailSettingsUpdated");
     default:
       return action;
   }
@@ -102,6 +141,16 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.department");
     case "user":
       return t("auditLog.targets.user");
+    case "attestation_schema":
+      return t("auditLog.targets.attestationSchema");
+    case "attestation_template":
+      return t("auditLog.targets.attestationTemplate");
+    case "issued_attestation":
+      return t("auditLog.targets.issuedAttestation");
+    case "attestation_key":
+      return t("auditLog.targets.attestationKey");
+    case "org_email_settings":
+      return t("auditLog.targets.orgEmailSettings");
     default:
       return targetType;
   }
