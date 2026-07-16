@@ -18,6 +18,7 @@ const (
 	envSessionCookieSecure = "SESSION_COOKIE_SECURE"
 	envSessionTTL          = "SESSION_TTL"
 	envSessionPruneEvery   = "SESSION_PRUNE_INTERVAL"
+	envPresentationTTL     = "PRESENTATION_SESSION_TTL"
 
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
@@ -48,6 +49,9 @@ const (
 	defaultSessionCookieSecure = "false"
 	defaultSessionTTL          = "24h"
 	defaultSessionPruneEvery   = "1h"
+	// A login/disclosure flow (scan QR, present in the wallet, claim) completes in
+	// minutes; the presentation-session mapping only needs to outlive that window.
+	defaultPresentationTTL = "15m"
 
 	// ProviderStub selects the in-process StubProvider (local dev / CI).
 	ProviderStub = "stub"
@@ -80,6 +84,7 @@ type Config struct {
 	SessionCookieSecure bool
 	SessionTTL          time.Duration
 	SessionPruneEvery   time.Duration
+	PresentationTTL     time.Duration
 
 	QerdsProvider             string
 	QerdsProviderURL          string
@@ -122,6 +127,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	presentationTTL, err := parseDuration(envPresentationTTL, defaultPresentationTTL)
+	if err != nil {
+		return Config{}, err
+	}
+
 	qerdsProvider := envOrDefault(envQerdsProvider, defaultQerdsProvider)
 	qerdsProviderURL := os.Getenv(envQerdsProviderURL)
 	if qerdsProvider != ProviderStub && qerdsProviderURL == "" {
@@ -139,6 +149,7 @@ func Load() (Config, error) {
 		SessionCookieSecure: cookieSecure,
 		SessionTTL:          sessionTTL,
 		SessionPruneEvery:   sessionPruneEvery,
+		PresentationTTL:     presentationTTL,
 
 		QerdsProvider:             qerdsProvider,
 		QerdsProviderURL:          qerdsProviderURL,

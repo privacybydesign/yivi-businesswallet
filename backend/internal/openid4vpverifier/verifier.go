@@ -15,6 +15,13 @@ import (
 	"strings"
 )
 
+// Presentation status values reported by Status: PENDING until the holder
+// completes the presentation, then DONE.
+const (
+	StatusPending = "PENDING"
+	StatusDone    = "DONE"
+)
+
 // Claim keys disclosed by the credentials we request (pbdf staging schemes).
 const (
 	ClaimEmail       = "email"
@@ -31,11 +38,12 @@ const (
 // the frontend's own timeout bounds the wait.
 var ErrPending = errors.New("openid4vpverifier: presentation pending")
 
-// Session is a started presentation: an opaque transaction id (kept server-side)
-// plus the wallet deeplink to render as a QR / universal link.
+// Session is a started presentation: the verifier-minted transaction id (kept
+// strictly server-side — never handed to the client, which polls via our own
+// opaque id) plus the wallet deeplink to render as a QR / universal link.
 type Session struct {
-	ID         string
-	WalletLink string
+	TransactionID string
+	WalletLink    string
 }
 
 // Presentation is the verified, disclosed claim set, flattened across the

@@ -7,6 +7,7 @@ package integration
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
@@ -29,6 +31,12 @@ import (
 )
 
 const sessionTTL = time.Hour
+
+// disclosureToken is the client-facing presentation id used across these tests.
+// setup seeds a presentation_sessions row mapping it to a verifier transaction id
+// so /claim, /status and disclosure flows resolve it (production mints a random
+// id per POST /auth/session; the fake verifier ignores the transaction id).
+const disclosureToken = "test-token"
 
 // fakeVerifier stands in for the EUDI verifier: Result discloses the configured
 // email (and optionally name), so a /claim logs in as that user. The claim shape
@@ -40,7 +48,7 @@ type fakeVerifier struct {
 }
 
 func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.Scope) (openid4vpverifier.Session, error) {
-	return openid4vpverifier.Session{ID: "test-token", WalletLink: "openid4vp://?request_uri=https%3A%2F%2Fverifier.test"}, nil
+	return openid4vpverifier.Session{TransactionID: "verifier-tx", WalletLink: "openid4vp://?request_uri=https%3A%2F%2Fverifier.test"}, nil
 }
 
 func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Presentation, error) {
@@ -87,7 +95,9 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	cookieCfg := auth.CookieConfig{Secure: false, MaxAge: int(sessionTTL.Seconds())}
 
 	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
-	authService := auth.NewService(fake, userStore, sessionStore, orgStore)
+	presentationStore := presentation.NewStore(pool, sessionTTL)
+	seedPresentation(t, pool, disclosureToken)
+	authService := auth.NewService(fake, presentationStore, userStore, sessionStore, orgStore)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, admins)
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
@@ -147,7 +157,7 @@ func (e *testEnv) login(email string) meBody {
 	e.createUser(email)
 	e.fake.email = email
 
-	resp := e.do(http.MethodPost, "/api/v1/auth/session/test-token/claim", nil)
+	resp := e.do(http.MethodPost, "/api/v1/auth/session/"+disclosureToken+"/claim", nil)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		e.t.Fatalf("claim status = %d, want 200", resp.StatusCode)
@@ -188,6 +198,24 @@ func (e *testEnv) createOrg(name, slug string) uuid.UUID {
 		e.t.Fatalf("create org %q: %v", slug, err)
 	}
 	return id
+}
+
+// seedPresentation inserts a presentation_sessions mapping so the given
+// client-facing id resolves to a verifier transaction id. It writes the row
+// directly (hashing the id as the store does) since these tests skip the live
+// POST /auth/session that would otherwise mint the id.
+func seedPresentation(t *testing.T, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	hash := sha256.Sum256([]byte(id))
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO presentation_sessions (id_hash, transaction_id, expires_at)
+		 VALUES ($1, $2, now() + interval '1 hour')
+		 ON CONFLICT (id_hash) DO NOTHING`,
+		hash[:], "verifier-tx",
+	)
+	if err != nil {
+		t.Fatalf("seed presentation %q: %v", id, err)
+	}
 }
 
 func (e *testEnv) addMembership(userID, orgID uuid.UUID, role string) {
