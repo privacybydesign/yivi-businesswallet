@@ -24,6 +24,10 @@ const (
 	orgKvkConstraint     = "organizations_kvk_number_key"
 	orgSlugConstraint    = "organizations_slug_key"
 	orgAddressConstraint = "organizations_digital_address_key"
+
+	// kvkContactName labels the KVK-derived recipient saved to the new org's
+	// address book at bootstrap.
+	kvkContactName = "KVK"
 )
 
 const orgColumns = `id, name, slug, kvk_number, euid, digital_address, status, bootstrapped_at`
@@ -51,11 +55,12 @@ func scanOrg(row interface{ Scan(...any) error }, org *organization.Organization
 }
 
 // RegisterOrganization creates the organization/business wallet atomically from a
-// KVK attestation: the org (identity + digital address + active status), its
-// default QERDS address, the requester as first owner (admin membership), and the
+// KVK attestation: the org (identity + slug-based digital address + active status),
+// its default (sending) QERDS address, the KVK-derived address saved as a recipient
+// in the address book, the requester as first owner (admin membership), and the
 // representation list (with the requester's own representation claimed). One tx,
 // following the AcceptInvitation idiom.
-func (s *Store) RegisterOrganization(ctx context.Context, requestorUserID uuid.UUID, slug, digitalAddress string, att registryprovider.RegistrationAttestation) (organization.Organization, error) {
+func (s *Store) RegisterOrganization(ctx context.Context, requestorUserID uuid.UUID, slug, digitalAddress, kvkContactAddress string, att registryprovider.RegistrationAttestation) (organization.Organization, error) {
 	var org organization.Organization
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insOrg = `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
@@ -64,9 +69,11 @@ func (s *Store) RegisterOrganization(ctx context.Context, requestorUserID uuid.U
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			switch pgErr.ConstraintName {
-			case orgKvkConstraint, orgAddressConstraint:
+			case orgKvkConstraint:
 				return ErrAlreadyRegistered
-			case orgSlugConstraint:
+			case orgSlugConstraint, orgAddressConstraint:
+				// digital_address is derived from the slug — a collision here
+				// means the slug is taken, not that the KVK is already registered.
 				return ErrSlugTaken
 			}
 		}
@@ -83,6 +90,18 @@ func (s *Store) RegisterOrganization(ctx context.Context, requestorUserID uuid.U
 		const insAddr = `INSERT INTO qerds_addresses (organization_id, address, is_default) VALUES ($1, $2, true)`
 		if _, err := q.Exec(ctx, insAddr, org.ID, digitalAddress); err != nil {
 			return fmt.Errorf("wallet: provision address: %w", err)
+		}
+
+		// Save the KVK-derived address as a recipient in the org's address book.
+		const insContact = `INSERT INTO qerds_contacts (organization_id, name, address) VALUES ($1, $2, $3) RETURNING id`
+		var contactID uuid.UUID
+		if err := q.QueryRow(ctx, insContact, org.ID, kvkContactName, kvkContactAddress).Scan(&contactID); err != nil {
+			return fmt.Errorf("wallet: save kvk contact: %w", err)
+		}
+		if err := s.audit.Record(ctx, q, audit.QerdsContactAdded,
+			audit.Target{Type: audit.TargetQerdsContact, ID: contactID.String(), OrgID: &org.ID},
+			audit.Created(map[string]any{"name": kvkContactName, "address": kvkContactAddress})); err != nil {
+			return err
 		}
 
 		const insMember = `INSERT INTO memberships (organization_id, user_id, role) VALUES ($1, $2, $3)`

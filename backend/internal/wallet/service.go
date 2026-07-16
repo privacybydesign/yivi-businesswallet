@@ -23,7 +23,7 @@ const kvkSenderAddress = "registratie@kvk.nl"
 
 // walletStore is the persistence surface the service coordinates.
 type walletStore interface {
-	RegisterOrganization(ctx context.Context, requestorUserID uuid.UUID, slug, digitalAddress string, att registryprovider.RegistrationAttestation) (organization.Organization, error)
+	RegisterOrganization(ctx context.Context, requestorUserID uuid.UUID, slug, digitalAddress, kvkContactAddress string, att registryprovider.RegistrationAttestation) (organization.Organization, error)
 	SetStatus(ctx context.Context, orgID uuid.UUID, status string) (organization.Organization, error)
 	ListRepresentations(ctx context.Context, orgID uuid.UUID) ([]Representation, error)
 	ClaimRepresentation(ctx context.Context, orgID, repID, userID uuid.UUID) error
@@ -150,8 +150,11 @@ func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, kvk
 		return RegistrationResult{}, ErrNotRepresentative
 	}
 
-	address := fmt.Sprintf("kvk-%s@%s", kvkNumber, s.addressDomain)
-	org, err := s.store.RegisterOrganization(ctx, requestorUserID, slug, address, att)
+	// The org's own default (sending) address is slug-based; the KVK-derived
+	// address is saved as a recipient in the address book, not used as sender.
+	digitalAddress := fmt.Sprintf("%s@%s", slug, s.addressDomain)
+	kvkContactAddress := fmt.Sprintf("kvk-%s@%s", kvkNumber, s.addressDomain)
+	org, err := s.store.RegisterOrganization(ctx, requestorUserID, slug, digitalAddress, kvkContactAddress, att)
 	if err != nil {
 		return RegistrationResult{}, err
 	}

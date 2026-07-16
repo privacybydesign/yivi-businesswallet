@@ -40,9 +40,10 @@ func TestRegisterOrganization(t *testing.T) {
 
 	store := wallet.NewStore(pool, audit.NopRecorder{})
 	const slug = "stub-co"
-	const address = "kvk-" + stubKVK + "@qerds.localhost"
+	const address = slug + "@qerds.localhost"
+	const kvkAddress = "kvk-" + stubKVK + "@qerds.localhost"
 
-	org, err := store.RegisterOrganization(ctx, requester.ID, slug, address, att)
+	org, err := store.RegisterOrganization(ctx, requester.ID, slug, address, kvkAddress, att)
 	if err != nil {
 		t.Fatalf("RegisterOrganization: %v", err)
 	}
@@ -72,6 +73,23 @@ func TestRegisterOrganization(t *testing.T) {
 	}
 	if defaultAddr != address {
 		t.Fatalf("default address = %q, want %q", defaultAddr, address)
+	}
+
+	// The KVK-derived address is saved as a recipient in the address book, not as
+	// one of the org's own (sending) addresses.
+	var contactAddr string
+	if err := pool.QueryRow(ctx, `SELECT address FROM qerds_contacts WHERE organization_id = $1`, org.ID).Scan(&contactAddr); err != nil {
+		t.Fatalf("kvk contact missing: %v", err)
+	}
+	if contactAddr != kvkAddress {
+		t.Fatalf("contact address = %q, want %q", contactAddr, kvkAddress)
+	}
+	var kvkIsOwnAddress bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM qerds_addresses WHERE organization_id = $1 AND address = $2)`, org.ID, kvkAddress).Scan(&kvkIsOwnAddress); err != nil {
+		t.Fatalf("check kvk address: %v", err)
+	}
+	if kvkIsOwnAddress {
+		t.Fatalf("kvk address %q should not be one of the org's own addresses", kvkAddress)
 	}
 
 	// Every representative is recorded; the requester's own one is claimed.
@@ -109,10 +127,10 @@ func TestRegisterOrganizationRejectsDuplicateKVK(t *testing.T) {
 	}
 	store := wallet.NewStore(pool, audit.NopRecorder{})
 
-	if _, err := store.RegisterOrganization(ctx, requester.ID, "first", "a@qerds.localhost", att); err != nil {
+	if _, err := store.RegisterOrganization(ctx, requester.ID, "first", "a@qerds.localhost", "kvk-a@qerds.localhost", att); err != nil {
 		t.Fatalf("first RegisterOrganization: %v", err)
 	}
-	_, err = store.RegisterOrganization(ctx, requester.ID, "second", "b@qerds.localhost", att)
+	_, err = store.RegisterOrganization(ctx, requester.ID, "second", "b@qerds.localhost", "kvk-b@qerds.localhost", att)
 	if err == nil {
 		t.Fatal("expected a duplicate-KVK registration to fail")
 	}
@@ -132,7 +150,7 @@ func TestSetStatus(t *testing.T) {
 		t.Fatalf("Consult: %v", err)
 	}
 	store := wallet.NewStore(pool, audit.NopRecorder{})
-	org, err := store.RegisterOrganization(ctx, requester.ID, "carol-co", "c@qerds.localhost", att)
+	org, err := store.RegisterOrganization(ctx, requester.ID, "carol-co", "c@qerds.localhost", "kvk-c@qerds.localhost", att)
 	if err != nil {
 		t.Fatalf("RegisterOrganization: %v", err)
 	}
