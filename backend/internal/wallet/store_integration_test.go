@@ -16,11 +16,11 @@ import (
 
 const stubKVK = "90001234"
 
-// TestActivateFromAttestation is the end-to-end regression for the atomic
-// bootstrap: one attestation must create the org, its default address, the
-// owner membership, the full representation list (with the requester's own
-// representation claimed) and flip the instance to active — all or nothing.
-func TestActivateFromAttestation(t *testing.T) {
+// TestRegisterOrganization is the end-to-end regression for the atomic
+// registration: one attestation must create the org (with KVK identity + digital
+// address + active status), the owner membership, and the representation list
+// (with the requester's own representation claimed) — all or nothing.
+func TestRegisterOrganization(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
 
@@ -33,51 +33,41 @@ func TestActivateFromAttestation(t *testing.T) {
 		t.Fatalf("create requester: %v", err)
 	}
 
-	store := wallet.NewStore(pool, audit.NopRecorder{})
-	const address = "kvk-" + stubKVK + "@qerds.localhost"
-
-	inst, err := store.CreateInstance(ctx, requester.ID, stubKVK, address)
-	if err != nil {
-		t.Fatalf("CreateInstance: %v", err)
-	}
-	if inst.Status != wallet.StatusProvisioning {
-		t.Fatalf("status = %q, want provisioning", inst.Status)
-	}
 	att, err := registryprovider.NewStubRegistry().Consult(ctx, stubKVK)
 	if err != nil {
 		t.Fatalf("Consult: %v", err)
 	}
 
-	active, err := store.ActivateFromAttestation(ctx, inst.ID, att)
-	if err != nil {
-		t.Fatalf("ActivateFromAttestation: %v", err)
-	}
-	if active.Status != wallet.StatusActive {
-		t.Fatalf("status = %q, want active", active.Status)
-	}
-	if active.OrganizationID == nil {
-		t.Fatal("organizationId is nil after activation")
-	}
-	if active.LegalName != att.LegalName || active.EUID != att.EUID {
-		t.Fatalf("identity = %q/%q, want %q/%q", active.LegalName, active.EUID, att.LegalName, att.EUID)
-	}
-	orgID := *active.OrganizationID
+	store := wallet.NewStore(pool, audit.NopRecorder{})
+	const slug = "stub-co"
+	const address = "kvk-" + stubKVK + "@qerds.localhost"
 
-	// The org exists and the requester is an admin member.
-	if _, err := organization.NewStore(pool, audit.NopRecorder{}).GetByID(ctx, orgID); err != nil {
-		t.Fatalf("org not created: %v", err)
+	org, err := store.RegisterOrganization(ctx, requester.ID, slug, address, att)
+	if err != nil {
+		t.Fatalf("RegisterOrganization: %v", err)
 	}
+	if org.Slug != slug || org.Name != att.LegalName || org.KVKNumber != stubKVK {
+		t.Fatalf("org = %q/%q/%q, want %q/%q/%q", org.Slug, org.Name, org.KVKNumber, slug, att.LegalName, stubKVK)
+	}
+	if org.Status != organization.StatusActive {
+		t.Fatalf("status = %q, want active", org.Status)
+	}
+	if org.DigitalAddress != address {
+		t.Fatalf("digital address = %q, want %q", org.DigitalAddress, address)
+	}
+
+	// The requester is an admin member.
 	var role string
-	if err := pool.QueryRow(ctx, `SELECT role FROM memberships WHERE organization_id = $1 AND user_id = $2`, orgID, requester.ID).Scan(&role); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT role FROM memberships WHERE organization_id = $1 AND user_id = $2`, org.ID, requester.ID).Scan(&role); err != nil {
 		t.Fatalf("owner membership missing: %v", err)
 	}
 	if role != organization.RoleAdmin {
 		t.Fatalf("owner role = %q, want admin", role)
 	}
 
-	// The org's default digital address is the wallet's provisioning address.
+	// The org's default digital address matches the wallet address.
 	var defaultAddr string
-	if err := pool.QueryRow(ctx, `SELECT address FROM qerds_addresses WHERE organization_id = $1 AND is_default`, orgID).Scan(&defaultAddr); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT address FROM qerds_addresses WHERE organization_id = $1 AND is_default`, org.ID).Scan(&defaultAddr); err != nil {
 		t.Fatalf("default address missing: %v", err)
 	}
 	if defaultAddr != address {
@@ -85,7 +75,7 @@ func TestActivateFromAttestation(t *testing.T) {
 	}
 
 	// Every representative is recorded; the requester's own one is claimed.
-	reps, err := store.ListRepresentations(ctx, orgID)
+	reps, err := store.ListRepresentations(ctx, org.ID)
 	if err != nil {
 		t.Fatalf("ListRepresentations: %v", err)
 	}
@@ -103,45 +93,55 @@ func TestActivateFromAttestation(t *testing.T) {
 	}
 }
 
-// TestRejectInstance covers the not-a-representative path: no org is created and
-// the instance is left rejected with a reason.
-func TestRejectInstance(t *testing.T) {
+// TestRegisterOrganizationRejectsDuplicateKVK covers "one wallet per company": a
+// second registration for the same KVK number is refused.
+func TestRegisterOrganizationRejectsDuplicateKVK(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
 
-	requester, err := user.NewStore(pool).Create(ctx, user.User{
-		Email:      "bob@example.com",
-		GivenNames: "Bob",
-		LastName:   "Outsider",
-	})
+	requester, err := user.NewStore(pool).Create(ctx, user.User{Email: "bob@example.com", GivenNames: "Bob", LastName: "Owner"})
 	if err != nil {
 		t.Fatalf("create requester: %v", err)
 	}
-
+	att, err := registryprovider.NewStubRegistry().Consult(ctx, stubKVK)
+	if err != nil {
+		t.Fatalf("Consult: %v", err)
+	}
 	store := wallet.NewStore(pool, audit.NopRecorder{})
-	inst, err := store.CreateInstance(ctx, requester.ID, stubKVK, "kvk-"+stubKVK+"@qerds.localhost")
+
+	if _, err := store.RegisterOrganization(ctx, requester.ID, "first", "a@qerds.localhost", att); err != nil {
+		t.Fatalf("first RegisterOrganization: %v", err)
+	}
+	_, err = store.RegisterOrganization(ctx, requester.ID, "second", "b@qerds.localhost", att)
+	if err == nil {
+		t.Fatal("expected a duplicate-KVK registration to fail")
+	}
+}
+
+// TestSetStatus transitions an org/wallet (suspend).
+func TestSetStatus(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+
+	requester, err := user.NewStore(pool).Create(ctx, user.User{Email: "carol@example.com", GivenNames: "Carol", LastName: "Owner"})
 	if err != nil {
-		t.Fatalf("CreateInstance: %v", err)
+		t.Fatalf("create requester: %v", err)
 	}
-	rejected, err := store.RejectInstance(ctx, inst.ID, wallet.RejectNotRepresentative)
+	att, err := registryprovider.NewStubRegistry().Consult(ctx, stubKVK)
 	if err != nil {
-		t.Fatalf("RejectInstance: %v", err)
+		t.Fatalf("Consult: %v", err)
 	}
-	if rejected.Status != wallet.StatusRejected {
-		t.Fatalf("status = %q, want rejected", rejected.Status)
-	}
-	if rejected.RejectReason != wallet.RejectNotRepresentative {
-		t.Fatalf("reason = %q, want %q", rejected.RejectReason, wallet.RejectNotRepresentative)
-	}
-	if rejected.OrganizationID != nil {
-		t.Fatal("organizationId set on a rejected instance")
+	store := wallet.NewStore(pool, audit.NopRecorder{})
+	org, err := store.RegisterOrganization(ctx, requester.ID, "carol-co", "c@qerds.localhost", att)
+	if err != nil {
+		t.Fatalf("RegisterOrganization: %v", err)
 	}
 
-	var orgs int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM organizations`).Scan(&orgs); err != nil {
-		t.Fatalf("count orgs: %v", err)
+	suspended, err := store.SetStatus(ctx, org.ID, organization.StatusSuspended)
+	if err != nil {
+		t.Fatalf("SetStatus: %v", err)
 	}
-	if orgs != 0 {
-		t.Fatalf("orgs created = %d, want 0", orgs)
+	if suspended.Status != organization.StatusSuspended {
+		t.Fatalf("status = %q, want suspended", suspended.Status)
 	}
 }

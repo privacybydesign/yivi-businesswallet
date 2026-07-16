@@ -1,9 +1,9 @@
 -- +goose Up
+-- The mandate list (Art 5(1)(j), Art 6(2)) for an organization/wallet.
 CREATE TABLE wallet_representations
 (
     id                 UUID        PRIMARY KEY DEFAULT uuidv7(),
-    wallet_instance_id UUID        NOT NULL REFERENCES wallet_instances (id) ON DELETE CASCADE,
-    organization_id    UUID        REFERENCES organizations (id) ON DELETE CASCADE,
+    organization_id    UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
     kind               TEXT        NOT NULL,
     given_names        TEXT        NOT NULL,
     family_name        TEXT        NOT NULL,
@@ -23,7 +23,6 @@ CREATE TABLE wallet_representations
     CONSTRAINT wallet_representations_authority_check CHECK (authority IN ('sole', 'jointly', 'beperkt', 'volledig'))
 );
 
-CREATE INDEX idx_wallet_representations_instance ON wallet_representations (wallet_instance_id);
 CREATE INDEX idx_wallet_representations_organization ON wallet_representations (organization_id);
 
 -- +goose Down

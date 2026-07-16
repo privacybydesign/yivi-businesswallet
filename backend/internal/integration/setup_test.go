@@ -178,8 +178,11 @@ func (e *testEnv) getMe(t *testing.T) meBody {
 func (e *testEnv) createOrg(name, slug string) uuid.UUID {
 	e.t.Helper()
 	var id uuid.UUID
+	// An org is a business wallet: the KVK identity columns are required.
 	err := e.pool.QueryRow(context.Background(),
-		"INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id", name, slug,
+		`INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
+		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		name, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost",
 	).Scan(&id)
 	if err != nil {
 		e.t.Fatalf("create org %q: %v", slug, err)

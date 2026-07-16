@@ -16,10 +16,25 @@ const CONFLICT_STATUS = 409;
 
 type Phase = "form" | "disclosing" | "registering" | "done" | "error";
 
+function errorCode(error: ApiError): string | null {
+  if (error.body && typeof error.body === "object" && "code" in error.body) {
+    const { code } = error.body as { code?: unknown };
+    return typeof code === "string" ? code : null;
+  }
+  return null;
+}
+
 function errorMessage(error: unknown, t: TFunction): string {
   if (error instanceof ApiError) {
+    const code = errorCode(error);
     if (error.status === FORBIDDEN_STATUS) {
       return t("register.notRepresentative");
+    }
+    if (code === "slug_taken") {
+      return t("register.slugTaken");
+    }
+    if (code === "reserved_slug" || code === "invalid_slug") {
+      return t("register.slugInvalid");
     }
     if (error.status === CONFLICT_STATUS) {
       return t("register.alreadyRegistered");
@@ -34,12 +49,17 @@ export default function Register(): React.JSX.Element {
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<Phase>("form");
   const [kvkNumber, setKvkNumber] = useState("");
+  const [slug, setSlug] = useState("");
   const [result, setResult] = useState<WalletEnrollment | null>(null);
   const [message, setMessage] = useState("");
 
   const onDisclosed = (disclosureToken: string): void => {
     setPhase("registering");
-    registerWallet(disclosureToken, kvkNumber.trim())
+    registerWallet({
+      disclosureToken,
+      kvkNumber: kvkNumber.trim(),
+      slug: slug.trim(),
+    })
       .then((data) => {
         setResult(data);
         setPhase("done");
@@ -150,7 +170,24 @@ export default function Register(): React.JSX.Element {
                   autoFocus
                 />
               </label>
-              <Button type="submit" disabled={kvkNumber.trim() === ""}>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-ink text-[13px] font-semibold">
+                  {t("register.slug")}
+                </span>
+                <Input
+                  value={slug}
+                  onChange={(event) => setSlug(event.target.value)}
+                  placeholder={t("register.slugPlaceholder")}
+                  className="font-mono"
+                />
+                <span className="text-muted text-[12px]">
+                  {t("register.slugHint")}
+                </span>
+              </label>
+              <Button
+                type="submit"
+                disabled={kvkNumber.trim() === "" || slug.trim() === ""}
+              >
                 {t("register.continue")}
               </Button>
             </form>

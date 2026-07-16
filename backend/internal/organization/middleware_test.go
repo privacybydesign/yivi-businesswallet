@@ -21,9 +21,6 @@ type fakeRepo struct {
 }
 
 func (f fakeRepo) List(context.Context) ([]Organization, error) { return nil, nil }
-func (f fakeRepo) Create(context.Context, string, string) (Organization, error) {
-	return Organization{}, nil
-}
 
 func (f fakeRepo) GetByID(context.Context, uuid.UUID) (Organization, error) {
 	return Organization{}, nil

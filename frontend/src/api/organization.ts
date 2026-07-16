@@ -11,10 +11,17 @@ export type Department = z.infer<typeof departmentSchema>;
 
 const departmentListSchema = z.array(departmentSchema);
 
+// An organization is a business wallet: identity from the KVK register plus the
+// wallet's QERDS digital address and lifecycle status.
 export const organizationSchema = z.object({
   id: z.string(),
   name: z.string(),
   slug: z.string(),
+  kvkNumber: z.string(),
+  euid: z.string(),
+  digitalAddress: z.string(),
+  status: z.string(),
+  bootstrappedAt: z.string(),
 });
 
 export type Organization = z.infer<typeof organizationSchema>;
@@ -99,18 +106,6 @@ export function getMyOrganizations(
 ): Promise<Organization[]> {
   return request("/api/v1/me/organizations", {
     schema: organizationListSchema,
-    signal,
-  });
-}
-
-export function createOrganization(
-  input: { name: string; slug: string },
-  signal?: AbortSignal,
-): Promise<Organization> {
-  return request("/api/v1/organizations", {
-    schema: organizationSchema,
-    method: "POST",
-    body: input,
     signal,
   });
 }

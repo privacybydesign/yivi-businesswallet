@@ -31,7 +31,6 @@ import QerdsMessage from "./routes/qerds-message";
 import Settings from "./routes/settings";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
-import CreateOrganization from "./routes/create-organization";
 import NotFound from "./routes/not-found";
 import ErrorBoundary from "./routes/error-boundary";
 
@@ -87,7 +86,6 @@ const reviewsCrumb: RouteHandle = {
 const orgsCrumb: RouteHandle = {
   crumb: ({ t }) => t("allOrganizations.title"),
 };
-const newOrgCrumb: RouteHandle = { crumb: ({ t }) => t("createOrg.title") };
 
 export const router = createBrowserRouter([
   {
@@ -195,11 +193,6 @@ export const router = createBrowserRouter([
                         handle: orgsCrumb,
                         children: [
                           { index: true, Component: AllOrganizations },
-                          {
-                            path: "new",
-                            Component: CreateOrganization,
-                            handle: newOrgCrumb,
-                          },
                         ],
                       },
                     ],

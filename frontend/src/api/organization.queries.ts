@@ -14,7 +14,6 @@ import type {
 import { useTranslation } from "react-i18next";
 import {
   createDepartment,
-  createOrganization,
   deleteDepartment,
   deleteOrganization,
   getMemberAuditEvents,
@@ -109,24 +108,6 @@ export function useOrganizationsQuery(
     queryKey: organizationsQueryKey,
     queryFn: ({ signal }) => getOrganizations(signal),
     enabled,
-  });
-}
-
-export function useCreateOrganizationMutation(): UseMutationResult<
-  Organization,
-  Error,
-  { name: string; slug: string }
-> {
-  const queryClient = useQueryClient();
-  const { t } = useTranslation();
-  return useMutation({
-    mutationFn: (input) => createOrganization(input),
-    meta: { suppressErrorToast: true },
-    onSuccess: () => {
-      toast.success(t("toasts.organizationCreated"));
-      void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
-      void queryClient.invalidateQueries({ queryKey: myOrganizationsQueryKey });
-    },
   });
 }
 

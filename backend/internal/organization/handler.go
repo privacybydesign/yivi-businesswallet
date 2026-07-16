@@ -18,7 +18,6 @@ import (
 
 type repository interface {
 	List(ctx context.Context) ([]Organization, error)
-	Create(ctx context.Context, name, slug string) (Organization, error)
 	GetByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetBySlug(ctx context.Context, slug string) (Organization, error)
 	Update(ctx context.Context, id uuid.UUID, name string) (Organization, error)
@@ -83,7 +82,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	}
 
 	mux.Handle("GET /organizations", platform(respond.HandlerFunc(h.list)))
-	mux.Handle("POST /organizations", platform(respond.HandlerFunc(h.create)))
 	mux.Handle("GET /organizations/{id}", platform(respond.HandlerFunc(h.get)))
 	mux.Handle("DELETE /organizations/{id}", platform(respond.HandlerFunc(h.delete)))
 
@@ -128,40 +126,6 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("listing organizations: %w", err)
 	}
 	respond.JSON(w, r, http.StatusOK, orgs)
-	return nil
-}
-
-type createRequest struct {
-	Name string `json:"name"`
-	Slug string `json:"slug"`
-}
-
-func (h *Handler) create(w http.ResponseWriter, r *http.Request) error {
-	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return badRequest("invalid_body", "invalid request body")
-	}
-	req.Name = strings.TrimSpace(req.Name)
-	req.Slug = strings.ToLower(strings.TrimSpace(req.Slug))
-	if req.Name == "" || req.Slug == "" {
-		return badRequest("invalid_input", "name and slug are required")
-	}
-	switch err := ValidateSlug(req.Slug); {
-	case errors.Is(err, ErrReservedSlug):
-		return badRequest("reserved_slug", "slug is reserved and cannot be used")
-	case errors.Is(err, ErrInvalidSlug):
-		return badRequest("invalid_slug", "slug may only contain letters, numbers, and hyphens")
-	}
-
-	org, err := h.store.Create(r.Context(), req.Name, req.Slug)
-	if errors.Is(err, ErrSlugTaken) {
-		return &respond.APIError{Status: http.StatusConflict, Code: "slug_taken", Message: "slug already taken"}
-	}
-	if err != nil {
-		return fmt.Errorf("creating organization: %w", err)
-	}
-
-	respond.JSON(w, r, http.StatusCreated, org)
 	return nil
 }
 

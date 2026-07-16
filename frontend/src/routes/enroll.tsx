@@ -24,16 +24,17 @@ const CONFLICT_STATUS = 409;
 
 function errorMessage(error: Error, t: TFunction): string {
   if (error instanceof ApiError) {
-    if (
-      error.status === FORBIDDEN_STATUS &&
-      errorCode(error) === "not_a_representative"
-    ) {
+    const code = errorCode(error);
+    if (error.status === FORBIDDEN_STATUS && code === "not_a_representative") {
       return t("enroll.notRepresentative");
     }
-    if (
-      error.status === CONFLICT_STATUS &&
-      errorCode(error) === "already_registered"
-    ) {
+    if (code === "slug_taken") {
+      return t("register.slugTaken");
+    }
+    if (code === "reserved_slug" || code === "invalid_slug") {
+      return t("register.slugInvalid");
+    }
+    if (error.status === CONFLICT_STATUS && code === "already_registered") {
       return t("enroll.alreadyRegistered");
     }
   }
@@ -45,13 +46,15 @@ export default function Enroll(): React.JSX.Element {
   const navigate = useNavigate();
   const enroll = useEnrollWalletMutation();
   const [kvkNumber, setKvkNumber] = useState("");
+  const [slug, setSlug] = useState("");
   const [result, setResult] = useState<WalletEnrollment | null>(null);
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    enroll.mutate(kvkNumber.trim(), {
-      onSuccess: (data) => setResult(data),
-    });
+    enroll.mutate(
+      { kvkNumber: kvkNumber.trim(), slug: slug.trim() },
+      { onSuccess: (data) => setResult(data) },
+    );
   }
 
   if (result !== null) {
@@ -82,7 +85,8 @@ export default function Enroll(): React.JSX.Element {
     );
   }
 
-  const canSubmit = kvkNumber.trim() !== "" && !enroll.isPending;
+  const canSubmit =
+    kvkNumber.trim() !== "" && slug.trim() !== "" && !enroll.isPending;
 
   return (
     <>
@@ -106,6 +110,18 @@ export default function Enroll(): React.JSX.Element {
                 inputMode="numeric"
                 className="font-mono"
                 autoFocus
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5">
+              <span className="text-ink text-[13px] font-semibold">
+                {t("register.slug")}
+              </span>
+              <Input
+                value={slug}
+                onChange={(event) => setSlug(event.target.value)}
+                placeholder={t("register.slugPlaceholder")}
+                className="font-mono"
               />
             </label>
 

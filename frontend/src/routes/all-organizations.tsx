@@ -48,23 +48,15 @@ export default function AllOrganizations(): React.JSX.Element {
             : t("allOrganizations.count", { count: data?.length ?? 0 })
         }
         actions={
-          <>
-            <div className="w-64">
-              <Input
-                icon="search"
-                placeholder={t("allOrganizations.searchPlaceholder")}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                aria-label={t("allOrganizations.searchPlaceholder")}
-              />
-            </div>
-            <Button
-              icon="add"
-              onClick={() => void navigate("/admin/organizations/new")}
-            >
-              {t("allOrganizations.create")}
-            </Button>
-          </>
+          <div className="w-64">
+            <Input
+              icon="search"
+              placeholder={t("allOrganizations.searchPlaceholder")}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              aria-label={t("allOrganizations.searchPlaceholder")}
+            />
+          </div>
         }
       />
 
@@ -82,6 +74,9 @@ export default function AllOrganizations(): React.JSX.Element {
                 <Table.HeaderCell>
                   {t("allOrganizations.columnOrganization")}
                 </Table.HeaderCell>
+                <Table.HeaderCell>
+                  {t("allOrganizations.columnKvk")}
+                </Table.HeaderCell>
                 <Table.HeaderCell>{t("common.slug")}</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">
                   {t("allOrganizations.columnActions")}
@@ -89,9 +84,9 @@ export default function AllOrganizations(): React.JSX.Element {
               </Table.Head>
               <Table.Body>
                 {isPending ? (
-                  <Table.State colSpan={3}>{t("common.loading")}</Table.State>
+                  <Table.State colSpan={4}>{t("common.loading")}</Table.State>
                 ) : filtered.length === 0 ? (
-                  <Table.State colSpan={3}>
+                  <Table.State colSpan={4}>
                     {data && data.length > 0
                       ? t("allOrganizations.noMatch")
                       : t("allOrganizations.none")}
@@ -113,6 +108,9 @@ export default function AllOrganizations(): React.JSX.Element {
                             {org.name}
                           </span>
                         </Link>
+                      </Table.Cell>
+                      <Table.Cell className="text-ink-soft font-mono text-[12px]">
+                        {org.kvkNumber ?? "—"}
                       </Table.Cell>
                       <Table.Cell className="text-ink-soft font-mono text-[12px]">
                         {org.slug}

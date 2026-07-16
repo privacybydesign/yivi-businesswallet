@@ -17,25 +17,22 @@ import (
 
 // walletService is the surface the handler depends on.
 type walletService interface {
-	OpenWallet(ctx context.Context, requestorUserID uuid.UUID, kvkNumber string) (EnrollmentResult, error)
+	OpenWallet(ctx context.Context, requestorUserID uuid.UUID, kvkNumber, slug string) (RegistrationResult, error)
 	StartRegisterSession(ctx context.Context) (auth.Session, error)
-	Register(ctx context.Context, disclosureToken, kvkNumber string) (RegistrationOutcome, error)
-	GetInstance(ctx context.Context, id uuid.UUID) (Instance, error)
-	WalletForOrg(ctx context.Context, orgID uuid.UUID) (Instance, error)
+	Register(ctx context.Context, disclosureToken, kvkNumber, slug string) (RegistrationOutcome, error)
 	Representations(ctx context.Context, orgID uuid.UUID) ([]Representation, error)
 	ClaimRepresentation(ctx context.Context, orgID, repID, userID uuid.UUID) error
-	Suspend(ctx context.Context, orgID uuid.UUID) (Instance, error)
-	Revoke(ctx context.Context, orgID uuid.UUID) (Instance, error)
+	Suspend(ctx context.Context, orgID uuid.UUID) (organization.Organization, error)
+	Revoke(ctx context.Context, orgID uuid.UUID) (organization.Organization, error)
 }
 
-// sessionIssuer logs the registrant in after a successful public registration:
-// the identity disclosure already proved who they are.
+// sessionIssuer logs the registrant in after a successful public registration.
 type sessionIssuer interface {
 	Issue(ctx context.Context, w http.ResponseWriter, userID uuid.UUID, idempotencyToken string) error
 }
 
-// Handler serves the public registration API (no session yet), the central
-// "open a wallet" API for logged-in users, and the org-scoped wallet routes.
+// Handler serves the public registration API (no session yet), the logged-in
+// registration API, and the org-scoped wallet routes.
 type Handler struct {
 	service     walletService
 	issuer      sessionIssuer
@@ -56,16 +53,14 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	}
 
 	// Public self-service registration (no account required yet): authenticate
-	// via wallet disclosure, then bootstrap the wallet.
+	// via wallet disclosure, then register the business wallet.
 	mux.Handle("POST /register/session", respond.HandlerFunc(h.registerSession))
 	mux.Handle("POST /register", respond.HandlerFunc(h.register))
 
-	// Logged-in enrollment (uses the session user; no re-disclosure).
+	// Logged-in registration (register an additional company).
 	mux.Handle("POST /wallet", h.requireUser(respond.HandlerFunc(h.open)))
-	mux.Handle("GET /wallet/{id}", h.requireUser(respond.HandlerFunc(h.getInstance)))
 
 	// Org-scoped.
-	mux.Handle("GET /orgs/{slug}/wallet", orgScoped(respond.HandlerFunc(h.getForOrg)))
 	mux.Handle("GET /orgs/{slug}/wallet/representations", orgScoped(respond.HandlerFunc(h.listRepresentations)))
 	mux.Handle("POST /orgs/{slug}/wallet/representations/{id}/claim", orgScoped(respond.HandlerFunc(h.claim)))
 	mux.Handle("POST /orgs/{slug}/wallet/suspend", orgAdmin(respond.HandlerFunc(h.suspend)))
@@ -73,27 +68,23 @@ func (h *Handler) Register(mux *http.ServeMux) {
 }
 
 type enrollResponse struct {
-	Status                  string `json:"status"`
 	OrganizationSlug        string `json:"organizationSlug"`
 	LegalName               string `json:"legalName"`
 	KVKNumber               string `json:"kvkNumber"`
+	Status                  string `json:"status"`
 	RepresentationKind      string `json:"representationKind,omitempty"`
 	RepresentationAuthority string `json:"representationAuthority,omitempty"`
 }
 
-func toEnrollResponse(res EnrollmentResult) enrollResponse {
+func toEnrollResponse(res RegistrationResult) enrollResponse {
 	return enrollResponse{
-		Status:                  res.Instance.Status,
-		OrganizationSlug:        res.Instance.OrganizationSlug,
-		LegalName:               res.Instance.LegalName,
-		KVKNumber:               res.Instance.KVKNumber,
+		OrganizationSlug:        res.Organization.Slug,
+		LegalName:               res.Organization.Name,
+		KVKNumber:               res.Organization.KVKNumber,
+		Status:                  res.Organization.Status,
 		RepresentationKind:      res.RepresentationKind,
 		RepresentationAuthority: res.RepresentationAuthority,
 	}
-}
-
-func notRepresentative() error {
-	return &respond.APIError{Status: http.StatusForbidden, Code: "not_a_representative", Message: "you are not registered as a representative of this company"}
 }
 
 func (h *Handler) registerSession(w http.ResponseWriter, r *http.Request) error {
@@ -108,6 +99,7 @@ func (h *Handler) registerSession(w http.ResponseWriter, r *http.Request) error 
 type registerRequest struct {
 	DisclosureToken string `json:"disclosureToken"`
 	KVKNumber       string `json:"kvkNumber"`
+	Slug            string `json:"slug"`
 }
 
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) error {
@@ -124,18 +116,9 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_input", "kvkNumber is required")
 	}
 
-	outcome, err := h.service.Register(r.Context(), req.DisclosureToken, req.KVKNumber)
-	if errors.Is(err, ErrRegistrationInProgress) {
-		return &respond.APIError{Status: http.StatusConflict, Code: "registration_in_progress", Message: "a registration is already in progress for this company"}
-	}
-	if errors.Is(err, ErrAlreadyRegistered) {
-		return &respond.APIError{Status: http.StatusConflict, Code: "already_registered", Message: "this company already has a business wallet"}
-	}
-	if err != nil {
-		return mapError(err, "registering wallet")
-	}
-	if outcome.Result.Instance.Status == StatusRejected {
-		return notRepresentative()
+	outcome, err := h.service.Register(r.Context(), req.DisclosureToken, req.KVKNumber, req.Slug)
+	if e := mapError(err); e != nil {
+		return e
 	}
 
 	// The identity disclosure proved who they are; log them in.
@@ -148,6 +131,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) error {
 
 type openRequest struct {
 	KVKNumber string `json:"kvkNumber"`
+	Slug      string `json:"slug"`
 }
 
 func (h *Handler) open(w http.ResponseWriter, r *http.Request) error {
@@ -161,54 +145,19 @@ func (h *Handler) open(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	u := auth.UserFromContext(r.Context())
-	res, err := h.service.OpenWallet(r.Context(), u.ID, req.KVKNumber)
-	if errors.Is(err, ErrRegistrationInProgress) {
-		return &respond.APIError{Status: http.StatusConflict, Code: "registration_in_progress", Message: "a registration is already in progress for this company"}
+	res, err := h.service.OpenWallet(r.Context(), u.ID, req.KVKNumber, req.Slug)
+	if e := mapError(err); e != nil {
+		return e
 	}
-	if errors.Is(err, ErrAlreadyRegistered) {
-		return &respond.APIError{Status: http.StatusConflict, Code: "already_registered", Message: "this company already has a business wallet"}
-	}
-	if err != nil {
-		return mapError(err, "opening wallet")
-	}
-	if res.Instance.Status == StatusRejected {
-		return notRepresentative()
-	}
-
 	respond.JSON(w, r, http.StatusCreated, toEnrollResponse(res))
-	return nil
-}
-
-func (h *Handler) getInstance(w http.ResponseWriter, r *http.Request) error {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		return badRequest("invalid_id", "invalid wallet id")
-	}
-	// TODO(wallet-bootstrap): scope the lookup to the requester so one user
-	// cannot poll another user's registration.
-	in, err := h.service.GetInstance(r.Context(), id)
-	if err != nil {
-		return mapError(err, "getting wallet")
-	}
-	respond.JSON(w, r, http.StatusOK, in)
-	return nil
-}
-
-func (h *Handler) getForOrg(w http.ResponseWriter, r *http.Request) error {
-	org := organization.OrgFromContext(r.Context())
-	in, err := h.service.WalletForOrg(r.Context(), org.ID)
-	if err != nil {
-		return mapError(err, "getting org wallet")
-	}
-	respond.JSON(w, r, http.StatusOK, in)
 	return nil
 }
 
 func (h *Handler) listRepresentations(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	reps, err := h.service.Representations(r.Context(), org.ID)
-	if err != nil {
-		return mapError(err, "listing representations")
+	if e := mapError(err); e != nil {
+		return e
 	}
 	respond.JSON(w, r, http.StatusOK, reps)
 	return nil
@@ -221,8 +170,8 @@ func (h *Handler) claim(w http.ResponseWriter, r *http.Request) error {
 	}
 	org := organization.OrgFromContext(r.Context())
 	u := auth.UserFromContext(r.Context())
-	if err := h.service.ClaimRepresentation(r.Context(), org.ID, repID, u.ID); err != nil {
-		return mapError(err, "claiming representation")
+	if e := mapError(h.service.ClaimRepresentation(r.Context(), org.ID, repID, u.ID)); e != nil {
+		return e
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
@@ -230,21 +179,21 @@ func (h *Handler) claim(w http.ResponseWriter, r *http.Request) error {
 
 func (h *Handler) suspend(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
-	in, err := h.service.Suspend(r.Context(), org.ID)
-	if err != nil {
-		return mapError(err, "suspending wallet")
+	updated, err := h.service.Suspend(r.Context(), org.ID)
+	if e := mapError(err); e != nil {
+		return e
 	}
-	respond.JSON(w, r, http.StatusOK, in)
+	respond.JSON(w, r, http.StatusOK, updated)
 	return nil
 }
 
 func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
-	in, err := h.service.Revoke(r.Context(), org.ID)
-	if err != nil {
-		return mapError(err, "revoking wallet")
+	updated, err := h.service.Revoke(r.Context(), org.ID)
+	if e := mapError(err); e != nil {
+		return e
 	}
-	respond.JSON(w, r, http.StatusOK, in)
+	respond.JSON(w, r, http.StatusOK, updated)
 	return nil
 }
 
@@ -252,17 +201,30 @@ func badRequest(code, msg string) error {
 	return &respond.APIError{Status: http.StatusBadRequest, Code: code, Message: msg}
 }
 
-// mapError translates domain sentinels to API errors; ErrNotImplemented surfaces
-// as 501 so unbuilt seams are visible rather than a generic 500.
-func mapError(err error, action string) error {
+// mapError translates wallet/registration errors to API errors. It returns nil
+// for a nil error, an *APIError for known cases, and a wrapped error otherwise
+// (rendered as 500 by the HandlerFunc adapter).
+func mapError(err error) error {
 	switch {
-	case errors.Is(err, ErrNotImplemented):
-		return &respond.APIError{Status: http.StatusNotImplemented, Code: "not_implemented", Message: "not implemented yet"}
-	case errors.Is(err, ErrInstanceNotFound):
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrNotRepresentative):
+		return &respond.APIError{Status: http.StatusForbidden, Code: "not_a_representative", Message: "you are not registered as a representative of this company"}
+	case errors.Is(err, ErrAlreadyRegistered):
+		return &respond.APIError{Status: http.StatusConflict, Code: "already_registered", Message: "this company already has a business wallet"}
+	case errors.Is(err, ErrSlugTaken):
+		return &respond.APIError{Status: http.StatusConflict, Code: "slug_taken", Message: "slug already taken"}
+	case errors.Is(err, organization.ErrReservedSlug):
+		return badRequest("reserved_slug", "slug is reserved and cannot be used")
+	case errors.Is(err, organization.ErrInvalidSlug):
+		return badRequest("invalid_slug", "slug may only contain lowercase letters, numbers, and hyphens")
+	case errors.Is(err, organization.ErrNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "wallet_not_found", Message: "wallet not found"}
 	case errors.Is(err, ErrRepresentationNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "representation_not_found", Message: "representation not found"}
+	case errors.Is(err, ErrNotImplemented):
+		return &respond.APIError{Status: http.StatusNotImplemented, Code: "not_implemented", Message: "not implemented yet"}
 	default:
-		return fmt.Errorf("%s: %w", action, err)
+		return fmt.Errorf("wallet: %w", err)
 	}
 }

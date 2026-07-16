@@ -25,10 +25,7 @@ func memberFixture(t *testing.T) (*organization.Store, uuid.UUID) {
 	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
-	org, err := store.Create(ctx, "Acme", "acme")
-	if err != nil {
-		t.Fatalf("Create org: %v", err)
-	}
+	org := makeOrg(t, pool, "Acme", "acme")
 
 	eng, err := store.CreateDepartment(ctx, org.ID, "Engineering")
 	if err != nil {
@@ -80,10 +77,7 @@ func TestGetMember(t *testing.T) {
 	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
-	org, err := store.Create(ctx, "Acme", "acme")
-	if err != nil {
-		t.Fatalf("Create org: %v", err)
-	}
+	org := makeOrg(t, pool, "Acme", "acme")
 
 	var userID uuid.UUID
 	if err := pool.QueryRow(ctx,
