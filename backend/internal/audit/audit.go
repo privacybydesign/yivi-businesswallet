@@ -39,6 +39,8 @@ const (
 	QerdsMessageSent        = "qerds.message_sent"
 	QerdsMessageReceived    = "qerds.message_received"
 	QerdsAddressProvisioned = "qerds.address_provisioned"
+	QerdsContactAdded       = "qerds.contact_added"
+	QerdsContactDeleted     = "qerds.contact_deleted"
 
 	WalletOpened          = "wallet.opened"
 	WalletBootstrapped    = "wallet.bootstrapped"
@@ -55,6 +57,7 @@ const (
 	TargetUser         = "user"
 	TargetQerdsMessage = "qerds_message"
 	TargetQerdsAddress = "qerds_address"
+	TargetQerdsContact = "qerds_contact"
 
 	TargetWalletInstance = "wallet_instance"
 	TargetRepresentation = "wallet_representation"

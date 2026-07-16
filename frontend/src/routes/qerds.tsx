@@ -61,6 +61,13 @@ export default function Qerds(): React.JSX.Element {
           <>
             <Button
               variant="secondary"
+              icon="personal"
+              onClick={() => void navigate(`/${slug}/qerds/contacts`)}
+            >
+              {t("qerds.contacts.title")}
+            </Button>
+            <Button
+              variant="secondary"
               icon="lock"
               onClick={() => void navigate(`/${slug}/qerds/addresses`)}
             >

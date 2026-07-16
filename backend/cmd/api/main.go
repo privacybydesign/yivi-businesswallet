@@ -161,7 +161,7 @@ func run() error {
 	}
 	qerdsStore := qerds.NewStore(pool, audit.NewDBRecorder())
 	qerdsService := qerds.NewService(qerdsStore, qerdsStore, qerdsProv)
-	qerdsHandler := qerds.NewHandler(qerdsService, qerdsStore, qerdsStore, requireUser, orgHandler.Authorize, cfg.QerdsWebhookSecret, cfg.QerdsDefaultAddressDomain)
+	qerdsHandler := qerds.NewHandler(qerdsService, qerdsStore, qerdsStore, qerdsStore, requireUser, orgHandler.Authorize, cfg.QerdsWebhookSecret, cfg.QerdsDefaultAddressDomain)
 
 	registry, err := newRegistryProvider(cfg)
 	if err != nil {
