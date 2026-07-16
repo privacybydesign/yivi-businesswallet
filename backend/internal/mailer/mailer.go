@@ -96,6 +96,12 @@ func (SMTPSender) Send(cfg Config, msg Message) error {
 	return client.Quit()
 }
 
+// headerReplacer strips CR and LF from header values so a newline embedded in an
+// org-admin-controlled input (from name/address, recipient, subject) cannot
+// inject extra headers or split the message. The SMTP envelope (Mail/Rcpt) is
+// already CR/LF-validated by net/smtp; the hand-built MIME headers below are not.
+var headerReplacer = strings.NewReplacer("\r", "", "\n", "")
+
 // buildMIME renders a multipart/alternative message (text + HTML).
 func buildMIME(cfg Config, msg Message) string {
 	from := cfg.FromAddress
@@ -104,9 +110,9 @@ func buildMIME(cfg Config, msg Message) string {
 	}
 	const boundary = "ybw-boundary-9f1c2a"
 	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", from)
-	fmt.Fprintf(&b, "To: %s\r\n", msg.To)
-	fmt.Fprintf(&b, "Subject: %s\r\n", msg.Subject)
+	fmt.Fprintf(&b, "From: %s\r\n", headerReplacer.Replace(from))
+	fmt.Fprintf(&b, "To: %s\r\n", headerReplacer.Replace(msg.To))
+	fmt.Fprintf(&b, "Subject: %s\r\n", headerReplacer.Replace(msg.Subject))
 	b.WriteString("MIME-Version: 1.0\r\n")
 	fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=%s\r\n\r\n", boundary)
 
