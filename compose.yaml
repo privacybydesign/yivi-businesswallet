@@ -36,6 +36,9 @@ services:
       context: postguard-sidecar
     environment:
       PG_SIDECAR_TOKEN: ${POSTGUARD_SHARED_SECRET:?POSTGUARD_SHARED_SECRET must be set}
+      # PostGuard for Business backend (production). Override per deployment.
+      PG_PKG_URL: ${POSTGUARD_PKG_URL:-https://pkg.postguard.eu}
+      PG_CRYPTIFY_URL: ${POSTGUARD_CRYPTIFY_URL:-https://storage.postguard.eu}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8090/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s

@@ -8,8 +8,8 @@
 
 const DEFAULT_PORT = 8090;
 const DEFAULT_BIND = "0.0.0.0"; // reachable by the backend container; never published to the host
-const DEFAULT_PKG_URL = "https://pkg.staging.postguard.eu";
-const DEFAULT_CRYPTIFY_URL = "https://storage.staging.postguard.eu";
+const DEFAULT_PKG_URL = "https://pkg.postguard.eu";
+const DEFAULT_CRYPTIFY_URL = "https://storage.postguard.eu";
 const DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB per request
 
 export interface Config {
