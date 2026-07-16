@@ -31,9 +31,12 @@ type OfferRequest struct {
 	Claims map[string]any
 	// ExpirationSeconds is the issued credential's lifetime.
 	ExpirationSeconds int
-	// UseTxCode requests a short out-of-band PIN the recipient types into their
-	// wallet, binding the claim to the intended recipient when the offer link
-	// travels over an untrusted channel (email / QERDS).
+	// UseTxCode requests a short numeric PIN (tx_code) that the recipient's wallet
+	// prompts for to complete the pre-authorized-code flow. Note: we currently
+	// deliver the PIN together with the offer link (claim page / email / QERDS),
+	// so it is a wallet-flow step rather than an out-of-band factor — the opaque
+	// claim token remains the access boundary. Real recipient binding would
+	// require sending the PIN over a genuinely separate channel.
 	UseTxCode bool
 }
 

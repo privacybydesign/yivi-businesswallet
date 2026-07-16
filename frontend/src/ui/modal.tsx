@@ -1,6 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "./icon";
+
+// Selector for the elements a keyboard user can Tab between inside the dialog.
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface ModalProps {
   title: string;
@@ -21,10 +25,43 @@ export function Modal({
   footer,
   wide = false,
 }: ModalProps): React.JSX.Element {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Move focus into the dialog on open and restore it to the trigger on close.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const first = dialog?.querySelector<HTMLElement>(FOCUSABLE);
+    (first ?? dialog)?.focus();
+    return () => previouslyFocused?.focus?.();
+  }, []);
+
+  // Escape closes; Tab is trapped inside the dialog.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         onClose();
+        return;
+      }
+      const dialog = dialogRef.current;
+      if (event.key !== "Tab" || !dialog) {
+        return;
+      }
+      const items = dialog.querySelectorAll<HTMLElement>(FOCUSABLE);
+      if (items.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === dialog)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -37,9 +74,11 @@ export function Modal({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         className={[
           "rounded-yivi bg-surface shadow-card my-8 flex w-full flex-col border",
