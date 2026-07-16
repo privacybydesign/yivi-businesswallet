@@ -40,10 +40,11 @@ func scanMessage(row rowScanner) (Message, error) {
 	return m, nil
 }
 
-// CreateOutbound persists a new outbound message in the "submitted" state and
-// audits the send, before the provider is called. If the provider call later
-// fails, the row stays submitted and is retryable.
-func (s *Store) CreateOutbound(ctx context.Context, orgID uuid.UUID, sender, recipient, subject, body string) (Message, error) {
+// CreateOutbound persists a new outbound message in the "submitted" state with
+// its attachments and audits the send, before the provider is called — all in
+// one transaction. If the provider call later fails, the row stays submitted
+// and is retryable.
+func (s *Store) CreateOutbound(ctx context.Context, orgID uuid.UUID, sender, recipient, subject, body string, attachments []qerdsprovider.Attachment) (Message, error) {
 	var m Message
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `INSERT INTO qerds_messages
@@ -55,9 +56,12 @@ func (s *Store) CreateOutbound(ctx context.Context, orgID uuid.UUID, sender, rec
 		if err != nil {
 			return fmt.Errorf("qerds: create outbound org %s: %w", orgID, err)
 		}
+		if err := insertAttachments(ctx, q, m.ID, attachments); err != nil {
+			return err
+		}
 		return s.audit.Record(ctx, q, audit.QerdsMessageSent,
 			audit.Target{Type: audit.TargetQerdsMessage, ID: m.ID.String(), OrgID: &orgID},
-			audit.Created(map[string]any{"recipient": recipient, "subject": subject}))
+			audit.Created(map[string]any{"recipient": recipient, "subject": subject, "attachmentCount": len(attachments)}))
 	})
 	return m, err
 }
@@ -121,6 +125,9 @@ func (s *Store) CreateInbound(ctx context.Context, orgID uuid.UUID, in qerdsprov
 		}
 		created = true
 
+		if err := insertAttachments(ctx, q, m.ID, in.Attachments); err != nil {
+			return err
+		}
 		if err := insertEvidence(ctx, q, m.ID, in.Evidence); err != nil {
 			return err
 		}
@@ -165,9 +172,13 @@ func (s *Store) GetWithEvidence(ctx context.Context, orgID, id uuid.UUID) (Messa
 		return MessageWithEvidence{}, fmt.Errorf("qerds: get message %s: %w", id, err)
 	}
 
+	attachments, err := s.listAttachments(ctx, m.ID)
+	if err != nil {
+		return MessageWithEvidence{}, err
+	}
 	evidence, err := s.listEvidence(ctx, m.ID)
 	if err != nil {
 		return MessageWithEvidence{}, err
 	}
-	return MessageWithEvidence{Message: m, Evidence: evidence}, nil
+	return MessageWithEvidence{Message: m, Attachments: attachments, Evidence: evidence}, nil
 }

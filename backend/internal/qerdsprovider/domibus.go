@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -51,6 +52,7 @@ const (
 	propFinalRecipient = "finalRecipient"
 	payloadCID         = "cid:message"
 	payloadMimeType    = "text/plain"
+	attachmentCIDBase  = "cid:attachment-"
 
 	domibusErrBodyLimit = 8 << 10
 )
@@ -181,6 +183,44 @@ func (p *DomibusProvider) call(ctx context.Context, action string, payload any, 
 }
 
 func (p *DomibusProvider) buildSubmitEnvelope(msg OutboundMessage) submitEnvelope {
+	// The body is always the first payload (cid:message); each attachment is an
+	// additional ebMS3 payload part carried by its own content id.
+	parts := []partInfo{{
+		Href:       payloadCID,
+		Properties: []property{{Name: "MimeType", Value: payloadMimeType}},
+	}}
+	payloads := []submitPayload{{
+		// Empty Space resets the inherited backendNS to no namespace.
+		XMLName:     xml.Name{Local: "payload"},
+		PayloadID:   payloadCID,
+		ContentType: payloadMimeType,
+		Value: xmlValue{
+			XMLName: xml.Name{Local: "value"},
+			Value:   base64.StdEncoding.EncodeToString([]byte(msg.Body)),
+		},
+	}}
+	for i, a := range msg.Attachments {
+		cid := attachmentCIDBase + strconv.Itoa(i)
+		mimeType := a.ContentType
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		props := []property{{Name: "MimeType", Value: mimeType}}
+		if a.Filename != "" {
+			props = append(props, property{Name: "PayloadName", Value: a.Filename})
+		}
+		parts = append(parts, partInfo{Href: cid, Properties: props})
+		payloads = append(payloads, submitPayload{
+			XMLName:     xml.Name{Local: "payload"},
+			PayloadID:   cid,
+			ContentType: mimeType,
+			Value: xmlValue{
+				XMLName: xml.Name{Local: "value"},
+				Value:   base64.StdEncoding.EncodeToString(a.Content),
+			},
+		})
+	}
+
 	return submitEnvelope{
 		XMLName: xml.Name{Space: soapNS, Local: "Envelope"},
 		Header: submitHeader{
@@ -200,28 +240,14 @@ func (p *DomibusProvider) buildSubmitEnvelope(msg OutboundMessage) submitEnvelop
 						{Name: propOriginalSender, Value: string(msg.Sender)},
 						{Name: propFinalRecipient, Value: string(msg.Recipient)},
 					},
-					PayloadInfo: payloadInfo{
-						PartInfo: partInfo{
-							Href:       payloadCID,
-							Properties: []property{{Name: "MimeType", Value: payloadMimeType}},
-						},
-					},
+					PayloadInfo: payloadInfo{PartInfo: parts},
 				},
 			},
 		},
 		Body: submitBody{
 			SubmitRequest: submitRequest{
 				XMLName: xml.Name{Space: backendNS, Local: "submitRequest"},
-				Payload: submitPayload{
-					// Empty Space resets the inherited backendNS to no namespace.
-					XMLName:     xml.Name{Local: "payload"},
-					PayloadID:   payloadCID,
-					ContentType: payloadMimeType,
-					Value: xmlValue{
-						XMLName: xml.Name{Local: "value"},
-						Value:   base64.StdEncoding.EncodeToString([]byte(msg.Body)),
-					},
-				},
+				Payload: payloads,
 			},
 		},
 	}
@@ -287,7 +313,7 @@ type property struct {
 }
 
 type payloadInfo struct {
-	PartInfo partInfo `xml:"PartInfo"`
+	PartInfo []partInfo `xml:"PartInfo"`
 }
 
 type partInfo struct {
@@ -297,7 +323,7 @@ type partInfo struct {
 
 type submitRequest struct {
 	XMLName xml.Name
-	Payload submitPayload
+	Payload []submitPayload `xml:"payload"`
 }
 
 // submitPayload and its children are UNqualified (empty namespace) even though

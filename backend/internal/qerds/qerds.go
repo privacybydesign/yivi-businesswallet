@@ -13,11 +13,12 @@ import (
 )
 
 var (
-	ErrMessageNotFound = errors.New("qerds: message not found")
-	ErrNoSenderAddress = errors.New("qerds: organization has no default digital address")
-	ErrAddressNotFound = errors.New("qerds: digital address not found")
-	ErrAddressTaken    = errors.New("qerds: digital address already taken")
-	ErrSenderNotOwned  = errors.New("qerds: sender address not owned by organization")
+	ErrMessageNotFound    = errors.New("qerds: message not found")
+	ErrAttachmentNotFound = errors.New("qerds: attachment not found")
+	ErrNoSenderAddress    = errors.New("qerds: organization has no default digital address")
+	ErrAddressNotFound    = errors.New("qerds: digital address not found")
+	ErrAddressTaken       = errors.New("qerds: digital address already taken")
+	ErrSenderNotOwned     = errors.New("qerds: sender address not owned by organization")
 
 	ErrContactNotFound     = errors.New("qerds: contact not found")
 	ErrContactAddressTaken = errors.New("qerds: contact address already saved")
@@ -64,6 +65,20 @@ type Evidence struct {
 	CreatedAt          time.Time `json:"createdAt"`
 }
 
+// Attachment is a message payload's metadata. The bytes are content-opaque and
+// fetched separately (download endpoint), never inlined in list/detail JSON:
+// payloads are large and possibly E2E-encrypted. content_hash + size_bytes are
+// the integrity metadata the ERDS store keeps.
+type Attachment struct {
+	ID          uuid.UUID `json:"id"`
+	MessageID   uuid.UUID `json:"messageId"`
+	Filename    string    `json:"filename"`
+	ContentType string    `json:"contentType"`
+	ContentHash string    `json:"contentHash"`
+	SizeBytes   int64     `json:"sizeBytes"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
 // Address is an organization's QERDS unique digital address (Art 6(1)(j)).
 type Address struct {
 	ID             uuid.UUID `json:"id"`
@@ -74,9 +89,10 @@ type Address struct {
 	CreatedAt      time.Time `json:"createdAt"`
 }
 
-// MessageWithEvidence is a message plus its full evidence chain, for the detail
-// view.
+// MessageWithEvidence is a message plus its attachment metadata and full
+// evidence chain, for the detail view.
 type MessageWithEvidence struct {
 	Message
-	Evidence []Evidence `json:"evidence"`
+	Attachments []Attachment `json:"attachments"`
+	Evidence    []Evidence   `json:"evidence"`
 }

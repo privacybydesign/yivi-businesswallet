@@ -19,8 +19,9 @@ export interface RequestOptions<T> {
   schema: z.ZodType<T>;
   method?: HttpMethod;
   /**
-   * Request body. A `FormData` value is sent as-is (multipart/form-data, with
-   * the browser setting the boundary); any other value is JSON-serialized.
+   * Request body. A `FormData` value is sent as multipart/form-data (the
+   * browser sets the boundary Content-Type); any other value is serialized as
+   * JSON.
    */
   body?: unknown;
   headers?: Record<string, string>;
@@ -124,7 +125,7 @@ async function performFetch<T>(
     Accept: "application/json",
     ...options.headers,
   };
-  // Let the browser set multipart's Content-Type (with boundary) for FormData.
+  // Let the browser set the multipart boundary Content-Type for FormData.
   if (hasBody && !isFormData) {
     headers["Content-Type"] = "application/json";
   }
@@ -156,6 +157,56 @@ async function performFetch<T>(
       throw new ApiValidationError(url, parsed.error.issues);
     }
     return parsed.data;
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", onExternalAbort);
+  }
+}
+
+const CONTENT_DISPOSITION_FILENAME = /filename="?([^"]+)"?/i;
+
+/** A downloaded binary body plus the server-suggested filename, if any. */
+export interface BlobResponse {
+  blob: Blob;
+  filename: string | null;
+}
+
+/**
+ * Fetches a binary response (e.g. a file download) with credentials, throwing
+ * {@link ApiError} on a non-2xx status. Unlike {@link request} it does not
+ * validate or retry — it is for opaque payloads, not JSON resources.
+ */
+export async function requestBlob(
+  path: string,
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<BlobResponse> {
+  const url = `${API_BASE_URL}${path}`;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  const onExternalAbort = () => controller.abort(options.signal?.reason);
+  options.signal?.addEventListener("abort", onExternalAbort, { once: true });
+
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/octet-stream" },
+      signal: controller.signal,
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      if (res.status === UNAUTHORIZED_STATUS) {
+        onUnauthorized?.();
+      }
+      const body = await parseBody(res).catch(() => undefined);
+      throw new ApiError(res.status, res.statusText, url, body);
+    }
+
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = CONTENT_DISPOSITION_FILENAME.exec(disposition);
+    return { blob: await res.blob(), filename: match ? match[1] : null };
   } finally {
     clearTimeout(timeout);
     options.signal?.removeEventListener("abort", onExternalAbort);

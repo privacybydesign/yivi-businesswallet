@@ -531,6 +531,12 @@ export const en = {
       recipientPlaceholder: "recipient@example.eu",
       subjectLabel: "Subject",
       bodyLabel: "Message",
+      attachmentsLabel: "Attachments",
+      addAttachment: "Add attachment",
+      removeAttachment: "Remove {{name}}",
+      tooManyAttachments: "You can attach at most {{max}} files.",
+      attachmentTooLarge: "Each attachment must be {{size}} or smaller.",
+      attachmentsTooLarge: "Attachments must total {{size}} or less.",
       note: "Delivery is asynchronous: once accepted, evidence and delivery receipts arrive over time.",
       recipientRequired: "Enter a recipient address.",
       recipientInvalid: "Enter a valid recipient address.",
@@ -538,6 +544,11 @@ export const en = {
       noSenderAddress:
         "Your organization has no default digital address. Provision one first.",
       error: "Could not send message: {{message}}",
+    },
+    attachments: {
+      title: "Attachments",
+      download: "Download",
+      downloadError: "Could not download the attachment. Please try again.",
     },
     addresses: {
       title: "Digital addresses",

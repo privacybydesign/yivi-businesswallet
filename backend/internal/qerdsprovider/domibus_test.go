@@ -70,6 +70,40 @@ func TestDomibusBuildSubmitEnvelope(t *testing.T) {
 	}
 }
 
+func TestDomibusBuildSubmitEnvelopeWithAttachment(t *testing.T) {
+	p := testDomibus()
+	envelope := p.buildSubmitEnvelope(OutboundMessage{
+		Sender:    "alice@qerds.localhost",
+		Recipient: "bob@qerds.localhost",
+		Subject:   "hello",
+		Body:      "world",
+		Attachments: []Attachment{
+			{Filename: "filing.pdf", ContentType: "application/pdf", Content: []byte("payload-bytes")},
+		},
+	})
+
+	raw, err := xml.Marshal(envelope)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	doc := string(raw)
+
+	// The body remains the first payload; the attachment is a second payload
+	// carried by its own content id, with its bytes base64-encoded.
+	for _, want := range []string{
+		payloadCID,
+		attachmentCIDBase + "0",
+		"filing.pdf",
+		"application/pdf",
+		base64.StdEncoding.EncodeToString([]byte("world")),
+		base64.StdEncoding.EncodeToString([]byte("payload-bytes")),
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("submit envelope missing %q\n%s", want, doc)
+		}
+	}
+}
+
 func TestDomibusParseSubmitResponse(t *testing.T) {
 	const body = `<?xml version="1.0"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">

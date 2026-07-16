@@ -13,7 +13,7 @@ import (
 // messageStore is the write/coordination surface the service needs; reads for
 // the API go through the store directly from the handler.
 type messageStore interface {
-	CreateOutbound(ctx context.Context, orgID uuid.UUID, sender, recipient, subject, body string) (Message, error)
+	CreateOutbound(ctx context.Context, orgID uuid.UUID, sender, recipient, subject, body string, attachments []qerdsprovider.Attachment) (Message, error)
 	RecordSent(ctx context.Context, messageID uuid.UUID, receipt qerdsprovider.SendReceipt) error
 	CreateInbound(ctx context.Context, orgID uuid.UUID, in qerdsprovider.InboundMessage) (Message, bool, error)
 }
@@ -50,7 +50,7 @@ func NewService(messages messageStore, addresses addressStore, prov provider) *S
 // The from parameter is the chosen sending address; empty means "use the
 // organization's default". A non-empty from must be one of the org's own
 // addresses (ErrSenderNotOwned otherwise).
-func (s *Service) Send(ctx context.Context, orgID uuid.UUID, from, recipient, subject, body string) (Message, error) {
+func (s *Service) Send(ctx context.Context, orgID uuid.UUID, from, recipient, subject, body string, attachments []qerdsprovider.Attachment) (Message, error) {
 	sender, err := s.resolveSender(ctx, orgID, from)
 	if err != nil {
 		return Message{}, err
@@ -61,16 +61,17 @@ func (s *Service) Send(ctx context.Context, orgID uuid.UUID, from, recipient, su
 		return Message{}, fmt.Errorf("qerds: resolve recipient %q: %w", recipient, err)
 	}
 
-	msg, err := s.messages.CreateOutbound(ctx, orgID, sender.Address, string(resolved), subject, body)
+	msg, err := s.messages.CreateOutbound(ctx, orgID, sender.Address, string(resolved), subject, body, attachments)
 	if err != nil {
 		return Message{}, err
 	}
 
 	receipt, err := s.provider.Send(ctx, qerdsprovider.OutboundMessage{
-		Sender:    qerdsprovider.Address(sender.Address),
-		Recipient: resolved,
-		Subject:   subject,
-		Body:      body,
+		Sender:      qerdsprovider.Address(sender.Address),
+		Recipient:   resolved,
+		Subject:     subject,
+		Body:        body,
+		Attachments: attachments,
 	})
 	if err != nil {
 		// Persisted and audited; retryable. Surface as the submitted message.

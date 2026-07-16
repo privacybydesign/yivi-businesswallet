@@ -71,12 +71,16 @@ export function useQerdsAddressesQuery(
   });
 }
 
-export function useSendQerdsMessageMutation(
-  slug: string,
-): UseMutationResult<
+export function useSendQerdsMessageMutation(slug: string): UseMutationResult<
   QerdsMessage,
   Error,
-  { sender?: string; recipient: string; subject: string; body: string }
+  {
+    sender?: string;
+    recipient: string;
+    subject: string;
+    body: string;
+    attachments?: File[];
+  }
 > {
   const queryClient = useQueryClient();
   const { t } = useTranslation();

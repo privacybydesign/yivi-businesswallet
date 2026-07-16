@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -15,8 +19,20 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
+// Attachment limits. Payloads are stored inline as bytes (blob-column MVP), so
+// these bound both the request and a single message's row footprint.
+const (
+	attachmentFormKey       = "attachments"
+	maxAttachmentBytes      = 25 << 20 // 25 MiB per file
+	maxAttachmentTotalBytes = 50 << 20 // 50 MiB per message
+	maxAttachmentCount      = 20
+	multipartMemoryBytes    = 8 << 20 // buffer in memory before spilling to a temp file
+	multipartOverheadBytes  = 1 << 20 // headroom over the payload cap for framing + text fields
+	defaultContentType      = "application/octet-stream"
+)
+
 type sender interface {
-	Send(ctx context.Context, orgID uuid.UUID, from, recipient, subject, body string) (Message, error)
+	Send(ctx context.Context, orgID uuid.UUID, from, recipient, subject, body string, attachments []qerdsprovider.Attachment) (Message, error)
 	Poll(ctx context.Context, orgID uuid.UUID) (int, error)
 	ReceiveInbound(ctx context.Context, in qerdsprovider.InboundMessage) error
 }
@@ -24,6 +40,7 @@ type sender interface {
 type reader interface {
 	List(ctx context.Context, orgID uuid.UUID) ([]Message, error)
 	GetWithEvidence(ctx context.Context, orgID, id uuid.UUID) (MessageWithEvidence, error)
+	GetAttachmentContent(ctx context.Context, orgID, messageID, attachmentID uuid.UUID) (AttachmentContent, error)
 }
 
 type addressManager interface {
@@ -74,6 +91,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/qerds/messages", orgScoped(respond.HandlerFunc(h.listMessages)))
 	mux.Handle("POST /orgs/{slug}/qerds/messages", orgScoped(respond.HandlerFunc(h.sendMessage)))
 	mux.Handle("GET /orgs/{slug}/qerds/messages/{id}", orgScoped(respond.HandlerFunc(h.getMessage)))
+	mux.Handle("GET /orgs/{slug}/qerds/messages/{id}/attachments/{attachmentId}", orgScoped(respond.HandlerFunc(h.downloadAttachment)))
 	mux.Handle("POST /orgs/{slug}/qerds/poll", orgScoped(respond.HandlerFunc(h.poll)))
 
 	mux.Handle("GET /orgs/{slug}/qerds/addresses", orgScoped(respond.HandlerFunc(h.listAddresses)))
@@ -98,31 +116,40 @@ func (h *Handler) listMessages(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-type sendMessageRequest struct {
-	// Sender is the chosen "from" address; empty means the org default.
-	Sender    string `json:"sender"`
-	Recipient string `json:"recipient"`
-	Subject   string `json:"subject"`
-	Body      string `json:"body"`
-}
-
+// sendMessage accepts multipart/form-data: the text fields sender, recipient,
+// subject and body plus zero or more file parts under the "attachments" key.
+// Multipart (rather than JSON) keeps payload bytes off the base64 bloat path.
+// An empty sender means the org default; a non-empty one must be an address the
+// org owns.
 func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request) error {
-	var req sendMessageRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return badRequest("invalid_body", "invalid request body")
+	// Bound the whole request body before parsing so an oversized upload fails
+	// fast, rather than buffering to memory and spilling to a temp file before
+	// parseAttachments ever gets to enforce its limits. The headroom covers the
+	// multipart framing and text fields around the attachment payload cap.
+	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentTotalBytes+multipartOverheadBytes)
+
+	if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil {
+		return badRequest("invalid_body", "invalid multipart form")
 	}
-	req.Sender = strings.TrimSpace(req.Sender)
-	req.Recipient = strings.TrimSpace(req.Recipient)
-	req.Subject = strings.TrimSpace(req.Subject)
-	if req.Recipient == "" {
+
+	sender := strings.TrimSpace(r.FormValue("sender"))
+	recipient := strings.TrimSpace(r.FormValue("recipient"))
+	subject := strings.TrimSpace(r.FormValue("subject"))
+	body := r.FormValue("body")
+	if recipient == "" {
 		return badRequest("invalid_input", "recipient is required")
 	}
-	if req.Subject == "" {
+	if subject == "" {
 		return badRequest("invalid_input", "subject is required")
 	}
 
+	attachments, err := parseAttachments(r)
+	if err != nil {
+		return err
+	}
+
 	org := organization.OrgFromContext(r.Context())
-	msg, err := h.service.Send(r.Context(), org.ID, req.Sender, req.Recipient, req.Subject, req.Body)
+	msg, err := h.service.Send(r.Context(), org.ID, sender, recipient, subject, body, attachments)
 	if errors.Is(err, ErrNoSenderAddress) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "no_sender_address", Message: "organization has no default digital address"}
 	}
@@ -134,6 +161,99 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	respond.JSON(w, r, http.StatusAccepted, msg)
+	return nil
+}
+
+// parseAttachments reads the uploaded file parts into provider attachments,
+// enforcing the per-file, total and count limits. Content type comes from the
+// part header (opaque — never sniffed), defaulting to octet-stream.
+func parseAttachments(r *http.Request) ([]qerdsprovider.Attachment, error) {
+	if r.MultipartForm == nil {
+		return nil, nil
+	}
+	files := r.MultipartForm.File[attachmentFormKey]
+	if len(files) > maxAttachmentCount {
+		return nil, badRequest("too_many_attachments", "too many attachments")
+	}
+
+	var total int64
+	attachments := make([]qerdsprovider.Attachment, 0, len(files))
+	for _, fh := range files {
+		if fh.Size > maxAttachmentBytes {
+			return nil, badRequest("attachment_too_large", fmt.Sprintf("attachment %q exceeds the size limit", fh.Filename))
+		}
+		total += fh.Size
+		if total > maxAttachmentTotalBytes {
+			return nil, badRequest("attachments_too_large", "attachments exceed the total size limit")
+		}
+
+		content, err := readMultipartFile(fh)
+		if err != nil {
+			return nil, err
+		}
+
+		contentType := fh.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = defaultContentType
+		}
+		filename := filepath.Base(strings.TrimSpace(fh.Filename))
+		if filename == "" || filename == "." || filename == string(filepath.Separator) {
+			filename = "attachment"
+		}
+		attachments = append(attachments, qerdsprovider.Attachment{
+			Filename:    filename,
+			ContentType: contentType,
+			Content:     content,
+		})
+	}
+	return attachments, nil
+}
+
+func readMultipartFile(fh *multipart.FileHeader) ([]byte, error) {
+	f, err := fh.Open()
+	if err != nil {
+		return nil, fmt.Errorf("opening attachment %q: %w", fh.Filename, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	// Bound the read defensively: fh.Size is advisory, so cap at one byte over
+	// the limit and reject if exceeded rather than trusting the reported size.
+	content, err := io.ReadAll(io.LimitReader(f, maxAttachmentBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading attachment %q: %w", fh.Filename, err)
+	}
+	if int64(len(content)) > maxAttachmentBytes {
+		return nil, badRequest("attachment_too_large", fmt.Sprintf("attachment %q exceeds the size limit", fh.Filename))
+	}
+	return content, nil
+}
+
+func (h *Handler) downloadAttachment(w http.ResponseWriter, r *http.Request) error {
+	messageID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid message id")
+	}
+	attachmentID, err := uuid.Parse(r.PathValue("attachmentId"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid attachment id")
+	}
+
+	org := organization.OrgFromContext(r.Context())
+	att, err := h.messages.GetAttachmentContent(r.Context(), org.ID, messageID, attachmentID)
+	if errors.Is(err, ErrAttachmentNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "attachment_not_found", Message: "attachment not found"}
+	}
+	if err != nil {
+		return fmt.Errorf("getting qerds attachment: %w", err)
+	}
+
+	w.Header().Set("Content-Type", att.ContentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", att.Filename))
+	w.Header().Set("Content-Length", strconv.Itoa(len(att.Content)))
+	// Content is opaque and provider-supplied; never let the browser sniff it.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(att.Content)
 	return nil
 }
 

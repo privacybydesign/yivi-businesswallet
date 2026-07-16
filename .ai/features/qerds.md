@@ -132,9 +132,13 @@ edge.
   qualified_timestamp_send, created_at, updated_at)`. `provider_ref` is the correlation key into
   the provider — our request-id never exists on their side.
 - **`qerds_attachments`** — `(id, message_id FK, filename, content_type, content_hash, size_bytes,
-  storage_ref)`. Content is large and possibly E2E-encrypted ciphertext we cannot read — the store
-  is **content-opaque**; the row holds the hash + integrity metadata, bytes live in blob
-  storage/column.
+  content, storage_ref)`. Content is large and possibly E2E-encrypted ciphertext we cannot read —
+  the store is **content-opaque**; the row holds the hash + integrity metadata. **Current MVP: bytes
+  live inline in the `content` BYTEA column** (blob-column). `storage_ref` is reserved for a later
+  object-storage backend (bytes elsewhere, referenced by the column) — the swap stays a code change
+  behind the store interface, not a schema break. Uploaded over multipart on `POST .../messages`,
+  streamed back via `GET .../messages/{id}/attachments/{attachmentId}` (org-scoped by join). Per-file
+  / per-message / count limits are enforced in the handler.
 - **`qerds_evidence`** — **append-only**. `(id, message_id FK, evidence_type, provider_ref,
   qualified_timestamp, raw_evidence bytea, verified_at, created_at)`. Never updated, only inserted.
   Backs the Art 5(1)(n) "access, store and verify" dashboard.
@@ -185,8 +189,10 @@ into unrelated wallet features.
 
 `src/api/` resource client + query hooks; `src/routes/` for inbox/outbox list, message detail with
 an **evidence panel** (the "verify" half of Art 5(1)(n) — show qualified timestamps + the receipt
-chain, allow export/validate), a compose flow with directory-backed recipient lookup, and address
-management in org settings.
+chain, allow export/validate), a compose flow with directory-backed recipient lookup and an
+attachment picker (multipart upload, client-side size/count limits mirroring the handler), an
+attachment list on the detail view with credentialed download, and address management in org
+settings.
 
 ---
 
@@ -274,8 +280,12 @@ default** provider.
   and digital-address management (`src/api/qerds*`, `src/routes/qerds*`).
 - **Dev bench:** the Domibus `domibus`-profile Compose services above.
 
-Follow-ups: the partner QTSP driver + sandbox integration, attachment/blob storage, and the
-European Digital Directory (SMP/SML) lookup.
+Attachments are implemented end-to-end (multipart upload, content-opaque blob-column storage,
+org-scoped download; threaded through the provider seam — stub loopback + Domibus ebMS3 payloads).
+
+Follow-ups: the partner QTSP driver + sandbox integration, object-storage backend for attachments
+(behind the unchanged store interface), inbound Domibus multi-payload extraction, and the European
+Digital Directory (SMP/SML) lookup.
 
 ---
 
@@ -299,7 +309,8 @@ UI must not imply EU-wide coverage that doesn't exist yet.
 ## 11. Open questions / follow-ups
 
 - Which NL QTSP to partner with (drives the concrete `qerdsprovider` driver + auth shape).
-- Attachment storage backend (blob column vs object storage) once real payloads/E2E ciphertext land.
+- Attachment storage backend: shipped as a blob column (MVP); revisit object storage (`storage_ref`)
+  once real payloads / E2E ciphertext land and the inline-BYTEA footprint becomes a concern.
 - European Digital Directory (SMP/SML) integration for cross-border address resolution (replaces the
   interim contacts address book as the primary resolver).
 - Multi-replica inbound: webhook idempotency store vs the daemon-style single-replica assumption.

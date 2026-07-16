@@ -60,6 +60,7 @@ func (p *StubProvider) Send(_ context.Context, msg OutboundMessage) (SendReceipt
 		Recipient:   msg.Recipient,
 		Subject:     msg.Subject,
 		Body:        msg.Body,
+		Attachments: msg.Attachments,
 		Evidence:    []Evidence{delivery},
 	})
 
