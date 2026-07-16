@@ -29,6 +29,8 @@ import QerdsCompose from "./routes/qerds-compose";
 import QerdsAddresses from "./routes/qerds-addresses";
 import QerdsContacts from "./routes/qerds-contacts";
 import QerdsMessage from "./routes/qerds-message";
+import Postguard from "./routes/postguard";
+import PostguardSend from "./routes/postguard-send";
 import Settings from "./routes/settings";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
@@ -77,6 +79,10 @@ const qerdsMessageCrumb: RouteHandle = {
     );
     return message ? message.subject : t("qerds.message.title");
   },
+};
+const postguardCrumb: RouteHandle = { crumb: ({ t }) => t("postguard.title") };
+const postguardSendCrumb: RouteHandle = {
+  crumb: ({ t }) => t("postguard.send.title"),
 };
 const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
 const invitationsCrumb: RouteHandle = {
@@ -169,6 +175,18 @@ export const router = createBrowserRouter([
                         path: ":messageId",
                         Component: QerdsMessage,
                         handle: qerdsMessageCrumb,
+                      },
+                    ],
+                  },
+                  {
+                    path: "postguard",
+                    handle: postguardCrumb,
+                    children: [
+                      { index: true, Component: Postguard },
+                      {
+                        path: "send",
+                        Component: PostguardSend,
+                        handle: postguardSendCrumb,
                       },
                     ],
                   },

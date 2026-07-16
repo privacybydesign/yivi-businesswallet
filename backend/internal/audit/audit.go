@@ -43,6 +43,12 @@ const (
 	QerdsContactAdded          = "qerds.contact_added"
 	QerdsContactDeleted        = "qerds.contact_deleted"
 
+	PostGuardKeySet               = "postguard.key_set"
+	PostGuardKeyRemoved           = "postguard.key_removed"
+	PostGuardEncryptionKeySet     = "postguard.encryption_key_set"
+	PostGuardEncryptionKeyRemoved = "postguard.encryption_key_removed"
+	PostGuardFileSent             = "postguard.file_sent"
+
 	WalletOpened          = "wallet.opened"
 	WalletBootstrapped    = "wallet.bootstrapped"
 	WalletSuspended       = "wallet.suspended"
@@ -62,6 +68,10 @@ const (
 
 	TargetWalletInstance = "wallet_instance"
 	TargetRepresentation = "wallet_representation"
+
+	TargetPostGuardKey           = "postguard_key"
+	TargetPostGuardEncryptionKey = "postguard_encryption_key"
+	TargetPostGuardFile          = "postguard_file"
 )
 
 type Actor struct {

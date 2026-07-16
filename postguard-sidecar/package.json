@@ -1,0 +1,26 @@
+{
+  "name": "postguard-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Internal, backend-only sidecar that encrypts and uploads files via PostGuard for Business using a per-request API key.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --build"
+  },
+  "dependencies": {
+    "@e4a/pg-js": "^2.2.0",
+    "busboy": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/busboy": "^1.5.4",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
