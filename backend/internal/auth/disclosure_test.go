@@ -5,128 +5,53 @@ import (
 	"net/http"
 	"testing"
 
-	irma "github.com/privacybydesign/irmago/irma"
-	irmaserver "github.com/privacybydesign/irmago/irma/server"
-
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
-const testEmailAttr = "irma-demo.sidn-pbdf.email.email"
-
-func strptr(s string) *string { return &s }
-
-func disclosed(id irma.AttributeTypeIdentifier, status irma.AttributeProofStatus, raw *string) [][]*irma.DisclosedAttribute {
-	return [][]*irma.DisclosedAttribute{{{
-		Identifier: id,
-		Status:     status,
-		RawValue:   raw,
-	}}}
+func presentation(claims map[string]string) openid4vpverifier.Presentation {
+	return openid4vpverifier.Presentation{Claims: claims}
 }
 
 func TestExtractEmail(t *testing.T) {
-	want := irma.NewAttributeTypeIdentifier(testEmailAttr)
-	other := irma.NewAttributeTypeIdentifier("irma-demo.sidn-pbdf.email.domain")
-
 	tests := []struct {
 		name      string
-		result    *irmaserver.SessionResult
+		claims    map[string]string
 		wantEmail user.Email
 		wantErr   error
 	}{
 		{
-			name: "valid disclosure yields email",
-			result: &irmaserver.SessionResult{
-				Status:      irma.ServerStatusDone,
-				ProofStatus: irma.ProofStatusValid,
-				Disclosed:   disclosed(want, irma.AttributeProofStatusPresent, strptr("user@example.test")),
-			},
+			name:      "valid disclosure yields email",
+			claims:    map[string]string{openid4vpverifier.ClaimEmail: "user@example.test"},
 			wantEmail: "user@example.test",
 		},
 		{
-			name: "mixed-case disclosure is normalized",
-			result: &irmaserver.SessionResult{
-				Status:      irma.ServerStatusDone,
-				ProofStatus: irma.ProofStatusValid,
-				Disclosed:   disclosed(want, irma.AttributeProofStatusPresent, strptr("  User@Example.TEST  ")),
-			},
+			name:      "mixed-case disclosure is normalized",
+			claims:    map[string]string{openid4vpverifier.ClaimEmail: "  User@Example.TEST  "},
 			wantEmail: "user@example.test",
 		},
 		{
-			name:    "not done -> session not finished",
-			result:  &irmaserver.SessionResult{Status: irma.ServerStatusConnected},
-			wantErr: errSessionNotFinished,
-		},
-		{
-			name:    "cancelled -> session not finished",
-			result:  &irmaserver.SessionResult{Status: irma.ServerStatusCancelled},
-			wantErr: errSessionNotFinished,
-		},
-		{
-			name:    "timeout -> session not finished",
-			result:  &irmaserver.SessionResult{Status: irma.ServerStatusTimeout},
-			wantErr: errSessionNotFinished,
-		},
-		{
-			name: "done but proof invalid -> disclosure invalid",
-			result: &irmaserver.SessionResult{
-				Status:      irma.ServerStatusDone,
-				ProofStatus: irma.ProofStatusInvalid,
-				Disclosed:   disclosed(want, irma.AttributeProofStatusPresent, strptr("user@example.test")),
-			},
+			name:    "missing email -> disclosure invalid",
+			claims:  map[string]string{},
 			wantErr: errDisclosureInvalid,
 		},
 		{
-			name: "empty disclosed -> disclosure invalid",
-			result: &irmaserver.SessionResult{
-				Status:      irma.ServerStatusDone,
-				ProofStatus: irma.ProofStatusValid,
-				Disclosed:   [][]*irma.DisclosedAttribute{},
-			},
+			name:    "empty email -> disclosure invalid",
+			claims:  map[string]string{openid4vpverifier.ClaimEmail: ""},
 			wantErr: errDisclosureInvalid,
 		},
 		{
-			name: "wrong attribute identifier -> disclosure invalid",
-			result: &irmaserver.SessionResult{
-				Status:      irma.ServerStatusDone,
-				ProofStatus: irma.ProofStatusValid,
-				Disclosed:   disclosed(other, irma.AttributeProofStatusPresent, strptr("user@example.test")),
-			},
-			wantErr: errDisclosureInvalid,
-		},
-		{
-			name: "attribute not present -> disclosure invalid",
-			result: &irmaserver.SessionResult{
-				Status:      irma.ServerStatusDone,
-				ProofStatus: irma.ProofStatusValid,
-				Disclosed:   disclosed(want, irma.AttributeProofStatusNull, strptr("user@example.test")),
-			},
-			wantErr: errDisclosureInvalid,
-		},
-		{
-			name: "nil raw value -> disclosure invalid",
-			result: &irmaserver.SessionResult{
-				Status:      irma.ServerStatusDone,
-				ProofStatus: irma.ProofStatusValid,
-				Disclosed:   disclosed(want, irma.AttributeProofStatusPresent, nil),
-			},
-			wantErr: errDisclosureInvalid,
-		},
-		{
-			name: "empty raw value -> disclosure invalid",
-			result: &irmaserver.SessionResult{
-				Status:      irma.ServerStatusDone,
-				ProofStatus: irma.ProofStatusValid,
-				Disclosed:   disclosed(want, irma.AttributeProofStatusPresent, strptr("")),
-			},
+			name:    "malformed email -> disclosure invalid",
+			claims:  map[string]string{openid4vpverifier.ClaimEmail: "nope"},
 			wantErr: errDisclosureInvalid,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			email, err := extractEmail(tt.result, want)
+			email, err := extractEmail(presentation(tt.claims))
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("err = %v, want %v", err, tt.wantErr)
@@ -144,82 +69,60 @@ func TestExtractEmail(t *testing.T) {
 }
 
 func TestExtractIdentity(t *testing.T) {
-	email := irma.NewAttributeTypeIdentifier("irma-demo.sidn-pbdf.email.email")
-	attrs := IdentityAttributes{
-		GivenNames: irma.NewAttributeTypeIdentifier("irma-demo.MijnOverheid.drivinglicense.firstnames"),
-		FamilyName: irma.NewAttributeTypeIdentifier("irma-demo.MijnOverheid.drivinglicense.familyname"),
-	}
-	present := func(id irma.AttributeTypeIdentifier, raw string) *irma.DisclosedAttribute {
-		return &irma.DisclosedAttribute{Identifier: id, Status: irma.AttributeProofStatusPresent, RawValue: strptr(raw)}
-	}
-	valid := func(disc [][]*irma.DisclosedAttribute) *irmaserver.SessionResult {
-		return &irmaserver.SessionResult{Status: irma.ServerStatusDone, ProofStatus: irma.ProofStatusValid, Disclosed: disc}
-	}
-
 	tests := []struct {
 		name    string
-		result  *irmaserver.SessionResult
+		claims  map[string]string
 		want    DisclosedIdentity
 		wantErr error
 	}{
 		{
 			name: "full disclosure yields identity",
-			result: valid([][]*irma.DisclosedAttribute{
-				{present(attrs.GivenNames, "José")},
-				{present(attrs.FamilyName, "van der Berg")},
-				{present(email, "user@example.test")},
-			}),
+			claims: map[string]string{
+				openid4vpverifier.ClaimGivenNames: "José",
+				openid4vpverifier.ClaimFamilyName: "van der Berg",
+				openid4vpverifier.ClaimEmail:      "user@example.test",
+			},
 			want: DisclosedIdentity{Email: "user@example.test", Name: identity.Name{GivenNames: "José", LastName: "van der Berg"}},
 		},
 		{
 			name: "name is kept literal, only trimmed",
-			result: valid([][]*irma.DisclosedAttribute{
-				{present(attrs.GivenNames, "  JOSE ")},
-				{present(attrs.FamilyName, "VAN DER BERG")},
-				{present(email, "user@example.test")},
-			}),
+			claims: map[string]string{
+				openid4vpverifier.ClaimGivenNames: "  JOSE ",
+				openid4vpverifier.ClaimFamilyName: "VAN DER BERG",
+				openid4vpverifier.ClaimEmail:      "user@example.test",
+			},
 			want: DisclosedIdentity{Email: "user@example.test", Name: identity.Name{GivenNames: "JOSE", LastName: "VAN DER BERG"}},
 		},
 		{
 			name: "missing family name -> invalid",
-			result: valid([][]*irma.DisclosedAttribute{
-				{present(attrs.GivenNames, "José")},
-				{present(email, "user@example.test")},
-			}),
+			claims: map[string]string{
+				openid4vpverifier.ClaimGivenNames: "José",
+				openid4vpverifier.ClaimEmail:      "user@example.test",
+			},
 			wantErr: errDisclosureInvalid,
 		},
 		{
 			name: "missing given names -> invalid",
-			result: valid([][]*irma.DisclosedAttribute{
-				{present(attrs.FamilyName, "Berg")},
-				{present(email, "user@example.test")},
-			}),
+			claims: map[string]string{
+				openid4vpverifier.ClaimFamilyName: "Berg",
+				openid4vpverifier.ClaimEmail:      "user@example.test",
+			},
 			wantErr: errDisclosureInvalid,
 		},
 		{
 			name: "invalid email -> invalid",
-			result: valid([][]*irma.DisclosedAttribute{
-				{present(attrs.GivenNames, "José")},
-				{present(attrs.FamilyName, "Berg")},
-				{present(email, "nope")},
-			}),
+			claims: map[string]string{
+				openid4vpverifier.ClaimGivenNames: "José",
+				openid4vpverifier.ClaimFamilyName: "Berg",
+				openid4vpverifier.ClaimEmail:      "nope",
+			},
 			wantErr: errDisclosureInvalid,
-		},
-		{
-			name:    "proof invalid -> invalid",
-			result:  &irmaserver.SessionResult{Status: irma.ServerStatusDone, ProofStatus: irma.ProofStatusInvalid},
-			wantErr: errDisclosureInvalid,
-		},
-		{
-			name:    "not done -> not finished",
-			result:  &irmaserver.SessionResult{Status: irma.ServerStatusCancelled},
-			wantErr: errSessionNotFinished,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := extractIdentity(tt.result, attrs, email)
+			got, err := extractIdentity(presentation(tt.claims))
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("err = %v, want %v", err, tt.wantErr)

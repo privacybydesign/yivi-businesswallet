@@ -64,6 +64,43 @@ func (s *Store) ProvisionAddress(ctx context.Context, orgID uuid.UUID, address s
 	return a, err
 }
 
+// SetDefaultAddress promotes an existing address to the organization's default
+// (sending) address, clearing any previous default so the partial unique index
+// (one default per org) holds. Returns ErrAddressNotFound if the address does
+// not belong to the organization. Promoting the current default is a no-op.
+func (s *Store) SetDefaultAddress(ctx context.Context, orgID, addressID uuid.UUID) (Address, error) {
+	var a Address
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		// Scope the lookup to the org so one org can't promote another's address.
+		const owned = `SELECT ` + addressColumns + ` FROM qerds_addresses WHERE id = $1 AND organization_id = $2`
+		existing, err := scanAddress(q.QueryRow(ctx, owned, addressID, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAddressNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("qerds: load address %s: %w", addressID, err)
+		}
+		if existing.IsDefault {
+			a = existing
+			return nil
+		}
+
+		const clear = `UPDATE qerds_addresses SET is_default = false WHERE organization_id = $1 AND is_default`
+		if _, err := q.Exec(ctx, clear, orgID); err != nil {
+			return fmt.Errorf("qerds: clear default address org %s: %w", orgID, err)
+		}
+		const promote = `UPDATE qerds_addresses SET is_default = true WHERE id = $1 RETURNING ` + addressColumns
+		a, err = scanAddress(q.QueryRow(ctx, promote, addressID))
+		if err != nil {
+			return fmt.Errorf("qerds: set default address %s: %w", addressID, err)
+		}
+		return s.audit.Record(ctx, q, audit.QerdsAddressDefaultChanged,
+			audit.Target{Type: audit.TargetQerdsAddress, ID: a.ID.String(), OrgID: &orgID},
+			audit.Updated(nil, map[string]any{"address": a.Address, "isDefault": true}))
+	})
+	return a, err
+}
+
 // ListAddresses returns an organization's digital addresses, default first.
 func (s *Store) ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, error) {
 	const query = `SELECT ` + addressColumns + ` FROM qerds_addresses WHERE organization_id = $1 ORDER BY is_default DESC, created_at`

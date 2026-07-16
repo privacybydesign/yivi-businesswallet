@@ -14,6 +14,7 @@ import (
 const (
 	OrganizationCreated = "organization.created"
 	OrganizationUpdated = "organization.updated"
+	OrganizationDeleted = "organization.deleted"
 
 	MembershipInvited        = "membership.invited"
 	MembershipInviteResent   = "membership.invite_resent"
@@ -35,11 +36,19 @@ const (
 	UserIdentityReviewRejected = "user.identity_review_rejected"
 	UserPurged                 = "user.purged"
 
-	QerdsMessageSent        = "qerds.message_sent"
-	QerdsMessageReceived    = "qerds.message_received"
-	QerdsAddressProvisioned = "qerds.address_provisioned"
-	QerdsContactAdded       = "qerds.contact_added"
-	QerdsContactDeleted     = "qerds.contact_deleted"
+	QerdsMessageSent           = "qerds.message_sent"
+	QerdsMessageReceived       = "qerds.message_received"
+	QerdsAddressProvisioned    = "qerds.address_provisioned"
+	QerdsAddressDefaultChanged = "qerds.address_default_changed"
+	QerdsContactAdded          = "qerds.contact_added"
+	QerdsContactDeleted        = "qerds.contact_deleted"
+
+	WalletOpened          = "wallet.opened"
+	WalletBootstrapped    = "wallet.bootstrapped"
+	WalletSuspended       = "wallet.suspended"
+	WalletRevoked         = "wallet.revoked"
+	RepresentationClaimed = "wallet.representation_claimed"
+	RepresentationRevoked = "wallet.representation_revoked"
 )
 
 const (
@@ -50,6 +59,9 @@ const (
 	TargetQerdsMessage = "qerds_message"
 	TargetQerdsAddress = "qerds_address"
 	TargetQerdsContact = "qerds_contact"
+
+	TargetWalletInstance = "wallet_instance"
+	TargetRepresentation = "wallet_representation"
 )
 
 type Actor struct {

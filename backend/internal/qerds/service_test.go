@@ -93,7 +93,7 @@ func TestServiceSendAndPollRoundTrip(t *testing.T) {
 	svcA := NewService(storeA, storeA, prov)
 	svcB := NewService(storeB, storeB, prov)
 
-	msg, err := svcA.Send(ctx, orgA, "bob@qerds.localhost", "hello", "world")
+	msg, err := svcA.Send(ctx, orgA, "", "bob@qerds.localhost", "hello", "world")
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -131,8 +131,29 @@ func TestServiceSendWithoutSenderAddress(t *testing.T) {
 	store := newFakeStore("") // no default address
 	svc := NewService(store, store, prov)
 
-	_, err := svc.Send(ctx, uuid.New(), "bob@qerds.localhost", "hi", "")
+	_, err := svc.Send(ctx, uuid.New(), "", "bob@qerds.localhost", "hi", "")
 	if !errors.Is(err, ErrNoSenderAddress) {
 		t.Fatalf("err = %v, want ErrNoSenderAddress", err)
+	}
+}
+
+func TestServiceSendWithChosenSender(t *testing.T) {
+	ctx := context.Background()
+	prov := qerdsprovider.NewStubProvider()
+	store := newFakeStore("alice@qerds.localhost")
+	svc := NewService(store, store, prov)
+
+	// Sending explicitly from an owned address is honoured.
+	msg, err := svc.Send(ctx, uuid.New(), "alice@qerds.localhost", "bob@qerds.localhost", "hi", "")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if msg.SenderAddress != "alice@qerds.localhost" {
+		t.Fatalf("sender = %q, want alice@qerds.localhost", msg.SenderAddress)
+	}
+
+	// Sending from an address the org does not own is rejected.
+	if _, err := svc.Send(ctx, uuid.New(), "eve@qerds.localhost", "bob@qerds.localhost", "hi", ""); !errors.Is(err, ErrSenderNotOwned) {
+		t.Fatalf("err = %v, want ErrSenderNotOwned", err)
 	}
 }

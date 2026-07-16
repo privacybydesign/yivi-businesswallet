@@ -11,6 +11,7 @@ const CHEVRON_SIZE = 14;
 const GLYPH_SIZE = 14;
 const ALL_ORGS_PATH = "/admin/organizations";
 const INVITATIONS_PATH = "/invitations";
+const ENROLL_PATH = "/enroll";
 
 interface OrgSwitcherProps {
   organizations: Organization[];
@@ -160,6 +161,16 @@ export function OrgSwitcher({
               </span>
             </button>
           )}
+
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => go(ENROLL_PATH)}
+            className="border-line text-ink-soft hover:bg-surface-3 hover:text-ink flex w-full items-center gap-2 border-t px-3 py-2.5 text-left text-[12.5px] font-medium transition-colors"
+          >
+            <Icon name="add" size={GLYPH_SIZE} />
+            {t("orgSwitcher.registerWallet")}
+          </button>
 
           {isPlatformAdmin && (
             <button

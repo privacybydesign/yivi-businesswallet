@@ -28,9 +28,19 @@ const (
 	roleChangeCount  = 8
 )
 
+// demoOrganization is a seeded business wallet: an org with KVK identity, a QERDS
+// digital address and one representative. Demo KVK numbers (900000xx) are kept
+// distinct from the live register-flow demo (94861412).
 type demoOrganization struct {
-	name string
-	slug string
+	name      string // legal name
+	slug      string
+	kvkNumber string
+	euid      string
+	address   string
+	repGiven  string
+	repFamily string
+	repKind   string
+	repAuth   string
 }
 
 type demoUser struct {
@@ -56,9 +66,9 @@ type demoMembership struct {
 // Anchor data: recognizable accounts/orgs that must stay stable so developers
 // can log in predictably. Volume and variety are generated with the faker.
 var demoOrganizations = []demoOrganization{
-	{name: "Yivi", slug: "yivi"},
-	{name: "Firsty.app", slug: "firsty"},
-	{name: "Radboud Universiteit", slug: "radboud-universiteit"},
+	{name: "Yivi B.V.", slug: "yivi", kvkNumber: "90000010", euid: "NL.KVK.90000010", address: "yivi@qerds.localhost", repGiven: "Johannes Hendrik", repFamily: "Janssen", repKind: "bestuurder", repAuth: "sole"},
+	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NL.KVK.90000020", address: "firsty@qerds.localhost", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly"},
+	{name: "Radboud Universiteit", slug: "radboud-universiteit", kvkNumber: "90000030", euid: "NL.KVK.90000030", address: "radboud@qerds.localhost", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt"},
 }
 
 var demoUsers = []demoUser{
@@ -91,7 +101,7 @@ func Run(ctx context.Context, dsn string) error {
 
 	orgsBySlug := map[string]organization.Organization{}
 	for _, o := range demoOrganizations {
-		org, err := ensureOrg(ctx, orgs, o.name, o.slug)
+		org, err := ensureOrg(ctx, pool, o)
 		if err != nil {
 			return err
 		}
@@ -154,15 +164,32 @@ func Run(ctx context.Context, dsn string) error {
 	return spreadAuditTimestamps(ctx, pool, demoOrg.ID)
 }
 
-func ensureOrg(ctx context.Context, orgs *organization.Store, name, slug string) (organization.Organization, error) {
-	if org, err := orgs.GetBySlug(ctx, slug); err == nil {
-		return org, nil
-	} else if !errors.Is(err, organization.ErrNotFound) {
-		return organization.Organization{}, fmt.Errorf("seed: lookup org %q: %w", slug, err)
-	}
-	org, err := orgs.Create(ctx, name, slug)
+// ensureOrg creates the demo organization/business wallet (identity + default
+// QERDS address + one representative). Idempotent: ON CONFLICT (slug) returns the
+// existing row, and the address/representation inserts are guarded.
+func ensureOrg(ctx context.Context, pool *pgxpool.Pool, o demoOrganization) (organization.Organization, error) {
+	var org organization.Organization
+	err := pool.QueryRow(ctx, `
+		INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug
+		RETURNING id, name, slug, kvk_number, euid, digital_address, status, bootstrapped_at`,
+		o.name, o.slug, o.kvkNumber, o.euid, o.address).Scan(
+		&org.ID, &org.Name, &org.Slug, &org.KVKNumber, &org.EUID, &org.DigitalAddress, &org.Status, &org.BootstrappedAt)
 	if err != nil {
-		return organization.Organization{}, fmt.Errorf("seed: create org %q: %w", slug, err)
+		return organization.Organization{}, fmt.Errorf("seed: ensure org %q: %w", o.slug, err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO qerds_addresses (organization_id, address, is_default) VALUES ($1, $2, true)
+		ON CONFLICT (address) DO NOTHING`, org.ID, o.address); err != nil {
+		return organization.Organization{}, fmt.Errorf("seed: qerds address %q: %w", o.slug, err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO wallet_representations (organization_id, kind, given_names, family_name, authority)
+		SELECT $1, $2, $3, $4, $5
+		WHERE NOT EXISTS (SELECT 1 FROM wallet_representations WHERE organization_id = $1)`,
+		org.ID, o.repKind, o.repGiven, o.repFamily, o.repAuth); err != nil {
+		return organization.Organization{}, fmt.Errorf("seed: representation %q: %w", o.slug, err)
 	}
 	return org, nil
 }

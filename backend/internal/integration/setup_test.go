@@ -1,12 +1,13 @@
 //go:build integration
 
 // Package integration exercises the fully assembled router (server.New) against
-// a real PostgreSQL database, with the IRMA daemon replaced by an in-process
-// fake. It is compiled only under the `integration` build tag.
+// a real PostgreSQL database, with the EUDI OpenID4VP verifier replaced by an
+// in-process fake. It is compiled only under the `integration` build tag.
 package integration
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,75 +18,50 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	irma "github.com/privacybydesign/irmago/irma"
-	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
-const (
-	testEmailAttr      = "irma-demo.sidn-pbdf.email.email"
-	testGivenNamesAttr = "irma-demo.MijnOverheid.drivinglicense.firstnames"
-	testFamilyNameAttr = "irma-demo.MijnOverheid.drivinglicense.familyname"
-	sessionTTL         = time.Hour
-)
+const sessionTTL = time.Hour
 
-// emailAttr is the disclosed attribute the fake daemon returns and the service
-// expects, matching the dev/default config.
-var (
-	emailAttr     = irma.NewAttributeTypeIdentifier(testEmailAttr)
-	identityAttrs = auth.IdentityAttributes{
-		GivenNames: irma.NewAttributeTypeIdentifier(testGivenNamesAttr),
-		FamilyName: irma.NewAttributeTypeIdentifier(testFamilyNameAttr),
-	}
-)
+// disclosureToken is the client-facing presentation id used across these tests.
+// setup seeds a presentation_sessions row mapping it to a verifier transaction id
+// so /claim, /status and disclosure flows resolve it (production mints a random
+// id per POST /auth/session; the fake verifier ignores the transaction id).
+const disclosureToken = "test-token"
 
-// fakeRequestor stands in for the IRMA daemon: Result discloses the configured
-// email, so a /claim logs in as that user. The disclosure shape mirrors the one
-// proven against extractEmail in internal/auth/disclosure_test.go.
-type fakeRequestor struct {
-	email        string
-	givenNames   string
-	familyName   string
-	proofInvalid bool
+// fakeVerifier stands in for the EUDI verifier: Result discloses the configured
+// email (and optionally name), so a /claim logs in as that user. The claim shape
+// mirrors the one proven against extractEmail in internal/auth/disclosure_test.go.
+type fakeVerifier struct {
+	email      string
+	givenNames string
+	familyName string
 }
 
-func (f *fakeRequestor) StartSession(_ context.Context, _ *irma.DisclosureRequest) (*irmaserver.SessionPackage, error) {
-	return &irmaserver.SessionPackage{
-		SessionPtr: &irma.Qr{URL: "https://daemon.test/irma", Type: irma.ActionDisclosing},
-		Token:      "test-token",
-	}, nil
+func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.Scope) (openid4vpverifier.Session, error) {
+	return openid4vpverifier.Session{TransactionID: "verifier-tx", WalletLink: "openid4vp://?request_uri=https%3A%2F%2Fverifier.test"}, nil
 }
 
-func (f *fakeRequestor) Status(_ context.Context, _ irma.RequestorToken) (irma.ServerStatus, error) {
-	return irma.ServerStatusDone, nil
-}
-
-func (f *fakeRequestor) Result(_ context.Context, _ irma.RequestorToken) (*irmaserver.SessionResult, error) {
-	proof := irma.ProofStatusValid
-	if f.proofInvalid {
-		proof = irma.ProofStatusInvalid
-	}
-	email := f.email
-	disclosed := [][]*irma.DisclosedAttribute{{{
-		Identifier: emailAttr,
-		Status:     irma.AttributeProofStatusPresent,
-		RawValue:   &email,
-	}}}
+func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Presentation, error) {
+	claims := map[string]string{openid4vpverifier.ClaimEmail: f.email}
 	if f.givenNames != "" || f.familyName != "" {
-		given, family := f.givenNames, f.familyName
-		disclosed = append(disclosed,
-			[]*irma.DisclosedAttribute{{Identifier: identityAttrs.GivenNames, Status: irma.AttributeProofStatusPresent, RawValue: &given}},
-			[]*irma.DisclosedAttribute{{Identifier: identityAttrs.FamilyName, Status: irma.AttributeProofStatusPresent, RawValue: &family}},
-		)
+		claims[openid4vpverifier.ClaimGivenNames] = f.givenNames
+		claims[openid4vpverifier.ClaimFamilyName] = f.familyName
 	}
-	return &irmaserver.SessionResult{Status: irma.ServerStatusDone, ProofStatus: proof, Disclosed: disclosed}, nil
+	return openid4vpverifier.Presentation{Claims: claims}, nil
+}
+
+func (f *fakeVerifier) Status(_ context.Context, _ string) (string, error) {
+	return "DONE", nil
 }
 
 type meBody struct {
@@ -99,7 +75,7 @@ type testEnv struct {
 	server *httptest.Server
 	client *http.Client
 	pool   *pgxpool.Pool
-	fake   *fakeRequestor
+	fake   *fakeVerifier
 }
 
 // setup assembles the real router exactly as cmd/api does (minus the IRMA boot
@@ -109,7 +85,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	t.Helper()
 	pool, _ := testdb.Fresh(t)
 
-	fake := &fakeRequestor{}
+	fake := &fakeVerifier{}
 	userStore := user.NewStore(pool)
 	sessionStore := session.NewStore(pool, sessionTTL)
 	admins := auth.NewPlatformAdmins(platformAdmins)
@@ -119,7 +95,9 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	cookieCfg := auth.CookieConfig{Secure: false, MaxAge: int(sessionTTL.Seconds())}
 
 	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
-	authService := auth.NewService(fake, userStore, sessionStore, emailAttr, identityAttrs, orgStore)
+	presentationStore := presentation.NewStore(pool, sessionTTL)
+	seedPresentation(t, pool, disclosureToken)
+	authService := auth.NewService(fake, presentationStore, userStore, sessionStore, orgStore)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, admins)
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
@@ -179,7 +157,7 @@ func (e *testEnv) login(email string) meBody {
 	e.createUser(email)
 	e.fake.email = email
 
-	resp := e.do(http.MethodPost, "/api/v1/auth/session/test-token/claim", nil)
+	resp := e.do(http.MethodPost, "/api/v1/auth/session/"+disclosureToken+"/claim", nil)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		e.t.Fatalf("claim status = %d, want 200", resp.StatusCode)
@@ -210,13 +188,34 @@ func (e *testEnv) getMe(t *testing.T) meBody {
 func (e *testEnv) createOrg(name, slug string) uuid.UUID {
 	e.t.Helper()
 	var id uuid.UUID
+	// An org is a business wallet: the KVK identity columns are required.
 	err := e.pool.QueryRow(context.Background(),
-		"INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id", name, slug,
+		`INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
+		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		name, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost",
 	).Scan(&id)
 	if err != nil {
 		e.t.Fatalf("create org %q: %v", slug, err)
 	}
 	return id
+}
+
+// seedPresentation inserts a presentation_sessions mapping so the given
+// client-facing id resolves to a verifier transaction id. It writes the row
+// directly (hashing the id as the store does) since these tests skip the live
+// POST /auth/session that would otherwise mint the id.
+func seedPresentation(t *testing.T, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	hash := sha256.Sum256([]byte(id))
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO presentation_sessions (id_hash, transaction_id, expires_at)
+		 VALUES ($1, $2, now() + interval '1 hour')
+		 ON CONFLICT (id_hash) DO NOTHING`,
+		hash[:], "verifier-tx",
+	)
+	if err != nil {
+		t.Fatalf("seed presentation %q: %v", id, err)
+	}
 }
 
 func (e *testEnv) addMembership(userID, orgID uuid.UUID, role string) {

@@ -92,6 +92,26 @@ export default function Dashboard(): React.JSX.Element {
             </div>
           )}
         </Card>
+
+        {org.data && (
+          <Card className="p-6">
+            <h2 className="text-[16px] font-semibold">
+              {t("dashboard.wallet.title")}
+            </h2>
+            <dl className="mt-3 grid grid-cols-[140px_1fr] gap-y-2 text-[13.5px]">
+              <dt className="text-muted">{t("dashboard.wallet.kvkNumber")}</dt>
+              <dd className="text-ink-soft font-mono">{org.data.kvkNumber}</dd>
+              <dt className="text-muted">{t("dashboard.wallet.euid")}</dt>
+              <dd className="text-ink-soft font-mono">{org.data.euid}</dd>
+              <dt className="text-muted">{t("dashboard.wallet.address")}</dt>
+              <dd className="text-ink-soft font-mono">
+                {org.data.digitalAddress}
+              </dd>
+              <dt className="text-muted">{t("dashboard.wallet.status")}</dt>
+              <dd className="text-ink">{org.data.status}</dd>
+            </dl>
+          </Card>
+        )}
       </div>
     </>
   );

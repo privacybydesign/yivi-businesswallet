@@ -31,6 +31,41 @@ export const claimResultSchema = z.union([
 ]);
 export type ClaimResult = z.infer<typeof claimResultSchema>;
 
+export const authSessionSchema = z.object({
+  id: z.string(),
+  walletLink: z.string(),
+});
+export type AuthSession = z.infer<typeof authSessionSchema>;
+
+// startDisclosureSession begins an OpenID4VP presentation at the given endpoint
+// (login, or an invitation-accept session) and returns the transaction id plus
+// the wallet deeplink to render as a QR / universal link.
+export function startDisclosureSession(
+  url: string,
+  signal?: AbortSignal,
+): Promise<AuthSession> {
+  return request(url, {
+    schema: authSessionSchema,
+    method: "POST",
+    signal,
+  });
+}
+
+const sessionStatusSchema = z.object({ status: z.string() });
+
+// getSessionStatus polls the verifier for a presentation's completion. Every
+// session (login or invitation) is polled through the central auth status
+// endpoint by its transaction id.
+export function getSessionStatus(
+  id: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  return request(`/api/v1/auth/session/${encodeURIComponent(id)}/status`, {
+    schema: sessionStatusSchema,
+    signal,
+  }).then((r) => r.status);
+}
+
 export function claimAuthSession(
   token: string,
   signal?: AbortSignal,

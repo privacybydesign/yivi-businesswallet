@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { useOrganizationsQuery } from "../api/organization.queries";
+import {
+  useDeleteOrganizationMutation,
+  useOrganizationsQuery,
+} from "../api/organization.queries";
 import { Avatar, Button, Card, Input, Table, TopBar } from "../ui";
 import * as React from "react";
 
@@ -9,7 +12,20 @@ export default function AllOrganizations(): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data, isPending, isError, error } = useOrganizationsQuery();
+  const del = useDeleteOrganizationMutation();
   const [query, setQuery] = useState("");
+
+  function handleDelete(
+    event: React.MouseEvent,
+    org: { id: string; name: string },
+  ): void {
+    event.stopPropagation();
+    if (
+      window.confirm(t("allOrganizations.confirmDelete", { name: org.name }))
+    ) {
+      del.mutate(org.id);
+    }
+  }
 
   const filtered = useMemo(() => {
     if (!data) {
@@ -32,23 +48,15 @@ export default function AllOrganizations(): React.JSX.Element {
             : t("allOrganizations.count", { count: data?.length ?? 0 })
         }
         actions={
-          <>
-            <div className="w-64">
-              <Input
-                icon="search"
-                placeholder={t("allOrganizations.searchPlaceholder")}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                aria-label={t("allOrganizations.searchPlaceholder")}
-              />
-            </div>
-            <Button
-              icon="add"
-              onClick={() => void navigate("/admin/organizations/new")}
-            >
-              {t("allOrganizations.create")}
-            </Button>
-          </>
+          <div className="w-64">
+            <Input
+              icon="search"
+              placeholder={t("allOrganizations.searchPlaceholder")}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              aria-label={t("allOrganizations.searchPlaceholder")}
+            />
+          </div>
         }
       />
 
@@ -66,13 +74,19 @@ export default function AllOrganizations(): React.JSX.Element {
                 <Table.HeaderCell>
                   {t("allOrganizations.columnOrganization")}
                 </Table.HeaderCell>
+                <Table.HeaderCell>
+                  {t("allOrganizations.columnKvk")}
+                </Table.HeaderCell>
                 <Table.HeaderCell>{t("common.slug")}</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">
+                  {t("allOrganizations.columnActions")}
+                </Table.HeaderCell>
               </Table.Head>
               <Table.Body>
                 {isPending ? (
-                  <Table.State colSpan={2}>{t("common.loading")}</Table.State>
+                  <Table.State colSpan={4}>{t("common.loading")}</Table.State>
                 ) : filtered.length === 0 ? (
-                  <Table.State colSpan={2}>
+                  <Table.State colSpan={4}>
                     {data && data.length > 0
                       ? t("allOrganizations.noMatch")
                       : t("allOrganizations.none")}
@@ -96,7 +110,20 @@ export default function AllOrganizations(): React.JSX.Element {
                         </Link>
                       </Table.Cell>
                       <Table.Cell className="text-ink-soft font-mono text-[12px]">
+                        {org.kvkNumber ?? "—"}
+                      </Table.Cell>
+                      <Table.Cell className="text-ink-soft font-mono text-[12px]">
                         {org.slug}
+                      </Table.Cell>
+                      <Table.Cell className="text-right">
+                        <Button
+                          variant="dangerGhost"
+                          icon="delete"
+                          iconOnly
+                          aria-label={t("allOrganizations.delete")}
+                          disabled={del.isPending}
+                          onClick={(event) => handleDelete(event, org)}
+                        />
                       </Table.Cell>
                     </Table.Row>
                   ))

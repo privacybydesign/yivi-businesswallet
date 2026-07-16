@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	irma "github.com/privacybydesign/irmago/irma"
-	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
@@ -38,8 +36,8 @@ type invitationStore interface {
 }
 
 type identityDiscloser interface {
-	StartIdentitySession(ctx context.Context) (*irmaserver.SessionPackage, error)
-	DiscloseIdentity(ctx context.Context, token irma.RequestorToken) (auth.DisclosedIdentity, error)
+	StartIdentitySession(ctx context.Context) (auth.Session, error)
+	DiscloseIdentity(ctx context.Context, sessionID string) (auth.DisclosedIdentity, error)
 }
 
 type Service struct {
@@ -99,9 +97,9 @@ func (s *Service) PendingInvitation(ctx context.Context, rawToken string) (Invit
 	return inv, nil
 }
 
-func (s *Service) StartAcceptSession(ctx context.Context, rawToken string) (*irmaserver.SessionPackage, error) {
+func (s *Service) StartAcceptSession(ctx context.Context, rawToken string) (auth.Session, error) {
 	if _, err := s.PendingInvitation(ctx, rawToken); err != nil {
-		return nil, err
+		return auth.Session{}, err
 	}
 	return s.discloser.StartIdentitySession(ctx)
 }
@@ -109,7 +107,7 @@ func (s *Service) StartAcceptSession(ctx context.Context, rawToken string) (*irm
 // StartIdentitySession begins an identity disclosure not bound to a specific
 // invitation, for the by-id accept flows (in-app and login-routed). The
 // invitation is selected at accept time and the disclosure's email-match gates it.
-func (s *Service) StartIdentitySession(ctx context.Context) (*irmaserver.SessionPackage, error) {
+func (s *Service) StartIdentitySession(ctx context.Context) (auth.Session, error) {
 	return s.discloser.StartIdentitySession(ctx)
 }
 
@@ -136,7 +134,7 @@ func (s *Service) AcceptInvitation(ctx context.Context, rawToken, disclosureToke
 }
 
 func (s *Service) acceptResolved(ctx context.Context, inv Invitation, disclosureToken string) (AcceptOutcome, error) {
-	disclosed, err := s.discloser.DiscloseIdentity(ctx, irma.RequestorToken(disclosureToken))
+	disclosed, err := s.discloser.DiscloseIdentity(ctx, disclosureToken)
 	if err != nil {
 		return AcceptOutcome{}, ErrDisclosureFailed
 	}
