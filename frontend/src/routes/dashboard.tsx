@@ -2,6 +2,7 @@ import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useMeQuery } from "../api/auth.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
+import { useOrgWalletQuery } from "../api/wallet.queries";
 import { accessMessage } from "../lib/access-message";
 import { greetingKey } from "../lib/greeting";
 import { displayName } from "../lib/name";
@@ -16,6 +17,7 @@ export default function Dashboard(): React.JSX.Element {
   const slug = orgSlug!;
   const { data: me } = useMeQuery();
   const org = useOrganizationQuery(slug);
+  const wallet = useOrgWalletQuery(slug);
   const isAdmin = org.data?.role === "admin";
   const greeting = t(greetingKey(), { name: me ? displayName(me) : "" });
 
@@ -92,6 +94,32 @@ export default function Dashboard(): React.JSX.Element {
             </div>
           )}
         </Card>
+
+        {wallet.data && (
+          <Card className="p-6">
+            <h2 className="text-[16px] font-semibold">
+              {t("dashboard.wallet.title")}
+            </h2>
+            <dl className="mt-3 grid grid-cols-[140px_1fr] gap-y-2 text-[13.5px]">
+              <dt className="text-muted">{t("dashboard.wallet.legalName")}</dt>
+              <dd className="text-ink">{wallet.data.legalName ?? "—"}</dd>
+              <dt className="text-muted">{t("dashboard.wallet.kvkNumber")}</dt>
+              <dd className="text-ink-soft font-mono">
+                {wallet.data.kvkNumber}
+              </dd>
+              <dt className="text-muted">{t("dashboard.wallet.euid")}</dt>
+              <dd className="text-ink-soft font-mono">
+                {wallet.data.euid ?? "—"}
+              </dd>
+              <dt className="text-muted">{t("dashboard.wallet.address")}</dt>
+              <dd className="text-ink-soft font-mono">
+                {wallet.data.digitalAddress}
+              </dd>
+              <dt className="text-muted">{t("dashboard.wallet.status")}</dt>
+              <dd className="text-ink">{wallet.data.status}</dd>
+            </dl>
+          </Card>
+        )}
       </div>
     </>
   );

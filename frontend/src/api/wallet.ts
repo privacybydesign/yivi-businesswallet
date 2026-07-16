@@ -1,6 +1,33 @@
 import { z } from "zod";
 import { request } from "./http";
 
+// A provisioned wallet instance for an organization (GET /orgs/{slug}/wallet).
+export const walletInstanceSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  kvkNumber: z.string(),
+  digitalAddress: z.string(),
+  organizationId: z.string().optional(),
+  organizationSlug: z.string().optional(),
+  legalName: z.string().optional(),
+  euid: z.string().optional(),
+  rejectReason: z.string().optional(),
+  bootstrappedAt: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type WalletInstance = z.infer<typeof walletInstanceSchema>;
+
+export function getOrgWallet(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<WalletInstance> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/wallet`, {
+    schema: walletInstanceSchema,
+    signal,
+  });
+}
+
 export const walletEnrollmentSchema = z.object({
   status: z.string(),
   organizationSlug: z.string(),

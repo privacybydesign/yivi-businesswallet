@@ -14,6 +14,7 @@ import (
 const (
 	OrganizationCreated = "organization.created"
 	OrganizationUpdated = "organization.updated"
+	OrganizationDeleted = "organization.deleted"
 
 	MembershipInvited        = "membership.invited"
 	MembershipInviteResent   = "membership.invite_resent"

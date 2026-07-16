@@ -16,6 +16,7 @@ import {
   createDepartment,
   createOrganization,
   deleteDepartment,
+  deleteOrganization,
   getMemberAuditEvents,
   getMyOrganizations,
   getOrganization,
@@ -123,6 +124,24 @@ export function useCreateOrganizationMutation(): UseMutationResult<
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.organizationCreated"));
+      void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
+      void queryClient.invalidateQueries({ queryKey: myOrganizationsQueryKey });
+    },
+  });
+}
+
+export function useDeleteOrganizationMutation(): UseMutationResult<
+  void,
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (id) => deleteOrganization(id),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.organizationDeleted"));
       void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
       void queryClient.invalidateQueries({ queryKey: myOrganizationsQueryKey });
     },

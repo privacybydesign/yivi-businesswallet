@@ -206,6 +206,14 @@ export const en = {
     details: "Details",
     id: "ID",
     viewMembers: "View members",
+    wallet: {
+      title: "Business wallet",
+      legalName: "Legal name",
+      kvkNumber: "KVK number",
+      euid: "EUID",
+      address: "Digital address",
+      status: "Status",
+    },
   },
   access: {
     notMember: "You are not a member of this organization.",
@@ -232,6 +240,7 @@ export const en = {
     memberUpdated: "Member updated",
     organizationCreated: "Organization created",
     organizationUpdated: "Organization updated",
+    organizationDeleted: "Organization deleted",
     departmentAdded: "Department added",
     departmentRenamed: "Department renamed",
     departmentDeleted: "Department deleted",
@@ -432,9 +441,13 @@ export const en = {
     searchPlaceholder: "Search organizations",
     loadError: "Could not load organizations: {{message}}",
     columnOrganization: "Organization",
+    columnActions: "Actions",
     noMatch: "No organizations match your search.",
     none: "No organizations found.",
     create: "Create organization",
+    delete: "Delete organization",
+    confirmDelete:
+      "Delete “{{name}}”? This permanently removes the organization and all its members, invitations, wallet and messages.",
   },
   createOrg: {
     title: "Create organization",

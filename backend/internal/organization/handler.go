@@ -22,6 +22,7 @@ type repository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetBySlug(ctx context.Context, slug string) (Organization, error)
 	Update(ctx context.Context, id uuid.UUID, name string) (Organization, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
@@ -84,6 +85,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /organizations", platform(respond.HandlerFunc(h.list)))
 	mux.Handle("POST /organizations", platform(respond.HandlerFunc(h.create)))
 	mux.Handle("GET /organizations/{id}", platform(respond.HandlerFunc(h.get)))
+	mux.Handle("DELETE /organizations/{id}", platform(respond.HandlerFunc(h.delete)))
 
 	mux.Handle("GET /admin/identity-reviews", platform(respond.HandlerFunc(h.listIdentityReviews)))
 	mux.Handle("POST /admin/identity-reviews/{id}/approve", platform(respond.HandlerFunc(h.approveIdentityReview)))
@@ -178,6 +180,22 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	respond.JSON(w, r, http.StatusOK, org)
+	return nil
+}
+
+func (h *Handler) delete(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid id")
+	}
+
+	if err := h.store.Delete(r.Context(), id); errors.Is(err, ErrNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "org_not_found", Message: "organization not found"}
+	} else if err != nil {
+		return fmt.Errorf("deleting organization %s: %w", id, err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

@@ -30,6 +30,8 @@ func (c *capturingRepo) Update(_ context.Context, id uuid.UUID, name string) (Or
 	return Organization{ID: id, Name: name, Slug: "acme"}, nil
 }
 
+func (c *capturingRepo) Delete(context.Context, uuid.UUID) error { return nil }
+
 func TestCreateValidatesSlug(t *testing.T) {
 	tests := []struct {
 		name string

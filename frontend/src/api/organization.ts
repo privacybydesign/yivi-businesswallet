@@ -115,6 +115,19 @@ export function createOrganization(
   });
 }
 
+// deleteOrganization removes an organization by id (platform-admin only). All
+// org-scoped data cascades server-side.
+export function deleteOrganization(
+  id: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(`/api/v1/organizations/${encodeURIComponent(id)}`, {
+    schema: z.void(),
+    method: "DELETE",
+    signal,
+  });
+}
+
 export function getOrganization(
   slug: string,
   signal?: AbortSignal,

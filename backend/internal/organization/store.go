@@ -74,6 +74,29 @@ func (s *Store) Create(ctx context.Context, name, slug string) (Organization, er
 	return org, err
 }
 
+// Delete removes an organization. All org-scoped data (memberships, invitations,
+// departments, qerds messages/addresses, wallet instances/representations)
+// cascades via FK ON DELETE CASCADE; audit events survive with a null org id.
+func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const del = `DELETE FROM organizations WHERE id = $1 RETURNING name, slug`
+		var name, slug string
+		err := q.QueryRow(ctx, del, id).Scan(&name, &slug)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("organization: delete %s: %w", id, err)
+		}
+		// OrgID is left nil: the organization row is already deleted in this tx, so
+		// the audit event cannot reference it (the FK would fail). The org id is
+		// still recorded as the target id.
+		return s.audit.Record(ctx, q, audit.OrganizationDeleted,
+			audit.Target{Type: audit.TargetOrganization, ID: id.String()},
+			audit.Deleted(map[string]any{"name": name, "slug": slug}))
+	})
+}
+
 func (s *Store) Update(ctx context.Context, id uuid.UUID, name string) (Organization, error) {
 	var org Organization
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
