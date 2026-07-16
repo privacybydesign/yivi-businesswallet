@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
@@ -137,6 +138,13 @@ func Run(ctx context.Context, dsn string) error {
 	}
 
 	demoOrg := orgsBySlug[demoOrgSlug]
+	if err := seedAttestations(ctx, pool, demoOrg.ID); err != nil {
+		return err
+	}
+	if err := seedEmailSettings(ctx, pool, demoOrg.ID); err != nil {
+		return err
+	}
+
 	demoDeptIDs := []uuid.UUID{
 		deptsByOrgName[demoOrgSlug+"/Engineering"].ID,
 		deptsByOrgName[demoOrgSlug+"/Operations"].ID,
@@ -348,6 +356,99 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 
 	slog.Info("seeded activity",
 		slog.Int("invited", inviteCount+1), slog.Int("revoked", revokeCount), slog.Int("roleChanged", roleChangeCount))
+	return nil
+}
+
+// seedAttestations gives the demo org a couple of credential schemas + issuance
+// templates matching the Attestations mockup. Idempotent: skips when the org
+// already has schemas. The "Corporate e-mail" schema maps to the Veramo
+// EmailCredentialSdJwt so it can issue end-to-end against the real hosted issuer.
+func seedAttestations(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+	store := attestation.NewStore(pool, audit.NewDBRecorder())
+
+	existing, err := store.ListSchemas(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("seed: list attestation schemas: %w", err)
+	}
+	if len(existing) > 0 {
+		return nil
+	}
+
+	demoSchemas := []struct {
+		schema       attestation.Schema
+		templateName string
+	}{
+		{
+			schema: attestation.Schema{
+				VCT:                "nl.yivi.email",
+				DisplayName:        "Corporate e-mail",
+				CredentialConfigID: "EmailCredentialSdJwt",
+				SubjectType:        attestation.SubjectNaturalPerson,
+				Attributes: []attestation.AttributeDef{
+					{Key: "email", Label: "E-mail", Type: "string", Required: true},
+					{Key: "domain", Label: "Domain", Type: "string"},
+				},
+			},
+			templateName: "Corporate e-mail",
+		},
+		{
+			schema: attestation.Schema{
+				VCT:                "nl.yivi.employee",
+				DisplayName:        "Employee of Yivi B.V.",
+				CredentialConfigID: "MembershipCredentialSdJwt",
+				SubjectType:        attestation.SubjectNaturalPerson,
+				Attributes: []attestation.AttributeDef{
+					{Key: "fullName", Label: "Full name", Type: "string", Required: true},
+					{Key: "department", Label: "Department", Type: "string"},
+					{Key: "role", Label: "Role", Type: "string"},
+				},
+			},
+			templateName: "Employee of Yivi B.V.",
+		},
+		{
+			// An organization-subject credential: delivered over QERDS to the
+			// recipient business wallet's digital address (from the address book).
+			schema: attestation.Schema{
+				VCT:                "nl.yivi.supplier",
+				DisplayName:        "Approved supplier",
+				CredentialConfigID: "OrganizationCredentialSdJwt",
+				SubjectType:        attestation.SubjectOrganization,
+				Attributes: []attestation.AttributeDef{
+					{Key: "name", Label: "Legal name", Type: "string", Required: true},
+					{Key: "kvkNumber", Label: "KVK number", Type: "string"},
+				},
+			},
+			templateName: "Approved supplier",
+		},
+	}
+
+	for _, d := range demoSchemas {
+		schema, err := store.CreateSchema(ctx, orgID, d.schema)
+		if err != nil {
+			return fmt.Errorf("seed: create attestation schema %q: %w", d.schema.VCT, err)
+		}
+		if _, err := store.CreateTemplate(ctx, orgID, attestation.Template{
+			SchemaID: schema.ID,
+			Name:     d.templateName,
+		}); err != nil {
+			return fmt.Errorf("seed: create attestation template %q: %w", d.templateName, err)
+		}
+	}
+
+	slog.Info("seeded attestation schemas + templates", slog.Int("count", len(demoSchemas)))
+	return nil
+}
+
+// seedEmailSettings points the demo org's SMTP at the dev Mailpit service (no
+// auth), so person-facing credential-offer e-mails are captured and viewable at
+// http://localhost:8025 out of the box. Idempotent.
+func seedEmailSettings(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+	const insert = `INSERT INTO org_email_settings (organization_id, host, port, from_name, from_address, enabled)
+		VALUES ($1, 'mailpit', 1025, 'Yivi B.V.', 'noreply@yivi.app', true)
+		ON CONFLICT (organization_id) DO NOTHING`
+	if _, err := pool.Exec(ctx, insert, orgID); err != nil {
+		return fmt.Errorf("seed: email settings: %w", err)
+	}
 	return nil
 }
 

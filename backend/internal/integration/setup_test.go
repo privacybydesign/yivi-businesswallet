@@ -19,8 +19,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
@@ -64,6 +66,20 @@ func (f *fakeVerifier) Status(_ context.Context, _ string) (string, error) {
 	return "DONE", nil
 }
 
+// stubEmailNotifier / stubQerdsNotifier satisfy the attestation delivery seams
+// without sending anything (delivery is best-effort and not the unit under test).
+type stubEmailNotifier struct{}
+
+func (stubEmailNotifier) SendCredentialOffer(_ context.Context, _ uuid.UUID, _, _, _, _, _ string) error {
+	return nil
+}
+
+type stubQerdsNotifier struct{}
+
+func (stubQerdsNotifier) SendCredentialOffer(_ context.Context, _ uuid.UUID, _, _, _, _ string) error {
+	return nil
+}
+
 type meBody struct {
 	ID              uuid.UUID `json:"id"`
 	Email           string    `json:"email"`
@@ -102,9 +118,17 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
 	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)
-	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, requireUser, admins)
+	// nil mailer: invitation e-mail delivery is best-effort and not exercised here.
+	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins)
 
-	srv := httptest.NewServer(server.New(pool, authHandler, orgHandler))
+	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
+	attestationService := attestation.NewService(
+		attestationStore, openid4vciissuer.NewStubIssuer(),
+		stubEmailNotifier{}, stubQerdsNotifier{}, "http://app.test",
+	)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, requireUser, orgHandler.Authorize)
+
+	srv := httptest.NewServer(server.New(pool, authHandler, orgHandler, attestationHandler))
 	t.Cleanup(srv.Close)
 
 	jar, err := cookiejar.New(nil)

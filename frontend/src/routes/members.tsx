@@ -367,15 +367,20 @@ export default function Members(): React.JSX.Element {
                           {member.departmentName ?? t("members.unassigned")}
                         </Table.Cell>
                         <Table.Cell>
-                          {pending ? (
-                            <Tag tone="amber" dot>
-                              {t("members.pending")}
-                            </Tag>
-                          ) : (
-                            <Tag tone="green" dot>
-                              {t("members.active")}
-                            </Tag>
-                          )}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {pending ? (
+                              <Tag tone="amber" dot>
+                                {t("members.pending")}
+                              </Tag>
+                            ) : (
+                              <Tag tone="green" dot>
+                                {t("members.active")}
+                              </Tag>
+                            )}
+                            {member.verified && (
+                              <Tag tone="blue">{t("members.verified")}</Tag>
+                            )}
+                          </div>
                         </Table.Cell>
                         <Table.Cell>
                           <Tag

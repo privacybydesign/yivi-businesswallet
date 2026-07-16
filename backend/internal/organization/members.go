@@ -1,6 +1,7 @@
 package organization
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -166,12 +167,24 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("inviting member: %w", err)
 	}
 
-	// The invite e-mail is not built yet; surface the accept token at debug level
-	// (silent in production) so the flow is testable in dev until delivery lands.
-	slog.DebugContext(r.Context(), "invitation created", slog.String("email", string(email)), slog.String("acceptToken", inv.Token))
+	h.sendInviteEmail(r.Context(), org, inv)
 
 	w.WriteHeader(http.StatusCreated)
 	return nil
+}
+
+// sendInviteEmail delivers the invitation e-mail best-effort: the invitation is
+// already persisted and discoverable in-app, so a delivery failure (including an
+// org with no SMTP configured) is logged, never fatal.
+func (h *Handler) sendInviteEmail(ctx context.Context, org Organization, inv Invitation) {
+	if h.mailer == nil {
+		return
+	}
+	acceptURL := h.appBaseURL + "/invite/" + inv.Token
+	if err := h.mailer.SendInvitation(ctx, org.ID, inv.Email, org.Name, acceptURL); err != nil {
+		slog.WarnContext(ctx, "invitation e-mail not sent",
+			slog.String("email", inv.Email), slog.Any("error", err))
+	}
 }
 
 func (h *Handler) resendInvitation(w http.ResponseWriter, r *http.Request) error {
@@ -180,12 +193,14 @@ func (h *Handler) resendInvitation(w http.ResponseWriter, r *http.Request) error
 		return badRequest("invalid_id", "invalid invitation id")
 	}
 	org := OrgFromContext(r.Context())
-	switch err := h.store.ResendInvitation(r.Context(), org.ID, id); {
+	inv, err := h.store.ResendInvitation(r.Context(), org.ID, id)
+	switch {
 	case errors.Is(err, ErrInvitationNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "invitation_not_found", Message: "invitation not found"}
 	case err != nil:
 		return fmt.Errorf("resending invitation: %w", err)
 	}
+	h.sendInviteEmail(r.Context(), org, inv)
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
@@ -264,4 +279,13 @@ func normalize(s *string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+// nullIfEmpty maps an empty string to nil so an absent value stores as SQL NULL
+// rather than an empty string (which the UI would render as a blank field).
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

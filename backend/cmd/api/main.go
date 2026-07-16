@@ -11,11 +11,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/config"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/postguard"
@@ -38,6 +45,9 @@ const (
 
 	qerdsProbeTimeout = 10 * time.Second
 	qerdsHTTPTimeout  = 30 * time.Second
+
+	issuerProbeTimeout = 10 * time.Second
+	issuerHTTPTimeout  = 15 * time.Second
 
 	// PostGuard uploads can be large; allow a generous client timeout.
 	postguardHTTPTimeout = 60 * time.Second
@@ -77,6 +87,43 @@ func newRegistryProvider(cfg config.Config) (registryProvider, error) {
 	default:
 		return nil, fmt.Errorf("wallet registry provider %q is not implemented", cfg.WalletRegistryProvider)
 	}
+}
+
+// attestationIssuer is the boot-time issuer surface: the readiness probe plus the
+// operations the attestation service uses. The concrete issuer is chosen by config.
+type attestationIssuer interface {
+	Ping(context.Context) error
+	CreateOffer(context.Context, openid4vciissuer.OfferRequest) (openid4vciissuer.Offer, error)
+	Status(context.Context, string) (string, error)
+}
+
+func newAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
+	switch cfg.AttestationIssuer {
+	case config.IssuerStub:
+		return openid4vciissuer.NewStubIssuer(), nil
+	case config.IssuerVeramo:
+		return openid4vciissuer.NewVeramoIssuer(
+			cfg.AttestationIssuerURL,
+			cfg.AttestationIssuerInstance,
+			openid4vciissuer.NewBearerAuthenticator(cfg.AttestationIssuerToken),
+			cfg.AttestationPingCredential,
+			&http.Client{Timeout: issuerHTTPTimeout},
+		), nil
+	default:
+		return nil, fmt.Errorf("attestation issuer %q is not implemented", cfg.AttestationIssuer)
+	}
+}
+
+// qerdsOfferSender adapts the QERDS service to the attestation slice's
+// organization-delivery seam: an attestation offered to an organization is sent
+// as a QERDS message to its digital address, carrying the claim link.
+type qerdsOfferSender struct{ svc *qerds.Service }
+
+func (a qerdsOfferSender) SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, claimURL string) error {
+	subject := fmt.Sprintf("Credential offer: %s", credentialName)
+	body := fmt.Sprintf("%s has offered your organization a credential (%s).\n\nAdd it to your business wallet: %s", orgName, credentialName, claimURL)
+	_, err := a.svc.Send(ctx, orgID, "", toAddress, subject, body, nil)
+	return err
 }
 
 func newQerdsProvider(cfg config.Config) (qerdsProvider, error) {
@@ -162,7 +209,18 @@ func run() error {
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
 	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)
-	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, requireUser, platformAdmins)
+
+	// Per-org e-mail (SMTP) for person-facing notifications (credential offers and
+	// member invitations). Built before the org handler so invitations deliver
+	// best-effort at invite / resend time.
+	emailCipher, err := crypto.NewCipher(cfg.EmailEncryptionKey)
+	if err != nil {
+		return err
+	}
+	emailStore := email.NewStore(pool, audit.NewDBRecorder(), emailCipher)
+	emailService := email.NewService(emailStore, mailer.New())
+
+	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins)
 
 	qerdsProv, err := newQerdsProvider(cfg)
 	if err != nil {
@@ -206,6 +264,25 @@ func run() error {
 	postguardService := postguard.NewService(postguardStore, postguardClient)
 	postguardHandler := postguard.NewHandler(postguardService, requireUser, orgHandler.Authorize)
 
+	attIssuer, err := newAttestationIssuer(cfg)
+	if err != nil {
+		return err
+	}
+	// Fatal readiness gate, mirroring the verifier/QERDS probes: fail at boot if the
+	// issuer will not accept a credential offer of our shape.
+	issuerProbeCtx, issuerProbeCancel := context.WithTimeout(ctx, issuerProbeTimeout)
+	defer issuerProbeCancel()
+	if err := attIssuer.Ping(issuerProbeCtx); err != nil {
+		return fmt.Errorf("attestation issuer ping: %w", err)
+	}
+	emailHandler := email.NewHandler(emailStore, emailService, requireUser, orgHandler.Authorize)
+
+	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
+	attestationService := attestation.NewService(
+		attestationStore, attIssuer, emailService, qerdsOfferSender{qerdsService}, cfg.AppBaseURL,
+	)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, requireUser, orgHandler.Authorize)
+
 	handler := server.New(
 		pool,
 		authHandler,
@@ -213,6 +290,8 @@ func run() error {
 		qerdsHandler,
 		walletHandler,
 		postguardHandler,
+		emailHandler,
+		attestationHandler,
 	)
 
 	httpServer := &http.Server{

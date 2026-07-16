@@ -44,6 +44,8 @@ export const memberSchema = z.object({
   jobTitle: z.string().nullable(),
   departmentId: z.string().nullable(),
   departmentName: z.string().nullable(),
+  phone: z.string().nullable(),
+  verified: z.boolean(),
 });
 
 export type Member = z.infer<typeof memberSchema>;
@@ -63,6 +65,8 @@ export const memberListEntrySchema = z.object({
   departmentName: z.string().nullable(),
   expiresAt: z.string().nullable(),
   invitedBy: z.string().nullable(),
+  phone: z.string().nullable(),
+  verified: z.boolean(),
 });
 
 export type MemberListEntry = z.infer<typeof memberListEntrySchema>;

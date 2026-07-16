@@ -27,7 +27,10 @@ type repository interface {
 	GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
 	ListMemberEntries(ctx context.Context, orgID uuid.UUID, p MemberListParams) ([]MemberEntry, int, error)
 	RevokeInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error
-	ResendInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error
+	// ResendInvitation rotates the invite token and extends the expiry, returning
+	// the refreshed invitation (with its new raw Token) so a fresh link can be
+	// e-mailed.
+	ResendInvitation(ctx context.Context, orgID, invitationID uuid.UUID) (Invitation, error)
 	UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, role *string, jobTitle *string, departmentID *uuid.UUID) (Member, error)
 	ListDepartments(ctx context.Context, orgID uuid.UUID) ([]Department, error)
 	CreateDepartment(ctx context.Context, orgID uuid.UUID, name string) (Department, error)
@@ -60,17 +63,26 @@ type sessionIssuer interface {
 	Issue(ctx context.Context, w http.ResponseWriter, userID uuid.UUID, idempotencyToken string) error
 }
 
+// inviteMailer delivers invitation e-mails. Best-effort: a delivery failure
+// never blocks the invite, which is also discoverable in-app. Satisfied by
+// *email.Service (kept as a local interface so this slice does not import it).
+type inviteMailer interface {
+	SendInvitation(ctx context.Context, orgID uuid.UUID, to, orgName, acceptURL string) error
+}
+
 type Handler struct {
 	store       repository
 	service     inviter
 	reader      auditReader
 	issuer      sessionIssuer
+	mailer      inviteMailer
+	appBaseURL  string
 	requireUser func(http.Handler) http.Handler
 	admins      auth.PlatformAdmins
 }
 
-func NewHandler(store repository, service inviter, reader auditReader, issuer sessionIssuer, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
-	return &Handler{store: store, service: service, reader: reader, issuer: issuer, requireUser: requireUser, admins: admins}
+func NewHandler(store repository, service inviter, reader auditReader, issuer sessionIssuer, mailer inviteMailer, appBaseURL string, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
+	return &Handler{store: store, service: service, reader: reader, issuer: issuer, mailer: mailer, appBaseURL: strings.TrimRight(appBaseURL, "/"), requireUser: requireUser, admins: admins}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {

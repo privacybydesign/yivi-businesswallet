@@ -38,7 +38,14 @@ func extractIdentity(res openid4vpverifier.Presentation) (DisclosedIdentity, err
 	if given == "" || family == "" {
 		return DisclosedIdentity{}, errDisclosureInvalid
 	}
-	return DisclosedIdentity{Email: email, Name: identity.Name{GivenNames: given, LastName: family}}, nil
+	// Phone is disclosed alongside the identity credential; treat it as best-effort
+	// (kept when present) rather than a hard requirement of a valid disclosure.
+	phone := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimPhone])
+	return DisclosedIdentity{
+		Email: email,
+		Name:  identity.Name{GivenNames: given, LastName: family},
+		Phone: phone,
+	}, nil
 }
 
 func mapClaimError(err error) error {

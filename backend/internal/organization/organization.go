@@ -99,6 +99,10 @@ type Member struct {
 	JobTitle       *string    `json:"jobTitle"`
 	DepartmentID   *uuid.UUID `json:"departmentId"`
 	DepartmentName *string    `json:"departmentName"`
+	Phone          *string    `json:"phone"`
+	// Verified reports that the member proved a passport/id-card identity when they
+	// joined; orthogonal to the active/invited status.
+	Verified bool `json:"verified"`
 }
 
 type MemberEntry struct {
@@ -115,6 +119,9 @@ type MemberEntry struct {
 	DepartmentName *string    `json:"departmentName"`
 	ExpiresAt      *time.Time `json:"expiresAt"`
 	InvitedBy      *uuid.UUID `json:"invitedBy"`
+	Phone          *string    `json:"phone"`
+	// Verified is always false for invited entries (no identity proven yet).
+	Verified bool `json:"verified"`
 }
 
 type MemberListParams struct {
