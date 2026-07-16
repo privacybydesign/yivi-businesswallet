@@ -56,10 +56,11 @@ func scanOrg(row interface{ Scan(...any) error }, org *organization.Organization
 
 // RegisterOrganization creates the organization/business wallet atomically from a
 // KVK attestation: the org (identity + slug-based digital address + active status),
-// its default (sending) QERDS address, the KVK-derived address saved as a recipient
-// in the address book, the requester as first owner (admin membership), and the
-// representation list (with the requester's own representation claimed). One tx,
-// following the AcceptInvitation idiom.
+// its default (sending) QERDS address, KVK saved as a recipient in the address book
+// (kvkContactAddress, the address it delivers the attestation from), the requester
+// as first owner (admin membership), and the representation list (with the
+// requester's own representation claimed). One tx, following the AcceptInvitation
+// idiom.
 func (s *Store) RegisterOrganization(ctx context.Context, requestorUserID uuid.UUID, slug, digitalAddress, kvkContactAddress string, att registryprovider.RegistrationAttestation) (organization.Organization, error) {
 	var org organization.Organization
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
@@ -92,7 +93,7 @@ func (s *Store) RegisterOrganization(ctx context.Context, requestorUserID uuid.U
 			return fmt.Errorf("wallet: provision address: %w", err)
 		}
 
-		// Save the KVK-derived address as a recipient in the org's address book.
+		// Save KVK as a recipient in the org's address book (its delivery address).
 		const insContact = `INSERT INTO qerds_contacts (organization_id, name, address) VALUES ($1, $2, $3) RETURNING id`
 		var contactID uuid.UUID
 		if err := q.QueryRow(ctx, insContact, org.ID, kvkContactName, kvkContactAddress).Scan(&contactID); err != nil {
