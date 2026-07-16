@@ -31,7 +31,9 @@ const (
 
 // postguardService is the surface the handler depends on.
 type postguardService interface {
-	APIKeyInfo(ctx context.Context, orgID uuid.UUID) (APIKeyInfo, error)
+	Settings(ctx context.Context, orgID uuid.UUID) (Settings, error)
+	SetEncryptionKey(ctx context.Context, orgID uuid.UUID, secret string) error
+	RemoveEncryptionKey(ctx context.Context, orgID uuid.UUID) error
 	SetAPIKey(ctx context.Context, orgID uuid.UUID, apiKey string) error
 	DeleteAPIKey(ctx context.Context, orgID uuid.UUID) error
 	ListSentFiles(ctx context.Context, orgID uuid.UUID) ([]SentFile, error)
@@ -59,6 +61,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	}
 
 	mux.Handle("GET /orgs/{slug}/postguard/settings", orgScoped(respond.HandlerFunc(h.settings)))
+	mux.Handle("PUT /orgs/{slug}/postguard/encryption-key", orgAdmin(respond.HandlerFunc(h.setEncryptionKey)))
+	mux.Handle("DELETE /orgs/{slug}/postguard/encryption-key", orgAdmin(respond.HandlerFunc(h.deleteEncryptionKey)))
 	mux.Handle("PUT /orgs/{slug}/postguard/api-key", orgAdmin(respond.HandlerFunc(h.setAPIKey)))
 	mux.Handle("DELETE /orgs/{slug}/postguard/api-key", orgAdmin(respond.HandlerFunc(h.deleteAPIKey)))
 	mux.Handle("GET /orgs/{slug}/postguard/files", orgScoped(respond.HandlerFunc(h.listFiles)))
@@ -67,11 +71,45 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 func (h *Handler) settings(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
-	info, err := h.service.APIKeyInfo(r.Context(), org.ID)
+	settings, err := h.service.Settings(r.Context(), org.ID)
 	if e := mapError(err); e != nil {
 		return e
 	}
-	respond.JSON(w, r, http.StatusOK, info)
+	respond.JSON(w, r, http.StatusOK, settings)
+	return nil
+}
+
+func (h *Handler) respondSettings(w http.ResponseWriter, r *http.Request, orgID uuid.UUID) error {
+	settings, err := h.service.Settings(r.Context(), orgID)
+	if e := mapError(err); e != nil {
+		return e
+	}
+	respond.JSON(w, r, http.StatusOK, settings)
+	return nil
+}
+
+type setEncryptionKeyRequest struct {
+	Key string `json:"key"`
+}
+
+func (h *Handler) setEncryptionKey(w http.ResponseWriter, r *http.Request) error {
+	var req setEncryptionKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return badRequest("invalid_body", "invalid request body")
+	}
+	org := organization.OrgFromContext(r.Context())
+	if e := mapError(h.service.SetEncryptionKey(r.Context(), org.ID, req.Key)); e != nil {
+		return e
+	}
+	return h.respondSettings(w, r, org.ID)
+}
+
+func (h *Handler) deleteEncryptionKey(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	if e := mapError(h.service.RemoveEncryptionKey(r.Context(), org.ID)); e != nil {
+		return e
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
@@ -88,12 +126,7 @@ func (h *Handler) setAPIKey(w http.ResponseWriter, r *http.Request) error {
 	if e := mapError(h.service.SetAPIKey(r.Context(), org.ID, req.APIKey)); e != nil {
 		return e
 	}
-	info, err := h.service.APIKeyInfo(r.Context(), org.ID)
-	if e := mapError(err); e != nil {
-		return e
-	}
-	respond.JSON(w, r, http.StatusOK, info)
-	return nil
+	return h.respondSettings(w, r, org.ID)
 }
 
 func (h *Handler) deleteAPIKey(w http.ResponseWriter, r *http.Request) error {
@@ -201,10 +234,14 @@ func mapError(err error) error {
 		return nil
 	case errors.Is(err, ErrNotConfigured):
 		return apiError(http.StatusServiceUnavailable, "postguard_not_configured", "PostGuard is not configured on this deployment")
+	case errors.Is(err, ErrEncryptionKeyNotSet):
+		return apiError(http.StatusConflict, "encryption_key_not_set", "configure a PostGuard encryption key for this organization first")
 	case errors.Is(err, ErrKeyNotSet):
 		return apiError(http.StatusConflict, "api_key_not_set", "no PostGuard API key is configured for this organization")
 	case errors.Is(err, ErrInvalidAPIKey):
 		return badRequest("invalid_api_key", "the API key is not a valid PostGuard for Business key")
+	case errors.Is(err, ErrInvalidEncryptionKey):
+		return badRequest("invalid_encryption_key", "the encryption key must not be empty")
 	case errors.Is(err, ErrNoRecipients):
 		return badRequest("no_recipients", "at least one recipient is required")
 	case errors.Is(err, ErrNoFiles):

@@ -3,10 +3,12 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   deletePostguardApiKey,
+  deletePostguardEncryptionKey,
   getPostguardFiles,
   getPostguardSettings,
   sendPostguardFile,
   setPostguardApiKey,
+  setPostguardEncryptionKey,
 } from "./postguard";
 import type {
   PostguardSentFile,
@@ -42,6 +44,40 @@ export function usePostguardFilesQuery(
     queryKey: postguardFilesQueryKey(slug),
     queryFn: ({ signal }) => getPostguardFiles(slug, signal),
     enabled: enabled && slug !== "",
+  });
+}
+
+export function useSetPostguardEncryptionKeyMutation(
+  slug: string,
+): UseMutationResult<PostguardSettings, Error, { key: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (input) => setPostguardEncryptionKey(slug, input),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.postguardEncryptionKeySaved"));
+      void queryClient.invalidateQueries({
+        queryKey: postguardSettingsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useDeletePostguardEncryptionKeyMutation(
+  slug: string,
+): UseMutationResult<void, Error, void> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: () => deletePostguardEncryptionKey(slug),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.postguardEncryptionKeyRemoved"));
+      void queryClient.invalidateQueries({
+        queryKey: postguardSettingsQueryKey(slug),
+      });
+    },
   });
 }
 

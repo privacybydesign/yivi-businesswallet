@@ -1,10 +1,20 @@
 import { z } from "zod";
 import { request } from "./http";
 
-export const postguardSettingsSchema = z.object({
+export const postguardApiKeyInfoSchema = z.object({
   configured: z.boolean(),
   last4: z.string().optional(),
   updatedAt: z.string().optional(),
+});
+
+export const postguardEncryptionKeyInfoSchema = z.object({
+  configured: z.boolean(),
+  updatedAt: z.string().optional(),
+});
+
+export const postguardSettingsSchema = z.object({
+  apiKey: postguardApiKeyInfoSchema,
+  encryptionKey: postguardEncryptionKeyInfoSchema,
 });
 
 export type PostguardSettings = z.infer<typeof postguardSettingsSchema>;
@@ -31,6 +41,27 @@ export function getPostguardSettings(
   return request(
     `/api/v1/orgs/${encodeURIComponent(slug)}/postguard/settings`,
     { schema: postguardSettingsSchema, signal },
+  );
+}
+
+export function setPostguardEncryptionKey(
+  slug: string,
+  input: { key: string },
+  signal?: AbortSignal,
+): Promise<PostguardSettings> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/postguard/encryption-key`,
+    { schema: postguardSettingsSchema, method: "PUT", body: input, signal },
+  );
+}
+
+export function deletePostguardEncryptionKey(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/postguard/encryption-key`,
+    { schema: z.void(), method: "DELETE", signal },
   );
 }
 

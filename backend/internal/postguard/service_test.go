@@ -10,14 +10,29 @@ import (
 
 // fakeStore records calls and returns canned values.
 type fakeStore struct {
-	setKey      string
-	setErr      error
-	decrypted   string
-	decryptErr  error
-	recorded    SentFile
-	recordErr   error
-	recordCalls int
+	setKey       string
+	setErr       error
+	setEncSecret string
+	setEncErr    error
+	setEncCalls  int
+	decrypted    string
+	decryptErr   error
+	recorded     SentFile
+	recordErr    error
+	recordCalls  int
 }
+
+func (f *fakeStore) EncryptionKeyInfo(context.Context, uuid.UUID) (EncryptionKeyInfo, error) {
+	return EncryptionKeyInfo{}, nil
+}
+
+func (f *fakeStore) SetEncryptionKey(_ context.Context, _ uuid.UUID, secret string) error {
+	f.setEncCalls++
+	f.setEncSecret = secret
+	return f.setEncErr
+}
+
+func (f *fakeStore) RemoveEncryptionKey(context.Context, uuid.UUID) error { return nil }
 
 func (f *fakeStore) APIKeyInfo(context.Context, uuid.UUID) (APIKeyInfo, error) {
 	return APIKeyInfo{}, nil
@@ -73,6 +88,30 @@ func TestSetAPIKeyAcceptsValidAndTrims(t *testing.T) {
 	}
 	if st.setKey != "PG-abcdef" {
 		t.Fatalf("expected trimmed key stored, got %q", st.setKey)
+	}
+}
+
+func TestSetEncryptionKeyRejectsEmpty(t *testing.T) {
+	for _, k := range []string{"", "   ", "\t"} {
+		st := &fakeStore{}
+		svc := NewService(st, &fakeSender{})
+		if err := svc.SetEncryptionKey(context.Background(), uuid.New(), k); !errors.Is(err, ErrInvalidEncryptionKey) {
+			t.Errorf("key %q: expected ErrInvalidEncryptionKey, got %v", k, err)
+		}
+		if st.setEncCalls != 0 {
+			t.Errorf("key %q: store should not have been called", k)
+		}
+	}
+}
+
+func TestSetEncryptionKeyAcceptsValue(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(st, &fakeSender{})
+	if err := svc.SetEncryptionKey(context.Background(), uuid.New(), "my-secret"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.setEncCalls != 1 || st.setEncSecret != "my-secret" {
+		t.Fatalf("expected store called with secret, got calls=%d secret=%q", st.setEncCalls, st.setEncSecret)
 	}
 }
 

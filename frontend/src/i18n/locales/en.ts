@@ -259,6 +259,8 @@ export const en = {
     qerdsContactDeleted: "Contact deleted",
     postguardKeySaved: "API key saved",
     postguardKeyRemoved: "API key removed",
+    postguardEncryptionKeySaved: "Encryption key saved",
+    postguardEncryptionKeyRemoved: "Encryption key removed",
     postguardFileSent: "Encrypted file sent",
   },
   members: {
@@ -592,6 +594,23 @@ export const en = {
       tagline: "Identity-based encryption",
       body: "Files are encrypted so that only a recipient who can prove ownership of the given e-mail address can open them. No account, no shared secret.",
     },
+    encryptionKey: {
+      title: "Encryption key",
+      subtitle: "Protects this organization's API key at rest",
+      help: "Set an encryption key for this organization. Enter a strong secret or generate one; it is stored wrapped by the deployment key, never in the clear.",
+      rotateHelp:
+        "Set a new encryption key. The stored API key is re-encrypted automatically.",
+      placeholder: "Enter or generate a key",
+      generate: "Generate a strong key",
+      rotate: "Rotate",
+      remove: "Remove",
+      set: "Encryption key configured",
+      setOn: "Encryption key set {{when}}",
+      invalid: "The encryption key must not be empty.",
+      error: "Could not save the encryption key: {{message}}",
+      notConfiguredMember:
+        "No encryption key configured yet. Ask an organization admin to set one.",
+    },
     apiKey: {
       title: "Business API key",
       subtitle: "Used to send on behalf of this organization",
@@ -601,6 +620,8 @@ export const en = {
       invalid: "That is not a valid PostGuard for Business API key.",
       error: "Could not save the API key: {{message}}",
       readyMember: "PostGuard is ready to use.",
+      needsEncryptionKey:
+        "Set an encryption key above before adding your API key.",
       notConfiguredMember:
         "No API key configured yet. Ask an organization admin to add one.",
     },

@@ -59,6 +59,53 @@ func TestEncryptUsesFreshNonce(t *testing.T) {
 	}
 }
 
+func TestEnvelopeRoundTrip(t *testing.T) {
+	master, err := NewCipher(testKey)
+	if err != nil {
+		t.Fatalf("master cipher: %v", err)
+	}
+	// Owner sets an arbitrary secret -> DEK -> wrapped by the master key.
+	dek := deriveDEK("owner's chosen passphrase")
+	wrapped, err := master.Encrypt(dek)
+	if err != nil {
+		t.Fatalf("wrap dek: %v", err)
+	}
+
+	// Later: unwrap the DEK and use it to seal/open the API key.
+	unwrapped, err := master.Decrypt(wrapped)
+	if err != nil {
+		t.Fatalf("unwrap dek: %v", err)
+	}
+	dekCipher, err := newCipherFromKey(unwrapped)
+	if err != nil {
+		t.Fatalf("dek cipher: %v", err)
+	}
+	sealed, err := dekCipher.Encrypt([]byte("PG-the-api-key"))
+	if err != nil {
+		t.Fatalf("seal api key: %v", err)
+	}
+	got, err := dekCipher.Decrypt(sealed)
+	if err != nil {
+		t.Fatalf("open api key: %v", err)
+	}
+	if string(got) != "PG-the-api-key" {
+		t.Fatalf("round trip mismatch: %q", got)
+	}
+}
+
+func TestDeriveDEKIsDeterministicAndSized(t *testing.T) {
+	a, b := deriveDEK("same"), deriveDEK("same")
+	if !bytes.Equal(a, b) {
+		t.Fatal("deriveDEK not deterministic")
+	}
+	if len(a) != keyBytes {
+		t.Fatalf("DEK length = %d, want %d", len(a), keyBytes)
+	}
+	if bytes.Equal(a, deriveDEK("different")) {
+		t.Fatal("different secrets produced the same DEK")
+	}
+}
+
 func TestDecryptRejectsTampered(t *testing.T) {
 	c, _ := NewCipher(testKey)
 	blob, _ := c.Encrypt([]byte("payload"))

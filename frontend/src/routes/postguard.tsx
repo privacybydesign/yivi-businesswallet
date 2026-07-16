@@ -7,6 +7,7 @@ import { useWhenFormatter } from "../lib/format-when";
 import { formatBytes } from "../lib/format-bytes";
 import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
 import { PostguardApiKeyCard } from "./postguard-api-key";
+import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
 import * as React from "react";
 
 const COLUMN_COUNT = 4;
@@ -151,7 +152,10 @@ export default function Postguard(): React.JSX.Element {
           </Card>
 
           {!org.isError && (
-            <PostguardApiKeyCard slug={slug} isAdmin={isAdmin} />
+            <>
+              <PostguardEncryptionKeyCard slug={slug} isAdmin={isAdmin} />
+              <PostguardApiKeyCard slug={slug} isAdmin={isAdmin} />
+            </>
           )}
         </div>
       </div>

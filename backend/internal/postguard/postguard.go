@@ -16,13 +16,18 @@ import (
 const apiKeyPrefix = "PG-"
 
 var (
-	// ErrNotConfigured is returned when the deployment lacks the PostGuard
+	// ErrNotConfigured is returned when the deployment lacks the master
 	// key-encryption key or sidecar configuration needed to run the feature.
 	ErrNotConfigured = errors.New("postguard: feature not configured")
+	// ErrEncryptionKeyNotSet is returned when an org has not configured its
+	// per-org encryption key yet (required before an API key can be stored).
+	ErrEncryptionKeyNotSet = errors.New("postguard: encryption key not set")
 	// ErrKeyNotSet is returned when an org has no PostGuard API key stored yet.
 	ErrKeyNotSet = errors.New("postguard: api key not set")
 	// ErrInvalidAPIKey is returned for a malformed API key on upload.
 	ErrInvalidAPIKey = errors.New("postguard: invalid api key")
+	// ErrInvalidEncryptionKey is returned for an empty encryption key value.
+	ErrInvalidEncryptionKey = errors.New("postguard: invalid encryption key")
 	// ErrNoRecipients / ErrNoFiles guard the send request.
 	ErrNoRecipients = errors.New("postguard: at least one recipient is required")
 	ErrNoFiles      = errors.New("postguard: at least one file is required")
@@ -37,6 +42,18 @@ type APIKeyInfo struct {
 	Configured bool       `json:"configured"`
 	Last4      string     `json:"last4,omitempty"`
 	UpdatedAt  *time.Time `json:"updatedAt,omitempty"`
+}
+
+// EncryptionKeyInfo is the non-secret view of an org's per-org encryption key.
+type EncryptionKeyInfo struct {
+	Configured bool       `json:"configured"`
+	UpdatedAt  *time.Time `json:"updatedAt,omitempty"`
+}
+
+// Settings is the combined, non-secret PostGuard configuration for an org.
+type Settings struct {
+	APIKey        APIKeyInfo        `json:"apiKey"`
+	EncryptionKey EncryptionKeyInfo `json:"encryptionKey"`
 }
 
 // SentFile is a record of an encrypted file transfer.

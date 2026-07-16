@@ -10,6 +10,9 @@ import (
 
 // store is the persistence surface the service coordinates.
 type store interface {
+	EncryptionKeyInfo(ctx context.Context, orgID uuid.UUID) (EncryptionKeyInfo, error)
+	SetEncryptionKey(ctx context.Context, orgID uuid.UUID, secret string) error
+	RemoveEncryptionKey(ctx context.Context, orgID uuid.UUID) error
 	APIKeyInfo(ctx context.Context, orgID uuid.UUID) (APIKeyInfo, error)
 	SetAPIKey(ctx context.Context, orgID uuid.UUID, apiKey string) error
 	DeleteAPIKey(ctx context.Context, orgID uuid.UUID) error
@@ -33,9 +36,30 @@ func NewService(s store, snd sender) *Service {
 	return &Service{store: s, sender: snd}
 }
 
-// APIKeyInfo returns the non-secret view of the org's stored key.
-func (s *Service) APIKeyInfo(ctx context.Context, orgID uuid.UUID) (APIKeyInfo, error) {
-	return s.store.APIKeyInfo(ctx, orgID)
+// Settings returns the combined non-secret PostGuard configuration for an org.
+func (s *Service) Settings(ctx context.Context, orgID uuid.UUID) (Settings, error) {
+	enc, err := s.store.EncryptionKeyInfo(ctx, orgID)
+	if err != nil {
+		return Settings{}, err
+	}
+	api, err := s.store.APIKeyInfo(ctx, orgID)
+	if err != nil {
+		return Settings{}, err
+	}
+	return Settings{APIKey: api, EncryptionKey: enc}, nil
+}
+
+// SetEncryptionKey validates and stores an org's encryption key (owner-supplied).
+func (s *Service) SetEncryptionKey(ctx context.Context, orgID uuid.UUID, secret string) error {
+	if strings.TrimSpace(secret) == "" {
+		return ErrInvalidEncryptionKey
+	}
+	return s.store.SetEncryptionKey(ctx, orgID, secret)
+}
+
+// RemoveEncryptionKey removes an org's encryption key (and its API key).
+func (s *Service) RemoveEncryptionKey(ctx context.Context, orgID uuid.UUID) error {
+	return s.store.RemoveEncryptionKey(ctx, orgID)
 }
 
 // SetAPIKey validates and stores an org's PostGuard for Business API key.
