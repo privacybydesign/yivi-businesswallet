@@ -11,31 +11,36 @@ import (
 	"syscall"
 	"time"
 
-	irma "github.com/privacybydesign/irmago/irma"
-
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/config"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/irmarequestor"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/postguard"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
 )
 
 const (
 	pingTimeout     = 5 * time.Second
 	shutdownTimeout = 10 * time.Second
 
-	irmaProbeTimeout = 10 * time.Second
-	irmaHTTPTimeout  = 15 * time.Second
+	verifierProbeTimeout = 10 * time.Second
+	verifierHTTPTimeout  = 15 * time.Second
 
 	qerdsProbeTimeout = 10 * time.Second
 	qerdsHTTPTimeout  = 30 * time.Second
+
+	// PostGuard uploads can be large; allow a generous client timeout.
+	postguardHTTPTimeout = 60 * time.Second
 
 	serverAddr = ":8080"
 )
@@ -47,6 +52,22 @@ type qerdsProvider interface {
 	Send(context.Context, qerdsprovider.OutboundMessage) (qerdsprovider.SendReceipt, error)
 	Fetch(context.Context, qerdsprovider.Address) ([]qerdsprovider.InboundMessage, error)
 	ResolveAddress(context.Context, string) (qerdsprovider.Address, error)
+}
+
+// registryProvider is the boot-time KVK/registry surface: the readiness probe
+// plus the request operation the wallet service uses. Chosen by config.
+type registryProvider interface {
+	Ping(context.Context) error
+	Consult(context.Context, string) (registryprovider.RegistrationAttestation, error)
+}
+
+func newRegistryProvider(cfg config.Config) (registryProvider, error) {
+	switch cfg.WalletRegistryProvider {
+	case config.ProviderStub:
+		return registryprovider.NewStubRegistry(), nil
+	default:
+		return nil, fmt.Errorf("wallet registry provider %q is not implemented", cfg.WalletRegistryProvider)
+	}
 }
 
 func newQerdsProvider(cfg config.Config) (qerdsProvider, error) {
@@ -99,25 +120,18 @@ func run() error {
 	}
 	defer pool.Close()
 
-	emailAttr := irma.NewAttributeTypeIdentifier(cfg.IrmaEmailAttribute)
-	identityAttrs := auth.IdentityAttributes{
-		GivenNames: irma.NewAttributeTypeIdentifier(cfg.IrmaGivenNamesAttribute),
-		FamilyName: irma.NewAttributeTypeIdentifier(cfg.IrmaFamilyNameAttribute),
-	}
-	requestor := irmarequestor.New(
-		cfg.IrmaRequestorURL,
-		irmarequestor.NewTokenAuthenticator(cfg.IrmaRequestorToken),
-		&http.Client{Timeout: irmaHTTPTimeout},
+	verifier := openid4vpverifier.New(
+		cfg.EudiVerifierURL,
+		cfg.EudiIssuerChain,
+		&http.Client{Timeout: verifierHTTPTimeout},
 	)
 
 	// Fatal startup readiness gate: fail the process at boot rather than let a
-	// misconfigured daemon silently fail a user's first login or accept (see Ping).
-	// Probe both shapes the app discloses: email-only login and identity accept.
-	probeCtx, probeCancel := context.WithTimeout(ctx, irmaProbeTimeout)
+	// misconfigured verifier silently fail a user's first login (see Ping). The
+	// probe confirms the verifier accepts a presentation request of our shape.
+	probeCtx, probeCancel := context.WithTimeout(ctx, verifierProbeTimeout)
 	defer probeCancel()
-	loginProbe := irma.NewDisclosureRequest(emailAttr)
-	acceptProbe := irma.NewDisclosureRequest(identityAttrs.GivenNames, identityAttrs.FamilyName, emailAttr)
-	if err := requestor.Ping(probeCtx, loginProbe, acceptProbe); err != nil {
+	if err := verifier.Ping(probeCtx); err != nil {
 		return err
 	}
 
@@ -129,10 +143,12 @@ func run() error {
 	}
 	platformAdmins := auth.NewPlatformAdmins(cfg.PlatformAdminEmails)
 	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
-	authService := auth.NewService(requestor, userStore, sessionStore, emailAttr, identityAttrs, orgStore)
+	presentationStore := presentation.NewStore(pool, cfg.PresentationTTL)
+	authService := auth.NewService(verifier, presentationStore, userStore, sessionStore, orgStore)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, platformAdmins)
 
-	startSessionPruner(ctx, sessionStore, cfg.SessionPruneEvery)
+	startPruner(ctx, "sessions", cfg.SessionPruneEvery, sessionStore.DeleteExpired)
+	startPruner(ctx, "presentation_sessions", cfg.SessionPruneEvery, presentationStore.DeleteExpired)
 
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
@@ -154,11 +170,40 @@ func run() error {
 	qerdsService := qerds.NewService(qerdsStore, qerdsStore, qerdsProv)
 	qerdsHandler := qerds.NewHandler(qerdsService, qerdsStore, qerdsStore, qerdsStore, requireUser, orgHandler.Authorize, cfg.QerdsWebhookSecret, cfg.QerdsDefaultAddressDomain)
 
+	registry, err := newRegistryProvider(cfg)
+	if err != nil {
+		return err
+	}
+	// Fatal readiness gate, mirroring the QERDS probe: fail at boot if the
+	// registry (KVK) provider will not accept our requests.
+	registryProbeCtx, registryProbeCancel := context.WithTimeout(ctx, qerdsProbeTimeout)
+	defer registryProbeCancel()
+	if err := registry.Ping(registryProbeCtx); err != nil {
+		return fmt.Errorf("wallet registry ping: %w", err)
+	}
+	walletStore := wallet.NewStore(pool, audit.NewDBRecorder())
+	walletService := wallet.NewService(walletStore, registry, authService, userStore, qerdsStore, cfg.QerdsDefaultAddressDomain)
+	walletHandler := wallet.NewHandler(walletService, sessionIssuer, requireUser, orgHandler.Authorize)
+
+	// PostGuard is an optional org capability; unlike the verifier/QERDS/registry
+	// it has no fatal boot gate (a send surfaces a clear error if unconfigured).
+	// A present-but-malformed key-encryption key is still a real misconfiguration.
+	postguardCipher, err := postguard.NewCipher(cfg.PostGuardEncryptionKey)
+	if err != nil {
+		return err
+	}
+	postguardStore := postguard.NewStore(pool, audit.NewDBRecorder(), postguardCipher)
+	postguardClient := postguard.NewClient(cfg.PostGuardSidecarURL, cfg.PostGuardSharedSecret, &http.Client{Timeout: postguardHTTPTimeout})
+	postguardService := postguard.NewService(postguardStore, postguardClient)
+	postguardHandler := postguard.NewHandler(postguardService, requireUser, orgHandler.Authorize)
+
 	handler := server.New(
 		pool,
 		authHandler,
 		orgHandler,
 		qerdsHandler,
+		walletHandler,
+		postguardHandler,
 	)
 
 	httpServer := &http.Server{

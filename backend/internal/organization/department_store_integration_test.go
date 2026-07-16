@@ -37,15 +37,28 @@ func addMembership(t *testing.T, pool *pgxpool.Pool, userID, orgID uuid.UUID, de
 	}
 }
 
+// makeOrg inserts a demo organization/business wallet (KVK identity columns are
+// required) and returns it.
+func makeOrg(t *testing.T, pool *pgxpool.Pool, name, slug string) organization.Organization {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO organizations (name, slug, kvk_number, euid, digital_address) VALUES ($1, $2, $3, $4, $5)`,
+		name, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost"); err != nil {
+		t.Fatalf("create org %q: %v", slug, err)
+	}
+	org, err := organization.NewStore(pool, audit.NopRecorder{}).GetBySlug(context.Background(), slug)
+	if err != nil {
+		t.Fatalf("get org %q: %v", slug, err)
+	}
+	return org
+}
+
 func TestStoreDepartmentCRUD(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
-	org, err := store.Create(ctx, "Acme", "acme")
-	if err != nil {
-		t.Fatalf("Create org: %v", err)
-	}
+	org := makeOrg(t, pool, "Acme", "acme")
 
 	dept, err := store.CreateDepartment(ctx, org.ID, "Engineering")
 	if err != nil {
@@ -92,10 +105,7 @@ func TestStoreDepartmentNotFound(t *testing.T) {
 	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
-	org, err := store.Create(ctx, "Acme", "acme")
-	if err != nil {
-		t.Fatalf("Create org: %v", err)
-	}
+	org := makeOrg(t, pool, "Acme", "acme")
 
 	if _, err := store.UpdateDepartment(ctx, org.ID, uuid.New(), "Nope"); !errors.Is(err, organization.ErrDepartmentNotFound) {
 		t.Errorf("update missing err = %v, want ErrDepartmentNotFound", err)
@@ -110,7 +120,7 @@ func TestStoreUpdateMembership(t *testing.T) {
 	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
-	org, _ := store.Create(ctx, "Acme", "acme")
+	org := makeOrg(t, pool, "Acme", "acme")
 	dept, err := store.CreateDepartment(ctx, org.ID, "Engineering")
 	if err != nil {
 		t.Fatalf("CreateDepartment: %v", err)
@@ -147,7 +157,7 @@ func TestStoreUpdateMembershipUnknownDepartment(t *testing.T) {
 	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
-	org, _ := store.Create(ctx, "Acme", "acme")
+	org := makeOrg(t, pool, "Acme", "acme")
 	userID := createUser(t, pool, "alice@example.test")
 	addMembership(t, pool, userID, org.ID, nil)
 
@@ -162,8 +172,8 @@ func TestStoreUpdateMembershipRejectsForeignOrgDepartment(t *testing.T) {
 	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
-	orgA, _ := store.Create(ctx, "A", "a")
-	orgB, _ := store.Create(ctx, "B", "b")
+	orgA := makeOrg(t, pool, "A", "a")
+	orgB := makeOrg(t, pool, "B", "b")
 	deptB, err := store.CreateDepartment(ctx, orgB.ID, "Sales")
 	if err != nil {
 		t.Fatalf("CreateDepartment: %v", err)
@@ -181,7 +191,7 @@ func TestStoreDeleteDepartmentInUse(t *testing.T) {
 	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
-	org, _ := store.Create(ctx, "Acme", "acme")
+	org := makeOrg(t, pool, "Acme", "acme")
 	dept, err := store.CreateDepartment(ctx, org.ID, "Engineering")
 	if err != nil {
 		t.Fatalf("CreateDepartment: %v", err)
@@ -202,7 +212,7 @@ func TestStoreOrgDeleteCascadesWithAssignedDepartment(t *testing.T) {
 	store := organization.NewStore(pool, audit.NopRecorder{})
 	ctx := context.Background()
 
-	org, _ := store.Create(ctx, "Acme", "acme")
+	org := makeOrg(t, pool, "Acme", "acme")
 	dept, err := store.CreateDepartment(ctx, org.ID, "Engineering")
 	if err != nil {
 		t.Fatalf("CreateDepartment: %v", err)

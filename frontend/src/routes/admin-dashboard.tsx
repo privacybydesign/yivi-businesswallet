@@ -42,12 +42,6 @@ export default function AdminDashboard(): React.JSX.Element {
             >
               {t("adminDashboard.viewAll")}
             </Button>
-            <Button
-              icon="add"
-              onClick={() => void navigate("/admin/organizations/new")}
-            >
-              {t("adminDashboard.create")}
-            </Button>
           </div>
         </Card>
       </div>

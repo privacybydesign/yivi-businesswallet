@@ -43,6 +43,12 @@ func open(dns string) (*goose.Provider, error) {
 		db,
 		migrations,
 		goose.WithSessionLocker(locker),
+		// Feature-branch merges routinely produce migrations whose timestamp is
+		// lower than an already-applied one (e.g. qerds_contacts landing after
+		// wallet_representations was applied). Apply such missing migrations in
+		// order rather than failing — safe here as our migrations are mutually
+		// independent (each only references tables from earlier timestamps).
+		goose.WithAllowOutofOrder(true),
 	)
 	if err != nil {
 		_ = db.Close()

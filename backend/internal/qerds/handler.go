@@ -27,11 +27,12 @@ const (
 	maxAttachmentTotalBytes = 50 << 20 // 50 MiB per message
 	maxAttachmentCount      = 20
 	multipartMemoryBytes    = 8 << 20 // buffer in memory before spilling to a temp file
+	multipartOverheadBytes  = 1 << 20 // headroom over the payload cap for framing + text fields
 	defaultContentType      = "application/octet-stream"
 )
 
 type sender interface {
-	Send(ctx context.Context, orgID uuid.UUID, recipient, subject, body string, attachments []qerdsprovider.Attachment) (Message, error)
+	Send(ctx context.Context, orgID uuid.UUID, from, recipient, subject, body string, attachments []qerdsprovider.Attachment) (Message, error)
 	Poll(ctx context.Context, orgID uuid.UUID) (int, error)
 	ReceiveInbound(ctx context.Context, in qerdsprovider.InboundMessage) error
 }
@@ -45,6 +46,7 @@ type reader interface {
 type addressManager interface {
 	ProvisionAddress(ctx context.Context, orgID uuid.UUID, address string, makeDefault bool, providerRef string) (Address, error)
 	ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, error)
+	SetDefaultAddress(ctx context.Context, orgID, addressID uuid.UUID) (Address, error)
 }
 
 type contactManager interface {
@@ -94,6 +96,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.Handle("GET /orgs/{slug}/qerds/addresses", orgScoped(respond.HandlerFunc(h.listAddresses)))
 	mux.Handle("POST /orgs/{slug}/qerds/addresses", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.provisionAddress))))
+	mux.Handle("POST /orgs/{slug}/qerds/addresses/{id}/default", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.setDefaultAddress))))
 
 	mux.Handle("GET /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.listContacts)))
 	mux.Handle("POST /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.createContact)))
@@ -113,14 +116,23 @@ func (h *Handler) listMessages(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// sendMessage accepts multipart/form-data: the text fields recipient, subject
-// and body plus zero or more file parts under the "attachments" key. Multipart
-// (rather than JSON) keeps payload bytes off the base64 bloat path.
+// sendMessage accepts multipart/form-data: the text fields sender, recipient,
+// subject and body plus zero or more file parts under the "attachments" key.
+// Multipart (rather than JSON) keeps payload bytes off the base64 bloat path.
+// An empty sender means the org default; a non-empty one must be an address the
+// org owns.
 func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request) error {
+	// Bound the whole request body before parsing so an oversized upload fails
+	// fast, rather than buffering to memory and spilling to a temp file before
+	// parseAttachments ever gets to enforce its limits. The headroom covers the
+	// multipart framing and text fields around the attachment payload cap.
+	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentTotalBytes+multipartOverheadBytes)
+
 	if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil {
 		return badRequest("invalid_body", "invalid multipart form")
 	}
 
+	sender := strings.TrimSpace(r.FormValue("sender"))
 	recipient := strings.TrimSpace(r.FormValue("recipient"))
 	subject := strings.TrimSpace(r.FormValue("subject"))
 	body := r.FormValue("body")
@@ -137,9 +149,12 @@ func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := organization.OrgFromContext(r.Context())
-	msg, err := h.service.Send(r.Context(), org.ID, recipient, subject, body, attachments)
+	msg, err := h.service.Send(r.Context(), org.ID, sender, recipient, subject, body, attachments)
 	if errors.Is(err, ErrNoSenderAddress) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "no_sender_address", Message: "organization has no default digital address"}
+	}
+	if errors.Is(err, ErrSenderNotOwned) {
+		return badRequest("invalid_sender", "sender is not one of your organization's addresses")
 	}
 	if err != nil {
 		return fmt.Errorf("sending qerds message: %w", err)
@@ -315,6 +330,25 @@ func (h *Handler) provisionAddress(w http.ResponseWriter, r *http.Request) error
 	}
 
 	respond.JSON(w, r, http.StatusCreated, addr)
+	return nil
+}
+
+func (h *Handler) setDefaultAddress(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid address id")
+	}
+
+	org := organization.OrgFromContext(r.Context())
+	addr, err := h.addresses.SetDefaultAddress(r.Context(), org.ID, id)
+	if errors.Is(err, ErrAddressNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "address_not_found", Message: "digital address not found"}
+	}
+	if err != nil {
+		return fmt.Errorf("setting default qerds address: %w", err)
+	}
+
+	respond.JSON(w, r, http.StatusOK, addr)
 	return nil
 }
 

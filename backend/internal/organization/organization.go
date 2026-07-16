@@ -14,6 +14,11 @@ const (
 	StatusActive  = "active"
 	StatusInvited = "invited"
 
+	// Organization (business wallet) lifecycle statuses (Art 6(2)). StatusActive
+	// is shared with the member-status value above.
+	StatusSuspended = "suspended"
+	StatusRevoked   = "revoked"
+
 	DefaultMemberListLimit = 25
 	MaxMemberListLimit     = 100
 )
@@ -38,10 +43,17 @@ var (
 	ErrDepartmentInUse     = errors.New("department still has members")
 )
 
+// Organization is a business wallet: identity from the KVK register plus the
+// wallet's QERDS digital address and lifecycle status.
 type Organization struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
-	Slug string    `json:"slug"`
+	ID             uuid.UUID `json:"id"`
+	Name           string    `json:"name"` // the register's official legal name
+	Slug           string    `json:"slug"`
+	KVKNumber      string    `json:"kvkNumber"`
+	EUID           string    `json:"euid"`
+	DigitalAddress string    `json:"digitalAddress"`
+	Status         string    `json:"status"`
+	BootstrappedAt time.Time `json:"bootstrappedAt"`
 }
 
 type Department struct {

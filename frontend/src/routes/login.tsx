@@ -1,10 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import * as yivi from "@privacybydesign/yivi-frontend";
-import "@privacybydesign/yivi-css";
 import { ApiError } from "../api/http";
 import { claimAuthSession } from "../api/auth";
 import type { PendingInvitation } from "../api/auth";
@@ -26,7 +24,6 @@ import {
 } from "../ui";
 import * as React from "react";
 
-const YIVI_ELEMENT_ID = "yivi-web-form";
 const AUTH_SESSION_URL = "/api/v1/auth/session";
 
 type LoginPhase =
@@ -52,55 +49,32 @@ export default function Login(): React.JSX.Element {
     inviteError(null, t),
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    let sessionToken = "";
-
-    const yiviWeb = yivi.newWeb({
-      debugging: import.meta.env.DEV,
-      element: `#${YIVI_ELEMENT_ID}`,
-      minimal: true,
-      session: {
-        url: "",
-        start: { url: () => AUTH_SESSION_URL, method: "POST" },
-        mapping: {
-          sessionToken: (r) => (sessionToken = (r as { token: string }).token),
-        },
-        result: false,
-      },
-    });
-
-    yiviWeb
-      .start()
-      .then(async () => {
-        if (cancelled) return;
-        setPhase("claiming");
-        try {
-          const result = await claimAuthSession(sessionToken);
-          if (cancelled) return;
-          if ("pendingInvitations" in result) {
-            setInvites(result.pendingInvitations);
-            setPhase("invited");
-            return;
-          }
-          queryClient.setQueryData(meQueryKey, result);
-          void navigate("/");
-        } catch (error) {
-          if (cancelled) return;
-          handleClaimError(error, setPhase, setMessage, t);
+  const handleLoginToken = (id: string): void => {
+    setPhase("claiming");
+    claimAuthSession(id)
+      .then((result) => {
+        if ("pendingInvitations" in result) {
+          setInvites(result.pendingInvitations);
+          setPhase("invited");
+          return;
         }
+        queryClient.setQueryData(meQueryKey, result);
+        void navigate("/");
       })
-      .catch(() => {
-        if (cancelled) return;
-        setPhase("idle");
-        setMessage(t("login.notCompleted"));
+      .catch((error: unknown) => {
+        handleClaimError(error, setPhase, setMessage, t);
       });
+  };
 
-    return () => {
-      cancelled = true;
-      void yiviWeb.abort();
-    };
-  }, [navigate, queryClient, t]);
+  const handleAbort = (): void => {
+    setPhase("idle");
+    setMessage(t("login.notCompleted"));
+  };
+
+  const retry = (): void => {
+    setMessage("");
+    setPhase("running");
+  };
 
   const onAcceptToken = (disclosureToken: string): void => {
     if (chosen == null) return;
@@ -229,25 +203,43 @@ export default function Login(): React.JSX.Element {
               {t("login.subtitle")}
             </p>
 
-            {phase === "claiming" && (
+            {phase === "claiming" ? (
               <p className="text-ink-soft mt-4 text-center text-[14px]">
                 {t("login.completing")}
               </p>
-            )}
-            {showMessage && (
-              <p
-                role="alert"
-                className="rounded-yivi bg-error-bg text-error mt-4 px-3 py-2 text-center text-[13px]"
-              >
-                {message}
-              </p>
+            ) : showMessage ? (
+              <>
+                <p
+                  role="alert"
+                  className="rounded-yivi bg-error-bg text-error mt-4 px-3 py-2 text-center text-[13px]"
+                >
+                  {message}
+                </p>
+                <div className="mt-4 flex justify-center">
+                  <Button variant="secondary" onClick={retry}>
+                    {t("inviteAccept.retry")}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="mt-6 flex justify-center">
+                <IdentityDisclosure
+                  sessionUrl={AUTH_SESSION_URL}
+                  onToken={handleLoginToken}
+                  onAborted={handleAbort}
+                />
+              </div>
             )}
 
-            <div
-              className={showMessage ? "hidden" : "mt-6 flex justify-center"}
-            >
-              <div id={YIVI_ELEMENT_ID} />
-            </div>
+            <p className="text-ink-soft mt-6 text-center text-[13px]">
+              <button
+                type="button"
+                onClick={() => void navigate("/register")}
+                className="text-primary font-medium hover:underline"
+              >
+                {t("login.registerLink")}
+              </button>
+            </p>
           </>
         )}
       </Card>

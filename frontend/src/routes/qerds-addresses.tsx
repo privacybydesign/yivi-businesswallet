@@ -5,6 +5,7 @@ import type { TFunction } from "i18next";
 import {
   useCreateQerdsAddressMutation,
   useQerdsAddressesQuery,
+  useSetDefaultQerdsAddressMutation,
 } from "../api/qerds.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { ApiError } from "../api/http";
@@ -44,6 +45,7 @@ export default function QerdsAddresses(): React.JSX.Element {
   const isAdmin = org.data?.role === "admin";
   const addresses = useQerdsAddressesQuery(slug, !org.isError);
   const create = useCreateQerdsAddressMutation(slug);
+  const setDefault = useSetDefaultQerdsAddressMutation(slug);
 
   const [localPart, setLocalPart] = useState("");
 
@@ -123,12 +125,29 @@ export default function QerdsAddresses(): React.JSX.Element {
                   <span className="text-ink flex-1 truncate font-mono text-[13px]">
                     {address.address}
                   </span>
-                  {address.isDefault && (
+                  {address.isDefault ? (
                     <Tag tone="green">{t("qerds.addresses.default")}</Tag>
+                  ) : (
+                    isAdmin && (
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          setDefault.mutate({ addressId: address.id })
+                        }
+                        disabled={setDefault.isPending}
+                      >
+                        {t("qerds.addresses.setDefault")}
+                      </Button>
+                    )
                   )}
                 </li>
               ))}
             </ul>
+          )}
+          {setDefault.isError && (
+            <p role="alert" className="text-error mt-2 text-[13px]">
+              {addressError(setDefault.error, t)}
+            </p>
           )}
         </div>
       </Card>

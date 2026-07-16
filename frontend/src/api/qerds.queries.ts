@@ -11,6 +11,7 @@ import {
   getQerdsMessages,
   pollQerdsInbox,
   sendQerdsMessage,
+  setDefaultQerdsAddress,
 } from "./qerds";
 import type {
   QerdsAddress,
@@ -70,12 +71,16 @@ export function useQerdsAddressesQuery(
   });
 }
 
-export function useSendQerdsMessageMutation(
-  slug: string,
-): UseMutationResult<
+export function useSendQerdsMessageMutation(slug: string): UseMutationResult<
   QerdsMessage,
   Error,
-  { recipient: string; subject: string; body: string; attachments?: File[] }
+  {
+    sender?: string;
+    recipient: string;
+    subject: string;
+    body: string;
+    attachments?: File[];
+  }
 > {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
@@ -121,6 +126,23 @@ export function useCreateQerdsAddressMutation(
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.qerdsAddressAdded"));
+      void queryClient.invalidateQueries({
+        queryKey: qerdsAddressesQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useSetDefaultQerdsAddressMutation(
+  slug: string,
+): UseMutationResult<QerdsAddress, Error, { addressId: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ addressId }) => setDefaultQerdsAddress(slug, addressId),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.qerdsAddressDefaultChanged"));
       void queryClient.invalidateQueries({
         queryKey: qerdsAddressesQueryKey(slug),
       });

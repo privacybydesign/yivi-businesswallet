@@ -15,10 +15,6 @@ const REPO_ROOT_PATH = join(__dirname, '..');
 const BACKEND_PATH = join(REPO_ROOT_PATH, 'backend');
 const FRONTEND_PATH = join(REPO_ROOT_PATH, 'frontend');
 const TIMING_THRESHOLD_MS = 2000;
-const IRMA_CLIENT_URL_ENV = "IRMA_CLIENT_URL";
-const CLOUDFLARED_METRICS_URL = "http://localhost:2000/quicktunnel";
-const TUNNEL_POLL_INTERVAL_MS = 1000;
-const TUNNEL_POLL_TIMEOUT_MS = 60_000;
 
 async function withTiming<T>(label: string, fn: () => T | Promise<T>): Promise<T> {
     const start = performance.now();
@@ -101,72 +97,12 @@ async function ensureDockerRunning(): Promise<void> {
     await checkDocker();
 }
 
-// hostname is absent until the tunnel is fully established.
-interface QuickTunnelResponse {
-    hostname?: string;
-}
-
-async function fetchTunnelHostname(): Promise<string | null> {
-    let response: Response;
-    try {
-        response = await fetch(CLOUDFLARED_METRICS_URL);
-    } catch {
-        // cloudflared not listening yet (container still starting)
-        return null;
-    }
-    if (!response.ok) {
-        return null;
-    }
-    const body = (await response.json()) as QuickTunnelResponse;
-    const hostname = body.hostname?.trim();
-    return hostname ? hostname : null;
-}
-
-async function delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForTunnelUrl(): Promise<string> {
-    const deadline = performance.now() + TUNNEL_POLL_TIMEOUT_MS;
-    while (performance.now() < deadline) {
-        const hostname = await fetchTunnelHostname();
-        if (hostname) {
-            return `https://${hostname}`;
-        }
-        await delay(TUNNEL_POLL_INTERVAL_MS);
-    }
-    throw new Error(
-        `Timed out after ${TUNNEL_POLL_TIMEOUT_MS / 1000}s waiting for the Cloudflare quick tunnel at ${CLOUDFLARED_METRICS_URL}. ` +
-        `Check network connectivity to Cloudflare, or set ${IRMA_CLIENT_URL_ENV} manually (LAN IP / named tunnel) to skip auto-tunnelling.`
-    );
-}
-
-async function startTunnelAndIrma(): Promise<string> {
-    console.log("Starting IRMA daemon and Cloudflare tunnel");
-    await spawnAsync("docker", ["compose", "up", "-d", "irma", "cloudflared"], REPO_ROOT_PATH);
-
-    const clientUrl = await waitForTunnelUrl();
-    console.log(`Cloudflare tunnel ready: ${clientUrl}`);
-
-    // Recreate irma so --url reflects the live tunnel. The requestor API is
-    // independent of --url, so this does not disturb the backend boot probe.
-    console.log("Recreating IRMA daemon with the tunnel URL");
-    await spawnAsync(
-        "docker",
-        ["compose", "up", "-d", "--force-recreate", "irma"],
-        REPO_ROOT_PATH,
-        { [IRMA_CLIENT_URL_ENV]: clientUrl }
-    );
-
-    return clientUrl;
-}
-
-async function streamDockerCompose(clientUrl: string): Promise<void> {
+async function streamDockerCompose(): Promise<void> {
     await spawnAsync(
         "docker",
         ["compose", "up"],
         REPO_ROOT_PATH,
-        { [IRMA_CLIENT_URL_ENV]: clientUrl },
+        undefined,
         true
     ).catch((error: unknown) => {
         if (isShuttingDown) {
@@ -176,10 +112,8 @@ async function streamDockerCompose(clientUrl: string): Promise<void> {
     });
 }
 
-async function startDockerComposeDetached(clientUrl: string): Promise<void> {
-    await spawnAsync("docker", ["compose", "up", "-d"], REPO_ROOT_PATH, {
-        [IRMA_CLIENT_URL_ENV]: clientUrl,
-    });
+async function startDockerComposeDetached(): Promise<void> {
+    await spawnAsync("docker", ["compose", "up", "-d"], REPO_ROOT_PATH);
 }
 
 function waitForShutdownSignal(): Promise<never> {
@@ -202,25 +136,18 @@ async function main() {
 
     await withTiming("Ensure Docker is available", () => ensureDockerRunning());
 
-    const presetClientUrl = process.env[IRMA_CLIENT_URL_ENV];
-    const clientUrl = presetClientUrl
-        ? (console.log(`${IRMA_CLIENT_URL_ENV} is preset (${presetClientUrl}); skipping auto tunnel`), presetClientUrl)
-        : await withTiming("Start Cloudflare tunnel + IRMA daemon", () => startTunnelAndIrma());
-
     if (debug) {
         const elapsed = ((performance.now() - totalStart) / 1000).toFixed(1);
         console.log(`\n✓ Setup ready in ${elapsed}s — starting the full development stack (--debug: streaming logs)`);
-        console.log(`Phone-facing IRMA URL (scan target): ${clientUrl}`);
         console.log("Press CTRL-C to stop Docker containers\n");
-        await streamDockerCompose(clientUrl);
+        await streamDockerCompose();
         return;
     }
 
-    await withTiming("Start Docker compose (full stack)", () => startDockerComposeDetached(clientUrl));
+    await withTiming("Start Docker compose (full stack)", () => startDockerComposeDetached());
 
     const totalElapsed = ((performance.now() - totalStart) / 1000).toFixed(1);
     console.log(`\n✓ Development setup complete! (${totalElapsed}s total)`);
-    console.log(`Phone-facing IRMA URL (scan target): ${clientUrl}`);
     console.log("Press CTRL-C to stop Docker containers (stack runs in background; re-run with --debug to stream logs)");
 
     // Stack runs detached; idle until CTRL-C triggers the SIGINT handler's down.

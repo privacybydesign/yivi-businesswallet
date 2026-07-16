@@ -13,8 +13,10 @@ import RootRedirect from "./routes/root-redirect";
 import ProtectedRoute from "./routes/protected-route";
 import AdminRoute from "./routes/admin-route";
 import Login from "./routes/login";
+import Register from "./routes/register";
 import InviteAccept from "./routes/invite-accept";
 import MyInvitations from "./routes/my-invitations";
+import Enroll from "./routes/enroll";
 import IdentityReviews from "./routes/identity-reviews";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
@@ -27,10 +29,11 @@ import QerdsCompose from "./routes/qerds-compose";
 import QerdsAddresses from "./routes/qerds-addresses";
 import QerdsContacts from "./routes/qerds-contacts";
 import QerdsMessage from "./routes/qerds-message";
+import Postguard from "./routes/postguard";
+import PostguardSend from "./routes/postguard-send";
 import Settings from "./routes/settings";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
-import CreateOrganization from "./routes/create-organization";
 import NotFound from "./routes/not-found";
 import ErrorBoundary from "./routes/error-boundary";
 
@@ -77,10 +80,15 @@ const qerdsMessageCrumb: RouteHandle = {
     return message ? message.subject : t("qerds.message.title");
   },
 };
+const postguardCrumb: RouteHandle = { crumb: ({ t }) => t("postguard.title") };
+const postguardSendCrumb: RouteHandle = {
+  crumb: ({ t }) => t("postguard.send.title"),
+};
 const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
 const invitationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("myInvitations.title"),
 };
+const enrollCrumb: RouteHandle = { crumb: ({ t }) => t("enroll.title") };
 const adminCrumb: RouteHandle = { crumb: ({ t }) => t("adminDashboard.title") };
 const reviewsCrumb: RouteHandle = {
   crumb: ({ t }) => t("identityReviews.title"),
@@ -88,13 +96,13 @@ const reviewsCrumb: RouteHandle = {
 const orgsCrumb: RouteHandle = {
   crumb: ({ t }) => t("allOrganizations.title"),
 };
-const newOrgCrumb: RouteHandle = { crumb: ({ t }) => t("createOrg.title") };
 
 export const router = createBrowserRouter([
   {
     ErrorBoundary,
     children: [
       { path: "/login", Component: Login },
+      { path: "/register", Component: Register },
       { path: "/invite/:token", Component: InviteAccept },
       { path: "*", Component: NotFound },
       {
@@ -108,6 +116,11 @@ export const router = createBrowserRouter([
                 path: "invitations",
                 Component: MyInvitations,
                 handle: invitationsCrumb,
+              },
+              {
+                path: "enroll",
+                Component: Enroll,
+                handle: enrollCrumb,
               },
               {
                 path: ":orgSlug",
@@ -166,6 +179,18 @@ export const router = createBrowserRouter([
                     ],
                   },
                   {
+                    path: "postguard",
+                    handle: postguardCrumb,
+                    children: [
+                      { index: true, Component: Postguard },
+                      {
+                        path: "send",
+                        Component: PostguardSend,
+                        handle: postguardSendCrumb,
+                      },
+                    ],
+                  },
+                  {
                     path: "audit-log",
                     Component: AuditLog,
                     handle: auditLogCrumb,
@@ -195,11 +220,6 @@ export const router = createBrowserRouter([
                         handle: orgsCrumb,
                         children: [
                           { index: true, Component: AllOrganizations },
-                          {
-                            path: "new",
-                            Component: CreateOrganization,
-                            handle: newOrgCrumb,
-                          },
                         ],
                       },
                     ],

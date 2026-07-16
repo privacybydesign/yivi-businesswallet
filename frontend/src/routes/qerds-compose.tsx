@@ -131,6 +131,7 @@ export default function QerdsCompose(): React.JSX.Element {
   const contacts = useQerdsContactsQuery(slug, !org.isError);
   const send = useSendQerdsMessageMutation(slug);
 
+  const [sender, setSender] = useState("");
   const [recipient, setRecipient] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -139,7 +140,10 @@ export default function QerdsCompose(): React.JSX.Element {
   const [attempted, setAttempted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const defaultAddress = addresses.data?.find((address) => address.isDefault);
+  const addressOptions = addresses.data ?? [];
+  const defaultAddress = addressOptions.find((address) => address.isDefault);
+  // The chosen "from"; falls back to the org default until the user picks one.
+  const selectedFrom = sender || defaultAddress?.address || "";
   const backToList = (): void => void navigate(`/${slug}/qerds`);
 
   const errors = attempted ? validate({ recipient, subject }) : {};
@@ -203,6 +207,7 @@ export default function QerdsCompose(): React.JSX.Element {
     }
     send.mutate(
       {
+        sender: selectedFrom || undefined,
         recipient: recipient.trim(),
         subject: subject.trim(),
         body,
@@ -246,14 +251,33 @@ export default function QerdsCompose(): React.JSX.Element {
       >
         <Card className="flex flex-col gap-5 p-5">
           <Field id="qerds-from" label={t("qerds.compose.from")}>
-            <input
-              id="qerds-from"
-              className={`${control(false)} h-9`}
-              value={defaultAddress?.address ?? ""}
-              placeholder={t("qerds.compose.noAddressPlaceholder")}
-              readOnly
-              disabled
-            />
+            {addressOptions.length > 0 ? (
+              <select
+                id="qerds-from"
+                className={`${control(false)} h-9`}
+                value={selectedFrom}
+                onChange={(event) => setSender(event.target.value)}
+              >
+                {addressOptions.map((address) => (
+                  <option key={address.id} value={address.address}>
+                    {address.isDefault
+                      ? t("qerds.compose.fromDefaultOption", {
+                          address: address.address,
+                        })
+                      : address.address}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                id="qerds-from"
+                className={`${control(false)} h-9`}
+                value=""
+                placeholder={t("qerds.compose.noAddressPlaceholder")}
+                readOnly
+                disabled
+              />
+            )}
           </Field>
 
           <Field
@@ -262,6 +286,28 @@ export default function QerdsCompose(): React.JSX.Element {
             required
             error={errors.recipient && t(errors.recipient)}
           >
+            {contacts.data && contacts.data.length > 0 && (
+              // Explicit picker for the interim address book (until the European
+              // Digital Directory); the free-text input below still accepts any
+              // address.
+              <select
+                className={`${control(false)} mb-2 h-9`}
+                value=""
+                onChange={(event) => {
+                  if (event.target.value !== "") {
+                    setRecipient(event.target.value);
+                  }
+                }}
+                aria-label={t("qerds.compose.chooseContact")}
+              >
+                <option value="">{t("qerds.compose.chooseContact")}</option>
+                {contacts.data.map((contact) => (
+                  <option key={contact.id} value={contact.address}>
+                    {contact.name} — {contact.address}
+                  </option>
+                ))}
+              </select>
+            )}
             <input
               id="qerds-recipient"
               className={`${control(Boolean(errors.recipient))} h-9`}

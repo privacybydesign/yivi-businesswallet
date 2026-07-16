@@ -4,11 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"time"
-
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 )
 
-func startSessionPruner(ctx context.Context, store *session.Store, every time.Duration) {
+// startPruner runs prune on a ticker until ctx is cancelled, logging failures.
+// It backs the expired-row cleanup for both the session and presentation stores.
+func startPruner(ctx context.Context, name string, every time.Duration, prune func(context.Context) (int64, error)) {
 	ticker := time.NewTicker(every)
 	go func() {
 		defer ticker.Stop()
@@ -17,8 +17,9 @@ func startSessionPruner(ctx context.Context, store *session.Store, every time.Du
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if _, err := store.DeleteExpired(ctx); err != nil {
-					slog.ErrorContext(ctx, "session prune failed",
+				if _, err := prune(ctx); err != nil {
+					slog.ErrorContext(ctx, "prune failed",
+						slog.String("store", name),
 						slog.String("error", err.Error()),
 					)
 				}

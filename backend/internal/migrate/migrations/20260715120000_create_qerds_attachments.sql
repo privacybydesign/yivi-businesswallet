@@ -16,9 +16,15 @@ CREATE TABLE qerds_attachments
     content_type TEXT        NOT NULL,
     content_hash TEXT        NOT NULL,
     size_bytes   BIGINT      NOT NULL,
-    content      BYTEA       NOT NULL,
+    content      BYTEA,
     storage_ref  TEXT,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Exactly one of content / storage_ref carries the payload: the blob-column
+    -- MVP fills content, a later object-storage backend fills storage_ref. The
+    -- CHECK keeps that swap a code change behind the store interface, not a
+    -- schema break (no DROP NOT NULL on content).
+    CONSTRAINT qerds_attachments_payload_present
+        CHECK ((content IS NOT NULL) <> (storage_ref IS NOT NULL))
 );
 
 CREATE INDEX idx_qerds_attachments_message_id ON qerds_attachments (message_id);

@@ -47,8 +47,11 @@ func NewService(messages messageStore, addresses addressStore, prov provider) *S
 // (submitted) and audits before calling the provider, then applies the receipt.
 // A provider failure leaves the message in a retryable "submitted" state rather
 // than losing it — QERDS delivery is asynchronous.
-func (s *Service) Send(ctx context.Context, orgID uuid.UUID, recipient, subject, body string, attachments []qerdsprovider.Attachment) (Message, error) {
-	sender, err := s.addresses.DefaultAddress(ctx, orgID)
+// The from parameter is the chosen sending address; empty means "use the
+// organization's default". A non-empty from must be one of the org's own
+// addresses (ErrSenderNotOwned otherwise).
+func (s *Service) Send(ctx context.Context, orgID uuid.UUID, from, recipient, subject, body string, attachments []qerdsprovider.Attachment) (Message, error) {
+	sender, err := s.resolveSender(ctx, orgID, from)
 	if err != nil {
 		return Message{}, err
 	}
@@ -92,6 +95,24 @@ func (s *Service) Send(ctx context.Context, orgID uuid.UUID, recipient, subject,
 		}
 	}
 	return msg, nil
+}
+
+// resolveSender picks the address a message is sent from: the org default when
+// from is empty, otherwise the chosen address — which must be one the org owns.
+func (s *Service) resolveSender(ctx context.Context, orgID uuid.UUID, from string) (Address, error) {
+	if from == "" {
+		return s.addresses.DefaultAddress(ctx, orgID)
+	}
+	owned, err := s.addresses.ListAddresses(ctx, orgID)
+	if err != nil {
+		return Address{}, err
+	}
+	for _, a := range owned {
+		if a.Address == from {
+			return a, nil
+		}
+	}
+	return Address{}, ErrSenderNotOwned
 }
 
 // Poll pulls new inbound messages for all of an organization's addresses and

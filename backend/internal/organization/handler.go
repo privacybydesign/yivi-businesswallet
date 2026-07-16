@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	irmaserver "github.com/privacybydesign/irmago/irma/server"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
@@ -19,10 +18,10 @@ import (
 
 type repository interface {
 	List(ctx context.Context) ([]Organization, error)
-	Create(ctx context.Context, name, slug string) (Organization, error)
 	GetByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetBySlug(ctx context.Context, slug string) (Organization, error)
 	Update(ctx context.Context, id uuid.UUID, name string) (Organization, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
@@ -39,8 +38,8 @@ type repository interface {
 type inviter interface {
 	InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) (Invitation, error)
 	PendingInvitation(ctx context.Context, rawToken string) (Invitation, error)
-	StartAcceptSession(ctx context.Context, rawToken string) (*irmaserver.SessionPackage, error)
-	StartIdentitySession(ctx context.Context) (*irmaserver.SessionPackage, error)
+	StartAcceptSession(ctx context.Context, rawToken string) (auth.Session, error)
+	StartIdentitySession(ctx context.Context) (auth.Session, error)
 	AcceptInvitation(ctx context.Context, rawToken, disclosureToken string) (AcceptOutcome, error)
 	DeclineInvitation(ctx context.Context, rawToken string) error
 	MyInvitations(ctx context.Context, email user.Email) ([]Invitation, error)
@@ -83,8 +82,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	}
 
 	mux.Handle("GET /organizations", platform(respond.HandlerFunc(h.list)))
-	mux.Handle("POST /organizations", platform(respond.HandlerFunc(h.create)))
 	mux.Handle("GET /organizations/{id}", platform(respond.HandlerFunc(h.get)))
+	mux.Handle("DELETE /organizations/{id}", platform(respond.HandlerFunc(h.delete)))
 
 	mux.Handle("GET /admin/identity-reviews", platform(respond.HandlerFunc(h.listIdentityReviews)))
 	mux.Handle("POST /admin/identity-reviews/{id}/approve", platform(respond.HandlerFunc(h.approveIdentityReview)))
@@ -130,40 +129,6 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-type createRequest struct {
-	Name string `json:"name"`
-	Slug string `json:"slug"`
-}
-
-func (h *Handler) create(w http.ResponseWriter, r *http.Request) error {
-	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return badRequest("invalid_body", "invalid request body")
-	}
-	req.Name = strings.TrimSpace(req.Name)
-	req.Slug = strings.ToLower(strings.TrimSpace(req.Slug))
-	if req.Name == "" || req.Slug == "" {
-		return badRequest("invalid_input", "name and slug are required")
-	}
-	switch err := ValidateSlug(req.Slug); {
-	case errors.Is(err, ErrReservedSlug):
-		return badRequest("reserved_slug", "slug is reserved and cannot be used")
-	case errors.Is(err, ErrInvalidSlug):
-		return badRequest("invalid_slug", "slug may only contain letters, numbers, and hyphens")
-	}
-
-	org, err := h.store.Create(r.Context(), req.Name, req.Slug)
-	if errors.Is(err, ErrSlugTaken) {
-		return &respond.APIError{Status: http.StatusConflict, Code: "slug_taken", Message: "slug already taken"}
-	}
-	if err != nil {
-		return fmt.Errorf("creating organization: %w", err)
-	}
-
-	respond.JSON(w, r, http.StatusCreated, org)
-	return nil
-}
-
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
@@ -179,6 +144,22 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	respond.JSON(w, r, http.StatusOK, org)
+	return nil
+}
+
+func (h *Handler) delete(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid id")
+	}
+
+	if err := h.store.Delete(r.Context(), id); errors.Is(err, ErrNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "org_not_found", Message: "organization not found"}
+	} else if err != nil {
+		return fmt.Errorf("deleting organization %s: %w", id, err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
