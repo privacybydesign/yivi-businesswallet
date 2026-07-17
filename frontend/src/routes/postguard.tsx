@@ -6,8 +6,6 @@ import { accessMessage } from "../lib/access-message";
 import { useWhenFormatter } from "../lib/format-when";
 import { formatBytes } from "../lib/format-bytes";
 import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
-import { PostguardApiKeyCard } from "./postguard-api-key";
-import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
 import * as React from "react";
 
 const COLUMN_COUNT = 4;
@@ -31,7 +29,6 @@ export default function Postguard(): React.JSX.Element {
   const files = usePostguardFilesQuery(slug, !org.isError);
   const formatWhen = useWhenFormatter();
 
-  const isAdmin = org.data?.role === "admin";
   const rows = files.data ?? [];
 
   return (
@@ -131,7 +128,7 @@ export default function Postguard(): React.JSX.Element {
           </Card>
         )}
 
-        <div className="flex flex-col gap-4">
+        <div>
           <Card className="p-5">
             <div className="mb-2.5 flex items-center gap-2.5">
               <span className="bg-brand/10 text-brand-600 flex h-8.5 w-8.5 items-center justify-center rounded-lg">
@@ -150,13 +147,6 @@ export default function Postguard(): React.JSX.Element {
               {t("postguard.about.body")}
             </p>
           </Card>
-
-          {!org.isError && (
-            <>
-              <PostguardEncryptionKeyCard slug={slug} isAdmin={isAdmin} />
-              <PostguardApiKeyCard slug={slug} isAdmin={isAdmin} />
-            </>
-          )}
         </div>
       </div>
     </>

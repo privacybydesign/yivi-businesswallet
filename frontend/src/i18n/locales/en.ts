@@ -467,6 +467,7 @@ export const en = {
     subtitle: "Organization profile and preferences",
     tabOrg: "Organization",
     tabEmail: "E-mail",
+    tabPostguard: "PostGuard",
     tabWallets: "Wallets",
     adminOnly: "Only organization admins can manage settings.",
     orgProfile: "Organization profile",
