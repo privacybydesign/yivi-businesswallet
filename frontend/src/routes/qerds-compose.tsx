@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
@@ -125,6 +125,7 @@ export default function QerdsCompose(): React.JSX.Element {
   const { orgSlug } = useParams();
   // Guaranteed by the ":orgSlug" route segment this component mounts under.
   const slug = orgSlug!;
+  const [searchParams] = useSearchParams();
 
   const org = useOrganizationQuery(slug);
   const addresses = useQerdsAddressesQuery(slug, !org.isError);
@@ -132,7 +133,11 @@ export default function QerdsCompose(): React.JSX.Element {
   const send = useSendQerdsMessageMutation(slug);
 
   const [sender, setSender] = useState("");
-  const [recipient, setRecipient] = useState("");
+  // Prefill the recipient from a "to" query param (e.g. from a member detail
+  // page); read once at mount since compose is a fresh navigation.
+  const [recipient, setRecipient] = useState(
+    () => searchParams.get("to") ?? "",
+  );
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [files, setFiles] = useState<File[]>([]);

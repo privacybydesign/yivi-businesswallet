@@ -261,6 +261,7 @@ export const en = {
     invitationResent: "Invitation resent",
     invitationRevoked: "Invitation revoked",
     memberUpdated: "Member updated",
+    memberRemoved: "Member removed",
     organizationUpdated: "Organization updated",
     organizationDeleted: "Organization deleted",
     departmentAdded: "Department added",
@@ -454,6 +455,14 @@ export const en = {
     verified: "Verified",
     sendMessage: "Send message",
     offboard: "Off-board member",
+    offboardConfirm: {
+      title: "Off-board member",
+      body: "Remove {{name}} from this organization? They lose access immediately. This does not delete their account.",
+      lastAdmin:
+        "This is the organization's only admin. Promote another member to admin first.",
+      error: "Could not off-board this member: {{message}}",
+      confirm: "Off-board",
+    },
   },
   memberEdit: {
     title: "Edit member",
