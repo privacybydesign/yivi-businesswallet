@@ -2,10 +2,16 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useSendPostguardFileMutation } from "../api/postguard.queries";
+import {
+  usePostguardSettingsQuery,
+  useSendPostguardFileMutation,
+} from "../api/postguard.queries";
+import { useOrganizationQuery } from "../api/organization.queries";
+import { postguardReadiness } from "../lib/postguard-availability";
 import { formatBytes } from "../lib/format-bytes";
 import { ApiError } from "../api/http";
 import { Button, Card, Icon, TopBar } from "../ui";
+import { PostguardNotReady } from "./postguard-not-ready";
 import * as React from "react";
 
 const FORM_ID = "postguard-send-form";
@@ -68,7 +74,20 @@ export default function PostguardSend(): React.JSX.Element {
   // Guaranteed by the ":orgSlug" route segment this component mounts under.
   const slug = orgSlug!;
 
+  const org = useOrganizationQuery(slug);
+  const settings = usePostguardSettingsQuery(slug, !org.isError);
   const send = useSendPostguardFileMutation(slug);
+
+  const readiness = postguardReadiness(
+    settings.data,
+    settings.error,
+    settings.isPending,
+  );
+  const isAdmin = org.data?.role === "admin";
+  const blockedReason =
+    readiness === "unconfigured" || readiness === "deploymentOff"
+      ? readiness
+      : null;
 
   const [files, setFiles] = useState<File[]>([]);
   const [recipients, setRecipients] = useState<string[]>([""]);
@@ -108,7 +127,7 @@ export default function PostguardSend(): React.JSX.Element {
   function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     setAttempted(true);
-    if (send.isPending) {
+    if (send.isPending || readiness !== "ready") {
       return;
     }
     if (
@@ -144,7 +163,7 @@ export default function PostguardSend(): React.JSX.Element {
               type="submit"
               form={FORM_ID}
               icon="lock"
-              disabled={send.isPending}
+              disabled={send.isPending || readiness !== "ready"}
             >
               {send.isPending
                 ? t("postguard.send.sending")
@@ -154,166 +173,178 @@ export default function PostguardSend(): React.JSX.Element {
         }
       />
 
-      <form
-        id={FORM_ID}
-        onSubmit={handleSubmit}
-        noValidate
-        className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_320px]"
-      >
-        <Card className="flex flex-col gap-5 p-5">
-          {/* File */}
-          <div className="flex flex-col gap-1.5">
-            <span className={FIELD_LABEL}>{t("postguard.send.fileLabel")}</span>
-            <label
-              className={[
-                "rounded-yivi flex cursor-pointer flex-col items-center justify-center border border-dashed px-4 py-6 text-center transition-colors",
-                filesError
-                  ? "border-error bg-error-bg/40"
-                  : "border-line-strong hover:bg-surface-3",
-              ].join(" ")}
-            >
-              <input
-                type="file"
-                multiple
-                className="sr-only"
-                onChange={(event) =>
-                  setFiles(Array.from(event.target.files ?? []))
-                }
-              />
-              <Icon name="add" size={20} className="text-muted" />
-              <span className="text-ink mt-1.5 text-[13px] font-semibold">
-                {t("postguard.send.fileCta")}
+      {blockedReason ? (
+        <div className="p-8">
+          <PostguardNotReady reason={blockedReason} isAdmin={isAdmin} />
+        </div>
+      ) : (
+        <form
+          id={FORM_ID}
+          onSubmit={handleSubmit}
+          noValidate
+          className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_320px]"
+        >
+          <Card className="flex flex-col gap-5 p-5">
+            {/* File */}
+            <div className="flex flex-col gap-1.5">
+              <span className={FIELD_LABEL}>
+                {t("postguard.send.fileLabel")}
               </span>
-              <span className="text-ink-soft mt-0.5 text-[12px]">
-                {t("postguard.send.fileHint")}
-              </span>
-            </label>
-            {files.length > 0 && (
-              <ul className="flex flex-col gap-1">
-                {files.map((file, index) => (
-                  <li
-                    key={`${file.name}-${index}`}
-                    className="rounded-yivi border-line bg-surface-2 flex items-center justify-between gap-2 border px-3 py-1.5 text-[13px]"
-                  >
-                    <span className="truncate">{file.name}</span>
-                    <span className="text-ink-soft shrink-0 font-mono text-[12px]">
-                      {formatBytes(file.size)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {filesError && (
-              <span role="alert" className="text-error text-[12px]">
-                {t("postguard.send.fileRequired")}
-              </span>
-            )}
-          </div>
-
-          {/* Recipients */}
-          <div className="flex flex-col gap-1.5">
-            <span className={FIELD_LABEL}>
-              {t("postguard.send.recipientsLabel")}
-            </span>
-            <div className="flex flex-col gap-2">
-              {recipients.map((recipient, index) => (
-                <div key={index} className="flex items-center gap-2">
-                  <input
-                    className={`${control(recipientsError)} h-9`}
-                    type="email"
-                    value={recipient}
-                    onChange={(event) =>
-                      updateRecipient(index, event.target.value)
-                    }
-                    placeholder={t("postguard.send.recipientPlaceholder")}
-                    aria-label={t("postguard.send.recipientsLabel")}
-                  />
-                  {recipients.length > 1 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      icon="delete"
-                      iconOnly
-                      aria-label={t("postguard.send.removeRecipient")}
-                      onClick={() => removeRecipient(index)}
-                    />
-                  )}
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={addRecipient}
-                className="text-link hover:text-ink inline-flex w-fit items-center gap-1 text-[13px] font-semibold transition-colors"
+              <label
+                className={[
+                  "rounded-yivi flex cursor-pointer flex-col items-center justify-center border border-dashed px-4 py-6 text-center transition-colors",
+                  filesError
+                    ? "border-error bg-error-bg/40"
+                    : "border-line-strong hover:bg-surface-3",
+                ].join(" ")}
               >
-                <Icon name="add" size={12} />
-                {t("postguard.send.addRecipient")}
-              </button>
+                <input
+                  type="file"
+                  multiple
+                  className="sr-only"
+                  onChange={(event) =>
+                    setFiles(Array.from(event.target.files ?? []))
+                  }
+                />
+                <Icon name="add" size={20} className="text-muted" />
+                <span className="text-ink mt-1.5 text-[13px] font-semibold">
+                  {t("postguard.send.fileCta")}
+                </span>
+                <span className="text-ink-soft mt-0.5 text-[12px]">
+                  {t("postguard.send.fileHint")}
+                </span>
+              </label>
+              {files.length > 0 && (
+                <ul className="flex flex-col gap-1">
+                  {files.map((file, index) => (
+                    <li
+                      key={`${file.name}-${index}`}
+                      className="rounded-yivi border-line bg-surface-2 flex items-center justify-between gap-2 border px-3 py-1.5 text-[13px]"
+                    >
+                      <span className="truncate">{file.name}</span>
+                      <span className="text-ink-soft shrink-0 font-mono text-[12px]">
+                        {formatBytes(file.size)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {filesError && (
+                <span role="alert" className="text-error text-[12px]">
+                  {t("postguard.send.fileRequired")}
+                </span>
+              )}
             </div>
-            {recipientsError && (
-              <span role="alert" className="text-error text-[12px]">
-                {t("postguard.send.recipientsInvalid")}
+
+            {/* Recipients */}
+            <div className="flex flex-col gap-1.5">
+              <span className={FIELD_LABEL}>
+                {t("postguard.send.recipientsLabel")}
               </span>
+              <div className="flex flex-col gap-2">
+                {recipients.map((recipient, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <input
+                      className={`${control(recipientsError)} h-9`}
+                      type="email"
+                      value={recipient}
+                      onChange={(event) =>
+                        updateRecipient(index, event.target.value)
+                      }
+                      placeholder={t("postguard.send.recipientPlaceholder")}
+                      aria-label={t("postguard.send.recipientsLabel")}
+                    />
+                    {recipients.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon="delete"
+                        iconOnly
+                        aria-label={t("postguard.send.removeRecipient")}
+                        onClick={() => removeRecipient(index)}
+                      />
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addRecipient}
+                  className="text-link hover:text-ink inline-flex w-fit items-center gap-1 text-[13px] font-semibold transition-colors"
+                >
+                  <Icon name="add" size={12} />
+                  {t("postguard.send.addRecipient")}
+                </button>
+              </div>
+              {recipientsError && (
+                <span role="alert" className="text-error text-[12px]">
+                  {t("postguard.send.recipientsInvalid")}
+                </span>
+              )}
+            </div>
+
+            {/* Expiry */}
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="postguard-expiry" className={FIELD_LABEL}>
+                {t("postguard.send.expiryLabel")}
+              </label>
+              <select
+                id="postguard-expiry"
+                className={`${control(false)} h-9`}
+                value={expiry}
+                onChange={(event) => setExpiry(event.target.value as Expiry)}
+              >
+                {EXPIRY_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {t(`postguard.send.expiry.${option}`)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Message */}
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="postguard-message" className={FIELD_LABEL}>
+                {t("postguard.send.messageLabel")}
+              </label>
+              <textarea
+                id="postguard-message"
+                className={`${control(false)} min-h-24 py-2 leading-relaxed`}
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+              />
+            </div>
+
+            <label className="flex items-center gap-2 text-[13px]">
+              <input
+                type="checkbox"
+                checked={notify}
+                onChange={(event) => setNotify(event.target.checked)}
+              />
+              {t("postguard.send.notify")}
+            </label>
+
+            {send.isError && (
+              <p
+                role="alert"
+                className="rounded-yivi bg-error-bg text-error px-3 py-2 text-[13px]"
+              >
+                {sendErrorMessage(send.error, t)}
+              </p>
             )}
-          </div>
+          </Card>
 
-          {/* Expiry */}
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="postguard-expiry" className={FIELD_LABEL}>
-              {t("postguard.send.expiryLabel")}
-            </label>
-            <select
-              id="postguard-expiry"
-              className={`${control(false)} h-9`}
-              value={expiry}
-              onChange={(event) => setExpiry(event.target.value as Expiry)}
-            >
-              {EXPIRY_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {t(`postguard.send.expiry.${option}`)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Message */}
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="postguard-message" className={FIELD_LABEL}>
-              {t("postguard.send.messageLabel")}
-            </label>
-            <textarea
-              id="postguard-message"
-              className={`${control(false)} min-h-24 py-2 leading-relaxed`}
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-            />
-          </div>
-
-          <label className="flex items-center gap-2 text-[13px]">
-            <input
-              type="checkbox"
-              checked={notify}
-              onChange={(event) => setNotify(event.target.checked)}
-            />
-            {t("postguard.send.notify")}
-          </label>
-
-          {send.isError && (
-            <p
-              role="alert"
-              className="rounded-yivi bg-error-bg text-error px-3 py-2 text-[13px]"
-            >
-              {sendErrorMessage(send.error, t)}
-            </p>
-          )}
-        </Card>
-
-        <Card variant="highlight" className="h-fit p-4">
-          <div className="flex items-start gap-2.5">
-            <Icon name="info" size={16} className="text-link mt-0.5 shrink-0" />
-            <p className="text-ink text-[13px]">{t("postguard.send.note")}</p>
-          </div>
-        </Card>
-      </form>
+          <Card variant="highlight" className="h-fit p-4">
+            <div className="flex items-start gap-2.5">
+              <Icon
+                name="info"
+                size={16}
+                className="text-link mt-0.5 shrink-0"
+              />
+              <p className="text-ink text-[13px]">{t("postguard.send.note")}</p>
+            </div>
+          </Card>
+        </form>
+      )}
     </>
   );
 }

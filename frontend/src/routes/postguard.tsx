@@ -1,11 +1,16 @@
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { usePostguardFilesQuery } from "../api/postguard.queries";
+import {
+  usePostguardFilesQuery,
+  usePostguardSettingsQuery,
+} from "../api/postguard.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
+import { postguardReadiness } from "../lib/postguard-availability";
 import { useWhenFormatter } from "../lib/format-when";
 import { formatBytes } from "../lib/format-bytes";
 import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
+import { PostguardNotReady } from "./postguard-not-ready";
 import * as React from "react";
 
 const COLUMN_COUNT = 4;
@@ -27,9 +32,21 @@ export default function Postguard(): React.JSX.Element {
 
   const org = useOrganizationQuery(slug);
   const files = usePostguardFilesQuery(slug, !org.isError);
+  const settings = usePostguardSettingsQuery(slug, !org.isError);
   const formatWhen = useWhenFormatter();
 
+  const isAdmin = org.data?.role === "admin";
   const rows = files.data ?? [];
+
+  const readiness = postguardReadiness(
+    settings.data,
+    settings.error,
+    settings.isPending,
+  );
+  const notReadyReason =
+    readiness === "unconfigured" || readiness === "deploymentOff"
+      ? readiness
+      : null;
 
   return (
     <>
@@ -39,6 +56,7 @@ export default function Postguard(): React.JSX.Element {
         actions={
           <Button
             icon="lock"
+            disabled={readiness !== "ready"}
             onClick={() => void navigate(`/${slug}/postguard/send`)}
           >
             {t("postguard.send.action")}
@@ -53,6 +71,8 @@ export default function Postguard(): React.JSX.Element {
               {accessMessage(org.error, t)}
             </p>
           </Card>
+        ) : notReadyReason ? (
+          <PostguardNotReady reason={notReadyReason} isAdmin={isAdmin} />
         ) : files.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
