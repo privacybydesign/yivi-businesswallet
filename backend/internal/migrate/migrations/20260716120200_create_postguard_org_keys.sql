@@ -6,7 +6,7 @@
 -- PostGuard API key in postguard_api_keys.
 CREATE TABLE postguard_org_keys
 (
-    id              UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID        NOT NULL UNIQUE REFERENCES organizations (id) ON DELETE CASCADE,
     wrapped_dek     BYTEA       NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),

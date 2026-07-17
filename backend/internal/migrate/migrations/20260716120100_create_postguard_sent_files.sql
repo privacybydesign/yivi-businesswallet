@@ -4,7 +4,7 @@
 -- e-mail identities the payload was encrypted to. No file content is stored here.
 CREATE TABLE postguard_sent_files
 (
-    id              UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
     sender_user_id  UUID        REFERENCES users (id) ON DELETE SET NULL,
     file_name       TEXT        NOT NULL,

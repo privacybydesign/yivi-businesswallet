@@ -1,7 +1,7 @@
 -- +goose Up
 CREATE TABLE qerds_addresses
 (
-    id              UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
     address         TEXT        NOT NULL UNIQUE,
     is_default      BOOLEAN     NOT NULL DEFAULT false,

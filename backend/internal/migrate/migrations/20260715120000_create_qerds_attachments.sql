@@ -10,7 +10,7 @@
 -- change behind the store interface rather than a schema break.
 CREATE TABLE qerds_attachments
 (
-    id           UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     message_id   UUID        NOT NULL REFERENCES qerds_messages (id) ON DELETE CASCADE,
     filename     TEXT        NOT NULL,
     content_type TEXT        NOT NULL,

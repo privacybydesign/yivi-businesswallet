@@ -8,7 +8,7 @@
 -- generated issuer metadata's `display` (the wallet's issuer branding).
 CREATE TABLE org_issuer_settings
 (
-    id              UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID        NOT NULL UNIQUE REFERENCES organizations (id) ON DELETE CASCADE,
     instance_name   TEXT        NOT NULL,
     display_name    TEXT        NOT NULL DEFAULT '',

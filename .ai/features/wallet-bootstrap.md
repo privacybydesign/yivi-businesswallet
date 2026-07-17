@@ -152,7 +152,7 @@ OpenID4VP login, `identity.Reconcile`, and the accept-via-presentation shape fro
 
 ## 4. Data model (new migrations)
 
-`.ai/conventions/BACKEND.md` §Migrations: one table per file, `uuidv7()` PKs,
+`.ai/conventions/BACKEND.md` §Migrations: one table per file, `gen_random_uuid()` PKs,
 `TIMESTAMPTZ DEFAULT now()`, always a `down`, edit-in-place pre-prod.
 
 ### 4.1 `wallet_instances` — the lifecycle entity (created at "open wallet")
@@ -162,7 +162,7 @@ known — the org row is populated only when KVK's attestation confirms it.
 
 | column | type | notes |
 |---|---|---|
-| `id` | uuid PK | `uuidv7()` |
+| `id` | uuid PK | `gen_random_uuid()` |
 | `status` | text CHECK | `provisioning` \| `awaiting_attestation` \| `active` \| `rejected` \| `suspended` \| `revoked` |
 | `requestor_user_id` | uuid FK→users | the person who opened it; `ON DELETE SET NULL` |
 | `kvk_number` | text | the number the requester entered |

@@ -6,7 +6,7 @@
 -- opaque correlation key into the hosted issuer (openid4vciissuer).
 CREATE TABLE issued_attestations
 (
-    id                    UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id       UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
     template_id           UUID        REFERENCES attestation_templates (id) ON DELETE SET NULL,
     schema_vct            TEXT        NOT NULL,

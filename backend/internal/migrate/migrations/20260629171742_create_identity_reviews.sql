@@ -1,7 +1,7 @@
 -- +goose Up
 CREATE TABLE identity_reviews
 (
-    id                    UUID PRIMARY KEY     DEFAULT uuidv7(),
+    id                    UUID PRIMARY KEY     DEFAULT gen_random_uuid(),
     user_id               UUID        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     invitation_id         UUID        NOT NULL UNIQUE REFERENCES invitations (id) ON DELETE CASCADE,
     stored_given_names    TEXT        NOT NULL,

@@ -4,7 +4,7 @@
 -- encrypted_key (nonce || ciphertext) and is never logged or audited.
 CREATE TABLE postguard_api_keys
 (
-    id              UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID        NOT NULL UNIQUE REFERENCES organizations (id) ON DELETE CASCADE,
     encrypted_key   BYTEA       NOT NULL,
     key_last4       TEXT        NOT NULL,

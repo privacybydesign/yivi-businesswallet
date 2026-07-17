@@ -6,7 +6,7 @@
 -- It exists for org-scoping, listing, audit and the QERDS evidence link.
 CREATE TABLE held_attestations
 (
-    id                UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id   UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
     -- id of the irmago IssuedCredentialInstance this row indexes (opaque to us).
     credential_ref    TEXT        NOT NULL,

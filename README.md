@@ -106,7 +106,7 @@ Integration tests are tag-gated and skip unless `TEST_DATABASE_URL` points at a
 real Postgres. For a throwaway one:
 
 ```sh
-docker run --rm -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:18-alpine
+docker run --rm -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16-alpine
 TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable \
   go test -tags=integration -race ./...
 ```
