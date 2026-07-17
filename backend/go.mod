@@ -204,7 +204,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.3.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/privacybydesign/irmago v1.1.2-0.20260717064849-4d83e2d8f997
+	github.com/privacybydesign/irmago v1.1.2-0.20260717112833-34d4cf3b3d47
 	github.com/prometheus/client_golang v1.12.1 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.32.1 // indirect
@@ -305,9 +305,3 @@ tool (
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	github.com/pressly/goose/v3/cmd/goose
 )
-
-// TEMPORARY (do not merge): the holder engine needs the CGO-free eudi/storage
-// from privacybydesign/irmago#622. Until that merges to irmago master, develop
-// against the local checkout. Pre-merge step: drop this replace and pin the
-// require above to the irmago master pseudo-version that includes #622.
-replace github.com/privacybydesign/irmago => /root/code/irmago
