@@ -14,14 +14,13 @@ on:
 permissions:
   contents: write
   packages: write
-  security-events: write
 
 jobs:
   publish-docker-image:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Check whether this event is the HEAD of main
         continue-on-error: true
@@ -31,7 +30,7 @@ jobs:
 
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -40,17 +39,17 @@ jobs:
             type=ref,event=branch,enable=${{ github.event_name == 'workflow_dispatch' }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build container and export to local Docker
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           load: true
@@ -58,26 +57,59 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The scan gates delivery directly: fail-build fails the job when a fixable
+      # critical vulnerability is present. Results are not uploaded to GitHub code
+      # scanning, which would require GitHub Advanced Security (Code Security) —
+      # a paid feature on this private repo, and intentionally left disabled.
       - name: Scan Image
-        uses: anchore/scan-action@v7
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         id: scan
         with:
           image: local/business-wallet:scan
           only-fixed: true
           fail-build: true
           severity-cutoff: critical
-          output-format: sarif
-
-      - name: Upload Anchore scan SARIF report
-        uses: github/codeql-action/upload-sarif@v3
-        if: ${{ !cancelled() }}
-        with:
-          sarif_file: ${{ steps.scan.outputs.sarif }}
 
       - name: Push image to GitHub Container Registry
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         if: ${{ github.event_name == 'release' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
         with:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  mirror-image:
+    runs-on: ubuntu-latest
+    name: Mirror image to Scaleway registry
+    needs: publish-docker-image
+    # SCW_SECRET_KEY lives in the `dev` environment; without this the secret is
+    # empty and `docker login --password-stdin` falls back to an interactive
+    # prompt, failing with "Cannot perform an interactive login from a non TTY device".
+    environment: dev
+    # Only mirror when the edge image was actually pushed (HEAD of main / manual run).
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    env:
+      SOURCE_IMAGE: ghcr.io/${{ github.repository }}:edge
+      TARGET_IMAGE: rg.nl-ams.scw.cloud/yivi-containter-registry/wallet-provider:edge
+    steps:
+      # The edge image is private on ghcr, and this is a separate job from the
+      # publish job, so it needs its own ghcr login to pull the source image.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Scaleway container registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: rg.nl-ams.scw.cloud
+          username: nologin
+          password: ${{ secrets.SCW_SECRET_KEY }}
+
+      - name: Mirror image
+        run: |
+          docker pull "$SOURCE_IMAGE"
+          docker tag "$SOURCE_IMAGE" "$TARGET_IMAGE"
+          docker push "$TARGET_IMAGE"
