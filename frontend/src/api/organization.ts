@@ -225,6 +225,23 @@ export function updateOrganizationMember(
   );
 }
 
+// removeMember off-boards an active member, revoking their membership. Returns
+// no body (204); the server refuses to remove the last admin (409).
+export function removeMember(
+  slug: string,
+  userId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`,
+    {
+      schema: z.void(),
+      method: "DELETE",
+      signal,
+    },
+  );
+}
+
 export function resendInvitation(
   slug: string,
   invitationId: string,

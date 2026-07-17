@@ -25,6 +25,7 @@ import {
   getOrganizationMembers,
   getOrganizations,
   inviteMember,
+  removeMember,
   resendInvitation,
   revokeInvitation,
   updateDepartment,
@@ -334,6 +335,29 @@ export function useRevokeInvitationMutation(
       toast.success(t("toasts.invitationRevoked"));
       void queryClient.invalidateQueries({
         queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useRemoveMemberMutation(
+  slug: string,
+): UseMutationResult<void, Error, { userId: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ userId }) => removeMember(slug, userId),
+    meta: { suppressErrorToast: true },
+    onSuccess: (_data, { userId }) => {
+      toast.success(t("toasts.memberRemoved"));
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationMemberQueryKey(slug, userId),
       });
       void queryClient.invalidateQueries({
         queryKey: organizationAuditEventsQueryKey(slug),

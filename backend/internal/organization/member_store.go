@@ -267,6 +267,59 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 	return s.GetMember(ctx, orgID, userID)
 }
 
+// RemoveMembership off-boards a member: it deletes their membership and records
+// a membership.revoked audit event in the same transaction. Removing the last
+// remaining admin is refused (ErrLastAdmin) so an organization can never be left
+// without an administrator; ErrNotMember signals no such membership exists.
+func (s *Store) RemoveMembership(ctx context.Context, orgID, userID uuid.UUID) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("organization: begin remove membership user %s org %s: %w", userID, orgID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var role, email, givenNames, lastName string
+	err = tx.QueryRow(ctx, `
+		SELECT m.role, u.email, u.given_names, u.last_name
+		FROM memberships m
+		JOIN users u ON u.id = m.user_id
+		WHERE m.organization_id = $1 AND m.user_id = $2`, orgID, userID).
+		Scan(&role, &email, &givenNames, &lastName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotMember
+	}
+	if err != nil {
+		return fmt.Errorf("organization: read membership user %s org %s: %w", userID, orgID, err)
+	}
+
+	// Locking the admin set (in user_id order, like a demotion) serializes with a
+	// concurrent removal so the last admin cannot slip through the count.
+	if role == RoleAdmin {
+		admins, err := lockAndCountAdmins(ctx, tx, orgID)
+		if err != nil {
+			return err
+		}
+		if admins <= 1 {
+			return ErrLastAdmin
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM memberships WHERE organization_id = $1 AND user_id = $2`, orgID, userID); err != nil {
+		return fmt.Errorf("organization: delete membership user %s org %s: %w", userID, orgID, err)
+	}
+
+	if err := s.audit.Record(ctx, tx, audit.MembershipRevoked,
+		audit.Target{Type: audit.TargetMembership, ID: userID.String(), OrgID: &orgID},
+		audit.Deleted(map[string]any{"email": email, "role": role, "givenNames": givenNames, "lastName": lastName})); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("organization: commit remove membership user %s org %s: %w", userID, orgID, err)
+	}
+	return nil
+}
+
 // ORDER BY user_id is load-bearing: it makes concurrent demotions take the row
 // locks in the same order, so they serialize instead of deadlocking.
 func lockAndCountAdmins(ctx context.Context, tx pgx.Tx, orgID uuid.UUID) (int, error) {
