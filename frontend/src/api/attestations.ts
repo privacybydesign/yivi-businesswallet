@@ -1,13 +1,46 @@
 import { z } from "zod";
 import { request } from "./http";
 
+// The value types an attribute may declare, mirroring the backend's
+// SupportedAttributeTypes allow-list. The schema editor offers these as a
+// dropdown; the backend rejects anything else on write.
+export const SUPPORTED_ATTRIBUTE_TYPES = [
+  "string",
+  "integer",
+  "number",
+  "boolean",
+  "date",
+] as const;
+
+export type AttestationAttributeType =
+  (typeof SUPPORTED_ATTRIBUTE_TYPES)[number];
+
+// One entry of an SD-JWT VC type metadata `display` array: a BCP-47 language
+// tag paired with the text a wallet shows for that language. The credential
+// display carries a `name`; a claim's display carries a `label`.
+export const localizedNameSchema = z.object({
+  lang: z.string(),
+  name: z.string(),
+});
+
+export type LocalizedName = z.infer<typeof localizedNameSchema>;
+
+export const localizedLabelSchema = z.object({
+  lang: z.string(),
+  label: z.string(),
+});
+
+export type LocalizedLabel = z.infer<typeof localizedLabelSchema>;
+
 // A single attribute declared by an attestation schema: the disclosure key, a
-// human label, the value type, and whether it must be present when issuing.
+// human label, the value type, whether it must be present when issuing, and
+// optional per-language labels.
 export const attestationAttributeSchema = z.object({
   key: z.string(),
   label: z.string(),
   type: z.string(),
   required: z.boolean(),
+  display: z.array(localizedLabelSchema).optional(),
 });
 
 export type AttestationAttribute = z.infer<typeof attestationAttributeSchema>;
@@ -33,6 +66,7 @@ export const attestationSchemaSchema = z.object({
   displayName: z.string(),
   credentialConfigId: z.string(),
   attributes: z.array(attestationAttributeSchema),
+  display: z.array(localizedNameSchema).optional(),
   subjectType: attestationSubjectTypeSchema,
   qualified: z.boolean(),
   status: z.string(),
@@ -136,6 +170,7 @@ export interface AttestationSchemaInput {
   displayName: string;
   credentialConfigId: string;
   attributes: AttestationAttribute[];
+  display?: LocalizedName[];
   subjectType: AttestationSubjectType;
   qualified: boolean;
   status?: string;
@@ -145,6 +180,7 @@ export interface AttestationSchemaUpdate {
   displayName: string;
   credentialConfigId: string;
   attributes: AttestationAttribute[];
+  display?: LocalizedName[];
   subjectType: AttestationSubjectType;
   qualified: boolean;
   status: string;

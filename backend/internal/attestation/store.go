@@ -45,6 +45,18 @@ func unmarshalAttributes(raw []byte) ([]AttributeDef, error) {
 	return attrs, nil
 }
 
+// unmarshalNames decodes a schema's localized credential-display list from jsonb.
+func unmarshalNames(raw []byte) ([]LocalizedName, error) {
+	names := []LocalizedName{}
+	if len(raw) == 0 {
+		return names, nil
+	}
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return nil, fmt.Errorf("attestation: decode display: %w", err)
+	}
+	return names, nil
+}
+
 // unmarshalStringMap decodes a {key: value} jsonb object.
 func unmarshalStringMap(raw []byte) (map[string]string, error) {
 	if len(raw) == 0 {

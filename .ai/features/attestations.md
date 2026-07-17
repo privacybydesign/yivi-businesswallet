@@ -260,7 +260,8 @@ namespaced under the org (`nl.caesar.employee`).
 | `org_id` | uuid FK→organizations | `ON DELETE CASCADE` |
 | `vct` | text | credential type, e.g. `nl.caesar.employee`; unique per org |
 | `display_name` | text | e.g. "Employee of Caesar Groep" |
-| `attributes` | jsonb | ordered list `[{key, label, type, required}]` — the attribute chips |
+| `attributes` | jsonb | ordered list `[{key, label, type, required, display?}]` — `type` is one of `SupportedAttributeTypes` (`string`/`integer`/`number`/`boolean`/`date`); `display` is the optional per-language SD-JWT VC claim labels `[{lang, label}]` |
+| `display` | jsonb | credential-level SD-JWT VC type metadata `display` array `[{lang, name}]` — per-language display names for wallets |
 | `qualified` | boolean | whether this type is issued as a **qualified** EAA (Art 5(1)(h)) |
 | `status` | text CHECK | `draft` \| `active` \| `deprecated` |
 | `created_at` / `updated_at` | timestamptz | |

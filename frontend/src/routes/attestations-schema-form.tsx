@@ -5,7 +5,9 @@ import type {
   AttestationAttribute,
   AttestationSchema,
   AttestationSubjectType,
+  LocalizedName,
 } from "../api/attestations";
+import { SUPPORTED_ATTRIBUTE_TYPES } from "../api/attestations";
 import {
   useCreateAttestationSchemaMutation,
   useUpdateAttestationSchemaMutation,
@@ -23,10 +25,51 @@ const SUBJECT_TYPES: readonly AttestationSubjectType[] = [
   SUBJECT_ORGANIZATION,
 ];
 
-type Row = AttestationAttribute;
+// A per-language display entry as edited in the form: a BCP-47 language tag and
+// the shown text. Converted to the API's {lang,name} / {lang,label} shapes on
+// submit (see toNames / toLabels).
+interface Translation {
+  lang: string;
+  text: string;
+}
+
+interface Row {
+  key: string;
+  label: string;
+  type: string;
+  required: boolean;
+  translations: Translation[];
+}
 
 function emptyRow(): Row {
-  return { key: "", label: "", type: DEFAULT_ATTRIBUTE_TYPE, required: false };
+  return {
+    key: "",
+    label: "",
+    type: DEFAULT_ATTRIBUTE_TYPE,
+    required: false,
+    translations: [],
+  };
+}
+
+function schemaRow(attr: AttestationAttribute): Row {
+  return {
+    key: attr.key,
+    label: attr.label,
+    type: attr.type,
+    required: attr.required,
+    translations: (attr.display ?? []).map((d) => ({
+      lang: d.lang,
+      text: d.label,
+    })),
+  };
+}
+
+// Drops fully-empty entries and trims the rest. Partial rows (a language without
+// text, or the reverse) are kept so the backend can reject them with a message.
+function cleanTranslations(entries: Translation[]): Translation[] {
+  return entries
+    .map((e) => ({ lang: e.lang.trim(), text: e.text.trim() }))
+    .filter((e) => e.lang !== "" || e.text !== "");
 }
 
 interface Props {
@@ -56,8 +99,13 @@ export function AttestationSchemaForm({
   );
   const [qualified, setQualified] = useState(schema?.qualified ?? false);
   const [status, setStatus] = useState(schema?.status ?? DEFAULT_STATUS);
+  const [displayNames, setDisplayNames] = useState<Translation[]>(
+    (schema?.display ?? []).map((d) => ({ lang: d.lang, text: d.name })),
+  );
   const [rows, setRows] = useState<Row[]>(
-    schema && schema.attributes.length > 0 ? schema.attributes : [emptyRow()],
+    schema && schema.attributes.length > 0
+      ? schema.attributes.map(schemaRow)
+      : [emptyRow()],
   );
   const [attempted, setAttempted] = useState(false);
 
@@ -74,8 +122,16 @@ export function AttestationSchemaForm({
       label: row.label.trim(),
       type: row.type.trim() || DEFAULT_ATTRIBUTE_TYPE,
       required: row.required,
+      display: cleanTranslations(row.translations).map((e) => ({
+        lang: e.lang,
+        label: e.text,
+      })),
     }))
     .filter((row) => row.key !== "");
+  const display: LocalizedName[] = cleanTranslations(displayNames).map((e) => ({
+    lang: e.lang,
+    name: e.text,
+  }));
 
   const vctError = attempted && !isEdit && trimmedVct === "";
   const nameError = attempted && trimmedName === "";
@@ -118,6 +174,7 @@ export function AttestationSchemaForm({
             displayName: trimmedName,
             credentialConfigId: trimmedConfig,
             attributes,
+            display,
             subjectType,
             qualified,
             status: status.trim() || DEFAULT_STATUS,
@@ -132,6 +189,7 @@ export function AttestationSchemaForm({
           displayName: trimmedName,
           credentialConfigId: trimmedConfig,
           attributes,
+          display,
           subjectType,
           qualified,
           status: status.trim() || DEFAULT_STATUS,
@@ -226,6 +284,18 @@ export function AttestationSchemaForm({
           />
         </Field>
 
+        <div className="flex flex-col gap-2">
+          <span className="text-ink-soft text-[12px] font-semibold">
+            {t("attestations.schemaForm.displayNames")}
+          </span>
+          <TranslationList
+            entries={displayNames}
+            onChange={setDisplayNames}
+            textLabel={t("attestations.schemaForm.displayName")}
+            textPlaceholder={t("attestations.schemaForm.displayName")}
+          />
+        </div>
+
         <Field
           id="schema-subject-type"
           label={t("attestations.schemaForm.subjectType")}
@@ -308,15 +378,20 @@ export function AttestationSchemaForm({
                     placeholder={t("attestations.schemaForm.attrLabel")}
                     aria-label={t("attestations.schemaForm.attrLabel")}
                   />
-                  <input
+                  <select
                     className={`${control(false)} h-8`}
                     value={row.type}
                     onChange={(event) =>
                       setRow(index, { type: event.target.value })
                     }
-                    placeholder={t("attestations.schemaForm.attrType")}
                     aria-label={t("attestations.schemaForm.attrType")}
-                  />
+                  >
+                    {SUPPORTED_ATTRIBUTE_TYPES.map((value) => (
+                      <option key={value} value={value}>
+                        {t(`attestations.schemaForm.types.${value}`)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="flex items-center justify-between">
                   <label className="text-ink-soft flex cursor-pointer items-center gap-2 text-[12.5px]">
@@ -340,6 +415,17 @@ export function AttestationSchemaForm({
                     />
                   )}
                 </div>
+                <div className="border-line flex flex-col gap-1.5 border-t pt-2">
+                  <span className="text-ink-soft text-[11.5px] font-semibold">
+                    {t("attestations.schemaForm.attrTranslations")}
+                  </span>
+                  <TranslationList
+                    entries={row.translations}
+                    onChange={(next) => setRow(index, { translations: next })}
+                    textLabel={t("attestations.schemaForm.attrLabel")}
+                    textPlaceholder={t("attestations.schemaForm.attrLabel")}
+                  />
+                </div>
               </div>
             ))}
           </div>
@@ -357,5 +443,70 @@ export function AttestationSchemaForm({
         )}
       </form>
     </Modal>
+  );
+}
+
+// TranslationList edits a list of per-language display entries (a language tag +
+// the shown text). Used for both the credential display names and a single
+// attribute's labels; the parent owns the entries and converts them to the API
+// shape on submit.
+function TranslationList({
+  entries,
+  onChange,
+  textLabel,
+  textPlaceholder,
+}: {
+  entries: Translation[];
+  onChange: (next: Translation[]) => void;
+  textLabel: string;
+  textPlaceholder: string;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+
+  function update(index: number, patch: Partial<Translation>): void {
+    onChange(entries.map((e, i) => (i === index ? { ...e, ...patch } : e)));
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {entries.map((entry, index) => (
+        <div key={index} className="grid grid-cols-[5rem_1fr_auto] gap-2">
+          <input
+            className={`${control(false)} h-8`}
+            value={entry.lang}
+            onChange={(event) => update(index, { lang: event.target.value })}
+            placeholder={t(
+              "attestations.schemaForm.translationLangPlaceholder",
+            )}
+            aria-label={t("attestations.schemaForm.translationLang")}
+          />
+          <input
+            className={`${control(false)} h-8`}
+            value={entry.text}
+            onChange={(event) => update(index, { text: event.target.value })}
+            placeholder={textPlaceholder}
+            aria-label={textLabel}
+          />
+          <Button
+            variant="dangerGhost"
+            size="sm"
+            icon="delete"
+            iconOnly
+            onClick={() => onChange(entries.filter((_, i) => i !== index))}
+            aria-label={t("attestations.schemaForm.removeTranslation")}
+          />
+        </div>
+      ))}
+      <div>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="add"
+          onClick={() => onChange([...entries, { lang: "", text: "" }])}
+        >
+          {t("attestations.schemaForm.addTranslation")}
+        </Button>
+      </div>
+    </div>
   );
 }

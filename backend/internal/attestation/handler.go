@@ -132,13 +132,14 @@ func (h *Handler) claim(w http.ResponseWriter, r *http.Request) error {
 // --- Schemas ---
 
 type schemaRequest struct {
-	VCT                string         `json:"vct"`
-	DisplayName        string         `json:"displayName"`
-	CredentialConfigID string         `json:"credentialConfigId"`
-	SubjectType        string         `json:"subjectType"`
-	Attributes         []AttributeDef `json:"attributes"`
-	Qualified          bool           `json:"qualified"`
-	Status             string         `json:"status"`
+	VCT                string          `json:"vct"`
+	DisplayName        string          `json:"displayName"`
+	CredentialConfigID string          `json:"credentialConfigId"`
+	SubjectType        string          `json:"subjectType"`
+	Attributes         []AttributeDef  `json:"attributes"`
+	Display            []LocalizedName `json:"display"`
+	Qualified          bool            `json:"qualified"`
+	Status             string          `json:"status"`
 }
 
 func (h *Handler) listSchemas(w http.ResponseWriter, r *http.Request) error {
@@ -176,7 +177,7 @@ func (h *Handler) createSchema(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	sc, err := h.schemas.CreateSchema(r.Context(), org.ID, Schema{
 		VCT: req.VCT, DisplayName: req.DisplayName, CredentialConfigID: req.CredentialConfigID,
-		SubjectType: req.SubjectType, Attributes: req.Attributes, Qualified: req.Qualified, Status: req.Status,
+		SubjectType: req.SubjectType, Attributes: req.Attributes, Display: req.Display, Qualified: req.Qualified, Status: req.Status,
 	})
 	if errors.Is(err, ErrSchemaVctTaken) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "vct_taken", Message: "a schema with that vct already exists"}
@@ -200,7 +201,7 @@ func (h *Handler) updateSchema(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	sc, err := h.schemas.UpdateSchema(r.Context(), org.ID, id, Schema{
 		DisplayName: req.DisplayName, CredentialConfigID: req.CredentialConfigID,
-		SubjectType: req.SubjectType, Attributes: req.Attributes, Qualified: req.Qualified, Status: req.Status,
+		SubjectType: req.SubjectType, Attributes: req.Attributes, Display: req.Display, Qualified: req.Qualified, Status: req.Status,
 	})
 	if errors.Is(err, ErrSchemaNotFound) {
 		return notFound("schema_not_found", "schema not found")
@@ -247,7 +248,96 @@ func decodeSchema(r *http.Request) (schemaRequest, error) {
 	if req.SubjectType != "" && req.SubjectType != SubjectNaturalPerson && req.SubjectType != SubjectOrganization {
 		return schemaRequest{}, badRequest("invalid_input", "invalid subjectType")
 	}
+	attrs, err := normalizeAttributes(req.Attributes)
+	if err != nil {
+		return schemaRequest{}, err
+	}
+	req.Attributes = attrs
+	display, err := normalizeNames(req.Display)
+	if err != nil {
+		return schemaRequest{}, err
+	}
+	req.Display = display
 	return req, nil
+}
+
+// normalizeAttributes trims and validates a schema's attribute list: every type
+// must be a supported claim type, and every localized label must carry both a
+// language tag and text with no duplicate languages. A missing type defaults to
+// string; fully-empty localized entries are dropped.
+func normalizeAttributes(attrs []AttributeDef) ([]AttributeDef, error) {
+	out := make([]AttributeDef, 0, len(attrs))
+	for _, a := range attrs {
+		a.Key = strings.TrimSpace(a.Key)
+		a.Label = strings.TrimSpace(a.Label)
+		a.Type = strings.TrimSpace(a.Type)
+		if a.Type == "" {
+			a.Type = AttributeTypeString
+		}
+		if !isSupportedAttributeType(a.Type) {
+			return nil, badRequest("invalid_input", "unsupported attribute type: "+a.Type)
+		}
+		labels, err := normalizeLabels(a.Display)
+		if err != nil {
+			return nil, err
+		}
+		a.Display = labels
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+func normalizeNames(in []LocalizedName) ([]LocalizedName, error) {
+	out := make([]LocalizedName, 0, len(in))
+	pairs := make([][2]string, 0, len(in))
+	for _, d := range in {
+		d.Lang = strings.TrimSpace(d.Lang)
+		d.Name = strings.TrimSpace(d.Name)
+		if d.Lang == "" && d.Name == "" {
+			continue
+		}
+		out = append(out, d)
+		pairs = append(pairs, [2]string{d.Lang, d.Name})
+	}
+	if err := validateLocaleEntries(pairs); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func normalizeLabels(in []LocalizedLabel) ([]LocalizedLabel, error) {
+	out := make([]LocalizedLabel, 0, len(in))
+	pairs := make([][2]string, 0, len(in))
+	for _, d := range in {
+		d.Lang = strings.TrimSpace(d.Lang)
+		d.Label = strings.TrimSpace(d.Label)
+		if d.Lang == "" && d.Label == "" {
+			continue
+		}
+		out = append(out, d)
+		pairs = append(pairs, [2]string{d.Lang, d.Label})
+	}
+	if err := validateLocaleEntries(pairs); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// validateLocaleEntries checks (lang, text) display entries: each needs a
+// non-empty language tag and text, with no repeated language.
+func validateLocaleEntries(entries [][2]string) error {
+	seen := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		lang, text := e[0], e[1]
+		if lang == "" || text == "" {
+			return badRequest("invalid_input", "each translation needs a language and text")
+		}
+		if seen[lang] {
+			return badRequest("invalid_input", "duplicate translation language: "+lang)
+		}
+		seen[lang] = true
+	}
+	return nil
 }
 
 // --- Templates ---
