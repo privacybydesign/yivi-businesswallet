@@ -147,6 +147,9 @@ func Run(ctx context.Context, dsn string) error {
 	if err := seedIssuerSettings(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
+	if err := seedHeldAttestations(ctx, pool, demoOrg.ID); err != nil {
+		return err
+	}
 
 	demoDeptIDs := []uuid.UUID{
 		deptsByOrgName[demoOrgSlug+"/Engineering"].ID,
@@ -491,6 +494,20 @@ func seedIssuerSettings(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID
 		ON CONFLICT (organization_id) DO NOTHING`
 	if _, err := pool.Exec(ctx, insert, orgID); err != nil {
 		return fmt.Errorf("seed: issuer settings: %w", err)
+	}
+	return nil
+}
+
+// seedHeldAttestations gives the demo org one held credential — its KVK
+// registration attestation, the first credential a bootstrapped wallet holds
+// (Art 5(1)(a)) — so the Held tab is populated out of the box. Idempotent: only
+// inserts when the org holds nothing yet.
+func seedHeldAttestations(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+	const insert = `INSERT INTO held_attestations (organization_id, credential_ref, vct, issuer, source)
+		SELECT $1, 'demo-kvk-registration', 'nl.kvk.registration', 'KVK', 'bootstrap'
+		WHERE NOT EXISTS (SELECT 1 FROM held_attestations WHERE organization_id = $1)`
+	if _, err := pool.Exec(ctx, insert, orgID); err != nil {
+		return fmt.Errorf("seed: held attestations: %w", err)
 	}
 	return nil
 }
