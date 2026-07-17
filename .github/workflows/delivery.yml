@@ -18,6 +18,23 @@ permissions:
 jobs:
   publish-docker-image:
     runs-on: ubuntu-latest
+    # One image per custom (non-stock) Dockerfile in the repo. Stock images
+    # (postgres, mailpit, domibus, ...) are pulled from their registries and are
+    # not built here; the development Dockerfiles are live-reload dev tooling and
+    # are not published. There is no root-level Dockerfile — each component builds
+    # from its own context, matching compose.yaml.
+    strategy:
+      # Scan each image independently: a vulnerability in one must not hide the
+      # build/scan status of the other.
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: backend
+            dockerfile: backend/docker/production/Dockerfile
+          - component: postguard-sidecar
+            context: postguard-sidecar
+            dockerfile: postguard-sidecar/Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -32,7 +49,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ghcr.io/${{ github.repository }}/${{ matrix.component }}
           tags: |
             type=semver,pattern={{major}}.{{minor}}.{{patch}}
             type=edge,enable=${{ steps.is-head-main.outcome == 'success' }}
@@ -51,11 +68,14 @@ jobs:
       - name: Build container and export to local Docker
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
-          context: .
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           load: true
-          tags: local/business-wallet:scan
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: local/${{ matrix.component }}:scan
+          # Per-component cache scope so the two matrix builds don't overwrite
+          # each other's GitHub Actions cache.
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
       # The scan gates delivery directly: fail-build fails the job when a fixable
       # critical vulnerability is present. Results are not uploaded to GitHub code
@@ -65,7 +85,7 @@ jobs:
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         id: scan
         with:
-          image: local/business-wallet:scan
+          image: local/${{ matrix.component }}:scan
           only-fixed: true
           fail-build: true
           severity-cutoff: critical
@@ -74,13 +94,16 @@ jobs:
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         if: ${{ github.event_name == 'release' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
         with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.component }}
 
   mirror-image:
     runs-on: ubuntu-latest
-    name: Mirror image to Scaleway registry
+    name: Mirror ${{ matrix.component }} to Scaleway registry
     needs: publish-docker-image
     # SCW_SECRET_KEY lives in the `dev` environment; without this the secret is
     # empty and `docker login --password-stdin` falls back to an interactive
@@ -88,9 +111,17 @@ jobs:
     environment: dev
     # Only mirror when the edge image was actually pushed (HEAD of main / manual run).
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            target: wallet-provider
+          - component: postguard-sidecar
+            target: postguard-sidecar
     env:
-      SOURCE_IMAGE: ghcr.io/${{ github.repository }}:edge
-      TARGET_IMAGE: rg.nl-ams.scw.cloud/yivi-containter-registry/wallet-provider:edge
+      SOURCE_IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.component }}:edge
+      TARGET_IMAGE: rg.nl-ams.scw.cloud/yivi-containter-registry/${{ matrix.target }}:edge
     steps:
       # The edge image is private on ghcr, and this is a separate job from the
       # publish job, so it needs its own ghcr login to pull the source image.
