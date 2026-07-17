@@ -1,6 +1,7 @@
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { useMeQuery } from "../api/auth.queries";
 import {
   useMemberAuditEventsQuery,
   useOrganizationMemberQuery,
@@ -105,6 +106,8 @@ export default function MemberDetail(): React.JSX.Element {
   // Both are guaranteed by the ":orgSlug/members/:userId" route.
   const slug = orgSlug!;
   const id = userId!;
+  const me = useMeQuery();
+  const isSelf = me.data?.id === id;
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
   const memberQuery = useOrganizationMemberQuery(slug, id, isAdmin);
@@ -288,20 +291,24 @@ export default function MemberDetail(): React.JSX.Element {
               variant="secondary"
               icon="email"
               className="w-full"
-              onClick={() => {
-                window.location.href = `mailto:${member.email}`;
-              }}
+              onClick={() =>
+                void navigate(
+                  `/${slug}/qerds/compose?to=${encodeURIComponent(member.email)}`,
+                )
+              }
             >
               {t("memberDetail.sendMessage")}
             </Button>
-            <Button
-              variant="danger"
-              icon="logout"
-              className="w-full"
-              onClick={() => setConfirmingOffboard(true)}
-            >
-              {t("memberDetail.offboard")}
-            </Button>
+            {!isSelf && (
+              <Button
+                variant="danger"
+                icon="logout"
+                className="w-full"
+                onClick={() => setConfirmingOffboard(true)}
+              >
+                {t("memberDetail.offboard")}
+              </Button>
+            )}
           </div>
         </Card>
       </div>
