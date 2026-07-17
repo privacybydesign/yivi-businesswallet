@@ -624,10 +624,17 @@ seam + interim contacts).
    **one Veramo issuer instance per org** (clean issuer-of-record + key isolation) or a
    shared instance with per-offer `credentialId`s? And how is an org's `credentialId`
    set registered on the instance from our schema definitions? Gates §5/§6.4.
-2. **Qualified key provisioning** — which NL QTSP issues the org's qualified
-   certificate, how is `attestation_keys.provider_ref` bound to it, and where does the
-   wallet unit attestation (Art 6(1)(k)) come from? (Ties to `FEATURE_LIST.md` QTSP
-   list.)
+2. **Qualified key provisioning + WUA-backed activation** — tracked in **#28**
+   (qualified trust services). Which NL QTSP issues the org's qualified certificate, how
+   is `attestation_keys.provider_ref` bound to it, and where does the **wallet unit
+   attestation** (Art 6(1)(k)/(l)) come from? The WUA is also the missing piece of
+   *wallet activation*: today wallet-bootstrap's `ActivateFromAttestation` only flips the
+   business-wallet record to `active`, whereas assurance-backed activation would provision
+   a WUA proving the wallet runs on a secure cryptographic device at assurance
+   "substantial". This stays a **server-side / remote-QSCD orchestrator** model (we never
+   hold private keys; no device-resident PIN/holder-binding ceremony — see
+   `wallet-bootstrap.md`). Likely shaped as a new provider seam (WUA/QSCD source) mirroring
+   the issuer/holder/qerds seams. (Ties to `FEATURE_LIST.md` QTSP list.)
 3. **External recipient reach** — for a non-member recipient with no known digital
    address, is delivery email-link only until the European Digital Directory lands, or
    QERDS-first? (Reuses the `qerds` resolution seam.)
