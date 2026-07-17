@@ -75,7 +75,7 @@ export default function MyInvitations(): React.JSX.Element {
 
   if (phase === "pendingReview") {
     return (
-      <InvitationsShell t={t}>
+      <InvitationsShell>
         <Outcome
           tone="info"
           icon="time"
@@ -93,7 +93,7 @@ export default function MyInvitations(): React.JSX.Element {
 
   if (phase === "error") {
     return (
-      <InvitationsShell t={t}>
+      <InvitationsShell>
         <Outcome
           tone="error"
           icon="warning"
@@ -111,7 +111,7 @@ export default function MyInvitations(): React.JSX.Element {
 
   if (phase === "disclosing" && active != null) {
     return (
-      <InvitationsShell t={t}>
+      <InvitationsShell>
         <div className="flex flex-col items-center text-center">
           <p className="text-ink-soft text-[14px]">
             {t("inviteAccept.scanPrompt", { org: active.organizationName })}
@@ -209,12 +209,11 @@ export default function MyInvitations(): React.JSX.Element {
 }
 
 function InvitationsShell({
-  t,
   children,
 }: {
-  t: ReturnType<typeof useTranslation>["t"];
   children: React.ReactNode;
 }): React.JSX.Element {
+  const { t } = useTranslation();
   return (
     <>
       <TopBar

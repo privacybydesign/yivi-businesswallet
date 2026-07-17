@@ -14,16 +14,17 @@ import (
 )
 
 const schemaColumns = `id, organization_id, vct, display_name, credential_config_id,
-	subject_type, attributes, qualified, status, created_at, updated_at`
+	subject_type, attributes, display, qualified, status, created_at, updated_at`
 
 func scanSchema(row rowScanner) (Schema, error) {
 	var (
-		s        Schema
-		attrsRaw []byte
+		s          Schema
+		attrsRaw   []byte
+		displayRaw []byte
 	)
 	if err := row.Scan(
 		&s.ID, &s.OrganizationID, &s.VCT, &s.DisplayName, &s.CredentialConfigID,
-		&s.SubjectType, &attrsRaw, &s.Qualified, &s.Status, &s.CreatedAt, &s.UpdatedAt,
+		&s.SubjectType, &attrsRaw, &displayRaw, &s.Qualified, &s.Status, &s.CreatedAt, &s.UpdatedAt,
 	); err != nil {
 		return Schema{}, err
 	}
@@ -32,6 +33,11 @@ func scanSchema(row rowScanner) (Schema, error) {
 		return Schema{}, err
 	}
 	s.Attributes = attrs
+	display, err := unmarshalNames(displayRaw)
+	if err != nil {
+		return Schema{}, err
+	}
+	s.Display = display
 	return s, nil
 }
 
@@ -81,6 +87,10 @@ func (s *Store) CreateSchema(ctx context.Context, orgID uuid.UUID, in Schema) (S
 	if err != nil {
 		return Schema{}, err
 	}
+	display, err := marshalJSON(in.Display)
+	if err != nil {
+		return Schema{}, err
+	}
 	status := in.Status
 	if status == "" {
 		status = SchemaActive
@@ -93,11 +103,11 @@ func (s *Store) CreateSchema(ctx context.Context, orgID uuid.UUID, in Schema) (S
 	var out Schema
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `INSERT INTO attestation_schemas
-			(organization_id, vct, display_name, credential_config_id, subject_type, attributes, qualified, status)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			(organization_id, vct, display_name, credential_config_id, subject_type, attributes, display, qualified, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			RETURNING ` + schemaColumns
 		var err error
-		out, err = scanSchema(q.QueryRow(ctx, insert, orgID, in.VCT, in.DisplayName, in.CredentialConfigID, subjectType, attrs, in.Qualified, status))
+		out, err = scanSchema(q.QueryRow(ctx, insert, orgID, in.VCT, in.DisplayName, in.CredentialConfigID, subjectType, attrs, display, in.Qualified, status))
 		if isUniqueViolation(err) {
 			return ErrSchemaVctTaken
 		}
@@ -117,15 +127,19 @@ func (s *Store) UpdateSchema(ctx context.Context, orgID, id uuid.UUID, in Schema
 	if err != nil {
 		return Schema{}, err
 	}
+	display, err := marshalJSON(in.Display)
+	if err != nil {
+		return Schema{}, err
+	}
 
 	var out Schema
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE attestation_schemas
-			SET display_name = $3, credential_config_id = $4, subject_type = $5, attributes = $6, qualified = $7, status = $8, updated_at = now()
+			SET display_name = $3, credential_config_id = $4, subject_type = $5, attributes = $6, display = $9, qualified = $7, status = $8, updated_at = now()
 			WHERE organization_id = $1 AND id = $2
 			RETURNING ` + schemaColumns
 		var err error
-		out, err = scanSchema(q.QueryRow(ctx, update, orgID, id, in.DisplayName, in.CredentialConfigID, in.SubjectType, attrs, in.Qualified, in.Status))
+		out, err = scanSchema(q.QueryRow(ctx, update, orgID, id, in.DisplayName, in.CredentialConfigID, in.SubjectType, attrs, in.Qualified, in.Status, display))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrSchemaNotFound
 		}

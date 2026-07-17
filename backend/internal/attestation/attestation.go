@@ -30,27 +30,73 @@ var (
 	ErrMissingAttribute = errors.New("attestation: required attribute missing")
 )
 
-// AttributeDef is one field in a schema's attribute allow-list.
+// LocalizedName and LocalizedLabel model the SD-JWT VC type metadata `display`
+// arrays: a BCP-47 language tag paired with the text a wallet renders for that
+// language. The credential display uses `name`; a claim's display uses `label`.
+type LocalizedName struct {
+	Lang string `json:"lang"`
+	Name string `json:"name"`
+}
+
+type LocalizedLabel struct {
+	Lang  string `json:"lang"`
+	Label string `json:"label"`
+}
+
+// AttributeDef is one field in a schema's attribute allow-list. Display carries
+// optional per-language labels for wallets showing the claim in that language.
 type AttributeDef struct {
-	Key      string `json:"key"`
-	Label    string `json:"label"`
-	Type     string `json:"type"`
-	Required bool   `json:"required"`
+	Key      string           `json:"key"`
+	Label    string           `json:"label"`
+	Type     string           `json:"type"`
+	Required bool             `json:"required"`
+	Display  []LocalizedLabel `json:"display,omitempty"`
+}
+
+// Attribute value types the schema editor offers and the API accepts. Kept in
+// sync with the frontend's SUPPORTED_ATTRIBUTE_TYPES: any other value is
+// rejected on write so only valid SD-JWT VC claim types reach a credential.
+const (
+	AttributeTypeString  = "string"
+	AttributeTypeInteger = "integer"
+	AttributeTypeNumber  = "number"
+	AttributeTypeBoolean = "boolean"
+	AttributeTypeDate    = "date"
+)
+
+// SupportedAttributeTypes is the allow-list for AttributeDef.Type, in the order
+// the editor's dropdown offers them.
+var SupportedAttributeTypes = []string{
+	AttributeTypeString,
+	AttributeTypeInteger,
+	AttributeTypeNumber,
+	AttributeTypeBoolean,
+	AttributeTypeDate,
+}
+
+func isSupportedAttributeType(t string) bool {
+	for _, s := range SupportedAttributeTypes {
+		if s == t {
+			return true
+		}
+	}
+	return false
 }
 
 // Schema is a credential-type definition an organization can issue.
 type Schema struct {
-	ID                 uuid.UUID      `json:"id"`
-	OrganizationID     uuid.UUID      `json:"organizationId"`
-	VCT                string         `json:"vct"`
-	DisplayName        string         `json:"displayName"`
-	CredentialConfigID string         `json:"credentialConfigId"`
-	SubjectType        string         `json:"subjectType"`
-	Attributes         []AttributeDef `json:"attributes"`
-	Qualified          bool           `json:"qualified"`
-	Status             string         `json:"status"`
-	CreatedAt          time.Time      `json:"createdAt"`
-	UpdatedAt          time.Time      `json:"updatedAt"`
+	ID                 uuid.UUID       `json:"id"`
+	OrganizationID     uuid.UUID       `json:"organizationId"`
+	VCT                string          `json:"vct"`
+	DisplayName        string          `json:"displayName"`
+	CredentialConfigID string          `json:"credentialConfigId"`
+	SubjectType        string          `json:"subjectType"`
+	Attributes         []AttributeDef  `json:"attributes"`
+	Display            []LocalizedName `json:"display,omitempty"`
+	Qualified          bool            `json:"qualified"`
+	Status             string          `json:"status"`
+	CreatedAt          time.Time       `json:"createdAt"`
+	UpdatedAt          time.Time       `json:"updatedAt"`
 }
 
 // Key is a signing key-material reference (never the private key itself).

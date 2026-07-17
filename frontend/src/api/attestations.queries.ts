@@ -9,6 +9,7 @@ import {
   deleteAttestationTemplate,
   getAttestationClaim,
   getAttestationKeys,
+  getAttestationSchemaIssuerConfig,
   getAttestationSchemas,
   getAttestationTemplates,
   getIssuedAttestation,
@@ -22,6 +23,7 @@ import {
 } from "./attestations";
 import type {
   AttestationClaim,
+  AttestationIssuerConfig,
   AttestationKey,
   AttestationKeyInput,
   AttestationSchema,
@@ -43,6 +45,21 @@ const OFFERED_STATUS = "offered";
 
 export function attestationSchemasQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "attestations", "schemas"];
+}
+
+export function attestationSchemaIssuerConfigQueryKey(
+  slug: string,
+  schemaId: string,
+): readonly string[] {
+  return [
+    "organizations",
+    "detail",
+    slug,
+    "attestations",
+    "schemas",
+    schemaId,
+    "issuer-config",
+  ];
 }
 
 export function attestationTemplatesQueryKey(slug: string): readonly string[] {
@@ -92,6 +109,22 @@ export function useAttestationSchemasQuery(
     queryKey: attestationSchemasQueryKey(slug),
     queryFn: ({ signal }) => getAttestationSchemas(slug, signal),
     enabled: enabled && slug !== "",
+  });
+}
+
+// Fetches the Veramo issuer GitOps config generated from a schema (metadata
+// fragment + VCT document). Fetched on demand — the schema editor enables it when
+// the operator opens the "issuer config" section.
+export function useAttestationSchemaIssuerConfigQuery(
+  slug: string,
+  schemaId: string,
+  enabled = true,
+): UseQueryResult<AttestationIssuerConfig, Error> {
+  return useQuery({
+    queryKey: attestationSchemaIssuerConfigQueryKey(slug, schemaId),
+    queryFn: ({ signal }) =>
+      getAttestationSchemaIssuerConfig(slug, schemaId, signal),
+    enabled: enabled && slug !== "" && schemaId !== "",
   });
 }
 

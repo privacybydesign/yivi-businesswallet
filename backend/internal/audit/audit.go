@@ -70,6 +70,8 @@ const (
 	AttestationKeyRevoked      = "attestation.key_revoked"
 
 	EmailSettingsUpdated = "email.settings_updated"
+
+	IssuerSettingsUpdated = "issuer.settings_updated"
 )
 
 const (
@@ -94,6 +96,8 @@ const (
 	TargetAttestationKey      = "attestation_key"
 
 	TargetEmailSettings = "org_email_settings"
+
+	TargetIssuerSettings = "org_issuer_settings"
 )
 
 type Actor struct {

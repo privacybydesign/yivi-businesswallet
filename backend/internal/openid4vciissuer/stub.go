@@ -38,8 +38,9 @@ func (StubIssuer) CreateOffer(_ context.Context, req OfferRequest) (Offer, error
 }
 
 // Status reports the credential as issued immediately: the stub has no real
-// wallet on the other end, so a poll resolves the offer for the demo/tests.
-func (StubIssuer) Status(_ context.Context, _ string) (string, error) {
+// wallet on the other end, so a poll resolves the offer for the demo/tests. The
+// instance is ignored (the stub has no per-instance routing).
+func (StubIssuer) Status(_ context.Context, _, _ string) (string, error) {
 	return StatusIssued, nil
 }
 
