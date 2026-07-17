@@ -72,6 +72,21 @@ func (s *Store) RecordHeld(ctx context.Context, orgID uuid.UUID, in HeldInput) (
 	return h, nil
 }
 
+// GetHeld returns a single active held credential by id. Returns ErrHeldNotFound
+// when the row is absent or already soft-deleted.
+func (s *Store) GetHeld(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error) {
+	const query = `SELECT ` + heldColumns + ` FROM held_attestations
+		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`
+	h, err := scanHeld(s.db.QueryRow(ctx, query, id, orgID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return HeldAttestation{}, ErrHeldNotFound
+	}
+	if err != nil {
+		return HeldAttestation{}, fmt.Errorf("attestation: get held %s org %s: %w", id, orgID, err)
+	}
+	return h, nil
+}
+
 // ListHeld returns an organization's active (not soft-deleted) held credentials.
 func (s *Store) ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error) {
 	const query = `SELECT ` + heldColumns + ` FROM held_attestations

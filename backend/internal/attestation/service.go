@@ -44,6 +44,21 @@ type issuedStore interface {
 	GetClaim(ctx context.Context, token string) (claimRow, error)
 }
 
+// heldMutator is the held-index surface the service coordinates for the
+// engine-backed delete flow (read the ref, then soft-delete the audited index
+// row). Backed by the attestation store.
+type heldMutator interface {
+	GetHeld(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error)
+	SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
+}
+
+// credentialRemover removes a credential from the organization's holder engine.
+// Backed by internal/eudiholder; accept the interface so the service stays
+// decoupled from the concrete engine (stub or irmago).
+type credentialRemover interface {
+	Delete(ctx context.Context, orgID uuid.UUID, ref string) error
+}
+
 // emailNotifier delivers a person-facing "your credential is ready" e-mail.
 type emailNotifier interface {
 	SendCredentialOffer(ctx context.Context, orgID uuid.UUID, to, orgName, credentialName, claimURL, txCode string) error
@@ -62,17 +77,21 @@ type Service struct {
 	instances  issuerInstanceResolver
 	email      emailNotifier
 	qerds      qerdsNotifier
+	held       heldMutator
+	holder     credentialRemover
 	appBaseURL string
 	now        func() time.Time
 }
 
-func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, appBaseURL string) *Service {
+func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, holder credentialRemover, appBaseURL string) *Service {
 	return &Service{
 		store:      store,
 		issuer:     iss,
 		instances:  instances,
 		email:      email,
 		qerds:      qerds,
+		held:       held,
+		holder:     holder,
 		appBaseURL: strings.TrimRight(appBaseURL, "/"),
 		now:        time.Now,
 	}
@@ -214,6 +233,23 @@ func (s *Service) ClaimStatus(ctx context.Context, token string) (ClaimView, err
 // Revoke revokes an issued attestation (Art 6(2)).
 func (s *Service) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
 	return s.store.Revoke(ctx, orgID, id)
+}
+
+// DeleteHeld removes a held credential the organization no longer wants to keep
+// (Art 5(1)(a) "store, select"): it deletes the live credential from the holder
+// engine first, then soft-deletes the audited index row. Engine-first ordering
+// means a failed engine delete aborts before the index is touched, so a
+// "removed" credential is never left presentable in the wallet. Returns
+// ErrHeldNotFound when the row is absent or already deleted.
+func (s *Service) DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error {
+	held, err := s.held.GetHeld(ctx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if err := s.holder.Delete(ctx, orgID, held.CredentialRef); err != nil {
+		return fmt.Errorf("attestation: delete held %s from engine: %w", id, err)
+	}
+	return s.held.SoftDeleteHeld(ctx, orgID, id)
 }
 
 // reconcile reports whether the issuer says the credential has been issued. A

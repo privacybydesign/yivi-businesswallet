@@ -1,6 +1,9 @@
 # Feature: Attestations (EAA issuance & holding for Business Wallets)
 
-**Status:** Issue side **implemented (v1)**; holder side still **Design**. The design
+**Status:** Issue side **implemented (v1)**. Holder side: Phase 1 (held index + Received
+tab) and Phase 2 (real irmago EUDI holder engine, `internal/eudiholder`) **implemented**
+(Phase 2 pending irmago#622 merge — see `.ai/plans/feat-attestations-holder.md`); receive
+flows (Phase 3) and export (Phase 4) still **Design**. The design
 surface is issue #15 ("Attestations for Business wallets") — the `Attestations`
 screen (Templates / Issued / Schemas tabs) and the "Issue attestation" wizard
 (template → recipient → attributes → review).
@@ -413,6 +416,22 @@ irmago-owned credential, it does not duplicate the claims:
 > re-adds it for a **different role** — the **holder** wallet engine — not the verifier
 > daemon. That is not a reversal of that decision, but it does re-add the `irmago`
 > dependency to `backend/`; call it out in the plan (§15).
+>
+> **Implemented (Phase 2), `internal/eudiholder`.** The `Holder` provider seam mirrors
+> the `openid4vciissuer` stub/veramo pattern: `ATTESTATION_HOLDER=stub` (in-memory,
+> default) or `irmago` (config-selected, never code). The irmago `Engine` opens one
+> `storage.NewStorageWithDialector(postgres.Open(dsn?search_path=holder_<orghex>), fs)`
+> **per org**, lazily + cached, with a fatal boot `Ping`. **Isolation is per-org Postgres
+> schema, not `org_id` rows** — irmago's holder models carry no tenant column, so
+> row-scoping would fork irmago; each org's tables live in `holder_<orghex>` on the shared
+> DB. **At-rest encryption:** the raw credential (`RawCredential`) rests under the
+> DB/volume posture — sqlcipher's per-field encryption is unavailable on Postgres and
+> irmago owns the write path, so per-org app-level envelope encryption is deferred (needs
+> an irmago seam), documented not dropped; a per-org filesystem key derived from
+> `ATTESTATION_HOLDER_MASTER_KEY` protects irmago's on-disk trust material. Consuming
+> irmago required an upstream split (privacybydesign/irmago#622) so `eudi/storage` imports
+> **without** the cgo `sqlcipher` package (the `CGO_ENABLED=0` Alpine build + `go test
+> -race` both forbid it).
 
 ---
 
@@ -617,17 +636,18 @@ seam + interim contacts).
    the verify-side trust list.
 5. **Revocation model** — StatusList2021 vs a QERDS-delivered revocation notice; how a
    relying party checks a revoked EAA. (Verify-side dependency.)
-6. **irmago Postgres seam** — irmago's `eudi/storage.NewStorage` hardcodes the
-   sqlcipher dialector; landing a `gorm.Dialector`/`NewStorageWithDialector` seam is an
-   **upstream irmago change** (`/root/code/irmago`). Is that change made in a vendored
-   fork or pushed upstream? And does re-adding the `irmago` dependency to `backend/`
-   (removed for verify in `auth-openid4vp.md`) need sign-off?
-7. **Holder at-rest encryption + multi-tenancy** — pgcrypto vs app-level envelope
-   encryption with a per-org key; per-org DB/schema vs `org_id`-scoped rows with RLS
-   (root `CLAUDE.md` multi-tenancy direction). Gates §6.5.
-8. **One holder engine or per-org instances** — instantiate irmago per org (its own AES
-   key, cleanest isolation) vs one engine with tenant-scoped rows. Perf/isolation
-   trade-off.
+6. ~~**irmago Postgres seam**~~ **RESOLVED (Phase 2).** Pushed upstream:
+   `NewStorageWithDialector` (irmago#620) + a sqlcipher-package split (irmago#622) so
+   `eudi/storage` is CGO-free. Re-adding the `irmago` dependency to `backend/` for the
+   **holder** role was signed off (distinct from the removed verifier daemon).
+7. ~~**Holder at-rest encryption + multi-tenancy**~~ **RESOLVED (Phase 2).** Multi-tenancy:
+   **per-org Postgres schema** (`holder_<orghex>`), not `org_id`-scoped rows (irmago's
+   models have no tenant column). At-rest: **DB/volume-level posture** documented;
+   app-level envelope encryption of `RawCredential` deferred (needs an irmago write-path
+   seam). No `ATTESTATION_HOLDER_ENCRYPTION_KEY` yet.
+8. ~~**One holder engine or per-org instances**~~ **RESOLVED (Phase 2).** Per-org engine
+   instance (one `storage.Storage` per org, lazily opened + cached, bounded pool), its own
+   filesystem key. The perf/connection trade-off is bounded by `engineMaxOpenConns`.
 
 ---
 
