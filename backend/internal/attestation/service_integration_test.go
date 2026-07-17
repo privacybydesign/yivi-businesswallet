@@ -32,6 +32,12 @@ func (r *recQerds) SendCredentialOffer(_ context.Context, _ uuid.UUID, toAddress
 	return nil
 }
 
+// stubInstances resolves every org to the default issuer instance (empty), so
+// the stub issuer's offer/claim loop runs without per-org routing.
+type stubInstances struct{}
+
+func (stubInstances) InstanceFor(_ context.Context, _ uuid.UUID) (string, error) { return "", nil }
+
 type env struct {
 	pool    *pgxpool.Pool
 	store   *attestation.Store
@@ -64,7 +70,7 @@ func setup(t *testing.T) env {
 	store := attestation.NewStore(pool, audit.NewDBRecorder())
 	mail := &recEmail{}
 	qerds := &recQerds{}
-	service := attestation.NewService(store, openid4vciissuer.NewStubIssuer(), mail, qerds, "http://app.test")
+	service := attestation.NewService(store, openid4vciissuer.NewStubIssuer(), stubInstances{}, mail, qerds, "http://app.test")
 	return env{pool, store, service, org.ID, actorID, mail, qerds}
 }
 

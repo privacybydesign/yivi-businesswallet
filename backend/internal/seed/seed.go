@@ -144,6 +144,9 @@ func Run(ctx context.Context, dsn string) error {
 	if err := seedEmailSettings(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
+	if err := seedIssuerSettings(ctx, pool, demoOrg.ID); err != nil {
+		return err
+	}
 
 	demoDeptIDs := []uuid.UUID{
 		deptsByOrgName[demoOrgSlug+"/Engineering"].ID,
@@ -382,11 +385,19 @@ func seedAttestations(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) 
 			schema: attestation.Schema{
 				VCT:                "nl.yivi.email",
 				DisplayName:        "Corporate e-mail",
-				CredentialConfigID: "EmailCredentialSdJwt",
+				CredentialConfigID: "YiviEmailSdJwt",
 				SubjectType:        attestation.SubjectNaturalPerson,
+				Display: []attestation.LocalizedName{
+					{Lang: "en", Name: "Corporate e-mail"},
+					{Lang: "nl", Name: "Zakelijk e-mailadres"},
+				},
 				Attributes: []attestation.AttributeDef{
-					{Key: "email", Label: "E-mail", Type: "string", Required: true},
-					{Key: "domain", Label: "Domain", Type: "string"},
+					{Key: "email", Label: "E-mail", Type: "string", Required: true, Display: []attestation.LocalizedLabel{
+						{Lang: "en", Label: "E-mail"}, {Lang: "nl", Label: "E-mailadres"},
+					}},
+					{Key: "domain", Label: "Domain", Type: "string", Display: []attestation.LocalizedLabel{
+						{Lang: "en", Label: "Domain"}, {Lang: "nl", Label: "Domein"},
+					}},
 				},
 			},
 			templateName: "Corporate e-mail",
@@ -395,12 +406,22 @@ func seedAttestations(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) 
 			schema: attestation.Schema{
 				VCT:                "nl.yivi.employee",
 				DisplayName:        "Employee of Yivi B.V.",
-				CredentialConfigID: "MembershipCredentialSdJwt",
+				CredentialConfigID: "YiviEmployeeSdJwt",
 				SubjectType:        attestation.SubjectNaturalPerson,
+				Display: []attestation.LocalizedName{
+					{Lang: "en", Name: "Employee of Yivi B.V."},
+					{Lang: "nl", Name: "Medewerker van Yivi B.V."},
+				},
 				Attributes: []attestation.AttributeDef{
-					{Key: "fullName", Label: "Full name", Type: "string", Required: true},
-					{Key: "department", Label: "Department", Type: "string"},
-					{Key: "role", Label: "Role", Type: "string"},
+					{Key: "fullName", Label: "Full name", Type: "string", Required: true, Display: []attestation.LocalizedLabel{
+						{Lang: "en", Label: "Full name"}, {Lang: "nl", Label: "Volledige naam"},
+					}},
+					{Key: "department", Label: "Department", Type: "string", Display: []attestation.LocalizedLabel{
+						{Lang: "en", Label: "Department"}, {Lang: "nl", Label: "Afdeling"},
+					}},
+					{Key: "role", Label: "Role", Type: "string", Display: []attestation.LocalizedLabel{
+						{Lang: "en", Label: "Role"}, {Lang: "nl", Label: "Functie"},
+					}},
 				},
 			},
 			templateName: "Employee of Yivi B.V.",
@@ -411,11 +432,19 @@ func seedAttestations(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) 
 			schema: attestation.Schema{
 				VCT:                "nl.yivi.supplier",
 				DisplayName:        "Approved supplier",
-				CredentialConfigID: "OrganizationCredentialSdJwt",
+				CredentialConfigID: "YiviSupplierSdJwt",
 				SubjectType:        attestation.SubjectOrganization,
+				Display: []attestation.LocalizedName{
+					{Lang: "en", Name: "Approved supplier"},
+					{Lang: "nl", Name: "Erkende leverancier"},
+				},
 				Attributes: []attestation.AttributeDef{
-					{Key: "name", Label: "Legal name", Type: "string", Required: true},
-					{Key: "kvkNumber", Label: "KVK number", Type: "string"},
+					{Key: "name", Label: "Legal name", Type: "string", Required: true, Display: []attestation.LocalizedLabel{
+						{Lang: "en", Label: "Legal name"}, {Lang: "nl", Label: "Statutaire naam"},
+					}},
+					{Key: "kvkNumber", Label: "KVK number", Type: "string", Display: []attestation.LocalizedLabel{
+						{Lang: "en", Label: "KVK number"}, {Lang: "nl", Label: "KVK-nummer"},
+					}},
 				},
 			},
 			templateName: "Approved supplier",
@@ -448,6 +477,20 @@ func seedEmailSettings(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID)
 		ON CONFLICT (organization_id) DO NOTHING`
 	if _, err := pool.Exec(ctx, insert, orgID); err != nil {
 		return fmt.Errorf("seed: email settings: %w", err)
+	}
+	return nil
+}
+
+// seedIssuerSettings gives the demo org its own Veramo issuer instance ("yivi")
+// with branding, so its attestations issue from a per-org issuer and the
+// generated GitOps bundle (org settings → Issuer) is populated out of the box.
+// Idempotent.
+func seedIssuerSettings(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+	const insert = `INSERT INTO org_issuer_settings (organization_id, instance_name, display_name, enabled)
+		VALUES ($1, 'yivi', 'Yivi B.V.', true)
+		ON CONFLICT (organization_id) DO NOTHING`
+	if _, err := pool.Exec(ctx, insert, orgID); err != nil {
+		return fmt.Errorf("seed: issuer settings: %w", err)
 	}
 	return nil
 }

@@ -6,12 +6,14 @@ import { accessMessage } from "../lib/access-message";
 import { Card, TopBar } from "../ui";
 import { DepartmentSettings } from "./department-settings";
 import { EmailSettingsPanel } from "./email-settings";
+import { IssuerSettingsPanel } from "./issuer-settings";
 import { OrgProfileSettings } from "./org-profile-settings";
 import * as React from "react";
 
 const TABS = [
   { key: "org", labelKey: "settings.tabOrg" },
   { key: "email", labelKey: "settings.tabEmail" },
+  { key: "issuer", labelKey: "settings.tabIssuer" },
   { key: "wallets", labelKey: "settings.tabWallets" },
 ] as const;
 
@@ -73,6 +75,8 @@ export default function Settings(): React.JSX.Element {
           </div>
         ) : tab === "email" ? (
           <EmailSettingsPanel slug={slug} />
+        ) : tab === "issuer" ? (
+          <IssuerSettingsPanel slug={slug} />
         ) : (
           <Card className="p-6">
             <p className="text-ink-soft text-[14px]">

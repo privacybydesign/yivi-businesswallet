@@ -266,6 +266,36 @@ export function updateAttestationSchema(
   });
 }
 
+// The Veramo issuer GitOps config generated from a schema: the metadata fragment
+// (keyed by credential config id, merged into conf/metadata/<instance>.json) and
+// a VCT document. Committing this to the issuer's ops repo is what makes the
+// schema's translations show in a wallet — the issuer's runtime config API is
+// disabled in the deployment, so display is provisioned by files. The inner
+// documents are opaque here (passed through verbatim for the operator to copy).
+export const attestationIssuerConfigSchema = z.object({
+  credentialConfigId: z.string(),
+  metadata: z.record(z.string(), z.unknown()),
+  vct: z.unknown(),
+});
+
+export type AttestationIssuerConfig = z.infer<
+  typeof attestationIssuerConfigSchema
+>;
+
+export function getAttestationSchemaIssuerConfig(
+  slug: string,
+  schemaId: string,
+  signal?: AbortSignal,
+): Promise<AttestationIssuerConfig> {
+  return request(
+    `${base(slug)}/schemas/${encodeURIComponent(schemaId)}/issuer-config`,
+    {
+      schema: attestationIssuerConfigSchema,
+      signal,
+    },
+  );
+}
+
 export function deleteAttestationSchema(
   slug: string,
   schemaId: string,

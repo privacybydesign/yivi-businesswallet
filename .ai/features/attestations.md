@@ -32,6 +32,43 @@ recipient step and the delivery route. On issue, the created offer is persisted
 **Divergences from the v1 design below (deliberate):**
 - **Schema→issuer mapping** is an explicit `credential_config_id` column on
   `attestation_schemas` (the Veramo `credentialId`), not derived — §6.1 reflects this.
+- **Localized display metadata is provisioned into the issuer by GitOps, not at
+  runtime.** A schema carries per-language display for the credential
+  (`attestation_schemas.display`, `[{lang,name}]`) and each attribute
+  (`attributes[].display`, `[{lang,label}]`). These are **not** sent on the
+  credential offer — in OpenID4VCI/SD-JWT VC `display` lives on the credential
+  *type*, served from the issuer's metadata (`credential_configurations_supported[<id>].credential_metadata.display`
+  and `.claims[].display`), keyed by `credentialConfigId`. The hosted Veramo issuer
+  *has* an admin API to register credential configs (`PUT/POST /api/credentials`,
+  gated by a global `BEARER_TOKEN`), **but that token is not set on the deployment**
+  (`openid4vc-poc-ops/veramo-issuer.tf`), so the runtime config API is disabled;
+  display is provisioned by static files (`conf/metadata/<instance>.json` +
+  `conf/vct/*.json`) rolled out via a ConfigMap. We therefore **generate** the
+  drop-in config from a schema rather than push it: `GET .../attestations/schemas/{id}/issuer-config`
+  (admin) returns the `credential_configurations_supported` fragment + a VCT
+  document (`internal/attestation/issuerconfig.go`, pure `BuildIssuerConfig`); the
+  schema editor shows both with copy buttons. An operator commits them to
+  `openid4vc-poc-ops` and redeploys. This partially answers **Open Question #1**
+  (how an org's `credentialId` display is registered on the instance): today, via
+  the generated GitOps fragment. If the issuer's `BEARER_TOKEN` is ever enabled,
+  the same `BuildIssuerConfig` mapping can drive a runtime `PUT/POST /api/credentials`
+  push instead.
+- **Issuer instance is per-organization.** Each org has its own Veramo issuer
+  instance (the `{instance}` path segment): a new `org_issuer_settings` slice
+  (`internal/issuersettings`, org settings → **Issuer** tab) stores the instance
+  name (default = org slug) + display-name/logo branding — **no secret**, since the
+  hosted issuer's admin token is deployment-global (every instance renders the same
+  `VERAMO_ISSUER_ADMIN_TOKEN`). `openid4vciissuer.OfferRequest.Instance` /
+  `Status(instance, …)` route offers to the org's instance (empty ⇒ the configured
+  default); `attestation.Service` resolves it per-org via the `issuerInstanceResolver`
+  seam. `GET .../attestations/issuer-bundle` (and the Issuer tab) generate the full
+  GitOps drop-in for an org's instance — `conf/issuer/<instance>.json`,
+  `conf/dids/<instance>-did.json`, `conf/metadata/<instance>.json` (all the org's
+  schema fragments + branding), and one `conf/vct/*.json` per schema — for an
+  operator to commit to `openid4vc-poc-ops` and redeploy (Terraform wiring is
+  manual per instance today; see that repo's `README-per-org-issuer.md`, incl. the
+  credential-config-id uniqueness caveat). The seeded `yivi` org ships with instance
+  `yivi` + en/nl schema translations and committed conf files.
 - **Key material is a table + CRUD** but the actual signing instance is the global
   Veramo instance from config; per-org qualified certs are data-model-ready only.
 - **Holder side (irmago + `held_attestations`) is NOT built** — deferred to a v2 plan

@@ -9,12 +9,14 @@ import type {
 } from "../api/attestations";
 import { SUPPORTED_ATTRIBUTE_TYPES } from "../api/attestations";
 import {
+  useAttestationSchemaIssuerConfigQuery,
   useCreateAttestationSchemaMutation,
   useUpdateAttestationSchemaMutation,
 } from "../api/attestations.queries";
 import { Button, Modal } from "../ui";
 import { control } from "../lib/attestation-form";
 import { Field } from "./attestations-fields";
+import { JsonSnippet } from "./json-snippet";
 
 const DEFAULT_STATUS = "active";
 const DEFAULT_ATTRIBUTE_TYPE = "string";
@@ -108,6 +110,13 @@ export function AttestationSchemaForm({
       : [emptyRow()],
   );
   const [attempted, setAttempted] = useState(false);
+  const [showIssuerConfig, setShowIssuerConfig] = useState(false);
+
+  const issuerConfig = useAttestationSchemaIssuerConfigQuery(
+    slug,
+    schema?.id ?? "",
+    isEdit && showIssuerConfig,
+  );
 
   const pending = create.isPending || update.isPending;
   const mutationError = create.error ?? update.error;
@@ -430,6 +439,55 @@ export function AttestationSchemaForm({
             ))}
           </div>
         </div>
+
+        {isEdit && (
+          <div className="border-line flex flex-col gap-2 border-t pt-3">
+            <div className="flex items-center justify-between">
+              <span className="text-ink-soft text-[12px] font-semibold">
+                {t("attestations.schemaForm.issuerConfig")}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowIssuerConfig((v) => !v)}
+              >
+                {showIssuerConfig
+                  ? t("attestations.schemaForm.issuerConfigHide")
+                  : t("attestations.schemaForm.issuerConfigShow")}
+              </Button>
+            </div>
+            {showIssuerConfig && (
+              <>
+                <p className="text-ink-soft text-[12px]">
+                  {t("attestations.schemaForm.issuerConfigHint")}
+                </p>
+                {issuerConfig.isPending && (
+                  <span className="text-ink-soft text-[12px]">
+                    {t("common.loading")}
+                  </span>
+                )}
+                {issuerConfig.isError && (
+                  <span role="alert" className="text-error text-[12px]">
+                    {t("attestations.schemaForm.issuerConfigError")}
+                  </span>
+                )}
+                {issuerConfig.data && (
+                  <div className="flex flex-col gap-3">
+                    <JsonSnippet
+                      title={t("attestations.schemaForm.issuerConfigMetadata")}
+                      value={issuerConfig.data.metadata}
+                    />
+                    <JsonSnippet
+                      title={t("attestations.schemaForm.issuerConfigVct")}
+                      value={issuerConfig.data.vct}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {showError && mutationError && (
           <p

@@ -2,6 +2,9 @@ export const en = {
   common: {
     cancel: "Cancel",
     comingSoon: "Coming soon",
+    copy: "Copy",
+    copied: "Copied to clipboard.",
+    copyFailed: "Could not copy to clipboard.",
     department: "Department",
     edit: "Edit",
     jobTitle: "Job title",
@@ -291,6 +294,7 @@ export const en = {
     attestationRevoked: "Attestation revoked",
     emailSettingsSaved: "E-mail settings saved",
     emailTestSent: "Test e-mail sent",
+    issuerSettingsSaved: "Issuer settings saved",
   },
   members: {
     title: "Members",
@@ -467,11 +471,36 @@ export const en = {
     subtitle: "Organization profile and preferences",
     tabOrg: "Organization",
     tabEmail: "E-mail",
+    tabIssuer: "Issuer",
     tabWallets: "Wallets",
     adminOnly: "Only organization admins can manage settings.",
     orgProfile: "Organization profile",
     discard: "Discard",
     walletsPlaceholder: "Allowed wallets settings are coming soon.",
+  },
+  issuerSettings: {
+    title: "Issuer instance",
+    intro:
+      "This organization issues attestations from its own Veramo issuer instance. The instance name is the path segment offers route to; the display name and logo are the issuer's branding shown in wallets.",
+    instanceName: "Instance name",
+    displayName: "Display name",
+    logoUri: "Logo URI",
+    logoUriPlaceholder: "https://… or data:image/png;base64,…",
+    enabled: "Enabled",
+    enabledHint: "Route this organization's offers to its own instance",
+    instanceNameInvalid:
+      "Instance name must be a lowercase slug (a–z, 0–9, hyphen).",
+    loadError: "Could not load issuer settings: {{message}}",
+    bundleTitle: "Issuer config bundle",
+    bundleShow: "Show bundle",
+    bundleHide: "Hide bundle",
+    bundleHint:
+      "The hosted issuer reads its config from files, not at runtime. Commit these to the issuer ops repo (openid4vc-poc-ops) and redeploy for this instance to serve the credentials and translations below.",
+    bundleError: "Could not generate the issuer bundle.",
+    bundleIssuer: "conf/issuer/{{instance}}.json",
+    bundleDid: "conf/dids/{{instance}}-did.json",
+    bundleMetadata: "conf/metadata/{{instance}}.json",
+    bundleVct: "conf/vct/{{name}}.json",
   },
   emailSettings: {
     title: "E-mail delivery",
@@ -758,6 +787,15 @@ export const en = {
       },
       removeAttribute: "Remove attribute",
       error: "Could not save the schema: {{message}}",
+      issuerConfig: "Issuer config (translations)",
+      issuerConfigShow: "Show issuer config",
+      issuerConfigHide: "Hide issuer config",
+      issuerConfigHint:
+        "The issuer does not read these translations at runtime. Commit the fragments below to the issuer's config repo (openid4vc-poc-ops) and redeploy for wallets to show the credential and its claims in each language.",
+      issuerConfigMetadata:
+        "Metadata fragment — merge into credential_configurations_supported in conf/metadata/<instance>.json",
+      issuerConfigVct: "VCT document — add as conf/vct/<name>.json",
+      issuerConfigError: "Could not load the issuer config.",
     },
     templateForm: {
       createTitle: "New template",
