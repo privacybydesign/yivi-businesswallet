@@ -71,6 +71,8 @@ const (
 	AttestationHeldDeleted     = "attestation.held_deleted"
 
 	EmailSettingsUpdated = "email.settings_updated"
+
+	IssuerSettingsUpdated = "issuer.settings_updated"
 )
 
 const (
@@ -96,6 +98,8 @@ const (
 	TargetHeldAttestation     = "held_attestation"
 
 	TargetEmailSettings = "org_email_settings"
+
+	TargetIssuerSettings = "org_issuer_settings"
 )
 
 type Actor struct {

@@ -1,13 +1,46 @@
 import { z } from "zod";
 import { request } from "./http";
 
+// The value types an attribute may declare, mirroring the backend's
+// SupportedAttributeTypes allow-list. The schema editor offers these as a
+// dropdown; the backend rejects anything else on write.
+export const SUPPORTED_ATTRIBUTE_TYPES = [
+  "string",
+  "integer",
+  "number",
+  "boolean",
+  "date",
+] as const;
+
+export type AttestationAttributeType =
+  (typeof SUPPORTED_ATTRIBUTE_TYPES)[number];
+
+// One entry of an SD-JWT VC type metadata `display` array: a BCP-47 language
+// tag paired with the text a wallet shows for that language. The credential
+// display carries a `name`; a claim's display carries a `label`.
+export const localizedNameSchema = z.object({
+  lang: z.string(),
+  name: z.string(),
+});
+
+export type LocalizedName = z.infer<typeof localizedNameSchema>;
+
+export const localizedLabelSchema = z.object({
+  lang: z.string(),
+  label: z.string(),
+});
+
+export type LocalizedLabel = z.infer<typeof localizedLabelSchema>;
+
 // A single attribute declared by an attestation schema: the disclosure key, a
-// human label, the value type, and whether it must be present when issuing.
+// human label, the value type, whether it must be present when issuing, and
+// optional per-language labels.
 export const attestationAttributeSchema = z.object({
   key: z.string(),
   label: z.string(),
   type: z.string(),
   required: z.boolean(),
+  display: z.array(localizedLabelSchema).optional(),
 });
 
 export type AttestationAttribute = z.infer<typeof attestationAttributeSchema>;
@@ -33,6 +66,7 @@ export const attestationSchemaSchema = z.object({
   displayName: z.string(),
   credentialConfigId: z.string(),
   attributes: z.array(attestationAttributeSchema),
+  display: z.array(localizedNameSchema).optional(),
   subjectType: attestationSubjectTypeSchema,
   qualified: z.boolean(),
   status: z.string(),
@@ -154,6 +188,7 @@ export interface AttestationSchemaInput {
   displayName: string;
   credentialConfigId: string;
   attributes: AttestationAttribute[];
+  display?: LocalizedName[];
   subjectType: AttestationSubjectType;
   qualified: boolean;
   status?: string;
@@ -163,6 +198,7 @@ export interface AttestationSchemaUpdate {
   displayName: string;
   credentialConfigId: string;
   attributes: AttestationAttribute[];
+  display?: LocalizedName[];
   subjectType: AttestationSubjectType;
   qualified: boolean;
   status: string;
@@ -268,6 +304,36 @@ export function updateAttestationSchema(
     body: input,
     signal,
   });
+}
+
+// The Veramo issuer GitOps config generated from a schema: the metadata fragment
+// (keyed by credential config id, merged into conf/metadata/<instance>.json) and
+// a VCT document. Committing this to the issuer's ops repo is what makes the
+// schema's translations show in a wallet — the issuer's runtime config API is
+// disabled in the deployment, so display is provisioned by files. The inner
+// documents are opaque here (passed through verbatim for the operator to copy).
+export const attestationIssuerConfigSchema = z.object({
+  credentialConfigId: z.string(),
+  metadata: z.record(z.string(), z.unknown()),
+  vct: z.unknown(),
+});
+
+export type AttestationIssuerConfig = z.infer<
+  typeof attestationIssuerConfigSchema
+>;
+
+export function getAttestationSchemaIssuerConfig(
+  slug: string,
+  schemaId: string,
+  signal?: AbortSignal,
+): Promise<AttestationIssuerConfig> {
+  return request(
+    `${base(slug)}/schemas/${encodeURIComponent(schemaId)}/issuer-config`,
+    {
+      schema: attestationIssuerConfigSchema,
+      signal,
+    },
+  );
 }
 
 export function deleteAttestationSchema(

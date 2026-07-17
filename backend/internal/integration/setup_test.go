@@ -22,6 +22,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
@@ -122,11 +123,12 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins)
 
 	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
+	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())
 	attestationService := attestation.NewService(
-		attestationStore, openid4vciissuer.NewStubIssuer(),
+		attestationStore, openid4vciissuer.NewStubIssuer(), issuerSettingsStore,
 		stubEmailNotifier{}, stubQerdsNotifier{}, "http://app.test",
 	)
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, requireUser, orgHandler.Authorize)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, "", requireUser, orgHandler.Authorize)
 
 	srv := httptest.NewServer(server.New(pool, authHandler, orgHandler, attestationHandler))
 	t.Cleanup(srv.Close)

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
@@ -94,7 +96,7 @@ func newRegistryProvider(cfg config.Config) (registryProvider, error) {
 type attestationIssuer interface {
 	Ping(context.Context) error
 	CreateOffer(context.Context, openid4vciissuer.OfferRequest) (openid4vciissuer.Offer, error)
-	Status(context.Context, string) (string, error)
+	Status(context.Context, string, string) (string, error)
 }
 
 func newAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
@@ -112,6 +114,17 @@ func newAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
 	default:
 		return nil, fmt.Errorf("attestation issuer %q is not implemented", cfg.AttestationIssuer)
 	}
+}
+
+// attestationIssuerURL is the hosted issuer instance base URL ({url}/{instance}),
+// emitted into generated VCT documents (attestation schema issuer-config). Empty
+// when the issuer is stubbed / unconfigured, in which case the generated config's
+// issuer field is left for the operator to fill in.
+func attestationIssuerURL(cfg config.Config) string {
+	if cfg.AttestationIssuerURL == "" || cfg.AttestationIssuerInstance == "" {
+		return ""
+	}
+	return strings.TrimRight(cfg.AttestationIssuerURL, "/") + "/" + cfg.AttestationIssuerInstance
 }
 
 // qerdsOfferSender adapts the QERDS service to the attestation slice's
@@ -277,11 +290,14 @@ func run() error {
 	}
 	emailHandler := email.NewHandler(emailStore, emailService, requireUser, orgHandler.Authorize)
 
+	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())
+	issuerSettingsHandler := issuersettings.NewHandler(issuerSettingsStore, requireUser, orgHandler.Authorize)
+
 	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
 	attestationService := attestation.NewService(
-		attestationStore, attIssuer, emailService, qerdsOfferSender{qerdsService}, cfg.AppBaseURL,
+		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, cfg.AppBaseURL,
 	)
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, requireUser, orgHandler.Authorize)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
 
 	handler := server.New(
 		pool,
@@ -291,6 +307,7 @@ func run() error {
 		walletHandler,
 		postguardHandler,
 		emailHandler,
+		issuerSettingsHandler,
 		attestationHandler,
 	)
 

@@ -2,6 +2,9 @@ export const en = {
   common: {
     cancel: "Cancel",
     comingSoon: "Coming soon",
+    copy: "Copy",
+    copied: "Copied to clipboard.",
+    copyFailed: "Could not copy to clipboard.",
     department: "Department",
     edit: "Edit",
     jobTitle: "Job title",
@@ -261,6 +264,7 @@ export const en = {
     invitationResent: "Invitation resent",
     invitationRevoked: "Invitation revoked",
     memberUpdated: "Member updated",
+    memberRemoved: "Member removed",
     organizationUpdated: "Organization updated",
     organizationDeleted: "Organization deleted",
     departmentAdded: "Department added",
@@ -292,6 +296,7 @@ export const en = {
     attestationRevoked: "Attestation revoked",
     emailSettingsSaved: "E-mail settings saved",
     emailTestSent: "Test e-mail sent",
+    issuerSettingsSaved: "Issuer settings saved",
   },
   members: {
     title: "Members",
@@ -456,6 +461,14 @@ export const en = {
     verified: "Verified",
     sendMessage: "Send message",
     offboard: "Off-board member",
+    offboardConfirm: {
+      title: "Off-board member",
+      body: "Remove {{name}} from this organization? They lose access immediately. This does not delete their account.",
+      lastAdmin:
+        "This is the organization's only admin. Promote another member to admin first.",
+      error: "Could not off-board this member: {{message}}",
+      confirm: "Off-board",
+    },
   },
   memberEdit: {
     title: "Edit member",
@@ -469,11 +482,37 @@ export const en = {
     subtitle: "Organization profile and preferences",
     tabOrg: "Organization",
     tabEmail: "E-mail",
+    tabIssuer: "Issuer",
+    tabPostguard: "PostGuard",
     tabWallets: "Wallets",
     adminOnly: "Only organization admins can manage settings.",
     orgProfile: "Organization profile",
     discard: "Discard",
     walletsPlaceholder: "Allowed wallets settings are coming soon.",
+  },
+  issuerSettings: {
+    title: "Issuer instance",
+    intro:
+      "This organization issues attestations from its own Veramo issuer instance. The instance name is the path segment offers route to; the display name and logo are the issuer's branding shown in wallets.",
+    instanceName: "Instance name",
+    displayName: "Display name",
+    logoUri: "Logo URI",
+    logoUriPlaceholder: "https://… or data:image/png;base64,…",
+    enabled: "Enabled",
+    enabledHint: "Route this organization's offers to its own instance",
+    instanceNameInvalid:
+      "Instance name must be a lowercase slug (a–z, 0–9, hyphen).",
+    loadError: "Could not load issuer settings: {{message}}",
+    bundleTitle: "Issuer config bundle",
+    bundleShow: "Show bundle",
+    bundleHide: "Hide bundle",
+    bundleHint:
+      "The hosted issuer reads its config from files, not at runtime. Commit these to the issuer ops repo (openid4vc-poc-ops) and redeploy for this instance to serve the credentials and translations below.",
+    bundleError: "Could not generate the issuer bundle.",
+    bundleIssuer: "conf/issuer/{{instance}}.json",
+    bundleDid: "conf/dids/{{instance}}-did.json",
+    bundleMetadata: "conf/metadata/{{instance}}.json",
+    bundleVct: "conf/vct/{{name}}.json",
   },
   emailSettings: {
     title: "E-mail delivery",
@@ -743,8 +782,13 @@ export const en = {
       vctRequired: "Enter a VCT.",
       displayName: "Display name",
       displayNameRequired: "Enter a display name.",
+      displayNames: "Display names per language",
       credentialConfigId: "Credential configuration ID",
       credentialConfigRequired: "Enter a credential configuration ID.",
+      translationLang: "Language",
+      translationLangPlaceholder: "e.g. en",
+      addTranslation: "Add translation",
+      removeTranslation: "Remove translation",
       subjectType: "Subject type",
       subjectNaturalPerson: "Natural person",
       subjectOrganization: "Organization",
@@ -757,8 +801,25 @@ export const en = {
       attrLabel: "Label",
       attrType: "Type",
       attrRequired: "Required",
+      attrTranslations: "Labels per language",
+      types: {
+        string: "Text",
+        integer: "Integer",
+        number: "Number",
+        boolean: "Boolean",
+        date: "Date",
+      },
       removeAttribute: "Remove attribute",
       error: "Could not save the schema: {{message}}",
+      issuerConfig: "Issuer config (translations)",
+      issuerConfigShow: "Show issuer config",
+      issuerConfigHide: "Hide issuer config",
+      issuerConfigHint:
+        "The issuer does not read these translations at runtime. Commit the fragments below to the issuer's config repo (openid4vc-poc-ops) and redeploy for wallets to show the credential and its claims in each language.",
+      issuerConfigMetadata:
+        "Metadata fragment — merge into credential_configurations_supported in conf/metadata/<instance>.json",
+      issuerConfigVct: "VCT document — add as conf/vct/<name>.json",
+      issuerConfigError: "Could not load the issuer config.",
     },
     templateForm: {
       createTitle: "New template",
@@ -836,6 +897,16 @@ export const en = {
       title: "About PostGuard",
       tagline: "Identity-based encryption",
       body: "Files are encrypted so that only a recipient who can prove ownership of the given e-mail address can open them. No account, no shared secret.",
+    },
+    notReady: {
+      title: "PostGuard needs configuration",
+      adminBody:
+        "Set the encryption key and the API key in the configuration panel before this organization can send encrypted files.",
+      memberBody:
+        "Ask an organization admin to configure PostGuard before this organization can send encrypted files.",
+      deploymentTitle: "PostGuard is not available",
+      deploymentBody:
+        "PostGuard is not configured on this deployment. Contact your platform administrator.",
     },
     encryptionKey: {
       title: "Encryption key",

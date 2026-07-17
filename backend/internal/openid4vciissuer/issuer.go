@@ -23,6 +23,10 @@ var ErrPending = errors.New("openid4vciissuer: issuance pending")
 // the verify side (where the wallet discloses claims to us), here we push the
 // attribute values into the offer; the issuer seals them into the credential.
 type OfferRequest struct {
+	// Instance is the issuer instance to create the offer at (the {instance}
+	// path segment). Empty uses the client's configured default instance; a
+	// per-organization instance routes the offer to that org's issuer.
+	Instance string
 	// CredentialConfigID is the issuer-registered credential type to issue (the
 	// Veramo credentialId our schema maps to).
 	CredentialConfigID string

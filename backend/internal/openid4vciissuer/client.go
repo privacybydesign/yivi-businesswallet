@@ -100,7 +100,7 @@ func (c *VeramoIssuer) CreateOffer(ctx context.Context, req OfferRequest) (Offer
 		return Offer{}, fmt.Errorf("openid4vciissuer: marshal create-offer: %w", err)
 	}
 
-	httpReq, err := c.newRequest(ctx, createOfferPath, body)
+	httpReq, err := c.newRequest(ctx, req.Instance, createOfferPath, body)
 	if err != nil {
 		return Offer{}, err
 	}
@@ -129,13 +129,14 @@ type checkOfferResponse struct {
 }
 
 // Status reports StatusPending until the recipient claims the credential, then
-// StatusIssued. A non-2xx or any non-issued status maps to pending.
-func (c *VeramoIssuer) Status(ctx context.Context, issuanceID string) (string, error) {
+// StatusIssued. A non-2xx or any non-issued status maps to pending. instance is
+// the issuer instance the offer was created at (empty uses the default).
+func (c *VeramoIssuer) Status(ctx context.Context, instance, issuanceID string) (string, error) {
 	body, err := json.Marshal(map[string]string{"id": issuanceID})
 	if err != nil {
 		return "", fmt.Errorf("openid4vciissuer: marshal check-offer: %w", err)
 	}
-	httpReq, err := c.newRequest(ctx, checkOfferPath, body)
+	httpReq, err := c.newRequest(ctx, instance, checkOfferPath, body)
 	if err != nil {
 		return "", err
 	}
@@ -170,8 +171,14 @@ func (c *VeramoIssuer) Ping(ctx context.Context) error {
 	return err
 }
 
-func (c *VeramoIssuer) newRequest(ctx context.Context, path string, body []byte) (*http.Request, error) {
-	url := c.baseURL + "/" + c.instance + path
+// newRequest builds a request to an issuer instance. instance selects the
+// {instance} path segment; empty falls back to the client's configured default
+// instance, so a per-organization instance routes offers to that org's issuer.
+func (c *VeramoIssuer) newRequest(ctx context.Context, instance, path string, body []byte) (*http.Request, error) {
+	if instance == "" {
+		instance = c.instance
+	}
+	url := c.baseURL + "/" + instance + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("openid4vciissuer: build request: %w", err)

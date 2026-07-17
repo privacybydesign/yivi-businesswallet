@@ -21,7 +21,14 @@ const claimTokenBytes = 24
 // injected at boot.
 type issuer interface {
 	CreateOffer(ctx context.Context, req openid4vciissuer.OfferRequest) (openid4vciissuer.Offer, error)
-	Status(ctx context.Context, issuanceID string) (string, error)
+	Status(ctx context.Context, instance, issuanceID string) (string, error)
+}
+
+// issuerInstanceResolver resolves an organization's Veramo issuer instance name
+// (the {instance} path segment) so offers route to that org's issuer. Backed by
+// the issuersettings store; an empty result means "use the configured default".
+type issuerInstanceResolver interface {
+	InstanceFor(ctx context.Context, orgID uuid.UUID) (string, error)
 }
 
 // issuedStore is the ledger surface the service coordinates; reads for the API go
@@ -52,21 +59,36 @@ type qerdsNotifier interface {
 type Service struct {
 	store      issuedStore
 	issuer     issuer
+	instances  issuerInstanceResolver
 	email      emailNotifier
 	qerds      qerdsNotifier
 	appBaseURL string
 	now        func() time.Time
 }
 
-func NewService(store issuedStore, iss issuer, email emailNotifier, qerds qerdsNotifier, appBaseURL string) *Service {
+func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, appBaseURL string) *Service {
 	return &Service{
 		store:      store,
 		issuer:     iss,
+		instances:  instances,
 		email:      email,
 		qerds:      qerds,
 		appBaseURL: strings.TrimRight(appBaseURL, "/"),
 		now:        time.Now,
 	}
+}
+
+// instanceFor resolves the org's issuer instance so offers route to that org's
+// issuer. A resolution error is non-fatal: it logs and returns "" so the client
+// falls back to its configured default instance.
+func (s *Service) instanceFor(ctx context.Context, orgID uuid.UUID) string {
+	instance, err := s.instances.InstanceFor(ctx, orgID)
+	if err != nil {
+		slog.WarnContext(ctx, "attestation: resolve issuer instance failed; using default",
+			slog.String("orgId", orgID.String()), slog.String("error", err.Error()))
+		return ""
+	}
+	return instance
 }
 
 // Issue validates the request, persists an offered ledger row (audited), asks the
@@ -108,6 +130,7 @@ func (s *Service) Issue(ctx context.Context, orgID, issuedBy uuid.UUID, orgName 
 	}
 
 	offer, err := s.issuer.CreateOffer(ctx, openid4vciissuer.OfferRequest{
+		Instance:           s.instanceFor(ctx, orgID),
 		CredentialConfigID: detail.CredentialConfigID,
 		Claims:             toClaims(in.Attributes),
 		ExpirationSeconds:  expirationSeconds,
@@ -159,7 +182,7 @@ func (s *Service) Status(ctx context.Context, orgID, id uuid.UUID) (Issued, erro
 	if issued.Status != StatusOffered || issued.IssuanceID == "" {
 		return issued, nil
 	}
-	if s.reconcile(ctx, issued.IssuanceID) {
+	if s.reconcile(ctx, s.instanceFor(ctx, orgID), issued.IssuanceID) {
 		return s.store.MarkClaimed(ctx, orgID, id)
 	}
 	return issued, nil
@@ -173,7 +196,7 @@ func (s *Service) ClaimStatus(ctx context.Context, token string) (ClaimView, err
 		return ClaimView{}, err
 	}
 	status := c.status
-	if status == StatusOffered && c.issuanceID != "" && s.reconcile(ctx, c.issuanceID) {
+	if status == StatusOffered && c.issuanceID != "" && s.reconcile(ctx, s.instanceFor(ctx, c.orgID), c.issuanceID) {
 		if _, err := s.store.MarkClaimed(ctx, c.orgID, c.id); err != nil {
 			return ClaimView{}, err
 		}
@@ -195,8 +218,8 @@ func (s *Service) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, erro
 
 // reconcile reports whether the issuer says the credential has been issued. A
 // transient issuer error is treated as "not yet" (never fails the poll).
-func (s *Service) reconcile(ctx context.Context, issuanceID string) bool {
-	status, err := s.issuer.Status(ctx, issuanceID)
+func (s *Service) reconcile(ctx context.Context, instance, issuanceID string) bool {
+	status, err := s.issuer.Status(ctx, instance, issuanceID)
 	if err != nil {
 		slog.WarnContext(ctx, "attestation: issuer status check failed",
 			slog.String("error", err.Error()))

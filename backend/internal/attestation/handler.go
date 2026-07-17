@@ -49,6 +49,13 @@ type issuanceService interface {
 	ClaimStatus(ctx context.Context, token string) (ClaimView, error)
 }
 
+// issuerSettingsReader resolves an org's issuer instance name (defaulted to the
+// fallback when unconfigured) and branding, for generating the issuer bundle.
+// Implemented by internal/issuersettings.Store.
+type issuerSettingsReader interface {
+	BundleConfig(ctx context.Context, orgID uuid.UUID, fallbackInstance string) (instance, displayName, logoURI string, err error)
+}
+
 // Handler serves the org-scoped attestations API (Schemas / Templates / Issued
 // tabs + key material). Org routes compose the injected requireUser + authorize
 // middleware; write/manage routes additionally require org admin.
@@ -60,26 +67,35 @@ type heldStore interface {
 }
 
 type Handler struct {
-	schemas     schemaStore
-	templates   templateStore
-	keys        keyStore
-	issued      issuedReader
-	held        heldStore
-	service     issuanceService
-	requireUser func(http.Handler) http.Handler
-	authorize   func(http.Handler) http.Handler
+	schemas        schemaStore
+	templates      templateStore
+	keys           keyStore
+	issued         issuedReader
+	held           heldStore
+	service        issuanceService
+	issuerSettings issuerSettingsReader
+	issuerURL      string
+	requireUser    func(http.Handler) http.Handler
+	authorize      func(http.Handler) http.Handler
 }
 
-func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, held heldStore, service issuanceService, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+// NewHandler wires the attestations API. issuerURL is the hosted issuer instance
+// base URL, emitted into generated VCT documents (see schemaIssuerConfig); it may
+// be empty (the generated config's issuer field is then left for the operator).
+// issuerSettings resolves an org's issuer instance + branding for the per-org
+// bundle generator (see issuerBundle).
+func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, held heldStore, service issuanceService, issuerSettings issuerSettingsReader, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
-		schemas:     schemas,
-		templates:   templates,
-		keys:        keys,
-		issued:      issued,
-		held:        held,
-		service:     service,
-		requireUser: requireUser,
-		authorize:   authorize,
+		schemas:        schemas,
+		templates:      templates,
+		keys:           keys,
+		issued:         issued,
+		held:           held,
+		service:        service,
+		issuerSettings: issuerSettings,
+		issuerURL:      issuerURL,
+		requireUser:    requireUser,
+		authorize:      authorize,
 	}
 }
 
@@ -95,8 +111,12 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/attestations/schemas", admin(respond.HandlerFunc(h.listSchemas)))
 	mux.Handle("POST /orgs/{slug}/attestations/schemas", admin(respond.HandlerFunc(h.createSchema)))
 	mux.Handle("GET /orgs/{slug}/attestations/schemas/{id}", admin(respond.HandlerFunc(h.getSchema)))
+	mux.Handle("GET /orgs/{slug}/attestations/schemas/{id}/issuer-config", admin(respond.HandlerFunc(h.schemaIssuerConfig)))
 	mux.Handle("PATCH /orgs/{slug}/attestations/schemas/{id}", admin(respond.HandlerFunc(h.updateSchema)))
 	mux.Handle("DELETE /orgs/{slug}/attestations/schemas/{id}", admin(respond.HandlerFunc(h.deleteSchema)))
+
+	// Per-org issuer GitOps bundle generator (admin).
+	mux.Handle("GET /orgs/{slug}/attestations/issuer-bundle", admin(respond.HandlerFunc(h.issuerBundle)))
 
 	// Templates (admin).
 	mux.Handle("GET /orgs/{slug}/attestations/templates", admin(respond.HandlerFunc(h.listTemplates)))
@@ -173,13 +193,14 @@ func (h *Handler) deleteHeld(w http.ResponseWriter, r *http.Request) error {
 // --- Schemas ---
 
 type schemaRequest struct {
-	VCT                string         `json:"vct"`
-	DisplayName        string         `json:"displayName"`
-	CredentialConfigID string         `json:"credentialConfigId"`
-	SubjectType        string         `json:"subjectType"`
-	Attributes         []AttributeDef `json:"attributes"`
-	Qualified          bool           `json:"qualified"`
-	Status             string         `json:"status"`
+	VCT                string          `json:"vct"`
+	DisplayName        string          `json:"displayName"`
+	CredentialConfigID string          `json:"credentialConfigId"`
+	SubjectType        string          `json:"subjectType"`
+	Attributes         []AttributeDef  `json:"attributes"`
+	Display            []LocalizedName `json:"display"`
+	Qualified          bool            `json:"qualified"`
+	Status             string          `json:"status"`
 }
 
 func (h *Handler) listSchemas(w http.ResponseWriter, r *http.Request) error {
@@ -209,6 +230,48 @@ func (h *Handler) getSchema(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// schemaIssuerConfig returns the Veramo issuer GitOps config generated from a
+// schema's display metadata: the credential_configurations_supported fragment an
+// operator merges into conf/metadata/<instance>.json plus a matching VCT
+// document. This is how a schema's translations reach the credential — the hosted
+// issuer's runtime config API is disabled in the deployment, so display is
+// provisioned by files (openid4vc-poc-ops). See internal/attestation/issuerconfig.go.
+func (h *Handler) schemaIssuerConfig(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseID(r, "id", "schema")
+	if err != nil {
+		return err
+	}
+	org := organization.OrgFromContext(r.Context())
+	sc, err := h.schemas.GetSchema(r.Context(), org.ID, id)
+	if errors.Is(err, ErrSchemaNotFound) {
+		return notFound("schema_not_found", "schema not found")
+	}
+	if err != nil {
+		return fmt.Errorf("getting attestation schema: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, BuildIssuerConfig(sc, h.issuerURL))
+	return nil
+}
+
+// issuerBundle returns the full Veramo issuer GitOps bundle for the org: the
+// issuer registration, its did:web key, the issuer metadata (carrying every
+// schema's localized display), and one VCT document per schema — for an operator
+// to commit to openid4vc-poc-ops and redeploy. The instance name defaults to the
+// org slug when the org has not configured one.
+func (h *Handler) issuerBundle(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	instance, displayName, logoURI, err := h.issuerSettings.BundleConfig(r.Context(), org.ID, org.Slug)
+	if err != nil {
+		return fmt.Errorf("resolving issuer settings: %w", err)
+	}
+	schemas, err := h.schemas.ListSchemas(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("listing attestation schemas: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, BuildIssuerBundle(instance, displayName, logoURI, schemas))
+	return nil
+}
+
 func (h *Handler) createSchema(w http.ResponseWriter, r *http.Request) error {
 	req, err := decodeSchema(r)
 	if err != nil {
@@ -217,7 +280,7 @@ func (h *Handler) createSchema(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	sc, err := h.schemas.CreateSchema(r.Context(), org.ID, Schema{
 		VCT: req.VCT, DisplayName: req.DisplayName, CredentialConfigID: req.CredentialConfigID,
-		SubjectType: req.SubjectType, Attributes: req.Attributes, Qualified: req.Qualified, Status: req.Status,
+		SubjectType: req.SubjectType, Attributes: req.Attributes, Display: req.Display, Qualified: req.Qualified, Status: req.Status,
 	})
 	if errors.Is(err, ErrSchemaVctTaken) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "vct_taken", Message: "a schema with that vct already exists"}
@@ -241,7 +304,7 @@ func (h *Handler) updateSchema(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	sc, err := h.schemas.UpdateSchema(r.Context(), org.ID, id, Schema{
 		DisplayName: req.DisplayName, CredentialConfigID: req.CredentialConfigID,
-		SubjectType: req.SubjectType, Attributes: req.Attributes, Qualified: req.Qualified, Status: req.Status,
+		SubjectType: req.SubjectType, Attributes: req.Attributes, Display: req.Display, Qualified: req.Qualified, Status: req.Status,
 	})
 	if errors.Is(err, ErrSchemaNotFound) {
 		return notFound("schema_not_found", "schema not found")
@@ -288,7 +351,96 @@ func decodeSchema(r *http.Request) (schemaRequest, error) {
 	if req.SubjectType != "" && req.SubjectType != SubjectNaturalPerson && req.SubjectType != SubjectOrganization {
 		return schemaRequest{}, badRequest("invalid_input", "invalid subjectType")
 	}
+	attrs, err := normalizeAttributes(req.Attributes)
+	if err != nil {
+		return schemaRequest{}, err
+	}
+	req.Attributes = attrs
+	display, err := normalizeNames(req.Display)
+	if err != nil {
+		return schemaRequest{}, err
+	}
+	req.Display = display
 	return req, nil
+}
+
+// normalizeAttributes trims and validates a schema's attribute list: every type
+// must be a supported claim type, and every localized label must carry both a
+// language tag and text with no duplicate languages. A missing type defaults to
+// string; fully-empty localized entries are dropped.
+func normalizeAttributes(attrs []AttributeDef) ([]AttributeDef, error) {
+	out := make([]AttributeDef, 0, len(attrs))
+	for _, a := range attrs {
+		a.Key = strings.TrimSpace(a.Key)
+		a.Label = strings.TrimSpace(a.Label)
+		a.Type = strings.TrimSpace(a.Type)
+		if a.Type == "" {
+			a.Type = AttributeTypeString
+		}
+		if !isSupportedAttributeType(a.Type) {
+			return nil, badRequest("invalid_input", "unsupported attribute type: "+a.Type)
+		}
+		labels, err := normalizeLabels(a.Display)
+		if err != nil {
+			return nil, err
+		}
+		a.Display = labels
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+func normalizeNames(in []LocalizedName) ([]LocalizedName, error) {
+	out := make([]LocalizedName, 0, len(in))
+	pairs := make([][2]string, 0, len(in))
+	for _, d := range in {
+		d.Lang = strings.TrimSpace(d.Lang)
+		d.Name = strings.TrimSpace(d.Name)
+		if d.Lang == "" && d.Name == "" {
+			continue
+		}
+		out = append(out, d)
+		pairs = append(pairs, [2]string{d.Lang, d.Name})
+	}
+	if err := validateLocaleEntries(pairs); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func normalizeLabels(in []LocalizedLabel) ([]LocalizedLabel, error) {
+	out := make([]LocalizedLabel, 0, len(in))
+	pairs := make([][2]string, 0, len(in))
+	for _, d := range in {
+		d.Lang = strings.TrimSpace(d.Lang)
+		d.Label = strings.TrimSpace(d.Label)
+		if d.Lang == "" && d.Label == "" {
+			continue
+		}
+		out = append(out, d)
+		pairs = append(pairs, [2]string{d.Lang, d.Label})
+	}
+	if err := validateLocaleEntries(pairs); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// validateLocaleEntries checks (lang, text) display entries: each needs a
+// non-empty language tag and text, with no repeated language.
+func validateLocaleEntries(entries [][2]string) error {
+	seen := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		lang, text := e[0], e[1]
+		if lang == "" || text == "" {
+			return badRequest("invalid_input", "each translation needs a language and text")
+		}
+		if seen[lang] {
+			return badRequest("invalid_input", "duplicate translation language: "+lang)
+		}
+		seen[lang] = true
+	}
+	return nil
 }
 
 // --- Templates ---

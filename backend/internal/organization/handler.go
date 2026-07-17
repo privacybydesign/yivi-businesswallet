@@ -32,6 +32,7 @@ type repository interface {
 	// e-mailed.
 	ResendInvitation(ctx context.Context, orgID, invitationID uuid.UUID) (Invitation, error)
 	UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, role *string, jobTitle *string, departmentID *uuid.UUID) (Member, error)
+	RemoveMembership(ctx context.Context, orgID, userID uuid.UUID) error
 	ListDepartments(ctx context.Context, orgID uuid.UUID) ([]Department, error)
 	CreateDepartment(ctx context.Context, orgID uuid.UUID, name string) (Department, error)
 	UpdateDepartment(ctx context.Context, orgID, deptID uuid.UUID, name string) (Department, error)
@@ -119,6 +120,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.member))))
 	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.invite))))
 	mux.Handle("PATCH /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMember))))
+	mux.Handle("DELETE /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.offboardMember))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberAuditEvents))))
 
 	mux.Handle("POST /orgs/{slug}/invitations/{id}/resend", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.resendInvitation))))
