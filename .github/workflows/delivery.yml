@@ -29,7 +29,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - component: backend
+          - component: business-wallet
             context: backend
             dockerfile: backend/docker/production/Dockerfile
           - component: postguard-sidecar
@@ -115,7 +115,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - component: backend
+          - component: business-wallet
             target: wallet-provider
           - component: postguard-sidecar
             target: postguard-sidecar
