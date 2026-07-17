@@ -116,7 +116,7 @@ jobs:
       matrix:
         include:
           - component: business-wallet
-            target: wallet-provider
+            target: business-wallet
           - component: postguard-sidecar
             target: postguard-sidecar
     env:
