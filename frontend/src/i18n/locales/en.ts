@@ -743,6 +743,7 @@ export const en = {
     held: {
       empty: "No credentials received yet.",
       delete: "Remove",
+      confirmDelete: "Remove credential “{{name}}”?",
       columns: {
         credential: "Credential",
         issuer: "Issued by",

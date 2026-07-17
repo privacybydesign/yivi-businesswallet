@@ -571,7 +571,17 @@ function HeldTab({
                     <Button
                       variant="dangerGhost"
                       size="sm"
-                      onClick={() => remove.mutate({ heldId: row.id })}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            t("attestations.held.confirmDelete", {
+                              name: row.vct,
+                            }),
+                          )
+                        ) {
+                          remove.mutate({ heldId: row.id });
+                        }
+                      }}
                     >
                       {t("attestations.held.delete")}
                     </Button>

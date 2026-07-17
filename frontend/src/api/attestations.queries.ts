@@ -412,7 +412,6 @@ export function useDeleteHeldAttestationMutation(
   const { t } = useTranslation();
   return useMutation({
     mutationFn: ({ heldId }) => deleteHeldAttestation(slug, heldId),
-    meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.attestationHeldDeleted"));
       void queryClient.invalidateQueries({
