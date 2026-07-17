@@ -268,6 +268,26 @@ func (h *Handler) updateMember(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+func (h *Handler) offboardMember(w http.ResponseWriter, r *http.Request) error {
+	userID, err := uuid.Parse(r.PathValue("userId"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid user id")
+	}
+
+	org := OrgFromContext(r.Context())
+	switch err := h.store.RemoveMembership(r.Context(), org.ID, userID); {
+	case errors.Is(err, ErrNotMember):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "member_not_found", Message: "member not found"}
+	case errors.Is(err, ErrLastAdmin):
+		return &respond.APIError{Status: http.StatusConflict, Code: "last_admin", Message: "cannot remove the last admin of the organization"}
+	case err != nil:
+		return fmt.Errorf("removing member: %w", err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 // normalize trims a job title and maps empty/whitespace to nil so the column
 // stays NULL rather than storing "".
 func normalize(s *string) *string {

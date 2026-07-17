@@ -264,6 +264,7 @@ export const en = {
     invitationResent: "Invitation resent",
     invitationRevoked: "Invitation revoked",
     memberUpdated: "Member updated",
+    memberRemoved: "Member removed",
     organizationUpdated: "Organization updated",
     organizationDeleted: "Organization deleted",
     departmentAdded: "Department added",
@@ -458,6 +459,14 @@ export const en = {
     verified: "Verified",
     sendMessage: "Send message",
     offboard: "Off-board member",
+    offboardConfirm: {
+      title: "Off-board member",
+      body: "Remove {{name}} from this organization? They lose access immediately. This does not delete their account.",
+      lastAdmin:
+        "This is the organization's only admin. Promote another member to admin first.",
+      error: "Could not off-board this member: {{message}}",
+      confirm: "Off-board",
+    },
   },
   memberEdit: {
     title: "Edit member",
@@ -472,6 +481,7 @@ export const en = {
     tabOrg: "Organization",
     tabEmail: "E-mail",
     tabIssuer: "Issuer",
+    tabPostguard: "PostGuard",
     tabWallets: "Wallets",
     adminOnly: "Only organization admins can manage settings.",
     orgProfile: "Organization profile",
@@ -873,6 +883,16 @@ export const en = {
       title: "About PostGuard",
       tagline: "Identity-based encryption",
       body: "Files are encrypted so that only a recipient who can prove ownership of the given e-mail address can open them. No account, no shared secret.",
+    },
+    notReady: {
+      title: "PostGuard needs configuration",
+      adminBody:
+        "Set the encryption key and the API key in the configuration panel before this organization can send encrypted files.",
+      memberBody:
+        "Ask an organization admin to configure PostGuard before this organization can send encrypted files.",
+      deploymentTitle: "PostGuard is not available",
+      deploymentBody:
+        "PostGuard is not configured on this deployment. Contact your platform administrator.",
     },
     encryptionKey: {
       title: "Encryption key",

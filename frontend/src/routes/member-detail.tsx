@@ -1,10 +1,12 @@
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { useMeQuery } from "../api/auth.queries";
 import {
   useMemberAuditEventsQuery,
   useOrganizationMemberQuery,
   useOrganizationQuery,
+  useRemoveMemberMutation,
 } from "../api/organization.queries";
 import type { AuditEvent } from "../api/organization";
 import { ApiError } from "../api/http";
@@ -17,11 +19,13 @@ import {
 } from "../lib/audit-event";
 import { fullName, personInitials } from "../lib/name";
 import { useWhenFormatter } from "../lib/format-when";
-import { Avatar, Button, Card, Icon, Tag, TopBar } from "../ui";
+import { Avatar, Button, Card, Icon, Modal, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const EYEBROW =
   "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+
+const CONFLICT_STATUS = 409;
 
 function DetailRow({
   label,
@@ -102,6 +106,8 @@ export default function MemberDetail(): React.JSX.Element {
   // Both are guaranteed by the ":orgSlug/members/:userId" route.
   const slug = orgSlug!;
   const id = userId!;
+  const me = useMeQuery();
+  const isSelf = me.data?.id === id;
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
   const memberQuery = useOrganizationMemberQuery(slug, id, isAdmin);
@@ -121,6 +127,8 @@ export default function MemberDetail(): React.JSX.Element {
     [i18n.language],
   );
   const formatWhen = useWhenFormatter();
+  const removeMember = useRemoveMemberMutation(slug);
+  const [confirmingOffboard, setConfirmingOffboard] = React.useState(false);
 
   const shell = (body: React.ReactNode): React.JSX.Element => (
     <>
@@ -279,15 +287,79 @@ export default function MemberDetail(): React.JSX.Element {
             <DetailRow label={t("common.phone")} value={member.phone ?? "—"} />
           </div>
           <div className="border-line flex flex-col gap-2 border-t p-4">
-            <Button variant="secondary" icon="email" className="w-full">
+            <Button
+              variant="secondary"
+              icon="email"
+              className="w-full"
+              onClick={() =>
+                void navigate(
+                  `/${slug}/qerds/compose?to=${encodeURIComponent(member.email)}`,
+                )
+              }
+            >
               {t("memberDetail.sendMessage")}
             </Button>
-            <Button variant="danger" icon="logout" className="w-full">
-              {t("memberDetail.offboard")}
-            </Button>
+            {!isSelf && (
+              <Button
+                variant="danger"
+                icon="logout"
+                className="w-full"
+                onClick={() => setConfirmingOffboard(true)}
+              >
+                {t("memberDetail.offboard")}
+              </Button>
+            )}
           </div>
         </Card>
       </div>
+
+      {confirmingOffboard && (
+        <Modal
+          title={t("memberDetail.offboardConfirm.title")}
+          closeLabel={t("common.cancel")}
+          onClose={() => setConfirmingOffboard(false)}
+          footer={
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => setConfirmingOffboard(false)}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                variant="danger"
+                icon="logout"
+                loading={removeMember.isPending}
+                onClick={() =>
+                  removeMember.mutate(
+                    { userId: id },
+                    { onSuccess: () => void navigate(`/${slug}/members`) },
+                  )
+                }
+              >
+                {t("memberDetail.offboardConfirm.confirm")}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-ink-soft text-[14px]">
+            {t("memberDetail.offboardConfirm.body", { name: fullName(member) })}
+          </p>
+          {removeMember.isError && (
+            <p
+              role="alert"
+              className="rounded-yivi bg-error-bg text-error mt-3 px-3 py-2 text-[13px]"
+            >
+              {removeMember.error instanceof ApiError &&
+              removeMember.error.status === CONFLICT_STATUS
+                ? t("memberDetail.offboardConfirm.lastAdmin")
+                : t("memberDetail.offboardConfirm.error", {
+                    message: removeMember.error.message,
+                  })}
+            </p>
+          )}
+        </Modal>
+      )}
     </>
   );
 }
