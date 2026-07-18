@@ -6,7 +6,7 @@
 -- code path, different seal.
 CREATE TABLE attestation_keys
 (
-    id              UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
     kind            TEXT        NOT NULL CHECK (kind IN ('wallet_managed', 'qualified_certificate')),
     label           TEXT        NOT NULL,

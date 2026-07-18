@@ -2,7 +2,7 @@
 -- The mandate list (Art 5(1)(j), Art 6(2)) for an organization/wallet.
 CREATE TABLE wallet_representations
 (
-    id                 UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id                 UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id    UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
     kind               TEXT        NOT NULL,
     given_names        TEXT        NOT NULL,

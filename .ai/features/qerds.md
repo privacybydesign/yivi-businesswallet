@@ -120,7 +120,7 @@ central and slug-free.
 
 ---
 
-## 4. Data model (Postgres, goose migrations, uuidv7 PKs)
+## 4. Data model (Postgres, goose migrations, gen_random_uuid PKs)
 
 One logical table per migration (convention). Timestamps `timestamptz`, `camelCase` JSON at the
 edge.

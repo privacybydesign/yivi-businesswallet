@@ -3,7 +3,7 @@
 -- the evidence is what gives a message its legal effect, so it is immutable.
 CREATE TABLE qerds_evidence
 (
-    id                  UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     message_id          UUID        NOT NULL REFERENCES qerds_messages (id) ON DELETE CASCADE,
     evidence_type       TEXT        NOT NULL,
     provider_ref        TEXT        NOT NULL,

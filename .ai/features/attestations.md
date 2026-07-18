@@ -281,7 +281,7 @@ the whole offer→claim loop runs offline — the issuer equivalent of the QERDS
 
 ---
 
-## 6. Data model (Postgres, goose migrations, uuidv7 PKs)
+## 6. Data model (Postgres, goose migrations, gen_random_uuid PKs)
 
 One logical table per migration (convention); `TIMESTAMPTZ DEFAULT now()`, always a
 `down`, edit-in-place pre-prod; `camelCase` JSON at the edge.
@@ -293,7 +293,7 @@ namespaced under the org (`nl.caesar.employee`).
 
 | column | type | notes |
 |---|---|---|
-| `id` | uuid PK | `uuidv7()` |
+| `id` | uuid PK | `gen_random_uuid()` |
 | `org_id` | uuid FK→organizations | `ON DELETE CASCADE` |
 | `vct` | text | credential type, e.g. `nl.caesar.employee`; unique per org |
 | `display_name` | text | e.g. "Employee of Caesar Groep" |

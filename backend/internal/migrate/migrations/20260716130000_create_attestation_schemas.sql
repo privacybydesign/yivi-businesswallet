@@ -6,7 +6,7 @@
 -- the data-minimisation boundary for issuance (Art 5(1)(b)).
 CREATE TABLE attestation_schemas
 (
-    id                   UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id                   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id      UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
     vct                  TEXT        NOT NULL,
     display_name         TEXT        NOT NULL,

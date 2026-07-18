@@ -2,7 +2,7 @@
 -- SET NULL (not cascade): deleting a user/org must never erase the audit trail.
 CREATE TABLE audit_events
 (
-    id              UUID PRIMARY KEY     DEFAULT uuidv7(),
+    id              UUID PRIMARY KEY     DEFAULT gen_random_uuid(),
     occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     actor_user_id   UUID REFERENCES users (id) ON DELETE SET NULL,
     organization_id UUID REFERENCES organizations (id) ON DELETE SET NULL,

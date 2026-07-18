@@ -6,7 +6,7 @@
 -- step for it is not built yet, the column keeps the model forward-compatible.
 CREATE TABLE attestation_templates
 (
-    id                 UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id                 UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id    UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
     schema_id          UUID        NOT NULL REFERENCES attestation_schemas (id) ON DELETE CASCADE,
     name               TEXT        NOT NULL,

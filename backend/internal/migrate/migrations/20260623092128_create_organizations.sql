@@ -3,7 +3,7 @@
 -- digital address) lives here rather than in a separate wallet_instances table.
 CREATE TABLE organizations
 (
-    id              UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     name            TEXT        NOT NULL,          -- the register's official legal name
     slug            TEXT        NOT NULL UNIQUE,
     kvk_number      TEXT        NOT NULL UNIQUE,   -- one wallet per company

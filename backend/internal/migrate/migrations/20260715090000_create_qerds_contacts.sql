@@ -3,7 +3,7 @@
 -- are saved per organization (name -> digital address) for reuse in Compose.
 CREATE TABLE qerds_contacts
 (
-    id              UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID        NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
     name            TEXT        NOT NULL,
     address         TEXT        NOT NULL,

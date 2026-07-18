@@ -5,7 +5,7 @@
 -- row never holds the plaintext password.
 CREATE TABLE org_email_settings
 (
-    id                   UUID        PRIMARY KEY DEFAULT uuidv7(),
+    id                   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id      UUID        NOT NULL UNIQUE REFERENCES organizations (id) ON DELETE CASCADE,
     host                 TEXT        NOT NULL,
     port                 INTEGER     NOT NULL,
