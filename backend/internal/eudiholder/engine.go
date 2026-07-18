@@ -54,8 +54,15 @@ type Engine struct {
 	storageDir string
 	masterKey  [32]byte
 
+	// mu guards engines + opening. It is only ever held for map operations, never
+	// across an open(), so a cold open of one org can't block the cached fast path
+	// (Store/Delete) of any other org.
 	mu      sync.Mutex
 	engines map[uuid.UUID]irmastorage.Storage
+	// opening holds a per-org lock that serializes concurrent cold opens of the
+	// same org (so two callers don't both AutoMigrate it). One entry per org ever
+	// seen — bounded by org count, so it is never pruned.
+	opening map[uuid.UUID]*sync.Mutex
 }
 
 // NewEngine builds the irmago-backed holder. dsn is the shared-database URL
@@ -67,6 +74,7 @@ func NewEngine(dsn, storageDir string, masterKey [32]byte) *Engine {
 		storageDir: storageDir,
 		masterKey:  masterKey,
 		engines:    make(map[uuid.UUID]irmastorage.Storage),
+		opening:    make(map[uuid.UUID]*sync.Mutex),
 	}
 }
 
@@ -114,9 +122,16 @@ func (e *Engine) Store(ctx context.Context, orgID uuid.UUID, cred Credential) (s
 	return batch.Instances[0].ID.String(), nil
 }
 
-// Delete removes the credential instance from the org's engine. A ref that is not
-// a valid instance id, or that matches no row, is a no-op (the index owns the
-// audit trail; the engine holds the live material).
+// Delete erases the credential from the org's engine. ref is an instance id, but
+// Store persists one single-instance CredentialBatch per credential and irmago's
+// cascade is declared parent→child (batch→instances/metadata/display). Deleting
+// the instance alone would orphan the batch, which still holds the decoded
+// SD-JWT claims (ProcessedSdJwtPayload) plus issuer metadata/display — leaving a
+// removed credential's personal data at rest. So resolve the batch from the
+// instance and delete the batch, letting the DB-level ON DELETE CASCADE remove
+// instance + metadata + display in one statement. A ref that is not a valid
+// instance id, or that matches no row, is a no-op (the index owns the audit
+// trail; the engine holds the live material).
 func (e *Engine) Delete(ctx context.Context, orgID uuid.UUID, ref string) error {
 	id, err := uuid.Parse(ref)
 	if err != nil {
@@ -126,8 +141,13 @@ func (e *Engine) Delete(ctx context.Context, orgID uuid.UUID, ref string) error 
 	if err != nil {
 		return err
 	}
-	if err := eng.Db().WithContext(ctx).
-		Where("id = ?", id).Delete(&models.IssuedCredentialInstance{}).Error; err != nil {
+	base := eng.Db()
+	batchID := base.WithContext(ctx).
+		Model(&models.IssuedCredentialInstance{}).
+		Select("credential_batch_id").
+		Where("id = ?", id)
+	if err := base.WithContext(ctx).
+		Where("id = (?)", batchID).Delete(&models.CredentialBatch{}).Error; err != nil {
 		return fmt.Errorf("eudiholder: delete credential %s org %s: %w", ref, orgID, err)
 	}
 	return nil
@@ -151,17 +171,46 @@ func (e *Engine) Close() error {
 }
 
 func (e *Engine) engineFor(ctx context.Context, orgID uuid.UUID) (irmastorage.Storage, error) {
+	// Fast path: a cache hit only holds e.mu for the map lookup, so it never waits
+	// on another org's in-progress cold open.
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if st, ok := e.engines[orgID]; ok {
+		e.mu.Unlock()
 		return st, nil
 	}
+	lock := e.openLock(orgID)
+	e.mu.Unlock()
+
+	// Serialize cold opens per org (not globally). Re-check under the per-org lock:
+	// another goroutine may have opened this org while we waited for it.
+	lock.Lock()
+	defer lock.Unlock()
+	e.mu.Lock()
+	st, ok := e.engines[orgID]
+	e.mu.Unlock()
+	if ok {
+		return st, nil
+	}
+
 	st, err := e.open(ctx, e.schemaFor(orgID), e.deriveKey(orgID[:]))
 	if err != nil {
 		return nil, err
 	}
+	e.mu.Lock()
 	e.engines[orgID] = st
+	e.mu.Unlock()
 	return st, nil
+}
+
+// openLock returns the per-org open lock, creating it on first use. The caller
+// must hold e.mu.
+func (e *Engine) openLock(orgID uuid.UUID) *sync.Mutex {
+	lock, ok := e.opening[orgID]
+	if !ok {
+		lock = &sync.Mutex{}
+		e.opening[orgID] = lock
+	}
+	return lock
 }
 
 // open ensures the org's schema exists, then opens the irmago engine bound to it
