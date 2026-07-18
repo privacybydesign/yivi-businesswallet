@@ -15,6 +15,7 @@ export { Logo } from "./logo";
 export { Sidebar } from "./sidebar";
 export { OrgSwitcher } from "./org-switcher";
 export { TopBar } from "./top-bar";
+export { MobileNavContext, useMobileNav } from "./mobile-nav";
 export { Modal } from "./modal";
 export { IdentityDisclosure } from "./identity-disclosure";
 export { Outcome } from "./outcome";

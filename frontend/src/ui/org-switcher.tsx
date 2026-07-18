@@ -17,12 +17,15 @@ interface OrgSwitcherProps {
   organizations: Organization[];
   isPending: boolean;
   isPlatformAdmin: boolean;
+  // Called after a menu entry navigates, so a parent mobile drawer can close.
+  onNavigate?: () => void;
 }
 
 export function OrgSwitcher({
   organizations,
   isPending,
   isPlatformAdmin,
+  onNavigate,
 }: OrgSwitcherProps): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -60,6 +63,7 @@ export function OrgSwitcher({
 
   function go(path: string): void {
     setOpen(false);
+    onNavigate?.();
     void navigate(path);
   }
 

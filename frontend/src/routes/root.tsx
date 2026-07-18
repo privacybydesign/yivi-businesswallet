@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Outlet, useMatches } from "react-router";
 import { useLogoutMutation, useMeQuery } from "../api/auth.queries";
 import {
@@ -6,13 +6,33 @@ import {
   useOrganizationsQuery,
 } from "../api/organization.queries";
 import { setStoredOrgSlug } from "../lib/active-org";
-import { Sidebar } from "../ui";
+import { MobileNavContext, Sidebar } from "../ui";
 import * as React from "react";
 
 export default function Root(): React.JSX.Element | null {
   const { data: me } = useMeQuery();
   const logout = useLogoutMutation();
   const matches = useMatches();
+
+  // Mobile-only: the sidebar collapses into an off-canvas drawer below `lg`.
+  const [navOpen, setNavOpen] = useState(false);
+  const closeNav = useCallback(() => setNavOpen(false), []);
+  const openNav = useCallback(() => setNavOpen(true), []);
+  const mobileNav = useMemo(() => ({ openNav }), [openNav]);
+
+  // Escape closes the open drawer.
+  useEffect(() => {
+    if (!navOpen) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setNavOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [navOpen]);
 
   const isPlatformAdmin = me?.isPlatformAdmin ?? false;
 
@@ -40,17 +60,28 @@ export default function Root(): React.JSX.Element | null {
   }
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar
-        me={me}
-        onLogout={() => logout.mutate()}
-        loggingOut={logout.isPending}
-        organizations={organizations ?? []}
-        organizationsPending={orgsQuery.isPending}
-      />
-      <main className="min-w-0 flex-1">
-        <Outlet />
-      </main>
-    </div>
+    <MobileNavContext.Provider value={mobileNav}>
+      <div className="flex min-h-screen">
+        {navOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+            aria-hidden="true"
+            onClick={closeNav}
+          />
+        )}
+        <Sidebar
+          me={me}
+          onLogout={() => logout.mutate()}
+          loggingOut={logout.isPending}
+          organizations={organizations ?? []}
+          organizationsPending={orgsQuery.isPending}
+          open={navOpen}
+          onNavigate={closeNav}
+        />
+        <main className="min-w-0 flex-1">
+          <Outlet />
+        </main>
+      </div>
+    </MobileNavContext.Provider>
   );
 }
