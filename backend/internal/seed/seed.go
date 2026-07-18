@@ -208,6 +208,43 @@ func ensureOrg(ctx context.Context, pool *pgxpool.Pool, o demoOrganization) (org
 	return org, nil
 }
 
+// Placeholder identity for bootstrap platform-admin accounts. Platform admins
+// authenticate with an email-only disclosure, which carries no name, so there
+// is nothing to populate these from; they simply mark the row as a provisioned
+// bootstrap account. Nothing overwrites the name of an existing user, so these
+// persist even if the admin later completes an identity-disclosing flow.
+const (
+	platformAdminGivenNames = "Platform"
+	platformAdminLastName   = "Admin"
+)
+
+// EnsurePlatformAdmins provisions a bare users row for each configured
+// platform-admin email so they can log in. PLATFORM_ADMIN_EMAILS only elevates
+// authorization for an already-existing user; it never creates the account, so
+// a brand-new admin who was never invited or registered cannot log in. This
+// closes that bootstrap gap. It is idempotent (find-or-create per email) and
+// creates no demo data, so — unlike Run — it is safe to run on every deploy.
+func EnsurePlatformAdmins(ctx context.Context, dsn string, emails []string) error {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("seed: connect: %w", err)
+	}
+	defer pool.Close()
+
+	users := user.NewStore(pool)
+	for _, email := range emails {
+		u, err := ensureUser(ctx, users, email, platformAdminGivenNames, platformAdminLastName, "")
+		if err != nil {
+			return err
+		}
+		slog.Info("ensured platform-admin account",
+			slog.String("email", string(u.Email)),
+			slog.String("id", u.ID.String()),
+		)
+	}
+	return nil
+}
+
 func ensureUser(ctx context.Context, users *user.Store, email, givenNames, lastName, preferredName string) (user.User, error) {
 	parsed, err := user.ParseEmail(email)
 	if err != nil {

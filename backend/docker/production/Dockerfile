@@ -31,12 +31,14 @@ COPY backend/ ./
 
 RUN go build -ldflags="-s -w" -o /bin/backend ./cmd/api
 RUN go build -ldflags="-s -w" -o /bin/migrate ./cmd/migrate
+RUN go build -ldflags="-s -w" -o /bin/seed ./cmd/seed
 
 # ---------- Runtime ----------
 FROM alpine:3.22
 
 COPY --from=build /bin/backend /backend
 COPY --from=build /bin/migrate /migrate
+COPY --from=build /bin/seed /seed
 COPY --from=frontend /app/frontend/dist /frontend
 
 # The API serves the bundled frontend as an SPA from this directory.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log/slog"
 	"os"
 
@@ -18,6 +19,10 @@ func main() {
 }
 
 func run() error {
+	adminsOnly := flag.Bool("admins", false,
+		"provision only the configured PLATFORM_ADMIN_EMAILS accounts (no demo data); safe for staging/production")
+	flag.Parse()
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -26,6 +31,15 @@ func run() error {
 	logging.Setup(cfg.LogLevel, cfg.LogFormat, cfg.LogSource)
 
 	ctx := context.Background()
+
+	if *adminsOnly {
+		slog.Info("provisioning platform-admin accounts", slog.Int("count", len(cfg.PlatformAdminEmails)))
+		if err := seed.EnsurePlatformAdmins(ctx, cfg.DatabaseDSN, cfg.PlatformAdminEmails); err != nil {
+			return err
+		}
+		slog.Info("platform-admin provisioning complete")
+		return nil
+	}
 
 	slog.Info("running database seed")
 	if err := seed.Run(ctx, cfg.DatabaseDSN); err != nil {
