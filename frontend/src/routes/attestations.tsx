@@ -9,6 +9,7 @@ import type {
   HeldAttestation,
   IssuedAttestation,
 } from "../api/attestations";
+import { localized } from "../api/attestations";
 import {
   useAttestationKeysQuery,
   useAttestationSchemasQuery,
@@ -550,45 +551,64 @@ function HeldTab({
               {t("attestations.held.empty")}
             </Table.State>
           ) : (
-            rows.map((row) => (
-              <Table.Row key={row.id}>
-                <Table.Cell className="text-ink truncate font-mono text-[12.5px]">
-                  {row.vct}
-                </Table.Cell>
-                <Table.Cell className="text-ink-soft truncate">
-                  {row.issuer}
-                </Table.Cell>
-                <Table.Cell>
-                  <Tag tone="default">
-                    <span className="capitalize">{row.source}</span>
-                  </Tag>
-                </Table.Cell>
-                <Table.Cell className="text-ink-soft text-[12.5px]">
-                  {formatWhen(row.receivedAt)}
-                </Table.Cell>
-                {isAdmin && (
-                  <Table.Cell className="text-right">
-                    <Button
-                      variant="dangerGhost"
-                      size="sm"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            t("attestations.held.confirmDelete", {
-                              name: row.vct,
-                            }),
-                          )
-                        ) {
-                          remove.mutate({ heldId: row.id });
-                        }
-                      }}
-                    >
-                      {t("attestations.held.delete")}
-                    </Button>
+            rows.map((row) => {
+              const cred = row.credential;
+              const name = localized(cred.name, cred.credential_id);
+              const issuerName = localized(cred.issuer.name, cred.issuer.id);
+              return (
+                <Table.Row key={row.heldId}>
+                  <Table.Cell>
+                    <div className="flex items-center gap-2">
+                      {cred.image?.base64 && (
+                        <img
+                          src={`data:${cred.image.mime_type ?? "image/png"};base64,${cred.image.base64}`}
+                          alt=""
+                          className="size-6 shrink-0 rounded object-contain"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-ink truncate">{name}</div>
+                        <div className="text-ink-soft truncate font-mono text-[11px]">
+                          {cred.credential_id}
+                        </div>
+                      </div>
+                    </div>
                   </Table.Cell>
-                )}
-              </Table.Row>
-            ))
+                  <Table.Cell className="text-ink-soft truncate">
+                    {issuerName}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <Tag tone="default">
+                      <span className="capitalize">{row.source}</span>
+                    </Tag>
+                  </Table.Cell>
+                  <Table.Cell className="text-ink-soft text-[12.5px]">
+                    {formatWhen(row.receivedAt)}
+                  </Table.Cell>
+                  {isAdmin && (
+                    <Table.Cell className="text-right">
+                      <Button
+                        variant="dangerGhost"
+                        size="sm"
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              t("attestations.held.confirmDelete", {
+                                name,
+                              }),
+                            )
+                          ) {
+                            remove.mutate({ heldId: row.heldId });
+                          }
+                        }}
+                      >
+                        {t("attestations.held.delete")}
+                      </Button>
+                    </Table.Cell>
+                  )}
+                </Table.Row>
+              );
+            })
           )}
         </Table.Body>
       </Table>

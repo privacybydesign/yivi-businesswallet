@@ -11,8 +11,24 @@ import (
 	"github.com/privacybydesign/irmago/eudi/credentials/sdjwtvc"
 	eudijwt "github.com/privacybydesign/irmago/eudi/jwt"
 	"github.com/privacybydesign/irmago/eudi/openid4vci"
+	"github.com/privacybydesign/irmago/eudi/services"
 	"github.com/privacybydesign/irmago/eudi/utils"
 )
+
+// List reads the org's held credentials from its irmago storage and returns them
+// as the clientmodels display model (localized names, issuer, attributes, logos)
+// via irmago's CredentialService — the same read path the irmamobile wallet uses.
+func (e *Engine) List(ctx context.Context, orgID uuid.UUID) ([]*clientmodels.Credential, error) {
+	st, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	creds, err := services.NewCredentialService(st).GetCredentialMetadataList()
+	if err != nil {
+		return nil, fmt.Errorf("eudiholder: list credentials org %s: %w", orgID, err)
+	}
+	return creds, nil
+}
 
 // redirectURI is unused by the pre-authorized-code grant (no browser redirect),
 // but NewSession requires a value.
