@@ -98,17 +98,6 @@ export function readableForeground(background: string): string {
   return dark > light ? DARK_FG : LIGHT_FG;
 }
 
-// bestForegroundContrast is the contrast the best foreground achieves — the
-// number to check a primary colour against the AA bar.
-export function bestForegroundContrast(background: string): number | null {
-  const light = contrastRatio(background, LIGHT_FG);
-  const dark = contrastRatio(background, DARK_FG);
-  if (light === null || dark === null) {
-    return null;
-  }
-  return Math.max(light, dark);
-}
-
 function darken(hex: string, amount: number): string {
   const rgb = parseHex(hex);
   if (!rgb) {
@@ -116,6 +105,22 @@ function darken(hex: string, amount: number): string {
   }
   const scale = 1 - amount;
   return toHex({ r: rgb.r * scale, g: rgb.g * scale, b: rgb.b * scale });
+}
+
+// primaryContrastFloor is the lowest contrast the applied foreground reaches
+// across the button's resting and hover backgrounds — the number to check a
+// primary colour against the AA bar. The hover shade is a darkened primary (see
+// applyOrgTheme) that keeps the same --yb-primary-fg, so a light primary which
+// only just clears 4.5:1 at rest can dip below it on hover; gating on the floor
+// keeps every interactive state at AA, not just the resting one.
+export function primaryContrastFloor(background: string): number | null {
+  const foreground = readableForeground(background);
+  const resting = contrastRatio(background, foreground);
+  const hover = contrastRatio(darken(background, HOVER_DARKEN), foreground);
+  if (resting === null || hover === null) {
+    return null;
+  }
+  return Math.min(resting, hover);
 }
 
 // applyOrgTheme maps a saved theme onto the design tokens on the documentElement.

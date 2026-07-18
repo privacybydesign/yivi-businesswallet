@@ -10,7 +10,7 @@ import {
   AA_CONTRAST,
   DEFAULT_ACCENT,
   DEFAULT_PRIMARY,
-  bestForegroundContrast,
+  primaryContrastFloor,
   readableForeground,
 } from "../lib/theme";
 import { Button, Card } from "../ui";
@@ -121,7 +121,7 @@ function ThemeForm({
 
   const primaryActive = HEX_PATTERN.test(primary);
   const primaryContrast = primaryActive
-    ? (bestForegroundContrast(primary) ?? 0)
+    ? (primaryContrastFloor(primary) ?? 0)
     : null;
   const contrastFails =
     primaryContrast !== null && primaryContrast < AA_CONTRAST;
