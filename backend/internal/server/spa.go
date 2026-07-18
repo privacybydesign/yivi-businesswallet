@@ -22,9 +22,15 @@ type spaHandler struct {
 }
 
 func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// filepath.Join calls path.Clean internally, which resolves any ".."
-	// segments before joining and so prevents directory traversal outside
-	// staticPath.
+	// The joined path is only used to decide whether a matching file exists; it
+	// is never served from directly. Note filepath.Join does NOT keep the result
+	// inside staticPath (Join("/frontend", "../secret") == "/secret"), so it is
+	// not the traversal guard. The guard is twofold: ServeMux cleans/redirects
+	// request paths containing ".." before this handler runs, and every actual
+	// read below re-derives from r.URL.Path through http.ServeFile /
+	// http.FileServer(http.Dir(...)), both of which reject "..". A stat that
+	// happens to resolve outside staticPath only routes us to the index fallback
+	// or the FileServer, neither of which serves that outside path.
 	path := filepath.Join(h.staticPath, r.URL.Path)
 
 	fi, err := os.Stat(path)

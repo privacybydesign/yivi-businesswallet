@@ -88,9 +88,10 @@ func TestSPA_DoesNotShadowHealthEndpoints(t *testing.T) {
 	}
 }
 
-// Traversal outside the static root must not escape it; filepath.Join cleans the
-// path, so "../" segments collapse and the request resolves inside staticDir
-// (here: the SPA index fallback), never a parent-directory file.
+// Traversal outside the static root must not leak a parent-directory file.
+// ServeMux cleans/redirects "../" paths before the handler runs, and the
+// FileServer/ServeFile reads reject ".." regardless, so the request never
+// resolves to a file outside staticDir.
 func TestSPA_RejectsTraversal(t *testing.T) {
 	dir := writeStaticSite(t)
 	secret := filepath.Join(filepath.Dir(dir), "secret.txt")
