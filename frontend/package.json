@@ -7,6 +7,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --build",
+    "test": "vitest run",
     "lint": "eslint . --cache",
     "lint:fix": "eslint . --fix --cache",
     "format": "prettier --check .",
@@ -42,6 +43,7 @@
     "tailwindcss": "^4.3.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.62.0",
-    "vite": "^8.1.0"
+    "vite": "^8.1.0",
+    "vitest": "^3.2.7"
   }
 }

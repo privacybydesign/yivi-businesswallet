@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import { ApiError } from "../api/http";
+import { errorCode } from "./api-error";
 
 export interface InviteErrorContent {
   title: string;
@@ -15,19 +15,6 @@ type InviteErrorKind =
   | "expired"
   | "notFound"
   | "failed";
-
-function errorCode(error: unknown): string | null {
-  if (
-    error instanceof ApiError &&
-    typeof error.body === "object" &&
-    error.body !== null &&
-    "code" in error.body &&
-    typeof error.body.code === "string"
-  ) {
-    return error.body.code;
-  }
-  return null;
-}
 
 function kindOf(error: unknown): InviteErrorKind {
   switch (errorCode(error)) {
