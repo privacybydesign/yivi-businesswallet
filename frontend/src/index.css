@@ -178,3 +178,89 @@
     fill: currentColor;
   }
 }
+
+/* --------- Animated mesh background (login / landing hero) ---------
+   Two blurred blob layers drift in opposite directions over the warm
+   surface, using the brand rose and highlight blue at low alpha so the
+   foreground text and sign-in card stay readable. Motion is transform-only
+   (GPU-friendly) and disabled under `prefers-reduced-motion`. */
+@layer components {
+  .mesh-wave {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background-color: var(--yb-surface-2);
+  }
+
+  .mesh-wave::before,
+  .mesh-wave::after {
+    content: "";
+    position: absolute;
+    inset: -25%;
+    z-index: -1;
+    background-repeat: no-repeat;
+    filter: blur(60px);
+    will-change: transform;
+  }
+
+  .mesh-wave::before {
+    background-image:
+      radial-gradient(
+        30% 40% at 25% 30%,
+        rgba(186, 51, 84, 0.18),
+        transparent 62%
+      ),
+      radial-gradient(
+        32% 42% at 78% 72%,
+        rgba(186, 51, 84, 0.12),
+        transparent 62%
+      );
+    animation: mesh-drift-a 22s ease-in-out infinite alternate;
+  }
+
+  .mesh-wave::after {
+    background-image:
+      radial-gradient(
+        34% 44% at 80% 22%,
+        rgba(29, 78, 137, 0.16),
+        transparent 62%
+      ),
+      radial-gradient(
+        30% 40% at 20% 82%,
+        rgba(29, 78, 137, 0.12),
+        transparent 62%
+      );
+    animation: mesh-drift-b 26s ease-in-out infinite alternate;
+  }
+
+  @keyframes mesh-drift-a {
+    0% {
+      transform: translate3d(-3%, -2%, 0) scale(1);
+    }
+    50% {
+      transform: translate3d(4%, 3%, 0) scale(1.12);
+    }
+    100% {
+      transform: translate3d(-2%, 4%, 0) scale(1.05);
+    }
+  }
+
+  @keyframes mesh-drift-b {
+    0% {
+      transform: translate3d(3%, 2%, 0) scale(1.05);
+    }
+    50% {
+      transform: translate3d(-4%, -3%, 0) scale(1);
+    }
+    100% {
+      transform: translate3d(2%, -4%, 0) scale(1.12);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mesh-wave::before,
+    .mesh-wave::after {
+      animation: none;
+    }
+  }
+}
