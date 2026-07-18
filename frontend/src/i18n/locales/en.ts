@@ -34,6 +34,7 @@ export const en = {
     platformAdmin: "Platform Admin",
     settings: "Settings",
     logIn: "Log in",
+    openMenu: "Open menu",
   },
   orgSwitcher: {
     label: "Switch organization",

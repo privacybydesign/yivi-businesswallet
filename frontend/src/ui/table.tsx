@@ -15,13 +15,18 @@ export function Table({
   className?: string;
 }): React.JSX.Element {
   return (
-    <table
-      className={["w-full border-collapse text-[13.5px]", className ?? ""].join(
-        " ",
-      )}
-    >
-      {children}
-    </table>
+    // Wide tables scroll horizontally within their container on small screens
+    // instead of forcing the whole page to overflow.
+    <div className="overflow-x-auto">
+      <table
+        className={[
+          "min-w-full border-collapse text-[13.5px]",
+          className ?? "",
+        ].join(" ")}
+      >
+        {children}
+      </table>
+    </div>
   );
 }
 

@@ -68,6 +68,11 @@ interface SidebarProps {
   loggingOut: boolean;
   organizations: Organization[];
   organizationsPending: boolean;
+  // Whether the mobile drawer is open. Ignored at `lg` and up, where the
+  // sidebar is always visible.
+  open: boolean;
+  // Called when a nav link is followed, so Root can close the mobile drawer.
+  onNavigate: () => void;
 }
 
 export function Sidebar({
@@ -76,6 +81,8 @@ export function Sidebar({
   loggingOut,
   organizations,
   organizationsPending,
+  open,
+  onNavigate,
 }: SidebarProps): React.JSX.Element {
   const { t } = useTranslation();
   const matches = useMatches();
@@ -98,7 +105,14 @@ export function Sidebar({
     : activeOrg.data?.role;
 
   return (
-    <aside className="border-line bg-surface sticky top-0 flex h-screen w-58 shrink-0 flex-col border-r">
+    <aside
+      className={[
+        // Off-canvas drawer on small screens; a static column from `lg` up.
+        "border-line bg-surface fixed inset-y-0 left-0 z-50 flex h-screen w-58 shrink-0 flex-col border-r transition-transform duration-200",
+        open ? "translate-x-0" : "invisible -translate-x-full",
+        "lg:visible lg:sticky lg:top-0 lg:z-auto lg:translate-x-0",
+      ].join(" ")}
+    >
       <div className="border-line border-b px-4 pt-4.5 pb-3.5">
         <Logo />
       </div>
@@ -107,6 +121,7 @@ export function Sidebar({
         organizations={organizations}
         isPending={organizationsPending}
         isPlatformAdmin={me.isPlatformAdmin}
+        onNavigate={onNavigate}
       />
 
       <nav className="flex-1 overflow-y-auto px-2.5 py-1.5">
@@ -115,6 +130,7 @@ export function Sidebar({
             key={item.to}
             to={item.to}
             end={item.end}
+            onClick={onNavigate}
             className={({ isActive }) =>
               [
                 "relative flex h-8.5 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] transition-colors",
