@@ -86,8 +86,9 @@ func TestEngineStoreDeleteRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}
-	if _, err := uuid.Parse(ref); err != nil {
-		t.Fatalf("store ref %q is not a uuid: %v", ref, err)
+	// The ref is the credential's batch hash (correlates with List, keys Delete).
+	if ref != "hash-1" {
+		t.Fatalf("store ref = %q, want the credential hash %q", ref, "hash-1")
 	}
 	if got := countInstances(t, pool, org); got != 1 {
 		t.Fatalf("expected 1 instance after store, got %d", got)
