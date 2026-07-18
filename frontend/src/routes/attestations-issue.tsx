@@ -536,7 +536,11 @@ export function AttestationIssueWizard({
             {OFFER_STEP_ORDER.map((step) => {
               const done = offerStates[step] === "done";
               return (
-                <li key={step} className="flex items-center gap-3">
+                <li
+                  key={step}
+                  className="flex items-center gap-3"
+                  aria-current={done ? undefined : "step"}
+                >
                   <span
                     className={[
                       "flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
