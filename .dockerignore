@@ -1,0 +1,22 @@
+# Build context is the repo root (see backend/docker/production/Dockerfile and
+# .github/workflows/delivery.yml). Keep the context lean: dependencies and build
+# output are reinstalled/rebuilt inside the image; local tooling never belongs in
+# it.
+.git
+.github
+.claude
+.ai
+
+# Node: reinstalled via `npm ci` in the frontend build stage.
+**/node_modules
+frontend/dist
+
+# Go: local dev scratch.
+backend/tmp
+
+# Docs / compliance sources are not needed to build the image.
+regulation
+
+# Logs and OS cruft.
+*.log
+.DS_Store

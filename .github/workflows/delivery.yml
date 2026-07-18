@@ -21,8 +21,9 @@ jobs:
     # One image per custom (non-stock) Dockerfile in the repo. Stock images
     # (postgres, mailpit, domibus, ...) are pulled from their registries and are
     # not built here; the development Dockerfiles are live-reload dev tooling and
-    # are not published. There is no root-level Dockerfile — each component builds
-    # from its own context, matching compose.yaml.
+    # are not published. Each component sets its own build context: the
+    # business-wallet image uses the repo root (to bundle the built frontend with
+    # the Go API), postguard-sidecar uses its own directory.
     strategy:
       # Scan each image independently: a vulnerability in one must not hide the
       # build/scan status of the other.
@@ -30,7 +31,9 @@ jobs:
       matrix:
         include:
           - component: business-wallet
-            context: backend
+            # Root context so the image can bundle the built frontend alongside
+            # the Go API (the backend serves the SPA on "/").
+            context: .
             dockerfile: backend/docker/production/Dockerfile
           - component: postguard-sidecar
             context: postguard-sidecar

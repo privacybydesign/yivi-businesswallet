@@ -301,6 +301,7 @@ func run() error {
 
 	handler := server.New(
 		pool,
+		cfg.StaticDir,
 		authHandler,
 		orgHandler,
 		qerdsHandler,
