@@ -18,3 +18,6 @@ export { TopBar } from "./top-bar";
 export { Modal } from "./modal";
 export { IdentityDisclosure } from "./identity-disclosure";
 export { Outcome } from "./outcome";
+export { Stepper } from "./stepper";
+export { DataDisclosure } from "./data-disclosure";
+export type { DataDisclosureItem } from "./data-disclosure";

@@ -121,6 +121,29 @@ export const en = {
     errorTitle: "Something went wrong",
     errorHint: "This credential could not be loaded. Please try again.",
   },
+  landing: {
+    headline: "The digital wallet for your business.",
+    subhead:
+      "Yivi Business Wallet lets your organization prove who it is, issue credentials, and exchange legally-binding documents — all with privacy by design.",
+    features: {
+      passwordless: {
+        title: "Passwordless sign-in",
+        body: "Authenticate with your EU Digital Identity wallet — no passwords, no shared secrets.",
+      },
+      verified: {
+        title: "KVK-verified organizations",
+        body: "Every business wallet is confirmed against the Chamber of Commerce.",
+      },
+      delivery: {
+        title: "Secure, legal delivery",
+        body: "Send legally-binding registered messages and end-to-end encrypted files.",
+      },
+      attestations: {
+        title: "Verifiable attestations",
+        body: "Issue and manage credentials for your members and partners.",
+      },
+    },
+  },
   login: {
     title: "Sign in",
     subtitle:
@@ -129,6 +152,7 @@ export const en = {
     notCompleted: "Login was not completed. Please try again.",
     credentialRejected: "This credential can't be used to sign in.",
     failed: "Sign-in could not be completed. Please try again.",
+    sharesEmail: "Signing in shares only your email address.",
     registerLink: "Registering a new business? Register here",
   },
   register: {
@@ -145,8 +169,26 @@ export const en = {
     slugInvalid:
       "Invalid handle. Use lowercase letters, numbers and hyphens only.",
     continue: "Continue",
-    scanTitle: "Confirm your identity",
-    scanPrompt: "Scan with your wallet to register KVK {{kvk}}.",
+    steps: {
+      kvk: "Register your KVK",
+      identity: "Prove your identity",
+      onboard: "Onboard wallet",
+    },
+    identityTitle: "Prove your identity",
+    identityIntro:
+      "Confirm your identity with your EU Digital Identity wallet. Here's exactly what you'll share:",
+    disclosure: {
+      identityLabel: "Passport or ID card",
+      identityDetail:
+        "Confirms your name, date of birth and nationality, so we can match you to the company's registered representatives at the KVK.",
+      emailLabel: "Email address",
+      emailDetail: "Becomes the address you sign in with.",
+      phoneLabel: "Phone number",
+      phoneDetail: "Added to your verified profile.",
+    },
+    disclosureFootnote:
+      "Nothing is stored beyond what's needed to create your wallet and match you at the Chamber of Commerce.",
+    onboardTitle: "Onboarding your wallet",
     registering: "Consulting KVK…",
     registeredAt: "Wallet registered for {{org}}",
     yourRole: "The KVK lists you as: {{role}}",
