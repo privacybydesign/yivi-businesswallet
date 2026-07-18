@@ -18,6 +18,7 @@ backend/      Go HTTP API (stdlib net/http, Go 1.22+ pattern routing)
   internal/respond/      JSON response helpers, HandlerFunc adapter, ApiError
   internal/seed/         dev seed logic
   internal/server/       router assembly, middleware, lifecycle
+  internal/apidocs/      embedded OpenAPI spec + ReDoc page, served at /api/docs (drift-checked against handlers)
 frontend/     React 19 + Vite + TS + react-router
   src/api/               HTTP transport, resource clients, query hooks
   src/routes/            route components, wired via src/router.tsx
