@@ -57,7 +57,11 @@ func TestUpsertThenGetRoundtrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
-	if got != saved {
+	// Settings holds a *time.Time, so compare fields rather than the struct
+	// (pointer identity would differ even when the values match).
+	if got.Configured != saved.Configured || got.PrimaryColor != saved.PrimaryColor ||
+		got.AccentColor != saved.AccentColor || got.LogoURI != saved.LogoURI ||
+		got.UpdatedAt == nil || !got.UpdatedAt.Equal(*saved.UpdatedAt) {
 		t.Errorf("GetSettings = %+v, want %+v", got, saved)
 	}
 }
