@@ -908,9 +908,16 @@ export const en = {
       reviewRecipient: "Recipient",
       offerHint:
         "Scan the QR with the recipient's wallet to claim the attestation.",
+      offerOrgHint:
+        "The offer was delivered to the organization over QERDS. Its wallet redeems it automatically.",
+      offerSteps: {
+        sent: "Offer sent",
+        claimed: "Received",
+      },
       openWallet: "Open wallet",
       txCode: "Transaction code: {{code}}",
       waiting: "Waiting for the recipient to claim…",
+      waitingOrg: "Waiting for the organization's wallet to redeem the offer…",
       claimedTitle: "Attestation claimed",
       claimedHint: "The recipient has added the attestation to their wallet.",
       done: "Done",

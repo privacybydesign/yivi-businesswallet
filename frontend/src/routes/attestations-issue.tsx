@@ -52,6 +52,33 @@ function isStep(phase: Phase): phase is Step {
   );
 }
 
+// The organization-to-organization offer is delivered over QERDS and redeemed
+// automatically by the receiving wallet, so there is no QR to scan. The backend
+// issuance lifecycle for this path is offered -> claimed (see backend
+// internal/attestation/status.go); the stepper reflects those two real states
+// rather than faking intermediate progress the backend cannot report.
+const OFFER_STEP_ORDER = ["sent", "claimed"] as const;
+type OfferStep = (typeof OFFER_STEP_ORDER)[number];
+
+const OFFER_STEP_LABEL_KEYS = {
+  sent: "attestations.wizard.offerSteps.sent",
+  claimed: "attestations.wizard.offerSteps.claimed",
+} as const;
+
+type StepState = "done" | "active";
+
+// Maps the polled issuance status to a per-step state. "sent" is complete as
+// soon as the offer screen renders (the offer was created and dispatched over
+// QERDS); "claimed" completes once the receiving wallet has redeemed it.
+function offerStepStates(
+  status: string | undefined,
+): Record<OfferStep, StepState> {
+  return {
+    sent: "done",
+    claimed: status === CLAIMED_STATUS ? "done" : "active",
+  };
+}
+
 function defaultsFor(template: AttestationTemplate): Record<string, string> {
   const values: Record<string, string> = {};
   for (const attribute of template.attributes) {
@@ -131,9 +158,14 @@ export function AttestationIssueWizard({
   );
   const claimed = issued.data?.status === CLAIMED_STATUS;
 
-  // Render the offer link as a QR once issued.
+  // Organization recipients get a status stepper instead of a QR (see below).
+  const offerToOrganization = result?.recipientKind === RECIPIENT_ORGANIZATION;
+  const offerStates = offerStepStates(issued.data?.status);
+
+  // Render the offer link as a QR once issued (natural-person recipients only;
+  // the organization path shows a status stepper instead of a scannable code).
   useEffect(() => {
-    if (!result) {
+    if (!result || result.recipientKind === RECIPIENT_ORGANIZATION) {
       return;
     }
     let cancelled = false;
@@ -495,7 +527,51 @@ export function AttestationIssueWizard({
         </div>
       )}
 
-      {phase === "offer" && result && (
+      {phase === "offer" && result && offerToOrganization && (
+        <div className="flex flex-col items-center gap-4">
+          <p className="text-ink-soft text-center text-[13px]">
+            {t("attestations.wizard.offerOrgHint")}
+          </p>
+          <ol className="flex w-full max-w-xs flex-col gap-3">
+            {OFFER_STEP_ORDER.map((step) => {
+              const done = offerStates[step] === "done";
+              return (
+                <li key={step} className="flex items-center gap-3">
+                  <span
+                    className={[
+                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
+                      done
+                        ? "bg-success-bg text-success"
+                        : "bg-primary text-primary-fg",
+                    ].join(" ")}
+                  >
+                    {done ? (
+                      <Icon name="valid" size={13} />
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+                      />
+                    )}
+                  </span>
+                  <span className="text-ink text-[13px] font-semibold">
+                    {t(OFFER_STEP_LABEL_KEYS[step])}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+          {claimed ? (
+            <Button onClick={onClose}>{t("attestations.wizard.done")}</Button>
+          ) : (
+            <p className="text-muted text-center text-[12px]">
+              {t("attestations.wizard.waitingOrg")}
+            </p>
+          )}
+        </div>
+      )}
+
+      {phase === "offer" && result && !offerToOrganization && (
         <div className="flex flex-col items-center gap-4">
           {claimed ? (
             <Outcome
