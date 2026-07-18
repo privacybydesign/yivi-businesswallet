@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/privacybydesign/irmago/common/clientmodels"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 )
@@ -44,18 +45,21 @@ type issuedStore interface {
 	GetClaim(ctx context.Context, token string) (claimRow, error)
 }
 
-// heldMutator is the held-index surface the service coordinates for the
-// engine-backed delete flow (read the ref, then soft-delete the audited index
-// row). Backed by the attestation store.
+// heldMutator is the held-index surface the service coordinates: list the org's
+// held rows (for display), read a ref, and soft-delete the audited index row.
+// Backed by the attestation store.
 type heldMutator interface {
+	ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error)
 	GetHeld(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error)
 	SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
 }
 
-// credentialRemover removes a credential from the organization's holder engine.
-// Backed by internal/eudiholder; accept the interface so the service stays
+// holderEngine is the org's holder-wallet engine surface the service uses: read
+// held credentials for display (irmago's clientmodels display model) and remove
+// one. Backed by internal/eudiholder; accept the interface so the service stays
 // decoupled from the concrete engine (stub or irmago).
-type credentialRemover interface {
+type holderEngine interface {
+	List(ctx context.Context, orgID uuid.UUID) ([]*clientmodels.Credential, error)
 	Delete(ctx context.Context, orgID uuid.UUID, ref string) error
 }
 
@@ -81,12 +85,12 @@ type Service struct {
 	email      emailNotifier
 	qerds      qerdsNotifier
 	held       heldMutator
-	holder     credentialRemover
+	holder     holderEngine
 	appBaseURL string
 	now        func() time.Time
 }
 
-func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, holder credentialRemover, appBaseURL string) *Service {
+func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, holder holderEngine, appBaseURL string) *Service {
 	return &Service{
 		store:      store,
 		issuer:     iss,
@@ -260,6 +264,54 @@ func (s *Service) DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error {
 		return fmt.Errorf("attestation: delete held %s from engine: %w", id, err)
 	}
 	return s.held.SoftDeleteHeld(ctx, orgID, id)
+}
+
+// displayFallbackLang localizes the minimal display fields synthesised when the
+// holder engine has no display data for an index row.
+const displayFallbackLang = "en"
+
+// ListHeldDisplay returns the org's held credentials for display: each index row
+// enriched with irmago's clientmodels display model read from the holder engine
+// (matched by credential ref → the engine's credential-instance ids). The index
+// is the source of truth for what the org holds, so a row whose credential is
+// missing from the engine is still returned, with a minimal display built from
+// the index (vct + issuer) rather than dropped.
+func (s *Service) ListHeldDisplay(ctx context.Context, orgID uuid.UUID) ([]HeldCredentialView, error) {
+	rows, err := s.held.ListHeld(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	creds, err := s.holder.List(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	byRef := make(map[string]*clientmodels.Credential, len(creds))
+	for _, c := range creds {
+		for _, ref := range c.CredentialInstanceIds {
+			byRef[ref] = c
+		}
+	}
+
+	views := make([]HeldCredentialView, 0, len(rows))
+	for _, row := range rows {
+		cred := byRef[row.CredentialRef]
+		if cred == nil {
+			cred = &clientmodels.Credential{
+				CredentialId: row.VCT,
+				Name:         clientmodels.TranslatedString{displayFallbackLang: row.VCT},
+				Issuer:       clientmodels.TrustedParty{Id: row.Issuer, Name: clientmodels.TranslatedString{displayFallbackLang: row.Issuer}},
+			}
+		}
+		views = append(views, HeldCredentialView{
+			HeldID:          row.ID,
+			Source:          row.Source,
+			ReceivedAt:      row.ReceivedAt,
+			SourceMessageID: row.SourceMessageID,
+			Credential:      cred,
+		})
+	}
+	return views, nil
 }
 
 // reconcile reports whether the issuer says the credential has been issued. A

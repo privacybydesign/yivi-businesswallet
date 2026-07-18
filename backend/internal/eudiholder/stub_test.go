@@ -74,6 +74,45 @@ func TestStubHolderRedeem(t *testing.T) {
 	}
 }
 
+func TestStubHolderList(t *testing.T) {
+	t.Parallel()
+	h := eudiholder.NewStubHolder()
+	ctx := context.Background()
+	org := uuid.New()
+
+	ref, err := h.Store(ctx, org, eudiholder.Credential{VCT: "nl.kvk.registration", CredentialIssuer: "https://issuer.test"})
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	creds, err := h.List(ctx, org)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(creds) != 1 {
+		t.Fatalf("expected 1 credential, got %d", len(creds))
+	}
+	c := creds[0]
+	if c.CredentialId != "nl.kvk.registration" {
+		t.Errorf("CredentialId = %q", c.CredentialId)
+	}
+	if got := c.CredentialInstanceIds["dc+sd-jwt"]; got != ref {
+		t.Errorf("instance id = %q, want stored ref %q", got, ref)
+	}
+	if c.Name["en"] == "" {
+		t.Error("expected a localized display name")
+	}
+
+	// Listing an org with nothing stored is an empty (non-nil) slice.
+	empty, err := h.List(ctx, uuid.New())
+	if err != nil {
+		t.Fatalf("list empty: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("expected no credentials, got %d", len(empty))
+	}
+}
+
 func TestParseMasterKey(t *testing.T) {
 	t.Parallel()
 	valid := strings.Repeat("ab", 32) // 64 hex chars = 32 bytes

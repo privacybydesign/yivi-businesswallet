@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/privacybydesign/irmago/common/clientmodels"
 )
 
 // ErrNotConfigured is returned by operations that require the real engine when
@@ -45,6 +46,13 @@ type Holder interface {
 	// held_attestations.credential_ref. Used by the receive flows (§9.5) and the
 	// dev seed.
 	Store(ctx context.Context, orgID uuid.UUID, cred Credential) (string, error)
+
+	// List returns the organization's held credentials as irmago's display model
+	// (common/clientmodels.Credential — the same DTOs the irmamobile wallet
+	// renders: localized name, issuer, attributes with display names, logos).
+	// This is the holder read/display layer the frontend consumes. The engine
+	// reads them straight from the org's storage; the stub synthesises them.
+	List(ctx context.Context, orgID uuid.UUID) ([]*clientmodels.Credential, error)
 
 	// Redeem runs the OpenID4VCI holder flow for offerURI — an
 	// openid-credential-offer:// deeplink using the pre-authorized-code grant —

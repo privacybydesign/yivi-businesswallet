@@ -2,12 +2,15 @@ package qerdsprovider
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"sync"
 	"time"
 )
+
+// refBytes is the length of the random provider-ref suffix.
+const refBytes = 8
 
 // StubProvider is an in-process QERDS provider for local dev and tests. Send
 // performs a real round-trip: it mints ERDS-style evidence with qualified
@@ -19,7 +22,6 @@ import (
 // are only truly exercised against a real QTSP sandbox. See .ai/features/qerds.md.
 type StubProvider struct {
 	mu    sync.Mutex
-	seq   int
 	inbox map[Address][]InboundMessage
 	now   func() time.Time
 }
@@ -47,8 +49,7 @@ func (p *StubProvider) Send(_ context.Context, msg OutboundMessage) (SendReceipt
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.seq++
-	ref := p.ref(msg, p.seq)
+	ref := p.ref()
 	ts := p.now()
 
 	submission := p.evidence(EvidenceSubmissionAcceptance, ref, ts)
@@ -81,9 +82,19 @@ func (p *StubProvider) Fetch(_ context.Context, addr Address) ([]InboundMessage,
 	return msgs, nil
 }
 
-func (p *StubProvider) ref(msg OutboundMessage, seq int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%s|%d", msg.Sender, msg.Recipient, msg.Subject, seq)))
-	return "stub-" + hex.EncodeToString(sum[:8])
+// ref mints a unique provider reference per submission, like a real QERDS
+// provider (each accepted message gets its own ERDS message id). It must be
+// globally unique — deriving it from message fields plus an in-memory counter
+// collided across process restarts (the counter reset), so a repeated send hit
+// the UNIQUE(direction, provider_ref) index and stuck the message in "submitted".
+func (p *StubProvider) ref() string {
+	var b [refBytes]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand should never fail; fall back to a timestamp so we still
+		// return a usable, near-unique ref rather than panicking.
+		return "stub-" + hex.EncodeToString([]byte(p.now().Format(time.RFC3339Nano)))
+	}
+	return "stub-" + hex.EncodeToString(b[:])
 }
 
 func (p *StubProvider) evidence(kind, ref string, ts time.Time) Evidence {

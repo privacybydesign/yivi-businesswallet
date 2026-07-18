@@ -6,9 +6,11 @@ import type {
   AttestationKey,
   AttestationSchema,
   AttestationTemplate,
+  ClientAttribute,
   HeldAttestation,
   IssuedAttestation,
 } from "../api/attestations";
+import { attributeValueText, localized } from "../api/attestations";
 import {
   useAttestationKeysQuery,
   useAttestationSchemasQuery,
@@ -26,7 +28,7 @@ import {
 import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { useWhenFormatter } from "../lib/format-when";
-import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
+import { Button, Card, Icon, Modal, Table, Tag, TopBar } from "../ui";
 import type { IconName } from "../ui";
 import { AttestationIssueWizard } from "./attestations-issue";
 import { AttestationSchemaForm } from "./attestations-schema-form";
@@ -59,16 +61,16 @@ function issuedTone(status: string): IssuedTone {
   }
 }
 
-type Tab = "templates" | "issued" | "held" | "schemas" | "keys";
+type Tab = "templates" | "issued" | "wallet" | "schemas" | "keys";
 
 const ADMIN_TABS: readonly Tab[] = [
   "templates",
   "issued",
-  "held",
+  "wallet",
   "schemas",
   "keys",
 ];
-const MEMBER_TABS: readonly Tab[] = ["issued", "held"];
+const MEMBER_TABS: readonly Tab[] = ["issued", "wallet"];
 
 function readTab(params: URLSearchParams, tabs: readonly Tab[]): Tab {
   const value = params.get("tab");
@@ -80,6 +82,7 @@ type ActiveModal =
   | { kind: "issue"; template?: AttestationTemplate }
   | { kind: "schema"; schema?: AttestationSchema }
   | { kind: "template"; template?: AttestationTemplate }
+  | { kind: "credential"; view: HeldAttestation }
   | null;
 
 export default function Attestations(): React.JSX.Element {
@@ -98,7 +101,7 @@ export default function Attestations(): React.JSX.Element {
 
   const enabled = !org.isError;
   const issued = useIssuedAttestationsQuery(slug, enabled);
-  const held = useHeldAttestationsQuery(slug, enabled);
+  const wallet = useHeldAttestationsQuery(slug, enabled);
   const templates = useAttestationTemplatesQuery(slug, enabled && isAdmin);
   const schemas = useAttestationSchemasQuery(slug, enabled && isAdmin);
   const keys = useAttestationKeysQuery(slug, enabled && isAdmin);
@@ -137,6 +140,27 @@ export default function Attestations(): React.JSX.Element {
         }
       />
 
+      <div className="border-line bg-surface flex gap-1 border-b px-8">
+        {tabs.map((value) => {
+          const active = tab === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTab(value)}
+              className={[
+                "h-11 border-b-2 px-3.5 text-[13.5px] transition-colors",
+                active
+                  ? "border-primary text-ink font-semibold"
+                  : "text-ink-soft hover:text-ink border-transparent font-medium",
+              ].join(" ")}
+            >
+              {t(TAB_LABEL_KEYS[value])}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="p-8">
         {org.isError ? (
           <Card className="p-6">
@@ -146,24 +170,6 @@ export default function Attestations(): React.JSX.Element {
           </Card>
         ) : (
           <div className="flex flex-col gap-5">
-            <div className="bg-surface-3 rounded-yivi inline-flex gap-1 self-start p-[3px]">
-              {tabs.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setTab(value)}
-                  className={[
-                    "h-[26px] cursor-pointer rounded-md px-3 text-[12.5px] font-semibold transition-colors",
-                    tab === value
-                      ? "bg-surface text-ink shadow-sm"
-                      : "text-ink-soft hover:text-ink",
-                  ].join(" ")}
-                >
-                  {t(TAB_LABEL_KEYS[value])}
-                </button>
-              ))}
-            </div>
-
             {tab === "templates" && (
               <TemplatesTab
                 slug={slug}
@@ -186,14 +192,15 @@ export default function Attestations(): React.JSX.Element {
               />
             )}
 
-            {tab === "held" && (
-              <HeldTab
+            {tab === "wallet" && (
+              <WalletTab
                 slug={slug}
-                rows={held.data ?? []}
-                pending={held.isPending}
-                error={held.error}
+                rows={wallet.data ?? []}
+                pending={wallet.isPending}
+                error={wallet.error}
                 isAdmin={isAdmin}
                 formatWhen={formatWhen}
+                onOpen={(view) => setModal({ kind: "credential", view })}
               />
             )}
 
@@ -244,6 +251,13 @@ export default function Attestations(): React.JSX.Element {
           onClose={() => setModal(null)}
         />
       )}
+      {modal?.kind === "credential" && (
+        <CredentialDetailModal
+          view={modal.view}
+          formatWhen={formatWhen}
+          onClose={() => setModal(null)}
+        />
+      )}
     </>
   );
 }
@@ -251,7 +265,7 @@ export default function Attestations(): React.JSX.Element {
 const TAB_LABEL_KEYS = {
   templates: "attestations.tabs.templates",
   issued: "attestations.tabs.issued",
-  held: "attestations.tabs.held",
+  wallet: "attestations.tabs.wallet",
   schemas: "attestations.tabs.schemas",
   keys: "attestations.tabs.keys",
 } as const;
@@ -489,15 +503,22 @@ function IssuedTab({
   );
 }
 
-const HELD_COLUMN_COUNT = 5;
+const WALLET_COLUMN_COUNT = 5;
 
-function HeldTab({
+// attributeLabel is the localized display name for an attribute, falling back to
+// its claim path (e.g. ["address","street"] → "address.street").
+function attributeLabel(attr: ClientAttribute): string {
+  return localized(attr.display_name, attr.claim_path.map(String).join("."));
+}
+
+function WalletTab({
   slug,
   rows,
   pending,
   error,
   isAdmin,
   formatWhen,
+  onOpen,
 }: {
   slug: string;
   rows: HeldAttestation[];
@@ -505,10 +526,11 @@ function HeldTab({
   error: Error | null;
   isAdmin: boolean;
   formatWhen: (iso: string) => string;
+  onOpen: (view: HeldAttestation) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const remove = useDeleteHeldAttestationMutation(slug);
-  const columnCount = isAdmin ? HELD_COLUMN_COUNT : HELD_COLUMN_COUNT - 1;
+  const columnCount = isAdmin ? WALLET_COLUMN_COUNT : WALLET_COLUMN_COUNT - 1;
 
   if (error) {
     return (
@@ -523,20 +545,20 @@ function HeldTab({
       <Table className="table-fixed">
         <Table.Head>
           <Table.HeaderCell className="w-[32%]">
-            {t("attestations.held.columns.credential")}
+            {t("attestations.wallet.columns.credential")}
           </Table.HeaderCell>
           <Table.HeaderCell className="w-[24%]">
-            {t("attestations.held.columns.issuer")}
+            {t("attestations.wallet.columns.issuer")}
           </Table.HeaderCell>
           <Table.HeaderCell className="w-[16%]">
-            {t("attestations.held.columns.source")}
+            {t("attestations.wallet.columns.source")}
           </Table.HeaderCell>
           <Table.HeaderCell className="w-[16%]">
-            {t("attestations.held.columns.received")}
+            {t("attestations.wallet.columns.received")}
           </Table.HeaderCell>
           {isAdmin && (
             <Table.HeaderCell className="w-[12%]" srOnly>
-              {t("attestations.held.columns.actions")}
+              {t("attestations.wallet.columns.actions")}
             </Table.HeaderCell>
           )}
         </Table.Head>
@@ -547,52 +569,203 @@ function HeldTab({
             </Table.State>
           ) : rows.length === 0 ? (
             <Table.State colSpan={columnCount}>
-              {t("attestations.held.empty")}
+              {t("attestations.wallet.empty")}
             </Table.State>
           ) : (
-            rows.map((row) => (
-              <Table.Row key={row.id}>
-                <Table.Cell className="text-ink truncate font-mono text-[12.5px]">
-                  {row.vct}
-                </Table.Cell>
-                <Table.Cell className="text-ink-soft truncate">
-                  {row.issuer}
-                </Table.Cell>
-                <Table.Cell>
-                  <Tag tone="default">
-                    <span className="capitalize">{row.source}</span>
-                  </Tag>
-                </Table.Cell>
-                <Table.Cell className="text-ink-soft text-[12.5px]">
-                  {formatWhen(row.receivedAt)}
-                </Table.Cell>
-                {isAdmin && (
-                  <Table.Cell className="text-right">
-                    <Button
-                      variant="dangerGhost"
-                      size="sm"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            t("attestations.held.confirmDelete", {
-                              name: row.vct,
-                            }),
-                          )
-                        ) {
-                          remove.mutate({ heldId: row.id });
-                        }
-                      }}
-                    >
-                      {t("attestations.held.delete")}
-                    </Button>
+            rows.map((row) => {
+              const cred = row.credential;
+              const name = localized(cred.name, cred.credential_id);
+              const issuerName = localized(cred.issuer.name, cred.issuer.id);
+              return (
+                <Table.Row
+                  key={row.heldId}
+                  role="button"
+                  tabIndex={0}
+                  title={t("attestations.wallet.rowHint")}
+                  onClick={() => onOpen(row)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onOpen(row);
+                    }
+                  }}
+                  className="hover:bg-surface-2 focus-visible:bg-surface-2 cursor-pointer outline-none"
+                >
+                  <Table.Cell>
+                    <div className="flex items-center gap-2">
+                      {cred.image?.base64 && (
+                        <img
+                          src={`data:${cred.image.mime_type ?? "image/png"};base64,${cred.image.base64}`}
+                          alt=""
+                          className="size-6 shrink-0 rounded object-contain"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-ink truncate">{name}</div>
+                        <div className="text-ink-soft truncate font-mono text-[11px]">
+                          {cred.credential_id}
+                        </div>
+                      </div>
+                    </div>
                   </Table.Cell>
-                )}
-              </Table.Row>
-            ))
+                  <Table.Cell className="text-ink-soft truncate">
+                    {issuerName}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <Tag tone="default">
+                      <span className="capitalize">{row.source}</span>
+                    </Tag>
+                  </Table.Cell>
+                  <Table.Cell className="text-ink-soft text-[12.5px]">
+                    {formatWhen(row.receivedAt)}
+                  </Table.Cell>
+                  {isAdmin && (
+                    <Table.Cell className="text-right">
+                      <Button
+                        variant="dangerGhost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (
+                            window.confirm(
+                              t("attestations.wallet.confirmDelete", {
+                                name,
+                              }),
+                            )
+                          ) {
+                            remove.mutate({ heldId: row.heldId });
+                          }
+                        }}
+                      >
+                        {t("attestations.wallet.delete")}
+                      </Button>
+                    </Table.Cell>
+                  )}
+                </Table.Row>
+              );
+            })
           )}
         </Table.Body>
       </Table>
     </Card>
+  );
+}
+
+// CredentialDetailModal shows one held credential's full display model: logo,
+// name, issuer, provenance/dates, and the disclosed attributes. Opened from a
+// wallet row — a single credential type can have several instances, so each row
+// is its own credential.
+function CredentialDetailModal({
+  view,
+  formatWhen,
+  onClose,
+}: {
+  view: HeldAttestation;
+  formatWhen: (iso: string) => string;
+  onClose: () => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const cred = view.credential;
+  const name = localized(cred.name, cred.credential_id);
+  const issuerName = localized(cred.issuer.name, cred.issuer.id);
+  const attributes = cred.attributes ?? [];
+
+  const unixWhen = (sec: number | null | undefined): string | null =>
+    sec ? formatWhen(new Date(sec * 1000).toISOString()) : null;
+  const issued = unixWhen(cred.issuance_date);
+  const expires = unixWhen(cred.expiry_date);
+
+  return (
+    <Modal title={name} closeLabel={t("common.close")} onClose={onClose}>
+      <div className="flex flex-col gap-5">
+        <div className="flex items-center gap-3">
+          {cred.image?.base64 && (
+            <img
+              src={`data:${cred.image.mime_type ?? "image/png"};base64,${cred.image.base64}`}
+              alt=""
+              className="size-10 shrink-0 rounded object-contain"
+            />
+          )}
+          <div className="min-w-0">
+            <div className="text-ink truncate text-[15px] font-semibold">
+              {name}
+            </div>
+            <div className="text-ink-soft truncate font-mono text-[11px]">
+              {cred.credential_id}
+            </div>
+          </div>
+        </div>
+
+        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-[13px]">
+          <DetailRow
+            label={t("attestations.wallet.details.issuer")}
+            value={issuerName}
+          />
+          <DetailRow
+            label={t("attestations.wallet.details.source")}
+            value={<span className="capitalize">{view.source}</span>}
+          />
+          <DetailRow
+            label={t("attestations.wallet.details.received")}
+            value={formatWhen(view.receivedAt)}
+          />
+          {issued && (
+            <DetailRow
+              label={t("attestations.wallet.details.issued")}
+              value={issued}
+            />
+          )}
+          {expires && (
+            <DetailRow
+              label={t("attestations.wallet.details.expires")}
+              value={expires}
+            />
+          )}
+        </dl>
+
+        <div>
+          <div className="text-ink mb-2 text-[13px] font-semibold">
+            {t("attestations.wallet.details.attributes")}
+          </div>
+          {attributes.length === 0 ? (
+            <p className="text-ink-soft text-[13px]">
+              {t("attestations.wallet.details.noAttributes")}
+            </p>
+          ) : (
+            <dl className="border-line divide-line rounded-yivi divide-y border">
+              {attributes.map((attr, i) => (
+                <div
+                  key={i}
+                  className="grid grid-cols-[40%_1fr] gap-3 px-3.5 py-2"
+                >
+                  <dt className="text-ink-soft truncate text-[12.5px]">
+                    {attributeLabel(attr)}
+                  </dt>
+                  <dd className="text-ink text-[13px] break-words">
+                    {attributeValueText(attr)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <>
+      <dt className="text-ink-soft">{label}</dt>
+      <dd className="text-ink min-w-0 break-words">{value}</dd>
+    </>
   );
 }
 

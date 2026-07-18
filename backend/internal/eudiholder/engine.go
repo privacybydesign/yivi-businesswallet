@@ -14,9 +14,11 @@ import (
 	"sync/atomic"
 
 	"github.com/google/uuid"
+	"github.com/privacybydesign/irmago/eudi"
 	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
 	"github.com/privacybydesign/irmago/eudi/storage/db/models"
 	"github.com/privacybydesign/irmago/eudi/storage/filesystem"
+	"github.com/sirupsen/logrus"
 	"gorm.io/datatypes"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -96,6 +98,13 @@ type RedeemConfig struct {
 // per-org filesystem storage, masterKey seeds per-org key derivation, and redeem
 // configures the receive/redemption trust posture.
 func NewEngine(dsn, storageDir string, masterKey [32]byte, redeem RedeemConfig) *Engine {
+	// irmago's eudi package logs through a package-global logrus logger that is
+	// nil until a consumer sets it (irmago's own client does the same). The
+	// trust-anchor / revocation-list loading in Configuration.Reload dereferences
+	// it, so leaving it nil panics on the first redeem. Initialise it once.
+	if eudi.Logger == nil {
+		eudi.Logger = logrus.New()
+	}
 	return &Engine{
 		dsn:        dsn,
 		storageDir: storageDir,
@@ -118,7 +127,9 @@ func (e *Engine) Ping(ctx context.Context) error {
 }
 
 // Store persists the credential as a single-instance CredentialBatch in the
-// org's holder engine and returns the created instance id.
+// org's holder engine and returns the credential's stable ref — the batch hash,
+// which is what List (GetCredentialMetadataList) reports as the credential's id
+// and what Delete keys on, so the held index correlates and erases consistently.
 func (e *Engine) Store(ctx context.Context, orgID uuid.UUID, cred Credential) (string, error) {
 	eng, err := e.engineFor(ctx, orgID)
 	if err != nil {
@@ -148,35 +159,26 @@ func (e *Engine) Store(ctx context.Context, orgID uuid.UUID, cred Credential) (s
 	if err := eng.Db().WithContext(ctx).Create(batch).Error; err != nil {
 		return "", fmt.Errorf("eudiholder: store credential org %s: %w", orgID, err)
 	}
-	return batch.Instances[0].ID.String(), nil
+	return batch.Hash, nil
 }
 
-// Delete erases the credential from the org's engine. ref is an instance id, but
-// Store persists one single-instance CredentialBatch per credential and irmago's
-// cascade is declared parent→child (batch→instances/metadata/display). Deleting
-// the instance alone would orphan the batch, which still holds the decoded
-// SD-JWT claims (ProcessedSdJwtPayload) plus issuer metadata/display — leaving a
-// removed credential's personal data at rest. So resolve the batch from the
-// instance and delete the batch, letting the DB-level ON DELETE CASCADE remove
-// instance + metadata + display in one statement. A ref that is not a valid
-// instance id, or that matches no row, is a no-op (the index owns the audit
-// trail; the engine holds the live material).
+// Delete erases the credential from the org's engine. ref is the credential's
+// batch hash (what Store returns, Redeem records and List reports as the id).
+// Deleting the CredentialBatch — not the instance — lets the DB-level ON DELETE
+// CASCADE remove instance + metadata + display in one statement, so no decoded
+// SD-JWT claims (ProcessedSdJwtPayload) or issuer metadata are orphaned at rest.
+// An empty ref, or one that matches no batch, is a no-op (the index owns the
+// audit trail; the engine holds the live material).
 func (e *Engine) Delete(ctx context.Context, orgID uuid.UUID, ref string) error {
-	id, err := uuid.Parse(ref)
-	if err != nil {
+	if ref == "" {
 		return nil
 	}
 	eng, err := e.engineFor(ctx, orgID)
 	if err != nil {
 		return err
 	}
-	base := eng.Db()
-	batchID := base.WithContext(ctx).
-		Model(&models.IssuedCredentialInstance{}).
-		Select("credential_batch_id").
-		Where("id = ?", id)
-	if err := base.WithContext(ctx).
-		Where("id = (?)", batchID).Delete(&models.CredentialBatch{}).Error; err != nil {
+	if err := eng.Db().WithContext(ctx).
+		Where("hash = ?", ref).Delete(&models.CredentialBatch{}).Error; err != nil {
 		return fmt.Errorf("eudiholder: delete credential %s org %s: %w", ref, orgID, err)
 	}
 	return nil

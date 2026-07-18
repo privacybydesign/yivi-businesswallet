@@ -525,6 +525,15 @@ secure channel (not a claim link) and redeeming it via the holder's OpenID4VCI
 flow — is designed in [`oid4vci-over-qerds.md`](./oid4vci-over-qerds.md) (pre-auth
 vs. authorization-code grants for business wallets).
 
+**Display** of held credentials uses irmago's own read/display model: the held
+list endpoint returns `HeldCredentialView` = the index row merged with
+`clientmodels.Credential` (the DTOs the irmamobile wallet renders — localized
+name, issuer, attributes, logos), read from the org's storage via irmago's
+`CredentialService.GetCredentialMetadataList`. This is the first step of moving
+issue/present/hold onto irmago-native abstractions as **config-selectable
+providers** (hosted issuer/verifier stay the default); native OpenID4VP
+presentation and native issuance are planned follow-ups.
+
 ---
 
 ## 10. HTTP API

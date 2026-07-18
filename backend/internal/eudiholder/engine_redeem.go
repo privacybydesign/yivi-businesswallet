@@ -11,8 +11,25 @@ import (
 	"github.com/privacybydesign/irmago/eudi/credentials/sdjwtvc"
 	eudijwt "github.com/privacybydesign/irmago/eudi/jwt"
 	"github.com/privacybydesign/irmago/eudi/openid4vci"
+	"github.com/privacybydesign/irmago/eudi/services"
+	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
 	"github.com/privacybydesign/irmago/eudi/utils"
 )
+
+// List reads the org's held credentials from its irmago storage and returns them
+// as the clientmodels display model (localized names, issuer, attributes, logos)
+// via irmago's CredentialService — the same read path the irmamobile wallet uses.
+func (e *Engine) List(ctx context.Context, orgID uuid.UUID) ([]*clientmodels.Credential, error) {
+	st, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	creds, err := services.NewCredentialService(st).GetCredentialMetadataList()
+	if err != nil {
+		return nil, fmt.Errorf("eudiholder: list credentials org %s: %w", orgID, err)
+	}
+	return creds, nil
+}
 
 // redirectURI is unused by the pre-authorized-code grant (no browser redirect),
 // but NewSession requires a value.
@@ -54,6 +71,16 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		client.AllowInsecureHttpForTesting()
 	}
 
+	// Snapshot the stored instance ids before redemption. irmago's success
+	// callback returns the credential's display data (name, attributes) but leaves
+	// CredentialInstanceIds empty, so the stored engine ref — which the held index
+	// needs to correlate the credential and to delete it later — is recovered by
+	// diffing storage after the session completes.
+	before, err := storedInstanceIDs(st)
+	if err != nil {
+		return Redeemed{}, fmt.Errorf("eudiholder: redeem snapshot org %s: %w", orgID, err)
+	}
+
 	handler := newRedeemHandler()
 	sessionID := int(e.sessionCounter.Add(1))
 	client.NewSession(sessionID, offerURI, redirectURI, handler)
@@ -65,8 +92,47 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		if res.err != nil {
 			return Redeemed{}, fmt.Errorf("eudiholder: redeem org %s: %w", orgID, res.err)
 		}
-		return res.redeemed, nil
+		ref, err := newInstanceRef(st, before)
+		if err != nil {
+			return Redeemed{}, fmt.Errorf("eudiholder: redeem resolve ref org %s: %w", orgID, err)
+		}
+		return Redeemed{Ref: ref, VCT: res.vct, Issuer: res.issuer}, nil
 	}
+}
+
+// storedInstanceIDs returns the set of credential-instance ids currently in the
+// org's storage.
+func storedInstanceIDs(st irmastorage.Storage) (map[string]struct{}, error) {
+	creds, err := services.NewCredentialService(st).GetCredentialMetadataList()
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]struct{})
+	for _, c := range creds {
+		for _, id := range c.CredentialInstanceIds {
+			ids[id] = struct{}{}
+		}
+	}
+	return ids, nil
+}
+
+// newInstanceRef returns the instance id stored during this redemption — the one
+// absent from the pre-redemption snapshot. A single-instance batch is stored per
+// offer, so the first new id is the credential's ref. Returns "" if none is new
+// (the credential is still stored; the index simply records no live ref).
+func newInstanceRef(st irmastorage.Storage, before map[string]struct{}) (string, error) {
+	creds, err := services.NewCredentialService(st).GetCredentialMetadataList()
+	if err != nil {
+		return "", err
+	}
+	for _, c := range creds {
+		for _, id := range c.CredentialInstanceIds {
+			if _, seen := before[id]; !seen {
+				return id, nil
+			}
+		}
+	}
+	return "", nil
 }
 
 // verificationContext builds the SD-JWT VC trust context: a configured
@@ -92,10 +158,12 @@ func (e *Engine) verificationContext(conf *eudi.Configuration) (sdjwtvc.SdJwtVcV
 }
 
 // redeemResult carries the outcome of the asynchronous, callback-driven session
-// back to Redeem over a buffered channel.
+// back to Redeem over a buffered channel. vct/issuer come from the success
+// callback; the stored instance ref is resolved separately (the callback omits it).
 type redeemResult struct {
-	redeemed Redeemed
-	err      error
+	vct    string
+	issuer string
+	err    error
 }
 
 // redeemHandler bridges irmago's callback-based openid4vci.Handler to a single
@@ -115,11 +183,7 @@ func (h *redeemHandler) Success(_ string, issued []*clientmodels.Credential) {
 		return
 	}
 	c := issued[0]
-	h.done <- redeemResult{redeemed: Redeemed{
-		Ref:    credentialInstanceRef(c),
-		VCT:    c.CredentialId,
-		Issuer: c.Issuer.Id,
-	}}
+	h.done <- redeemResult{vct: c.CredentialId, issuer: c.Issuer.Id}
 }
 
 func (h *redeemHandler) Cancelled() {
@@ -154,13 +218,4 @@ func (h *redeemHandler) RequestPermission(
 	callback openid4vci.PermissionHandler,
 ) {
 	callback(true)
-}
-
-// credentialInstanceRef returns the stored instance id for the credential (there
-// is one per format; the receive flow stores a single SD-JWT VC).
-func credentialInstanceRef(c *clientmodels.Credential) string {
-	for _, id := range c.CredentialInstanceIds {
-		return id
-	}
-	return ""
 }

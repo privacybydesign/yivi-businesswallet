@@ -146,16 +146,84 @@ const issuedAttestationListSchema = z.array(issuedAttestationSchema);
 
 // A credential the organization HOLDS (the "Received" facet). The claims live in
 // the holder engine; this is the thin org-scoped index over it.
+// The held-credential API returns irmago's clientmodels display model (the same
+// DTOs the irmamobile wallet renders): localized names, issuer, attributes and
+// logos. Schemas are permissive (passthrough / nullable) so the full irmago
+// payload — which carries more fields than we render — validates unchanged.
+const translatedStringSchema = z.record(z.string(), z.string());
+
+const clientImageSchema = z
+  .object({ base64: z.string(), mime_type: z.string().nullish() })
+  .passthrough();
+
+const clientAttributeValueSchema = z
+  .object({
+    type: z.string().optional(),
+    int: z.number().nullish(),
+    bool: z.boolean().nullish(),
+    string: z.string().nullish(),
+    image_path: z.string().nullish(),
+    base64_image: z.string().nullish(),
+  })
+  .passthrough();
+
+const clientAttributeSchema = z
+  .object({
+    claim_path: z.array(z.unknown()),
+    display_name: translatedStringSchema.nullish(),
+    description: translatedStringSchema.nullish(),
+    value: clientAttributeValueSchema.nullish(),
+  })
+  .passthrough();
+
+const clientTrustedPartySchema = z
+  .object({ id: z.string(), name: translatedStringSchema.nullish() })
+  .passthrough();
+
+// A subset of clientmodels.Credential — the display fields we render.
+const clientCredentialSchema = z
+  .object({
+    credential_id: z.string(),
+    hash: z.string().optional(),
+    name: translatedStringSchema.nullish(),
+    issuer: clientTrustedPartySchema,
+    attributes: z.array(clientAttributeSchema).nullish(),
+    image: clientImageSchema.nullish(),
+    expiry_date: z.number().nullish(),
+    issuance_date: z.number().nullish(),
+  })
+  .passthrough();
+
+export type ClientCredential = z.infer<typeof clientCredentialSchema>;
+export type ClientAttribute = z.infer<typeof clientAttributeSchema>;
+
+/** localized picks the "en" translation, else the first available, else fallback. */
+export function localized(
+  ts: Record<string, string> | null | undefined,
+  fallback: string,
+): string {
+  if (!ts) return fallback;
+  return ts.en ?? Object.values(ts)[0] ?? fallback;
+}
+
+/** attributeValueText renders a clientmodels AttributeValue as display text. */
+export function attributeValueText(attr: ClientAttribute): string {
+  const v = attr.value;
+  if (!v) return "";
+  if (v.string != null) return v.string;
+  if (v.int != null) return String(v.int);
+  if (v.bool != null) return v.bool ? "true" : "false";
+  return "";
+}
+
+// HeldCredentialView pairs the org's index metadata with the clientmodels
+// display model read from the holder engine.
 export const heldAttestationSchema = z.object({
-  id: z.string(),
-  organizationId: z.string(),
-  credentialRef: z.string(),
-  vct: z.string(),
-  issuer: z.string(),
+  heldId: z.string(),
   source: z.enum(["qerds", "openid4vci", "bootstrap"]),
   sourceMessageId: z.string().optional(),
   receivedAt: z.string(),
-  createdAt: z.string(),
+  credential: clientCredentialSchema,
 });
 
 export type HeldAttestation = z.infer<typeof heldAttestationSchema>;

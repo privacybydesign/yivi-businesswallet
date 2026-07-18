@@ -47,6 +47,7 @@ type issuanceService interface {
 	Status(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ClaimStatus(ctx context.Context, token string) (ClaimView, error)
+	ListHeldDisplay(ctx context.Context, orgID uuid.UUID) ([]HeldCredentialView, error)
 	DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
 }
 
@@ -60,20 +61,11 @@ type issuerSettingsReader interface {
 // Handler serves the org-scoped attestations API (Schemas / Templates / Issued
 // tabs + key material). Org routes compose the injected requireUser + authorize
 // middleware; write/manage routes additionally require org admin.
-//
-// heldStore is the read surface over the org's held-credential index; deletion
-// runs through the service (it also removes the credential from the holder
-// engine, §6.5), so only the list read lives here.
-type heldStore interface {
-	ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error)
-}
-
 type Handler struct {
 	schemas        schemaStore
 	templates      templateStore
 	keys           keyStore
 	issued         issuedReader
-	held           heldStore
 	service        issuanceService
 	issuerSettings issuerSettingsReader
 	issuerURL      string
@@ -86,13 +78,12 @@ type Handler struct {
 // be empty (the generated config's issuer field is then left for the operator).
 // issuerSettings resolves an org's issuer instance + branding for the per-org
 // bundle generator (see issuerBundle).
-func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, held heldStore, service issuanceService, issuerSettings issuerSettingsReader, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, service issuanceService, issuerSettings issuerSettingsReader, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		schemas:        schemas,
 		templates:      templates,
 		keys:           keys,
 		issued:         issued,
-		held:           held,
 		service:        service,
 		issuerSettings: issuerSettings,
 		issuerURL:      issuerURL,
@@ -168,7 +159,7 @@ func (h *Handler) claim(w http.ResponseWriter, r *http.Request) error {
 
 func (h *Handler) listHeld(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
-	held, err := h.held.ListHeld(r.Context(), org.ID)
+	held, err := h.service.ListHeldDisplay(r.Context(), org.ID)
 	if err != nil {
 		return fmt.Errorf("listing held attestations: %w", err)
 	}

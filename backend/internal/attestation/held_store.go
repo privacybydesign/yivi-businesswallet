@@ -8,10 +8,24 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/privacybydesign/irmago/common/clientmodels"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
+
+// HeldCredentialView is the display projection of a held credential: the org's
+// index metadata (id, provenance) merged with irmago's clientmodels display
+// model (localized name, issuer, attributes, logos) read from the holder engine.
+// The Credential shape mirrors what the irmamobile wallet renders, so the
+// frontend can render held credentials the same way.
+type HeldCredentialView struct {
+	HeldID          uuid.UUID                `json:"heldId"`
+	Source          string                   `json:"source"`
+	ReceivedAt      time.Time                `json:"receivedAt"`
+	SourceMessageID *uuid.UUID               `json:"sourceMessageId,omitempty"`
+	Credential      *clientmodels.Credential `json:"credential"`
+}
 
 // Held-credential sources: how an EAA the organization holds arrived.
 const (

@@ -9,7 +9,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/privacybydesign/irmago/common/clientmodels"
 )
+
+// stubDisplayLang is the single locale the stub localizes its synthetic display
+// strings under (real credentials carry issuer-supplied localizations).
+const stubDisplayLang = "en"
 
 const stubRefBytes = 16
 
@@ -65,6 +70,26 @@ func (h *StubHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI strin
 		return Redeemed{}, err
 	}
 	return Redeemed{Ref: ref, VCT: cred.VCT, Issuer: cred.CredentialIssuer}, nil
+}
+
+// List returns the org's stored credentials as the clientmodels display model,
+// synthesised from the in-memory credentials so the read/display path renders
+// under the stub (dev/CI). Real display strings come from issuer metadata; the
+// stub fills name/issuer from what it holds.
+func (h *StubHolder) List(_ context.Context, orgID uuid.UUID) ([]*clientmodels.Credential, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	creds := make([]*clientmodels.Credential, 0, len(h.creds[orgID]))
+	for ref, c := range h.creds[orgID] {
+		creds = append(creds, &clientmodels.Credential{
+			CredentialId:          c.VCT,
+			Hash:                  c.Hash,
+			Name:                  clientmodels.TranslatedString{stubDisplayLang: c.VCT},
+			Issuer:                clientmodels.TrustedParty{Id: c.CredentialIssuer, Name: clientmodels.TranslatedString{stubDisplayLang: c.CredentialIssuer}},
+			CredentialInstanceIds: map[clientmodels.CredentialFormat]string{clientmodels.Format_SdJwtVc: ref},
+		})
+	}
+	return creds, nil
 }
 
 // Delete removes the credential; an absent ref is a no-op (matches the engine
