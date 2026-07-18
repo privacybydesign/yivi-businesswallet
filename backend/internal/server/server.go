@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/apidocs"
 )
 
 const (
@@ -34,6 +36,11 @@ func New(db Pinger, staticDir string, features ...Registerer) http.Handler {
 
 	root.HandleFunc(livePath, live)
 	root.HandleFunc(readyPath, ready(db))
+
+	// API documentation: a ReDoc page and the raw OpenAPI spec. Mounted on the
+	// root mux under /api/docs (not /api/v1) so they are not mistaken for API
+	// resources; the more specific patterns win over the SPA fallback.
+	apidocs.Register(root)
 
 	v1 := http.NewServeMux()
 	for _, f := range features {

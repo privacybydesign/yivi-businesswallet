@@ -88,6 +88,24 @@ func TestSPA_DoesNotShadowHealthEndpoints(t *testing.T) {
 	}
 }
 
+// The docs routes are mounted on the root mux under /api/docs; the SPA fallback
+// must not shadow them even when a static site is served on "/".
+func TestDocsRoutesNotShadowedBySPA(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t))
+
+	for _, path := range []string{"/api/docs", "/api/docs/openapi.yaml"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d, want 200", path, rec.Code)
+		}
+		if rec.Body.String() == "<!doctype html>index" {
+			t.Fatalf("GET %s: served the SPA index instead of the docs handler", path)
+		}
+	}
+}
+
 // Traversal outside the static root must not leak a parent-directory file.
 // ServeMux cleans/redirects "../" paths before the handler runs, and the
 // FileServer/ServeFile reads reject ".." regardless, so the request never
