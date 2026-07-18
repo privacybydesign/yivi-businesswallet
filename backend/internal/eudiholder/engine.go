@@ -14,9 +14,11 @@ import (
 	"sync/atomic"
 
 	"github.com/google/uuid"
+	"github.com/privacybydesign/irmago/eudi"
 	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
 	"github.com/privacybydesign/irmago/eudi/storage/db/models"
 	"github.com/privacybydesign/irmago/eudi/storage/filesystem"
+	"github.com/sirupsen/logrus"
 	"gorm.io/datatypes"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -96,6 +98,13 @@ type RedeemConfig struct {
 // per-org filesystem storage, masterKey seeds per-org key derivation, and redeem
 // configures the receive/redemption trust posture.
 func NewEngine(dsn, storageDir string, masterKey [32]byte, redeem RedeemConfig) *Engine {
+	// irmago's eudi package logs through a package-global logrus logger that is
+	// nil until a consumer sets it (irmago's own client does the same). The
+	// trust-anchor / revocation-list loading in Configuration.Reload dereferences
+	// it, so leaving it nil panics on the first redeem. Initialise it once.
+	if eudi.Logger == nil {
+		eudi.Logger = logrus.New()
+	}
 	return &Engine{
 		dsn:        dsn,
 		storageDir: storageDir,
