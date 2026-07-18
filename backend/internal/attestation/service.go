@@ -64,9 +64,12 @@ type emailNotifier interface {
 	SendCredentialOffer(ctx context.Context, orgID uuid.UUID, to, orgName, credentialName, claimURL, txCode string) error
 }
 
-// qerdsNotifier delivers an organization-facing offer over QERDS to a digital address.
+// qerdsNotifier delivers an organization-facing OpenID4VCI credential offer over
+// QERDS to a digital address. offerURI is the self-contained
+// openid-credential-offer:// deeplink the receiver redeems via its holder flow —
+// not a claim link.
 type qerdsNotifier interface {
-	SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, claimURL string) error
+	SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, offerURI string) error
 }
 
 // Service coordinates issuance across the ledger store, the hosted issuer and the
@@ -153,7 +156,12 @@ func (s *Service) Issue(ctx context.Context, orgID, issuedBy uuid.UUID, orgName 
 		CredentialConfigID: detail.CredentialConfigID,
 		Claims:             toClaims(in.Attributes),
 		ExpirationSeconds:  expirationSeconds,
-		UseTxCode:          in.Recipient.Kind != RecipientMember,
+		// tx_code is a second factor only for the external-email path (a person
+		// keys the PIN in). Members redeem while authenticated; organizations
+		// auto-redeem over the authenticated QERDS channel — a tx_code there has
+		// no one to enter it and would block automated issuance (see
+		// .ai/features/oid4vci-over-qerds.md §4).
+		UseTxCode: in.Recipient.Kind == RecipientExternal,
 	})
 	if err != nil {
 		if failErr := s.store.MarkFailed(ctx, orgID, issued.ID); failErr != nil {
@@ -178,7 +186,9 @@ func (s *Service) deliver(ctx context.Context, orgID uuid.UUID, orgName, credent
 	claimURL := s.appBaseURL + "/claim/" + claimToken
 	switch recipient.Kind {
 	case RecipientOrganization:
-		if err := s.qerds.SendCredentialOffer(ctx, orgID, recipient.Ref, orgName, credentialName, claimURL); err != nil {
+		// Organizations receive the real OpenID4VCI offer (their wallet redeems it
+		// automatically over the secure channel), not a human claim link.
+		if err := s.qerds.SendCredentialOffer(ctx, orgID, recipient.Ref, orgName, credentialName, offer.OfferURI); err != nil {
 			slog.ErrorContext(ctx, "attestation: qerds offer delivery failed",
 				slog.String("recipient", recipient.Ref), slog.String("error", err.Error()))
 		}

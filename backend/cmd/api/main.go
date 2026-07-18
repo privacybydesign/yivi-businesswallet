@@ -130,7 +130,11 @@ func newAttestationHolder(cfg config.Config) (eudiholder.Holder, error) {
 		if err != nil {
 			return nil, err
 		}
-		return eudiholder.NewEngine(cfg.DatabaseDSN, cfg.AttestationHolderStorageDir, key), nil
+		return eudiholder.NewEngine(cfg.DatabaseDSN, cfg.AttestationHolderStorageDir, key, eudiholder.RedeemConfig{
+			TrustChainPEM:       []byte(cfg.AttestationHolderTrustChain),
+			StagingTrustAnchors: cfg.AttestationHolderStagingAnchors,
+			AllowInsecureHTTP:   cfg.AttestationHolderAllowInsecureHTTP,
+		}), nil
 	default:
 		return nil, fmt.Errorf("attestation holder %q is not implemented", cfg.AttestationHolder)
 	}
@@ -149,13 +153,18 @@ func attestationIssuerURL(cfg config.Config) string {
 
 // qerdsOfferSender adapts the QERDS service to the attestation slice's
 // organization-delivery seam: an attestation offered to an organization is sent
-// as a QERDS message to its digital address, carrying the claim link.
+// as a QERDS message to its digital address, carrying a structured OpenID4VCI
+// credential offer in the body (the recipient's wallet redeems it), not a claim
+// link.
 type qerdsOfferSender struct{ svc *qerds.Service }
 
-func (a qerdsOfferSender) SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, claimURL string) error {
+func (a qerdsOfferSender) SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, offerURI string) error {
+	body, err := attestation.MarshalCredentialOfferEnvelope(orgName, credentialName, offerURI)
+	if err != nil {
+		return err
+	}
 	subject := fmt.Sprintf("Credential offer: %s", credentialName)
-	body := fmt.Sprintf("%s has offered your organization a credential (%s).\n\nAdd it to your business wallet: %s", orgName, credentialName, claimURL)
-	_, err := a.svc.Send(ctx, orgID, "", toAddress, subject, body, nil)
+	_, err = a.svc.Send(ctx, orgID, "", toAddress, subject, body, nil)
 	return err
 }
 
@@ -331,6 +340,9 @@ func run() error {
 	}()
 
 	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
+	// An inbound QERDS message carrying an OpenID4VCI credential offer is redeemed
+	// into the org's holder engine and indexed (source=qerds).
+	qerdsService.SetInboundConsumer(attestation.NewOfferReceiver(attHolder, attestationStore))
 	attestationService := attestation.NewService(
 		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, attestationStore, attHolder, cfg.AppBaseURL,
 	)

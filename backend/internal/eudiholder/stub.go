@@ -6,11 +6,17 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 const stubRefBytes = 16
+
+// stubReceivedVCT is the placeholder credential type the stub records for a
+// redeemed offer — the stub does not run a real OpenID4VCI flow, so there is no
+// issuer-supplied vct to read.
+const stubReceivedVCT = "eaa.received.stub"
 
 // StubHolder is an in-process, in-memory holder engine for local dev / CI
 // (ATTESTATION_HOLDER=stub, the default). It keeps credentials in a map keyed by
@@ -40,6 +46,25 @@ func (h *StubHolder) Store(_ context.Context, orgID uuid.UUID, cred Credential) 
 	}
 	h.creds[orgID][ref] = cred
 	return ref, nil
+}
+
+// Redeem synthesises a stored credential instead of running a real OpenID4VCI
+// flow, so the QERDS receive → held-index loop runs offline under the stub
+// (dev/CI default). offerURI is used only as a stable dedup hash. It mirrors the
+// engine contract: on return the credential is "held" and the ref can be indexed.
+func (h *StubHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (Redeemed, error) {
+	cred := Credential{
+		VCT:              stubReceivedVCT,
+		IssuerURL:        offerURI,
+		CredentialIssuer: offerURI,
+		Hash:             offerURI,
+		IssuedAt:         time.Now(),
+	}
+	ref, err := h.Store(ctx, orgID, cred)
+	if err != nil {
+		return Redeemed{}, err
+	}
+	return Redeemed{Ref: ref, VCT: cred.VCT, Issuer: cred.CredentialIssuer}, nil
 }
 
 // Delete removes the credential; an absent ref is a no-op (matches the engine

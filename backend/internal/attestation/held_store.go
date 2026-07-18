@@ -72,6 +72,20 @@ func (s *Store) RecordHeld(ctx context.Context, orgID uuid.UUID, in HeldInput) (
 	return h, nil
 }
 
+// HeldForMessage reports whether an active held credential already indexes the
+// given source QERDS message. The receive flow uses it as an idempotency guard so
+// a re-delivered credential offer is not redeemed and recorded twice.
+func (s *Store) HeldForMessage(ctx context.Context, orgID, messageID uuid.UUID) (bool, error) {
+	const query = `SELECT EXISTS (
+		SELECT 1 FROM held_attestations
+		WHERE organization_id = $1 AND source_message_id = $2 AND deleted_at IS NULL)`
+	var exists bool
+	if err := s.db.QueryRow(ctx, query, orgID, messageID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("attestation: held for message %s org %s: %w", messageID, orgID, err)
+	}
+	return exists, nil
+}
+
 // GetHeld returns a single active held credential by id. Returns ErrHeldNotFound
 // when the row is absent or already soft-deleted.
 func (s *Store) GetHeld(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error) {
