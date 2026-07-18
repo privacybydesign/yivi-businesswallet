@@ -130,7 +130,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	)
 	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, "", requireUser, orgHandler.Authorize)
 
-	srv := httptest.NewServer(server.New(pool, authHandler, orgHandler, attestationHandler))
+	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler))
 	t.Cleanup(srv.Close)
 
 	jar, err := cookiejar.New(nil)

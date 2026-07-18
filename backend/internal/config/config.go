@@ -44,6 +44,9 @@ const (
 	envAppBaseURL = "APP_BASE_URL"
 	// EMAIL_ENCRYPTION_KEY (hex 32 bytes) encrypts per-org SMTP passwords at rest.
 	envEmailEncryptionKey = "EMAIL_ENCRYPTION_KEY"
+	// STATIC_DIR points at the built frontend; when set the API also serves it as
+	// an SPA on "/". Unset in dev (Vite serves the frontend).
+	envStaticDir = "STATIC_DIR"
 
 	defaultAppBaseURL = "http://localhost:5173"
 
@@ -141,6 +144,11 @@ type Config struct {
 	AppBaseURL         string
 	EmailEncryptionKey string
 
+	// StaticDir is the directory holding the built frontend (index.html + assets).
+	// When set, the API server also serves it as an SPA on "/"; empty disables
+	// static serving (dev serves the frontend via Vite).
+	StaticDir string
+
 	PostGuardSidecarURL    string
 	PostGuardSharedSecret  string
 	PostGuardEncryptionKey string
@@ -230,6 +238,7 @@ func Load() (Config, error) {
 
 		AppBaseURL:         envOrDefault(envAppBaseURL, defaultAppBaseURL),
 		EmailEncryptionKey: os.Getenv(envEmailEncryptionKey),
+		StaticDir:          os.Getenv(envStaticDir),
 
 		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
 		PostGuardSharedSecret:  os.Getenv(envPostGuardSharedSecret),
