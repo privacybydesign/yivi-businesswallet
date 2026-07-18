@@ -5,7 +5,9 @@ import {
   useMyOrganizationsQuery,
   useOrganizationsQuery,
 } from "../api/organization.queries";
+import { useOrgThemeQuery } from "../api/theme.queries";
 import { setStoredOrgSlug } from "../lib/active-org";
+import { applyOrgTheme, clearOrgTheme } from "../lib/theme";
 import { MobileNavContext, Sidebar } from "../ui";
 import * as React from "react";
 
@@ -53,6 +55,21 @@ export default function Root(): React.JSX.Element | null {
     }
   }, [activeSlug, organizations]);
 
+  // Apply the active org's branding at runtime, mapping its colours onto the
+  // design tokens; fall back to the default look when no org is in the URL.
+  const theme = useOrgThemeQuery(activeSlug ?? "");
+  const orgTheme = theme.data;
+  useEffect(() => {
+    if (!activeSlug) {
+      clearOrgTheme();
+      return;
+    }
+    applyOrgTheme(orgTheme);
+  }, [activeSlug, orgTheme]);
+  useEffect(() => clearOrgTheme, []);
+
+  const activeOrg = organizations?.find((org) => org.slug === activeSlug);
+
   // ProtectedRoute guarantees an authenticated user before Root mounts; this
   // narrows the nullable query type instead of re-deriving it defensively.
   if (me == null) {
@@ -75,6 +92,8 @@ export default function Root(): React.JSX.Element | null {
           loggingOut={logout.isPending}
           organizations={organizations ?? []}
           organizationsPending={orgsQuery.isPending}
+          brandLogoUri={orgTheme?.logoUri || undefined}
+          brandName={activeOrg?.name}
           open={navOpen}
           onNavigate={closeNav}
         />

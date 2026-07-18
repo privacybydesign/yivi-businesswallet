@@ -29,6 +29,8 @@ tags:
     description: Per-organisation email settings.
   - name: issuer-settings
     description: Per-organisation issuer settings.
+  - name: theme
+    description: Per-organisation colour scheme and logo.
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -2166,6 +2168,57 @@ paths:
       tags: [qerds]
       summary: Poll the provider for inbound QERDS messages
       description: Requires membership of the organisation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/theme:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [theme]
+      summary: Get the organisation theme
+      description: Requires membership of the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [theme]
+      summary: Update the organisation theme
+      description: Requires an administrator role in the organisation.
       requestBody:
         required: true
         content:
