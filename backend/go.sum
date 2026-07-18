@@ -758,8 +758,8 @@ github.com/pressly/goose/v3 v3.27.1 h1:6uEvcprBybDmW4hcz3gYujhARhye+GoWKhEWyzD5s
 github.com/pressly/goose/v3 v3.27.1/go.mod h1:maruOxsPnIG2yHHyo8UqKWXYKFcH7Q76csUV7+7KYoM=
 github.com/privacybydesign/gabi v0.0.0-20221212095008-68a086907750 h1:3RuYOQTlArQ6Uw2TgySusmZGluP+18WdQL56YSfkM3Q=
 github.com/privacybydesign/gabi v0.0.0-20221212095008-68a086907750/go.mod h1:QZI8hX8Ff2GfZ7UJuxyWw3nAGgt2s5+U4hxY6rmwQvs=
-github.com/privacybydesign/irmago v1.1.2-0.20260717112833-34d4cf3b3d47 h1:2wSa2wfZSP6pjaw6zcNhfyCj1maGEdTNhaXgMomZ3eQ=
-github.com/privacybydesign/irmago v1.1.2-0.20260717112833-34d4cf3b3d47/go.mod h1:h8Cnwbfj8s5lKKIURMMVBsssKQtGjisant9+LewK0Lg=
+github.com/privacybydesign/irmago v1.1.2-0.20260718174753-4bef2ad551c7 h1:G5TTqvgVKwrCQGATX3prFVtPd+NokND3PSGHCU0LMt8=
+github.com/privacybydesign/irmago v1.1.2-0.20260718174753-4bef2ad551c7/go.mod h1:h8Cnwbfj8s5lKKIURMMVBsssKQtGjisant9+LewK0Lg=
 github.com/prometheus/client_golang v0.9.1/go.mod h1:7SWBe2y4D6OKWSNQJUaRYU/AaXPKyh/dDVn+NZz0KFw=
 github.com/prometheus/client_golang v1.0.0/go.mod h1:db9x61etRT2tGnBNRi70OPL5FsnadC4Ky3P0J6CfImo=
 github.com/prometheus/client_golang v1.7.1/go.mod h1:PY5Wy2awLA44sXw4AOSfFBetzPP4j5+D6mVACh+pe2M=
