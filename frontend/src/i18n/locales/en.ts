@@ -1,6 +1,7 @@
 export const en = {
   common: {
     cancel: "Cancel",
+    close: "Close",
     comingSoon: "Coming soon",
     copy: "Copy",
     copied: "Copied to clipboard.",
@@ -758,7 +759,7 @@ export const en = {
     tabs: {
       templates: "Templates",
       issued: "Issued",
-      held: "Received",
+      wallet: "Wallet",
       schemas: "Schemas",
       keys: "Keys",
     },
@@ -782,16 +783,27 @@ export const en = {
         actions: "Actions",
       },
     },
-    held: {
-      empty: "No credentials received yet.",
+    wallet: {
+      empty: "No credentials in your wallet yet.",
       delete: "Remove",
       confirmDelete: "Remove credential “{{name}}”?",
+      rowHint: "View attributes",
       columns: {
         credential: "Credential",
         issuer: "Issued by",
         source: "Received via",
         received: "Received",
         actions: "Actions",
+      },
+      details: {
+        attributes: "Attributes",
+        noAttributes: "This credential discloses no attributes.",
+        issuer: "Issued by",
+        source: "Received via",
+        received: "Received",
+        issued: "Issued",
+        expires: "Expires",
+        type: "Type",
       },
     },
     schemas: {
