@@ -46,7 +46,17 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	if err != nil {
 		return Redeemed{}, err
 	}
-	client, err := openid4vci.NewClient(e.httpClient, conf, sdjwtvc.NewHolderVerificationProcessor(verCtx))
+	var opts []openid4vci.ClientOption
+	binder, err := e.holderKeyBinder(ctx, orgID, st)
+	if err != nil {
+		return Redeemed{}, err
+	}
+	if binder != nil {
+		// WSCA-backed: the holder binding key + its proof of possession are
+		// produced by the wallet-provider HSM, not software keys.
+		opts = append(opts, openid4vci.WithHolderKeyBinder(binder))
+	}
+	client, err := openid4vci.NewClient(e.httpClient, conf, sdjwtvc.NewHolderVerificationProcessor(verCtx), opts...)
 	if err != nil {
 		return Redeemed{}, fmt.Errorf("eudiholder: redeem client org %s: %w", orgID, err)
 	}

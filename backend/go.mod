@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	filippo.io/nistec v0.0.4 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
@@ -33,6 +34,7 @@ require (
 	github.com/mr-tron/base58 v1.1.3 // indirect
 	github.com/oasdiff/yaml v0.1.0 // indirect
 	github.com/oasdiff/yaml3 v0.0.13 // indirect
+	github.com/pavlo-v-chernykh/keystore-go/v4 v4.5.0 // indirect
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
 	github.com/privacybydesign/gabi v0.0.0-20221212095008-68a086907750 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
@@ -216,7 +218,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.3.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/privacybydesign/irmago v1.1.2-0.20260717112833-34d4cf3b3d47
+	github.com/privacybydesign/irmago v1.1.2-0.20260718193541-beee65e3a8ff
 	github.com/prometheus/client_golang v1.12.1 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.32.1 // indirect
@@ -290,11 +292,11 @@ require (
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260209203927-2842357ff358 // indirect
-	golang.org/x/mod v0.36.0 // indirect
+	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/tools v0.45.0 // indirect
+	golang.org/x/tools v0.46.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260420184626-e10c466a9529 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
@@ -310,6 +312,7 @@ require (
 	modernc.org/sqlite v1.49.1 // indirect
 	mvdan.cc/gofumpt v0.9.2 // indirect
 	mvdan.cc/unparam v0.0.0-20251027182757-5beb8c8f8f15 // indirect
+	secdsa v0.0.0-20260718193816-8dc7ba301cc7
 )
 
 tool (
@@ -317,3 +320,5 @@ tool (
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	github.com/pressly/goose/v3/cmd/goose
 )
+
+replace secdsa => github.com/privacybydesign/wallet-provider v0.0.0-20260718193816-8dc7ba301cc7

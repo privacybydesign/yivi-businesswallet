@@ -37,6 +37,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
 )
 
 const (
@@ -121,7 +122,7 @@ func newAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
 
 // newAttestationHolder builds the holder-wallet engine chosen by config: the
 // in-process stub (dev / CI) or the irmago EUDI engine backed by Postgres.
-func newAttestationHolder(cfg config.Config) (eudiholder.Holder, error) {
+func newAttestationHolder(cfg config.Config, wscaStore *wsca.Store) (eudiholder.Holder, error) {
 	switch cfg.AttestationHolder {
 	case config.HolderStub:
 		return eudiholder.NewStubHolder(), nil
@@ -130,11 +131,25 @@ func newAttestationHolder(cfg config.Config) (eudiholder.Holder, error) {
 		if err != nil {
 			return nil, err
 		}
-		return eudiholder.NewEngine(cfg.DatabaseDSN, cfg.AttestationHolderStorageDir, key, eudiholder.RedeemConfig{
+		engine := eudiholder.NewEngine(cfg.DatabaseDSN, cfg.AttestationHolderStorageDir, key, eudiholder.RedeemConfig{
 			TrustChainPEM:       []byte(cfg.AttestationHolderTrustChain),
 			StagingTrustAnchors: cfg.AttestationHolderStagingAnchors,
 			AllowInsecureHTTP:   cfg.AttestationHolderAllowInsecureHTTP,
-		}), nil
+		})
+		// WSCA-backed holder binding is opt-in: only when a wallet-provider URL is
+		// configured. It requires the sealed-secret store (a WSCA KEK).
+		if cfg.AttestationHolderWSCAURL != "" {
+			if !wscaStore.Configured() {
+				return nil, fmt.Errorf("%s is set but %s is not", "ATTESTATION_HOLDER_WSCA_URL", "ATTESTATION_HOLDER_WSCA_KEK")
+			}
+			engine.SetWSCA(&eudiholder.WSCAConfig{
+				BaseURL:     cfg.AttestationHolderWSCAURL,
+				KeystoreDir: cfg.AttestationHolderWSCAKeystoreDir,
+				Insecure:    cfg.AttestationHolderWSCAInsecure,
+				Secret:      wscaStore.Secret,
+			})
+		}
+		return engine, nil
 	default:
 		return nil, fmt.Errorf("attestation holder %q is not implemented", cfg.AttestationHolder)
 	}
@@ -322,7 +337,12 @@ func run() error {
 	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())
 	issuerSettingsHandler := issuersettings.NewHandler(issuerSettingsStore, requireUser, orgHandler.Authorize)
 
-	attHolder, err := newAttestationHolder(cfg)
+	wscaCipher, err := crypto.NewCipher(cfg.AttestationHolderWSCAKEK)
+	if err != nil {
+		return err
+	}
+	wscaStore := wsca.NewStore(pool, wscaCipher)
+	attHolder, err := newAttestationHolder(cfg, wscaStore)
 	if err != nil {
 		return err
 	}

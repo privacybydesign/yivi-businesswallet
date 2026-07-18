@@ -73,6 +73,9 @@ type Engine struct {
 	httpClient *http.Client
 	// sessionCounter yields a unique session id per redemption.
 	sessionCounter atomic.Uint64
+	// wsca, when set, backs holder binding keys with the wallet-provider WSCA/HSM
+	// instead of software keys (see engine_wsca.go). nil = software keys.
+	wsca *WSCAConfig
 }
 
 // RedeemConfig configures the OpenID4VCI holder-redemption path (the QERDS
