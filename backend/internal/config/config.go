@@ -47,6 +47,10 @@ const (
 	envAttestationHolder           = "ATTESTATION_HOLDER"
 	envAttestationHolderStorageDir = "ATTESTATION_HOLDER_STORAGE_DIR"
 	envAttestationHolderMasterKey  = "ATTESTATION_HOLDER_MASTER_KEY"
+	// Trust posture for the holder's OpenID4VCI receive/redeem path (QERDS).
+	envAttestationHolderTrustChain        = "ATTESTATION_HOLDER_TRUST_CHAIN"
+	envAttestationHolderStagingAnchors    = "ATTESTATION_HOLDER_STAGING_ANCHORS"
+	envAttestationHolderAllowInsecureHTTP = "ATTESTATION_HOLDER_ALLOW_INSECURE_HTTP"
 
 	// APP_BASE_URL is the public base URL of the frontend, used to build links in
 	// outbound e-mail / QERDS messages (e.g. the credential claim page).
@@ -160,6 +164,16 @@ type Config struct {
 	AttestationHolder           string
 	AttestationHolderStorageDir string
 	AttestationHolderMasterKey  string
+	// AttestationHolderTrustChain is the trusted-issuer CA PEM the holder verifies
+	// received credentials against (holder analogue of EudiIssuerChain). Empty uses
+	// irmago's built-in trust model.
+	AttestationHolderTrustChain string
+	// AttestationHolderStagingAnchors adds irmago's staging trust anchors (for the
+	// Yivi staging Veramo issuer in dev/staging).
+	AttestationHolderStagingAnchors bool
+	// AttestationHolderAllowInsecureHTTP permits http:// issuer endpoints on the
+	// receive path (local dev only).
+	AttestationHolderAllowInsecureHTTP bool
 
 	AppBaseURL         string
 	EmailEncryptionKey string
@@ -271,6 +285,11 @@ func Load() (Config, error) {
 		AttestationHolder:           attestationHolder,
 		AttestationHolderStorageDir: attestationHolderStorageDir,
 		AttestationHolderMasterKey:  attestationHolderMasterKey,
+		AttestationHolderTrustChain: os.Getenv(envAttestationHolderTrustChain),
+		AttestationHolderStagingAnchors: strings.EqualFold(
+			os.Getenv(envAttestationHolderStagingAnchors), "true"),
+		AttestationHolderAllowInsecureHTTP: strings.EqualFold(
+			os.Getenv(envAttestationHolderAllowInsecureHTTP), "true"),
 
 		AppBaseURL:         envOrDefault(envAppBaseURL, defaultAppBaseURL),
 		EmailEncryptionKey: os.Getenv(envEmailEncryptionKey),

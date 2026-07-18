@@ -31,16 +31,44 @@ type provider interface {
 	ResolveAddress(ctx context.Context, identifier string) (qerdsprovider.Address, error)
 }
 
+// InboundConsumer is notified of each received message so a domain slice can act
+// on its content — e.g. detect an OpenID4VCI credential offer in the body and
+// redeem it into the org's holder engine (see internal/attestation). It is
+// optional and best-effort: a consumer error is logged, never fatal, so it can
+// never lose or reject an already-stored QERDS message. Implementations must be
+// idempotent — the consumer runs again if the same message is re-delivered.
+type InboundConsumer interface {
+	OnInboundMessage(ctx context.Context, orgID, messageID uuid.UUID, subject, body string) error
+}
+
 // Service coordinates the send flow, inbound intake and evidence persistence
 // across the message store, address store and the external provider.
 type Service struct {
 	messages  messageStore
 	addresses addressStore
 	provider  provider
+	consumer  InboundConsumer
 }
 
 func NewService(messages messageStore, addresses addressStore, prov provider) *Service {
 	return &Service{messages: messages, addresses: addresses, provider: prov}
+}
+
+// SetInboundConsumer registers the (optional) consumer notified on every inbound
+// message. Wire it at boot; nil leaves inbound intake as pure persistence.
+func (s *Service) SetInboundConsumer(c InboundConsumer) { s.consumer = c }
+
+// notifyConsumer runs the inbound consumer best-effort: a failure is logged and
+// swallowed so it never rejects an already-persisted message. The consumer is
+// idempotent, so a later re-delivery re-attempts a failed redemption.
+func (s *Service) notifyConsumer(ctx context.Context, orgID uuid.UUID, msg Message) {
+	if s.consumer == nil {
+		return
+	}
+	if err := s.consumer.OnInboundMessage(ctx, orgID, msg.ID, msg.Subject, msg.Body); err != nil {
+		slog.ErrorContext(ctx, "qerds inbound consumer failed",
+			slog.String("messageId", msg.ID.String()), slog.String("error", err.Error()))
+	}
 }
 
 // Send transmits a message via the provider. It persists the message
@@ -131,12 +159,13 @@ func (s *Service) Poll(ctx context.Context, orgID uuid.UUID) (int, error) {
 			return count, fmt.Errorf("qerds: fetch %q: %w", addr.Address, err)
 		}
 		for _, in := range inbound {
-			_, created, err := s.messages.CreateInbound(ctx, orgID, in)
+			msg, created, err := s.messages.CreateInbound(ctx, orgID, in)
 			if err != nil {
 				return count, err
 			}
 			if created {
 				count++
+				s.notifyConsumer(ctx, orgID, msg)
 			}
 		}
 	}
@@ -150,8 +179,12 @@ func (s *Service) ReceiveInbound(ctx context.Context, in qerdsprovider.InboundMe
 	if err != nil {
 		return err
 	}
-	if _, _, err := s.messages.CreateInbound(ctx, orgID, in); err != nil {
+	msg, created, err := s.messages.CreateInbound(ctx, orgID, in)
+	if err != nil {
 		return err
+	}
+	if created {
+		s.notifyConsumer(ctx, orgID, msg)
 	}
 	return nil
 }

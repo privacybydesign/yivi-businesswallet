@@ -520,6 +520,11 @@ delivered over QERDS (`source=qerds`, with the `qerds_evidence` chain). The org 
 list, select/combine, and delete held EAAs (soft-delete). Export (§10, Art 5(1)(l))
 covers both issued and held.
 
+The `source=qerds` path — delivering a real OpenID4VCI Credential Offer over the
+secure channel (not a claim link) and redeeming it via the holder's OpenID4VCI
+flow — is designed in [`oid4vci-over-qerds.md`](./oid4vci-over-qerds.md) (pre-auth
+vs. authorization-code grants for business wallets).
+
 ---
 
 ## 10. HTTP API

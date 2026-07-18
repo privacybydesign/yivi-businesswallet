@@ -50,6 +50,30 @@ func TestStubHolderStoreDeleteRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStubHolderRedeem(t *testing.T) {
+	t.Parallel()
+	h := eudiholder.NewStubHolder()
+	ctx := context.Background()
+	org := uuid.New()
+
+	const offer = "openid-credential-offer://?credential_offer=%7B%7D"
+	got, err := h.Redeem(ctx, org, offer)
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if got.Ref == "" {
+		t.Error("redeem returned empty ref")
+	}
+	if got.VCT == "" {
+		t.Error("redeem returned empty vct")
+	}
+
+	// The redeemed credential is now held: deleting its ref is a no-op success.
+	if err := h.Delete(ctx, org, got.Ref); err != nil {
+		t.Fatalf("delete redeemed ref: %v", err)
+	}
+}
+
 func TestParseMasterKey(t *testing.T) {
 	t.Parallel()
 	valid := strings.Repeat("ab", 32) // 64 hex chars = 32 bytes

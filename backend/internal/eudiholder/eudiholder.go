@@ -46,6 +46,15 @@ type Holder interface {
 	// dev seed.
 	Store(ctx context.Context, orgID uuid.UUID, cred Credential) (string, error)
 
+	// Redeem runs the OpenID4VCI holder flow for offerURI — an
+	// openid-credential-offer:// deeplink using the pre-authorized-code grant —
+	// against the sending org's issuer, verifies and stores the received
+	// credential in this org's holder engine, and returns the fields the caller
+	// indexes in held_attestations. This is the receive counterpart to the issue
+	// side: it is how an OpenID4VCI offer delivered over QERDS (§9.5,
+	// .ai/features/oid4vci-over-qerds.md) becomes a held credential.
+	Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (Redeemed, error)
+
 	// Delete removes a credential instance from the organization's holder engine.
 	// Deleting an absent ref is a no-op: the held_attestations index is the source
 	// of truth for the audit trail (it soft-deletes), while the engine holds the
@@ -78,4 +87,16 @@ type Credential struct {
 	IssuedAt time.Time
 	// ExpiresAt is the exp claim; nil if the credential does not expire.
 	ExpiresAt *time.Time
+}
+
+// Redeemed is the outcome of redeeming a credential offer: the fields the caller
+// records in held_attestations. The credential material itself is already stored
+// in the org's holder engine by the time Redeem returns.
+type Redeemed struct {
+	// Ref is the engine credential-instance id → held_attestations.credential_ref.
+	Ref string
+	// VCT is the verifiable-credential type of the received credential.
+	VCT string
+	// Issuer is the credential issuer identifier (for the held index / display).
+	Issuer string
 }

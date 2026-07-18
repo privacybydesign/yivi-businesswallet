@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
@@ -63,18 +65,45 @@ type Engine struct {
 	// same org (so two callers don't both AutoMigrate it). One entry per org ever
 	// seen — bounded by org count, so it is never pruned.
 	opening map[uuid.UUID]*sync.Mutex
+
+	// redeem configures the OpenID4VCI holder-redemption path (QERDS receive).
+	redeem RedeemConfig
+	// httpClient is the client the holder uses to reach the issuer's token and
+	// credential endpoints.
+	httpClient *http.Client
+	// sessionCounter yields a unique session id per redemption.
+	sessionCounter atomic.Uint64
+}
+
+// RedeemConfig configures the OpenID4VCI holder-redemption path (the QERDS
+// receive flow, see .ai/features/oid4vci-over-qerds.md). The zero value verifies
+// received credentials against irmago's built-in production trust anchors only
+// and requires HTTPS issuer endpoints.
+type RedeemConfig struct {
+	// TrustChainPEM, when set, is the trusted-issuer CA chain received credentials
+	// are verified against — the holder analogue of the verifier's
+	// EUDI_ISSUER_CHAIN. When empty, irmago's built-in trust model is used.
+	TrustChainPEM []byte
+	// StagingTrustAnchors adds irmago's staging trust anchors, for dev/staging
+	// issuers (e.g. the Yivi staging Veramo issuer). Ignored when TrustChainPEM set.
+	StagingTrustAnchors bool
+	// AllowInsecureHTTP permits http:// issuer endpoints; tests / local dev only.
+	AllowInsecureHTTP bool
 }
 
 // NewEngine builds the irmago-backed holder. dsn is the shared-database URL
 // (search_path is set per org), storageDir is the base directory for irmago's
-// per-org filesystem storage, and masterKey seeds per-org key derivation.
-func NewEngine(dsn, storageDir string, masterKey [32]byte) *Engine {
+// per-org filesystem storage, masterKey seeds per-org key derivation, and redeem
+// configures the receive/redemption trust posture.
+func NewEngine(dsn, storageDir string, masterKey [32]byte, redeem RedeemConfig) *Engine {
 	return &Engine{
 		dsn:        dsn,
 		storageDir: storageDir,
 		masterKey:  masterKey,
 		engines:    make(map[uuid.UUID]irmastorage.Storage),
 		opening:    make(map[uuid.UUID]*sync.Mutex),
+		redeem:     redeem,
+		httpClient: &http.Client{},
 	}
 }
 

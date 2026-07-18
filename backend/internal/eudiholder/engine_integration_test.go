@@ -25,7 +25,7 @@ func newTestEngine(t *testing.T) (*eudiholder.Engine, *pgxpool.Pool) {
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	eng := eudiholder.NewEngine(dsn, t.TempDir(), key)
+	eng := eudiholder.NewEngine(dsn, t.TempDir(), key, eudiholder.RedeemConfig{})
 	t.Cleanup(func() { _ = eng.Close() })
 	return eng, pool
 }
