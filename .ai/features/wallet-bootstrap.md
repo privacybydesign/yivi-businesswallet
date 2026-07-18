@@ -35,6 +35,19 @@ join via a claim, not a duplicate).
 
 Still pending: owner-claim matching (`ClaimRepresentation`, 501); a shared strong
 identifier for matching; the async QERDS request→attestation transport.
+
+> **"Activation" here is a business-record flip, not WUA-backed wallet-unit
+> provisioning.** `ActivateFromAttestation` sets the org/business-wallet record to
+> `StatusActive` (Art 6(2) lifecycle) after the KVK check — it does **not** provision
+> a **wallet unit attestation** (Art 6(1)(k)/(l)) proving the wallet instance runs on a
+> secure cryptographic device at assurance "substantial". That assurance-backed
+> activation is unbuilt and tracked in **#28** (qualified trust services). Note the
+> deployment model: this is a **server-side, org-level** wallet with a remote/QTSP-side
+> QSCD (the requestor/orchestrator never holds private keys) — there is **no
+> device-resident PIN / holder-binding / biometric ceremony**; the human factor is
+> OpenID4VP representative authentication (the PID/identity disclosure at
+> enrollment/registration), not a locally-chosen passcode.
+
 **Depends on:** the `qerds` slice (messages/addresses/evidence/provider); **OpenID4VP/EUDI
 login** (`.ai/features/auth-openid4vp.md`) for the PID/identity seam; `organization`
 (orgs/memberships/audit); `identity` (name reconciliation).

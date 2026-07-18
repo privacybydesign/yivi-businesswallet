@@ -39,6 +39,15 @@ const (
 	envAttestationIssuerInstance = "ATTESTATION_ISSUER_INSTANCE"
 	envAttestationPingCredential = "ATTESTATION_ISSUER_PING_CREDENTIAL"
 
+	// Attestation holder (the "store, select" side). The irmago EUDI holder engine
+	// is backed by Postgres, one isolated schema per org; the storage dir holds
+	// irmago's per-org filesystem material and the master key (hex 32 bytes) seeds
+	// per-org key derivation. Both are required only when the irmago engine is
+	// selected (the stub needs neither).
+	envAttestationHolder           = "ATTESTATION_HOLDER"
+	envAttestationHolderStorageDir = "ATTESTATION_HOLDER_STORAGE_DIR"
+	envAttestationHolderMasterKey  = "ATTESTATION_HOLDER_MASTER_KEY"
+
 	// APP_BASE_URL is the public base URL of the frontend, used to build links in
 	// outbound e-mail / QERDS messages (e.g. the credential claim page).
 	envAppBaseURL = "APP_BASE_URL"
@@ -93,6 +102,13 @@ const (
 
 	defaultAttestationIssuer = IssuerStub
 
+	// HolderStub selects the in-process StubHolder (local dev / CI); HolderIrmago
+	// selects the irmago EUDI holder engine backed by Postgres.
+	HolderStub   = "stub"
+	HolderIrmago = "irmago"
+
+	defaultAttestationHolder = HolderStub
+
 	defaultQerdsProvider             = ProviderStub
 	defaultQerdsDefaultAddressDomain = "qerds.localhost"
 
@@ -140,6 +156,10 @@ type Config struct {
 	AttestationIssuerToken    string
 	AttestationIssuerInstance string
 	AttestationPingCredential string
+
+	AttestationHolder           string
+	AttestationHolderStorageDir string
+	AttestationHolderMasterKey  string
 
 	AppBaseURL         string
 	EmailEncryptionKey string
@@ -202,6 +222,18 @@ func Load() (Config, error) {
 		}
 	}
 
+	attestationHolder := envOrDefault(envAttestationHolder, defaultAttestationHolder)
+	attestationHolderStorageDir := os.Getenv(envAttestationHolderStorageDir)
+	attestationHolderMasterKey := os.Getenv(envAttestationHolderMasterKey)
+	if attestationHolder != HolderStub {
+		if attestationHolderStorageDir == "" {
+			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationHolderStorageDir, envAttestationHolder, HolderStub)
+		}
+		if attestationHolderMasterKey == "" {
+			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationHolderMasterKey, envAttestationHolder, HolderStub)
+		}
+	}
+
 	return Config{
 		DatabaseDSN: dsn,
 		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
@@ -235,6 +267,10 @@ func Load() (Config, error) {
 		AttestationIssuerToken:    os.Getenv(envAttestationIssuerToken),
 		AttestationIssuerInstance: attestationIssuerInstance,
 		AttestationPingCredential: os.Getenv(envAttestationPingCredential),
+
+		AttestationHolder:           attestationHolder,
+		AttestationHolderStorageDir: attestationHolderStorageDir,
+		AttestationHolderMasterKey:  attestationHolderMasterKey,
 
 		AppBaseURL:         envOrDefault(envAppBaseURL, defaultAppBaseURL),
 		EmailEncryptionKey: os.Getenv(envEmailEncryptionKey),

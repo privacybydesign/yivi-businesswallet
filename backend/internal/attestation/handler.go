@@ -47,6 +47,7 @@ type issuanceService interface {
 	Status(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ClaimStatus(ctx context.Context, token string) (ClaimView, error)
+	DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
 }
 
 // issuerSettingsReader resolves an org's issuer instance name (defaulted to the
@@ -59,11 +60,12 @@ type issuerSettingsReader interface {
 // Handler serves the org-scoped attestations API (Schemas / Templates / Issued
 // tabs + key material). Org routes compose the injected requireUser + authorize
 // middleware; write/manage routes additionally require org admin.
-// heldStore is the read/delete surface over the org's held-credential index
-// (the credential material itself lives in the holder engine, §6.5).
+//
+// heldStore is the read surface over the org's held-credential index; deletion
+// runs through the service (it also removes the credential from the holder
+// engine, §6.5), so only the list read lives here.
 type heldStore interface {
 	ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error)
-	SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
 }
 
 type Handler struct {
@@ -180,7 +182,7 @@ func (h *Handler) deleteHeld(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_id", "invalid held attestation id")
 	}
 	org := organization.OrgFromContext(r.Context())
-	switch err := h.held.SoftDeleteHeld(r.Context(), org.ID, id); {
+	switch err := h.service.DeleteHeld(r.Context(), org.ID, id); {
 	case errors.Is(err, ErrHeldNotFound):
 		return notFound("held_not_found", "held attestation not found")
 	case err != nil:

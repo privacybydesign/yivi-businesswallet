@@ -21,6 +21,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
@@ -50,6 +51,8 @@ const (
 
 	issuerProbeTimeout = 10 * time.Second
 	issuerHTTPTimeout  = 15 * time.Second
+
+	holderProbeTimeout = 10 * time.Second
 
 	// PostGuard uploads can be large; allow a generous client timeout.
 	postguardHTTPTimeout = 60 * time.Second
@@ -113,6 +116,23 @@ func newAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
 		), nil
 	default:
 		return nil, fmt.Errorf("attestation issuer %q is not implemented", cfg.AttestationIssuer)
+	}
+}
+
+// newAttestationHolder builds the holder-wallet engine chosen by config: the
+// in-process stub (dev / CI) or the irmago EUDI engine backed by Postgres.
+func newAttestationHolder(cfg config.Config) (eudiholder.Holder, error) {
+	switch cfg.AttestationHolder {
+	case config.HolderStub:
+		return eudiholder.NewStubHolder(), nil
+	case config.HolderIrmago:
+		key, err := eudiholder.ParseMasterKey(cfg.AttestationHolderMasterKey)
+		if err != nil {
+			return nil, err
+		}
+		return eudiholder.NewEngine(cfg.DatabaseDSN, cfg.AttestationHolderStorageDir, key), nil
+	default:
+		return nil, fmt.Errorf("attestation holder %q is not implemented", cfg.AttestationHolder)
 	}
 }
 
@@ -293,9 +313,26 @@ func run() error {
 	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())
 	issuerSettingsHandler := issuersettings.NewHandler(issuerSettingsStore, requireUser, orgHandler.Authorize)
 
+	attHolder, err := newAttestationHolder(cfg)
+	if err != nil {
+		return err
+	}
+	// Fatal readiness gate, mirroring the issuer probe: fail at boot if the holder
+	// engine cannot open + migrate its per-org schema (irmago) against Postgres.
+	holderProbeCtx, holderProbeCancel := context.WithTimeout(ctx, holderProbeTimeout)
+	defer holderProbeCancel()
+	if err := attHolder.Ping(holderProbeCtx); err != nil {
+		return fmt.Errorf("attestation holder ping: %w", err)
+	}
+	defer func() {
+		if err := attHolder.Close(); err != nil {
+			slog.Error("closing attestation holder", slog.String("error", err.Error()))
+		}
+	}()
+
 	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
 	attestationService := attestation.NewService(
-		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, cfg.AppBaseURL,
+		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, attestationStore, attHolder, cfg.AppBaseURL,
 	)
 	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
 

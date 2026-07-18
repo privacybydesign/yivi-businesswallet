@@ -22,6 +22,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
@@ -126,7 +127,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())
 	attestationService := attestation.NewService(
 		attestationStore, openid4vciissuer.NewStubIssuer(), issuerSettingsStore,
-		stubEmailNotifier{}, stubQerdsNotifier{}, "http://app.test",
+		stubEmailNotifier{}, stubQerdsNotifier{}, attestationStore, eudiholder.NewStubHolder(), "http://app.test",
 	)
 	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, "", requireUser, orgHandler.Authorize)
 
