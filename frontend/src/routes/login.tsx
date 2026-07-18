@@ -3,7 +3,6 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { ApiError } from "../api/http";
 import { claimAuthSession } from "../api/auth";
 import type { PendingInvitation } from "../api/auth";
 import { meQueryKey } from "../api/auth.queries";
@@ -13,6 +12,7 @@ import {
 } from "../api/invitations";
 import { inviteError } from "../lib/invite-error";
 import type { InviteErrorContent } from "../lib/invite-error";
+import { claimErrorKind } from "../lib/login-error";
 import {
   Avatar,
   Button,
@@ -65,6 +65,7 @@ type LoginPhase =
   | "running"
   | "claiming"
   | "invited"
+  | "notRegistered"
   | "disclosing"
   | "accepting"
   | "accepted"
@@ -260,6 +261,26 @@ export default function Login(): React.JSX.Element {
                   ))}
                 </div>
               </>
+            ) : phase === "notRegistered" ? (
+              <Outcome
+                tone="info"
+                icon="personal"
+                title={t("login.notRegistered")}
+                message={t("login.notRegisteredHint")}
+                action={
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      variant="primary"
+                      onClick={() => void navigate("/register")}
+                    >
+                      {t("login.notRegisteredAction")}
+                    </Button>
+                    <Button variant="secondary" onClick={retry}>
+                      {t("inviteAccept.retry")}
+                    </Button>
+                  </div>
+                }
+              />
             ) : (
               <>
                 <h1 className="mt-6 text-center text-[24px] font-bold">
@@ -327,10 +348,17 @@ function handleClaimError(
   setMessage: (m: string) => void,
   t: TFunction,
 ): void {
-  setPhase("idle");
-  if (error instanceof ApiError && error.status === 422) {
-    setMessage(t("login.credentialRejected"));
-    return;
+  switch (claimErrorKind(error)) {
+    case "notRegistered":
+      setPhase("notRegistered");
+      return;
+    case "credentialRejected":
+      setPhase("idle");
+      setMessage(t("login.credentialRejected"));
+      return;
+    case "failed":
+      setPhase("idle");
+      setMessage(t("login.failed"));
+      return;
   }
-  setMessage(t("login.failed"));
 }

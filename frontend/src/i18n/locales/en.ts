@@ -106,6 +106,8 @@ export const en = {
   disclosure: {
     openWallet: "Open your wallet",
     scanHint: "Scan the QR with your wallet, or open it on this device.",
+    expired: "This QR code has expired.",
+    refresh: "Show a new QR code",
   },
   claim: {
     issuedBy: "Issued by {{org}}",
@@ -152,6 +154,10 @@ export const en = {
     notCompleted: "Login was not completed. Please try again.",
     credentialRejected: "This credential can't be used to sign in.",
     failed: "Sign-in could not be completed. Please try again.",
+    notRegistered: "This email isn't registered yet.",
+    notRegisteredHint:
+      "Register a new business wallet, or ask your Business Wallet admin to invite you.",
+    notRegisteredAction: "Register a business",
     sharesEmail: "Signing in shares only your email address.",
     registerLink: "Registering a new business? Register here",
   },

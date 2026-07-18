@@ -42,7 +42,12 @@ npm run format      # prettier --check (use format:write to fix)
 npm run lint        # eslint . --cache
 npm run typecheck   # tsc --build
 npm run build       # vite build
+npm test            # vitest run (DOM-free unit tests; not yet a CI job)
 ```
+
+Frontend unit tests use Vitest (node env, no jsdom) and live beside their source as
+`*.test.ts`; they cover extracted pure logic, not rendered components. CI does not
+run them yet (`.github/workflows/ci.yml` only lints/typechecks/builds the frontend).
 
 **Backend** (`cd backend`), in order:
 ```bash
