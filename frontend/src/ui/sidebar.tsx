@@ -73,6 +73,9 @@ interface SidebarProps {
   open: boolean;
   // Called when a nav link is followed, so Root can close the mobile drawer.
   onNavigate: () => void;
+  // The active org's custom logo, shown in place of the Yivi wordmark.
+  brandLogoUri?: string;
+  brandName?: string;
 }
 
 export function Sidebar({
@@ -83,6 +86,8 @@ export function Sidebar({
   organizationsPending,
   open,
   onNavigate,
+  brandLogoUri,
+  brandName,
 }: SidebarProps): React.JSX.Element {
   const { t } = useTranslation();
   const matches = useMatches();
@@ -114,7 +119,7 @@ export function Sidebar({
       ].join(" ")}
     >
       <div className="border-line border-b px-4 pt-4.5 pb-3.5">
-        <Logo />
+        <Logo src={brandLogoUri} alt={brandName} />
       </div>
 
       <OrgSwitcher

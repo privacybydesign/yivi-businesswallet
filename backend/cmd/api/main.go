@@ -35,6 +35,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
 )
@@ -322,6 +323,9 @@ func run() error {
 	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())
 	issuerSettingsHandler := issuersettings.NewHandler(issuerSettingsStore, requireUser, orgHandler.Authorize)
 
+	themeSettingsStore := themesettings.NewStore(pool, audit.NewDBRecorder())
+	themeSettingsHandler := themesettings.NewHandler(themeSettingsStore, requireUser, orgHandler.Authorize)
+
 	attHolder, err := newAttestationHolder(cfg)
 	if err != nil {
 		return err
@@ -358,6 +362,7 @@ func run() error {
 		postguardHandler,
 		emailHandler,
 		issuerSettingsHandler,
+		themeSettingsHandler,
 		attestationHandler,
 	)
 

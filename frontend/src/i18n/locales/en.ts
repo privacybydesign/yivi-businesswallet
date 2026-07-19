@@ -346,6 +346,7 @@ export const en = {
     emailSettingsSaved: "E-mail settings saved",
     emailTestSent: "Test e-mail sent",
     issuerSettingsSaved: "Issuer settings saved",
+    themeSaved: "Branding updated",
   },
   members: {
     title: "Members",
@@ -530,6 +531,7 @@ export const en = {
     title: "Settings",
     subtitle: "Organization profile and preferences",
     tabOrg: "Organization",
+    tabBranding: "Branding",
     tabEmail: "E-mail",
     tabIssuer: "Issuer",
     tabPostguard: "PostGuard",
@@ -562,6 +564,25 @@ export const en = {
     bundleDid: "conf/dids/{{instance}}-did.json",
     bundleMetadata: "conf/metadata/{{instance}}.json",
     bundleVct: "conf/vct/{{name}}.json",
+  },
+  themeSettings: {
+    title: "Branding",
+    intro:
+      "Give this organization's wallet its own look. The primary colour is used for buttons and highlights, the accent colour for badges and small accents, and the logo replaces the Yivi wordmark. Leave a field empty to keep the default.",
+    primaryColor: "Primary colour",
+    accentColor: "Accent colour",
+    logoUri: "Logo URI",
+    logoUriPlaceholder: "https://… or data:image/png;base64,…",
+    reset: "Reset",
+    colorInvalid: "Colours must be a hex value like #1d4e89.",
+    logoInvalid: "The logo must be an https or data:image URI.",
+    contrastFail:
+      "The primary colour only reaches {{ratio}}:1 against text; pick a darker or lighter colour for at least 4.5:1 (WCAG AA).",
+    preview: "Preview",
+    previewButton: "Sample button",
+    logoPreviewAlt: "Logo preview",
+    loadError: "Could not load branding: {{message}}",
+    saveError: "Could not save branding: {{message}}",
   },
   emailSettings: {
     title: "E-mail delivery",
