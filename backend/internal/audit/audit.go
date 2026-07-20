@@ -73,6 +73,8 @@ const (
 	EmailSettingsUpdated = "email.settings_updated"
 
 	IssuerSettingsUpdated = "issuer.settings_updated"
+
+	ThemeSettingsUpdated = "theme.settings_updated"
 )
 
 const (
@@ -100,6 +102,8 @@ const (
 	TargetEmailSettings = "org_email_settings"
 
 	TargetIssuerSettings = "org_issuer_settings"
+
+	TargetThemeSettings = "org_theme_settings"
 )
 
 type Actor struct {

@@ -64,10 +64,19 @@ type demoMembership struct {
 	department string
 }
 
+// yiviOrg is the canonical Yivi organisation (Yivi B.V.): the anchor org for
+// the dev demo seed and the only org provisioned by the staging org seed
+// (EnsureYiviOrganization), so both paths create an identical Yivi wallet.
+var yiviOrg = demoOrganization{
+	name: "Yivi B.V.", slug: demoOrgSlug, kvkNumber: "90000010", euid: "NL.KVK.90000010",
+	address: "yivi@qerds.localhost", repGiven: "Johannes Hendrik", repFamily: "Janssen",
+	repKind: "bestuurder", repAuth: "sole",
+}
+
 // Anchor data: recognizable accounts/orgs that must stay stable so developers
 // can log in predictably. Volume and variety are generated with the faker.
 var demoOrganizations = []demoOrganization{
-	{name: "Yivi B.V.", slug: "yivi", kvkNumber: "90000010", euid: "NL.KVK.90000010", address: "yivi@qerds.localhost", repGiven: "Johannes Hendrik", repFamily: "Janssen", repKind: "bestuurder", repAuth: "sole"},
+	yiviOrg,
 	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NL.KVK.90000020", address: "firsty@qerds.localhost", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly"},
 	{name: "Radboud Universiteit", slug: "radboud-universiteit", kvkNumber: "90000030", euid: "NL.KVK.90000030", address: "radboud@qerds.localhost", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt"},
 }
@@ -243,6 +252,31 @@ func EnsurePlatformAdmins(ctx context.Context, dsn string, emails []string) erro
 		)
 	}
 	return nil
+}
+
+// EnsureYiviOrganization provisions the Yivi organisation (identity + default
+// QERDS address + representative) and nothing else — no demo members,
+// invitations or audit activity. ensureOrg is ON CONFLICT-guarded, so this is
+// idempotent and — unlike Run — safe to run on every staging/production deploy
+// without polluting a shared environment with demo data. It exists so staging
+// starts with a realistic organisation instead of an empty database or one that
+// has to be created by hand through the UI each time.
+func EnsureYiviOrganization(ctx context.Context, dsn string) (organization.Organization, error) {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return organization.Organization{}, fmt.Errorf("seed: connect: %w", err)
+	}
+	defer pool.Close()
+
+	org, err := ensureOrg(ctx, pool, yiviOrg)
+	if err != nil {
+		return organization.Organization{}, err
+	}
+	slog.Info("ensured Yivi organisation",
+		slog.String("slug", org.Slug),
+		slog.String("id", org.ID.String()),
+	)
+	return org, nil
 }
 
 func ensureUser(ctx context.Context, users *user.Store, email, givenNames, lastName, preferredName string) (user.User, error) {

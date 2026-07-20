@@ -35,6 +35,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
@@ -347,6 +348,10 @@ func run() error {
 		return err
 	}
 	wscaStore := wsca.NewStore(pool, wscaCipher)
+
+	themeSettingsStore := themesettings.NewStore(pool, audit.NewDBRecorder())
+	themeSettingsHandler := themesettings.NewHandler(themeSettingsStore, requireUser, orgHandler.Authorize)
+
 	attHolder, err := newAttestationHolder(cfg, wscaStore)
 	if err != nil {
 		return err
@@ -396,6 +401,7 @@ func run() error {
 		postguardHandler,
 		emailHandler,
 		issuerSettingsHandler,
+		themeSettingsHandler,
 		attestationHandler,
 		wscaWalletHandler,
 	)

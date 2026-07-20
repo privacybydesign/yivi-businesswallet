@@ -10,11 +10,13 @@ import { IssuerSettingsPanel } from "./issuer-settings";
 import { OrgProfileSettings } from "./org-profile-settings";
 import { PostguardApiKeyCard } from "./postguard-api-key";
 import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
+import { ThemeSettingsPanel } from "./theme-settings";
 import { WscaWalletPanel } from "./wsca-wallet-settings";
 import * as React from "react";
 
 const TABS = [
   { key: "org", labelKey: "settings.tabOrg" },
+  { key: "branding", labelKey: "settings.tabBranding" },
   { key: "email", labelKey: "settings.tabEmail" },
   { key: "issuer", labelKey: "settings.tabIssuer" },
   { key: "postguard", labelKey: "settings.tabPostguard" },
@@ -77,6 +79,8 @@ export default function Settings(): React.JSX.Element {
             <OrgProfileSettings org={org.data} />
             <DepartmentSettings slug={slug} />
           </div>
+        ) : tab === "branding" ? (
+          <ThemeSettingsPanel slug={slug} />
         ) : tab === "email" ? (
           <EmailSettingsPanel slug={slug} />
         ) : tab === "issuer" ? (
