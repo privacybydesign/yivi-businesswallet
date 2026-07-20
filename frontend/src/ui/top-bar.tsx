@@ -46,7 +46,9 @@ export function TopBar({
         </div>
         <div className="flex shrink-0 items-center gap-4">
           {actions && <div className="flex shrink-0 gap-2">{actions}</div>}
-          {brand.logoUri && <Logo src={brand.logoUri} alt={brand.name ?? ""} />}
+          {brand.logoUri && (
+            <Logo src={brand.logoUri} alt={brand.name || "Organization logo"} />
+          )}
         </div>
       </div>
     </div>

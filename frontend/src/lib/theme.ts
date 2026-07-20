@@ -151,6 +151,19 @@ export function resolveThemeTokens(
   return tokens;
 }
 
+// shouldApplyOrgTheme reports whether the runtime theme effect should push
+// tokens onto the document for the current query state. While the theme query is
+// in flight its data is `undefined`; applying then runs applyOrgTheme(undefined),
+// which clears every token — stripping the palette the inline pre-paint script
+// (index.html) already set and flashing the default look back in (the FOUC).
+// Only apply once real data has arrived (a theme object, or null for an org that
+// has no theme, which legitimately resets to the default).
+export function shouldApplyOrgTheme(
+  theme: OrgTheme | null | undefined,
+): boolean {
+  return theme !== undefined;
+}
+
 // applyOrgTheme maps a saved theme onto the design tokens on the documentElement.
 // Missing/invalid fields are cleared so they fall back to the default look.
 export function applyOrgTheme(theme: OrgTheme | null | undefined): void {

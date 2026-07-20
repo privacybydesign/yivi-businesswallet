@@ -7,7 +7,12 @@ import {
 } from "../api/organization.queries";
 import { useOrgThemeQuery } from "../api/theme.queries";
 import { setStoredOrgSlug } from "../lib/active-org";
-import { applyOrgTheme, cacheOrgTheme, clearOrgTheme } from "../lib/theme";
+import {
+  applyOrgTheme,
+  cacheOrgTheme,
+  clearOrgTheme,
+  shouldApplyOrgTheme,
+} from "../lib/theme";
 import { BrandProvider, MobileNavContext, Sidebar } from "../ui";
 import * as React from "react";
 
@@ -62,6 +67,13 @@ export default function Root(): React.JSX.Element | null {
   useEffect(() => {
     if (!activeSlug) {
       clearOrgTheme();
+      return;
+    }
+    // While the theme query is in flight `orgTheme` is undefined. Bail rather
+    // than apply it: applyOrgTheme(undefined) would strip the tokens the inline
+    // pre-paint script (index.html) already put on the document, flashing the
+    // default palette back in before the fetch resolves — the FOUC this avoids.
+    if (!shouldApplyOrgTheme(orgTheme)) {
       return;
     }
     applyOrgTheme(orgTheme);

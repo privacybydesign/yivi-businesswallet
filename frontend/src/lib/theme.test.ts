@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveThemeTokens } from "./theme";
+import { resolveThemeTokens, shouldApplyOrgTheme } from "./theme";
 import type { OrgTheme } from "../api/theme";
 
 // resolveThemeTokens is the single source of truth for both the runtime apply
@@ -67,5 +67,23 @@ describe("resolveThemeTokens", () => {
     expect(
       resolveThemeTokens(theme({ primaryColor: "#fff" })), // 3-digit shorthand is not accepted
     ).toEqual({});
+  });
+});
+
+// The runtime theme effect (routes/root.tsx) must skip applying while the theme
+// query is still loading: its data is `undefined` in flight, and applying then
+// would clear the tokens the inline pre-paint script (index.html) already set,
+// flashing the default palette back in before the fetch resolves (the FOUC).
+describe("shouldApplyOrgTheme", () => {
+  it("does not apply while the theme query is loading", () => {
+    expect(shouldApplyOrgTheme(undefined)).toBe(false);
+  });
+
+  it("applies once real theme data has arrived", () => {
+    expect(shouldApplyOrgTheme(theme({ primaryColor: "#1d4e89" }))).toBe(true);
+    // An org with no theme resolves to a value (not undefined) and legitimately
+    // resets to the default look.
+    expect(shouldApplyOrgTheme(theme({}))).toBe(true);
+    expect(shouldApplyOrgTheme(null)).toBe(true);
   });
 });
