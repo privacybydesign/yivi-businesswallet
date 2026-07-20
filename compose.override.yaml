@@ -10,6 +10,10 @@ services:
       start_period: 180s
       start_interval: 2s
     environment:
+      # Ignore any host go.work (bind-mounted via ./backend): WSCA is opt-in and
+      # its private module is only pulled in by a -tags wsca workspace build,
+      # which the default dev container never does. See .ai/features/wsca-holder-binding.md.
+      GOWORK: "off"
       # Login/disclosure runs over OpenID4VP against a hosted EUDI verifier.
       # Empty falls back to the config default (Yivi staging verifier).
       EUDI_VERIFIER_URL: ${EUDI_VERIFIER_URL:-}
@@ -52,6 +56,9 @@ services:
     build:
       dockerfile: docker/development/Dockerfile
     entrypoint: [ "go", "run", "./cmd/migrate"]
+    environment:
+      # Ignore any host go.work bind-mounted via ./backend (see backend service).
+      GOWORK: "off"
     volumes:
       - ./backend:/app
       - backend-go-build:/root/.cache/go-build
@@ -63,6 +70,8 @@ services:
       dockerfile: docker/development/Dockerfile
     entrypoint: ["go", "run", "./cmd/seed"]
     environment:
+      # Ignore any host go.work bind-mounted via ./backend (see backend service).
+      GOWORK: "off"
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
     depends_on:
       migrate:
