@@ -312,7 +312,6 @@ require (
 	modernc.org/sqlite v1.49.1 // indirect
 	mvdan.cc/gofumpt v0.9.2 // indirect
 	mvdan.cc/unparam v0.0.0-20251027182757-5beb8c8f8f15 // indirect
-	secdsa v0.0.0-20260718193816-8dc7ba301cc7
 )
 
 tool (
@@ -320,5 +319,3 @@ tool (
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	github.com/pressly/goose/v3/cmd/goose
 )
-
-replace secdsa => github.com/privacybydesign/wallet-provider v0.0.0-20260718193816-8dc7ba301cc7

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"secdsa/mobile/walletmobile"
 	"strings"
 	"syscall"
 	"time"
@@ -139,8 +138,12 @@ func newAttestationHolder(cfg config.Config, wscaStore *wsca.Store) (eudiholder.
 			AllowInsecureHTTP:   cfg.AttestationHolderAllowInsecureHTTP,
 		})
 		// WSCA-backed holder binding is opt-in: only when a wallet-provider URL is
-		// configured. It requires the sealed-secret store (a WSCA KEK).
+		// configured. It requires the sealed-secret store (a WSCA KEK) and a binary
+		// built with the `wsca` tag (the walletmobile client is a private module).
 		if cfg.AttestationHolderWSCAURL != "" {
+			if !wscaCompiledIn {
+				return nil, fmt.Errorf("%s is set but this binary was built without -tags wsca", "ATTESTATION_HOLDER_WSCA_URL")
+			}
 			if !wscaStore.Configured() {
 				return nil, fmt.Errorf("%s is set but %s is not", "ATTESTATION_HOLDER_WSCA_URL", "ATTESTATION_HOLDER_WSCA_KEK")
 			}
@@ -377,7 +380,7 @@ func run() error {
 	wscaActivator := wscawallet.NewActivator(
 		cfg.AttestationHolderWSCAURL != "",
 		func(orgID uuid.UUID) (wscawallet.WalletClient, error) {
-			return walletmobile.NewWallet(cfg.AttestationHolderWSCAURL, eudiholder.OrgKeystoreDir(cfg.AttestationHolderWSCAKeystoreDir, orgID), cfg.AttestationHolderWSCAInsecure)
+			return newWSCAWalletClient(cfg, orgID)
 		},
 		wscaStore,
 	)

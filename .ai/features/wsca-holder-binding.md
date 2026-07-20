@@ -78,12 +78,35 @@ rotate.
 - `ATTESTATION_HOLDER_WSCA_INSECURE` — trust the wallet-provider dev TLS cert
   (local/staging only).
 
-## Dependency note
+## Build tag + dependency isolation
 
-`backend/go.mod` currently `replace`s `secdsa` with a pinned wallet-provider
-pseudo-version, and CI accesses the private repo via a deploy key
-(`WALLET_PROVIDER_DEPLOY_KEY` + `GOPRIVATE`). The irmago `holderkeys` split is
-upstream (see irmago changes); repin to the merged versions before final merge.
+The WSCA client (`secdsa/mobile/walletmobile`) is a **private** module. To keep
+the default build — dev Docker containers, the default CI jobs — free of any
+private dependency (no `git`, no deploy key, no module fetch), all code that
+imports it lives behind the **`wsca` build tag**:
+
+- `internal/eudiholder/engine_wsca_binder_on.go` (`//go:build wsca`) — the real
+  `holderKeyBinder`; `engine_wsca_binder_off.go` (`//go:build !wsca`) is a stub
+  that returns nil (software keys) and errors if a WSCAConfig was set.
+- `cmd/api/wsca_on.go` / `wsca_off.go` — `newWSCAWalletClient` + `wscaCompiledIn`.
+  `newAttestationHolder` fails at boot if `ATTESTATION_HOLDER_WSCA_URL` is set on
+  a binary built without the tag.
+
+`secdsa` is **not** in `backend/go.mod` — a default `go build ./...` needs it
+nowhere. A `-tags wsca` build gets it through a **Go workspace** (`go.work`, git-
+ignored, per-developer paths) that `use`s a local wallet-provider clone:
+
+```
+go 1.26.4
+use .
+use /path/to/wallet-provider
+```
+
+CI's `backend-build-wsca` job clones the wallet-provider (via the
+`WALLET_PROVIDER_DEPLOY_KEY` deploy key), writes that `go.work`, and runs
+`go build -tags wsca ./...` + the tagged tests. It is the only job that touches
+the private repo. To run the WSCA path locally (or in the dev container), create
+the same `go.work` pointing at your clone and build/run with `-tags wsca`.
 
 ## Open items
 
