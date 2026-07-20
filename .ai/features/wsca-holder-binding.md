@@ -105,8 +105,28 @@ use /path/to/wallet-provider
 CI's `backend-build-wsca` job clones the wallet-provider (via the
 `WALLET_PROVIDER_DEPLOY_KEY` deploy key), writes that `go.work`, and runs
 `go build -tags wsca ./...` + the tagged tests. It is the only job that touches
-the private repo. To run the WSCA path locally (or in the dev container), create
-the same `go.work` pointing at your clone and build/run with `-tags wsca`.
+the private repo.
+
+### Running WSCA locally (Docker)
+
+The default dev containers set `GOWORK=off`, so a host `go.work` never leaks in.
+To bring the stack up with WSCA enabled, layer `compose.wsca.yaml`:
+
+```bash
+# needs a wallet-provider clone at ../wallet-provider (or set WALLET_PROVIDER_PATH)
+# and ATTESTATION_HOLDER_WSCA_KEK in .env (openssl rand -hex 32)
+docker compose -f compose.yaml -f compose.override.yaml -f compose.wsca.yaml up --build
+```
+
+That layer bind-mounts the clone to `/wallet-provider`, points `GOWORK` at
+`docker/development/wsca.work`, sets `GOFLAGS=-tags=wsca`, and defaults
+`ATTESTATION_HOLDER_WSCA_URL` to the Yivi staging wallet-provider. The activation
+panel (Settings → Wallets) then shows `configured: true`. The activation UI works
+with any holder mode; set `ATTESTATION_HOLDER=irmago` (+ master key) to also bind
+received credentials to the WSCA key on the redeem path.
+
+On the host (backend outside Docker) the equivalent is a `go.work` with
+`use .` + `use /path/to/wallet-provider` and `go run -tags wsca ./cmd/api`.
 
 ## Open items
 
