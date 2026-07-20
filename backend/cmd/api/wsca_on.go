@@ -3,9 +3,8 @@
 package main
 
 import (
-	"secdsa/mobile/walletmobile"
-
 	"github.com/google/uuid"
+	"github.com/privacybydesign/wallet-provider/mobile/walletmobile"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/config"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
