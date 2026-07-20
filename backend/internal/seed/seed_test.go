@@ -41,6 +41,35 @@ func TestDemoOrgsMatchRegister(t *testing.T) {
 	}
 }
 
+// TestRegisterOnlyCompanyIsOpenable is the regression for the unreachable
+// open-wallet happy path: at least one validatable KVK number must NOT be seeded
+// as an organisation, otherwise every validated requester is bounced with
+// ErrAlreadyRegistered when OpenWallet tries to create the org. It also pins the
+// register-only demo company (OpenableKVKNumber) as that openable entry.
+func TestRegisterOnlyCompanyIsOpenable(t *testing.T) {
+	seededKVK := map[string]bool{registryprovider.RegisterKVKNumber: true}
+	for _, o := range demoOrganizations {
+		seededKVK[o.kvkNumber] = true
+	}
+
+	if seededKVK[registryprovider.OpenableKVKNumber] {
+		t.Fatalf("register-only company %s must not be seeded as an org", registryprovider.OpenableKVKNumber)
+	}
+	if _, ok := registryprovider.DefaultDataset()[registryprovider.OpenableKVKNumber]; !ok {
+		t.Fatalf("register-only company %s must be a consultable register entry", registryprovider.OpenableKVKNumber)
+	}
+
+	openable := 0
+	for kvk := range registryprovider.DefaultDataset() {
+		if !seededKVK[kvk] {
+			openable++
+		}
+	}
+	if openable == 0 {
+		t.Fatal("no validatable KVK number is openable: every register entry is already seeded as an org, so OpenWallet's positive path is unreachable")
+	}
+}
+
 // TestKVKRegisterOrgNotConsultable guards that the KVK register participant is not
 // itself a consultable company in the dataset.
 func TestKVKRegisterOrgNotConsultable(t *testing.T) {

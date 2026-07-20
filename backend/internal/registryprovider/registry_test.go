@@ -91,6 +91,29 @@ func TestConsultValidatesMatchingRepresentative(t *testing.T) {
 	}
 }
 
+// TestConsultValidatesRegisterOnlyCompany proves the open-wallet happy path is
+// reachable through the register: the register-only demo company (not seeded as an
+// org) validates its representative, so OpenWallet can go on to create the org.
+func TestConsultValidatesRegisterOnlyCompany(t *testing.T) {
+	reg, _ := newTestRegistry()
+
+	att, err := reg.Consult(context.Background(), ConsultRequest{
+		KVKNumber:   OpenableKVKNumber,
+		GivenNames:  "Sanne Marijke",
+		FamilyName:  "Visser",
+		DateOfBirth: "1983-07-08",
+	})
+	if err != nil {
+		t.Fatalf("Consult: %v", err)
+	}
+	if !att.RequesterIsRepresentative {
+		t.Fatal("expected the register-only company's representative to be validated")
+	}
+	if att.LegalName != "Zonnedael B.V." {
+		t.Fatalf("legal name = %q, want Zonnedael B.V.", att.LegalName)
+	}
+}
+
 func TestConsultMatchesAccentAndCaseInsensitively(t *testing.T) {
 	reg, _ := newTestRegistry()
 

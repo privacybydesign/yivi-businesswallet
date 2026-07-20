@@ -27,9 +27,18 @@ type Registration struct {
 }
 
 // DemoRegistrations is the seeded fake KVK API: the deterministic set of known
-// company registrations the register matches consults against. The KVK numbers
-// and primary representatives are the single source of truth the seed reuses for
-// its demo organisations, so the seeded data and the register flow never drift.
+// company registrations the register matches consults against.
+//
+// The first three entries' KVK numbers and primary representatives are the single
+// source of truth the seed reuses for its demo organisations, so the seeded data
+// and the register flow never drift (TestDemoOrgsMatchRegister).
+//
+// The final entry is deliberately register-only: it is NOT seeded as an
+// organisation, so its KVK number is validatable but not yet registered. Without
+// it every consultable company would already exist as an org and OpenWallet would
+// bounce a validated requester with ErrAlreadyRegistered — leaving the positive
+// registration path unreachable. This entry keeps that path exercisable
+// (TestRegisterOnlyCompanyIsOpenable, and the OpenWallet-success integration test).
 var DemoRegistrations = []Registration{
 	{
 		KVKNumber: "90000010", LegalName: "Yivi B.V.", EUID: "NL.KVK.90000010",
@@ -50,7 +59,21 @@ var DemoRegistrations = []Registration{
 			{Kind: KindGevolmachtigde, GivenNames: "Anke", FamilyName: "Bakker", DateOfBirth: "1990-02-17", Authority: AuthorityBeperkt},
 		},
 	},
+	{
+		// Register-only: validatable but not seeded as an org, so a validated
+		// requester can actually open its wallet (see the type comment above).
+		KVKNumber: OpenableKVKNumber, LegalName: "Zonnedael B.V.", EUID: "NL.KVK." + OpenableKVKNumber,
+		Representatives: []Representative{
+			{Kind: KindBestuurder, GivenNames: "Sanne Marijke", FamilyName: "Visser", DateOfBirth: "1983-07-08", Authority: AuthoritySole},
+		},
+	},
 }
+
+// OpenableKVKNumber is the register-only demo company: a KVK number that validates
+// but is not seeded as an organisation, so the open-wallet happy path stays
+// reachable. Exposed so tests and demo tooling can drive a successful registration
+// without hard-coding the number.
+const OpenableKVKNumber = "90000040"
 
 // Dataset is an in-memory index of registrations keyed by KVK number: the
 // consultable state of the fake authentic source.
