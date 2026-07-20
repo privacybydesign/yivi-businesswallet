@@ -60,7 +60,7 @@ func (s *SeededRegistry) Consult(ctx context.Context, req ConsultRequest) (Regis
 		LegalName:       reg.LegalName,
 		EUID:            reg.EUID,
 		Representatives: reg.Representatives,
-		IssuedAt:        s.now(),
+		IssuedAt:        time.Now().UTC(),
 	}
 	idx, ok := reg.match(req)
 	if !ok {
@@ -72,10 +72,6 @@ func (s *SeededRegistry) Consult(ctx context.Context, req ConsultRequest) (Regis
 	s.audit(ctx, req, reg.LegalName, true, "")
 	return att, nil
 }
-
-// now returns the attestation issue time. It is a method so tests can keep the
-// field deterministic without reaching for a clock abstraction the stub predates.
-func (*SeededRegistry) now() time.Time { return time.Now().UTC() }
 
 // audit records the KVK-side decision on the register organisation's audit log:
 // the KVK number and identification data consulted, and the outcome (validated /
