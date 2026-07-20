@@ -766,6 +766,8 @@ github.com/privacybydesign/gabi v0.0.0-20221212095008-68a086907750 h1:3RuYOQTlAr
 github.com/privacybydesign/gabi v0.0.0-20221212095008-68a086907750/go.mod h1:QZI8hX8Ff2GfZ7UJuxyWw3nAGgt2s5+U4hxY6rmwQvs=
 github.com/privacybydesign/irmago v1.1.2-0.20260718193541-beee65e3a8ff h1:QAVN2njLOBbNZLoi+W5cjzBb21dR18UhaCXrL+MDcMI=
 github.com/privacybydesign/irmago v1.1.2-0.20260718193541-beee65e3a8ff/go.mod h1:h8Cnwbfj8s5lKKIURMMVBsssKQtGjisant9+LewK0Lg=
+github.com/privacybydesign/wallet-provider v0.0.0-20260718193816-8dc7ba301cc7 h1:ZSHIPBMVs11H1brGkyZLjOzrBedNL0TLK9IgF67sKII=
+github.com/privacybydesign/wallet-provider v0.0.0-20260718193816-8dc7ba301cc7/go.mod h1:7Hq11dSDl4fV4va8tgiFgcKeCOiRb8otJZavHpUA7Bo=
 github.com/prometheus/client_golang v0.9.1/go.mod h1:7SWBe2y4D6OKWSNQJUaRYU/AaXPKyh/dDVn+NZz0KFw=
 github.com/prometheus/client_golang v1.0.0/go.mod h1:db9x61etRT2tGnBNRi70OPL5FsnadC4Ky3P0J6CfImo=
 github.com/prometheus/client_golang v1.7.1/go.mod h1:PY5Wy2awLA44sXw4AOSfFBetzPP4j5+D6mVACh+pe2M=
