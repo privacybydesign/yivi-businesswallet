@@ -24,6 +24,10 @@ backend/build-errors.log
 *.test
 *.out
 coverage.*
+# Go workspace: only used for local WSCA builds (-tags wsca) that pull in the
+# private wallet-provider clone; paths are per-developer. See .ai/features/wsca-holder-binding.md.
+go.work
+go.work.sum
 
 # ---- Node (root tooling: husky, lint-staged) ----
 node_modules/

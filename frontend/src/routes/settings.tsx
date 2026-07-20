@@ -11,6 +11,7 @@ import { OrgProfileSettings } from "./org-profile-settings";
 import { PostguardApiKeyCard } from "./postguard-api-key";
 import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
 import { ThemeSettingsPanel } from "./theme-settings";
+import { WscaWalletPanel } from "./wsca-wallet-settings";
 import * as React from "react";
 
 const TABS = [
@@ -90,11 +91,7 @@ export default function Settings(): React.JSX.Element {
             <PostguardApiKeyCard slug={slug} isAdmin={isAdmin} />
           </div>
         ) : (
-          <Card className="p-6">
-            <p className="text-ink-soft text-[14px]">
-              {t("settings.walletsPlaceholder")}
-            </p>
-          </Card>
+          <WscaWalletPanel slug={slug} />
         )}
       </div>
     </>

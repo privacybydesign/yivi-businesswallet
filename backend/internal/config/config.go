@@ -55,6 +55,11 @@ const (
 	// (hex-encoded 32 bytes). Source from a KMS/secret manager. See
 	// .ai/features/wsca-holder-binding.md.
 	envAttestationHolderWSCAKEK = "ATTESTATION_HOLDER_WSCA_KEK"
+	// WSCA (wallet-provider) holder-binding backend. When URL is set, redemption
+	// binds holder keys via the WSCA/HSM instead of software keys.
+	envAttestationHolderWSCAURL         = "ATTESTATION_HOLDER_WSCA_URL"
+	envAttestationHolderWSCAKeystoreDir = "ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR"
+	envAttestationHolderWSCAInsecure    = "ATTESTATION_HOLDER_WSCA_INSECURE"
 
 	// APP_BASE_URL is the public base URL of the frontend, used to build links in
 	// outbound e-mail / QERDS messages (e.g. the credential claim page).
@@ -181,6 +186,14 @@ type Config struct {
 	// AttestationHolderWSCAKEK is the hex-encoded 32-byte deployment key that
 	// seals each org's WSCA activation secret at rest. Empty = WSCA not configured.
 	AttestationHolderWSCAKEK string
+	// AttestationHolderWSCAURL is the wallet-provider (WSCA) base URL. When set
+	// (with the irmago holder), redemption binds holder keys via the WSCA.
+	AttestationHolderWSCAURL string
+	// AttestationHolderWSCAKeystoreDir is the parent dir for per-org walletmobile
+	// keystores (a persistent volume).
+	AttestationHolderWSCAKeystoreDir string
+	// AttestationHolderWSCAInsecure trusts the wallet-provider's dev TLS cert.
+	AttestationHolderWSCAInsecure bool
 
 	AppBaseURL         string
 	EmailEncryptionKey string
@@ -297,7 +310,11 @@ func Load() (Config, error) {
 			os.Getenv(envAttestationHolderStagingAnchors), "true"),
 		AttestationHolderAllowInsecureHTTP: strings.EqualFold(
 			os.Getenv(envAttestationHolderAllowInsecureHTTP), "true"),
-		AttestationHolderWSCAKEK: os.Getenv(envAttestationHolderWSCAKEK),
+		AttestationHolderWSCAKEK:         os.Getenv(envAttestationHolderWSCAKEK),
+		AttestationHolderWSCAURL:         os.Getenv(envAttestationHolderWSCAURL),
+		AttestationHolderWSCAKeystoreDir: os.Getenv(envAttestationHolderWSCAKeystoreDir),
+		AttestationHolderWSCAInsecure: strings.EqualFold(
+			os.Getenv(envAttestationHolderWSCAInsecure), "true"),
 
 		AppBaseURL:         envOrDefault(envAppBaseURL, defaultAppBaseURL),
 		EmailEncryptionKey: os.Getenv(envEmailEncryptionKey),

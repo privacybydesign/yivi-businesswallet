@@ -346,6 +346,8 @@ export const en = {
     emailSettingsSaved: "E-mail settings saved",
     emailTestSent: "Test e-mail sent",
     issuerSettingsSaved: "Issuer settings saved",
+    wscaActivated: "Holder wallet activated",
+    wscaRotated: "Wallet secret rotated",
     themeSaved: "Branding updated",
   },
   members: {
@@ -539,7 +541,6 @@ export const en = {
     adminOnly: "Only organization admins can manage settings.",
     orgProfile: "Organization profile",
     discard: "Discard",
-    walletsPlaceholder: "Allowed wallets settings are coming soon.",
   },
   issuerSettings: {
     title: "Issuer instance",
@@ -564,6 +565,37 @@ export const en = {
     bundleDid: "conf/dids/{{instance}}-did.json",
     bundleMetadata: "conf/metadata/{{instance}}.json",
     bundleVct: "conf/vct/{{name}}.json",
+  },
+  wscaWallet: {
+    title: "Holder wallet (WSCA)",
+    intro:
+      "This organization holds received attestations in its own wallet-provider account. Holder-binding keys live in the wallet-provider HSM under sole control (SECDSA); the private key never leaves it.",
+    notConfigured:
+      "WSCA-backed holder binding is not enabled on this deployment.",
+    loadError: "Could not load the wallet status: {{message}}",
+    statusActivated: "Activated",
+    accountId: "Account",
+    certificateId: "Certificate",
+    activatedAt: "Activated",
+    rotatedAt: "Last rotated",
+    activateHint:
+      "Set a secret to activate the wallet. It is stored encrypted and used to sign holder-binding proofs autonomously; you only re-enter it to rotate.",
+    secret: "Secret",
+    confirmSecret: "Confirm secret",
+    secretHint: "At least 5 digits.",
+    secretInvalid: "The secret must be at least 5 digits.",
+    secretMismatch: "The secrets do not match.",
+    activate: "Activate wallet",
+    activating: "Activating…",
+    rotateTitle: "Rotate secret",
+    rotateHint:
+      "Re-key the wallet's certificate against a new secret. The account (and held credentials) are preserved.",
+    currentSecret: "Current secret",
+    newSecret: "New secret",
+    currentRequired: "The current secret is required.",
+    rotate: "Rotate secret",
+    rotating: "Rotating…",
+    actionError: "The operation failed: {{message}}",
   },
   themeSettings: {
     title: "Branding",

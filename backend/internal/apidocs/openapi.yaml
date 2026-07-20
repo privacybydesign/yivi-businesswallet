@@ -29,6 +29,8 @@ tags:
     description: Per-organisation email settings.
   - name: issuer-settings
     description: Per-organisation issuer settings.
+  - name: wsca
+    description: Per-organisation WSCA holder-wallet activation and rotation.
   - name: theme
     description: Per-organisation colour scheme and logo.
 paths:
@@ -1530,6 +1532,104 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/wsca:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [wsca]
+      summary: Get the organisation WSCA holder-wallet status
+      description: >-
+        Requires an administrator role. Reports whether WSCA-backed holder
+        binding is configured on this deployment and whether the organisation
+        has activated its wallet.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/wsca/activate:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [wsca]
+      summary: Activate the organisation WSCA holder wallet
+      description: >-
+        Requires an administrator role. Runs the one-time SECDSA activation with
+        the supplied secret (>=5 ASCII digits) and seals it. 409 if already
+        activated; 503 if WSCA is not configured on this deployment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/wsca/rotate:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [wsca]
+      summary: Rotate the organisation WSCA holder-wallet secret
+      description: >-
+        Requires an administrator role. Proves the current secret and re-keys the
+        certificate against a new secret (SECDSA ChangePIN; the account and held
+        credentials are preserved). 409 if not activated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/members:
     parameters:
       - name: slug

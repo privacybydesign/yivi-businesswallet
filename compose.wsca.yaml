@@ -1,0 +1,41 @@
+# Opt-in WSCA dev layer. Enables WSCA-backed holder binding locally by building
+# the backend with `-tags wsca` and pointing it at the Yivi staging
+# wallet-provider. Layer it AFTER the base + dev override:
+#
+#   docker compose -f compose.yaml -f compose.override.yaml -f compose.wsca.yaml up --build
+#
+# (or set COMPOSE_FILE=compose.yaml:compose.override.yaml:compose.wsca.yaml)
+#
+# Requires:
+#   - a local wallet-provider clone (WALLET_PROVIDER_PATH, default ../wallet-provider),
+#     so the private `secdsa` module is resolved from disk (no git/deploy key);
+#   - ATTESTATION_HOLDER_WSCA_KEK set in .env (openssl rand -hex 32) to seal
+#     activation secrets at rest.
+#
+# Then: Settings -> Wallets shows the WSCA panel enabled; activate the org wallet.
+# See .ai/features/wsca-holder-binding.md.
+services:
+  backend:
+    environment:
+      # Build every `go` invocation (air's `go build`) with the wsca tag, and
+      # resolve `secdsa` via the workspace instead of the default GOWORK=off.
+      GOFLAGS: "-tags=wsca"
+      GOWORK: /wsca.work
+      # The activation UI (Settings -> Wallets) works with any holder mode — it
+      # runs through the Activator, independent of the redeem path. Inherit
+      # ATTESTATION_HOLDER from .env (default stub). To also bind received
+      # credentials to the WSCA key on the redeem path, set ATTESTATION_HOLDER=irmago
+      # (+ ATTESTATION_HOLDER_MASTER_KEY) in .env.
+      ATTESTATION_HOLDER_WSCA_URL: ${ATTESTATION_HOLDER_WSCA_URL:-https://wallet-provider.staging.yivi.app}
+      ATTESTATION_HOLDER_WSCA_KEK: ${ATTESTATION_HOLDER_WSCA_KEK:?set ATTESTATION_HOLDER_WSCA_KEK in .env (openssl rand -hex 32) to enable the WSCA dev layer}
+      ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR: /var/lib/ybw/wsca
+      ATTESTATION_HOLDER_WSCA_INSECURE: ${ATTESTATION_HOLDER_WSCA_INSECURE:-false}
+    volumes:
+      - ${WALLET_PROVIDER_PATH:-../wallet-provider}:/wallet-provider
+      - ./docker/development/wsca.work:/wsca.work:ro
+      # Persist per-org walletmobile keystores across restarts (an activated
+      # wallet's possession key U lives here).
+      - wsca-keystores:/var/lib/ybw/wsca
+
+volumes:
+  wsca-keystores:
