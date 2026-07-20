@@ -49,7 +49,7 @@ func (e *Engine) holderKeyBinder(ctx context.Context, orgID uuid.UUID, st irmast
 	if e.wsca == nil {
 		return nil, nil
 	}
-	w, err := walletmobile.NewWallet(e.wsca.BaseURL, e.orgKeystoreDir(orgID), e.wsca.Insecure)
+	w, err := walletmobile.NewWallet(e.wsca.BaseURL, OrgKeystoreDir(e.wsca.KeystoreDir, orgID), e.wsca.Insecure)
 	if err != nil {
 		return nil, fmt.Errorf("eudiholder: open WSCA wallet org %s: %w", orgID, err)
 	}
@@ -61,7 +61,10 @@ func (e *Engine) holderKeyBinder(ctx context.Context, orgID uuid.UUID, st irmast
 	return irmabinding.NewIssuanceBinderFactory(signer)(st), nil
 }
 
-// orgKeystoreDir is the per-org walletmobile keystore directory.
-func (e *Engine) orgKeystoreDir(orgID uuid.UUID) string {
-	return filepath.Join(e.wsca.KeystoreDir, hex.EncodeToString(orgID[:]))
+// OrgKeystoreDir is the per-org walletmobile keystore directory under base. It is
+// the single source of truth for the layout: the activation flow
+// (internal/wscawallet) and this redeem path MUST agree, or activation writes a
+// keystore the redeem path never finds.
+func OrgKeystoreDir(base string, orgID uuid.UUID) string {
+	return filepath.Join(base, hex.EncodeToString(orgID[:]))
 }

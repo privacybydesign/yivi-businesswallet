@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"secdsa/mobile/walletmobile"
 	"strings"
 	"syscall"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wscawallet"
 )
 
 const (
@@ -368,6 +370,19 @@ func run() error {
 	)
 	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
 
+	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
+	// sealed-secret store + keystore layout with the holder redeem path so a wallet
+	// activated here is the one the redeem path signs with. Enabled (Configured())
+	// only when a wallet-provider URL is set.
+	wscaActivator := wscawallet.NewActivator(
+		cfg.AttestationHolderWSCAURL != "",
+		func(orgID uuid.UUID) (wscawallet.WalletClient, error) {
+			return walletmobile.NewWallet(cfg.AttestationHolderWSCAURL, eudiholder.OrgKeystoreDir(cfg.AttestationHolderWSCAKeystoreDir, orgID), cfg.AttestationHolderWSCAInsecure)
+		},
+		wscaStore,
+	)
+	wscaWalletHandler := wscawallet.NewHandler(wscaActivator, requireUser, orgHandler.Authorize)
+
 	handler := server.New(
 		pool,
 		cfg.StaticDir,
@@ -379,6 +394,7 @@ func run() error {
 		emailHandler,
 		issuerSettingsHandler,
 		attestationHandler,
+		wscaWalletHandler,
 	)
 
 	httpServer := &http.Server{
