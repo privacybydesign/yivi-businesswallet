@@ -51,6 +51,10 @@ const (
 	envAttestationHolderTrustChain        = "ATTESTATION_HOLDER_TRUST_CHAIN"
 	envAttestationHolderStagingAnchors    = "ATTESTATION_HOLDER_STAGING_ANCHORS"
 	envAttestationHolderAllowInsecureHTTP = "ATTESTATION_HOLDER_ALLOW_INSECURE_HTTP"
+	// Deployment key that seals each org's WSCA activation secret at rest
+	// (hex-encoded 32 bytes). Source from a KMS/secret manager. See
+	// .ai/features/wsca-holder-binding.md.
+	envAttestationHolderWSCAKEK = "ATTESTATION_HOLDER_WSCA_KEK"
 
 	// APP_BASE_URL is the public base URL of the frontend, used to build links in
 	// outbound e-mail / QERDS messages (e.g. the credential claim page).
@@ -174,6 +178,9 @@ type Config struct {
 	// AttestationHolderAllowInsecureHTTP permits http:// issuer endpoints on the
 	// receive path (local dev only).
 	AttestationHolderAllowInsecureHTTP bool
+	// AttestationHolderWSCAKEK is the hex-encoded 32-byte deployment key that
+	// seals each org's WSCA activation secret at rest. Empty = WSCA not configured.
+	AttestationHolderWSCAKEK string
 
 	AppBaseURL         string
 	EmailEncryptionKey string
@@ -290,6 +297,7 @@ func Load() (Config, error) {
 			os.Getenv(envAttestationHolderStagingAnchors), "true"),
 		AttestationHolderAllowInsecureHTTP: strings.EqualFold(
 			os.Getenv(envAttestationHolderAllowInsecureHTTP), "true"),
+		AttestationHolderWSCAKEK: os.Getenv(envAttestationHolderWSCAKEK),
 
 		AppBaseURL:         envOrDefault(envAppBaseURL, defaultAppBaseURL),
 		EmailEncryptionKey: os.Getenv(envEmailEncryptionKey),
