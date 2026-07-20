@@ -5,13 +5,13 @@ package eudiholder
 import (
 	"context"
 	"fmt"
-	"secdsa/mobile/walletmobile"
-	"secdsa/mobile/walletmobile/irmabinding"
 
 	"github.com/google/uuid"
 	"github.com/privacybydesign/irmago/eudi/openid4vci"
 	"github.com/privacybydesign/irmago/eudi/services"
 	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
+	"github.com/privacybydesign/wallet-provider/mobile/walletmobile"
+	"github.com/privacybydesign/wallet-provider/mobile/walletmobile/irmabinding"
 )
 
 // holderKeyBinder (wsca build) builds the org's WSCA issuance key binder over its
