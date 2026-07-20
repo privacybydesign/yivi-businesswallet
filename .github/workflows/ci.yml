@@ -125,7 +125,7 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts
           git clone git@github.com:privacybydesign/wallet-provider.git "$GITHUB_WORKSPACE/wallet-provider"
-          git -C "$GITHUB_WORKSPACE/wallet-provider" checkout 8dc7ba301cc7
+          git -C "$GITHUB_WORKSPACE/wallet-provider" checkout e9304d078c2ba60a02e77bebd5189e74ae395579
       - name: Create Go workspace (main module + wallet-provider clone)
         run: |
           GO_VERSION="$(go mod edit -json | python3 -c 'import json,sys;print(json.load(sys.stdin)["Go"])')"
