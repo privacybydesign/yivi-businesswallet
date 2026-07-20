@@ -123,29 +123,46 @@ export function primaryContrastFloor(background: string): number | null {
   return Math.min(resting, hover);
 }
 
-// applyOrgTheme maps a saved theme onto the design tokens on the documentElement.
-// Missing/invalid fields are cleared so they fall back to the default look.
-export function applyOrgTheme(theme: OrgTheme | null | undefined): void {
-  const root = document.documentElement.style;
+// resolveThemeTokens turns a saved theme into the map of design-token overrides
+// to apply on the documentElement: the brand seed colours plus the hover/shade
+// and readable-foreground variants derived from them. A missing or malformed
+// seed is simply left out (so it falls back to the :root default), so the
+// returned map only ever holds valid overrides. This is the single source of
+// truth for both the runtime apply and the pre-paint cache (see index.html),
+// so the cached palette and the applied palette can never drift apart.
+export function resolveThemeTokens(
+  theme: OrgTheme | null | undefined,
+): Record<string, string> {
+  const tokens: Record<string, string> = {};
 
   const primary = theme?.primaryColor ?? "";
   if (parseHex(primary)) {
-    root.setProperty(PRIMARY, primary);
-    root.setProperty(PRIMARY_HOVER, darken(primary, HOVER_DARKEN));
-    root.setProperty(PRIMARY_FG, readableForeground(primary));
-  } else {
-    root.removeProperty(PRIMARY);
-    root.removeProperty(PRIMARY_HOVER);
-    root.removeProperty(PRIMARY_FG);
+    tokens[PRIMARY] = primary;
+    tokens[PRIMARY_HOVER] = darken(primary, HOVER_DARKEN);
+    tokens[PRIMARY_FG] = readableForeground(primary);
   }
 
   const accent = theme?.accentColor ?? "";
   if (parseHex(accent)) {
-    root.setProperty(ACCENT, accent);
-    root.setProperty(ACCENT_600, darken(accent, ACCENT_DARKEN));
-  } else {
-    root.removeProperty(ACCENT);
-    root.removeProperty(ACCENT_600);
+    tokens[ACCENT] = accent;
+    tokens[ACCENT_600] = darken(accent, ACCENT_DARKEN);
+  }
+
+  return tokens;
+}
+
+// applyOrgTheme maps a saved theme onto the design tokens on the documentElement.
+// Missing/invalid fields are cleared so they fall back to the default look.
+export function applyOrgTheme(theme: OrgTheme | null | undefined): void {
+  const root = document.documentElement.style;
+  const tokens = resolveThemeTokens(theme);
+  for (const property of THEMED_PROPERTIES) {
+    const value = tokens[property];
+    if (value === undefined) {
+      root.removeProperty(property);
+    } else {
+      root.setProperty(property, value);
+    }
   }
 }
 
@@ -154,5 +171,35 @@ export function clearOrgTheme(): void {
   const root = document.documentElement.style;
   for (const property of THEMED_PROPERTIES) {
     root.removeProperty(property);
+  }
+}
+
+// Cached theme, keyed by org slug, so a full page reload can paint the tenant's
+// colours before React hydrates (see the inline script in index.html). Without
+// it the default palette paints first and then applyOrgTheme swaps it in — a
+// visible flash of the wrong branding (FOUC).
+export const THEME_CACHE_PREFIX = "ybw.theme.";
+
+function themeCacheKey(slug: string): string {
+  return THEME_CACHE_PREFIX + slug;
+}
+
+// cacheOrgTheme stores the resolved token overrides for an org so the next full
+// load can apply them before first paint. An empty map (the org uses the
+// default look) is written too, so clearing a theme also clears the stale cache.
+export function cacheOrgTheme(
+  slug: string,
+  theme: OrgTheme | null | undefined,
+): void {
+  if (!slug) {
+    return;
+  }
+  try {
+    const tokens = resolveThemeTokens(theme);
+    window.localStorage.setItem(themeCacheKey(slug), JSON.stringify(tokens));
+  } catch {
+    // Storage can be unavailable (private mode, quota). The runtime apply still
+    // themes the app; only the pre-paint optimisation is lost, so this is
+    // non-fatal.
   }
 }

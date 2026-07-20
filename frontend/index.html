@@ -9,6 +9,31 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Yivi | Business Wallet Dashboard</title>
+    <script>
+      // Apply the active org's cached theme tokens before first paint, so a full
+      // reload never flashes the default palette before React swaps the tenant
+      // branding in. The org slug is the first path segment; the cache is
+      // written by cacheOrgTheme (src/lib/theme.ts) — keep the key and the token
+      // map in step with it. Any failure is swallowed: the runtime apply then
+      // themes the app a moment later, so this is only an optimisation.
+      (function () {
+        try {
+          var slug = location.pathname.split("/")[1];
+          if (!slug) return;
+          var raw = localStorage.getItem("ybw.theme." + slug);
+          if (!raw) return;
+          var tokens = JSON.parse(raw);
+          var style = document.documentElement.style;
+          for (var name in tokens) {
+            if (Object.prototype.hasOwnProperty.call(tokens, name)) {
+              style.setProperty(name, tokens[name]);
+            }
+          }
+        } catch (e) {
+          /* no-op: fall back to the runtime apply */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

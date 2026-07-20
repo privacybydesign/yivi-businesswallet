@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useBrand } from "./brand";
 import { Breadcrumbs } from "./breadcrumb";
 import { Icon } from "./icon";
+import { Logo } from "./logo";
 import { useMobileNav } from "./mobile-nav";
 
 interface TopBarProps {
@@ -17,6 +19,7 @@ export function TopBar({
 }: TopBarProps): React.JSX.Element {
   const { t } = useTranslation();
   const nav = useMobileNav();
+  const brand = useBrand();
   return (
     <div className="border-line bg-surface sticky top-0 z-10 border-b px-4 pt-[22px] pb-[18px] sm:px-8">
       <div className="flex items-end justify-between gap-5">
@@ -41,7 +44,10 @@ export function TopBar({
             )}
           </div>
         </div>
-        {actions && <div className="flex shrink-0 gap-2">{actions}</div>}
+        <div className="flex shrink-0 items-center gap-4">
+          {actions && <div className="flex shrink-0 gap-2">{actions}</div>}
+          {brand.logoUri && <Logo src={brand.logoUri} alt={brand.name ?? ""} />}
+        </div>
       </div>
     </div>
   );
