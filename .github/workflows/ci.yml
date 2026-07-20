@@ -54,16 +54,6 @@ jobs:
         with:
           go-version: "1.26"
           cache-dependency-path: backend/go.sum
-      - name: Access private wallet-provider module
-        env:
-          DEPLOY_KEY: ${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          go env -w GOPRIVATE=github.com/privacybydesign/wallet-provider
-          git config --global url."git@github.com:privacybydesign/wallet-provider".insteadOf "https://github.com/privacybydesign/wallet-provider"
       - name: Check formatting
         run: go tool golangci-lint fmt --diff
       - run: go tool golangci-lint run ./...
@@ -79,16 +69,6 @@ jobs:
         with:
           go-version: "1.26"
           cache-dependency-path: backend/go.sum
-      - name: Access private wallet-provider module
-        env:
-          DEPLOY_KEY: ${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          go env -w GOPRIVATE=github.com/privacybydesign/wallet-provider
-          git config --global url."git@github.com:privacybydesign/wallet-provider".insteadOf "https://github.com/privacybydesign/wallet-provider"
       - run: go build ./...
       - run: go test -race ./...
 
@@ -117,7 +97,26 @@ jobs:
         with:
           go-version: "1.26"
           cache-dependency-path: backend/go.sum
-      - name: Access private wallet-provider module
+      - run: go test -tags=integration -race ./...
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+
+  # WSCA is opt-in and its client (walletmobile) is a private module, so the
+  # default build above pulls in nothing private. This job is the only one that
+  # needs the deploy key: it clones the wallet-provider and builds/tests the
+  # `wsca`-tagged path through a Go workspace, so the WSCA code stays compiling.
+  backend-build-wsca:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache-dependency-path: backend/go.sum
+      - name: Clone the private wallet-provider module
         env:
           DEPLOY_KEY: ${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
         run: |
@@ -125,8 +124,17 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts
-          go env -w GOPRIVATE=github.com/privacybydesign/wallet-provider
-          git config --global url."git@github.com:privacybydesign/wallet-provider".insteadOf "https://github.com/privacybydesign/wallet-provider"
-      - run: go test -tags=integration -race ./...
-        env:
-          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+          git clone git@github.com:privacybydesign/wallet-provider.git "$GITHUB_WORKSPACE/wallet-provider"
+          git -C "$GITHUB_WORKSPACE/wallet-provider" checkout 8dc7ba301cc7
+      - name: Create Go workspace (main module + wallet-provider clone)
+        run: |
+          GO_VERSION="$(go mod edit -json | python3 -c 'import json,sys;print(json.load(sys.stdin)["Go"])')"
+          {
+            echo "go ${GO_VERSION}"
+            echo
+            echo "use ."
+            echo
+            echo "use ../wallet-provider"
+          } > go.work
+      - run: go build -tags wsca ./...
+      - run: go test -tags wsca -race ./internal/eudiholder/ ./internal/wscawallet/

@@ -3,14 +3,9 @@ package eudiholder
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
 	"path/filepath"
-	"secdsa/mobile/walletmobile"
-	"secdsa/mobile/walletmobile/irmabinding"
 
 	"github.com/google/uuid"
-	"github.com/privacybydesign/irmago/eudi/openid4vci"
-	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
 )
 
 // WSCAConfig enables WSCA-backed holder binding on the redeem path: the SD-JWT VC
@@ -19,6 +14,12 @@ import (
 // keys, so the holder private key never enters this process. Optional; when the
 // engine has no WSCAConfig the default software binder is used (backwards
 // compatible). See .ai/features/wsca-holder-binding.md.
+//
+// The WSCA client (walletmobile) is a private module, so the code that actually
+// talks to it lives behind the `wsca` build tag (engine_wsca_binder_on.go). A
+// default build (no tag) has no WSCA client: holderKeyBinder then errors if a
+// WSCAConfig was set, so a misconfigured binary fails loudly instead of silently
+// downgrading to software keys.
 //
 // Each org's walletmobile keystore (its possession key U) must already be
 // activated (walletmobile.Activate) before a redeem — that is the org-admin setup
@@ -42,26 +43,10 @@ type WSCAConfig struct {
 // keys. Set once at boot before serving.
 func (e *Engine) SetWSCA(cfg *WSCAConfig) { e.wsca = cfg }
 
-// holderKeyBinder builds the org's WSCA issuance key binder over its
-// already-activated walletmobile wallet, or returns nil to fall back to the
-// default software binder (when WSCA is not configured).
-func (e *Engine) holderKeyBinder(ctx context.Context, orgID uuid.UUID, st irmastorage.Storage) (openid4vci.HolderKeyBinder, error) {
-	if e.wsca == nil {
-		return nil, nil
-	}
-	w, err := walletmobile.NewWallet(e.wsca.BaseURL, e.orgKeystoreDir(orgID), e.wsca.Insecure)
-	if err != nil {
-		return nil, fmt.Errorf("eudiholder: open WSCA wallet org %s: %w", orgID, err)
-	}
-	secret, err := e.wsca.Secret(ctx, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("eudiholder: WSCA secret org %s: %w", orgID, err)
-	}
-	signer := irmabinding.NewSigner(w, func() (string, error) { return secret, nil })
-	return irmabinding.NewIssuanceBinderFactory(signer)(st), nil
-}
-
-// orgKeystoreDir is the per-org walletmobile keystore directory.
-func (e *Engine) orgKeystoreDir(orgID uuid.UUID) string {
-	return filepath.Join(e.wsca.KeystoreDir, hex.EncodeToString(orgID[:]))
+// OrgKeystoreDir is the per-org walletmobile keystore directory under base. It is
+// the single source of truth for the layout: the activation flow
+// (internal/wscawallet) and this redeem path MUST agree, or activation writes a
+// keystore the redeem path never finds.
+func OrgKeystoreDir(base string, orgID uuid.UUID) string {
+	return filepath.Join(base, hex.EncodeToString(orgID[:]))
 }

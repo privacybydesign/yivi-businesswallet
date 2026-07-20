@@ -1,0 +1,10 @@
+// Go workspace used ONLY by the opt-in WSCA dev layer (compose.wsca.yaml).
+// It stitches the bind-mounted backend module (/app) together with the
+// bind-mounted wallet-provider clone (/wallet-provider) so a `-tags wsca` build
+// resolves the private `secdsa` module locally — no git, no deploy key.
+// Container paths, so it is inert on the host (GOWORK is unset there).
+go 1.26.4
+
+use /app
+
+use /wallet-provider

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/privacybydesign/irmago/common/clientmodels"
@@ -137,7 +138,30 @@ func (h *redeemHandler) Cancelled() {
 }
 
 func (h *redeemHandler) Failure(err *clientmodels.SessionError) {
-	h.done <- redeemResult{err: fmt.Errorf("session error %q: %s", err.ErrorType, err.Info)}
+	// Surface every populated field: irmago sets only WrappedError on many
+	// failure paths (leaving ErrorType/Info empty), and RemoteStatus/RemoteError
+	// carry the issuer's HTTP response — the earlier message dropped all of them.
+	parts := make([]string, 0, 5)
+	if err.ErrorType != "" {
+		parts = append(parts, "type="+err.ErrorType)
+	}
+	if err.WrappedError != "" {
+		parts = append(parts, "wrapped="+err.WrappedError)
+	}
+	if err.Info != "" {
+		parts = append(parts, "info="+err.Info)
+	}
+	if err.RemoteStatus != 0 {
+		parts = append(parts, fmt.Sprintf("remoteStatus=%d", err.RemoteStatus))
+	}
+	if err.RemoteError != nil {
+		parts = append(parts, fmt.Sprintf("remoteError=%+v", err.RemoteError))
+	}
+	detail := strings.Join(parts, " ")
+	if detail == "" {
+		detail = "(no detail)"
+	}
+	h.done <- redeemResult{err: fmt.Errorf("openid4vci session failed: %s", detail)}
 }
 
 func (h *redeemHandler) RequestPreAuthorizedCodeFlowPermission(

@@ -12,7 +12,6 @@ require (
 )
 
 require (
-	filippo.io/nistec v0.0.4 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
@@ -34,7 +33,6 @@ require (
 	github.com/mr-tron/base58 v1.1.3 // indirect
 	github.com/oasdiff/yaml v0.1.0 // indirect
 	github.com/oasdiff/yaml3 v0.0.13 // indirect
-	github.com/pavlo-v-chernykh/keystore-go/v4 v4.5.0 // indirect
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
 	github.com/privacybydesign/gabi v0.0.0-20221212095008-68a086907750 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
@@ -244,7 +242,7 @@ require (
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
-	github.com/sirupsen/logrus v1.9.4 // indirect
+	github.com/sirupsen/logrus v1.9.4
 	github.com/sivchari/containedctx v1.0.3 // indirect
 	github.com/sonatard/noctx v0.5.1 // indirect
 	github.com/sourcegraph/go-diff v0.8.0 // indirect
@@ -312,7 +310,6 @@ require (
 	modernc.org/sqlite v1.49.1 // indirect
 	mvdan.cc/gofumpt v0.9.2 // indirect
 	mvdan.cc/unparam v0.0.0-20251027182757-5beb8c8f8f15 // indirect
-	secdsa v0.0.0-20260718193816-8dc7ba301cc7
 )
 
 tool (
@@ -320,5 +317,3 @@ tool (
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	github.com/pressly/goose/v3/cmd/goose
 )
-
-replace secdsa => github.com/privacybydesign/wallet-provider v0.0.0-20260718193816-8dc7ba301cc7

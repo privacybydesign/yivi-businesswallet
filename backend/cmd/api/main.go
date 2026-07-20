@@ -38,6 +38,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wscawallet"
 )
 
 const (
@@ -137,8 +138,12 @@ func newAttestationHolder(cfg config.Config, wscaStore *wsca.Store) (eudiholder.
 			AllowInsecureHTTP:   cfg.AttestationHolderAllowInsecureHTTP,
 		})
 		// WSCA-backed holder binding is opt-in: only when a wallet-provider URL is
-		// configured. It requires the sealed-secret store (a WSCA KEK).
+		// configured. It requires the sealed-secret store (a WSCA KEK) and a binary
+		// built with the `wsca` tag (the walletmobile client is a private module).
 		if cfg.AttestationHolderWSCAURL != "" {
+			if !wscaCompiledIn {
+				return nil, fmt.Errorf("%s is set but this binary was built without -tags wsca", "ATTESTATION_HOLDER_WSCA_URL")
+			}
 			if !wscaStore.Configured() {
 				return nil, fmt.Errorf("%s is set but %s is not", "ATTESTATION_HOLDER_WSCA_URL", "ATTESTATION_HOLDER_WSCA_KEK")
 			}
@@ -368,6 +373,19 @@ func run() error {
 	)
 	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
 
+	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
+	// sealed-secret store + keystore layout with the holder redeem path so a wallet
+	// activated here is the one the redeem path signs with. Enabled (Configured())
+	// only when a wallet-provider URL is set.
+	wscaActivator := wscawallet.NewActivator(
+		cfg.AttestationHolderWSCAURL != "",
+		func(orgID uuid.UUID) (wscawallet.WalletClient, error) {
+			return newWSCAWalletClient(cfg, orgID)
+		},
+		wscaStore,
+	)
+	wscaWalletHandler := wscawallet.NewHandler(wscaActivator, requireUser, orgHandler.Authorize)
+
 	handler := server.New(
 		pool,
 		cfg.StaticDir,
@@ -379,6 +397,7 @@ func run() error {
 		emailHandler,
 		issuerSettingsHandler,
 		attestationHandler,
+		wscaWalletHandler,
 	)
 
 	httpServer := &http.Server{

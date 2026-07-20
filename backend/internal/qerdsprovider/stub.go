@@ -2,7 +2,7 @@ package qerdsprovider
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -19,7 +19,6 @@ import (
 // are only truly exercised against a real QTSP sandbox. See .ai/features/qerds.md.
 type StubProvider struct {
 	mu    sync.Mutex
-	seq   int
 	inbox map[Address][]InboundMessage
 	now   func() time.Time
 }
@@ -47,8 +46,7 @@ func (p *StubProvider) Send(_ context.Context, msg OutboundMessage) (SendReceipt
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.seq++
-	ref := p.ref(msg, p.seq)
+	ref := p.ref()
 	ts := p.now()
 
 	submission := p.evidence(EvidenceSubmissionAcceptance, ref, ts)
@@ -81,9 +79,16 @@ func (p *StubProvider) Fetch(_ context.Context, addr Address) ([]InboundMessage,
 	return msgs, nil
 }
 
-func (p *StubProvider) ref(msg OutboundMessage, seq int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%s|%d", msg.Sender, msg.Recipient, msg.Subject, seq)))
-	return "stub-" + hex.EncodeToString(sum[:8])
+// ref returns a globally-unique provider reference. It must NOT be derived from
+// message content or an in-process counter: the stub's inbox and any counter
+// reset on restart, but qerds_messages persists, so a content/seq-derived ref
+// collides with a prior run's rows on the unique (direction, provider_ref)
+// index — which fails the outbound RecordSent update (message stuck "submitted")
+// and dedupes the inbound away (never received). A random ref cannot collide.
+func (p *StubProvider) ref() string {
+	var b [12]byte
+	_, _ = rand.Read(b[:])
+	return "stub-" + hex.EncodeToString(b[:])
 }
 
 func (p *StubProvider) evidence(kind, ref string, ts time.Time) Evidence {
