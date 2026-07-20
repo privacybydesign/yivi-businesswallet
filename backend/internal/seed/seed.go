@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
@@ -30,8 +32,10 @@ const (
 )
 
 // demoOrganization is a seeded business wallet: an org with KVK identity, a QERDS
-// digital address and one representative. Demo KVK numbers (900000xx) are kept
-// distinct from the live register-flow demo (94861412).
+// digital address and one representative. Its KVK identity and primary
+// representative mirror registryprovider.DemoRegistrations (the register flow's
+// fake API), so a seeded user resolves to a real representative entry and the
+// seeded data never drifts from the register — enforced by TestDemoOrgsMatchRegister.
 type demoOrganization struct {
 	name      string // legal name
 	slug      string
@@ -42,6 +46,7 @@ type demoOrganization struct {
 	repFamily string
 	repKind   string
 	repAuth   string
+	repDOB    string // "2006-01-02"
 }
 
 type demoUser struct {
@@ -70,15 +75,26 @@ type demoMembership struct {
 var yiviOrg = demoOrganization{
 	name: "Yivi B.V.", slug: demoOrgSlug, kvkNumber: "90000010", euid: "NL.KVK.90000010",
 	address: "yivi@qerds.localhost", repGiven: "Johannes Hendrik", repFamily: "Janssen",
-	repKind: "bestuurder", repAuth: "sole",
+	repKind: "bestuurder", repAuth: "sole", repDOB: "1979-05-14",
+}
+
+// kvkRegisterOrg is the KVK register itself as a business-wallet participant: the
+// organisation the register's match/no-match decisions are audited against
+// (registryprovider.SeededRegistry). It is provisioned like any other org but has
+// no representative of its own — it is the authentic source, not a consultable
+// company.
+var kvkRegisterOrg = demoOrganization{
+	name: registryprovider.RegisterLegalName, slug: registryprovider.RegisterSlug,
+	kvkNumber: registryprovider.RegisterKVKNumber, euid: registryprovider.RegisterEUID,
+	address: "kvk@qerds.localhost",
 }
 
 // Anchor data: recognizable accounts/orgs that must stay stable so developers
 // can log in predictably. Volume and variety are generated with the faker.
 var demoOrganizations = []demoOrganization{
 	yiviOrg,
-	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NL.KVK.90000020", address: "firsty@qerds.localhost", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly"},
-	{name: "Radboud Universiteit", slug: "radboud-universiteit", kvkNumber: "90000030", euid: "NL.KVK.90000030", address: "radboud@qerds.localhost", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt"},
+	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NL.KVK.90000020", address: "firsty@qerds.localhost", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly", repDOB: "1985-11-22"},
+	{name: "Radboud Universiteit", slug: "radboud-universiteit", kvkNumber: "90000030", euid: "NL.KVK.90000030", address: "radboud@qerds.localhost", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
 }
 
 var demoUsers = []demoUser{
@@ -108,6 +124,12 @@ func Run(ctx context.Context, dsn string) error {
 	faker := gofakeit.New(fakerSeed)
 	users := user.NewStore(pool)
 	orgs := organization.NewStore(pool, audit.NewDBRecorder())
+
+	// The KVK register participant must exist so its consult decisions have an
+	// audit log to be recorded against (registryprovider.SeededRegistry).
+	if _, err := ensureOrg(ctx, pool, kvkRegisterOrg); err != nil {
+		return err
+	}
 
 	orgsBySlug := map[string]organization.Organization{}
 	for _, o := range demoOrganizations {
@@ -207,12 +229,16 @@ func ensureOrg(ctx context.Context, pool *pgxpool.Pool, o demoOrganization) (org
 		ON CONFLICT (address) DO NOTHING`, org.ID, o.address); err != nil {
 		return organization.Organization{}, fmt.Errorf("seed: qerds address %q: %w", o.slug, err)
 	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO wallet_representations (organization_id, kind, given_names, family_name, authority)
-		SELECT $1, $2, $3, $4, $5
-		WHERE NOT EXISTS (SELECT 1 FROM wallet_representations WHERE organization_id = $1)`,
-		org.ID, o.repKind, o.repGiven, o.repFamily, o.repAuth); err != nil {
-		return organization.Organization{}, fmt.Errorf("seed: representation %q: %w", o.slug, err)
+	// The KVK register org (repKind == "") is the authentic source, not a
+	// consultable company, so it has no representative of its own.
+	if o.repKind != "" {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO wallet_representations (organization_id, kind, given_names, family_name, date_of_birth, authority)
+			SELECT $1, $2, $3, $4, $5, $6
+			WHERE NOT EXISTS (SELECT 1 FROM wallet_representations WHERE organization_id = $1)`,
+			org.ID, o.repKind, o.repGiven, o.repFamily, optionalDate(o.repDOB), o.repAuth); err != nil {
+			return organization.Organization{}, fmt.Errorf("seed: representation %q: %w", o.slug, err)
+		}
 	}
 	return org, nil
 }
@@ -268,6 +294,11 @@ func EnsureYiviOrganization(ctx context.Context, dsn string) (organization.Organ
 	}
 	defer pool.Close()
 
+	// The KVK register participant is provisioned alongside Yivi so the register's
+	// consult decisions have an audit log even on the org-only staging seed.
+	if _, err := ensureOrg(ctx, pool, kvkRegisterOrg); err != nil {
+		return organization.Organization{}, err
+	}
 	org, err := ensureOrg(ctx, pool, yiviOrg)
 	if err != nil {
 		return organization.Organization{}, err
@@ -619,6 +650,19 @@ func optional(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// optionalDate parses a "2006-01-02" birth date into a nullable date. An empty or
+// unparseable value seeds NULL rather than failing the whole seed run.
+func optionalDate(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return nil
+	}
+	return &t
 }
 
 // slugify reduces a name to lowercase ASCII letters so it is safe in an email
