@@ -50,6 +50,12 @@ Frontend unit tests use Vitest (node env, no jsdom) and live beside their source
 `*.test.ts`; they cover extracted pure logic, not rendered components. CI does not
 run them yet (`.github/workflows/ci.yml` only lints/typechecks/builds the frontend).
 
+`src/lib/audit-event.test.ts` parses the action/target constants out of
+`backend/internal/audit/audit.go` and asserts each resolves to a real i18n
+string, so a new backend audit action must gain an `auditLog.actions.*` /
+`auditLog.targets.*` translation (and a `case` in `audit-event.ts`) or that test
+fails — the audit UI would otherwise render the raw dotted key.
+
 **Backend** (`cd backend`), in order:
 ```bash
 gofmt -l .                      # must print nothing
