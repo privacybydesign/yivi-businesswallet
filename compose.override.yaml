@@ -123,6 +123,14 @@ services:
       MYSQL_DATABASE: domibus
       MYSQL_USER: edelivery
       MYSQL_PASSWORD: edelivery
+    # First-run MySQL init is slow (slower still under amd64 emulation on arm64),
+    # so gate readiness on a real ping before starting Domibus.
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p123456 --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
     networks:
       # The Domibus Tomcat image resolves its datasource host as "mysql".
       default:
@@ -144,7 +152,8 @@ services:
     ports:
       - "8090:8080"
     depends_on:
-      - domibus-mysql
+      domibus-mysql:
+        condition: service_healthy
 
 volumes:
   backend-go-build:
