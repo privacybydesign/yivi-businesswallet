@@ -7,8 +7,13 @@ import {
 } from "../api/organization.queries";
 import { useOrgThemeQuery } from "../api/theme.queries";
 import { setStoredOrgSlug } from "../lib/active-org";
-import { applyOrgTheme, clearOrgTheme } from "../lib/theme";
-import { MobileNavContext, Sidebar } from "../ui";
+import {
+  applyOrgTheme,
+  cacheOrgTheme,
+  clearOrgTheme,
+  shouldApplyOrgTheme,
+} from "../lib/theme";
+import { BrandProvider, MobileNavContext, Sidebar } from "../ui";
 import * as React from "react";
 
 export default function Root(): React.JSX.Element | null {
@@ -64,11 +69,25 @@ export default function Root(): React.JSX.Element | null {
       clearOrgTheme();
       return;
     }
+    // While the theme query is in flight `orgTheme` is undefined. Bail rather
+    // than apply it: applyOrgTheme(undefined) would strip the tokens the inline
+    // pre-paint script (index.html) already put on the document, flashing the
+    // default palette back in before the fetch resolves — the FOUC this avoids.
+    if (!shouldApplyOrgTheme(orgTheme)) {
+      return;
+    }
     applyOrgTheme(orgTheme);
+    // Cache the resolved palette so the next full reload of this org paints its
+    // branding before React hydrates (see index.html), avoiding the FOUC.
+    cacheOrgTheme(activeSlug, orgTheme);
   }, [activeSlug, orgTheme]);
   useEffect(() => clearOrgTheme, []);
 
   const activeOrg = organizations?.find((org) => org.slug === activeSlug);
+  const brand = useMemo(
+    () => ({ logoUri: orgTheme?.logoUri || undefined, name: activeOrg?.name }),
+    [orgTheme?.logoUri, activeOrg?.name],
+  );
 
   // ProtectedRoute guarantees an authenticated user before Root mounts; this
   // narrows the nullable query type instead of re-deriving it defensively.
@@ -78,29 +97,31 @@ export default function Root(): React.JSX.Element | null {
 
   return (
     <MobileNavContext.Provider value={mobileNav}>
-      <div className="flex min-h-screen">
-        {navOpen && (
-          <div
-            className="fixed inset-0 z-40 bg-black/40 lg:hidden"
-            aria-hidden="true"
-            onClick={closeNav}
+      <BrandProvider value={brand}>
+        <div className="flex min-h-screen">
+          {navOpen && (
+            <div
+              className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+              aria-hidden="true"
+              onClick={closeNav}
+            />
+          )}
+          <Sidebar
+            me={me}
+            onLogout={() => logout.mutate()}
+            loggingOut={logout.isPending}
+            organizations={organizations ?? []}
+            organizationsPending={orgsQuery.isPending}
+            brandLogoUri={orgTheme?.logoUri || undefined}
+            brandName={activeOrg?.name}
+            open={navOpen}
+            onNavigate={closeNav}
           />
-        )}
-        <Sidebar
-          me={me}
-          onLogout={() => logout.mutate()}
-          loggingOut={logout.isPending}
-          organizations={organizations ?? []}
-          organizationsPending={orgsQuery.isPending}
-          brandLogoUri={orgTheme?.logoUri || undefined}
-          brandName={activeOrg?.name}
-          open={navOpen}
-          onNavigate={closeNav}
-        />
-        <main className="min-w-0 flex-1">
-          <Outlet />
-        </main>
-      </div>
+          <main className="min-w-0 flex-1">
+            <Outlet />
+          </main>
+        </div>
+      </BrandProvider>
     </MobileNavContext.Provider>
   );
 }
