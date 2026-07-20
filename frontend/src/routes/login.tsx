@@ -19,6 +19,7 @@ import {
   Card,
   Icon,
   IdentityDisclosure,
+  LanguageSwitcher,
   Logo,
   Outcome,
 } from "../ui";
@@ -136,7 +137,10 @@ export default function Login(): React.JSX.Element {
   const showMessage = phase === "idle" && message !== "";
 
   return (
-    <div className="mesh-wave flex min-h-screen flex-col justify-center">
+    <div className="mesh-wave relative flex min-h-screen flex-col justify-center">
+      <div className="absolute top-4 right-4 sm:top-6 sm:right-6">
+        <LanguageSwitcher />
+      </div>
       <div className="mx-auto grid w-full max-w-6xl items-center gap-10 px-6 py-12 lg:grid-cols-2 lg:gap-16">
         <section className="order-2 flex flex-col lg:order-1">
           <h1 className="font-display text-ink text-[32px] leading-[1.15] font-bold sm:text-[38px]">

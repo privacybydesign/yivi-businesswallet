@@ -28,8 +28,9 @@ export interface RouteHandle {
 const SEPARATOR_SIZE = 12;
 
 function Breadcrumb({ items }: { items: BreadcrumbItem[] }): React.JSX.Element {
+  const { t } = useTranslation();
   return (
-    <nav aria-label="Breadcrumb">
+    <nav aria-label={t("nav.breadcrumb")}>
       <ol className="flex items-center gap-1.5 text-[12px]">
         {items.map((item, index) => {
           const isLast = index === items.length - 1;

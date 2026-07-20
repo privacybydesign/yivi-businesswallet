@@ -8,6 +8,7 @@ import { personInitials, fullName } from "../lib/name";
 import { Icon } from "./icon";
 import { Avatar } from "./avatar";
 import { Logo } from "./logo";
+import { LanguageSwitcher } from "./language-switcher";
 import { OrgSwitcher } from "./org-switcher";
 import * as React from "react";
 
@@ -157,6 +158,10 @@ export function Sidebar({
           </NavLink>
         ))}
       </nav>
+
+      <div className="border-line flex justify-end border-t px-3.5 py-2.5">
+        <LanguageSwitcher />
+      </div>
 
       <div className="border-line flex items-center gap-2.5 border-t px-3.5 py-2.5">
         <Avatar initials={personInitials(me)} />
