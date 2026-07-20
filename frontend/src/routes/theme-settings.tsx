@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import type { OrgTheme } from "../api/theme";
+import type { LogoChange, OrgTheme } from "../api/theme";
 import {
   useOrgThemeQuery,
   useUpdateOrgThemeMutation,
@@ -21,8 +21,17 @@ const CONTROL =
   "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
 
 const HEX_PATTERN = /^#[0-9a-fA-F]{6}$/;
-// Keep the logo constraint in step with the backend isSafeLogoURI allowlist.
-const LOGO_PATTERN = /^(https?:\/\/|data:image\/)/;
+
+// Keep the accepted types and size cap in step with the backend detectLogoType
+// allowlist and MaxLogoBytes.
+const ACCEPTED_LOGO_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+];
+const MAX_LOGO_BYTES = 512 * 1024;
 
 export function ThemeSettingsPanel({
   slug,
@@ -117,7 +126,20 @@ function ThemeForm({
 
   const [primary, setPrimary] = useState(settings.primaryColor);
   const [accent, setAccent] = useState(settings.accentColor);
-  const [logo, setLogo] = useState(settings.logoUri);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [newLogoUrl, setNewLogoUrl] = useState<string | null>(null);
+  const [removeLogo, setRemoveLogo] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+
+  // The object URL for a freshly picked file is created in the change handler
+  // (not render), so this effect only revokes the previous one when it changes
+  // or the form unmounts.
+  useEffect(() => {
+    if (!newLogoUrl) {
+      return;
+    }
+    return () => URL.revokeObjectURL(newLogoUrl);
+  }, [newLogoUrl]);
 
   const primaryActive = HEX_PATTERN.test(primary);
   const primaryContrast = primaryActive
@@ -128,18 +150,50 @@ function ThemeForm({
 
   const primaryInvalid = primary !== "" && !primaryActive;
   const accentInvalid = accent !== "" && !HEX_PATTERN.test(accent);
-  const logoInvalid = logo !== "" && !LOGO_PATTERN.test(logo);
-  const invalid =
-    primaryInvalid || accentInvalid || logoInvalid || contrastFails;
+  const invalid = primaryInvalid || accentInvalid || contrastFails;
+
+  const hasStoredLogo = settings.logoUri !== "";
+  const showStoredLogo = hasStoredLogo && !removeLogo && logoFile === null;
+  const logoPreviewSrc = logoFile
+    ? newLogoUrl
+    : showStoredLogo
+      ? settings.logoUri
+      : null;
+
+  function handleLogoSelect(file: File | null): void {
+    if (!file) {
+      return;
+    }
+    if (!ACCEPTED_LOGO_TYPES.includes(file.type)) {
+      setLogoError(t("themeSettings.logoTypeInvalid"));
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setLogoError(t("themeSettings.logoTooLarge"));
+      return;
+    }
+    setLogoError(null);
+    setRemoveLogo(false);
+    setLogoFile(file);
+    setNewLogoUrl(URL.createObjectURL(file));
+  }
+
+  function handleLogoRemove(): void {
+    setLogoError(null);
+    setLogoFile(null);
+    setNewLogoUrl(null);
+    setRemoveLogo(true);
+  }
 
   function handleSave(): void {
     if (invalid || save.isPending) {
       return;
     }
+    const logo: LogoChange = logoFile ?? (removeLogo ? "remove" : "keep");
     save.mutate({
       primaryColor: primary.trim(),
       accentColor: accent.trim(),
-      logoUri: logo.trim(),
+      logo,
     });
   }
 
@@ -169,14 +223,35 @@ function ThemeForm({
           onClear={() => setAccent("")}
           clearLabel={t("themeSettings.reset")}
         />
-        <span className={EYEBROW}>{t("themeSettings.logoUri")}</span>
-        <input
-          className={CONTROL}
-          value={logo}
-          onChange={(event) => setLogo(event.target.value)}
-          placeholder={t("themeSettings.logoUriPlaceholder")}
-          aria-label={t("themeSettings.logoUri")}
-        />
+        <span className={EYEBROW}>{t("themeSettings.logo")}</span>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <label className="rounded-yivi border-line-strong bg-surface text-ink hover:bg-surface-3 inline-flex h-9 cursor-pointer items-center border px-3 text-[13px] font-medium transition-colors">
+              <input
+                type="file"
+                accept={ACCEPTED_LOGO_TYPES.join(",")}
+                className="sr-only"
+                onChange={(event) =>
+                  handleLogoSelect(event.target.files?.[0] ?? null)
+                }
+              />
+              {t("themeSettings.logoChoose")}
+            </label>
+            {(logoFile !== null || showStoredLogo) && (
+              <Button variant="ghost" size="sm" onClick={handleLogoRemove}>
+                {t("themeSettings.logoRemove")}
+              </Button>
+            )}
+          </div>
+          {logoFile && (
+            <span className="text-ink-soft truncate text-[12px]">
+              {logoFile.name}
+            </span>
+          )}
+          <span className="text-muted text-[11px]">
+            {t("themeSettings.logoHint")}
+          </span>
+        </div>
       </div>
 
       {(primaryInvalid || accentInvalid) && (
@@ -184,9 +259,9 @@ function ThemeForm({
           {t("themeSettings.colorInvalid")}
         </p>
       )}
-      {logoInvalid && (
+      {logoError && (
         <p role="alert" className="text-error mt-2 text-[12px]">
-          {t("themeSettings.logoInvalid")}
+          {logoError}
         </p>
       )}
       {contrastFails && (
@@ -216,9 +291,9 @@ function ThemeForm({
               aria-hidden="true"
             />
           )}
-          {logo !== "" && LOGO_PATTERN.test(logo) && (
+          {logoPreviewSrc && (
             <img
-              src={logo}
+              src={logoPreviewSrc}
               alt={t("themeSettings.logoPreviewAlt")}
               className="max-h-9 max-w-[160px]"
             />
