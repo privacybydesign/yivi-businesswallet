@@ -1,6 +1,8 @@
 # QERDS — Qualified Electronic Registered Delivery Service
 
-**Status:** local/dev implementation (stub provider). Not production-qualified.
+**Status:** integrates a real QERDS provider (currently the Domibus AS4 driver). A provider
+connection is **required configuration** — there is no in-process fake and the backend fails to boot
+without one. Not yet production-qualified (evidence layer needs a partner QTSP sandbox).
 **Regulation:** COM(2025) 838 Art 5(1)(i), 5(1)(m), 5(1)(n), 5(3), 6(1)(d), 6(1)(i), 6(1)(j); eIDAS (EU 910/2014) Art 43–44.
 **Source refs:** `regulation/FEATURE_LIST.md`, `regulation/COM_2025_838_act.md`, `regulation/COM_2025_838_annex.md`.
 
@@ -81,10 +83,11 @@ No domain logic. Talks to the partner QERDS provider. Contains:
 - A boot `Ping(ctx)` — resolve our own digital address / provider capability call. **Fatal** on
   failure, same as the Yivi readiness gate. Catches "will the provider accept what we'll send"
   (creds valid, our address provisioned, scheme reachable), which `depends_on` cannot.
-- **Local `StubProvider`** — an in-process implementation of the same interface used in dev/test.
-  Deterministic, generates plausible ERDS-style evidence with timestamps so the whole flow is
-  exercisable offline. This is the QERDS equivalent of the `--no-auth` empty-token dev
-  authenticator. Selected by config (`QERDS_PROVIDER=stub`).
+There is deliberately **no in-process stub provider**. A real provider connection is required
+configuration (`QERDS_PROVIDER` + `QERDS_PROVIDER_URL`, no default) so a deployment that forgets to
+configure QERDS fails to boot rather than silently synthesising fake receipts and sending nothing.
+Dev/CI exercise the driver against the local Domibus Compose bench (§9); unit tests use a
+test-local fake implementing the provider interface, not a shipped stub.
 
 The provider dependency is expressed as a **consumer-defined interface** in `internal/qerds`
 (accept interfaces, return structs) — the concrete client/stub is injected at boot.
@@ -166,12 +169,19 @@ If the provider call fails after the DB commit, the message sits in a retryable 
 
 ### 5.2 Inbound (receive) — webhook preferred, poll fallback
 
-- **Webhook push (preferred):** provider POSTs to `webhook.go`, authenticated out-of-band
+The inbound mode is selectable via `QERDS_INBOUND_MODE=push|poll|both` (default `push`):
+
+- **Webhook push (`push`):** provider POSTs to `webhook.go`, authenticated out-of-band
   (HMAC/mTLS). Records the inbound message + delivery evidence (that evidence itself has legal
-  effect — it proves *we* received it). Idempotent on `provider_ref`.
-- **Polling fallback:** a background worker pulls new messages by address (a `cmd/` binary or a
-  ticker, consistent with the migrate/seed-as-separate-service pattern). Simpler, no inbound
-  network exposure, higher latency.
+  effect — it proves *we* received it). Idempotent on `provider_ref`. Push requires
+  `QERDS_WEBHOOK_SECRET`; the config load fails fast when it is missing rather than letting the
+  endpoint silently disable itself (404).
+- **Polling (`poll`):** a background worker (`cmd/api` ticker, `QERDS_POLL_INTERVAL`) calls
+  `Service.PollAll` — `Service.Poll` per org address for every org that has one. This is the AS4
+  One-Way/Pull equivalent and removes reliance on the manual "Check inbox" button. Simpler, no
+  inbound network exposure, higher latency. Intake is idempotent (dedupe on `provider_ref`), so
+  repeated polls are safe.
+- **Both (`both`):** the poll worker runs as a reconciliation fallback behind webhook push.
 
 ---
 
@@ -202,10 +212,12 @@ Env-driven like everything else (`internal/config`):
 
 | Var | Meaning | Required |
 |---|---|---|
-| `QERDS_PROVIDER` | `stub` (dev) or the provider driver name | no (default `stub`) |
-| `QERDS_PROVIDER_URL` | provider base URL | when not `stub` |
+| `QERDS_PROVIDER` | provider driver name (e.g. `domibus`) | **yes** (no default) |
+| `QERDS_PROVIDER_URL` | provider base URL | **yes** (no default) |
 | `QERDS_AUTH_TOKEN` | bearer / creds material | when the driver needs it |
-| `QERDS_WEBHOOK_SECRET` | HMAC secret for inbound webhook auth | when webhook enabled |
+| `QERDS_INBOUND_MODE` | `push`, `poll` or `both` | no (default `push`) |
+| `QERDS_POLL_INTERVAL` | poll-worker interval (Go duration) | no (default `5m`) |
+| `QERDS_WEBHOOK_SECRET` | HMAC secret for inbound webhook auth | when mode is `push` or `both` |
 | `QERDS_DEFAULT_ADDRESS_DOMAIN` | domain for minted digital addresses | no (has default) |
 
 Boot `Ping` is **fatal** (matches the Yivi readiness gate). `/readyz` stays DB-only.
@@ -227,16 +239,19 @@ bench:
 ### Tiered strategy
 
 ```
-Dev/CI:   qerdsprovider StubProvider (in-process)   ← offline, deterministic, default
-   ↕      Domibus in Compose (AS4, `domibus` profile) ← proves transport plumbing
-Staging:  partner QTSP sandbox                        ← real ERDS evidence + qualified timestamps
+Dev:      Domibus in Compose (AS4, `domibus` profile) ← required; proves transport plumbing
+CI:       unit tests use a test-local provider fake    ← DB-free, no full-app boot
+Staging:  partner QTSP sandbox                          ← real ERDS evidence + qualified timestamps
 Prod:     partner QTSP production
 ```
 
-Same three-tier shape as `irma-demo.*` → `pbdf.*`.
+A real provider connection is required at every tier — there is no in-process fake to fall back on,
+so a QERDS-less full-app boot fails. Dev points the backend at the local Domibus bench below; CI's
+`go test -race` is DB-free and does not boot the full app, so its unit tests use a test-local fake
+implementing the provider interface.
 
-**Caveat:** the Stub/Domibus loop proves plumbing, **not** compliance. A green local loop must not
-read as "QERDS done" — the evidence store and qualified-timestamp capture are only truly exercised
+**Caveat:** the Domibus loop proves plumbing, **not** compliance. A green local loop must not read
+as "QERDS done" — the evidence store and qualified-timestamp capture are only truly exercised
 against a real QTSP sandbox.
 
 ### Domibus AS4 bench (opt-in dev Compose)
@@ -288,12 +303,14 @@ envelope construction + response parsing offline (runs in the default `go test`)
 `domibus_integration_test.go` (`//go:build integration`, gated on `QERDS_TEST_DOMIBUS_URL`) runs the
 real round-trip — upload PMode, `Ping`, `Send`, assert Domibus accepts and returns a provider ref.
 CI's `backend-integration-test` job now runs a Domibus + MySQL service pair so that test executes on
-every push; the **stub remains the config default** provider for dev/CI unit runs.
+every push. There is no shipped stub provider — the QERDS unit tests use a test-local provider fake,
+and a real provider connection is required for any full-app boot.
 
-### What this branch implements
+### What this implements
 
-- **Backend:** `qerdsprovider` interface + `StubProvider` + `DomibusProvider`, the `qerds` domain
-  slice, migrations, org-scoped routes, boot `Ping`, and the inbound webhook.
+- **Backend:** `qerdsprovider` interface + `DomibusProvider`, the `qerds` domain slice, migrations,
+  org-scoped routes, boot `Ping`, the inbound webhook, and the background poll worker
+  (`QERDS_INBOUND_MODE=poll|both`). A real provider connection is required — no in-process stub.
 - **Frontend:** inbox/outbox list, message detail with the delivery-evidence panel, compose flow,
   and digital-address management (`src/api/qerds*`, `src/routes/qerds*`).
 - **Dev bench:** the Domibus `domibus`-profile Compose services above.

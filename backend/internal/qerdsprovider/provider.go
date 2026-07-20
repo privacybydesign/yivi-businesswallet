@@ -2,9 +2,10 @@
 // Registered Delivery Service (QERDS) provider. It mirrors internal/irmarequestor:
 // our backend is a requestor / relying party talking to a qualified trust
 // service over HTTP, never the trust service itself. The concrete provider is
-// swapped by config — a StubProvider in dev/CI, a real HTTP driver in
-// staging/prod — so the domain slice depends only on the value types and
-// behaviours defined here. See .ai/features/qerds.md.
+// swapped by config — there is no in-process stub, so a real HTTP driver (the
+// Domibus AS4 access point) is required in every environment — and the domain
+// slice depends only on the value types and behaviours defined here. See
+// .ai/features/qerds.md.
 package qerdsprovider
 
 import "time"

@@ -22,6 +22,7 @@ type addressStore interface {
 	DefaultAddress(ctx context.Context, orgID uuid.UUID) (Address, error)
 	ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, error)
 	OrgByAddress(ctx context.Context, address string) (uuid.UUID, error)
+	OrgIDsWithAddresses(ctx context.Context) ([]uuid.UUID, error)
 }
 
 // provider is the external QERDS provider seam (see internal/qerdsprovider).
@@ -174,6 +175,29 @@ func (s *Service) Poll(ctx context.Context, orgID uuid.UUID) (int, error) {
 		}
 	}
 	return count, nil
+}
+
+// PollAll polls inbound messages for every organization that has at least one
+// digital address and returns the total newly stored. It backs the background
+// poll worker (the poll / both inbound modes). A failure polling one org is
+// logged and skipped so a single bad org does not stall delivery for the rest.
+func (s *Service) PollAll(ctx context.Context) (int, error) {
+	orgIDs, err := s.addresses.OrgIDsWithAddresses(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	total := 0
+	for _, orgID := range orgIDs {
+		received, err := s.Poll(ctx, orgID)
+		if err != nil {
+			slog.ErrorContext(ctx, "qerds poll worker: org poll failed",
+				slog.String("orgId", orgID.String()), slog.String("error", err.Error()))
+			continue
+		}
+		total += received
+	}
+	return total, nil
 }
 
 // ReceiveInbound stores a single message pushed by the provider (webhook path).

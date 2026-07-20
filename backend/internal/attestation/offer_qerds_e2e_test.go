@@ -3,6 +3,7 @@ package attestation_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -13,6 +14,60 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 )
+
+// loopbackProvider is a test-local QERDS provider: Send loops the message into
+// the recipient's inbox so a Fetch on the receiving address returns it,
+// exercising the whole send/receive flow in process. The shipped in-process
+// stub was removed (a real provider connection is now required — see
+// .ai/features/qerds.md), so tests carry their own loopback fake.
+type loopbackProvider struct {
+	mu    sync.Mutex
+	inbox map[qerdsprovider.Address][]qerdsprovider.InboundMessage
+	seq   int
+}
+
+func newLoopbackProvider() *loopbackProvider {
+	return &loopbackProvider{inbox: map[qerdsprovider.Address][]qerdsprovider.InboundMessage{}}
+}
+
+func (p *loopbackProvider) ResolveAddress(_ context.Context, identifier string) (qerdsprovider.Address, error) {
+	return qerdsprovider.Address(identifier), nil
+}
+
+func (p *loopbackProvider) Send(_ context.Context, msg qerdsprovider.OutboundMessage) (qerdsprovider.SendReceipt, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.seq++
+	ref := fmt.Sprintf("loopback-%d", p.seq)
+	delivery := qerdsprovider.Evidence{Type: qerdsprovider.EvidenceDelivery, ProviderRef: ref}
+	p.inbox[msg.Recipient] = append(p.inbox[msg.Recipient], qerdsprovider.InboundMessage{
+		ProviderRef: ref,
+		Sender:      msg.Sender,
+		Recipient:   msg.Recipient,
+		Subject:     msg.Subject,
+		Body:        msg.Body,
+		Attachments: msg.Attachments,
+		Evidence:    []qerdsprovider.Evidence{delivery},
+	})
+	return qerdsprovider.SendReceipt{
+		ProviderRef: ref,
+		Status:      qerdsprovider.StatusDelivered,
+		Evidence: []qerdsprovider.Evidence{
+			{Type: qerdsprovider.EvidenceSubmissionAcceptance, ProviderRef: ref},
+			delivery,
+		},
+	}, nil
+}
+
+func (p *loopbackProvider) Fetch(_ context.Context, addr qerdsprovider.Address) ([]qerdsprovider.InboundMessage, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	msgs := p.inbox[addr]
+	delete(p.inbox, addr)
+	return msgs, nil
+}
 
 // These tests exercise the full "OpenID4VCI credential offer over QERDS" path in
 // process — a Yivi org issues an org-subject credential to another org, the offer
@@ -91,6 +146,10 @@ func (m *memQerds) OrgByAddress(_ context.Context, address string) (uuid.UUID, e
 	return uuid.Nil, qerds.ErrAddressNotFound
 }
 
+func (m *memQerds) OrgIDsWithAddresses(_ context.Context) ([]uuid.UUID, error) {
+	return []uuid.UUID{m.orgID}, nil
+}
+
 // memHeld is an in-memory held recorder implementing attestation's heldRecorder
 // seam: HeldForMessage is the idempotency guard, RecordHeld stores the index row.
 type memHeld struct {
@@ -152,7 +211,7 @@ const (
 // attributes display.
 func TestCredentialOfferOverQERDSEndToEnd(t *testing.T) {
 	ctx := context.Background()
-	prov := qerdsprovider.NewStubProvider()
+	prov := newLoopbackProvider()
 
 	yiviOrg, ruOrg := uuid.New(), uuid.New()
 	yiviQ := newMemQerds(yiviOrg, yiviAddress)
@@ -207,7 +266,7 @@ func TestCredentialOfferOverQERDSEndToEnd(t *testing.T) {
 // rather than being deduped away forever.
 func TestCredentialOfferRetriedOnRedelivery(t *testing.T) {
 	ctx := context.Background()
-	prov := qerdsprovider.NewStubProvider()
+	prov := newLoopbackProvider()
 
 	ruOrg := uuid.New()
 	ruQ := newMemQerds(ruOrg, ruAddress)

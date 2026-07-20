@@ -84,3 +84,47 @@ func TestSetDefaultAddress(t *testing.T) {
 		t.Fatalf("cross-org err = %v, want ErrAddressNotFound", err)
 	}
 }
+
+// TestOrgIDsWithAddresses covers the poll worker's fan-out query: it returns
+// exactly the organizations that have at least one digital address, each once.
+func TestOrgIDsWithAddresses(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+	store := qerds.NewStore(pool, audit.NopRecorder{})
+
+	// No addresses provisioned yet: empty result.
+	orgIDs, err := store.OrgIDsWithAddresses(ctx)
+	if err != nil {
+		t.Fatalf("OrgIDsWithAddresses (empty): %v", err)
+	}
+	if len(orgIDs) != 0 {
+		t.Fatalf("orgIDs = %v, want none before any address is provisioned", orgIDs)
+	}
+
+	withOne := seedOrg(t, ctx, pool, "acme")
+	withTwo := seedOrg(t, ctx, pool, "beta")
+	seedOrg(t, ctx, pool, "gamma") // org with no QERDS address
+
+	if _, err := store.ProvisionAddress(ctx, withOne, "acme@qerds.localhost", true, ""); err != nil {
+		t.Fatalf("provision acme: %v", err)
+	}
+	if _, err := store.ProvisionAddress(ctx, withTwo, "beta1@qerds.localhost", true, ""); err != nil {
+		t.Fatalf("provision beta1: %v", err)
+	}
+	// A second address for the same org must not duplicate it in the result.
+	if _, err := store.ProvisionAddress(ctx, withTwo, "beta2@qerds.localhost", false, ""); err != nil {
+		t.Fatalf("provision beta2: %v", err)
+	}
+
+	orgIDs, err = store.OrgIDsWithAddresses(ctx)
+	if err != nil {
+		t.Fatalf("OrgIDsWithAddresses: %v", err)
+	}
+	got := map[uuid.UUID]int{}
+	for _, id := range orgIDs {
+		got[id]++
+	}
+	if len(got) != 2 || got[withOne] != 1 || got[withTwo] != 1 {
+		t.Fatalf("orgIDs = %v, want exactly acme and beta once each", orgIDs)
+	}
+}

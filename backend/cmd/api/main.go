@@ -90,7 +90,7 @@ type registryProvider interface {
 
 func newRegistryProvider(cfg config.Config, db database.DB, recorder audit.Recorder) (registryProvider, error) {
 	switch cfg.WalletRegistryProvider {
-	case config.ProviderStub:
+	case config.WalletRegistryStub:
 		return registryprovider.NewSeededRegistry(db, recorder), nil
 	default:
 		return nil, fmt.Errorf("wallet registry provider %q is not implemented", cfg.WalletRegistryProvider)
@@ -191,8 +191,6 @@ func (a qerdsOfferSender) SendCredentialOffer(ctx context.Context, orgID uuid.UU
 
 func newQerdsProvider(cfg config.Config) (qerdsProvider, error) {
 	switch cfg.QerdsProvider {
-	case config.ProviderStub:
-		return qerdsprovider.NewStubProvider(), nil
 	case config.ProviderDomibus:
 		return qerdsprovider.NewDomibusProvider(
 			cfg.QerdsProviderURL,
@@ -373,6 +371,19 @@ func run() error {
 	// An inbound QERDS message carrying an OpenID4VCI credential offer is redeemed
 	// into the org's holder engine and indexed (source=qerds).
 	qerdsService.SetInboundConsumer(attestation.NewOfferReceiver(attHolder, attestationStore))
+
+	// Inbound delivery mode. When it enables polling, a background worker pulls new
+	// messages per org address on a ticker (the AS4 One-Way/Pull equivalent),
+	// started only after the inbound consumer is wired so a polled offer is
+	// redeemed. Push arrives via the webhook, which stays registered.
+	switch cfg.QerdsInboundMode {
+	case config.QerdsInboundPoll, config.QerdsInboundBoth:
+		slog.Info("starting qerds poll worker",
+			slog.String("mode", cfg.QerdsInboundMode),
+			slog.Duration("interval", cfg.QerdsPollInterval))
+		startQerdsPoller(ctx, cfg.QerdsPollInterval, qerdsService.PollAll)
+	}
+
 	attestationService := attestation.NewService(
 		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, attestationStore, attHolder, cfg.AppBaseURL,
 	)

@@ -27,6 +27,8 @@ const (
 	envQerdsAuthToken            = "QERDS_AUTH_TOKEN"
 	envQerdsWebhookSecret        = "QERDS_WEBHOOK_SECRET"
 	envQerdsDefaultAddressDomain = "QERDS_DEFAULT_ADDRESS_DOMAIN"
+	envQerdsInboundMode          = "QERDS_INBOUND_MODE"
+	envQerdsPollInterval         = "QERDS_POLL_INTERVAL"
 
 	envWalletRegistryProvider = "WALLET_REGISTRY_PROVIDER"
 
@@ -107,11 +109,24 @@ const (
 	// minutes; the presentation-session mapping only needs to outlive that window.
 	defaultPresentationTTL = "15m"
 
-	// ProviderStub selects the in-process StubProvider (local dev / CI).
-	ProviderStub = "stub"
 	// ProviderDomibus selects the Domibus AS4 access-point driver. Requires
-	// QERDS_PROVIDER_URL (the WS-plugin endpoint).
+	// QERDS_PROVIDER_URL (the WS-plugin endpoint). There is deliberately no
+	// in-process QERDS stub: a real provider connection is required (see
+	// .ai/features/qerds.md).
 	ProviderDomibus = "domibus"
+
+	// QERDS inbound delivery mode (QERDS_INBOUND_MODE). QERDS/eIDAS prescribes
+	// neither push nor pull, so it is an integration choice:
+	//   push - the provider POSTs to the inbound webhook (needs a shared secret).
+	//   poll - a background worker pulls new messages per org address on a ticker.
+	//   both - poll runs as a reconciliation fallback behind webhook push.
+	QerdsInboundPush = "push"
+	QerdsInboundPoll = "poll"
+	QerdsInboundBoth = "both"
+
+	// WalletRegistryStub selects the in-process KVK registry stub (local dev / CI).
+	// This is the wallet-bootstrap registry, unrelated to the QERDS provider.
+	WalletRegistryStub = "stub"
 	// IssuerStub selects the in-process StubIssuer (local dev / CI); IssuerVeramo
 	// selects the hosted Veramo OpenID4VCI issuer.
 	IssuerStub   = "stub"
@@ -126,11 +141,12 @@ const (
 
 	defaultAttestationHolder = HolderStub
 
-	defaultQerdsProvider             = ProviderStub
 	defaultQerdsDefaultAddressDomain = "qerds.localhost"
+	defaultQerdsInboundMode          = QerdsInboundPush
+	defaultQerdsPollInterval         = "5m"
 
-	// The wallet-bootstrap registry (KVK) provider. Reuses ProviderStub ("stub").
-	defaultWalletRegistryProvider = ProviderStub
+	// The wallet-bootstrap registry (KVK) provider.
+	defaultWalletRegistryProvider = WalletRegistryStub
 
 	defaultQerdsDomibusFromParty   = "domibus-blue"
 	defaultQerdsDomibusToParty     = "domibus-red"
@@ -158,6 +174,12 @@ type Config struct {
 	QerdsAuthToken            string
 	QerdsWebhookSecret        string
 	QerdsDefaultAddressDomain string
+	// QerdsInboundMode selects how inbound messages arrive: push (webhook), poll
+	// (background worker) or both. See the QerdsInbound* constants.
+	QerdsInboundMode string
+	// QerdsPollInterval is how often the background poll worker pulls new inbound
+	// messages, when the inbound mode enables polling.
+	QerdsPollInterval time.Duration
 
 	QerdsDomibusFromParty   string
 	QerdsDomibusToParty     string
@@ -247,10 +269,40 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	qerdsProvider := envOrDefault(envQerdsProvider, defaultQerdsProvider)
+	// A real QERDS provider connection is required — there is no in-process fake
+	// and no default, so a deployment that forgets to configure QERDS fails to
+	// boot rather than silently sending nothing.
+	qerdsProvider := os.Getenv(envQerdsProvider)
+	if qerdsProvider == "" {
+		return Config{}, fmt.Errorf("config: %s is required", envQerdsProvider)
+	}
 	qerdsProviderURL := os.Getenv(envQerdsProviderURL)
-	if qerdsProvider != ProviderStub && qerdsProviderURL == "" {
-		return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envQerdsProviderURL, envQerdsProvider, ProviderStub)
+	if qerdsProviderURL == "" {
+		return Config{}, fmt.Errorf("config: %s is required", envQerdsProviderURL)
+	}
+
+	qerdsInboundMode := envOrDefault(envQerdsInboundMode, defaultQerdsInboundMode)
+	switch qerdsInboundMode {
+	case QerdsInboundPush, QerdsInboundPoll, QerdsInboundBoth:
+	default:
+		return Config{}, fmt.Errorf("config: %s %q must be one of %q, %q or %q",
+			envQerdsInboundMode, qerdsInboundMode, QerdsInboundPush, QerdsInboundPoll, QerdsInboundBoth)
+	}
+
+	qerdsPollInterval, err := parseDuration(envQerdsPollInterval, defaultQerdsPollInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	if qerdsPollInterval <= 0 {
+		return Config{}, fmt.Errorf("config: %s must be a positive duration", envQerdsPollInterval)
+	}
+
+	// When the inbound mode enables push, the webhook must be authenticated —
+	// fail loudly rather than let the endpoint silently disable itself (404).
+	qerdsWebhookSecret := os.Getenv(envQerdsWebhookSecret)
+	if (qerdsInboundMode == QerdsInboundPush || qerdsInboundMode == QerdsInboundBoth) && qerdsWebhookSecret == "" {
+		return Config{}, fmt.Errorf("config: %s is required when %s enables push (%q or %q)",
+			envQerdsWebhookSecret, envQerdsInboundMode, QerdsInboundPush, QerdsInboundBoth)
 	}
 
 	attestationIssuer := envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
@@ -293,8 +345,10 @@ func Load() (Config, error) {
 		QerdsProvider:             qerdsProvider,
 		QerdsProviderURL:          qerdsProviderURL,
 		QerdsAuthToken:            os.Getenv(envQerdsAuthToken),
-		QerdsWebhookSecret:        os.Getenv(envQerdsWebhookSecret),
+		QerdsWebhookSecret:        qerdsWebhookSecret,
 		QerdsDefaultAddressDomain: envOrDefault(envQerdsDefaultAddressDomain, defaultQerdsDefaultAddressDomain),
+		QerdsInboundMode:          qerdsInboundMode,
+		QerdsPollInterval:         qerdsPollInterval,
 
 		QerdsDomibusFromParty:   envOrDefault(envQerdsDomibusFromParty, defaultQerdsDomibusFromParty),
 		QerdsDomibusToParty:     envOrDefault(envQerdsDomibusToParty, defaultQerdsDomibusToParty),

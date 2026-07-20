@@ -14,7 +14,7 @@ import (
 
 // DomibusProvider drives a Domibus AS4 access point through its WS plugin
 // (SOAP). Domibus is the EU eDelivery reference access point; this makes our
-// backend a requestor against it, exactly as the StubProvider is in-process.
+// backend a requestor against it over the AS4 transport.
 //
 // SCOPE: this targets the Domibus 4.x/5.x WS-plugin schema and the ebMS3
 // namespaces below. The parties/service/action must match a PMode configured on
