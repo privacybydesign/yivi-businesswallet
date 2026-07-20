@@ -12,6 +12,9 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
+// ErrNoLogo is returned by GetLogo when the org has no stored logo.
+var ErrNoLogo = errors.New("themesettings: no logo")
+
 // Store persists per-org theme settings.
 type Store struct {
 	db    database.DB
@@ -22,13 +25,15 @@ func NewStore(db database.DB, recorder audit.Recorder) *Store {
 	return &Store{db: db, audit: recorder}
 }
 
-// GetSettings returns an org's theme (Configured false when no row exists).
+// GetSettings returns an org's theme (Configured false when no row exists). The
+// logo bytes are not read here — only whether a logo is stored (HasLogo); the
+// handler turns that into the served LogoURI.
 func (s *Store) GetSettings(ctx context.Context, orgID uuid.UUID) (Settings, error) {
-	const query = `SELECT primary_color, accent_color, logo_uri, updated_at
+	const query = `SELECT primary_color, accent_color, logo_bytes IS NOT NULL, updated_at
 		FROM org_theme_settings WHERE organization_id = $1`
 	var out Settings
 	err := s.db.QueryRow(ctx, query, orgID).Scan(
-		&out.PrimaryColor, &out.AccentColor, &out.LogoURI, &out.UpdatedAt,
+		&out.PrimaryColor, &out.AccentColor, &out.HasLogo, &out.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Settings{Configured: false}, nil
@@ -40,27 +45,69 @@ func (s *Store) GetSettings(ctx context.Context, orgID uuid.UUID) (Settings, err
 	return out, nil
 }
 
-// Upsert creates or updates an org's theme and audits, in one transaction.
-func (s *Store) Upsert(ctx context.Context, orgID uuid.UUID, in SettingsInput) (Settings, error) {
+// GetLogo returns the org's stored logo, or ErrNoLogo when none is set.
+func (s *Store) GetLogo(ctx context.Context, orgID uuid.UUID) (Logo, error) {
+	const query = `SELECT logo_bytes, logo_content_type
+		FROM org_theme_settings WHERE organization_id = $1`
+	var logo Logo
+	err := s.db.QueryRow(ctx, query, orgID).Scan(&logo.Bytes, &logo.ContentType)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Logo{}, ErrNoLogo
+	}
+	if err != nil {
+		return Logo{}, fmt.Errorf("themesettings: get logo org %s: %w", orgID, err)
+	}
+	if len(logo.Bytes) == 0 {
+		return Logo{}, ErrNoLogo
+	}
+	return logo, nil
+}
+
+// Save creates or updates an org's colours and, when logo.Replace is set, its
+// logo, then audits — all in one transaction.
+func (s *Store) Save(ctx context.Context, orgID uuid.UUID, in SettingsInput, logo LogoUpdate) (Settings, error) {
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const upsert = `INSERT INTO org_theme_settings
-			(organization_id, primary_color, accent_color, logo_uri)
-			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (organization_id) DO UPDATE SET
-				primary_color = EXCLUDED.primary_color,
-				accent_color = EXCLUDED.accent_color,
-				logo_uri = EXCLUDED.logo_uri,
-				updated_at = now()`
-		if _, err := q.Exec(ctx, upsert, orgID, in.PrimaryColor, in.AccentColor, in.LogoURI); err != nil {
-			return fmt.Errorf("themesettings: upsert settings org %s: %w", orgID, err)
+		if logo.Replace {
+			// An empty Logo (nil bytes) clears the stored logo.
+			var bytes []byte
+			if len(logo.Logo.Bytes) > 0 {
+				bytes = logo.Logo.Bytes
+			}
+			const upsert = `INSERT INTO org_theme_settings
+				(organization_id, primary_color, accent_color, logo_bytes, logo_content_type)
+				VALUES ($1, $2, $3, $4, $5)
+				ON CONFLICT (organization_id) DO UPDATE SET
+					primary_color = EXCLUDED.primary_color,
+					accent_color = EXCLUDED.accent_color,
+					logo_bytes = EXCLUDED.logo_bytes,
+					logo_content_type = EXCLUDED.logo_content_type,
+					updated_at = now()`
+			if _, err := q.Exec(ctx, upsert, orgID, in.PrimaryColor, in.AccentColor, bytes, logo.Logo.ContentType); err != nil {
+				return fmt.Errorf("themesettings: save settings org %s: %w", orgID, err)
+			}
+		} else {
+			const upsert = `INSERT INTO org_theme_settings
+				(organization_id, primary_color, accent_color)
+				VALUES ($1, $2, $3)
+				ON CONFLICT (organization_id) DO UPDATE SET
+					primary_color = EXCLUDED.primary_color,
+					accent_color = EXCLUDED.accent_color,
+					updated_at = now()`
+			if _, err := q.Exec(ctx, upsert, orgID, in.PrimaryColor, in.AccentColor); err != nil {
+				return fmt.Errorf("themesettings: save settings org %s: %w", orgID, err)
+			}
+		}
+
+		after := map[string]any{
+			"primaryColor": in.PrimaryColor,
+			"accentColor":  in.AccentColor,
+		}
+		if logo.Replace {
+			after["hasLogo"] = len(logo.Logo.Bytes) > 0
 		}
 		return s.audit.Record(ctx, q, audit.ThemeSettingsUpdated,
 			audit.Target{Type: audit.TargetThemeSettings, ID: orgID.String(), OrgID: &orgID},
-			audit.Updated(nil, map[string]any{
-				"primaryColor": in.PrimaryColor,
-				"accentColor":  in.AccentColor,
-				"hasLogo":      in.LogoURI != "",
-			}))
+			audit.Updated(nil, after))
 	})
 	if err != nil {
 		return Settings{}, err

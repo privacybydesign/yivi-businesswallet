@@ -2,6 +2,15 @@ import type { z } from "zod";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
+/**
+ * Prefixes an API path with the configured base URL, so a value the backend
+ * returns as a path (e.g. a logo URL) resolves against the API origin even when
+ * the SPA is served from a different one.
+ */
+export function absoluteApiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
+
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 300;
