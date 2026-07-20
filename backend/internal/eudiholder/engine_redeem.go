@@ -47,17 +47,15 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	if err != nil {
 		return Redeemed{}, err
 	}
-	var opts []openid4vci.ClientOption
+	// holderKeyBinder is required by NewClient (non-nil): the WSCA-backed binder
+	// when configured (holder key + proof of possession produced by the
+	// wallet-provider HSM, not software keys), otherwise irmago's default
+	// storage-backed software binder.
 	binder, err := e.holderKeyBinder(ctx, orgID, st)
 	if err != nil {
 		return Redeemed{}, err
 	}
-	if binder != nil {
-		// WSCA-backed: the holder binding key + its proof of possession are
-		// produced by the wallet-provider HSM, not software keys.
-		opts = append(opts, openid4vci.WithHolderKeyBinder(binder))
-	}
-	client, err := openid4vci.NewClient(e.httpClient, conf, sdjwtvc.NewHolderVerificationProcessor(verCtx), opts...)
+	client, err := openid4vci.NewClient(e.httpClient, conf, sdjwtvc.NewHolderVerificationProcessor(verCtx), binder)
 	if err != nil {
 		return Redeemed{}, fmt.Errorf("eudiholder: redeem client org %s: %w", orgID, err)
 	}
