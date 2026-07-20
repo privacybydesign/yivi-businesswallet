@@ -294,11 +294,6 @@ func EnsureYiviOrganization(ctx context.Context, dsn string) (organization.Organ
 	}
 	defer pool.Close()
 
-	// The KVK register participant is provisioned alongside Yivi so the register's
-	// consult decisions have an audit log even on the org-only staging seed.
-	if _, err := ensureOrg(ctx, pool, kvkRegisterOrg); err != nil {
-		return organization.Organization{}, err
-	}
 	org, err := ensureOrg(ctx, pool, yiviOrg)
 	if err != nil {
 		return organization.Organization{}, err
