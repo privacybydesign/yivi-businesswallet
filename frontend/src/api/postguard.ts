@@ -12,9 +12,19 @@ export const postguardEncryptionKeyInfoSchema = z.object({
   updatedAt: z.string().optional(),
 });
 
+export const postguardNotificationDeliverySchema = z.enum([
+  "postguard",
+  "smtp",
+]);
+
+export type PostguardNotificationDelivery = z.infer<
+  typeof postguardNotificationDeliverySchema
+>;
+
 export const postguardSettingsSchema = z.object({
   apiKey: postguardApiKeyInfoSchema,
   encryptionKey: postguardEncryptionKeyInfoSchema,
+  notifications: postguardNotificationDeliverySchema,
 });
 
 export type PostguardSettings = z.infer<typeof postguardSettingsSchema>;
@@ -87,6 +97,17 @@ export function deletePostguardApiKey(
     method: "DELETE",
     signal,
   });
+}
+
+export function setPostguardNotifications(
+  slug: string,
+  input: { notifications: PostguardNotificationDelivery },
+  signal?: AbortSignal,
+): Promise<PostguardSettings> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/postguard/notifications`,
+    { schema: postguardSettingsSchema, method: "PUT", body: input, signal },
+  );
 }
 
 export function getPostguardFiles(

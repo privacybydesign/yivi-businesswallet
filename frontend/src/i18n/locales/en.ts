@@ -331,6 +331,7 @@ export const en = {
     postguardEncryptionKeySaved: "Encryption key saved",
     postguardEncryptionKeyRemoved: "Encryption key removed",
     postguardFileSent: "Encrypted file sent",
+    postguardNotificationsSaved: "Notification settings saved",
     attestationSchemaCreated: "Schema created",
     attestationSchemaUpdated: "Schema updated",
     attestationSchemaDeleted: "Schema deleted",
@@ -1051,6 +1052,20 @@ export const en = {
         "Set an encryption key above before adding your API key.",
       notConfiguredMember:
         "No API key configured yet. Ask an organization admin to add one.",
+    },
+    notifications: {
+      title: "Recipient notifications",
+      subtitle: "Who sends the e-mail that tells recipients a file is waiting",
+      postguardTitle: "PostGuard mailing service",
+      postguardBody:
+        "PostGuard notifies recipients. The sender address comes from this organization's PostGuard for Business account.",
+      smtpTitle: "Own SMTP server",
+      smtpBody:
+        "This organization's own SMTP server sends the notification, with a link to the encrypted file.",
+      smtpHint:
+        "Configure and enable this organization's SMTP server on the E-mail tab. Without it, sending a file will report that SMTP is not configured.",
+      member: "Recipient notifications are delivered by: {{method}}.",
+      error: "Could not save the notification settings: {{message}}",
     },
     send: {
       action: "Send encrypted file",

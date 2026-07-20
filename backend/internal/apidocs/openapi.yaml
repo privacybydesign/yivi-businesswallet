@@ -1837,6 +1837,43 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/postguard/notifications:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    put:
+      tags: [postguard]
+      summary: Set the recipient-notification delivery method
+      description: >-
+        Choose whether recipient notifications are delivered by PostGuard's
+        hosted mailing service ("postguard") or by the organisation's own SMTP
+        server ("smtp"). Requires an administrator role in the organisation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/postguard/encryption-key:
     parameters:
       - name: slug
