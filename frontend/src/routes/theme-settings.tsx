@@ -226,7 +226,7 @@ function ThemeForm({
         <span className={EYEBROW}>{t("themeSettings.logo")}</span>
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">
-            <label className="rounded-yivi border-line-strong bg-surface text-ink hover:bg-surface-3 inline-flex h-9 cursor-pointer items-center border px-3 text-[13px] font-medium transition-colors">
+            <label className="rounded-yivi border-line-strong bg-surface text-ink hover:bg-surface-3 focus-within:border-ink focus-within:ring-ink/10 inline-flex h-9 cursor-pointer items-center border px-3 text-[13px] font-medium transition-colors focus-within:ring-3">
               <input
                 type="file"
                 accept={ACCEPTED_LOGO_TYPES.join(",")}
