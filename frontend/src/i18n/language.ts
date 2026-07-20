@@ -7,8 +7,9 @@ export type Language = (typeof SUPPORTED_LANGUAGES)[number];
 
 export const DEFAULT_LANGUAGE: Language = "en";
 
-// localStorage key holding an explicit user choice. Reused as i18next's own
-// detection cache key so a stored choice survives reloads.
+// localStorage key holding the user's explicit language choice. Read and
+// written only by the resolver in index.ts (no i18next detector is wired), so
+// the choice survives reloads.
 export const LANGUAGE_STORAGE_KEY = "bw.language";
 
 export function isSupportedLanguage(
