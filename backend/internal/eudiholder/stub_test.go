@@ -68,10 +68,61 @@ func TestStubHolderRedeem(t *testing.T) {
 		t.Error("redeem returned empty vct")
 	}
 
+	// A redeemed credential exposes its disclosed attributes (the stub attaches a
+	// synthetic payload so the held-detail view has data in dev/CI).
+	claims, err := h.Claims(ctx, org, got.Ref, got.VCT)
+	if err != nil {
+		t.Fatalf("claims: %v", err)
+	}
+	if got := attributeValue(claims.Attributes, "company_name"); got != "Demo Supplier B.V." {
+		t.Errorf("claims[company_name] = %v, want the demo value", got)
+	}
+	if hasAttribute(claims.Attributes, "vct") {
+		t.Error("claims should not include the registered vct claim")
+	}
+
+	// The vct fallback resolves the same credential when the ref is unknown.
+	viaVCT, err := h.Claims(ctx, org, "", got.VCT)
+	if err != nil {
+		t.Fatalf("claims by vct: %v", err)
+	}
+	if got := attributeValue(viaVCT.Attributes, "company_name"); got != "Demo Supplier B.V." {
+		t.Errorf("claims by vct[company_name] = %v, want the demo value", got)
+	}
+
+	// Claims for an unknown ref and vct yields an empty attribute set, not an error.
+	empty, err := h.Claims(ctx, org, "does-not-exist", "")
+	if err != nil {
+		t.Fatalf("claims unknown ref: %v", err)
+	}
+	if len(empty.Attributes) != 0 {
+		t.Errorf("claims for unknown ref = %v, want empty", empty.Attributes)
+	}
+
 	// The redeemed credential is now held: deleting its ref is a no-op success.
 	if err := h.Delete(ctx, org, got.Ref); err != nil {
 		t.Fatalf("delete redeemed ref: %v", err)
 	}
+}
+
+// attributeValue returns the value of the attribute with the given key, or nil.
+func attributeValue(attrs []eudiholder.HeldAttribute, key string) any {
+	for _, a := range attrs {
+		if a.Key == key {
+			return a.Value
+		}
+	}
+	return nil
+}
+
+// hasAttribute reports whether an attribute with the given key is present.
+func hasAttribute(attrs []eudiholder.HeldAttribute, key string) bool {
+	for _, a := range attrs {
+		if a.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func TestParseMasterKey(t *testing.T) {

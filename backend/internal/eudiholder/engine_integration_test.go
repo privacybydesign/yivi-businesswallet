@@ -37,7 +37,7 @@ func sampleCredential(vct, hash string) eudiholder.Credential {
 		CredentialIssuer: "https://issuer.test",
 		Hash:             hash,
 		RawToken:         []byte("raw-sd-jwt-vc-token"),
-		ProcessedPayload: []byte(fmt.Sprintf(`{"vct":%q}`, vct)),
+		ProcessedPayload: []byte(fmt.Sprintf(`{"vct":%q,"company_name":"Demo B.V."}`, vct)),
 		IssuedAt:         time.Unix(1_700_000_000, 0).UTC(),
 	}
 }
@@ -96,6 +96,28 @@ func TestEngineStoreDeleteRoundTrip(t *testing.T) {
 		t.Fatalf("expected 1 batch after store, got %d", got)
 	}
 
+	// Claims decodes the stored payload's attributes and strips the registered vct.
+	claims, err := eng.Claims(ctx, org, ref, "nl.kvk.registration")
+	if err != nil {
+		t.Fatalf("claims: %v", err)
+	}
+	if got := attributeValue(claims.Attributes, "company_name"); got != "Demo B.V." {
+		t.Fatalf("claims[company_name] = %v, want the demo value", got)
+	}
+	if hasAttribute(claims.Attributes, "vct") {
+		t.Fatal("claims should not include the registered vct claim")
+	}
+
+	// The vct fallback recovers the batch when the instance ref is empty — the
+	// case irmago's redemption produces (unpopulated CredentialInstanceIds).
+	viaVCT, err := eng.Claims(ctx, org, "", "nl.kvk.registration")
+	if err != nil {
+		t.Fatalf("claims by vct: %v", err)
+	}
+	if got := attributeValue(viaVCT.Attributes, "company_name"); got != "Demo B.V." {
+		t.Fatalf("claims by vct[company_name] = %v, want the demo value", got)
+	}
+
 	if err := eng.Delete(ctx, org, ref); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -106,6 +128,12 @@ func TestEngineStoreDeleteRoundTrip(t *testing.T) {
 	// would orphan it, so assert erasure cascaded to the batch too.
 	if got := countBatches(t, pool, org); got != 0 {
 		t.Fatalf("expected 0 batches after delete, got %d", got)
+	}
+	// Claims for a now-absent ref and vct yields an empty attribute set, not an error.
+	if got, err := eng.Claims(ctx, org, ref, "nl.kvk.registration"); err != nil {
+		t.Fatalf("claims after delete: %v", err)
+	} else if len(got.Attributes) != 0 {
+		t.Fatalf("claims after delete = %v, want empty", got.Attributes)
 	}
 
 	// Deleting an absent / non-uuid ref is a no-op.

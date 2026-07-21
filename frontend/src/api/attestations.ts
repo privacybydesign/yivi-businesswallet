@@ -162,6 +162,31 @@ export type HeldAttestation = z.infer<typeof heldAttestationSchema>;
 
 const heldAttestationListSchema = z.array(heldAttestationSchema);
 
+// One disclosed attribute of a held credential: its payload key, the issuer
+// metadata display label (empty when the credential carries no label — the UI
+// falls back to the key), and the value (any JSON type, rendered generically).
+export const heldAttributeSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  value: z.unknown(),
+});
+
+export type HeldAttribute = z.infer<typeof heldAttributeSchema>;
+
+// The detail view of a held credential: its index metadata plus the disclosed
+// attributes read from the holder engine, display-ordered and labelled server-side.
+export const heldAttestationClaimsSchema = z.object({
+  id: z.string(),
+  vct: z.string(),
+  issuer: z.string(),
+  issuerName: z.string(),
+  source: z.string(),
+  receivedAt: z.string(),
+  attributes: z.array(heldAttributeSchema),
+});
+
+export type HeldAttestationClaims = z.infer<typeof heldAttestationClaimsSchema>;
+
 // The response to a POST issue: the ledger entry plus the wallet offer link
 // (and an optional transaction code the recipient must enter).
 export const issueResultSchema = issuedAttestationSchema.extend({
@@ -238,6 +263,17 @@ export function getHeldAttestations(
 ): Promise<HeldAttestation[]> {
   return request(`${base(slug)}/held`, {
     schema: heldAttestationListSchema,
+    signal,
+  });
+}
+
+export function getHeldAttestationClaims(
+  slug: string,
+  heldId: string,
+  signal?: AbortSignal,
+): Promise<HeldAttestationClaims> {
+  return request(`${base(slug)}/held/${encodeURIComponent(heldId)}/claims`, {
+    schema: heldAttestationClaimsSchema,
     signal,
   });
 }
