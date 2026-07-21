@@ -12,6 +12,7 @@ type Translation<T> = {
 export const nl: Translation<typeof en> = {
   common: {
     cancel: "Annuleren",
+    close: "Sluiten",
     comingSoon: "Binnenkort beschikbaar",
     copy: "Kopiëren",
     copied: "Gekopieerd naar klembord.",
@@ -907,12 +908,18 @@ export const nl: Translation<typeof en> = {
       empty: "Nog geen credentials ontvangen.",
       delete: "Verwijderen",
       confirmDelete: "Credential “{{name}}” verwijderen?",
+      viewDetail: "Details van {{name}} bekijken",
       columns: {
         credential: "Credential",
         issuer: "Uitgegeven door",
         source: "Ontvangen via",
         received: "Ontvangen",
         actions: "Acties",
+      },
+      detail: {
+        type: "Type credential",
+        attributes: "Attributen",
+        noAttributes: "Deze credential geeft geen attributen vrij.",
       },
     },
     schemas: {

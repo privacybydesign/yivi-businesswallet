@@ -24,7 +24,7 @@ import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { credentialDisplayName } from "../lib/credential-display";
 import { useWhenFormatter } from "../lib/format-when";
-import { Button, Card, Modal, Table, Tag, TopBar } from "../ui";
+import { Button, Card, ConfirmDialog, Modal, Table, Tag, TopBar } from "../ui";
 import { AttestationIssueWizard } from "./attestations-issue";
 import { AttestationSchemaForm } from "./attestations-schema-form";
 import { AttestationTemplateForm } from "./attestations-template-form";
@@ -273,6 +273,8 @@ function TemplatesTab({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const remove = useDeleteAttestationTemplateMutation(slug);
+  const [pendingDelete, setPendingDelete] =
+    useState<AttestationTemplate | null>(null);
 
   if (error) {
     return (
@@ -299,88 +301,97 @@ function TemplatesTab({
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {templates.map((template) => {
-        const chips = template.attributes.slice(0, CHIP_LIMIT);
-        const extra = template.attributes.length - chips.length;
-        return (
-          <Card key={template.id} className="flex flex-col gap-3 p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-ink truncate font-semibold">
-                  {template.name}
+    <>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {templates.map((template) => {
+          const chips = template.attributes.slice(0, CHIP_LIMIT);
+          const extra = template.attributes.length - chips.length;
+          return (
+            <Card key={template.id} className="flex flex-col gap-3 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-ink truncate font-semibold">
+                    {template.name}
+                  </div>
+                  <div className="text-ink-soft truncate font-mono text-[12px]">
+                    {template.vct}
+                  </div>
                 </div>
-                <div className="text-ink-soft truncate font-mono text-[12px]">
-                  {template.vct}
+                {template.qualified && (
+                  <Tag tone="blue">{t("attestations.qualified")}</Tag>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {chips.map((attribute) => (
+                  <span
+                    key={attribute.key}
+                    className="bg-surface-3 text-ink-soft rounded-full px-2 py-0.5 text-[11.5px] font-medium"
+                  >
+                    {attribute.label || attribute.key}
+                  </span>
+                ))}
+                {extra > 0 && (
+                  <span className="text-ink-soft px-1 py-0.5 text-[11.5px] font-medium">
+                    {t("attestations.templates.moreAttributes", {
+                      count: extra,
+                    })}
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-auto flex items-center justify-between pt-1">
+                <span className="text-ink-soft text-[12.5px]">
+                  {t("attestations.templates.issuedCount", {
+                    count: template.issuedCount,
+                  })}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="edit"
+                    iconOnly
+                    onClick={() => onEdit(template)}
+                    aria-label={t("common.edit")}
+                  />
+                  <Button
+                    variant="dangerGhost"
+                    size="sm"
+                    icon="delete"
+                    iconOnly
+                    onClick={() => setPendingDelete(template)}
+                    aria-label={t("attestations.templates.delete")}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onIssue(template)}
+                  >
+                    {t("attestations.templates.issueAction")}
+                  </Button>
                 </div>
               </div>
-              {template.qualified && (
-                <Tag tone="blue">{t("attestations.qualified")}</Tag>
-              )}
-            </div>
-
-            <div className="flex flex-wrap gap-1.5">
-              {chips.map((attribute) => (
-                <span
-                  key={attribute.key}
-                  className="bg-surface-3 text-ink-soft rounded-full px-2 py-0.5 text-[11.5px] font-medium"
-                >
-                  {attribute.label || attribute.key}
-                </span>
-              ))}
-              {extra > 0 && (
-                <span className="text-ink-soft px-1 py-0.5 text-[11.5px] font-medium">
-                  {t("attestations.templates.moreAttributes", { count: extra })}
-                </span>
-              )}
-            </div>
-
-            <div className="mt-auto flex items-center justify-between pt-1">
-              <span className="text-ink-soft text-[12.5px]">
-                {t("attestations.templates.issuedCount", {
-                  count: template.issuedCount,
-                })}
-              </span>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon="edit"
-                  iconOnly
-                  onClick={() => onEdit(template)}
-                  aria-label={t("common.edit")}
-                />
-                <Button
-                  variant="dangerGhost"
-                  size="sm"
-                  icon="delete"
-                  iconOnly
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        t("attestations.templates.confirmDelete", {
-                          name: template.name,
-                        }),
-                      )
-                    ) {
-                      remove.mutate({ templateId: template.id });
-                    }
-                  }}
-                  aria-label={t("attestations.templates.delete")}
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => onIssue(template)}
-                >
-                  {t("attestations.templates.issueAction")}
-                </Button>
-              </div>
-            </div>
-          </Card>
-        );
-      })}
-    </div>
+            </Card>
+          );
+        })}
+      </div>
+      {pendingDelete && (
+        <ConfirmDialog
+          title={t("attestations.templates.delete")}
+          message={t("attestations.templates.confirmDelete", {
+            name: pendingDelete.name,
+          })}
+          confirmLabel={t("attestations.templates.delete")}
+          busy={remove.isPending}
+          onConfirm={() => {
+            remove.mutate({ templateId: pendingDelete.id });
+            setPendingDelete(null);
+          }}
+          onClose={() => setPendingDelete(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -502,6 +513,9 @@ function HeldTab({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const remove = useDeleteHeldAttestationMutation(slug);
+  const [pendingDelete, setPendingDelete] = useState<HeldAttestation | null>(
+    null,
+  );
   const columnCount = isAdmin ? HELD_COLUMN_COUNT : HELD_COLUMN_COUNT - 1;
 
   if (error) {
@@ -587,15 +601,7 @@ function HeldTab({
                         size="sm"
                         onClick={(event) => {
                           event.stopPropagation();
-                          if (
-                            window.confirm(
-                              t("attestations.held.confirmDelete", {
-                                name,
-                              }),
-                            )
-                          ) {
-                            remove.mutate({ heldId: row.id });
-                          }
+                          setPendingDelete(row);
                         }}
                       >
                         {t("attestations.held.delete")}
@@ -608,6 +614,21 @@ function HeldTab({
           )}
         </Table.Body>
       </Table>
+      {pendingDelete && (
+        <ConfirmDialog
+          title={t("attestations.held.delete")}
+          message={t("attestations.held.confirmDelete", {
+            name: credentialDisplayName(pendingDelete.vct),
+          })}
+          confirmLabel={t("attestations.held.delete")}
+          busy={remove.isPending}
+          onConfirm={() => {
+            remove.mutate({ heldId: pendingDelete.id });
+            setPendingDelete(null);
+          }}
+          onClose={() => setPendingDelete(null)}
+        />
+      )}
     </Card>
   );
 }
@@ -728,6 +749,9 @@ function SchemasTab({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const remove = useDeleteAttestationSchemaMutation(slug);
+  const [pendingDelete, setPendingDelete] = useState<AttestationSchema | null>(
+    null,
+  );
 
   if (error) {
     return (
@@ -784,17 +808,7 @@ function SchemasTab({
                     size="sm"
                     icon="delete"
                     iconOnly
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          t("attestations.schemas.confirmDelete", {
-                            name: schema.displayName,
-                          }),
-                        )
-                      ) {
-                        remove.mutate({ schemaId: schema.id });
-                      }
-                    }}
+                    onClick={() => setPendingDelete(schema)}
                     aria-label={t("attestations.schemas.delete")}
                   />
                 </div>
@@ -812,6 +826,21 @@ function SchemasTab({
             </Card>
           ))}
         </div>
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title={t("attestations.schemas.delete")}
+          message={t("attestations.schemas.confirmDelete", {
+            name: pendingDelete.displayName,
+          })}
+          confirmLabel={t("attestations.schemas.delete")}
+          busy={remove.isPending}
+          onConfirm={() => {
+            remove.mutate({ schemaId: pendingDelete.id });
+            setPendingDelete(null);
+          }}
+          onClose={() => setPendingDelete(null)}
+        />
       )}
     </div>
   );

@@ -20,6 +20,7 @@ export { MobileNavContext, useMobileNav } from "./mobile-nav";
 export { BrandProvider, useBrand } from "./brand";
 export type { Brand } from "./brand";
 export { Modal } from "./modal";
+export { ConfirmDialog } from "./confirm-dialog";
 export { IdentityDisclosure } from "./identity-disclosure";
 export { Outcome } from "./outcome";
 export { Stepper } from "./stepper";
