@@ -70,6 +70,8 @@ jobs:
 
       - name: Build container and export to local Docker
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        env:
+          WALLET_PROVIDER_DEPLOY_KEY: ${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -80,10 +82,12 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
           # The business-wallet image builds the API with -tags wsca, which needs
-          # a clone of the private wallet-provider repo. Consumed only by that
-          # Dockerfile; harmlessly ignored by the postguard-sidecar build.
-          secrets: |
-            wallet_provider_key=${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
+          # a clone of the private wallet-provider repo. Passed by env-var NAME
+          # (not value) so the multi-line SSH key is not newline-split into bogus
+          # secret entries. Consumed only by that Dockerfile; harmlessly ignored
+          # by the postguard-sidecar build.
+          secret-envs: |
+            wallet_provider_key=WALLET_PROVIDER_DEPLOY_KEY
 
       # The scan gates delivery directly: fail-build fails the job when a fixable
       # critical vulnerability is present. Results are not uploaded to GitHub code
@@ -101,6 +105,8 @@ jobs:
       - name: Push image to GitHub Container Registry
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         if: ${{ github.event_name == 'release' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+        env:
+          WALLET_PROVIDER_DEPLOY_KEY: ${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -108,8 +114,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.component }}
-          secrets: |
-            wallet_provider_key=${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
+          secret-envs: |
+            wallet_provider_key=WALLET_PROVIDER_DEPLOY_KEY
 
   mirror-image:
     runs-on: ubuntu-latest

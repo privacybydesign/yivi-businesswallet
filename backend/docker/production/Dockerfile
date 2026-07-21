@@ -35,14 +35,19 @@ ARG WALLET_PROVIDER_REF=3f463ccc34aa617ce668cc2158de6e75b1e4967c
 RUN apk add --no-cache git openssh-client
 
 # Clone the private wallet-provider next to the backend module. The deploy key is
-# supplied as a BuildKit secret (never written to an image layer); it mirrors the
-# WALLET_PROVIDER_DEPLOY_KEY the CI wsca job uses.
+# supplied as a BuildKit secret (mirrors the WALLET_PROVIDER_DEPLOY_KEY the CI
+# wsca job uses). Write it out with a guaranteed trailing newline — OpenSSH
+# rejects a key file whose final line is unterminated — and remove it within the
+# same RUN so it never lands in a committed image layer.
 RUN --mount=type=secret,id=wallet_provider_key,required=true \
-    mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
-    ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null && \
-    GIT_SSH_COMMAND="ssh -i /run/secrets/wallet_provider_key -o IdentitiesOnly=yes" \
+    mkdir -p /root/.ssh && chmod 700 /root/.ssh && \
+    { cat /run/secrets/wallet_provider_key; echo; } > /root/.ssh/wallet_provider && \
+    chmod 600 /root/.ssh/wallet_provider && \
+    ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && \
+    GIT_SSH_COMMAND="ssh -i /root/.ssh/wallet_provider -o IdentitiesOnly=yes" \
       git clone git@github.com:privacybydesign/wallet-provider.git /wallet-provider && \
-    git -C /wallet-provider checkout "${WALLET_PROVIDER_REF}"
+    git -C /wallet-provider checkout "${WALLET_PROVIDER_REF}" && \
+    rm -f /root/.ssh/wallet_provider
 
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
