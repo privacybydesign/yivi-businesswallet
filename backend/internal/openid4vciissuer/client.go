@@ -220,7 +220,7 @@ func (c *VeramoIssuer) RevokeCredential(ctx context.Context, instance, credentia
 	case revokedStatus, wasRevokedStatus:
 		return nil
 	case unknownStatus:
-		return fmt.Errorf("openid4vciissuer: revoke-credential could not find a status-list bit for the credential")
+		return ErrNoStatusListBit
 	default:
 		return fmt.Errorf("openid4vciissuer: revoke-credential returned unexpected status %q", out.Status)
 	}

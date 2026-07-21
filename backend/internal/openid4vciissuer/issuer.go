@@ -19,6 +19,14 @@ const (
 // ErrPending means the recipient has not claimed the credential yet.
 var ErrPending = errors.New("openid4vciissuer: issuance pending")
 
+// ErrNoStatusListBit means the issuer has no status-list bit reserved for the
+// credential (it answered UNKNOWN): the deployment issues without a status list,
+// or the list could not be found. Callers can treat this as a degrade-to-local
+// signal rather than a hard failure — there is nothing published to flip, so
+// revocation falls back to the local ledger alone (matching StubIssuer, which
+// keeps no status list and returns a no-op success).
+var ErrNoStatusListBit = errors.New("openid4vciissuer: no status-list bit reserved for the credential")
+
 // IssuanceStatus reports an offer's progress. CredentialUUID is the issuer's
 // handle for the minted credential (check-offer's `uuid`), populated only once
 // Status is StatusIssued — it is what the revocation API keys on to flip the

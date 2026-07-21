@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -250,8 +251,11 @@ func (s *Service) ClaimStatus(ctx context.Context, token string) (ClaimView, err
 // "revoked" flag is never set without the published status list also marking it
 // revoked (the two must not drift). Only a claimed credential has a published
 // uuid to revoke; an offered/failed row has nothing published, so the local flip
-// stands alone. If the issuer call fails, the local state is left untouched and
-// the error surfaces (the same fail-safe, external-first ordering as DeleteHeld).
+// stands alone. If the issuer reports no status-list bit for the credential (a
+// deployment issuing without a Token Status List), the revoke degrades to a
+// local-only flip — there is nothing published that could drift. Any other
+// issuer failure leaves the local state untouched and surfaces the error (the
+// same fail-safe, external-first ordering as DeleteHeld).
 func (s *Service) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
 	issued, err := s.store.GetIssued(ctx, orgID, id)
 	if err != nil {
@@ -259,7 +263,16 @@ func (s *Service) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, erro
 	}
 	switch {
 	case issued.CredentialUUID != "" && isRevocable(issued.Status):
-		if err := s.issuer.RevokeCredential(ctx, s.instanceFor(ctx, orgID), issued.CredentialUUID); err != nil {
+		switch err := s.issuer.RevokeCredential(ctx, s.instanceFor(ctx, orgID), issued.CredentialUUID); {
+		case errors.Is(err, openid4vciissuer.ErrNoStatusListBit):
+			// The deployment issues without a Token Status List (enableStatusLists
+			// off / no statusLists block), so the issuer reserved no bit to flip.
+			// Degrade to a local-only revocation: the local ledger records it, and
+			// there is nothing published that could drift. Matches StubIssuer,
+			// whose RevokeCredential is a graceful no-op success.
+			slog.WarnContext(ctx, "attestation: issuer has no status-list bit for the credential; revoking locally only",
+				slog.String("id", id.String()))
+		case err != nil:
 			return Issued{}, fmt.Errorf("attestation: revoke on issuer status list: %w", err)
 		}
 	case issued.CredentialUUID == "" && issued.Status == StatusClaimed:

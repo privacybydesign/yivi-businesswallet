@@ -126,6 +126,27 @@ func TestRevokeAbortsWhenIssuerFails(t *testing.T) {
 	}
 }
 
+// TestRevokeDegradesWhenNoStatusListBit asserts that in a deployment issuing
+// without a Token Status List — where a claimed credential has a captured uuid
+// but the issuer reserved no bit and answers UNKNOWN — the revoke degrades to a
+// local-only flip instead of hard-failing, so an admin can still revoke.
+func TestRevokeDegradesWhenNoStatusListBit(t *testing.T) {
+	store := &fakeStore{row: Issued{Status: StatusClaimed, CredentialUUID: "cred-1"}}
+	iss := &fakeIssuer{revokeErr: openid4vciissuer.ErrNoStatusListBit}
+	svc := newRevokeService(store, iss)
+
+	revoked, err := svc.Revoke(context.Background(), uuid.New(), uuid.New())
+	if err != nil {
+		t.Fatalf("Revoke should degrade to local-only when the issuer has no status-list bit, got: %v", err)
+	}
+	if revoked.Status != StatusRevoked {
+		t.Fatalf("expected local status revoked, got %q", revoked.Status)
+	}
+	if !store.revoked {
+		t.Fatalf("local ledger should still be flipped when the issuer has no status-list bit")
+	}
+}
+
 // TestRevokeOfferedSkipsIssuer asserts an offered row (nothing published yet, no
 // credential uuid) is revoked locally without an issuer call.
 func TestRevokeOfferedSkipsIssuer(t *testing.T) {

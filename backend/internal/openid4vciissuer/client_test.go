@@ -3,6 +3,7 @@ package openid4vciissuer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -145,7 +146,7 @@ func TestCreateOfferEnablesStatusLists(t *testing.T) {
 
 // TestRevokeCredentialSetsBit asserts the revoke-credential call requests the
 // revoked state for the credential uuid and treats REVOKED/WAS_REVOKED as
-// success while UNKNOWN is an error.
+// success while UNKNOWN maps to the ErrNoStatusListBit degrade signal.
 func TestRevokeCredentialSetsBit(t *testing.T) {
 	stub := newVeramoStub(t)
 	client := NewVeramoIssuer(stub.server.URL, "default-issuer", NewBearerAuthenticator("admin-token"), "", http.DefaultClient)
@@ -164,8 +165,8 @@ func TestRevokeCredentialSetsBit(t *testing.T) {
 	}
 
 	stub.revokeStatus = unknownStatus
-	if err := client.RevokeCredential(context.Background(), "", "cred-uuid-9"); err == nil {
-		t.Fatalf("expected error for UNKNOWN revoke status")
+	if err := client.RevokeCredential(context.Background(), "", "cred-uuid-9"); !errors.Is(err, ErrNoStatusListBit) {
+		t.Fatalf("expected ErrNoStatusListBit for UNKNOWN revoke status, got %v", err)
 	}
 }
 
