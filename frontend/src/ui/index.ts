@@ -14,6 +14,7 @@ export { Stat } from "./stat";
 export { Logo } from "./logo";
 export { Sidebar } from "./sidebar";
 export { OrgSwitcher } from "./org-switcher";
+export { LanguageSwitcher } from "./language-switcher";
 export { TopBar } from "./top-bar";
 export { MobileNavContext, useMobileNav } from "./mobile-nav";
 export { BrandProvider, useBrand } from "./brand";
