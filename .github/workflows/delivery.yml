@@ -79,6 +79,11 @@ jobs:
           # each other's GitHub Actions cache.
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+          # The business-wallet image builds the API with -tags wsca, which needs
+          # a clone of the private wallet-provider repo. Consumed only by that
+          # Dockerfile; harmlessly ignored by the postguard-sidecar build.
+          secrets: |
+            wallet_provider_key=${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
 
       # The scan gates delivery directly: fail-build fails the job when a fixable
       # critical vulnerability is present. Results are not uploaded to GitHub code
@@ -103,6 +108,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.component }}
+          secrets: |
+            wallet_provider_key=${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
 
   mirror-image:
     runs-on: ubuntu-latest
