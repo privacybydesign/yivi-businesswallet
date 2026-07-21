@@ -507,9 +507,25 @@ by email. The service polls `Result`; on claim → `claimed` + `claimed_at` + au
 TTL → `expired`.
 
 ### 9.4 Revoke an issued attestation (admin, Art 6(2))
-`POST .../attestations/{id}/revoke` → `status → revoked`, `revoked_at`, propagate
-revocation to the issuer's status list (StatusList2021-style; provider seam call),
-audit. Revocation propagation to external validators beyond the status list is v2.
+`POST .../attestations/{id}/revoke` → propagate revocation to the issuer's Token
+Status List, then `status → revoked`, `revoked_at`, audit. **Implemented** against
+the hosted Veramo issuer's status-list API:
+- **At issuance** the offer sets `credentialMetadata.enableStatusLists: true`, so
+  the issuer reserves a Token Status List bit and embeds the `status.status_list`
+  reference in the credential (a no-op unless the issuer instance has a
+  `statusLists` block configured in `openid4vc-poc-ops` + a deployed
+  `statuslist-agent`).
+- **On claim** the poll captures the issuer's credential `uuid` (`check-offer`'s
+  `uuid`) onto `issued_attestations.credential_uuid` — the handle revocation keys
+  on.
+- **On revoke** `Service.Revoke` calls the issuer's
+  `POST /{instance}/api/revoke-credential` (`state: revoke`) with that uuid, then
+  flips the local ledger. Issuer-first ordering keeps the local `revoked` flag and
+  the published status list from drifting: a failed issuer call aborts before the
+  local flip (same fail-safe ordering as `DeleteHeld`). An offered row (nothing
+  published yet) or a legacy claimed row with no captured uuid flips locally only.
+
+Revocation propagation to external validators beyond the status list is v2.
 
 ### 9.5 Receive / hold (holder side, Art 5(1)(a))
 Inbound EAAs land in the org's **irmago EUDI holder engine** (§6.5) with a
@@ -614,8 +630,9 @@ KVK attestation from bootstrap surfacing as the first held credential.
 
 **Out (v1):** a real hosted issuer / QTSP integration (stub only); qualified-seal
 issuance against a real qualified certificate + QTST (data model ready, key
-provisioning is a QTSP onboarding step); status-list revocation propagation to
-external validators beyond flipping our own list; ISO-mdoc credential format
+provisioning is a QTSP onboarding step); revocation propagation to external
+validators beyond the issuer's Token Status List (the status-list wiring itself is
+now in — §9.4); ISO-mdoc credential format
 (SD-JWT VC only, same as the verify side); the European Digital Directory for
 resolving external recipients' digital addresses (reuse the `qerds` `ResolveAddress`
 seam + interim contacts).
@@ -646,8 +663,14 @@ seam + interim contacts).
 4. **Schema governance** — are org `vct` types free-form, or must they be registered
    in a shared type catalogue for cross-org verifiability? Affects §6.1 uniqueness and
    the verify-side trust list.
-5. **Revocation model** — StatusList2021 vs a QERDS-delivered revocation notice; how a
-   relying party checks a revoked EAA. (Verify-side dependency.)
+5. ~~**Revocation model**~~ **RESOLVED.** IETF Token Status List
+   (`draft-ietf-oauth-status-list`), published by the hosted issuer: the
+   `veramo-agent` reserves a bit and embeds `status.status_list` at issuance, the
+   `statuslist-agent` serves the signed list, and `Service.Revoke` flips the bit via
+   the issuer's `revoke-credential` API (§9.4). A relying party checks a revoked EAA
+   by fetching the signed status list token the credential references — handled by
+   the hosted verifier on the verify side, not our code. A QERDS-delivered notice
+   remains an option for out-of-band notification but is not the primary mechanism.
 6. ~~**irmago Postgres seam**~~ **RESOLVED (Phase 2).** Pushed upstream:
    `NewStorageWithDialector` (irmago#620) + a sqlcipher-package split (irmago#622) so
    `eudi/storage` is CGO-free. Re-adding the `irmago` dependency to `backend/` for the

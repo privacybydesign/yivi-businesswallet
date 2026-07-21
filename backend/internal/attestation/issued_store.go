@@ -15,7 +15,7 @@ import (
 
 const issuedColumns = `id, organization_id, template_id, schema_vct, recipient_kind,
 	recipient_user_id, recipient_ref, attributes, qualified, status, delivery, issuance_id,
-	issued_by_user_id, claimed_at, expires_at, revoked_at, created_at, updated_at`
+	credential_uuid, issued_by_user_id, claimed_at, expires_at, revoked_at, created_at, updated_at`
 
 func scanIssued(row rowScanner) (Issued, error) {
 	var (
@@ -25,7 +25,7 @@ func scanIssued(row rowScanner) (Issued, error) {
 	if err := row.Scan(
 		&i.ID, &i.OrganizationID, &i.TemplateID, &i.SchemaVCT, &i.RecipientKind,
 		&i.RecipientUserID, &i.RecipientRef, &attrsRaw, &i.Qualified, &i.Status, &i.Delivery, &i.IssuanceID,
-		&i.IssuedByUserID, &i.ClaimedAt, &i.ExpiresAt, &i.RevokedAt, &i.CreatedAt, &i.UpdatedAt,
+		&i.CredentialUUID, &i.IssuedByUserID, &i.ClaimedAt, &i.ExpiresAt, &i.RevokedAt, &i.CreatedAt, &i.UpdatedAt,
 	); err != nil {
 		return Issued{}, err
 	}
@@ -162,15 +162,17 @@ func (s *Store) MarkFailed(ctx context.Context, orgID, id uuid.UUID) error {
 	return nil
 }
 
-// MarkClaimed transitions an offered attestation to claimed and audits, in one tx.
-func (s *Store) MarkClaimed(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
+// MarkClaimed transitions an offered attestation to claimed and audits, in one
+// tx, recording the issuer's credential uuid so a later revocation can flip the
+// credential's status-list bit.
+func (s *Store) MarkClaimed(ctx context.Context, orgID, id uuid.UUID, credentialUUID string) (Issued, error) {
 	var out Issued
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const update = `UPDATE issued_attestations SET status = $3, claimed_at = now(), updated_at = now()
-			WHERE organization_id = $1 AND id = $2 AND status = $4
+		const update = `UPDATE issued_attestations SET status = $3, credential_uuid = $4, claimed_at = now(), updated_at = now()
+			WHERE organization_id = $1 AND id = $2 AND status = $5
 			RETURNING ` + issuedColumns
 		var err error
-		out, err = scanIssued(q.QueryRow(ctx, update, orgID, id, StatusClaimed, StatusOffered))
+		out, err = scanIssued(q.QueryRow(ctx, update, orgID, id, StatusClaimed, credentialUUID, StatusOffered))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrIssuedNotFound
 		}
