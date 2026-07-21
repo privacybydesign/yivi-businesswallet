@@ -48,6 +48,7 @@ type issuanceService interface {
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ClaimStatus(ctx context.Context, token string) (ClaimView, error)
 	DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
+	HeldClaims(ctx context.Context, orgID, id uuid.UUID) (HeldClaimsView, error)
 }
 
 // issuerSettingsReader resolves an org's issuer instance name (defaulted to the
@@ -141,6 +142,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	// Held credentials (member read; admin delete). Art 5(1)(a) "store, select".
 	mux.Handle("GET /orgs/{slug}/attestations/held", member(respond.HandlerFunc(h.listHeld)))
+	mux.Handle("GET /orgs/{slug}/attestations/held/{id}/claims", member(respond.HandlerFunc(h.heldClaims)))
 	mux.Handle("DELETE /orgs/{slug}/attestations/held/{id}", admin(respond.HandlerFunc(h.deleteHeld)))
 
 	// Public, unauthenticated claim view (keyed on an opaque claim token, never the
@@ -173,6 +175,23 @@ func (h *Handler) listHeld(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("listing held attestations: %w", err)
 	}
 	respond.JSON(w, r, http.StatusOK, held)
+	return nil
+}
+
+func (h *Handler) heldClaims(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid held attestation id")
+	}
+	org := organization.OrgFromContext(r.Context())
+	view, err := h.service.HeldClaims(r.Context(), org.ID, id)
+	switch {
+	case errors.Is(err, ErrHeldNotFound):
+		return notFound("held_not_found", "held attestation not found")
+	case err != nil:
+		return fmt.Errorf("reading held attestation claims: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, view)
 	return nil
 }
 

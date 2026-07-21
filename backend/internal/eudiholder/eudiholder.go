@@ -61,6 +61,18 @@ type Holder interface {
 	// live credential material.
 	Delete(ctx context.Context, orgID uuid.UUID, ref string) error
 
+	// Claims returns the disclosed attributes of a held credential as a
+	// display-ordered, labelled list: each attribute's value comes from the verified
+	// SD-JWT payload (stripped of the registered protocol claims iss, vct, cnf, the
+	// SD digests) and its label from the credential's stored issuer metadata. It
+	// resolves the credential by ref (the engine instance id) when that resolves,
+	// else falls back to vct — irmago's redemption hands back a credential whose
+	// instance id is not populated, so a stored ref can be empty. An unresolvable
+	// ref+vct yields an empty slice, not an error: the held_attestations index owns
+	// existence (a caller resolves the row first), while the engine holds the
+	// claims. Used by the held-credential detail view (Art 5(1)(a) "store, select").
+	Claims(ctx context.Context, orgID uuid.UUID, ref, vct string) (HeldCredential, error)
+
 	// Close releases all per-organization engines.
 	Close() error
 }

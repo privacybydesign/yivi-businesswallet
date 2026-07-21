@@ -684,6 +684,37 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/held/{id}/claims:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    get:
+      tags: [attestation]
+      summary: Get the disclosed attributes of a held attestation
+      description: Requires membership of the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/attestations/issuer-bundle:
     parameters:
       - name: slug

@@ -18,6 +18,12 @@ const stubRefBytes = 16
 // issuer-supplied vct to read.
 const stubReceivedVCT = "eaa.received.stub"
 
+// stubReceivedPayload is a synthetic verified SD-JWT payload the stub attaches to
+// a redeemed credential so the held-credential detail view has attributes to show
+// in local dev / CI (the real receive flow supplies the issuer's payload). It
+// carries a couple of demo attributes plus the registered claims Claims strips.
+const stubReceivedPayload = `{"vct":"eaa.received.stub","iss":"stub-issuer","company_name":"Demo Supplier B.V.","kvk_number":"12345678","approval_status":"approved"}`
+
 // StubHolder is an in-process, in-memory holder engine for local dev / CI
 // (ATTESTATION_HOLDER=stub, the default). It keeps credentials in a map keyed by
 // org so the store/index/delete loop runs offline without irmago or Postgres. It
@@ -58,6 +64,7 @@ func (h *StubHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI strin
 		IssuerURL:        offerURI,
 		CredentialIssuer: offerURI,
 		Hash:             offerURI,
+		ProcessedPayload: []byte(stubReceivedPayload),
 		IssuedAt:         time.Now(),
 	}
 	ref, err := h.Store(ctx, orgID, cred)
@@ -65,6 +72,35 @@ func (h *StubHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI strin
 		return Redeemed{}, err
 	}
 	return Redeemed{Ref: ref, VCT: cred.VCT, Issuer: cred.CredentialIssuer}, nil
+}
+
+// Claims decodes the stored credential's processed payload into its disclosed
+// attributes, resolving by ref then falling back to vct (mirroring the engine's
+// recovery of an empty ref). An unknown org/ref/vct yields an empty map (matches
+// the engine contract, so the held-detail flow behaves the same under stub and
+// irmago).
+func (h *StubHolder) Claims(_ context.Context, orgID uuid.UUID, ref, vct string) (HeldCredential, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	found, ok := h.creds[orgID][ref]
+	if !ok && vct != "" {
+		for _, cred := range h.creds[orgID] {
+			if cred.VCT == vct {
+				found, ok = cred, true
+				break
+			}
+		}
+	}
+	if !ok {
+		return HeldCredential{Attributes: []HeldAttribute{}}, nil
+	}
+	attributes, err := assembleAttributes(found.ProcessedPayload, nil, nil)
+	if err != nil {
+		return HeldCredential{}, err
+	}
+	// The stub records no issuer display metadata, so IssuerName is left empty and
+	// the caller falls back to the issuer identifier.
+	return HeldCredential{Attributes: attributes}, nil
 }
 
 // Delete removes the credential; an absent ref is a no-op (matches the engine

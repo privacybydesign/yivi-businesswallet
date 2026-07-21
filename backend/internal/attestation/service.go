@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 )
 
@@ -52,11 +53,14 @@ type heldMutator interface {
 	SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
 }
 
-// credentialRemover removes a credential from the organization's holder engine.
-// Backed by internal/eudiholder; accept the interface so the service stays
-// decoupled from the concrete engine (stub or irmago).
-type credentialRemover interface {
+// holderEngine is the organization's holder-wallet engine seam the service
+// coordinates: removing a credential (the delete flow) and reading a held
+// credential's disclosed attributes (the detail view). Backed by
+// internal/eudiholder; accept the interface so the service stays decoupled from
+// the concrete engine (stub or irmago).
+type holderEngine interface {
 	Delete(ctx context.Context, orgID uuid.UUID, ref string) error
+	Claims(ctx context.Context, orgID uuid.UUID, ref, vct string) (eudiholder.HeldCredential, error)
 }
 
 // emailNotifier delivers a person-facing "your credential is ready" e-mail.
@@ -81,12 +85,12 @@ type Service struct {
 	email      emailNotifier
 	qerds      qerdsNotifier
 	held       heldMutator
-	holder     credentialRemover
+	holder     holderEngine
 	appBaseURL string
 	now        func() time.Time
 }
 
-func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, holder credentialRemover, appBaseURL string) *Service {
+func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, holder holderEngine, appBaseURL string) *Service {
 	return &Service{
 		store:      store,
 		issuer:     iss,
@@ -260,6 +264,50 @@ func (s *Service) DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error {
 		return fmt.Errorf("attestation: delete held %s from engine: %w", id, err)
 	}
 	return s.held.SoftDeleteHeld(ctx, orgID, id)
+}
+
+// HeldClaimsView is a held credential's index metadata plus its disclosed
+// attributes, assembled for the detail view. The index row carries the
+// routing/identity fields (vct, issuer identifier, source, receivedAt); the
+// attributes and the issuer's human display name are read from the holder engine,
+// where the credential material and its metadata live (§6.5). Issuer is the issuer
+// identifier (a URL); IssuerName is its display name, falling back to the
+// identifier when the credential carried no issuer display metadata.
+type HeldClaimsView struct {
+	ID         uuid.UUID                  `json:"id"`
+	VCT        string                     `json:"vct"`
+	Issuer     string                     `json:"issuer"`
+	IssuerName string                     `json:"issuerName"`
+	Source     string                     `json:"source"`
+	ReceivedAt time.Time                  `json:"receivedAt"`
+	Attributes []eudiholder.HeldAttribute `json:"attributes"`
+}
+
+// HeldClaims returns a held credential's disclosed attributes for the detail view,
+// after confirming the organization holds it (the index row is the source of truth
+// for existence). Returns ErrHeldNotFound when the row is absent or already deleted.
+func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID) (HeldClaimsView, error) {
+	held, err := s.held.GetHeld(ctx, orgID, id)
+	if err != nil {
+		return HeldClaimsView{}, err
+	}
+	cred, err := s.holder.Claims(ctx, orgID, held.CredentialRef, held.VCT)
+	if err != nil {
+		return HeldClaimsView{}, fmt.Errorf("attestation: held claims %s from engine: %w", id, err)
+	}
+	issuerName := cred.IssuerName
+	if issuerName == "" {
+		issuerName = held.Issuer
+	}
+	return HeldClaimsView{
+		ID:         held.ID,
+		VCT:        held.VCT,
+		Issuer:     held.Issuer,
+		IssuerName: issuerName,
+		Source:     held.Source,
+		ReceivedAt: held.ReceivedAt,
+		Attributes: cred.Attributes,
+	}, nil
 }
 
 // reconcile reports whether the issuer says the credential has been issued. A

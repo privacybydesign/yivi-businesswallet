@@ -74,7 +74,21 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		if res.err != nil {
 			return Redeemed{}, fmt.Errorf("eudiholder: redeem org %s: %w", orgID, res.err)
 		}
-		return res.redeemed, nil
+		redeemed := res.redeemed
+		// irmago hands back the offered credential, whose instance id is not
+		// populated (session.buildOfferedCredentials leaves CredentialInstanceIds
+		// empty), so credentialInstanceRef yields "". Recover the stored instance id
+		// by vct so the held index gets a usable ref for delete/claims.
+		if redeemed.Ref == "" {
+			batch, ok, err := e.batchByVCT(ctx, orgID, redeemed.VCT)
+			if err != nil {
+				return Redeemed{}, err
+			}
+			if ok && len(batch.Instances) > 0 {
+				redeemed.Ref = batch.Instances[0].ID.String()
+			}
+		}
+		return redeemed, nil
 	}
 }
 

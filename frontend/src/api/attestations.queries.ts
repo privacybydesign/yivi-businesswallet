@@ -14,6 +14,7 @@ import {
   getAttestationSchemas,
   getAttestationTemplates,
   getHeldAttestations,
+  getHeldAttestationClaims,
   getIssuedAttestation,
   getIssuedAttestations,
   issueAttestation,
@@ -35,6 +36,7 @@ import type {
   AttestationTemplateInput,
   AttestationTemplateUpdate,
   HeldAttestation,
+  HeldAttestationClaims,
   IssuedAttestation,
   IssueAttestationInput,
   IssueResult,
@@ -90,6 +92,13 @@ export function attestationClaimQueryKey(token: string): readonly string[] {
 
 export function heldAttestationsQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "attestations", "held"];
+}
+
+export function heldAttestationClaimsQueryKey(
+  slug: string,
+  heldId: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "held", heldId];
 }
 
 // Public claim polling: re-fetches while the attestation is still offered so the
@@ -402,6 +411,20 @@ export function useHeldAttestationsQuery(
     queryKey: heldAttestationsQueryKey(slug),
     queryFn: ({ signal }) => getHeldAttestations(slug, signal),
     enabled: enabled && slug !== "",
+  });
+}
+
+// Fetches a held credential's disclosed attributes on demand — the Wallet tab
+// enables it when the user opens a credential's detail view.
+export function useHeldAttestationClaimsQuery(
+  slug: string,
+  heldId: string,
+  enabled = true,
+): UseQueryResult<HeldAttestationClaims, Error> {
+  return useQuery({
+    queryKey: heldAttestationClaimsQueryKey(slug, heldId),
+    queryFn: ({ signal }) => getHeldAttestationClaims(slug, heldId, signal),
+    enabled: enabled && slug !== "" && heldId !== "",
   });
 }
 

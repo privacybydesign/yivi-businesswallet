@@ -3,7 +3,6 @@ import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import type {
-  AttestationKey,
   AttestationSchema,
   AttestationTemplate,
   HeldAttestation,
@@ -13,33 +12,26 @@ import {
   useAttestationKeysQuery,
   useAttestationSchemasQuery,
   useAttestationTemplatesQuery,
-  useCreateAttestationKeyMutation,
   useDeleteAttestationSchemaMutation,
   useDeleteAttestationTemplateMutation,
   useDeleteHeldAttestationMutation,
+  useHeldAttestationClaimsQuery,
   useHeldAttestationsQuery,
   useIssuedAttestationsQuery,
-  useRevokeAttestationKeyMutation,
   useRevokeIssuedAttestationMutation,
-  useSuspendAttestationKeyMutation,
 } from "../api/attestations.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
+import { credentialDisplayName } from "../lib/credential-display";
 import { useWhenFormatter } from "../lib/format-when";
-import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
-import type { IconName } from "../ui";
+import { Button, Card, Modal, Table, Tag, TopBar } from "../ui";
 import { AttestationIssueWizard } from "./attestations-issue";
 import { AttestationSchemaForm } from "./attestations-schema-form";
 import { AttestationTemplateForm } from "./attestations-template-form";
-import { control } from "../lib/attestation-form";
 
 const ISSUED_COLUMN_COUNT = 5;
 const CHIP_LIMIT = 3;
 const ADMIN_ROLE = "admin";
-
-const KIND_WALLET = "wallet_managed";
-const KIND_QUALIFIED = "qualified_certificate";
-const KEY_KINDS = [KIND_WALLET, KIND_QUALIFIED] as const;
 
 type IssuedTone = "default" | "green" | "amber" | "red" | "blue";
 
@@ -59,16 +51,10 @@ function issuedTone(status: string): IssuedTone {
   }
 }
 
-type Tab = "templates" | "issued" | "held" | "schemas" | "keys";
+type Tab = "held" | "templates" | "issued" | "schemas";
 
-const ADMIN_TABS: readonly Tab[] = [
-  "templates",
-  "issued",
-  "held",
-  "schemas",
-  "keys",
-];
-const MEMBER_TABS: readonly Tab[] = ["issued", "held"];
+const ADMIN_TABS: readonly Tab[] = ["held", "templates", "issued", "schemas"];
+const MEMBER_TABS: readonly Tab[] = ["held", "issued"];
 
 function readTab(params: URLSearchParams, tabs: readonly Tab[]): Tab {
   const value = params.get("tab");
@@ -95,6 +81,10 @@ export default function Attestations(): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = readTab(searchParams, tabs);
   const [modal, setModal] = useState<ActiveModal>(null);
+  // The held credential whose attributes are being viewed, if any.
+  const [selectedHeld, setSelectedHeld] = useState<HeldAttestation | null>(
+    null,
+  );
 
   const enabled = !org.isError;
   const issued = useIssuedAttestationsQuery(slug, enabled);
@@ -137,6 +127,27 @@ export default function Attestations(): React.JSX.Element {
         }
       />
 
+      <div className="border-line bg-surface flex gap-1 border-b px-8">
+        {tabs.map((value) => {
+          const active = tab === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTab(value)}
+              className={[
+                "h-11 border-b-2 px-3.5 text-[13.5px] transition-colors",
+                active
+                  ? "border-primary text-ink font-semibold"
+                  : "text-ink-soft hover:text-ink border-transparent font-medium",
+              ].join(" ")}
+            >
+              {t(TAB_LABEL_KEYS[value])}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="p-8">
         {org.isError ? (
           <Card className="p-6">
@@ -146,24 +157,6 @@ export default function Attestations(): React.JSX.Element {
           </Card>
         ) : (
           <div className="flex flex-col gap-5">
-            <div className="bg-surface-3 rounded-yivi inline-flex gap-1 self-start p-[3px]">
-              {tabs.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setTab(value)}
-                  className={[
-                    "h-[26px] cursor-pointer rounded-md px-3 text-[12.5px] font-semibold transition-colors",
-                    tab === value
-                      ? "bg-surface text-ink shadow-sm"
-                      : "text-ink-soft hover:text-ink",
-                  ].join(" ")}
-                >
-                  {t(TAB_LABEL_KEYS[value])}
-                </button>
-              ))}
-            </div>
-
             {tab === "templates" && (
               <TemplatesTab
                 slug={slug}
@@ -194,6 +187,7 @@ export default function Attestations(): React.JSX.Element {
                 error={held.error}
                 isAdmin={isAdmin}
                 formatWhen={formatWhen}
+                onSelect={setSelectedHeld}
               />
             )}
 
@@ -205,15 +199,6 @@ export default function Attestations(): React.JSX.Element {
                 error={schemas.error}
                 onCreate={() => setModal({ kind: "schema" })}
                 onEdit={(schema) => setModal({ kind: "schema", schema })}
-              />
-            )}
-
-            {tab === "keys" && (
-              <KeysTab
-                slug={slug}
-                keys={keys.data ?? []}
-                pending={keys.isPending}
-                error={keys.error}
               />
             )}
           </div>
@@ -244,16 +229,23 @@ export default function Attestations(): React.JSX.Element {
           onClose={() => setModal(null)}
         />
       )}
+      {selectedHeld && (
+        <HeldDetailModal
+          slug={slug}
+          held={selectedHeld}
+          formatWhen={formatWhen}
+          onClose={() => setSelectedHeld(null)}
+        />
+      )}
     </>
   );
 }
 
 const TAB_LABEL_KEYS = {
+  held: "attestations.tabs.held",
   templates: "attestations.tabs.templates",
   issued: "attestations.tabs.issued",
-  held: "attestations.tabs.held",
   schemas: "attestations.tabs.schemas",
-  keys: "attestations.tabs.keys",
 } as const;
 
 function ErrorCard({ message }: { message: string }): React.JSX.Element {
@@ -498,6 +490,7 @@ function HeldTab({
   error,
   isAdmin,
   formatWhen,
+  onSelect,
 }: {
   slug: string;
   rows: HeldAttestation[];
@@ -505,6 +498,7 @@ function HeldTab({
   error: Error | null;
   isAdmin: boolean;
   formatWhen: (iso: string) => string;
+  onSelect: (row: HeldAttestation) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const remove = useDeleteHeldAttestationMutation(slug);
@@ -550,50 +544,171 @@ function HeldTab({
               {t("attestations.held.empty")}
             </Table.State>
           ) : (
-            rows.map((row) => (
-              <Table.Row key={row.id}>
-                <Table.Cell className="text-ink truncate font-mono text-[12.5px]">
-                  {row.vct}
-                </Table.Cell>
-                <Table.Cell className="text-ink-soft truncate">
-                  {row.issuer}
-                </Table.Cell>
-                <Table.Cell>
-                  <Tag tone="default">
-                    <span className="capitalize">{row.source}</span>
-                  </Tag>
-                </Table.Cell>
-                <Table.Cell className="text-ink-soft text-[12.5px]">
-                  {formatWhen(row.receivedAt)}
-                </Table.Cell>
-                {isAdmin && (
-                  <Table.Cell className="text-right">
-                    <Button
-                      variant="dangerGhost"
-                      size="sm"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            t("attestations.held.confirmDelete", {
-                              name: row.vct,
-                            }),
-                          )
-                        ) {
-                          remove.mutate({ heldId: row.id });
-                        }
-                      }}
-                    >
-                      {t("attestations.held.delete")}
-                    </Button>
+            rows.map((row) => {
+              const name = credentialDisplayName(row.vct);
+              return (
+                <Table.Row
+                  key={row.id}
+                  onClick={() => onSelect(row)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onSelect(row);
+                    }
+                  }}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={t("attestations.held.viewDetail", { name })}
+                  className="hover:bg-surface-2 focus-visible:bg-surface-2 cursor-pointer outline-none"
+                >
+                  <Table.Cell className="min-w-0">
+                    <div className="text-ink truncate font-semibold">
+                      {name}
+                    </div>
+                    <div className="text-ink-soft truncate font-mono text-[12px]">
+                      {row.vct}
+                    </div>
                   </Table.Cell>
-                )}
-              </Table.Row>
-            ))
+                  <Table.Cell className="text-ink-soft truncate">
+                    {row.issuer}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <Tag tone="default">
+                      <span className="capitalize">{row.source}</span>
+                    </Tag>
+                  </Table.Cell>
+                  <Table.Cell className="text-ink-soft text-[12.5px]">
+                    {formatWhen(row.receivedAt)}
+                  </Table.Cell>
+                  {isAdmin && (
+                    <Table.Cell className="text-right">
+                      <Button
+                        variant="dangerGhost"
+                        size="sm"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (
+                            window.confirm(
+                              t("attestations.held.confirmDelete", {
+                                name,
+                              }),
+                            )
+                          ) {
+                            remove.mutate({ heldId: row.id });
+                          }
+                        }}
+                      >
+                        {t("attestations.held.delete")}
+                      </Button>
+                    </Table.Cell>
+                  )}
+                </Table.Row>
+              );
+            })
           )}
         </Table.Body>
       </Table>
     </Card>
   );
+}
+
+// HeldDetailModal shows a held credential's friendly name, provenance metadata and
+// its disclosed attributes (fetched on open from the holder engine). Attribute
+// values are rendered generically since the SD-JWT payload may carry any JSON type.
+function HeldDetailModal({
+  slug,
+  held,
+  formatWhen,
+  onClose,
+}: {
+  slug: string;
+  held: HeldAttestation;
+  formatWhen: (iso: string) => string;
+  onClose: () => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const claims = useHeldAttestationClaimsQuery(slug, held.id);
+  const name = credentialDisplayName(held.vct);
+  const attributes = claims.data?.attributes ?? [];
+
+  return (
+    <Modal title={name} closeLabel={t("common.close")} onClose={onClose}>
+      <div className="flex flex-col gap-5">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
+          <dt className="text-ink-soft">
+            {t("attestations.held.columns.issuer")}
+          </dt>
+          <dd className="text-ink">{claims.data?.issuerName || held.issuer}</dd>
+          <dt className="text-ink-soft">
+            {t("attestations.held.columns.source")}
+          </dt>
+          <dd className="text-ink capitalize">{held.source}</dd>
+          <dt className="text-ink-soft">
+            {t("attestations.held.columns.received")}
+          </dt>
+          <dd className="text-ink">{formatWhen(held.receivedAt)}</dd>
+          <dt className="text-ink-soft">
+            {t("attestations.held.detail.type")}
+          </dt>
+          <dd className="text-ink-soft font-mono text-[12px] break-all">
+            {held.vct}
+          </dd>
+        </dl>
+
+        <div>
+          <h3 className="text-ink mb-2 text-[13px] font-semibold">
+            {t("attestations.held.detail.attributes")}
+          </h3>
+          {claims.isError ? (
+            <p className="text-error text-[13px]">
+              {t("attestations.loadError", { message: claims.error.message })}
+            </p>
+          ) : claims.isPending ? (
+            <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
+          ) : attributes.length === 0 ? (
+            <p className="text-ink-soft text-[13px]">
+              {t("attestations.held.detail.noAttributes")}
+            </p>
+          ) : (
+            <dl className="border-line divide-line divide-y rounded-md border">
+              {attributes.map((attribute) => (
+                <div
+                  key={attribute.key}
+                  className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4 px-3 py-2"
+                >
+                  <dt className="text-ink-soft truncate text-[12.5px]">
+                    {attribute.label || attribute.key}
+                  </dt>
+                  <dd className="text-ink text-[13px] break-words">
+                    {formatClaimValue(attribute.value)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// formatClaimValue renders a disclosed SD-JWT claim value for display. Primitives
+// show as text; objects/arrays are JSON-stringified so nested claims stay legible.
+function formatClaimValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return String(value);
+  }
+  return JSON.stringify(value);
 }
 
 function SchemasTab({
@@ -694,185 +809,6 @@ function SchemasTab({
                   </span>
                 ))}
               </div>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function KeysTab({
-  slug,
-  keys,
-  pending,
-  error,
-}: {
-  slug: string;
-  keys: AttestationKey[];
-  pending: boolean;
-  error: Error | null;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const create = useCreateAttestationKeyMutation(slug);
-  const suspend = useSuspendAttestationKeyMutation(slug);
-  const revoke = useRevokeAttestationKeyMutation(slug);
-
-  const [label, setLabel] = useState("");
-  const [kind, setKind] = useState<(typeof KEY_KINDS)[number]>(KIND_WALLET);
-  const [providerRef, setProviderRef] = useState("");
-
-  function handleAdd(event: React.FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    if (create.isPending || label.trim() === "") {
-      return;
-    }
-    create.mutate(
-      {
-        kind,
-        label: label.trim(),
-        providerRef: providerRef.trim() || undefined,
-      },
-      {
-        onSuccess: () => {
-          setLabel("");
-          setProviderRef("");
-        },
-      },
-    );
-  }
-
-  const kindIcon: IconName = "lock";
-
-  if (error) {
-    return (
-      <ErrorCard
-        message={t("attestations.loadError", { message: error.message })}
-      />
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <Card className="p-4">
-        <form
-          onSubmit={handleAdd}
-          className="flex flex-col gap-3 md:flex-row md:items-end"
-        >
-          <div className="flex flex-1 flex-col gap-1">
-            <label
-              htmlFor="key-label"
-              className="text-ink-soft text-[12px] font-semibold"
-            >
-              {t("attestations.keys.labelLabel")}
-            </label>
-            <input
-              id="key-label"
-              className={`${control(false)} h-9`}
-              value={label}
-              onChange={(event) => setLabel(event.target.value)}
-              placeholder={t("attestations.keys.labelPlaceholder")}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label
-              htmlFor="key-kind"
-              className="text-ink-soft text-[12px] font-semibold"
-            >
-              {t("attestations.keys.kindLabel")}
-            </label>
-            <select
-              id="key-kind"
-              className={`${control(false)} h-9`}
-              value={kind}
-              onChange={(event) =>
-                setKind(event.target.value as (typeof KEY_KINDS)[number])
-              }
-            >
-              {KEY_KINDS.map((value) => (
-                <option key={value} value={value}>
-                  {value === KIND_WALLET
-                    ? t("attestations.keys.kinds.walletManaged")
-                    : t("attestations.keys.kinds.qualifiedCertificate")}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-1 flex-col gap-1">
-            <label
-              htmlFor="key-provider"
-              className="text-ink-soft text-[12px] font-semibold"
-            >
-              {t("attestations.keys.providerRef")}
-            </label>
-            <input
-              id="key-provider"
-              className={`${control(false)} h-9`}
-              value={providerRef}
-              onChange={(event) => setProviderRef(event.target.value)}
-            />
-          </div>
-          <Button type="submit" icon="add" loading={create.isPending}>
-            {t("attestations.keys.add")}
-          </Button>
-        </form>
-        {create.isError && create.error && (
-          <p role="alert" className="text-error mt-2 text-[12px]">
-            {t("attestations.keys.error", { message: create.error.message })}
-          </p>
-        )}
-      </Card>
-
-      {pending ? (
-        <Card className="p-6">
-          <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
-        </Card>
-      ) : keys.length === 0 ? (
-        <Card className="p-6">
-          <p className="text-ink-soft text-[14px]">
-            {t("attestations.keys.empty")}
-          </p>
-        </Card>
-      ) : (
-        <div className="flex flex-col gap-2.5">
-          {keys.map((key) => (
-            <Card key={key.id} className="flex items-center gap-3 p-4">
-              <span className="bg-surface-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-md">
-                <Icon name={kindIcon} size={14} className="text-ink-soft" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="text-ink truncate font-semibold">
-                  {key.label}
-                </div>
-                <div className="text-ink-soft text-[12.5px]">
-                  {key.kind === KIND_WALLET
-                    ? t("attestations.keys.kinds.walletManaged")
-                    : t("attestations.keys.kinds.qualifiedCertificate")}
-                </div>
-              </div>
-              <Tag tone={key.status === "active" ? "green" : "default"} dot>
-                <span className="capitalize">{key.status}</span>
-              </Tag>
-              {key.status !== "revoked" && (
-                <div className="flex items-center gap-1">
-                  {key.status === "active" && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => suspend.mutate({ keyId: key.id })}
-                    >
-                      {t("attestations.keys.suspend")}
-                    </Button>
-                  )}
-                  <Button
-                    variant="dangerGhost"
-                    size="sm"
-                    onClick={() => revoke.mutate({ keyId: key.id })}
-                  >
-                    {t("attestations.keys.revoke")}
-                  </Button>
-                </div>
-              )}
             </Card>
           ))}
         </div>
