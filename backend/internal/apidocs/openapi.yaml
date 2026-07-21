@@ -1509,14 +1509,35 @@ paths:
     put:
       tags: [issuer-settings]
       summary: Update the organisation issuer settings
-      description: Requires an administrator role in the organisation.
+      description: >-
+        Requires an administrator role in the organisation. Sent as
+        multipart/form-data: string fields instanceName, displayName and enabled
+        ("true"/"false"), an optional logo image file that replaces the logo, and
+        removeLogo=true to clear it. Omitting both leaves the existing logo
+        untouched.
       requestBody:
         required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
               type: object
-              description: JSON request payload; see the endpoint description.
+              properties:
+                instanceName:
+                  type: string
+                  description: Lowercase slug the org's offers route to.
+                displayName:
+                  type: string
+                  description: Issuer display name shown in wallets.
+                enabled:
+                  type: string
+                  description: Set to "true" to route this org's offers to its own instance.
+                logo:
+                  type: string
+                  format: binary
+                  description: Logo image (PNG, JPEG, GIF, WebP or SVG) that replaces the current logo.
+                removeLogo:
+                  type: string
+                  description: Set to "true" to clear the stored logo.
       responses:
         '2XX':
           description: Successful response.
@@ -1526,6 +1547,37 @@ paths:
                 description: Response payload; shape depends on the endpoint.
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: The uploaded logo is too large.
+  /api/v1/orgs/{slug}/issuer/settings/logo:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [issuer-settings]
+      summary: Get the organisation issuer logo
+      description: >-
+        Serves the uploaded issuer logo image bytes for the admin preview.
+        Requires membership of the organisation. Returns 404 when no logo is set.
+      responses:
+        '2XX':
+          description: The logo image bytes.
+          content:
+            image/png: {}
+            image/jpeg: {}
+            image/gif: {}
+            image/webp: {}
+            image/svg+xml: {}
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

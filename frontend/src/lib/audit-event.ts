@@ -66,6 +66,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.orgCreated");
     case "organization.updated":
       return t("auditLog.actions.orgUpdated");
+    case "organization.deleted":
+      return t("auditLog.actions.orgDeleted");
     case "membership.invited":
       return t("auditLog.actions.memberInvited");
     case "membership.invite_resent":
@@ -100,6 +102,40 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityReviewRejected");
     case "user.purged":
       return t("auditLog.actions.userPurged");
+    case "qerds.message_sent":
+      return t("auditLog.actions.qerdsMessageSent");
+    case "qerds.message_received":
+      return t("auditLog.actions.qerdsMessageReceived");
+    case "qerds.address_provisioned":
+      return t("auditLog.actions.qerdsAddressProvisioned");
+    case "qerds.address_default_changed":
+      return t("auditLog.actions.qerdsAddressDefaultChanged");
+    case "qerds.contact_added":
+      return t("auditLog.actions.qerdsContactAdded");
+    case "qerds.contact_deleted":
+      return t("auditLog.actions.qerdsContactDeleted");
+    case "postguard.key_set":
+      return t("auditLog.actions.postguardKeySet");
+    case "postguard.key_removed":
+      return t("auditLog.actions.postguardKeyRemoved");
+    case "postguard.encryption_key_set":
+      return t("auditLog.actions.postguardEncryptionKeySet");
+    case "postguard.encryption_key_removed":
+      return t("auditLog.actions.postguardEncryptionKeyRemoved");
+    case "postguard.file_sent":
+      return t("auditLog.actions.postguardFileSent");
+    case "wallet.opened":
+      return t("auditLog.actions.walletOpened");
+    case "wallet.bootstrapped":
+      return t("auditLog.actions.walletBootstrapped");
+    case "wallet.suspended":
+      return t("auditLog.actions.walletSuspended");
+    case "wallet.revoked":
+      return t("auditLog.actions.walletRevoked");
+    case "wallet.representation_claimed":
+      return t("auditLog.actions.representationClaimed");
+    case "wallet.representation_revoked":
+      return t("auditLog.actions.representationRevoked");
     case "attestation.schema_created":
       return t("auditLog.actions.attestationSchemaCreated");
     case "attestation.schema_updated":
@@ -124,8 +160,14 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.attestationKeySuspended");
     case "attestation.key_revoked":
       return t("auditLog.actions.attestationKeyRevoked");
+    case "attestation.held_deleted":
+      return t("auditLog.actions.attestationHeldDeleted");
     case "email.settings_updated":
       return t("auditLog.actions.emailSettingsUpdated");
+    case "issuer.settings_updated":
+      return t("auditLog.actions.issuerSettingsUpdated");
+    case "theme.settings_updated":
+      return t("auditLog.actions.themeSettingsUpdated");
     default:
       return action;
   }
@@ -141,6 +183,22 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.department");
     case "user":
       return t("auditLog.targets.user");
+    case "qerds_message":
+      return t("auditLog.targets.qerdsMessage");
+    case "qerds_address":
+      return t("auditLog.targets.qerdsAddress");
+    case "qerds_contact":
+      return t("auditLog.targets.qerdsContact");
+    case "wallet_instance":
+      return t("auditLog.targets.walletInstance");
+    case "wallet_representation":
+      return t("auditLog.targets.walletRepresentation");
+    case "postguard_key":
+      return t("auditLog.targets.postguardKey");
+    case "postguard_encryption_key":
+      return t("auditLog.targets.postguardEncryptionKey");
+    case "postguard_file":
+      return t("auditLog.targets.postguardFile");
     case "attestation_schema":
       return t("auditLog.targets.attestationSchema");
     case "attestation_template":
@@ -149,8 +207,14 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.issuedAttestation");
     case "attestation_key":
       return t("auditLog.targets.attestationKey");
+    case "held_attestation":
+      return t("auditLog.targets.heldAttestation");
     case "org_email_settings":
       return t("auditLog.targets.orgEmailSettings");
+    case "org_issuer_settings":
+      return t("auditLog.targets.orgIssuerSettings");
+    case "org_theme_settings":
+      return t("auditLog.targets.orgThemeSettings");
     default:
       return targetType;
   }
