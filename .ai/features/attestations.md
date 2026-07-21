@@ -61,7 +61,11 @@ recipient step and the delivery route. On issue, the created offer is persisted
   (`internal/issuersettings`, org settings → **Issuer** tab) stores the instance
   name (default = org slug) + display-name/logo branding — **no secret**, since the
   hosted issuer's admin token is deployment-global (every instance renders the same
-  `VERAMO_ISSUER_ADMIN_TOKEN`). `openid4vciissuer.OfferRequest.Instance` /
+  `VERAMO_ISSUER_ADMIN_TOKEN`). The logo is an **uploaded image** stored as bytes
+  (`logo_bytes`/`logo_content_type`, mirroring the theme-branding upload): the admin
+  preview is served at `GET .../issuer/settings/logo`, while the generated metadata
+  embeds it as a self-contained `data:` URI (the hosted issuer serves that metadata
+  to wallets and cannot reach a business-wallet endpoint). `openid4vciissuer.OfferRequest.Instance` /
   `Status(instance, …)` route offers to the org's instance (empty ⇒ the configured
   default); `attestation.Service` resolves it per-org via the `issuerInstanceResolver`
   seam. `GET .../attestations/issuer-bundle` (and the Issuer tab) generate the full
