@@ -127,7 +127,16 @@ func Run(ctx context.Context, dsn string) error {
 
 	// The KVK register participant must exist so its consult decisions have an
 	// audit log to be recorded against (registryprovider.SeededRegistry).
-	if _, err := ensureOrg(ctx, pool, kvkRegisterOrg); err != nil {
+	kvkOrg, err := ensureOrg(ctx, pool, kvkRegisterOrg)
+	if err != nil {
+		return err
+	}
+	// The register issues the KVK registration attestation, so it owns the
+	// nl.kvk.registration schema + template and its own Veramo issuer instance.
+	if err := seedKVKRegisterAttestation(ctx, pool, kvkOrg.ID); err != nil {
+		return err
+	}
+	if err := seedIssuerSettings(ctx, pool, kvkOrg.ID, "kvk", registryprovider.RegisterLegalName); err != nil {
 		return err
 	}
 
@@ -175,7 +184,7 @@ func Run(ctx context.Context, dsn string) error {
 	if err := seedEmailSettings(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
-	if err := seedIssuerSettings(ctx, pool, demoOrg.ID); err != nil {
+	if err := seedIssuerSettings(ctx, pool, demoOrg.ID, "yivi", "Yivi B.V."); err != nil {
 		return err
 	}
 	if err := seedHeldAttestations(ctx, pool, demoOrg.ID); err != nil {
@@ -581,17 +590,68 @@ func seedEmailSettings(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID)
 	return nil
 }
 
-// seedIssuerSettings gives the demo org its own Veramo issuer instance ("yivi")
-// with branding, so its attestations issue from a per-org issuer and the
-// generated GitOps bundle (org settings → Issuer) is populated out of the box.
-// Idempotent.
-func seedIssuerSettings(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+// seedIssuerSettings gives an org its own Veramo issuer instance with branding,
+// so its attestations issue from a per-org issuer and the generated GitOps bundle
+// (org settings → Issuer) is populated out of the box. Idempotent.
+func seedIssuerSettings(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, instanceName, displayName string) error {
 	const insert = `INSERT INTO org_issuer_settings (organization_id, instance_name, display_name, enabled)
-		VALUES ($1, 'yivi', 'Yivi B.V.', true)
+		VALUES ($1, $2, $3, true)
 		ON CONFLICT (organization_id) DO NOTHING`
-	if _, err := pool.Exec(ctx, insert, orgID); err != nil {
+	if _, err := pool.Exec(ctx, insert, orgID, instanceName, displayName); err != nil {
 		return fmt.Errorf("seed: issuer settings: %w", err)
 	}
+	return nil
+}
+
+// seedKVKRegisterAttestation gives the KVK register org the nl.kvk.registration
+// schema + template it issues to a bootstrapped business wallet — an
+// organization-subject credential carrying the org's owner identification data
+// (Art 8): its legal name + KVK number + EUID. Idempotent: skips when the register
+// org already has schemas. The CredentialConfigID maps to the Veramo issuer's
+// registered credentialId (the GitOps bundle for the "kvk" instance).
+func seedKVKRegisterAttestation(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+	store := attestation.NewStore(pool, audit.NewDBRecorder())
+
+	existing, err := store.ListSchemas(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("seed: list kvk register schemas: %w", err)
+	}
+	if len(existing) > 0 {
+		return nil
+	}
+
+	schema, err := store.CreateSchema(ctx, orgID, attestation.Schema{
+		VCT:                "nl.kvk.registration",
+		DisplayName:        "KVK registration",
+		CredentialConfigID: "KvkRegistrationSdJwt",
+		SubjectType:        attestation.SubjectOrganization,
+		Display: []attestation.LocalizedName{
+			{Lang: "en", Name: "KVK registration"},
+			{Lang: "nl", Name: "KVK-inschrijving"},
+		},
+		Attributes: []attestation.AttributeDef{
+			{Key: "legalName", Label: "Legal name", Type: "string", Required: true, Display: []attestation.LocalizedLabel{
+				{Lang: "en", Label: "Legal name"}, {Lang: "nl", Label: "Statutaire naam"},
+			}},
+			{Key: "kvkNumber", Label: "KVK number", Type: "string", Required: true, Display: []attestation.LocalizedLabel{
+				{Lang: "en", Label: "KVK number"}, {Lang: "nl", Label: "KVK-nummer"},
+			}},
+			{Key: "euid", Label: "EUID", Type: "string", Display: []attestation.LocalizedLabel{
+				{Lang: "en", Label: "EUID"}, {Lang: "nl", Label: "EUID"},
+			}},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("seed: create kvk registration schema: %w", err)
+	}
+	if _, err := store.CreateTemplate(ctx, orgID, attestation.Template{
+		SchemaID: schema.ID,
+		Name:     "KVK registration",
+	}); err != nil {
+		return fmt.Errorf("seed: create kvk registration template: %w", err)
+	}
+
+	slog.Info("seeded KVK registration schema + template")
 	return nil
 }
 
