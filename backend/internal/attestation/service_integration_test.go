@@ -232,6 +232,18 @@ func TestRevoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
+
+	// Poll once so the (stub) issuer reports the credential issued: this captures
+	// the issuer's credential uuid on the ledger row, the handle revocation needs
+	// to flip the status-list bit.
+	claimed, err := e.service.Status(ctx, e.orgID, result.ID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if claimed.Status != attestation.StatusClaimed || claimed.CredentialUUID == "" {
+		t.Fatalf("expected claimed with a captured credential uuid, got %+v", claimed)
+	}
+
 	revoked, err := e.service.Revoke(ctx, e.orgID, result.ID)
 	if err != nil {
 		t.Fatalf("Revoke: %v", err)

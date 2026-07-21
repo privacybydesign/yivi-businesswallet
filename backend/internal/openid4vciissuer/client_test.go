@@ -21,11 +21,14 @@ type veramoStub struct {
 	lastAuth     string
 	lastInstance string
 	checkStatus  string
+	checkUUID    string
+	lastRevoke   revokeCredentialRequest
+	revokeStatus string
 }
 
 func newVeramoStub(t *testing.T) *veramoStub {
 	t.Helper()
-	s := &veramoStub{checkStatus: StatusIssued}
+	s := &veramoStub{checkStatus: StatusIssued, checkUUID: "cred-uuid-1", revokeStatus: revokedStatus}
 	mux := http.NewServeMux()
 	// Match any {instance} so tests can assert which instance the offer routed to.
 	mux.HandleFunc("POST /{instance}/api/create-offer", func(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +47,16 @@ func newVeramoStub(t *testing.T) *veramoStub {
 	})
 	mux.HandleFunc("POST /{instance}/api/check-offer", func(w http.ResponseWriter, r *http.Request) {
 		s.lastInstance = r.PathValue("instance")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": s.checkStatus})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": s.checkStatus, "uuid": s.checkUUID})
+	})
+	mux.HandleFunc("POST /{instance}/api/revoke-credential", func(w http.ResponseWriter, r *http.Request) {
+		s.lastInstance = r.PathValue("instance")
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &s.lastRevoke); err != nil {
+			http.Error(w, "bad body", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": s.revokeStatus})
 	})
 	s.server = httptest.NewServer(mux)
 	t.Cleanup(s.server.Close)
@@ -97,13 +109,63 @@ func TestStatusMapsIssuedAndPending(t *testing.T) {
 	client := NewVeramoIssuer(stub.server.URL, testInstance, NewBearerAuthenticator(""), "", http.DefaultClient)
 
 	stub.checkStatus = StatusIssued
-	if st, err := client.Status(context.Background(), "", "offer-123"); err != nil || st != StatusIssued {
-		t.Fatalf("expected issued, got %q err %v", st, err)
+	stub.checkUUID = "cred-uuid-42"
+	st, err := client.Status(context.Background(), "", "offer-123")
+	if err != nil || st.Status != StatusIssued {
+		t.Fatalf("expected issued, got %+v err %v", st, err)
+	}
+	if st.CredentialUUID != "cred-uuid-42" {
+		t.Fatalf("credential uuid not captured: %q", st.CredentialUUID)
 	}
 
 	stub.checkStatus = "PENDING"
-	if st, err := client.Status(context.Background(), "", "offer-123"); err != nil || st != StatusPending {
-		t.Fatalf("expected pending, got %q err %v", st, err)
+	st, err = client.Status(context.Background(), "", "offer-123")
+	if err != nil || st.Status != StatusPending {
+		t.Fatalf("expected pending, got %+v err %v", st, err)
+	}
+	if st.CredentialUUID != "" {
+		t.Fatalf("pending status must not carry a credential uuid: %q", st.CredentialUUID)
+	}
+}
+
+// TestCreateOfferEnablesStatusLists asserts issued credentials request a Token
+// Status List reference (the create-offer credentialMetadata flag), so a later
+// revocation is observable to a verifier.
+func TestCreateOfferEnablesStatusLists(t *testing.T) {
+	stub := newVeramoStub(t)
+	client := NewVeramoIssuer(stub.server.URL, testInstance, NewBearerAuthenticator("admin-token"), "", http.DefaultClient)
+
+	if _, err := client.CreateOffer(context.Background(), OfferRequest{CredentialConfigID: "EmailCredentialSdJwt"}); err != nil {
+		t.Fatalf("CreateOffer: %v", err)
+	}
+	if stub.lastOffer.CredentialMetadata["enableStatusLists"] != true {
+		t.Fatalf("create-offer did not enable status lists: %+v", stub.lastOffer.CredentialMetadata)
+	}
+}
+
+// TestRevokeCredentialSetsBit asserts the revoke-credential call requests the
+// revoked state for the credential uuid and treats REVOKED/WAS_REVOKED as
+// success while UNKNOWN is an error.
+func TestRevokeCredentialSetsBit(t *testing.T) {
+	stub := newVeramoStub(t)
+	client := NewVeramoIssuer(stub.server.URL, "default-issuer", NewBearerAuthenticator("admin-token"), "", http.DefaultClient)
+
+	for _, ok := range []string{revokedStatus, wasRevokedStatus} {
+		stub.revokeStatus = ok
+		if err := client.RevokeCredential(context.Background(), "org-yivi", "cred-uuid-9"); err != nil {
+			t.Fatalf("RevokeCredential(%s): %v", ok, err)
+		}
+		if stub.lastRevoke.UUID != "cred-uuid-9" || stub.lastRevoke.State != revokeState {
+			t.Fatalf("unexpected revoke body: %+v", stub.lastRevoke)
+		}
+		if stub.lastInstance != "org-yivi" {
+			t.Fatalf("revoke did not route to per-org instance: %q", stub.lastInstance)
+		}
+	}
+
+	stub.revokeStatus = unknownStatus
+	if err := client.RevokeCredential(context.Background(), "", "cred-uuid-9"); err == nil {
+		t.Fatalf("expected error for UNKNOWN revoke status")
 	}
 }
 
@@ -137,6 +199,13 @@ func TestCreateOfferRoutesToPerOrgInstance(t *testing.T) {
 	}
 	if stub.lastInstance != "org-yivi" {
 		t.Fatalf("Status did not route to per-org instance: got %q", stub.lastInstance)
+	}
+
+	if err := client.RevokeCredential(context.Background(), "org-yivi", "cred-uuid-1"); err != nil {
+		t.Fatalf("RevokeCredential: %v", err)
+	}
+	if stub.lastInstance != "org-yivi" {
+		t.Fatalf("RevokeCredential did not route to per-org instance: got %q", stub.lastInstance)
 	}
 }
 

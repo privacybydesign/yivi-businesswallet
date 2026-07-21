@@ -164,12 +164,16 @@ type Issued struct {
 	Status          string            `json:"status"`
 	Delivery        string            `json:"delivery"`
 	IssuanceID      string            `json:"-"`
-	IssuedByUserID  *uuid.UUID        `json:"issuedByUserId,omitempty"`
-	ClaimedAt       *time.Time        `json:"claimedAt,omitempty"`
-	ExpiresAt       *time.Time        `json:"expiresAt,omitempty"`
-	RevokedAt       *time.Time        `json:"revokedAt,omitempty"`
-	CreatedAt       time.Time         `json:"createdAt"`
-	UpdatedAt       time.Time         `json:"updatedAt"`
+	// CredentialUUID is the hosted issuer's handle for the minted credential,
+	// captured on claim. It keys the issuer's status-list revocation and never
+	// leaves the backend.
+	CredentialUUID string     `json:"-"`
+	IssuedByUserID *uuid.UUID `json:"issuedByUserId,omitempty"`
+	ClaimedAt      *time.Time `json:"claimedAt,omitempty"`
+	ExpiresAt      *time.Time `json:"expiresAt,omitempty"`
+	RevokedAt      *time.Time `json:"revokedAt,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 // Recipient identifies who an attestation is issued to.

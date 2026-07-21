@@ -19,6 +19,15 @@ const (
 // ErrPending means the recipient has not claimed the credential yet.
 var ErrPending = errors.New("openid4vciissuer: issuance pending")
 
+// IssuanceStatus reports an offer's progress. CredentialUUID is the issuer's
+// handle for the minted credential (check-offer's `uuid`), populated only once
+// Status is StatusIssued — it is what the revocation API keys on to flip the
+// credential's bit on the issuer's Token Status List.
+type IssuanceStatus struct {
+	Status         string
+	CredentialUUID string
+}
+
 // OfferRequest is what the attestation service asks the issuer to offer. Unlike
 // the verify side (where the wallet discloses claims to us), here we push the
 // attribute values into the offer; the issuer seals them into the credential.

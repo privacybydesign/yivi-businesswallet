@@ -11,14 +11,24 @@ import (
 )
 
 const (
-	createOfferPath = "/api/create-offer"
-	checkOfferPath  = "/api/check-offer"
+	createOfferPath      = "/api/create-offer"
+	checkOfferPath       = "/api/check-offer"
+	revokeCredentialPath = "/api/revoke-credential"
 	// bodyLimit caps the issuer response we read, guarding against a hostile or
 	// broken upstream.
 	bodyLimit = 1 << 20
 
 	preAuthGrant = "urn:ietf:params:oauth:grant-type:pre-authorized_code"
 	txCodeLength = 6
+
+	// revokeState is the revoke-credential `state` that sets the status-list bit
+	// (any other value would unset it). The issuer replies with one of the
+	// revoke*Status values below.
+	revokeState = "revoke"
+
+	revokedStatus    = "REVOKED"     // bit was set by this call
+	wasRevokedStatus = "WAS_REVOKED" // bit was already set (idempotent)
+	unknownStatus    = "UNKNOWN"     // no bit reserved / list not found
 )
 
 // RequestAuthenticator authorizes a request to the hosted issuer. The Veramo
@@ -91,9 +101,13 @@ func (c *VeramoIssuer) CreateOffer(ctx context.Context, req OfferRequest) (Offer
 		claims = map[string]any{}
 	}
 	body, err := json.Marshal(createOfferRequest{
-		Credentials:                 []string{req.CredentialConfigID},
-		Grants:                      map[string]any{preAuthGrant: preAuth},
-		CredentialMetadata:          map[string]any{"expiration": req.ExpirationSeconds},
+		Credentials: []string{req.CredentialConfigID},
+		Grants:      map[string]any{preAuthGrant: preAuth},
+		// enableStatusLists asks the issuer to reserve a Token Status List bit and
+		// embed the `status.status_list` reference in the credential, so a later
+		// revocation is observable to a verifier. It is a no-op unless the issuer
+		// instance has a status list configured (its GitOps `statusLists` block).
+		CredentialMetadata:          map[string]any{"expiration": req.ExpirationSeconds, "enableStatusLists": true},
 		CredentialDataSupplierInput: claims,
 	})
 	if err != nil {
@@ -126,38 +140,90 @@ func (c *VeramoIssuer) CreateOffer(ctx context.Context, req OfferRequest) (Offer
 
 type checkOfferResponse struct {
 	Status string `json:"status"`
+	// UUID is the issuer's credential handle, present only once the credential
+	// has actually been issued to the wallet. It is what revoke-credential keys
+	// on.
+	UUID string `json:"uuid"`
 }
 
 // Status reports StatusPending until the recipient claims the credential, then
-// StatusIssued. A non-2xx or any non-issued status maps to pending. instance is
-// the issuer instance the offer was created at (empty uses the default).
-func (c *VeramoIssuer) Status(ctx context.Context, instance, issuanceID string) (string, error) {
+// StatusIssued together with the issuer's credential uuid. A non-2xx or any
+// non-issued status maps to pending. instance is the issuer instance the offer
+// was created at (empty uses the default).
+func (c *VeramoIssuer) Status(ctx context.Context, instance, issuanceID string) (IssuanceStatus, error) {
 	body, err := json.Marshal(map[string]string{"id": issuanceID})
 	if err != nil {
-		return "", fmt.Errorf("openid4vciissuer: marshal check-offer: %w", err)
+		return IssuanceStatus{}, fmt.Errorf("openid4vciissuer: marshal check-offer: %w", err)
 	}
 	httpReq, err := c.newRequest(ctx, instance, checkOfferPath, body)
 	if err != nil {
-		return "", err
+		return IssuanceStatus{}, err
 	}
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("openid4vciissuer: check-offer request: %w", err)
+		return IssuanceStatus{}, fmt.Errorf("openid4vciissuer: check-offer request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
-		return StatusPending, nil
+		return IssuanceStatus{Status: StatusPending}, nil
 	}
 
 	var out checkOfferResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, bodyLimit)).Decode(&out); err != nil {
-		return "", fmt.Errorf("openid4vciissuer: decode check-offer: %w", err)
+		return IssuanceStatus{}, fmt.Errorf("openid4vciissuer: decode check-offer: %w", err)
 	}
 	if out.Status != StatusIssued {
-		return StatusPending, nil
+		return IssuanceStatus{Status: StatusPending}, nil
 	}
-	return StatusIssued, nil
+	return IssuanceStatus{Status: StatusIssued, CredentialUUID: out.UUID}, nil
+}
+
+type revokeCredentialRequest struct {
+	UUID  string `json:"uuid"`
+	State string `json:"state"`
+}
+
+type revokeCredentialResponse struct {
+	Status string `json:"status"`
+}
+
+// RevokeCredential flips the credential's bit on the issuer's Token Status List
+// to revoked, so a verifier fetching the signed status list observes the
+// revocation. It is idempotent: an already-revoked credential returns success.
+// credentialUUID is the issuer's uuid captured at issuance (check-offer's
+// `uuid`). instance is the issuer instance that minted the credential.
+func (c *VeramoIssuer) RevokeCredential(ctx context.Context, instance, credentialUUID string) error {
+	body, err := json.Marshal(revokeCredentialRequest{UUID: credentialUUID, State: revokeState})
+	if err != nil {
+		return fmt.Errorf("openid4vciissuer: marshal revoke-credential: %w", err)
+	}
+	httpReq, err := c.newRequest(ctx, instance, revokeCredentialPath, body)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("openid4vciissuer: revoke-credential request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("openid4vciissuer: revoke-credential returned status %d", resp.StatusCode)
+	}
+
+	var out revokeCredentialResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, bodyLimit)).Decode(&out); err != nil {
+		return fmt.Errorf("openid4vciissuer: decode revoke-credential: %w", err)
+	}
+	switch out.Status {
+	case revokedStatus, wasRevokedStatus:
+		return nil
+	case unknownStatus:
+		return fmt.Errorf("openid4vciissuer: revoke-credential could not find a status-list bit for the credential")
+	default:
+		return fmt.Errorf("openid4vciissuer: revoke-credential returned unexpected status %q", out.Status)
+	}
 }
 
 // Ping is the boot readiness probe: it verifies the issuer accepts a create-offer

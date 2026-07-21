@@ -102,7 +102,8 @@ func newRegistryProvider(cfg config.Config) (registryProvider, error) {
 type attestationIssuer interface {
 	Ping(context.Context) error
 	CreateOffer(context.Context, openid4vciissuer.OfferRequest) (openid4vciissuer.Offer, error)
-	Status(context.Context, string, string) (string, error)
+	Status(context.Context, string, string) (openid4vciissuer.IssuanceStatus, error)
+	RevokeCredential(context.Context, string, string) error
 }
 
 func newAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
