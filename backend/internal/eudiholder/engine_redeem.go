@@ -78,9 +78,12 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		// irmago hands back the offered credential, whose instance id is not
 		// populated (session.buildOfferedCredentials leaves CredentialInstanceIds
 		// empty), so credentialInstanceRef yields "". Recover the stored instance id
-		// by vct so the held index gets a usable ref for delete/claims.
+		// by the credential's dedup hash — a unique index (vct + sorted disclosed
+		// attributes) that identifies exactly the batch just stored, even when the
+		// org already holds another credential of the same vct — so the held index
+		// gets a precise ref for delete/claims.
 		if redeemed.Ref == "" {
-			batch, ok, err := e.batchByVCT(ctx, orgID, redeemed.VCT)
+			batch, ok, err := e.batchByHash(ctx, orgID, res.hash)
 			if err != nil {
 				return Redeemed{}, err
 			}
@@ -115,9 +118,12 @@ func (e *Engine) verificationContext(conf *eudi.Configuration) (sdjwtvc.SdJwtVcV
 }
 
 // redeemResult carries the outcome of the asynchronous, callback-driven session
-// back to Redeem over a buffered channel.
+// back to Redeem over a buffered channel. hash is the received credential's dedup
+// hash, kept out of the public Redeemed type: it is not indexed in
+// held_attestations, only used to backfill a precise instance ref (see Redeem).
 type redeemResult struct {
 	redeemed Redeemed
+	hash     string
 	err      error
 }
 
@@ -138,11 +144,14 @@ func (h *redeemHandler) Success(_ string, issued []*clientmodels.Credential) {
 		return
 	}
 	c := issued[0]
-	h.done <- redeemResult{redeemed: Redeemed{
-		Ref:    credentialInstanceRef(c),
-		VCT:    c.CredentialId,
-		Issuer: c.Issuer.Id,
-	}}
+	h.done <- redeemResult{
+		redeemed: Redeemed{
+			Ref:    credentialInstanceRef(c),
+			VCT:    c.CredentialId,
+			Issuer: c.Issuer.Id,
+		},
+		hash: c.Hash,
+	}
 }
 
 func (h *redeemHandler) Cancelled() {

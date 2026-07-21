@@ -250,6 +250,33 @@ func (e *Engine) claimsBatch(ctx context.Context, orgID uuid.UUID, ref, vct stri
 	return e.batchByVCT(ctx, orgID, vct)
 }
 
+// batchByHash loads an org's stored credential batch (with its instances) by the
+// credential's dedup hash, which irmago persists under a unique index (vct + sorted
+// disclosed attributes). Unlike batchByVCT this identifies exactly one batch even
+// when the org holds several credentials of the same vct, so the receive flow uses
+// it to backfill a precise instance ref when irmago hands back an unpopulated one
+// (see Redeem). Returns (batch, false, nil) when hash is empty or no batch matches.
+func (e *Engine) batchByHash(ctx context.Context, orgID uuid.UUID, hash string) (models.CredentialBatch, bool, error) {
+	if hash == "" {
+		return models.CredentialBatch{}, false, nil
+	}
+	eng, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return models.CredentialBatch{}, false, err
+	}
+	var batch models.CredentialBatch
+	err = eng.Db().WithContext(ctx).
+		Preload("Instances").
+		Where("hash = ?", hash).First(&batch).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return models.CredentialBatch{}, false, nil
+	}
+	if err != nil {
+		return models.CredentialBatch{}, false, fmt.Errorf("eudiholder: batch by hash org %s: %w", orgID, err)
+	}
+	return batch, true, nil
+}
+
 // batchByVCT loads an org's stored credential batch (with its instances and claim
 // metadata) for a verifiable-credential type, recovering the batch when the
 // instance ref is unavailable (see Claims). It returns (batch, false, nil) when
