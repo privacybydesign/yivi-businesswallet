@@ -136,7 +136,8 @@ export function OrgSwitcher({
                       <Avatar
                         name={org.name}
                         src={org.logoUri}
-                        alt={org.name}
+                        // decorative: the org name is shown as visible text beside it
+                        alt=""
                         tone="rose"
                       />
                       <span className="min-w-0 flex-1">
