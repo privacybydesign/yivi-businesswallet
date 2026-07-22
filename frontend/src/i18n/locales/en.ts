@@ -10,6 +10,10 @@ export const en = {
     edit: "Edit",
     jobTitle: "Job title",
     language: "Language",
+    languageName: {
+      en: "English",
+      nl: "Nederlands",
+    },
     loading: "Loading…",
     logOut: "Log out",
     name: "Name",
