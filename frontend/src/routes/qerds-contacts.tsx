@@ -48,6 +48,9 @@ export default function QerdsContacts(): React.JSX.Element {
 
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [legalName, setLegalName] = useState("");
+  const [kvkNumber, setKvkNumber] = useState("");
+  const [euid, setEuid] = useState("");
 
   function handleCreate(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -57,11 +60,20 @@ export default function QerdsContacts(): React.JSX.Element {
       return;
     }
     create.mutate(
-      { name: trimmedName, address: trimmedAddress },
+      {
+        name: trimmedName,
+        address: trimmedAddress,
+        legalName: legalName.trim() || undefined,
+        kvkNumber: kvkNumber.trim() || undefined,
+        euid: euid.trim() || undefined,
+      },
       {
         onSuccess: () => {
           setName("");
           setAddress("");
+          setLegalName("");
+          setKvkNumber("");
+          setEuid("");
         },
       },
     );
@@ -86,34 +98,64 @@ export default function QerdsContacts(): React.JSX.Element {
           {t("qerds.contacts.description")}
         </p>
 
-        <form onSubmit={handleCreate} className="mt-4 flex gap-2">
-          <div className="w-[34%]">
-            <Input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder={t("qerds.contacts.namePlaceholder")}
-              aria-label={t("qerds.contacts.namePlaceholder")}
-            />
+        <form onSubmit={handleCreate} className="mt-4 flex flex-col gap-2">
+          <div className="flex gap-2">
+            <div className="w-[34%]">
+              <Input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder={t("qerds.contacts.namePlaceholder")}
+                aria-label={t("qerds.contacts.namePlaceholder")}
+              />
+            </div>
+            <div className="flex-1">
+              <Input
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+                placeholder={t("qerds.contacts.addressPlaceholder")}
+                aria-label={t("qerds.contacts.addressPlaceholder")}
+              />
+            </div>
           </div>
-          <div className="flex-1">
-            <Input
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
-              placeholder={t("qerds.contacts.addressPlaceholder")}
-              aria-label={t("qerds.contacts.addressPlaceholder")}
-            />
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <Input
+                value={legalName}
+                onChange={(event) => setLegalName(event.target.value)}
+                placeholder={t("qerds.contacts.legalNamePlaceholder")}
+                aria-label={t("qerds.contacts.legalNamePlaceholder")}
+              />
+            </div>
+            <div className="w-[26%]">
+              <Input
+                value={kvkNumber}
+                onChange={(event) => setKvkNumber(event.target.value)}
+                placeholder={t("qerds.contacts.kvkPlaceholder")}
+                aria-label={t("qerds.contacts.kvkPlaceholder")}
+              />
+            </div>
+            <div className="w-[26%]">
+              <Input
+                value={euid}
+                onChange={(event) => setEuid(event.target.value)}
+                placeholder={t("qerds.contacts.euidPlaceholder")}
+                aria-label={t("qerds.contacts.euidPlaceholder")}
+              />
+            </div>
           </div>
-          <Button
-            type="submit"
-            icon="add"
-            disabled={
-              name.trim() === "" || address.trim() === "" || create.isPending
-            }
-          >
-            {create.isPending
-              ? t("qerds.contacts.adding")
-              : t("qerds.contacts.add")}
-          </Button>
+          <div className="flex justify-end">
+            <Button
+              type="submit"
+              icon="add"
+              disabled={
+                name.trim() === "" || address.trim() === "" || create.isPending
+              }
+            >
+              {create.isPending
+                ? t("qerds.contacts.adding")
+                : t("qerds.contacts.add")}
+            </Button>
+          </div>
         </form>
         {create.isError && (
           <p role="alert" className="text-error mt-2 text-[13px]">
@@ -148,6 +190,13 @@ export default function QerdsContacts(): React.JSX.Element {
                     <div className="text-ink-soft truncate font-mono text-[12px]">
                       {contact.address}
                     </div>
+                    {contact.kvkNumber && (
+                      <div className="text-ink-soft truncate text-[12px]">
+                        {t("qerds.contacts.kvkLabel", {
+                          kvk: contact.kvkNumber,
+                        })}
+                      </div>
+                    )}
                   </div>
                   <Button
                     size="sm"

@@ -322,7 +322,8 @@ validity, branding, and the key-material choice. The card's "N issued" is a coun
 | `org_id` | uuid FK→organizations | `ON DELETE CASCADE` |
 | `schema_id` | uuid FK→attestation_schemas | the type this template issues |
 | `name` | text | e.g. "Board signing authority" |
-| `default_attributes` | jsonb NULL | pre-filled values for the wizard |
+| `default_attributes` | jsonb NULL | static pre-filled values for the wizard |
+| `attribute_sources` | jsonb NOT NULL `{}` | per-attribute **subject-field bindings** (attribute key → a source token like `member.email` / `org.kvkNumber`); at issue time the wizard copies that field from the selected recipient into the attribute (editable pre-fill). Validated against the schema's `subject_type` + attribute list (`attestation.ValidateAttributeSources`); mutually exclusive with `default_attributes` per attribute. Vocabulary: `attestation.SubjectSourceTokens`, mirrored frontend `SUBJECT_SOURCE_FIELDS`/`resolveSubjectSource`. Org-recipient data is copied from the enriched **`qerds_contacts`** row (now carries `legal_name`/`kvk_number`/`euid`). |
 | `validity_period` | interval NULL | issued-credential lifetime (→ `expires_at`) |
 | `key_material_id` | uuid FK→attestation_keys NULL | which key/cert seals it (§7); null ⇒ org default |
 | `linked_schema_ids` | uuid[] NULL | chained attestations (Art 5(1)(g)) — types this one links to |

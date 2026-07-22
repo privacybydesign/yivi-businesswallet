@@ -8,7 +8,9 @@ import type {
   AttestationTemplate,
   IssueAttestationInput,
   IssueResult,
+  SubjectSourceValue,
 } from "../api/attestations";
+import { resolveSubjectSource } from "../api/attestations";
 import {
   useIssueAttestationMutation,
   useIssuedAttestationQuery,
@@ -28,10 +30,16 @@ const RECIPIENT_MEMBER = "member";
 const RECIPIENT_EXTERNAL = "external";
 const RECIPIENT_ORGANIZATION = "organization";
 const SUBJECT_ORGANIZATION = "organization";
+// Natural-person delivery methods: e-mail a claim link, or show the QR directly.
+const DELIVERY_EMAIL = "email";
+const DELIVERY_QR = "qr";
+// Backend delivery channel recorded on the ledger row (Issued.delivery).
+const DELIVERY_CHANNEL_EMAIL = "email";
 // Plausible address check only; the backend is the authority.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type RecipientKind = typeof RECIPIENT_MEMBER | typeof RECIPIENT_EXTERNAL;
+type DeliveryMethod = typeof DELIVERY_EMAIL | typeof DELIVERY_QR;
 
 // The wizard phases, in order. "review" is a summary before submitting; "offer"
 // is the post-submit QR + claim-polling screen.
@@ -87,6 +95,32 @@ function defaultsFor(template: AttestationTemplate): Record<string, string> {
   return values;
 }
 
+// applySubjectSources pre-fills the template's source-bound attributes from the
+// selected recipient. It fills only empty fields, so it never overwrites a value
+// the issuer already typed (editable pre-fill).
+function applySubjectSources(
+  current: Record<string, string>,
+  template: AttestationTemplate,
+  subject: SubjectSourceValue,
+): Record<string, string> {
+  const sources = template.attributeSources;
+  if (!sources) {
+    return current;
+  }
+  const next = { ...current };
+  for (const attribute of template.attributes) {
+    const token = sources[attribute.key];
+    if (!token || (next[attribute.key] ?? "") !== "") {
+      continue;
+    }
+    const value = resolveSubjectSource(token, subject);
+    if (value !== "") {
+      next[attribute.key] = value;
+    }
+  }
+  return next;
+}
+
 function inlineError(error: Error, t: TFunction): string {
   const code = apiErrorCode(error);
   if (code === "unknown_attribute") {
@@ -128,6 +162,10 @@ export function AttestationIssueWizard({
   const [templateId, setTemplateId] = useState(initialTemplate?.id ?? "");
   const [recipientKind, setRecipientKind] =
     useState<RecipientKind>(RECIPIENT_MEMBER);
+  // Default to showing the QR for a member (often issued in person) and e-mailing
+  // an external recipient (not present); either can be overridden below.
+  const [deliveryMethod, setDeliveryMethod] =
+    useState<DeliveryMethod>(DELIVERY_QR);
   const [memberUserId, setMemberUserId] = useState("");
   const [externalEmail, setExternalEmail] = useState("");
   const [contactAddress, setContactAddress] = useState("");
@@ -194,12 +232,37 @@ export function AttestationIssueWizard({
     const entry = memberEntries.find((m) => m.userId === userId);
     if (entry && template) {
       setValues((current) => {
-        const next = { ...current };
+        let next = { ...current };
+        // Legacy convenience for templates without an explicit binding: fill an
+        // empty "email" attribute from the member.
         if (EMAIL_ATTRIBUTE_KEY in next && next[EMAIL_ATTRIBUTE_KEY] === "") {
           next[EMAIL_ATTRIBUTE_KEY] = entry.email;
         }
+        next = applySubjectSources(next, template, {
+          kind: "natural_person",
+          member: entry,
+        });
         return next;
       });
+    }
+  }
+
+  function selectContact(address: string): void {
+    setContactAddress(address);
+    const contact = (contacts.data ?? []).find((c) => c.address === address);
+    if (contact && template) {
+      setValues((current) =>
+        applySubjectSources(current, template, {
+          kind: "organization",
+          org: {
+            name: contact.name,
+            legalName: contact.legalName,
+            kvkNumber: contact.kvkNumber,
+            euid: contact.euid,
+            address: contact.address,
+          },
+        }),
+      );
     }
   }
 
@@ -236,6 +299,8 @@ export function AttestationIssueWizard({
       templateId: template.id,
       recipient,
       attributes,
+      // Delivery method applies to natural persons only; organizations go over QERDS.
+      ...(isOrganization ? {} : { deliveryMethod }),
     };
     issue.mutate(input, {
       onSuccess: (data) => {
@@ -352,7 +417,7 @@ export function AttestationIssueWizard({
                 id="wizard-contact"
                 className={`${control(attempted && !recipientValid)} h-9`}
                 value={contactAddress}
-                onChange={(event) => setContactAddress(event.target.value)}
+                onChange={(event) => selectContact(event.target.value)}
               >
                 <option value="">
                   {t("attestations.wizard.selectContact")}
@@ -375,7 +440,12 @@ export function AttestationIssueWizard({
               <button
                 key={kind}
                 type="button"
-                onClick={() => setRecipientKind(kind as RecipientKind)}
+                onClick={() => {
+                  setRecipientKind(kind as RecipientKind);
+                  setDeliveryMethod(
+                    kind === RECIPIENT_MEMBER ? DELIVERY_QR : DELIVERY_EMAIL,
+                  );
+                }}
                 className={[
                   "h-[26px] cursor-pointer rounded-md px-2.5 text-[12.5px] font-semibold transition-colors",
                   recipientKind === kind
@@ -438,6 +508,31 @@ export function AttestationIssueWizard({
               />
             </Field>
           )}
+
+          <Field
+            id="wizard-delivery"
+            label={t("attestations.wizard.deliveryMethod")}
+          >
+            <div className="bg-surface-3 rounded-yivi inline-flex gap-1 self-start p-[3px]">
+              {[DELIVERY_QR, DELIVERY_EMAIL].map((method) => (
+                <button
+                  key={method}
+                  type="button"
+                  onClick={() => setDeliveryMethod(method as DeliveryMethod)}
+                  className={[
+                    "h-[26px] cursor-pointer rounded-md px-2.5 text-[12.5px] font-semibold transition-colors",
+                    deliveryMethod === method
+                      ? "bg-surface text-ink shadow-sm"
+                      : "text-ink-soft hover:text-ink",
+                  ].join(" ")}
+                >
+                  {method === DELIVERY_QR
+                    ? t("attestations.wizard.deliveryQr")
+                    : t("attestations.wizard.deliveryEmail")}
+                </button>
+              ))}
+            </div>
+          </Field>
         </div>
       )}
 
@@ -592,7 +687,11 @@ export function AttestationIssueWizard({
           ) : (
             <>
               <p className="text-ink-soft text-center text-[13px]">
-                {t("attestations.wizard.offerHint")}
+                {result.delivery === DELIVERY_CHANNEL_EMAIL
+                  ? t("attestations.wizard.offerEmailedHint", {
+                      recipient: result.recipientRef,
+                    })
+                  : t("attestations.wizard.offerHint")}
               </p>
               <div
                 className="border-line-strong bg-surface rounded-yivi flex items-center justify-center border"

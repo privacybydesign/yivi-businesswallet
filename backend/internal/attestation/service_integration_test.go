@@ -157,6 +157,33 @@ func TestIssuePersonEmailsAndClaims(t *testing.T) {
 	}
 }
 
+// TestIssuePersonQrMethodSkipsEmail: the "show QR directly" method creates the
+// offer but sends nothing — delivery is recorded as none and no e-mail goes out.
+func TestIssuePersonQrMethodSkipsEmail(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	templateID := personTemplate(t, ctx, e.store, e.orgID)
+
+	result, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+		TemplateID:     templateID,
+		Recipient:      attestation.Recipient{Kind: attestation.RecipientMember, Ref: "anna@example.com"},
+		Attributes:     map[string]string{"email": "anna@example.com"},
+		DeliveryMethod: attestation.DeliveryMethodQR,
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if result.OfferURI == "" {
+		t.Fatalf("expected an offerUri to render as a QR, got %+v", result)
+	}
+	if result.Delivery != attestation.DeliveryNone {
+		t.Fatalf("delivery = %q, want %q", result.Delivery, attestation.DeliveryNone)
+	}
+	if len(e.email.to) != 0 || len(e.qerds.to) != 0 {
+		t.Fatalf("expected no delivery, got email=%v qerds=%v", e.email.to, e.qerds.to)
+	}
+}
+
 // TestIssueOrganizationDeliversOverQerds: an org-subject issue routes to QERDS.
 func TestIssueOrganizationDeliversOverQerds(t *testing.T) {
 	e := setup(t)
@@ -192,6 +219,52 @@ func TestRecipientKindMustMatchSubjectType(t *testing.T) {
 	})
 	if !errors.Is(err, attestation.ErrRecipientKindMismatch) {
 		t.Fatalf("expected ErrRecipientKindMismatch, got %v", err)
+	}
+}
+
+// TestTemplateAttributeSourcesRoundTrip persists a template's subject-source
+// bindings and reads them back enriched, and confirms an empty map round-trips.
+func TestTemplateAttributeSourcesRoundTrip(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+
+	schema, err := e.store.CreateSchema(ctx, e.orgID, attestation.Schema{
+		VCT:                "nl.caesar.badge",
+		DisplayName:        "Badge",
+		CredentialConfigID: "EmailCredentialSdJwt",
+		SubjectType:        attestation.SubjectNaturalPerson,
+		Attributes: []attestation.AttributeDef{
+			{Key: "email", Label: "E-mail", Type: "string", Required: true},
+			{Key: "department", Label: "Department", Type: "string"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSchema: %v", err)
+	}
+
+	sources := map[string]string{
+		"email":      attestation.SourceMemberEmail,
+		"department": attestation.SourceMemberDepartment,
+	}
+	created, err := e.store.CreateTemplate(ctx, e.orgID, attestation.Template{
+		SchemaID: schema.ID, Name: "Badge", AttributeSources: sources,
+	})
+	if err != nil {
+		t.Fatalf("CreateTemplate: %v", err)
+	}
+	if got := created.AttributeSources; len(got) != 2 || got["email"] != attestation.SourceMemberEmail || got["department"] != attestation.SourceMemberDepartment {
+		t.Fatalf("AttributeSources round-trip = %v, want %v", got, sources)
+	}
+
+	// Clearing the bindings on update round-trips to an empty map.
+	updated, err := e.store.UpdateTemplate(ctx, e.orgID, created.ID, attestation.Template{
+		Name: "Badge", AttributeSources: nil,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if len(updated.AttributeSources) != 0 {
+		t.Fatalf("AttributeSources after clear = %v, want empty", updated.AttributeSources)
 	}
 }
 

@@ -148,7 +148,7 @@ func (s *Service) Issue(ctx context.Context, orgID, issuedBy uuid.UUID, orgName 
 	if err != nil {
 		return IssueResult{}, err
 	}
-	delivery := deliveryFor(detail.SubjectType)
+	delivery := resolveDelivery(detail.SubjectType, in.DeliveryMethod)
 
 	issued, err := s.store.CreateOffered(ctx, orgID, in, detail, issuedBy, expiresAt, claimToken, delivery)
 	if err != nil {
@@ -180,27 +180,31 @@ func (s *Service) Issue(ctx context.Context, orgID, issuedBy uuid.UUID, orgName 
 	}
 	issued.IssuanceID = offer.IssuanceID
 
-	s.deliver(ctx, orgID, orgName, detail.Name, offer, in.Recipient, claimToken)
+	s.deliver(ctx, orgID, orgName, detail.Name, offer, in.Recipient, claimToken, delivery)
 
 	return IssueResult{Issued: issued, OfferURI: offer.OfferURI, TxCode: offer.TxCode}, nil
 }
 
-// deliver routes the offer to the recipient. Errors are logged, never fatal.
-func (s *Service) deliver(ctx context.Context, orgID uuid.UUID, orgName, credentialName string, offer openid4vciissuer.Offer, recipient Recipient, claimToken string) {
-	claimURL := s.appBaseURL + "/claim/" + claimToken
-	switch recipient.Kind {
-	case RecipientOrganization:
+// deliver routes the offer over the resolved delivery channel. Errors are logged,
+// never fatal. DeliveryNone (the "show QR directly" choice) sends nothing — the
+// issuing UI shows the QR.
+func (s *Service) deliver(ctx context.Context, orgID uuid.UUID, orgName, credentialName string, offer openid4vciissuer.Offer, recipient Recipient, claimToken, delivery string) {
+	switch delivery {
+	case DeliveryQerds:
 		// Organizations receive the real OpenID4VCI offer (their wallet redeems it
 		// automatically over the secure channel), not a human claim link.
 		if err := s.qerds.SendCredentialOffer(ctx, orgID, recipient.Ref, orgName, credentialName, offer.OfferURI); err != nil {
 			slog.ErrorContext(ctx, "attestation: qerds offer delivery failed",
 				slog.String("recipient", recipient.Ref), slog.String("error", err.Error()))
 		}
-	default: // member / external → natural person → e-mail
+	case DeliveryEmail:
+		claimURL := s.appBaseURL + "/claim/" + claimToken
 		if err := s.email.SendCredentialOffer(ctx, orgID, recipient.Ref, orgName, credentialName, claimURL, offer.TxCode); err != nil {
 			slog.ErrorContext(ctx, "attestation: email offer delivery failed",
 				slog.String("recipient", recipient.Ref), slog.String("error", err.Error()))
 		}
+	case DeliveryNone:
+		// "Show QR directly" — nothing to send; the issuing UI renders the QR.
 	}
 }
 
@@ -337,9 +341,15 @@ func checkRecipientKind(subjectType, kind string) error {
 	return nil
 }
 
-func deliveryFor(subjectType string) string {
+// resolveDelivery picks the delivery channel: organizations always go over QERDS;
+// a natural person is e-mailed a claim link unless the caller chose the QR method
+// (DeliveryNone — shown directly in the UI, no e-mail sent).
+func resolveDelivery(subjectType, method string) string {
 	if subjectType == SubjectOrganization {
 		return DeliveryQerds
+	}
+	if method == DeliveryMethodQR {
+		return DeliveryNone
 	}
 	return DeliveryEmail
 }
