@@ -3,15 +3,19 @@ import { changeLanguage, SUPPORTED_LANGUAGES } from "../i18n";
 import type { Language } from "../i18n";
 import * as React from "react";
 
-// Language tags render as their own uppercase code (a "NL"/"EN" toggle), which
-// reads the same in any language, so no per-language label lookup is needed.
-const LANGUAGE_LABELS: Record<Language, string> = {
-  en: "EN",
-  nl: "NL",
+// Each language shows its country flag instead of an "EN"/"NL" text code. A flag
+// glyph is not an accessible name (screen readers may skip or mis-announce it),
+// so every option carries an aria-label with the language's own name and keeps
+// the aria-pressed state of the original segmented toggle.
+const LANGUAGE_FLAGS: Record<Language, string> = {
+  en: "🇬🇧",
+  nl: "🇳🇱",
 };
 
 // A compact segmented toggle matching the members-list filter control, so it is
-// indistinguishable from the existing house style.
+// indistinguishable from the existing house style. The selected language keeps
+// the raised surface pill; the flag can't change colour, so the unselected one
+// is dimmed to reinforce the state conveyed by aria-pressed.
 export function LanguageSwitcher(): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const active = (i18n.resolvedLanguage ?? i18n.language) as Language;
@@ -28,14 +32,15 @@ export function LanguageSwitcher(): React.JSX.Element {
           type="button"
           onClick={() => changeLanguage(lng)}
           aria-pressed={active === lng}
+          aria-label={t(`common.languageName.${lng}`)}
           className={[
-            "h-[26px] cursor-pointer rounded-md px-2.5 text-[12.5px] font-semibold transition-colors",
+            "flex h-[26px] w-[34px] cursor-pointer items-center justify-center rounded-md text-[15px] leading-none transition-opacity",
             active === lng
-              ? "bg-surface text-ink shadow-sm"
-              : "text-ink-soft hover:text-ink",
+              ? "bg-surface shadow-sm"
+              : "opacity-55 hover:opacity-100",
           ].join(" ")}
         >
-          {LANGUAGE_LABELS[lng]}
+          <span aria-hidden="true">{LANGUAGE_FLAGS[lng]}</span>
         </button>
       ))}
     </div>

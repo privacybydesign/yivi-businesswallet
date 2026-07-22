@@ -21,6 +21,10 @@ export const nl: Translation<typeof en> = {
     edit: "Bewerken",
     jobTitle: "Functie",
     language: "Taal",
+    languageName: {
+      en: "English",
+      nl: "Nederlands",
+    },
     loading: "Laden…",
     logOut: "Uitloggen",
     name: "Naam",

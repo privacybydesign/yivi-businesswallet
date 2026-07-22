@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useBrand } from "./brand";
 import { Breadcrumbs } from "./breadcrumb";
 import { Icon } from "./icon";
+import { LanguageSwitcher } from "./language-switcher";
 import { Logo } from "./logo";
 import { useMobileNav } from "./mobile-nav";
 
@@ -46,6 +47,7 @@ export function TopBar({
         </div>
         <div className="flex shrink-0 items-center gap-4">
           {actions && <div className="flex shrink-0 gap-2">{actions}</div>}
+          <LanguageSwitcher />
           {brand.logoUri && (
             <Logo
               src={brand.logoUri}
