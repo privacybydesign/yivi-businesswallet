@@ -79,6 +79,10 @@ const (
 	envPostGuardSidecarURL    = "POSTGUARD_SIDECAR_URL"
 	envPostGuardSharedSecret  = "POSTGUARD_SHARED_SECRET"
 	envPostGuardEncryptionKey = "POSTGUARD_KEY_ENCRYPTION_KEY"
+	// POSTGUARD_WEBSITE_URL is the public PostGuard website the recipient download
+	// link points at; used only for the "own SMTP" notification path.
+	envPostGuardWebsiteURL     = "POSTGUARD_WEBSITE_URL"
+	defaultPostGuardWebsiteURL = "https://postguard.eu"
 
 	// Domibus WS-plugin ebMS3 addressing. Defaults match the parties in the
 	// Domibus sample PMode so a blue -> red self-send works out of the box.
@@ -206,6 +210,11 @@ type Config struct {
 	PostGuardSidecarURL    string
 	PostGuardSharedSecret  string
 	PostGuardEncryptionKey string
+	// PostGuardWebsiteURL is the public base URL of the PostGuard website the
+	// recipient download link points at (e.g. https://postguard.eu/download?uuid=…).
+	// Used only for the "own SMTP" notification path, where the backend composes
+	// the notification itself instead of letting PostGuard's service send it.
+	PostGuardWebsiteURL string
 
 	PlatformAdminEmails []string
 }
@@ -323,6 +332,7 @@ func Load() (Config, error) {
 		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
 		PostGuardSharedSecret:  os.Getenv(envPostGuardSharedSecret),
 		PostGuardEncryptionKey: os.Getenv(envPostGuardEncryptionKey),
+		PostGuardWebsiteURL:    envOrDefault(envPostGuardWebsiteURL, defaultPostGuardWebsiteURL),
 
 		PlatformAdminEmails: parseList(os.Getenv(envPlatformAdminEmails)),
 	}, nil

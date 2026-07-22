@@ -65,6 +65,34 @@ func (s *Service) SendInvitation(ctx context.Context, orgID uuid.UUID, to, orgNa
 	})
 }
 
+// SendPostguardNotification notifies each recipient that an organization has sent
+// them an encrypted file via PostGuard, linking to the sealed package. Used for
+// the PostGuard "own SMTP" delivery path, where the backend mails recipients
+// itself instead of PostGuard's hosted service. Returns ErrNotConfigured when the
+// org has no usable SMTP settings; on a per-recipient send failure it stops and
+// returns that error.
+func (s *Service) SendPostguardNotification(ctx context.Context, orgID uuid.UUID, recipients []string, orgName, message, downloadURL string) error {
+	cfg, ok, err := s.settings.configFor(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotConfigured
+	}
+	subject := fmt.Sprintf("%s has sent you an encrypted file", orgName)
+	for _, to := range recipients {
+		if err := s.sender.Send(cfg, mailer.Message{
+			To:       to,
+			Subject:  subject,
+			TextBody: postguardText(orgName, message, downloadURL),
+			HTMLBody: postguardHTML(orgName, message, downloadURL),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SendTest sends a minimal message to verify an org's SMTP configuration.
 func (s *Service) SendTest(ctx context.Context, orgID uuid.UUID, to string) error {
 	cfg, ok, err := s.settings.configFor(ctx, orgID)
@@ -99,6 +127,28 @@ func offerHTML(orgName, credentialName, claimURL, txCode string) string {
 		`<p><strong>%s</strong> has issued you a credential: <strong>%s</strong>.</p>`+
 			`<p><a href="%s">Add it to your wallet</a></p>%s`,
 		html.EscapeString(orgName), html.EscapeString(credentialName), html.EscapeString(claimURL), code,
+	)
+}
+
+func postguardText(orgName, message, downloadURL string) string {
+	body := fmt.Sprintf("%s has sent you an encrypted file with PostGuard.\n\n", orgName)
+	if message != "" {
+		body += fmt.Sprintf("Message:\n%s\n\n", message)
+	}
+	body += fmt.Sprintf("Open it:\n%s\n\nYou unlock the file by proving ownership of this e-mail address.\n", downloadURL)
+	return body
+}
+
+func postguardHTML(orgName, message, downloadURL string) string {
+	msg := ""
+	if message != "" {
+		msg = fmt.Sprintf(`<p style="white-space:pre-wrap">%s</p>`, html.EscapeString(message))
+	}
+	return fmt.Sprintf(
+		`<p><strong>%s</strong> has sent you an encrypted file with PostGuard.</p>%s`+
+			`<p><a href="%s">Open the file</a></p>`+
+			`<p>You unlock the file by proving ownership of this e-mail address.</p>`,
+		html.EscapeString(orgName), msg, html.EscapeString(downloadURL),
 	)
 }
 
