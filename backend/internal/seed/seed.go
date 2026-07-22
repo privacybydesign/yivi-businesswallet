@@ -78,6 +78,18 @@ var yiviOrg = demoOrganization{
 	repKind: "bestuurder", repAuth: "sole", repDOB: "1979-05-14",
 }
 
+// yiviTeam are the real Yivi team members provisioned as admins of the Yivi
+// organisation by the staging/production org seed (EnsureYiviOrganization), so a
+// fresh environment isn't peopleless. They are also the platform admins
+// (PLATFORM_ADMIN_EMAILS), provisioned as bare accounts by `/seed --admins`;
+// ensureTeamMember upgrades that generic placeholder name to the real one.
+var yiviTeam = []demoUser{
+	{email: "w.ensink@yivi.app", givenNames: "Wouter", lastName: "Ensink"},
+	{email: "m.kamphuis@yivi.app", givenNames: "Martijn", lastName: "Kamphuis"},
+	{email: "r.hensen@yivi.app", givenNames: "Ruben", lastName: "Hensen"},
+	{email: "d.mulder@yivi.app", givenNames: "Dibran", lastName: "Mulder"},
+}
+
 // kvkRegisterOrg is the KVK register itself as a business-wallet participant: the
 // organisation the register's match/no-match decisions are audited against
 // (registryprovider.SeededRegistry). It is provisioned like any other org but has
@@ -307,11 +319,87 @@ func EnsureYiviOrganization(ctx context.Context, dsn string) (organization.Organ
 	if err != nil {
 		return organization.Organization{}, err
 	}
+
+	// Provision the real Yivi team as admins of the org so a fresh environment
+	// starts with people, not just an empty org.
+	users := user.NewStore(pool)
+	orgs := organization.NewStore(pool, audit.NewDBRecorder())
+	for _, m := range yiviTeam {
+		if err := ensureTeamMember(ctx, users, orgs, org.ID, m); err != nil {
+			return organization.Organization{}, err
+		}
+	}
+
+	// Yivi's own attestation catalogue (corporate e-mail, employee, approved
+	// supplier) plus its Veramo issuer instance, so the org can issue out of the
+	// box. Both are local DB writes only (no call to the hosted issuer) and
+	// existence-guarded, so they are safe and idempotent on a shared environment.
+	if err := seedAttestations(ctx, pool, org.ID); err != nil {
+		return organization.Organization{}, err
+	}
+	if err := seedIssuerSettings(ctx, pool, org.ID, demoOrgSlug, yiviOrg.name); err != nil {
+		return organization.Organization{}, err
+	}
+
 	slog.Info("ensured Yivi organisation",
 		slog.String("slug", org.Slug),
 		slog.String("id", org.ID.String()),
 	)
 	return org, nil
+}
+
+// EnsureKVKRegisterOrganization provisions the KVK register participant (the
+// authentic source register consult decisions are audited against) plus the
+// nl.kvk.registration schema/template and issuer settings it owns — and nothing
+// else. Like EnsureYiviOrganization it creates no demo data and is idempotent
+// (ensureOrg is ON CONFLICT-guarded; the attestation/issuer seeds are
+// existence-guarded), so it is safe to run on every staging/production deploy.
+// The schema + issuer settings are local DB rows only — no call to the hosted
+// issuer at seed time — so a missing GitOps "kvk" instance does not fail the
+// seed; only runtime issuance would need it.
+func EnsureKVKRegisterOrganization(ctx context.Context, dsn string) (organization.Organization, error) {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return organization.Organization{}, fmt.Errorf("seed: connect: %w", err)
+	}
+	defer pool.Close()
+
+	org, err := ensureOrg(ctx, pool, kvkRegisterOrg)
+	if err != nil {
+		return organization.Organization{}, err
+	}
+	if err := seedKVKRegisterAttestation(ctx, pool, org.ID); err != nil {
+		return organization.Organization{}, err
+	}
+	if err := seedIssuerSettings(ctx, pool, org.ID, registryprovider.RegisterSlug, registryprovider.RegisterLegalName); err != nil {
+		return organization.Organization{}, err
+	}
+
+	slog.Info("ensured KVK register organisation",
+		slog.String("slug", org.Slug),
+		slog.String("id", org.ID.String()),
+	)
+	return org, nil
+}
+
+// ensureTeamMember find-or-creates a Yivi team member and makes them an admin of
+// the Yivi org. If the account already exists with the generic platform-admin
+// placeholder name (created by `/seed --admins`, which only has the e-mail), its
+// name is upgraded to the real one; a name the user has since set themselves is
+// left untouched. Idempotent via ensureUser / ensureMembership.
+func ensureTeamMember(ctx context.Context, users *user.Store, orgs *organization.Store, orgID uuid.UUID, m demoUser) error {
+	u, err := ensureUser(ctx, users, m.email, m.givenNames, m.lastName, m.preferredName)
+	if err != nil {
+		return err
+	}
+	placeholder := u.GivenNames == platformAdminGivenNames && u.LastName == platformAdminLastName
+	empty := u.GivenNames == "" && u.LastName == ""
+	if (placeholder || empty) && (u.GivenNames != m.givenNames || u.LastName != m.lastName) {
+		if err := users.UpdateName(ctx, u.ID, m.givenNames, m.lastName); err != nil {
+			return fmt.Errorf("seed: upgrade team member name %q: %w", m.email, err)
+		}
+	}
+	return ensureMembership(ctx, orgs, orgID, u.ID, organization.RoleAdmin, "", nil)
 }
 
 func ensureUser(ctx context.Context, users *user.Store, email, givenNames, lastName, preferredName string) (user.User, error) {

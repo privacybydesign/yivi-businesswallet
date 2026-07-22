@@ -22,7 +22,7 @@ func run() error {
 	adminsOnly := flag.Bool("admins", false,
 		"provision only the configured PLATFORM_ADMIN_EMAILS accounts (no demo data); safe for staging/production")
 	orgOnly := flag.Bool("org", false,
-		"provision only the Yivi organisation (no demo members or activity); safe for staging/production")
+		"provision the anchor organisations — Yivi (with its team as admins + attestation catalogue) and the KVK register (authentic source); no demo members or activity, safe for staging/production")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -51,6 +51,12 @@ func run() error {
 				return err
 			}
 			slog.Info("Yivi organisation provisioning complete")
+
+			slog.Info("provisioning KVK register organisation")
+			if _, err := seed.EnsureKVKRegisterOrganization(ctx, cfg.DatabaseDSN); err != nil {
+				return err
+			}
+			slog.Info("KVK register organisation provisioning complete")
 		}
 		return nil
 	}
