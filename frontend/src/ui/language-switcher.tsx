@@ -1,15 +1,19 @@
 import { useTranslation } from "react-i18next";
 import { changeLanguage, SUPPORTED_LANGUAGES } from "../i18n";
 import type { Language } from "../i18n";
+import gbFlag from "../assets/flags/gb.svg";
+import nlFlag from "../assets/flags/nl.svg";
 import * as React from "react";
 
-// Each language shows its country flag instead of an "EN"/"NL" text code. A flag
-// glyph is not an accessible name (screen readers may skip or mis-announce it),
-// so every option carries an aria-label with the language's own name and keeps
-// the aria-pressed state of the original segmented toggle.
+// Each language shows its country flag instead of an "EN"/"NL" text code. Flags
+// are shipped as SVG images rather than regional-indicator emoji: Windows (and
+// some other platforms) render those emoji as the plain "GB"/"NL" letter pair,
+// defeating the point. A flag image is not an accessible name, so every option
+// carries an aria-label with the language's own name and keeps the aria-pressed
+// state of the original segmented toggle.
 const LANGUAGE_FLAGS: Record<Language, string> = {
-  en: "🇬🇧",
-  nl: "🇳🇱",
+  en: gbFlag,
+  nl: nlFlag,
 };
 
 // A compact segmented toggle matching the members-list filter control, so it is
@@ -34,13 +38,18 @@ export function LanguageSwitcher(): React.JSX.Element {
           aria-pressed={active === lng}
           aria-label={t(`common.languageName.${lng}`)}
           className={[
-            "flex h-[26px] w-[34px] cursor-pointer items-center justify-center rounded-md text-[15px] leading-none transition-opacity",
+            "flex h-[26px] w-[34px] cursor-pointer items-center justify-center rounded-md transition-opacity",
             active === lng
               ? "bg-surface shadow-sm"
               : "opacity-55 hover:opacity-100",
           ].join(" ")}
         >
-          <span aria-hidden="true">{LANGUAGE_FLAGS[lng]}</span>
+          <img
+            src={LANGUAGE_FLAGS[lng]}
+            alt=""
+            aria-hidden="true"
+            className="border-line h-[15px] w-[21px] rounded-[2px] border object-cover"
+          />
         </button>
       ))}
     </div>
