@@ -91,55 +91,31 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
-      # Domibus AS4 access point (+ its MySQL) for the live QERDS provider test.
-      # The domibus entrypoint waits for the DB itself, so no cross-service
-      # ordering is needed here. JAVA_OPTS disables cert validation (the bundled
-      # sample certs expired in 2017) — the image appends to JAVA_OPTS, so these
-      # -D overrides take effect. The test uploads the PMode itself.
-      mysql:
-        image: fiware/domibus-mysql:latest
-        env:
-          MYSQL_ROOT_PASSWORD: "123456"
-          MYSQL_DATABASE: domibus
-          MYSQL_USER: edelivery
-          MYSQL_PASSWORD: edelivery
-        options: >-
-          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -p123456 --silent"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 30
-          --health-start-period 90s
-      domibus:
-        image: fiware/domibus-tomcat:latest
-        env:
-          DB_TYPE: MySQL
-          DB_HOST: mysql
-          DB_PORT: "3306"
-          DB_NAME: domibus
-          DB_USER: edelivery
-          DB_PASS: edelivery
-          JAVA_OPTS: >-
-            -Ddomibus.receiver.certificate.validation.onsending=false
-            -Ddomibus.sender.certificate.validation.onsending=false
-            -Ddomibus.sender.certificate.validation.onreceiving=false
-        ports:
-          - "8090:8080"
-        options: >-
-          --health-cmd "curl -fsS -o /dev/null http://localhost:8080/domibus/services/backend?wsdl"
-          --health-interval 10s
-          --health-timeout 10s
-          --health-retries 40
-          --health-start-period 60s
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           cache-dependency-path: backend/go.sum
+      # Domibus AS4 access point (+ its MySQL) for the live QERDS provider test.
+      # This runs as a compose stack in a step, NOT as a `services:` container,
+      # because service containers start before actions/checkout — so they can't
+      # mount the regenerated (non-expired) gateway keystores the AS4 self-send
+      # needs. With the image's stock certs (expired 2025-12-01) WSS4J rejects the
+      # signed message on receipt, so the inbound round-trip never delivers and
+      # the test times out. `--wait` blocks until both containers are healthy; the
+      # test itself uploads the PMode + message filter. See docker/ci/domibus.yml.
+      - name: Start Domibus AS4 access point
+        working-directory: ${{ github.workspace }}
+        run: docker compose -f docker/ci/domibus.yml up -d --wait
       - run: go test -tags=integration -race ./...
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
           QERDS_TEST_DOMIBUS_URL: http://localhost:8090/domibus
+      - name: Stop Domibus AS4 access point
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: docker compose -f docker/ci/domibus.yml down -v
 
   # WSCA is opt-in and its client (walletmobile) is a private module, so the
   # default build above pulls in nothing private. This job is the only one that
