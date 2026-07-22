@@ -39,10 +39,15 @@ function initialsFrom(name: string): string {
 }
 
 // Either give a `name` (initials derived from its words, e.g. an org) or
-// pre-computed `initials` (e.g. a person's preferred + last initial).
+// pre-computed `initials` (e.g. a person's preferred + last initial). An optional
+// `src` renders that image (e.g. an org's uploaded logo) in place of the
+// initials, keeping the circular frame; `alt` labels it (initials stay
+// decorative). When `src` is empty the initials fallback is used.
 type AvatarProps = {
   tone?: AvatarTone;
   size?: AvatarSize;
+  src?: string;
+  alt?: string;
 } & ({ name: string; initials?: string } | { name?: string; initials: string });
 
 export function Avatar({
@@ -50,7 +55,21 @@ export function Avatar({
   initials,
   tone,
   size = "md",
+  src,
+  alt,
 }: AvatarProps): React.JSX.Element {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={alt ?? ""}
+        className={[
+          "bg-surface-3 shrink-0 rounded-full object-contain",
+          SIZE_CLASSES[size],
+        ].join(" ")}
+      />
+    );
+  }
   const text = initials ?? initialsFrom(name ?? "");
   const resolvedTone = tone ?? toneFromName(text);
   return (

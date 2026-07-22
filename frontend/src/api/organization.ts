@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { request } from "./http";
+import { absoluteApiUrl, request } from "./http";
 
 export const departmentSchema = z.object({
   id: z.string(),
@@ -22,11 +22,23 @@ export const organizationSchema = z.object({
   digitalAddress: z.string(),
   status: z.string(),
   bootstrappedAt: z.string(),
+  // Only the list endpoints carry the org's theme logo path (absent when the org
+  // has no logo, or on single-org endpoints), so the org switcher can show it.
+  logoUri: z.string().optional(),
 });
 
 export type Organization = z.infer<typeof organizationSchema>;
 
 const organizationListSchema = z.array(organizationSchema);
+
+// The backend returns each org's logo as a path on the API; make it absolute so
+// an <img> loads it from the API origin even when the SPA is served elsewhere
+// (mirrors withAbsoluteLogo in theme.ts).
+export function withAbsoluteLogos(orgs: Organization[]): Organization[] {
+  return orgs.map((org) =>
+    org.logoUri ? { ...org, logoUri: absoluteApiUrl(org.logoUri) } : org,
+  );
+}
 
 export const organizationDetailSchema = organizationSchema.extend({
   role: z.string(),
@@ -96,22 +108,24 @@ export interface MemberListParams {
   offset?: number;
 }
 
-export function getOrganizations(
+export async function getOrganizations(
   signal?: AbortSignal,
 ): Promise<Organization[]> {
-  return request("/api/v1/organizations", {
+  const orgs = await request("/api/v1/organizations", {
     schema: organizationListSchema,
     signal,
   });
+  return withAbsoluteLogos(orgs);
 }
 
-export function getMyOrganizations(
+export async function getMyOrganizations(
   signal?: AbortSignal,
 ): Promise<Organization[]> {
-  return request("/api/v1/me/organizations", {
+  const orgs = await request("/api/v1/me/organizations", {
     schema: organizationListSchema,
     signal,
   });
+  return withAbsoluteLogos(orgs);
 }
 
 // deleteOrganization removes an organization by id (platform-admin only). All
