@@ -58,9 +58,14 @@
         <properties>
             <property name="originalSenderProperty" key="originalSender" datatype="string" required="true"/>
             <property name="finalRecipientProperty" key="finalRecipient" datatype="string" required="true"/>
+            <!-- Optional message subject. Must be in the property set or Domibus
+                 rejects it: "Property profiling ... does not include a property
+                 named [subject]". Carries the message title to the recipient. -->
+            <property name="subjectProperty" key="subject" datatype="string" required="false"/>
             <propertySet name="ecodexPropertySet">
                 <propertyRef property="finalRecipientProperty"/>
                 <propertyRef property="originalSenderProperty"/>
+                <propertyRef property="subjectProperty"/>
             </propertySet>
         </properties>
         <payloadProfiles>

@@ -116,6 +116,7 @@ func TestDomibusProviderInboundRoundTripIntegration(t *testing.T) {
 	// distinguish it from any leftover.
 	recipient := qerdsprovider.Address("inbound-it@qerds.localhost")
 	body := fmt.Sprintf("inbound round-trip %d", time.Now().UnixNano())
+	subject := fmt.Sprintf("subject %d", time.Now().UnixNano())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -123,7 +124,7 @@ func TestDomibusProviderInboundRoundTripIntegration(t *testing.T) {
 	if _, err := provider.Send(ctx, qerdsprovider.OutboundMessage{
 		Sender:    "sender@qerds.localhost",
 		Recipient: recipient,
-		Subject:   "inbound round-trip",
+		Subject:   subject,
 		Body:      body,
 	}); err != nil {
 		t.Fatalf("Send: %v", err)
@@ -151,6 +152,9 @@ func TestDomibusProviderInboundRoundTripIntegration(t *testing.T) {
 	}
 	if got.Recipient != recipient {
 		t.Errorf("inbound recipient = %q, want %q", got.Recipient, recipient)
+	}
+	if got.Subject != subject {
+		t.Errorf("inbound subject = %q, want %q (subject must round-trip)", got.Subject, subject)
 	}
 	if got.ProviderRef == "" {
 		t.Error("inbound message has an empty ProviderRef")
