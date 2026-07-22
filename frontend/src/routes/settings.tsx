@@ -10,6 +10,7 @@ import { IssuerSettingsPanel } from "./issuer-settings";
 import { OrgProfileSettings } from "./org-profile-settings";
 import { PostguardApiKeyCard } from "./postguard-api-key";
 import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
+import { PostguardNotificationsCard } from "./postguard-notifications";
 import { ThemeSettingsPanel } from "./theme-settings";
 import { WscaWalletPanel } from "./wsca-wallet-settings";
 import * as React from "react";
@@ -89,6 +90,7 @@ export default function Settings(): React.JSX.Element {
           <div className="flex max-w-2xl flex-col gap-6">
             <PostguardEncryptionKeyCard slug={slug} isAdmin={isAdmin} />
             <PostguardApiKeyCard slug={slug} isAdmin={isAdmin} />
+            <PostguardNotificationsCard slug={slug} isAdmin={isAdmin} />
           </div>
         ) : (
           <WscaWalletPanel slug={slug} />

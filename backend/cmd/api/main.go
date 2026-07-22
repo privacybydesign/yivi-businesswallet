@@ -324,7 +324,7 @@ func run() error {
 	}
 	postguardStore := postguard.NewStore(pool, audit.NewDBRecorder(), postguardCipher)
 	postguardClient := postguard.NewClient(cfg.PostGuardSidecarURL, cfg.PostGuardSharedSecret, &http.Client{Timeout: postguardHTTPTimeout})
-	postguardService := postguard.NewService(postguardStore, postguardClient)
+	postguardService := postguard.NewService(postguardStore, postguardClient, postguardNotifier{email: emailService}, cfg.PostGuardWebsiteURL)
 	postguardHandler := postguard.NewHandler(postguardService, requireUser, orgHandler.Authorize)
 
 	attIssuer, err := newAttestationIssuer(cfg)
@@ -435,4 +435,19 @@ func run() error {
 
 	slog.Info("server stopped")
 	return nil
+}
+
+// postguardNotifier adapts the e-mail service to the PostGuard "own SMTP"
+// notification seam, mapping the e-mail package's not-configured sentinel onto
+// PostGuard's so the handler reports a clear "configure your SMTP" error.
+type postguardNotifier struct {
+	email *email.Service
+}
+
+func (n postguardNotifier) SendPostguardNotification(ctx context.Context, orgID uuid.UUID, recipients []string, orgName, message, downloadURL string) error {
+	err := n.email.SendPostguardNotification(ctx, orgID, recipients, orgName, message, downloadURL)
+	if errors.Is(err, email.ErrNotConfigured) {
+		return postguard.ErrSMTPNotConfigured
+	}
+	return err
 }

@@ -6,9 +6,13 @@
    CSS custom properties on :root so they remain a single source of truth, and
    `@theme inline` maps them onto Tailwind utilities (bg-*, text-*, font-*, …).
 
-   Dark mode is intentionally out of scope for now, but because every utility
-   resolves through the --yb-* variables, adding a `[data-theme="dark"]` block
-   that overrides them is all it would take.
+   Dark mode follows the OS `prefers-color-scheme` preference: a single
+   `@media (prefers-color-scheme: dark)` block (further down) overrides the
+   neutral, surface, status and elevation --yb-* variables with the design
+   system's dark values, and every utility resolves through those variables so
+   the whole shell flips at once. A tenant's brand seed colours are applied
+   inline on the documentElement by the theme engine (lib/theme.ts), so they
+   win over both the light and dark defaults and carry into dark mode unchanged.
    ========================================================================== */
 
 @import url("https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap");
@@ -60,6 +64,10 @@
 
 /* --------- Raw design tokens (single source of truth) --------- */
 :root {
+  /* Let the browser render native UI (form controls, scrollbars, the colour
+     picker) to match the active light/dark palette. */
+  color-scheme: light dark;
+
   /* Brand & ink */
   --yb-brand: #ba3354; /* rose — accent only */
   --yb-brand-600: #9a2744;
@@ -96,6 +104,50 @@
   --yb-radius-sm: 6px;
   --yb-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
   --yb-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+/* --------- Dark palette ---------
+   Values are lifted verbatim from the Yivi Business design system
+   (`ui_kits/business/tokens.css`, `[data-theme="dark"]`). Only the neutral,
+   surface, status and elevation tokens flip; the brand seed (--yb-brand /
+   --yb-primary and its derived shades) is overridden inline on the
+   documentElement by the theme engine (lib/theme.ts), so a tenant's colours
+   win over these defaults and carry into dark mode unchanged. The status
+   foregrounds come from the design system's dark tag palette so each stays
+   ≥4.5:1 (WCAG 2.2 AA) on its dark chip background — pinned by
+   index-css-dark.test.ts. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --yb-ink: #f2efec;
+    --yb-ink-soft: #b8b3b0;
+    --yb-muted: #7e7876;
+
+    --yb-line: #2b2928;
+    --yb-line-strong: #3a3736;
+    --yb-surface: #1d1b1a;
+    --yb-surface-2: #141312;
+    --yb-surface-3: #252322;
+    --yb-highlight: #1c3648;
+    --yb-highlight-border: #2b5774;
+
+    --yb-success: #6ad28c;
+    --yb-success-bg: #10321e;
+    --yb-warning: #eba73b;
+    --yb-warning-fg: #eba73b;
+    --yb-warning-bg: #3a2e14;
+    --yb-error: #ed7070;
+    --yb-error-bg: #3b1b1b;
+    --yb-link: #7db4e8;
+
+    /* Default (unthemed) primary flips to light ink; an org's primary seed
+       overrides this inline. */
+    --yb-primary: #f2efec;
+    --yb-primary-hover: #e0dad4;
+    --yb-primary-fg: #141312;
+
+    --yb-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+    --yb-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6);
+  }
 }
 
 /* --------- Map tokens onto Tailwind utilities --------- */

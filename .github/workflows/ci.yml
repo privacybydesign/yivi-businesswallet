@@ -97,9 +97,25 @@ jobs:
         with:
           go-version: "1.26"
           cache-dependency-path: backend/go.sum
+      # Domibus AS4 access point (+ its MySQL) for the live QERDS provider test.
+      # This runs as a compose stack in a step, NOT as a `services:` container,
+      # because service containers start before actions/checkout — so they can't
+      # mount the regenerated (non-expired) gateway keystores the AS4 self-send
+      # needs. With the image's stock certs (expired 2025-12-01) WSS4J rejects the
+      # signed message on receipt, so the inbound round-trip never delivers and
+      # the test times out. `--wait` blocks until both containers are healthy; the
+      # test itself uploads the PMode + message filter. See docker/ci/domibus.yml.
+      - name: Start Domibus AS4 access point
+        working-directory: ${{ github.workspace }}
+        run: docker compose -f docker/ci/domibus.yml up -d --wait
       - run: go test -tags=integration -race ./...
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+          QERDS_TEST_DOMIBUS_URL: http://localhost:8090/domibus
+      - name: Stop Domibus AS4 access point
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: docker compose -f docker/ci/domibus.yml down -v
 
   # WSCA is opt-in and its client (walletmobile) is a private module, so the
   # default build above pulls in nothing private. This job is the only one that

@@ -48,6 +48,7 @@ const (
 	PostGuardEncryptionKeySet     = "postguard.encryption_key_set"
 	PostGuardEncryptionKeyRemoved = "postguard.encryption_key_removed"
 	PostGuardFileSent             = "postguard.file_sent"
+	PostGuardNotificationSet      = "postguard.notification_delivery_set"
 
 	WalletOpened          = "wallet.opened"
 	WalletBootstrapped    = "wallet.bootstrapped"
@@ -98,6 +99,7 @@ const (
 	TargetPostGuardKey           = "postguard_key"
 	TargetPostGuardEncryptionKey = "postguard_encryption_key"
 	TargetPostGuardFile          = "postguard_file"
+	TargetPostGuardSettings      = "postguard_settings"
 
 	TargetAttestationSchema   = "attestation_schema"
 	TargetAttestationTemplate = "attestation_template"

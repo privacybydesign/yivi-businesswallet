@@ -3,6 +3,7 @@ package postguard
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/google/uuid"
@@ -17,6 +18,8 @@ type store interface {
 	SetAPIKey(ctx context.Context, orgID uuid.UUID, apiKey string) error
 	DeleteAPIKey(ctx context.Context, orgID uuid.UUID) error
 	DecryptedAPIKey(ctx context.Context, orgID uuid.UUID) (string, error)
+	NotificationDelivery(ctx context.Context, orgID uuid.UUID) (NotificationDelivery, error)
+	SetNotificationDelivery(ctx context.Context, orgID uuid.UUID, method NotificationDelivery) error
 	RecordSentFile(ctx context.Context, orgID, senderUserID uuid.UUID, f SentFile) (SentFile, error)
 	ListSentFiles(ctx context.Context, orgID uuid.UUID) ([]SentFile, error)
 }
@@ -26,14 +29,27 @@ type sender interface {
 	Send(ctx context.Context, req sendRequest) (string, error)
 }
 
-// Service coordinates the API-key store and the sidecar sender.
-type Service struct {
-	store  store
-	sender sender
+// notifier delivers the recipient notification via the org's own SMTP config,
+// for the NotifySMTP delivery method. downloadURL is the link recipients follow
+// to fetch the sealed package. Implementations must return ErrSMTPNotConfigured
+// when the org has no usable SMTP configuration.
+type notifier interface {
+	SendPostguardNotification(ctx context.Context, orgID uuid.UUID, recipients []string, orgName, message, downloadURL string) error
 }
 
-func NewService(s store, snd sender) *Service {
-	return &Service{store: s, sender: snd}
+// Service coordinates the API-key store, the sidecar sender and — for the "own
+// SMTP" notification path — the SMTP notifier.
+type Service struct {
+	store      store
+	sender     sender
+	notifier   notifier
+	websiteURL string
+}
+
+// NewService wires the service. websiteURL is the public PostGuard website base
+// the "own SMTP" recipient download link points at (e.g. https://postguard.eu).
+func NewService(s store, snd sender, n notifier, websiteURL string) *Service {
+	return &Service{store: s, sender: snd, notifier: n, websiteURL: websiteURL}
 }
 
 // Settings returns the combined non-secret PostGuard configuration for an org.
@@ -46,7 +62,20 @@ func (s *Service) Settings(ctx context.Context, orgID uuid.UUID) (Settings, erro
 	if err != nil {
 		return Settings{}, err
 	}
-	return Settings{APIKey: api, EncryptionKey: enc}, nil
+	delivery, err := s.store.NotificationDelivery(ctx, orgID)
+	if err != nil {
+		return Settings{}, err
+	}
+	return Settings{APIKey: api, EncryptionKey: enc, Notifications: delivery}, nil
+}
+
+// SetNotificationDelivery validates and stores an org's recipient-notification
+// delivery method.
+func (s *Service) SetNotificationDelivery(ctx context.Context, orgID uuid.UUID, method NotificationDelivery) error {
+	if !method.valid() {
+		return ErrInvalidNotificationDelivery
+	}
+	return s.store.SetNotificationDelivery(ctx, orgID, method)
 }
 
 // SetEncryptionKey validates and stores an org's encryption key (owner-supplied).
@@ -97,15 +126,34 @@ func (s *Service) Send(ctx context.Context, orgID, senderUserID uuid.UUID, in Se
 		return SentFile{}, err
 	}
 
+	delivery, err := s.store.NotificationDelivery(ctx, orgID)
+	if err != nil {
+		return SentFile{}, err
+	}
+
+	// PostGuard's hosted service notifies recipients only on the PostGuard
+	// delivery path. On the "own SMTP" path we upload silently and send the
+	// notification ourselves below, so PostGuard must not also mail them.
+	postguardNotify := in.Notify && delivery == NotifyPostGuard
+
 	uuidStr, err := s.sender.Send(ctx, sendRequest{
 		APIKey:     apiKey,
 		Recipients: in.Recipients,
 		Files:      in.Files,
-		Notify:     in.Notify,
+		Notify:     postguardNotify,
 		Message:    in.Message,
 	})
 	if err != nil {
 		return SentFile{}, err
+	}
+
+	// Own-SMTP path: compose and deliver the notification via the org's SMTP
+	// config before recording, mirroring how a failed upload returns before the
+	// transfer is recorded. A missing SMTP config surfaces as ErrSMTPNotConfigured.
+	if in.Notify && delivery == NotifySMTP {
+		if err := s.notifier.SendPostguardNotification(ctx, orgID, in.Recipients, in.OrgName, in.Message, s.downloadURL(uuidStr)); err != nil {
+			return SentFile{}, err
+		}
 	}
 
 	var totalSize int64
@@ -120,6 +168,14 @@ func (s *Service) Send(ctx context.Context, orgID, senderUserID uuid.UUID, in Se
 		CryptifyUUID: uuidStr,
 		ExpiresAfter: in.ExpiresAfter,
 	})
+}
+
+// downloadURL builds the recipient-facing PostGuard link for a sealed package.
+// Files-mode uploads resolve at "<website>/download?uuid=<uuid>" — the same page
+// PostGuard's own notification links to.
+func (s *Service) downloadURL(cryptifyUUID string) string {
+	base := strings.TrimRight(s.websiteURL, "/")
+	return fmt.Sprintf("%s/download?uuid=%s", base, url.QueryEscape(cryptifyUUID))
 }
 
 // displayName names a transfer by its single file, or "<first> (+N more)".

@@ -36,6 +36,7 @@ type postguardService interface {
 	RemoveEncryptionKey(ctx context.Context, orgID uuid.UUID) error
 	SetAPIKey(ctx context.Context, orgID uuid.UUID, apiKey string) error
 	DeleteAPIKey(ctx context.Context, orgID uuid.UUID) error
+	SetNotificationDelivery(ctx context.Context, orgID uuid.UUID, method NotificationDelivery) error
 	ListSentFiles(ctx context.Context, orgID uuid.UUID) ([]SentFile, error)
 	Send(ctx context.Context, orgID, senderUserID uuid.UUID, in SendInput) (SentFile, error)
 }
@@ -65,6 +66,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("DELETE /orgs/{slug}/postguard/encryption-key", orgAdmin(respond.HandlerFunc(h.deleteEncryptionKey)))
 	mux.Handle("PUT /orgs/{slug}/postguard/api-key", orgAdmin(respond.HandlerFunc(h.setAPIKey)))
 	mux.Handle("DELETE /orgs/{slug}/postguard/api-key", orgAdmin(respond.HandlerFunc(h.deleteAPIKey)))
+	mux.Handle("PUT /orgs/{slug}/postguard/notifications", orgAdmin(respond.HandlerFunc(h.setNotifications)))
 	mux.Handle("GET /orgs/{slug}/postguard/files", orgScoped(respond.HandlerFunc(h.listFiles)))
 	mux.Handle("POST /orgs/{slug}/postguard/files", orgScoped(respond.HandlerFunc(h.send)))
 }
@@ -129,6 +131,22 @@ func (h *Handler) setAPIKey(w http.ResponseWriter, r *http.Request) error {
 	return h.respondSettings(w, r, org.ID)
 }
 
+type setNotificationsRequest struct {
+	Notifications NotificationDelivery `json:"notifications"`
+}
+
+func (h *Handler) setNotifications(w http.ResponseWriter, r *http.Request) error {
+	var req setNotificationsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return badRequest("invalid_body", "invalid request body")
+	}
+	org := organization.OrgFromContext(r.Context())
+	if e := mapError(h.service.SetNotificationDelivery(r.Context(), org.ID, req.Notifications)); e != nil {
+		return e
+	}
+	return h.respondSettings(w, r, org.ID)
+}
+
 func (h *Handler) deleteAPIKey(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	if e := mapError(h.service.DeleteAPIKey(r.Context(), org.ID)); e != nil {
@@ -163,6 +181,7 @@ func (h *Handler) send(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := organization.OrgFromContext(r.Context())
+	input.OrgName = org.Name
 	u := auth.UserFromContext(r.Context())
 	sent, err := h.service.Send(r.Context(), org.ID, u.ID, input)
 	if e := mapError(err); e != nil {
@@ -242,6 +261,10 @@ func mapError(err error) error {
 		return badRequest("invalid_api_key", "the API key is not a valid PostGuard for Business key")
 	case errors.Is(err, ErrInvalidEncryptionKey):
 		return badRequest("invalid_encryption_key", "the encryption key must not be empty")
+	case errors.Is(err, ErrInvalidNotificationDelivery):
+		return badRequest("invalid_notifications", "the notification delivery method must be \"postguard\" or \"smtp\"")
+	case errors.Is(err, ErrSMTPNotConfigured):
+		return apiError(http.StatusConflict, "smtp_not_configured", "configure and enable this organization's SMTP settings to notify recipients over your own server")
 	case errors.Is(err, ErrNoRecipients):
 		return badRequest("no_recipients", "at least one recipient is required")
 	case errors.Is(err, ErrNoFiles):

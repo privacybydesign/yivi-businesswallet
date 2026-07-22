@@ -258,19 +258,37 @@ QERDS_PROVIDER_URL=http://domibus:8080/domibus/services/backend
 
 The `qerdsprovider.DomibusProvider` driver speaks the WS-plugin SOAP (submitMessage /
 listPendingMessages / retrieveMessage) and boot-probes the endpoint's WSDL. Its ebMS3 addressing
-(`QERDS_DOMIBUS_*`) defaults to the Domibus **sample PMode** parties (`domibus-blue` → `domibus-red`,
-service `bdx:noprocess`, action `TC1Leg1`). A different Domibus deployment needs those vars aligned
-to its PMode.
+(`QERDS_DOMIBUS_*`) defaults to the parties in `backend/internal/qerdsprovider/testdata/pmode.xml`
+(`domibus-blue` → `domibus-red`, service `bdx:noprocess`, action `TC1Leg1`). A different Domibus
+deployment needs those vars aligned to its PMode.
 
-**Live verification (manual, against this bench):** `Ping` succeeds against the real WS-plugin WSDL,
-and `submitMessage` is **structurally accepted** by Domibus 4.0 — the envelope unmarshals fully
-(this shook out a real bug: the WS-plugin `payload`/`value` elements are `elementFormDefault`
-unqualified and must reset to the empty namespace inside `submitRequest`, now covered by a
-regression test). A fully-*accepted* submission additionally requires a **PMode uploaded to the
-Domibus instance** (a fresh Domibus answers `EBMS:0010 PMode could not be found`); that is a
-Domibus-admin step (upload the sample PMode via the `:8090` console), not driver work. CI exercises
-only the envelope construction + response parsing (unit tests); the **stub remains the verified
-default** provider.
+**The bench is self-provisioning.** A fresh Domibus has no PMode and answers `EBMS:0010 PMode could
+not be found`, so the `domibus-provision` Compose service waits for the WS plugin to be healthy and
+uploads `testdata/pmode.xml` via the admin REST API (idempotent — re-runs on every `up`). It also
+persists a **message filter** routing inbound to the WS plugin (`backendWebservice`): the image
+ships three backend plugins (WS + JMS + FS) and, with no persisted filter, a *received* message
+matches no backend and is dropped to `notification.unknown` — `listPendingMessages` then stays empty
+and the recipient's poll never sees it. The live integration test provisions the same two things
+itself (CI's Domibus starts unprovisioned). The
+bundled `blue_gw`/`red_gw` sample certs **expired 2025-12-01**, which breaks the AS4 self-send two
+ways. First, Domibus's own send-side cert validation; the `domibus` service turns that off via
+`JAVA_OPTS` `-D` overrides (the image's entrypoint appends to `JAVA_OPTS`, so it survives a
+recreate). Second — and not covered by any Domibus flag — the receive side's WSS4J
+`SignatureTrustValidator` rejects a message *signed* by an expired cert (`CertificateExpiredException`
+→ `EBMS:0005`/`EBMS:0004`), so submission was accepted and logged but the send never reached `SENT`.
+The fix: `docker/development/domibus/gateway_{keystore,truststore}.jks` hold freshly-generated
+`blue_gw`/`red_gw` certs (same aliases/password as the image, so `domibus.properties` is unchanged),
+mounted over the image's expired ones. With those, the loopback completes end to end — sending side
+`ACKNOWLEDGED`, receiving side `RECEIVED`. This proves AS4 transport plumbing, **not** qualified
+compliance — the certs are self-signed and real qualified delivery keeps cert validation on.
+
+The `payload`/`value` `elementFormDefault`-unqualified reset (WS-plugin `submitRequest`) that the
+offline marshalling tests pin was a real bug shaken out here. Coverage: `domibus_test.go` unit-tests
+envelope construction + response parsing offline (runs in the default `go test`), and
+`domibus_integration_test.go` (`//go:build integration`, gated on `QERDS_TEST_DOMIBUS_URL`) runs the
+real round-trip — upload PMode, `Ping`, `Send`, assert Domibus accepts and returns a provider ref.
+CI's `backend-integration-test` job now runs a Domibus + MySQL service pair so that test executes on
+every push; the **stub remains the config default** provider for dev/CI unit runs.
 
 ### What this branch implements
 

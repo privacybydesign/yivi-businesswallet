@@ -44,9 +44,22 @@ services:
       ATTESTATION_HOLDER_WSCA_KEK: ${ATTESTATION_HOLDER_WSCA_KEK:-}
       ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR: ${ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR:-/tmp/eudiholder-wsca}
       ATTESTATION_HOLDER_WSCA_INSECURE: ${ATTESTATION_HOLDER_WSCA_INSECURE:-}
+      # QERDS transport: stub by default. Set QERDS_PROVIDER=domibus (+ URL) in
+      # .env to drive the real Domibus AS4 access point (run with --profile domibus).
+      QERDS_PROVIDER: ${QERDS_PROVIDER:-stub}
+      QERDS_PROVIDER_URL: ${QERDS_PROVIDER_URL:-}
+      QERDS_AUTH_TOKEN: ${QERDS_AUTH_TOKEN:-}
+      QERDS_DOMIBUS_FROM_PARTY: ${QERDS_DOMIBUS_FROM_PARTY:-}
+      QERDS_DOMIBUS_TO_PARTY: ${QERDS_DOMIBUS_TO_PARTY:-}
     depends_on:
       seed:
         condition: service_completed_successfully
+      # Optional: only present when the `domibus` profile is enabled. With
+      # QERDS_PROVIDER=domibus the backend does a fatal one-shot ping at boot,
+      # so wait for Domibus's WS plugin to be serving before starting.
+      domibus:
+        condition: service_healthy
+        required: false
     volumes:
       - ./backend:/app
       - backend-go-build:/root/.cache/go-build
@@ -149,11 +162,80 @@ services:
       DB_NAME: domibus
       DB_USER: edelivery
       DB_PASS: edelivery
+      # Belt-and-suspenders: turn off Domibus's own cert-validation checks. Not
+      # strictly needed now that the mounted keystores below hold non-expired
+      # certs, but harmless and keeps submission unblocked (NOT for real
+      # qualified delivery). The image's entrypoint appends to JAVA_OPTS, so
+      # these -D overrides survive a container recreate.
+      JAVA_OPTS: >-
+        -Ddomibus.receiver.certificate.validation.onsending=false
+        -Ddomibus.sender.certificate.validation.onsending=false
+        -Ddomibus.sender.certificate.validation.onreceiving=false
     ports:
       - "8090:8080"
+    # Overlay freshly-generated blue_gw/red_gw keystores over the image's baked-in
+    # sample ones (which expired 2025-12-01). WSS4J rejects a message *signed* by
+    # an expired cert on receipt (EBMS:0005/0004, "The provided certificate is
+    # invalid") regardless of the validation flags above, so the self-send never
+    # reached SENT with the stock certs. Same aliases (blue_gw/red_gw) and
+    # password (test123) as the image, so domibus.properties needs no change. See
+    # docker/development/domibus/README.md for regeneration.
+    volumes:
+      - ./docker/development/domibus/gateway_keystore.jks:/data/tomcat/conf/domibus/keystores/gateway_keystore.jks:ro
+      - ./docker/development/domibus/gateway_truststore.jks:/data/tomcat/conf/domibus/keystores/gateway_truststore.jks:ro
+    # Tomcat deploys the WAR + connects MySQL on first boot (slow under amd64
+    # emulation on arm64), so gate readiness on the WS plugin actually serving
+    # the WSDL — the exact endpoint the backend pings at startup.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/domibus/services/backend?wsdl"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 240s
     depends_on:
       domibus-mysql:
         condition: service_healthy
+
+  # One-shot PMode provisioner: a fresh Domibus has no PMode, so submitMessage
+  # fails with EBMS:0010 until one is uploaded. Waits for the WS plugin to be
+  # healthy, then uploads the blue->red self-send PMode via the admin REST API.
+  # Idempotent (re-uploading replaces the current PMode), so it re-runs cleanly
+  # on every `up`. Same PMode file the live-Domibus integration test embeds.
+  domibus-provision:
+    image: curlimages/curl:latest
+    platform: linux/amd64
+    profiles: ["domibus"]
+    restart: "no"
+    depends_on:
+      domibus:
+        condition: service_healthy
+    volumes:
+      - ./backend/internal/qerdsprovider/testdata/pmode.xml:/pmode.xml:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        curl -s -c /tmp/cj.txt -o /dev/null -H "Content-Type: application/json" \
+          -X POST http://domibus:8080/domibus/rest/security/authentication \
+          -d '{"username":"admin","password":"123456"}'
+        XSRF=$$(grep -i XSRF-TOKEN /tmp/cj.txt | awk '{print $$7}')
+        echo "uploading PMode..."
+        curl -sf -b /tmp/cj.txt -H "X-XSRF-TOKEN: $$XSRF" \
+          -F "file=@/pmode.xml" -F "description=qerds bench blue->red self-send" \
+          -X POST http://domibus:8080/domibus/rest/pmode
+        echo "PMode uploaded"
+        # Route inbound messages to the WS plugin. The image ships THREE backend
+        # plugins (WS + JMS + FS) with no persisted message filter, so a received
+        # message matches no backend and is dropped to notification.unknown
+        # (listPendingMessages then stays empty and the recipient never sees it).
+        # Persist a filter list with backendWebservice first (no routing criteria
+        # => it catches everything) so retrieveMessage works.
+        echo "configuring message filter (WS plugin first)..."
+        curl -sf -b /tmp/cj.txt -H "X-XSRF-TOKEN: $$XSRF" -H "Content-Type: application/json" \
+          -X PUT http://domibus:8080/domibus/rest/messagefilters \
+          -d '[{"entityId":0,"index":0,"routingCriterias":[],"backendName":"backendWebservice","persisted":true},{"entityId":0,"index":1,"routingCriterias":[],"backendName":"backendFSPlugin","persisted":true},{"entityId":0,"index":2,"routingCriterias":[],"backendName":"Jms","persisted":true}]'
+        echo "message filter configured"
 
 volumes:
   backend-go-build:
