@@ -44,19 +44,21 @@ var DemoRegistrations = []Registration{
 		KVKNumber: "90000010", LegalName: "Yivi B.V.", EUID: "NL.KVK.90000010",
 		Representatives: []Representative{
 			{Kind: KindBestuurder, GivenNames: "Johannes Hendrik", FamilyName: "Janssen", DateOfBirth: "1979-05-14", Authority: AuthoritySole},
-			{Kind: KindGevolmachtigde, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1988-09-03", Authority: AuthorityBeperkt},
+			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
 		},
 	},
 	{
 		KVKNumber: "90000020", LegalName: "Firsty.app B.V.", EUID: "NL.KVK.90000020",
 		Representatives: []Representative{
 			{Kind: KindBestuurder, GivenNames: "Thijs Adriaan", FamilyName: "de Vries", DateOfBirth: "1985-11-22", Authority: AuthorityJointly},
+			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
 		},
 	},
 	{
 		KVKNumber: "90000030", LegalName: "Radboud Universiteit", EUID: "NL.KVK.90000030",
 		Representatives: []Representative{
 			{Kind: KindGevolmachtigde, GivenNames: "Anke", FamilyName: "Bakker", DateOfBirth: "1990-02-17", Authority: AuthorityBeperkt},
+			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
 		},
 	},
 	{
@@ -65,6 +67,7 @@ var DemoRegistrations = []Registration{
 		KVKNumber: OpenableKVKNumber, LegalName: "Zonnedael B.V.", EUID: "NL.KVK." + OpenableKVKNumber,
 		Representatives: []Representative{
 			{Kind: KindBestuurder, GivenNames: "Sanne Marijke", FamilyName: "Visser", DateOfBirth: "1983-07-08", Authority: AuthoritySole},
+			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
 		},
 	},
 }
