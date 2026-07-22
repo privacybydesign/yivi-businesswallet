@@ -348,6 +348,7 @@ export const nl: Translation<typeof en> = {
     postguardEncryptionKeySaved: "Versleutelingssleutel opgeslagen",
     postguardEncryptionKeyRemoved: "Versleutelingssleutel verwijderd",
     postguardFileSent: "Versleuteld bestand verstuurd",
+    postguardNotificationsSaved: "Notificatie-instellingen opgeslagen",
     attestationSchemaCreated: "Schema aangemaakt",
     attestationSchemaUpdated: "Schema bijgewerkt",
     attestationSchemaDeleted: "Schema verwijderd",
@@ -437,6 +438,7 @@ export const nl: Translation<typeof en> = {
       postguardKey: "PostGuard API-sleutel",
       postguardEncryptionKey: "PostGuard-encryptiesleutel",
       postguardFile: "PostGuard-bestand",
+      postguardSettings: "PostGuard-instellingen",
       attestationSchema: "Attestatieschema",
       attestationTemplate: "Attestatiesjabloon",
       issuedAttestation: "Uitgegeven attestatie",
@@ -478,6 +480,8 @@ export const nl: Translation<typeof en> = {
       postguardEncryptionKeySet: "PostGuard-encryptiesleutel ingesteld",
       postguardEncryptionKeyRemoved: "PostGuard-encryptiesleutel verwijderd",
       postguardFileSent: "Versleuteld bestand verstuurd",
+      postguardNotificationDeliverySet:
+        "Notificaties voor ontvangers ingesteld",
       walletOpened: "Wallet geopend",
       walletBootstrapped: "Wallet geïnitialiseerd",
       walletSuspended: "Wallet opgeschort",
@@ -1121,6 +1125,21 @@ export const nl: Translation<typeof en> = {
         "Stel hierboven een versleutelingssleutel in voordat je je API-sleutel toevoegt.",
       notConfiguredMember:
         "Nog geen API-sleutel geconfigureerd. Vraag een organisatiebeheerder om er een toe te voegen.",
+    },
+    notifications: {
+      title: "Notificaties voor ontvangers",
+      subtitle:
+        "Wie de e-mail verstuurt die ontvangers laat weten dat er een bestand klaarstaat",
+      postguardTitle: "PostGuard-mailservice",
+      postguardBody:
+        "PostGuard stelt ontvangers op de hoogte. Het afzenderadres komt uit het PostGuard for Business-account van deze organisatie.",
+      smtpTitle: "Eigen SMTP-server",
+      smtpBody:
+        "De eigen SMTP-server van deze organisatie verstuurt de notificatie, met een link naar het versleutelde bestand.",
+      smtpHint:
+        "Configureer en schakel de SMTP-server van deze organisatie in op het tabblad E-mail. Zonder dat meldt het versturen van een bestand dat SMTP niet is geconfigureerd.",
+      member: "Notificaties voor ontvangers worden verzonden via: {{method}}.",
+      error: "Kon de notificatie-instellingen niet opslaan: {{message}}",
     },
     send: {
       action: "Versleuteld bestand versturen",

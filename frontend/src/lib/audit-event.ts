@@ -124,6 +124,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.postguardEncryptionKeyRemoved");
     case "postguard.file_sent":
       return t("auditLog.actions.postguardFileSent");
+    case "postguard.notification_delivery_set":
+      return t("auditLog.actions.postguardNotificationDeliverySet");
     case "wallet.opened":
       return t("auditLog.actions.walletOpened");
     case "wallet.bootstrapped":
@@ -205,6 +207,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.postguardEncryptionKey");
     case "postguard_file":
       return t("auditLog.targets.postguardFile");
+    case "postguard_settings":
+      return t("auditLog.targets.postguardSettings");
     case "attestation_schema":
       return t("auditLog.targets.attestationSchema");
     case "attestation_template":
