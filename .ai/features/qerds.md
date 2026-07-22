@@ -265,15 +265,17 @@ deployment needs those vars aligned to its PMode.
 **The bench is self-provisioning.** A fresh Domibus has no PMode and answers `EBMS:0010 PMode could
 not be found`, so the `domibus-provision` Compose service waits for the WS plugin to be healthy and
 uploads `testdata/pmode.xml` via the admin REST API (idempotent — re-runs on every `up`). The
-bundled `blue_gw`/`red_gw` sample certs **expired in 2017**, so the `domibus` service turns off
-Domibus's cert-validation checks via `JAVA_OPTS` `-D` overrides (the image's entrypoint appends to
-`JAVA_OPTS`, so this survives a container recreate without mounting a `domibus.properties`). That is
-enough for `submitMessage` to be **accepted** — a provider ref is returned and the message is
-logged, which is what the app and the integration test assert. It is **not** enough for the async
-AS4 self-send to reach `SENT`: the receive side still rejects a message *signed* by the expired
-sender cert (→ `WAITING_FOR_RETRY`). A true green `SENT` on the loopback would need the sample
-keystore certs regenerated, which this bench does not do. Either way this proves AS4 transport
-plumbing, **not** qualified compliance — real qualified delivery keeps cert validation on.
+bundled `blue_gw`/`red_gw` sample certs **expired 2025-12-01**, which breaks the AS4 self-send two
+ways. First, Domibus's own send-side cert validation; the `domibus` service turns that off via
+`JAVA_OPTS` `-D` overrides (the image's entrypoint appends to `JAVA_OPTS`, so it survives a
+recreate). Second — and not covered by any Domibus flag — the receive side's WSS4J
+`SignatureTrustValidator` rejects a message *signed* by an expired cert (`CertificateExpiredException`
+→ `EBMS:0005`/`EBMS:0004`), so submission was accepted and logged but the send never reached `SENT`.
+The fix: `docker/development/domibus/gateway_{keystore,truststore}.jks` hold freshly-generated
+`blue_gw`/`red_gw` certs (same aliases/password as the image, so `domibus.properties` is unchanged),
+mounted over the image's expired ones. With those, the loopback completes end to end — sending side
+`ACKNOWLEDGED`, receiving side `RECEIVED`. This proves AS4 transport plumbing, **not** qualified
+compliance — the certs are self-signed and real qualified delivery keeps cert validation on.
 
 The `payload`/`value` `elementFormDefault`-unqualified reset (WS-plugin `submitRequest`) that the
 offline marshalling tests pin was a real bug shaken out here. Coverage: `domibus_test.go` unit-tests

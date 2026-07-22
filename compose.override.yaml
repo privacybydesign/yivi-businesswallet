@@ -162,22 +162,27 @@ services:
       DB_NAME: domibus
       DB_USER: edelivery
       DB_PASS: edelivery
-      # The bundled blue_gw/red_gw sample certs expired in 2017. These flags turn
-      # off Domibus's cert-validation checks so submission isn't blocked (NOT for
-      # real qualified delivery). The image's entrypoint appends to JAVA_OPTS, so
-      # these -D overrides survive a container recreate without mounting a
-      # domibus.properties. NB: this is enough for submitMessage to be accepted
-      # (a provider ref is returned and the message is logged) — what the app and
-      # the integration test rely on — but NOT enough for the async AS4 self-send
-      # to reach SENT: the receive side still rejects a message *signed* by the
-      # expired sender cert (-> WAITING_FOR_RETRY). A true green SENT needs the
-      # sample keystore certs regenerated, which this bench does not do.
+      # Belt-and-suspenders: turn off Domibus's own cert-validation checks. Not
+      # strictly needed now that the mounted keystores below hold non-expired
+      # certs, but harmless and keeps submission unblocked (NOT for real
+      # qualified delivery). The image's entrypoint appends to JAVA_OPTS, so
+      # these -D overrides survive a container recreate.
       JAVA_OPTS: >-
         -Ddomibus.receiver.certificate.validation.onsending=false
         -Ddomibus.sender.certificate.validation.onsending=false
         -Ddomibus.sender.certificate.validation.onreceiving=false
     ports:
       - "8090:8080"
+    # Overlay freshly-generated blue_gw/red_gw keystores over the image's baked-in
+    # sample ones (which expired 2025-12-01). WSS4J rejects a message *signed* by
+    # an expired cert on receipt (EBMS:0005/0004, "The provided certificate is
+    # invalid") regardless of the validation flags above, so the self-send never
+    # reached SENT with the stock certs. Same aliases (blue_gw/red_gw) and
+    # password (test123) as the image, so domibus.properties needs no change. See
+    # docker/development/domibus/README.md for regeneration.
+    volumes:
+      - ./docker/development/domibus/gateway_keystore.jks:/data/tomcat/conf/domibus/keystores/gateway_keystore.jks:ro
+      - ./docker/development/domibus/gateway_truststore.jks:/data/tomcat/conf/domibus/keystores/gateway_truststore.jks:ro
     # Tomcat deploys the WAR + connects MySQL on first boot (slow under amd64
     # emulation on arm64), so gate readiness on the WS plugin actually serving
     # the WSDL — the exact endpoint the backend pings at startup.
