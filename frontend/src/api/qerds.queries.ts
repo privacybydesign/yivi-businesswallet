@@ -165,9 +165,17 @@ export function useQerdsContactsQuery(
   });
 }
 
-export function useCreateQerdsContactMutation(
-  slug: string,
-): UseMutationResult<QerdsContact, Error, { name: string; address: string }> {
+export function useCreateQerdsContactMutation(slug: string): UseMutationResult<
+  QerdsContact,
+  Error,
+  {
+    name: string;
+    address: string;
+    legalName?: string;
+    kvkNumber?: string;
+    euid?: string;
+  }
+> {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   return useMutation({

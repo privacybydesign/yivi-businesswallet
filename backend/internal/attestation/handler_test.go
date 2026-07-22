@@ -52,6 +52,52 @@ func TestDecodeSchemaAcceptsSupportedAttributeTypes(t *testing.T) {
 	}
 }
 
+func TestValidateAttributeSources(t *testing.T) {
+	personAttrs := []AttributeDef{
+		{Key: "name", Type: AttributeTypeString},
+		{Key: "dept", Type: AttributeTypeString},
+	}
+	orgAttrs := []AttributeDef{{Key: "kvk", Type: AttributeTypeString}}
+
+	t.Run("valid person binding", func(t *testing.T) {
+		err := ValidateAttributeSources(SubjectNaturalPerson, personAttrs, map[string]string{
+			"name": SourceMemberFullName,
+			"dept": SourceMemberDepartment,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("valid org binding", func(t *testing.T) {
+		err := ValidateAttributeSources(SubjectOrganization, orgAttrs, map[string]string{
+			"kvk": SourceOrgKVKNumber,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("unknown attribute key rejected", func(t *testing.T) {
+		err := ValidateAttributeSources(SubjectNaturalPerson, personAttrs, map[string]string{
+			"missing": SourceMemberEmail,
+		})
+		if !errors.Is(err, ErrUnknownAttribute) {
+			t.Fatalf("err = %v, want ErrUnknownAttribute", err)
+		}
+	})
+
+	t.Run("wrong-subject token rejected", func(t *testing.T) {
+		// An org token on a natural-person schema is not a valid source.
+		err := ValidateAttributeSources(SubjectNaturalPerson, personAttrs, map[string]string{
+			"name": SourceOrgKVKNumber,
+		})
+		if !errors.Is(err, ErrUnknownAttributeSource) {
+			t.Fatalf("err = %v, want ErrUnknownAttributeSource", err)
+		}
+	})
+}
+
 func TestDecodeSchemaDefaultsEmptyAttributeTypeToString(t *testing.T) {
 	body := `{"displayName":"Employee","credentialConfigId":"cfg",
 		"attributes":[{"key":"name","label":"Name","type":""}]}`

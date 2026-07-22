@@ -79,6 +79,11 @@ export const qerdsContactSchema = z.object({
   organizationId: z.string(),
   name: z.string(),
   address: z.string(),
+  // Optional structured organisation data, so an attestation issued to this
+  // recipient can copy the org's real details into the credential.
+  legalName: z.string().optional(),
+  kvkNumber: z.string().optional(),
+  euid: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -227,7 +232,13 @@ export function getQerdsContacts(
 
 export function createQerdsContact(
   slug: string,
-  input: { name: string; address: string },
+  input: {
+    name: string;
+    address: string;
+    legalName?: string;
+    kvkNumber?: string;
+    euid?: string;
+  },
   signal?: AbortSignal,
 ): Promise<QerdsContact> {
   return request(`/api/v1/orgs/${encodeURIComponent(slug)}/qerds/contacts`, {

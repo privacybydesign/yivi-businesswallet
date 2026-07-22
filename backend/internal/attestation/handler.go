@@ -470,6 +470,7 @@ type templateRequest struct {
 	SchemaID          string            `json:"schemaId"`
 	Name              string            `json:"name"`
 	DefaultAttributes map[string]string `json:"defaultAttributes"`
+	AttributeSources  map[string]string `json:"attributeSources"`
 	ValiditySeconds   *int              `json:"validitySeconds"`
 	KeyMaterialID     *string           `json:"keyMaterialId"`
 	Status            string            `json:"status"`
@@ -517,9 +518,22 @@ func (h *Handler) createTemplate(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := organization.OrgFromContext(r.Context())
+	if len(req.AttributeSources) > 0 {
+		sc, err := h.schemas.GetSchema(r.Context(), org.ID, schemaID)
+		if errors.Is(err, ErrSchemaNotFound) {
+			return badRequest("invalid_input", "schema not found")
+		}
+		if err != nil {
+			return fmt.Errorf("resolving schema for template attribute sources: %w", err)
+		}
+		if err := ValidateAttributeSources(sc.SubjectType, sc.Attributes, req.AttributeSources); err != nil {
+			return badRequest("invalid_input", err.Error())
+		}
+	}
 	t, err := h.templates.CreateTemplate(r.Context(), org.ID, Template{
 		SchemaID: schemaID, Name: req.Name, DefaultAttributes: req.DefaultAttributes,
-		ValiditySeconds: req.ValiditySeconds, KeyMaterialID: keyID,
+		AttributeSources: req.AttributeSources,
+		ValiditySeconds:  req.ValiditySeconds, KeyMaterialID: keyID,
 	})
 	if errors.Is(err, ErrSchemaNotFound) {
 		return badRequest("invalid_input", "schema not found")
@@ -546,9 +560,22 @@ func (h *Handler) updateTemplate(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := organization.OrgFromContext(r.Context())
+	if len(req.AttributeSources) > 0 {
+		existing, err := h.templates.GetTemplate(r.Context(), org.ID, id)
+		if errors.Is(err, ErrTemplateNotFound) {
+			return notFound("template_not_found", "template not found")
+		}
+		if err != nil {
+			return fmt.Errorf("resolving template for attribute sources: %w", err)
+		}
+		if err := ValidateAttributeSources(existing.SubjectType, existing.Attributes, req.AttributeSources); err != nil {
+			return badRequest("invalid_input", err.Error())
+		}
+	}
 	t, err := h.templates.UpdateTemplate(r.Context(), org.ID, id, Template{
 		Name: req.Name, DefaultAttributes: req.DefaultAttributes,
-		ValiditySeconds: req.ValiditySeconds, KeyMaterialID: keyID, Status: req.Status,
+		AttributeSources: req.AttributeSources,
+		ValiditySeconds:  req.ValiditySeconds, KeyMaterialID: keyID, Status: req.Status,
 	})
 	if errors.Is(err, ErrTemplateNotFound) {
 		return notFound("template_not_found", "template not found")
@@ -665,9 +692,10 @@ type recipientRequest struct {
 }
 
 type issueRequest struct {
-	TemplateID string            `json:"templateId"`
-	Recipient  recipientRequest  `json:"recipient"`
-	Attributes map[string]string `json:"attributes"`
+	TemplateID     string            `json:"templateId"`
+	Recipient      recipientRequest  `json:"recipient"`
+	Attributes     map[string]string `json:"attributes"`
+	DeliveryMethod string            `json:"deliveryMethod"`
 }
 
 func (h *Handler) listIssued(w http.ResponseWriter, r *http.Request) error {
@@ -720,13 +748,18 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) error {
 	if req.Attributes == nil {
 		req.Attributes = map[string]string{}
 	}
+	deliveryMethod := strings.TrimSpace(req.DeliveryMethod)
+	if deliveryMethod != "" && deliveryMethod != DeliveryMethodEmail && deliveryMethod != DeliveryMethodQR {
+		return badRequest("invalid_input", "invalid deliveryMethod")
+	}
 
 	org := organization.OrgFromContext(r.Context())
 	actor := auth.UserFromContext(r.Context())
 	result, err := h.service.Issue(r.Context(), org.ID, actor.ID, org.Name, IssueInput{
-		TemplateID: templateID,
-		Recipient:  Recipient{Kind: req.Recipient.Kind, UserID: userID, Ref: ref},
-		Attributes: req.Attributes,
+		TemplateID:     templateID,
+		Recipient:      Recipient{Kind: req.Recipient.Kind, UserID: userID, Ref: ref},
+		Attributes:     req.Attributes,
+		DeliveryMethod: deliveryMethod,
 	})
 	switch {
 	case errors.Is(err, ErrTemplateNotFound):

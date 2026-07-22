@@ -57,6 +57,101 @@ export type AttestationSubjectType = z.infer<
   typeof attestationSubjectTypeSchema
 >;
 
+// Subject-field tokens a template attribute can be bound to, so the issue wizard
+// pre-fills that attribute from the recipient's known data. Kept in sync with the
+// backend's SubjectSourceTokens vocabulary (internal/attestation/attestation.go).
+// SUBJECT_SOURCE_FIELDS lists the tokens per subject type, in the order the
+// template editor offers them; the editor maps each token to an i18n label.
+export const SUBJECT_SOURCE_FIELDS: Record<AttestationSubjectType, string[]> = {
+  natural_person: [
+    "member.givenNames",
+    "member.lastName",
+    "member.fullName",
+    "member.preferredName",
+    "member.email",
+    "member.phone",
+    "member.role",
+    "member.jobTitle",
+    "member.department",
+  ],
+  organization: ["org.name", "org.kvkNumber", "org.euid", "org.digitalAddress"],
+};
+
+// The recipient data a source binding reads from. Fields are optional/nullable —
+// a missing field resolves to an empty string (the wizard leaves the input blank).
+export interface MemberSubject {
+  givenNames?: string | null;
+  lastName?: string | null;
+  preferredName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  role?: string | null;
+  jobTitle?: string | null;
+  departmentName?: string | null;
+}
+
+export interface OrgSubject {
+  name?: string | null; // address-book display name
+  legalName?: string | null;
+  kvkNumber?: string | null;
+  euid?: string | null;
+  address?: string | null; // QERDS digital address
+}
+
+export type SubjectSourceValue =
+  | { kind: "natural_person"; member: MemberSubject }
+  | { kind: "organization"; org: OrgSubject };
+
+// resolveSubjectSource returns the value a source token resolves to for the given
+// recipient, or "" when the token is unknown for the subject or the field is empty.
+export function resolveSubjectSource(
+  token: string,
+  subject: SubjectSourceValue,
+): string {
+  const value = (v: string | null | undefined): string => v ?? "";
+  if (subject.kind === "natural_person") {
+    const m = subject.member;
+    switch (token) {
+      case "member.givenNames":
+        return value(m.givenNames);
+      case "member.lastName":
+        return value(m.lastName);
+      case "member.fullName":
+        return [m.givenNames, m.lastName]
+          .map((p) => (p ?? "").trim())
+          .filter(Boolean)
+          .join(" ");
+      case "member.preferredName":
+        return value(m.preferredName);
+      case "member.email":
+        return value(m.email);
+      case "member.phone":
+        return value(m.phone);
+      case "member.role":
+        return value(m.role);
+      case "member.jobTitle":
+        return value(m.jobTitle);
+      case "member.department":
+        return value(m.departmentName);
+      default:
+        return "";
+    }
+  }
+  const o = subject.org;
+  switch (token) {
+    case "org.name":
+      return value(o.legalName) || value(o.name);
+    case "org.kvkNumber":
+      return value(o.kvkNumber);
+    case "org.euid":
+      return value(o.euid);
+    case "org.digitalAddress":
+      return value(o.address);
+    default:
+      return "";
+  }
+}
+
 // A credential schema: the shape of an attestation (its VCT + attributes),
 // independent of any issuance defaults.
 export const attestationSchemaSchema = z.object({
@@ -86,6 +181,7 @@ export const attestationTemplateSchema = z.object({
   schemaId: z.string(),
   name: z.string(),
   defaultAttributes: z.record(z.string(), z.string()).optional(),
+  attributeSources: z.record(z.string(), z.string()).optional(),
   validitySeconds: z.number().optional(),
   keyMaterialId: z.string().optional(),
   status: z.string(),
@@ -132,6 +228,9 @@ export const issuedAttestationSchema = z.object({
   attributes: z.record(z.string(), z.string()),
   qualified: z.boolean(),
   status: z.string(),
+  // The delivery channel the offer was routed over: "email", "qerds", or "none"
+  // (shown as a QR directly, no message sent).
+  delivery: z.string(),
   issuedByUserId: z.string().optional(),
   claimedAt: z.string().optional(),
   expiresAt: z.string().optional(),
@@ -233,6 +332,7 @@ export interface AttestationTemplateInput {
   schemaId: string;
   name: string;
   defaultAttributes?: Record<string, string>;
+  attributeSources?: Record<string, string>;
   validitySeconds?: number;
   keyMaterialId?: string;
 }
@@ -240,6 +340,7 @@ export interface AttestationTemplateInput {
 export interface AttestationTemplateUpdate {
   name: string;
   defaultAttributes?: Record<string, string>;
+  attributeSources?: Record<string, string>;
   validitySeconds?: number;
   keyMaterialId?: string;
   status: string;
@@ -255,6 +356,9 @@ export interface IssueAttestationInput {
   templateId: string;
   recipient: { kind: string; userId?: string; ref: string };
   attributes: Record<string, string>;
+  // "email" (send a claim link) or "qr" (show the QR directly, no e-mail) for a
+  // natural person; omitted for organizations (always delivered over QERDS).
+  deliveryMethod?: "email" | "qr";
 }
 
 export function getHeldAttestations(

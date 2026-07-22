@@ -33,6 +33,15 @@ func marshalJSON(v any) ([]byte, error) {
 	return b, nil
 }
 
+// marshalStringMapOrEmpty marshals a {key: value} map for a NOT NULL jsonb column,
+// encoding a nil/empty map as "{}" rather than SQL NULL.
+func marshalStringMapOrEmpty(m map[string]string) ([]byte, error) {
+	if len(m) == 0 {
+		return []byte("{}"), nil
+	}
+	return marshalJSON(m)
+}
+
 // unmarshalAttributes decodes a schema attribute list from jsonb bytes.
 func unmarshalAttributes(raw []byte) ([]AttributeDef, error) {
 	attrs := []AttributeDef{}

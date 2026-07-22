@@ -15,7 +15,7 @@ import (
 // templateSelect joins the schema identity + attribute chips and counts issued
 // attestations, so the Templates tab renders from a single query.
 const templateSelect = `SELECT t.id, t.organization_id, t.schema_id, t.name,
-		t.default_attributes, t.validity_seconds, t.key_material_id, t.status, t.created_at, t.updated_at,
+		t.default_attributes, t.attribute_sources, t.validity_seconds, t.key_material_id, t.status, t.created_at, t.updated_at,
 		s.vct, s.display_name, s.subject_type, s.attributes, s.qualified,
 		COUNT(ia.id) AS issued_count
 	FROM attestation_templates t
@@ -29,6 +29,7 @@ func scanTemplate(row rowScanner) (Template, error) {
 	var (
 		t               Template
 		defaultAttrsRaw []byte
+		sourcesRaw      []byte
 		schemaAttrsRaw  []byte
 		schemaDisplay   string
 		validitySeconds *int
@@ -36,7 +37,7 @@ func scanTemplate(row rowScanner) (Template, error) {
 	)
 	if err := row.Scan(
 		&t.ID, &t.OrganizationID, &t.SchemaID, &t.Name,
-		&defaultAttrsRaw, &validitySeconds, &keyMaterialID, &t.Status, &t.CreatedAt, &t.UpdatedAt,
+		&defaultAttrsRaw, &sourcesRaw, &validitySeconds, &keyMaterialID, &t.Status, &t.CreatedAt, &t.UpdatedAt,
 		&t.VCT, &schemaDisplay, &t.SubjectType, &schemaAttrsRaw, &t.Qualified,
 		&t.IssuedCount,
 	); err != nil {
@@ -52,6 +53,13 @@ func scanTemplate(row rowScanner) (Template, error) {
 	}
 	if len(defaults) > 0 {
 		t.DefaultAttributes = defaults
+	}
+	sources, err := unmarshalStringMap(sourcesRaw)
+	if err != nil {
+		return Template{}, err
+	}
+	if len(sources) > 0 {
+		t.AttributeSources = sources
 	}
 	attrs, err := unmarshalAttributes(schemaAttrsRaw)
 	if err != nil {
@@ -130,21 +138,22 @@ func (s *Store) GetTemplateDetail(ctx context.Context, orgID, id uuid.UUID) (Tem
 
 // CreateTemplate inserts a template and audits, in one tx, then returns it enriched.
 func (s *Store) CreateTemplate(ctx context.Context, orgID uuid.UUID, in Template) (Template, error) {
-	var defaults []byte
-	if len(in.DefaultAttributes) > 0 {
-		var err error
-		if defaults, err = marshalJSON(in.DefaultAttributes); err != nil {
-			return Template{}, err
-		}
+	defaults, err := marshalStringMapOrEmpty(in.DefaultAttributes)
+	if err != nil {
+		return Template{}, err
+	}
+	sources, err := marshalStringMapOrEmpty(in.AttributeSources)
+	if err != nil {
+		return Template{}, err
 	}
 
 	var id uuid.UUID
-	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `INSERT INTO attestation_templates
-			(organization_id, schema_id, name, default_attributes, validity_seconds, key_material_id)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			(organization_id, schema_id, name, default_attributes, attribute_sources, validity_seconds, key_material_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			RETURNING id`
-		if err := q.QueryRow(ctx, insert, orgID, in.SchemaID, in.Name, defaults, in.ValiditySeconds, in.KeyMaterialID).Scan(&id); err != nil {
+		if err := q.QueryRow(ctx, insert, orgID, in.SchemaID, in.Name, defaults, sources, in.ValiditySeconds, in.KeyMaterialID).Scan(&id); err != nil {
 			// A missing schema (or key) surfaces as a foreign-key violation.
 			if isForeignKeyViolation(err) {
 				return ErrSchemaNotFound
@@ -163,25 +172,26 @@ func (s *Store) CreateTemplate(ctx context.Context, orgID uuid.UUID, in Template
 
 // UpdateTemplate updates mutable fields and audits, in one tx, then returns it enriched.
 func (s *Store) UpdateTemplate(ctx context.Context, orgID, id uuid.UUID, in Template) (Template, error) {
-	var defaults []byte
-	if len(in.DefaultAttributes) > 0 {
-		var err error
-		if defaults, err = marshalJSON(in.DefaultAttributes); err != nil {
-			return Template{}, err
-		}
+	defaults, err := marshalStringMapOrEmpty(in.DefaultAttributes)
+	if err != nil {
+		return Template{}, err
+	}
+	sources, err := marshalStringMapOrEmpty(in.AttributeSources)
+	if err != nil {
+		return Template{}, err
 	}
 	status := in.Status
 	if status == "" {
 		status = TemplateActive
 	}
 
-	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE attestation_templates
-			SET name = $3, default_attributes = $4, validity_seconds = $5, key_material_id = $6, status = $7, updated_at = now()
+			SET name = $3, default_attributes = $4, attribute_sources = $5, validity_seconds = $6, key_material_id = $7, status = $8, updated_at = now()
 			WHERE organization_id = $1 AND id = $2
 			RETURNING id`
 		var got uuid.UUID
-		if err := q.QueryRow(ctx, update, orgID, id, in.Name, defaults, in.ValiditySeconds, in.KeyMaterialID, status).Scan(&got); errors.Is(err, pgx.ErrNoRows) {
+		if err := q.QueryRow(ctx, update, orgID, id, in.Name, defaults, sources, in.ValiditySeconds, in.KeyMaterialID, status).Scan(&got); errors.Is(err, pgx.ErrNoRows) {
 			return ErrTemplateNotFound
 		} else if err != nil {
 			return fmt.Errorf("attestation: update template %s: %w", id, err)

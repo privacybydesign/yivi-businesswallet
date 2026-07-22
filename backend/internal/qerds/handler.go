@@ -51,7 +51,7 @@ type addressManager interface {
 
 type contactManager interface {
 	ListContacts(ctx context.Context, orgID uuid.UUID) ([]Contact, error)
-	CreateContact(ctx context.Context, orgID uuid.UUID, name, address string) (Contact, error)
+	CreateContact(ctx context.Context, orgID uuid.UUID, in Contact) (Contact, error)
 	DeleteContact(ctx context.Context, orgID, id uuid.UUID) error
 }
 
@@ -363,8 +363,24 @@ func (h *Handler) listContacts(w http.ResponseWriter, r *http.Request) error {
 }
 
 type createContactRequest struct {
-	Name    string `json:"name"`
-	Address string `json:"address"`
+	Name      string  `json:"name"`
+	Address   string  `json:"address"`
+	LegalName *string `json:"legalName"`
+	KVKNumber *string `json:"kvkNumber"`
+	EUID      *string `json:"euid"`
+}
+
+// trimOptional trims an optional string field, collapsing an empty result to nil so
+// blank inputs are stored as SQL NULL rather than "".
+func trimOptional(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*v)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 func (h *Handler) createContact(w http.ResponseWriter, r *http.Request) error {
@@ -382,7 +398,13 @@ func (h *Handler) createContact(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := organization.OrgFromContext(r.Context())
-	contact, err := h.contacts.CreateContact(r.Context(), org.ID, req.Name, req.Address)
+	contact, err := h.contacts.CreateContact(r.Context(), org.ID, Contact{
+		Name:      req.Name,
+		Address:   req.Address,
+		LegalName: trimOptional(req.LegalName),
+		KVKNumber: trimOptional(req.KVKNumber),
+		EUID:      trimOptional(req.EUID),
+	})
 	if errors.Is(err, ErrContactAddressTaken) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "address_taken", Message: "a contact with that address already exists"}
 	}
