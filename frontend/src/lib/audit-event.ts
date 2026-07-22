@@ -270,6 +270,9 @@ export function auditSubject(
 
   const snapshot = after ?? before;
   if (!snapshot) return null;
-  const id = snapshot.name ?? snapshot.email ?? snapshot.role;
+  // `recipient` identifies an issued attestation (who it was issued to); the
+  // issue handler rejects an empty ref, so it is always present on that event.
+  const id =
+    snapshot.name ?? snapshot.email ?? snapshot.recipient ?? snapshot.role;
   return typeof id === "string" ? id : null;
 }

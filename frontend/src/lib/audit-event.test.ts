@@ -1,8 +1,13 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import type { AuditEvent } from "../api/organization";
 import i18n from "../i18n";
-import { auditActionLabel, auditTargetLabel } from "./audit-event";
+import {
+  auditActionLabel,
+  auditSubject,
+  auditTargetLabel,
+} from "./audit-event";
 
 // The backend is the source of truth for audit action/target identifiers
 // (backend/internal/audit/audit.go). auditActionLabel / auditTargetLabel map
@@ -46,5 +51,53 @@ describe("audit-event backend/frontend parity", () => {
   it.each(targets)("translates the target %s", (target) => {
     const label = auditTargetLabel(target, t);
     expect(isUnresolved(label, target)).toBe(false);
+  });
+});
+
+describe("auditSubject", () => {
+  const dateFormatter = new Intl.DateTimeFormat("en");
+
+  function event(metadata: Record<string, unknown>): AuditEvent {
+    return {
+      id: "1",
+      occurredAt: "2026-07-22T10:00:00Z",
+      action: "attestation.issued",
+      targetType: "issued_attestation",
+      targetId: "att-1",
+      metadata,
+      actor: null,
+    };
+  }
+
+  // The issued-attestation create event carries the recipient, not name/email/
+  // role, so the subject must resolve to it — otherwise the row renders blank.
+  it("uses the recipient for an issued-attestation event", () => {
+    const subject = auditSubject(
+      event({
+        after: {
+          schemaVct: "https://example.test/vct",
+          recipient: "alice@example.test",
+          recipientKind: "external",
+          qualified: false,
+        },
+      }),
+      dateFormatter,
+    );
+    expect(subject).toBe("alice@example.test");
+  });
+
+  it("prefers name/email over recipient when present", () => {
+    expect(
+      auditSubject(
+        event({ after: { name: "Acme", recipient: "acme-ref" } }),
+        dateFormatter,
+      ),
+    ).toBe("Acme");
+    expect(
+      auditSubject(
+        event({ after: { email: "a@b.test", recipient: "acme-ref" } }),
+        dateFormatter,
+      ),
+    ).toBe("a@b.test");
   });
 });
