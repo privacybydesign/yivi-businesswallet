@@ -264,7 +264,12 @@ deployment needs those vars aligned to its PMode.
 
 **The bench is self-provisioning.** A fresh Domibus has no PMode and answers `EBMS:0010 PMode could
 not be found`, so the `domibus-provision` Compose service waits for the WS plugin to be healthy and
-uploads `testdata/pmode.xml` via the admin REST API (idempotent — re-runs on every `up`). The
+uploads `testdata/pmode.xml` via the admin REST API (idempotent — re-runs on every `up`). It also
+persists a **message filter** routing inbound to the WS plugin (`backendWebservice`): the image
+ships three backend plugins (WS + JMS + FS) and, with no persisted filter, a *received* message
+matches no backend and is dropped to `notification.unknown` — `listPendingMessages` then stays empty
+and the recipient's poll never sees it. The live integration test provisions the same two things
+itself (CI's Domibus starts unprovisioned). The
 bundled `blue_gw`/`red_gw` sample certs **expired 2025-12-01**, which breaks the AS4 self-send two
 ways. First, Domibus's own send-side cert validation; the `domibus` service turns that off via
 `JAVA_OPTS` `-D` overrides (the image's entrypoint appends to `JAVA_OPTS`, so it survives a

@@ -376,7 +376,7 @@ func newRetrieveEnvelope(messageID string) retrieveEnvelope {
 		Body: retrieveBody{
 			Request: retrieveRequest{
 				XMLName:   xml.Name{Space: backendNS, Local: "retrieveMessageRequest"},
-				MessageID: messageID,
+				MessageID: xmlValue{XMLName: xml.Name{Local: "messageID"}, Value: messageID},
 			},
 		},
 	}
@@ -392,8 +392,13 @@ type retrieveBody struct {
 }
 
 type retrieveRequest struct {
-	XMLName   xml.Name
-	MessageID string `xml:"messageID"`
+	XMLName xml.Name
+	// Unqualified (empty namespace), like the submitRequest payload and the
+	// listPending finalRecipient: the backend schema is
+	// elementFormDefault="unqualified", so the messageID child must reset the
+	// backendNS it would otherwise inherit from retrieveMessageRequest — else
+	// Domibus rejects it ("unexpected element ... Expected elements are <{}messageID>").
+	MessageID xmlValue
 }
 
 // --- SOAP response types (local-name matched, namespace-agnostic) ---

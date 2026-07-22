@@ -225,6 +225,17 @@ services:
           -F "file=@/pmode.xml" -F "description=qerds bench blue->red self-send" \
           -X POST http://domibus:8080/domibus/rest/pmode
         echo "PMode uploaded"
+        # Route inbound messages to the WS plugin. The image ships THREE backend
+        # plugins (WS + JMS + FS) with no persisted message filter, so a received
+        # message matches no backend and is dropped to notification.unknown
+        # (listPendingMessages then stays empty and the recipient never sees it).
+        # Persist a filter list with backendWebservice first (no routing criteria
+        # => it catches everything) so retrieveMessage works.
+        echo "configuring message filter (WS plugin first)..."
+        curl -sf -b /tmp/cj.txt -H "X-XSRF-TOKEN: $$XSRF" -H "Content-Type: application/json" \
+          -X PUT http://domibus:8080/domibus/rest/messagefilters \
+          -d '[{"entityId":0,"index":0,"routingCriterias":[],"backendName":"backendWebservice","persisted":true},{"entityId":0,"index":1,"routingCriterias":[],"backendName":"backendFSPlugin","persisted":true},{"entityId":0,"index":2,"routingCriterias":[],"backendName":"Jms","persisted":true}]'
+        echo "message filter configured"
 
 volumes:
   backend-go-build:
