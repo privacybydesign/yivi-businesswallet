@@ -44,9 +44,22 @@ services:
       ATTESTATION_HOLDER_WSCA_KEK: ${ATTESTATION_HOLDER_WSCA_KEK:-}
       ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR: ${ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR:-/tmp/eudiholder-wsca}
       ATTESTATION_HOLDER_WSCA_INSECURE: ${ATTESTATION_HOLDER_WSCA_INSECURE:-}
+      # QERDS transport: stub by default. Set QERDS_PROVIDER=domibus (+ URL) in
+      # .env to drive the real Domibus AS4 access point (run with --profile domibus).
+      QERDS_PROVIDER: ${QERDS_PROVIDER:-stub}
+      QERDS_PROVIDER_URL: ${QERDS_PROVIDER_URL:-}
+      QERDS_AUTH_TOKEN: ${QERDS_AUTH_TOKEN:-}
+      QERDS_DOMIBUS_FROM_PARTY: ${QERDS_DOMIBUS_FROM_PARTY:-}
+      QERDS_DOMIBUS_TO_PARTY: ${QERDS_DOMIBUS_TO_PARTY:-}
     depends_on:
       seed:
         condition: service_completed_successfully
+      # Optional: only present when the `domibus` profile is enabled. With
+      # QERDS_PROVIDER=domibus the backend does a fatal one-shot ping at boot,
+      # so wait for Domibus's WS plugin to be serving before starting.
+      domibus:
+        condition: service_healthy
+        required: false
     volumes:
       - ./backend:/app
       - backend-go-build:/root/.cache/go-build
@@ -149,11 +162,64 @@ services:
       DB_NAME: domibus
       DB_USER: edelivery
       DB_PASS: edelivery
+      # The bundled blue_gw/red_gw sample certs expired in 2017. These flags turn
+      # off Domibus's cert-validation checks so submission isn't blocked (NOT for
+      # real qualified delivery). The image's entrypoint appends to JAVA_OPTS, so
+      # these -D overrides survive a container recreate without mounting a
+      # domibus.properties. NB: this is enough for submitMessage to be accepted
+      # (a provider ref is returned and the message is logged) — what the app and
+      # the integration test rely on — but NOT enough for the async AS4 self-send
+      # to reach SENT: the receive side still rejects a message *signed* by the
+      # expired sender cert (-> WAITING_FOR_RETRY). A true green SENT needs the
+      # sample keystore certs regenerated, which this bench does not do.
+      JAVA_OPTS: >-
+        -Ddomibus.receiver.certificate.validation.onsending=false
+        -Ddomibus.sender.certificate.validation.onsending=false
+        -Ddomibus.sender.certificate.validation.onreceiving=false
     ports:
       - "8090:8080"
+    # Tomcat deploys the WAR + connects MySQL on first boot (slow under amd64
+    # emulation on arm64), so gate readiness on the WS plugin actually serving
+    # the WSDL — the exact endpoint the backend pings at startup.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/domibus/services/backend?wsdl"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 240s
     depends_on:
       domibus-mysql:
         condition: service_healthy
+
+  # One-shot PMode provisioner: a fresh Domibus has no PMode, so submitMessage
+  # fails with EBMS:0010 until one is uploaded. Waits for the WS plugin to be
+  # healthy, then uploads the blue->red self-send PMode via the admin REST API.
+  # Idempotent (re-uploading replaces the current PMode), so it re-runs cleanly
+  # on every `up`. Same PMode file the live-Domibus integration test embeds.
+  domibus-provision:
+    image: curlimages/curl:latest
+    platform: linux/amd64
+    profiles: ["domibus"]
+    restart: "no"
+    depends_on:
+      domibus:
+        condition: service_healthy
+    volumes:
+      - ./backend/internal/qerdsprovider/testdata/pmode.xml:/pmode.xml:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        curl -s -c /tmp/cj.txt -o /dev/null -H "Content-Type: application/json" \
+          -X POST http://domibus:8080/domibus/rest/security/authentication \
+          -d '{"username":"admin","password":"123456"}'
+        XSRF=$$(grep -i XSRF-TOKEN /tmp/cj.txt | awk '{print $$7}')
+        echo "uploading PMode..."
+        curl -sf -b /tmp/cj.txt -H "X-XSRF-TOKEN: $$XSRF" \
+          -F "file=@/pmode.xml" -F "description=qerds bench blue->red self-send" \
+          -X POST http://domibus:8080/domibus/rest/pmode
+        echo "PMode uploaded"
 
 volumes:
   backend-go-build:

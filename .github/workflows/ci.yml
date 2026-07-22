@@ -91,6 +91,45 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
+      # Domibus AS4 access point (+ its MySQL) for the live QERDS provider test.
+      # The domibus entrypoint waits for the DB itself, so no cross-service
+      # ordering is needed here. JAVA_OPTS disables cert validation (the bundled
+      # sample certs expired in 2017) — the image appends to JAVA_OPTS, so these
+      # -D overrides take effect. The test uploads the PMode itself.
+      mysql:
+        image: fiware/domibus-mysql:latest
+        env:
+          MYSQL_ROOT_PASSWORD: "123456"
+          MYSQL_DATABASE: domibus
+          MYSQL_USER: edelivery
+          MYSQL_PASSWORD: edelivery
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -p123456 --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+          --health-start-period 90s
+      domibus:
+        image: fiware/domibus-tomcat:latest
+        env:
+          DB_TYPE: MySQL
+          DB_HOST: mysql
+          DB_PORT: "3306"
+          DB_NAME: domibus
+          DB_USER: edelivery
+          DB_PASS: edelivery
+          JAVA_OPTS: >-
+            -Ddomibus.receiver.certificate.validation.onsending=false
+            -Ddomibus.sender.certificate.validation.onsending=false
+            -Ddomibus.sender.certificate.validation.onreceiving=false
+        ports:
+          - "8090:8080"
+        options: >-
+          --health-cmd "curl -fsS -o /dev/null http://localhost:8080/domibus/services/backend?wsdl"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 40
+          --health-start-period 60s
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -100,6 +139,7 @@ jobs:
       - run: go test -tags=integration -race ./...
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+          QERDS_TEST_DOMIBUS_URL: http://localhost:8090/domibus
 
   # WSCA is opt-in and its client (walletmobile) is a private module, so the
   # default build above pulls in nothing private. This job is the only one that
