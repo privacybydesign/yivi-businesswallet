@@ -12,6 +12,7 @@ const PRIMARY_HOVER = "--yb-primary-hover";
 const PRIMARY_FG = "--yb-primary-fg";
 const ACCENT = "--yb-brand";
 const ACCENT_600 = "--yb-brand-600";
+const LINK = "--yb-link";
 
 const THEMED_PROPERTIES = [
   PRIMARY,
@@ -29,6 +30,41 @@ const DARK_FG = "#211f1f";
 // How far to darken a colour for its hover / -600 shade.
 const HOVER_DARKEN = 0.12;
 const ACCENT_DARKEN = 0.16;
+
+// Link is a themeable role too: when a tenant sets a brand accent, the app's
+// links pick it up (instead of staying the default Yivi blue) so the brand
+// carries across the whole UI, not just buttons and avatars. A link must stay
+// legible on every surface it sits on, and those surfaces differ between light
+// and dark mode, so no single value clears WCAG-AA in both — the accent seed is
+// darkened for light mode and lightened for dark mode until each clears the AA
+// floor against the worst-case background it lands on. applyOrgLinkTheme ships
+// the pair as a mode-aware <style> (an inline custom property can't carry a
+// media query).
+
+// The backgrounds a `text-link` element renders on, per mode: the surface tiers
+// plus the highlight/info chip. Values mirror the light and dark
+// --yb-surface*/--yb-highlight tokens in index.css. The derived link must clear
+// AA against every one, so we gate on the worst case (the darkest light bg / the
+// lightest dark bg — clearing AA there clears it on all the others in that mode).
+const LINK_BACKGROUNDS_LIGHT = [
+  "#ffffff",
+  "#faf8f6",
+  "#f5f2ef",
+  "#eaf3f9",
+] as const;
+const LINK_BACKGROUNDS_DARK = [
+  "#1d1b1a",
+  "#141312",
+  "#252322",
+  "#1c3648",
+] as const;
+
+// Step size and iteration cap when nudging the accent toward the contrast floor.
+const LINK_ADJUST_STEP = 0.06;
+const LINK_ADJUST_MAX_STEPS = 24;
+
+// The <style> element carrying the mode-aware link override.
+const ORG_LINK_STYLE_ID = "ybw-org-link-theme";
 
 // WCAG 2.2 AA needs 4.5:1 for normal-size text; buttons use ~13.5px semibold,
 // which is "normal" text, so this is the bar a primary colour must clear.
@@ -107,6 +143,19 @@ function darken(hex: string, amount: number): string {
   return toHex({ r: rgb.r * scale, g: rgb.g * scale, b: rgb.b * scale });
 }
 
+// lighten mixes a colour towards white by the given fraction (0–1).
+function lighten(hex: string, amount: number): string {
+  const rgb = parseHex(hex);
+  if (!rgb) {
+    return hex;
+  }
+  return toHex({
+    r: rgb.r + (255 - rgb.r) * amount,
+    g: rgb.g + (255 - rgb.g) * amount,
+    b: rgb.b + (255 - rgb.b) * amount,
+  });
+}
+
 // primaryContrastFloor is the lowest contrast the applied foreground reaches
 // across the button's resting and hover backgrounds — the number to check a
 // primary colour against the AA bar. The hover shade is a darkened primary (see
@@ -151,6 +200,110 @@ export function resolveThemeTokens(
   return tokens;
 }
 
+// extremeBackground returns the background from the list with the highest or
+// lowest relative luminance — the worst case to gate a link's contrast on (see
+// resolveLinkTheme).
+function extremeBackground(
+  backgrounds: readonly string[],
+  pick: "lightest" | "darkest",
+): string {
+  let chosen = backgrounds[0];
+  let chosenLuminance = pick === "lightest" ? -1 : 2;
+  for (const bg of backgrounds) {
+    const rgb = parseHex(bg);
+    if (!rgb) {
+      continue;
+    }
+    const luminance = relativeLuminance(rgb);
+    if (
+      (pick === "lightest" && luminance > chosenLuminance) ||
+      (pick === "darkest" && luminance < chosenLuminance)
+    ) {
+      chosen = bg;
+      chosenLuminance = luminance;
+    }
+  }
+  return chosen;
+}
+
+// adjustToContrast nudges a colour towards black (darken) or white (lighten) in
+// small steps until it clears the AA floor against the given background, or the
+// step cap is hit (by which point it is near-black / near-white and clears AA
+// against any surface tier).
+function adjustToContrast(
+  color: string,
+  background: string,
+  direction: "darken" | "lighten",
+): string {
+  let current = color;
+  for (let i = 0; i < LINK_ADJUST_MAX_STEPS; i++) {
+    if ((contrastRatio(current, background) ?? 0) >= AA_CONTRAST) {
+      break;
+    }
+    current =
+      direction === "darken"
+        ? darken(current, LINK_ADJUST_STEP)
+        : lighten(current, LINK_ADJUST_STEP);
+  }
+  return current;
+}
+
+// The light and dark link colours derived from a theme's accent seed.
+export interface LinkTheme {
+  light: string;
+  dark: string;
+}
+
+// resolveLinkTheme derives the mode-aware link colour from the accent seed:
+// darkened until it clears AA on the darkest light-mode background, and
+// lightened until it clears AA on the lightest dark-mode background. Returns
+// null when there is no valid accent (the default Yivi link then stands).
+export function resolveLinkTheme(
+  theme: OrgTheme | null | undefined,
+): LinkTheme | null {
+  const accent = theme?.accentColor ?? "";
+  if (!parseHex(accent)) {
+    return null;
+  }
+  return {
+    light: adjustToContrast(
+      accent,
+      extremeBackground(LINK_BACKGROUNDS_LIGHT, "darkest"),
+      "darken",
+    ),
+    dark: adjustToContrast(
+      accent,
+      extremeBackground(LINK_BACKGROUNDS_DARK, "lightest"),
+      "lighten",
+    ),
+  };
+}
+
+// applyOrgLinkTheme installs (or removes) the mode-aware link override as a
+// <style> element. A media query can't live in an inline style property, so the
+// light value goes on :root and the dark value under prefers-color-scheme;
+// appended after index.css it wins by source order in both modes.
+function applyOrgLinkTheme(theme: OrgTheme | null | undefined): void {
+  const link = resolveLinkTheme(theme);
+  const existing = document.getElementById(ORG_LINK_STYLE_ID);
+  if (!link) {
+    existing?.remove();
+    return;
+  }
+  const css =
+    `:root{${LINK}:${link.light}}` +
+    `@media (prefers-color-scheme: dark){:root{${LINK}:${link.dark}}}`;
+  const style =
+    existing instanceof HTMLStyleElement
+      ? existing
+      : document.createElement("style");
+  style.id = ORG_LINK_STYLE_ID;
+  style.textContent = css;
+  if (!style.isConnected) {
+    document.head.appendChild(style);
+  }
+}
+
 // shouldApplyOrgTheme reports whether the runtime theme effect should push
 // tokens onto the document for the current query state. While the theme query is
 // in flight its data is `undefined`; applying then runs applyOrgTheme(undefined),
@@ -177,6 +330,7 @@ export function applyOrgTheme(theme: OrgTheme | null | undefined): void {
       root.setProperty(property, value);
     }
   }
+  applyOrgLinkTheme(theme);
 }
 
 // clearOrgTheme restores every token to its default (used when leaving an org).
@@ -185,6 +339,7 @@ export function clearOrgTheme(): void {
   for (const property of THEMED_PROPERTIES) {
     root.removeProperty(property);
   }
+  document.getElementById(ORG_LINK_STYLE_ID)?.remove();
 }
 
 // Cached theme, keyed by org slug, so a full page reload can paint the tenant's
