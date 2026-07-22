@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -41,6 +44,37 @@ func scanOrg(row rowScanner) (Organization, error) {
 	var o Organization
 	err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status, &o.BootstrappedAt)
 	return o, err
+}
+
+// scanOrgWithLogo scans an org row that also selects its theme-logo presence and
+// last-updated timestamp (via a LEFT JOIN on org_theme_settings), resolving them
+// into LogoURI. Used by the list queries so the org switcher can render logos.
+func scanOrgWithLogo(row rowScanner) (Organization, error) {
+	var o Organization
+	var hasLogo bool
+	var themeUpdatedAt *time.Time
+	if err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status, &o.BootstrappedAt, &hasLogo, &themeUpdatedAt); err != nil {
+		return Organization{}, err
+	}
+	o.LogoURI = logoURL(o.Slug, hasLogo, themeUpdatedAt)
+	return o, nil
+}
+
+// logoURL is the API path serving an org's theme logo, or "" when none is stored.
+// The theme's updated-at is a cache-busting version so a replaced logo is
+// re-fetched rather than served stale. The path mirrors the one themesettings
+// serves the logo at; it is duplicated here rather than imported because
+// themesettings imports this package (an import cycle otherwise), so keep the two
+// in sync.
+func logoURL(slug string, hasLogo bool, themeUpdatedAt *time.Time) string {
+	if !hasLogo {
+		return ""
+	}
+	version := "0"
+	if themeUpdatedAt != nil {
+		version = strconv.FormatInt(themeUpdatedAt.Unix(), 10)
+	}
+	return fmt.Sprintf("/api/v1/orgs/%s/theme/logo?v=%s", url.PathEscape(slug), version)
 }
 
 func (s *Store) GetByID(ctx context.Context, id uuid.UUID) (Organization, error) {
@@ -113,8 +147,14 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, name string) (Organiza
 	return org, err
 }
 
+// orgLogoJoin selects each org's theme-logo presence and last-updated timestamp
+// alongside orgColumnsQ, so the list queries can resolve LogoURI for the switcher.
+const orgLogoJoin = `, ots.logo_bytes IS NOT NULL, ots.updated_at
+	FROM organizations o
+	LEFT JOIN org_theme_settings ots ON ots.organization_id = o.id`
+
 func (s *Store) List(ctx context.Context) ([]Organization, error) {
-	rows, err := s.db.Query(ctx, "SELECT "+orgColumns+" FROM organizations ORDER BY name")
+	rows, err := s.db.Query(ctx, "SELECT "+orgColumnsQ+orgLogoJoin+" ORDER BY o.name")
 	if err != nil {
 		return nil, fmt.Errorf("organization: list query: %w", err)
 	}
@@ -122,7 +162,7 @@ func (s *Store) List(ctx context.Context) ([]Organization, error) {
 
 	orgs := []Organization{}
 	for rows.Next() {
-		org, err := scanOrg(rows)
+		org, err := scanOrgWithLogo(rows)
 		if err != nil {
 			return nil, fmt.Errorf("organization: list scan: %w", err)
 		}
@@ -136,8 +176,7 @@ func (s *Store) List(ctx context.Context) ([]Organization, error) {
 
 func (s *Store) ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error) {
 	const q = `
-		SELECT ` + orgColumnsQ + `
-		FROM organizations o
+		SELECT ` + orgColumnsQ + orgLogoJoin + `
 		JOIN memberships m ON m.organization_id = o.id
 		WHERE m.user_id = $1
 		ORDER BY o.name`
@@ -149,7 +188,7 @@ func (s *Store) ListForUser(ctx context.Context, userID uuid.UUID) ([]Organizati
 
 	orgs := []Organization{}
 	for rows.Next() {
-		org, err := scanOrg(rows)
+		org, err := scanOrgWithLogo(rows)
 		if err != nil {
 			return nil, fmt.Errorf("organization: list for user scan: %w", err)
 		}

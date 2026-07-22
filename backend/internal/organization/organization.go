@@ -54,6 +54,11 @@ type Organization struct {
 	DigitalAddress string    `json:"digitalAddress"`
 	Status         string    `json:"status"`
 	BootstrappedAt time.Time `json:"bootstrappedAt"`
+	// LogoURI is the API path serving the org's theme logo, or "" when none is
+	// set. Only the list endpoints (List/ListForUser) populate it, so the org
+	// switcher can show each org's logo without a per-org theme fetch; the
+	// single-org endpoints leave it empty.
+	LogoURI string `json:"logoUri,omitempty"`
 }
 
 type Department struct {
