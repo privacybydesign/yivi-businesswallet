@@ -85,13 +85,13 @@ type qerdsProvider interface {
 // plus the request operation the wallet service uses. Chosen by config.
 type registryProvider interface {
 	Ping(context.Context) error
-	Consult(context.Context, string) (registryprovider.RegistrationAttestation, error)
+	Consult(context.Context, registryprovider.ConsultRequest) (registryprovider.RegistrationAttestation, error)
 }
 
-func newRegistryProvider(cfg config.Config) (registryProvider, error) {
+func newRegistryProvider(cfg config.Config, db database.DB, recorder audit.Recorder) (registryProvider, error) {
 	switch cfg.WalletRegistryProvider {
 	case config.ProviderStub:
-		return registryprovider.NewStubRegistry(), nil
+		return registryprovider.NewSeededRegistry(db, recorder), nil
 	default:
 		return nil, fmt.Errorf("wallet registry provider %q is not implemented", cfg.WalletRegistryProvider)
 	}
@@ -300,7 +300,7 @@ func run() error {
 	qerdsService := qerds.NewService(qerdsStore, qerdsStore, qerdsProv)
 	qerdsHandler := qerds.NewHandler(qerdsService, qerdsStore, qerdsStore, qerdsStore, requireUser, orgHandler.Authorize, cfg.QerdsWebhookSecret, cfg.QerdsDefaultAddressDomain)
 
-	registry, err := newRegistryProvider(cfg)
+	registry, err := newRegistryProvider(cfg, pool, audit.NewDBRecorder())
 	if err != nil {
 		return err
 	}

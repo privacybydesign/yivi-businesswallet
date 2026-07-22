@@ -85,6 +85,17 @@ func TestExtractIdentity(t *testing.T) {
 			want: DisclosedIdentity{Email: "user@example.test", Name: identity.Name{GivenNames: "José", LastName: "van der Berg"}},
 		},
 		{
+			name: "date of birth and phone are carried through",
+			claims: map[string]string{
+				openid4vpverifier.ClaimGivenNames:  "José",
+				openid4vpverifier.ClaimFamilyName:  "van der Berg",
+				openid4vpverifier.ClaimEmail:       "user@example.test",
+				openid4vpverifier.ClaimDateOfBirth: " 1980-01-02 ",
+				openid4vpverifier.ClaimPhone:       "+31600000000",
+			},
+			want: DisclosedIdentity{Email: "user@example.test", Name: identity.Name{GivenNames: "José", LastName: "van der Berg"}, DateOfBirth: "1980-01-02", Phone: "+31600000000"},
+		},
+		{
 			name: "name is kept literal, only trimmed",
 			claims: map[string]string{
 				openid4vpverifier.ClaimGivenNames: "  JOSE ",

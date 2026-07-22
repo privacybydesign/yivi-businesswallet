@@ -57,6 +57,11 @@ const (
 	RepresentationClaimed = "wallet.representation_claimed"
 	RepresentationRevoked = "wallet.representation_revoked"
 
+	// KVK-side decisions, recorded against the KVK register's own audit log when
+	// it consults its authentic source for a registration request.
+	KVKRegistrationValidated    = "kvk.registration_validated"
+	KVKRegistrationNotValidated = "kvk.registration_not_validated"
+
 	AttestationSchemaCreated   = "attestation.schema_created"
 	AttestationSchemaUpdated   = "attestation.schema_updated"
 	AttestationSchemaDeleted   = "attestation.schema_deleted"
@@ -87,8 +92,9 @@ const (
 	TargetQerdsAddress = "qerds_address"
 	TargetQerdsContact = "qerds_contact"
 
-	TargetWalletInstance = "wallet_instance"
-	TargetRepresentation = "wallet_representation"
+	TargetWalletInstance  = "wallet_instance"
+	TargetRepresentation  = "wallet_representation"
+	TargetKVKRegistration = "kvk_registration"
 
 	TargetPostGuardKey           = "postguard_key"
 	TargetPostGuardEncryptionKey = "postguard_encryption_key"

@@ -124,6 +124,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.postguardEncryptionKeyRemoved");
     case "postguard.file_sent":
       return t("auditLog.actions.postguardFileSent");
+    case "postguard.notification_delivery_set":
+      return t("auditLog.actions.postguardNotificationDeliverySet");
     case "wallet.opened":
       return t("auditLog.actions.walletOpened");
     case "wallet.bootstrapped":
@@ -136,6 +138,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.representationClaimed");
     case "wallet.representation_revoked":
       return t("auditLog.actions.representationRevoked");
+    case "kvk.registration_validated":
+      return t("auditLog.actions.kvkRegistrationValidated");
+    case "kvk.registration_not_validated":
+      return t("auditLog.actions.kvkRegistrationNotValidated");
     case "attestation.schema_created":
       return t("auditLog.actions.attestationSchemaCreated");
     case "attestation.schema_updated":
@@ -193,12 +199,16 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.walletInstance");
     case "wallet_representation":
       return t("auditLog.targets.walletRepresentation");
+    case "kvk_registration":
+      return t("auditLog.targets.kvkRegistration");
     case "postguard_key":
       return t("auditLog.targets.postguardKey");
     case "postguard_encryption_key":
       return t("auditLog.targets.postguardEncryptionKey");
     case "postguard_file":
       return t("auditLog.targets.postguardFile");
+    case "postguard_settings":
+      return t("auditLog.targets.postguardSettings");
     case "attestation_schema":
       return t("auditLog.targets.attestationSchema");
     case "attestation_template":

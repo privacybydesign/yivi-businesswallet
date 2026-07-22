@@ -38,13 +38,16 @@ func extractIdentity(res openid4vpverifier.Presentation) (DisclosedIdentity, err
 	if given == "" || family == "" {
 		return DisclosedIdentity{}, errDisclosureInvalid
 	}
-	// Phone is disclosed alongside the identity credential; treat it as best-effort
-	// (kept when present) rather than a hard requirement of a valid disclosure.
+	// Date of birth and phone are disclosed alongside the identity credential;
+	// treat them as best-effort (kept when present) rather than a hard requirement
+	// of a valid disclosure.
+	dateOfBirth := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimDateOfBirth])
 	phone := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimPhone])
 	return DisclosedIdentity{
-		Email: email,
-		Name:  identity.Name{GivenNames: given, LastName: family},
-		Phone: phone,
+		Email:       email,
+		Name:        identity.Name{GivenNames: given, LastName: family},
+		DateOfBirth: dateOfBirth,
+		Phone:       phone,
 	}, nil
 }
 

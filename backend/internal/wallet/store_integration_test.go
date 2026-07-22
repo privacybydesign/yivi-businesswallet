@@ -16,6 +16,23 @@ import (
 
 const stubKVK = "90001234"
 
+// stubAttestation is a fixed KVK attestation for the store-level tests: the store
+// persists whatever the registry validated, so these tests build the attestation
+// directly rather than depend on the registry's dataset. The requester is the
+// first (claimed) representative.
+func stubAttestation() registryprovider.RegistrationAttestation {
+	return registryprovider.RegistrationAttestation{
+		KVKNumber:                    stubKVK,
+		LegalName:                    "Stub Company B.V.",
+		EUID:                         "NL.KVK." + stubKVK,
+		RequesterIsRepresentative:    true,
+		RequesterRepresentativeIndex: 0,
+		Representatives: []registryprovider.Representative{
+			{Kind: registryprovider.KindBestuurder, GivenNames: "Alice", FamilyName: "Owner", Authority: registryprovider.AuthoritySole},
+		},
+	}
+}
+
 // TestRegisterOrganization is the end-to-end regression for the atomic
 // registration: one attestation must create the org (with KVK identity + digital
 // address + active status), the owner membership, and the representation list
@@ -33,10 +50,7 @@ func TestRegisterOrganization(t *testing.T) {
 		t.Fatalf("create requester: %v", err)
 	}
 
-	att, err := registryprovider.NewStubRegistry().Consult(ctx, stubKVK)
-	if err != nil {
-		t.Fatalf("Consult: %v", err)
-	}
+	att := stubAttestation()
 
 	store := wallet.NewStore(pool, audit.NopRecorder{})
 	const slug = "stub-co"
@@ -121,10 +135,7 @@ func TestRegisterOrganizationRejectsDuplicateKVK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create requester: %v", err)
 	}
-	att, err := registryprovider.NewStubRegistry().Consult(ctx, stubKVK)
-	if err != nil {
-		t.Fatalf("Consult: %v", err)
-	}
+	att := stubAttestation()
 	store := wallet.NewStore(pool, audit.NopRecorder{})
 
 	if _, err := store.RegisterOrganization(ctx, requester.ID, "first", "a@qerds.localhost", "kvk-a@qerds.localhost", att); err != nil {
@@ -145,10 +156,7 @@ func TestSetStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create requester: %v", err)
 	}
-	att, err := registryprovider.NewStubRegistry().Consult(ctx, stubKVK)
-	if err != nil {
-		t.Fatalf("Consult: %v", err)
-	}
+	att := stubAttestation()
 	store := wallet.NewStore(pool, audit.NopRecorder{})
 	org, err := store.RegisterOrganization(ctx, requester.ID, "carol-co", "c@qerds.localhost", "kvk-c@qerds.localhost", att)
 	if err != nil {
