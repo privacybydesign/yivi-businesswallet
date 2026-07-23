@@ -13,6 +13,7 @@ import {
 import { inviteError } from "../lib/invite-error";
 import type { InviteErrorContent } from "../lib/invite-error";
 import { claimErrorKind } from "../lib/login-error";
+import { usePreAuthOrgTheme } from "../lib/pre-auth-theme";
 import {
   Avatar,
   Button,
@@ -76,6 +77,7 @@ type LoginPhase =
 
 export default function Login(): React.JSX.Element {
   const { t } = useTranslation();
+  usePreAuthOrgTheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<LoginPhase>("running");

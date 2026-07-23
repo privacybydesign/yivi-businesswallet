@@ -113,12 +113,12 @@ export function Sidebar({
     <aside
       className={[
         // Off-canvas drawer on small screens; a static column from `lg` up.
-        "border-line bg-surface fixed inset-y-0 left-0 z-50 flex h-screen w-58 shrink-0 flex-col border-r transition-transform duration-200",
+        "border-sidebar-line bg-sidebar text-sidebar-fg fixed inset-y-0 left-0 z-50 flex h-screen w-58 shrink-0 flex-col border-r transition-transform duration-200",
         open ? "translate-x-0" : "invisible -translate-x-full",
         "lg:visible lg:sticky lg:top-0 lg:z-auto lg:translate-x-0",
       ].join(" ")}
     >
-      <div className="border-line border-b px-4 pt-4.5 pb-3.5">
+      <div className="border-sidebar-line border-b px-4 pt-4.5 pb-3.5">
         <Logo src={brandLogoUri} alt={brandName} />
       </div>
 
@@ -140,8 +140,8 @@ export function Sidebar({
               [
                 "relative flex h-8.5 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] transition-colors",
                 isActive
-                  ? "bg-surface-3 text-ink font-semibold"
-                  : "text-ink-soft hover:bg-surface-3 hover:text-ink font-medium",
+                  ? "bg-sidebar-active text-sidebar-fg font-semibold"
+                  : "text-sidebar-fg-soft hover:bg-sidebar-active hover:text-sidebar-fg font-medium",
               ].join(" ")
             }
           >
@@ -158,13 +158,13 @@ export function Sidebar({
         ))}
       </nav>
 
-      <div className="border-line flex items-center gap-2.5 border-t px-3.5 py-2.5">
+      <div className="border-sidebar-line flex items-center gap-2.5 border-t px-3.5 py-2.5">
         <Avatar initials={personInitials(me)} />
         <div className="min-w-0 flex-1">
-          <div className="text-ink truncate text-[12.5px] font-semibold">
+          <div className="text-sidebar-fg truncate text-[12.5px] font-semibold">
             {fullName(me)}
           </div>
-          <div className="text-ink-soft text-[10.5px] capitalize">
+          <div className="text-sidebar-fg-soft text-[10.5px] capitalize">
             {roleLabel}
           </div>
         </div>
@@ -173,7 +173,7 @@ export function Sidebar({
           onClick={onLogout}
           disabled={loggingOut}
           aria-label={t("common.logOut")}
-          className="text-ink-soft hover:text-ink transition-colors disabled:opacity-50"
+          className="text-sidebar-fg-soft hover:text-sidebar-fg transition-colors disabled:opacity-50"
         >
           <Icon name="logout" size={NAV_ICON_SIZE} />
         </button>

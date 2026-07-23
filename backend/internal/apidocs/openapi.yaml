@@ -2440,9 +2440,12 @@ paths:
       summary: Update the organisation theme
       description: >-
         Requires an administrator role in the organisation. Sent as
-        multipart/form-data: string fields primaryColor and accentColor, an
-        optional logo image file that replaces the logo, and removeLogo=true to
-        clear it. Omitting both leaves the existing logo untouched.
+        multipart/form-data: the palette colour string fields (primaryColor,
+        accentColor, textColor, surfaceColor, borderColor, linkColor,
+        successColor, warningColor, errorColor), the navigation chrome colours
+        (sidebarColor, topbarColor), a body font (fontFamily), an optional logo
+        image file that replaces the logo, and removeLogo=true to clear it.
+        Omitting both leaves the existing logo untouched.
       requestBody:
         required: true
         content:
@@ -2456,6 +2459,36 @@ paths:
                 accentColor:
                   type: string
                   description: Accent colour as a 6-digit hex string; empty clears it.
+                textColor:
+                  type: string
+                  description: Text colour as a 6-digit hex string; empty clears it.
+                surfaceColor:
+                  type: string
+                  description: Surface colour as a 6-digit hex string; empty clears it.
+                borderColor:
+                  type: string
+                  description: Border colour as a 6-digit hex string; empty clears it.
+                linkColor:
+                  type: string
+                  description: Link colour as a 6-digit hex string; empty clears it.
+                successColor:
+                  type: string
+                  description: Success colour as a 6-digit hex string; empty clears it.
+                warningColor:
+                  type: string
+                  description: Warning colour as a 6-digit hex string; empty clears it.
+                errorColor:
+                  type: string
+                  description: Error colour as a 6-digit hex string; empty clears it.
+                sidebarColor:
+                  type: string
+                  description: Sidebar colour as a 6-digit hex string; empty clears it.
+                topbarColor:
+                  type: string
+                  description: Top bar colour as a 6-digit hex string; empty clears it.
+                fontFamily:
+                  type: string
+                  description: CSS font-family list (e.g. "Open Sans", sans-serif); empty uses the default.
                 logo:
                   type: string
                   format: binary

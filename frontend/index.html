@@ -10,24 +10,37 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Yivi | Business Wallet Dashboard</title>
     <script>
-      // Apply the active org's cached theme tokens before first paint, so a full
-      // reload never flashes the default palette before React swaps the tenant
-      // branding in. The org slug is the first path segment; the cache is
-      // written by cacheOrgTheme (src/lib/theme.ts) — keep the key and the token
-      // map in step with it. Any failure is swallowed: the runtime apply then
-      // themes the app a moment later, so this is only an optimisation.
+      // Apply the active org's cached theme before first paint, so a full reload
+      // never flashes the default palette before React swaps the tenant branding
+      // in. The org slug is the first path segment; the cache is written by
+      // cacheOrgTheme (src/lib/theme.ts) as { inline, css } — keep this reader in
+      // step with it. `inline` holds the mode-safe brand fills (set on the
+      // documentElement); `css` is the mode-aware block (surface/text/border/
+      // link/status) whose `:root:root` selector wins over Vite's CSS by
+      // specificity, so injecting it here has no source-order race. Any failure
+      // is swallowed: the runtime apply then themes the app a moment later, so
+      // this is only an optimisation.
       (function () {
         try {
           var slug = location.pathname.split("/")[1];
           if (!slug) return;
           var raw = localStorage.getItem("ybw.theme." + slug);
           if (!raw) return;
-          var tokens = JSON.parse(raw);
+          var payload = JSON.parse(raw);
+          var inline = (payload && payload.inline) || {};
           var style = document.documentElement.style;
-          for (var name in tokens) {
-            if (Object.prototype.hasOwnProperty.call(tokens, name)) {
-              style.setProperty(name, tokens[name]);
+          for (var name in inline) {
+            if (Object.prototype.hasOwnProperty.call(inline, name)) {
+              style.setProperty(name, inline[name]);
             }
+          }
+          if (payload && payload.css) {
+            var el =
+              document.getElementById("ybw-org-theme") ||
+              document.createElement("style");
+            el.id = "ybw-org-theme";
+            el.textContent = payload.css;
+            if (!el.isConnected) document.head.appendChild(el);
           }
         } catch (e) {
           /* no-op: fall back to the runtime apply */
