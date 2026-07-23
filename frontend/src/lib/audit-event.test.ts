@@ -86,6 +86,23 @@ describe("auditSubject", () => {
     expect(subject).toBe("alice@example.test");
   });
 
+  // The sent-encrypted-file create event carries the recipient list, not
+  // name/email/role, so the subject must join it — otherwise the row is blank.
+  it("joins the recipients for a sent-encrypted-file event", () => {
+    const subject = auditSubject(
+      event({
+        after: {
+          fileName: "contract.pdf",
+          sizeBytes: 1024,
+          recipients: ["alice@example.test", "bob@example.test"],
+          cryptifyUuid: "abc",
+        },
+      }),
+      dateFormatter,
+    );
+    expect(subject).toBe("alice@example.test, bob@example.test");
+  });
+
   it("prefers name/email over recipient when present", () => {
     expect(
       auditSubject(
