@@ -270,6 +270,11 @@ export function auditSubject(
 
   const snapshot = after ?? before;
   if (!snapshot) return null;
+  // `recipients` identifies a sent encrypted file (who it was sent to): the
+  // send handler rejects an empty list, so it is always a non-empty array.
+  if (Array.isArray(snapshot.recipients) && snapshot.recipients.length > 0) {
+    return snapshot.recipients.filter((r) => typeof r === "string").join(", ");
+  }
   // `recipient` identifies an issued attestation (who it was issued to); the
   // issue handler rejects an empty ref, so it is always present on that event.
   const id =

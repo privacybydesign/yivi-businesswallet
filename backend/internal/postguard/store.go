@@ -298,7 +298,7 @@ func (s *Store) RecordSentFile(ctx context.Context, orgID uuid.UUID, senderUserI
 			audit.Created(map[string]any{
 				"fileName":     f.FileName,
 				"sizeBytes":    f.SizeBytes,
-				"recipients":   len(f.Recipients),
+				"recipients":   f.Recipients,
 				"cryptifyUuid": f.CryptifyUUID,
 			}))
 	})
