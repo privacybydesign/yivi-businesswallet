@@ -22,6 +22,8 @@ type schemaStore interface {
 	CreateSchema(ctx context.Context, orgID uuid.UUID, in Schema) (Schema, error)
 	UpdateSchema(ctx context.Context, orgID, id uuid.UUID, in Schema) (Schema, error)
 	DeleteSchema(ctx context.Context, orgID, id uuid.UUID) error
+	GetSchemaLogo(ctx context.Context, orgID, id uuid.UUID) (Logo, error)
+	SetSchemaLogo(ctx context.Context, orgID, id uuid.UUID, logo LogoUpdate) (Schema, error)
 }
 
 type templateStore interface {
@@ -115,6 +117,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/attestations/schemas", admin(respond.HandlerFunc(h.createSchema)))
 	mux.Handle("GET /orgs/{slug}/attestations/schemas/{id}", admin(respond.HandlerFunc(h.getSchema)))
 	mux.Handle("GET /orgs/{slug}/attestations/schemas/{id}/issuer-config", admin(respond.HandlerFunc(h.schemaIssuerConfig)))
+	mux.Handle("GET /orgs/{slug}/attestations/schemas/{id}/logo", admin(respond.HandlerFunc(h.serveSchemaLogo)))
+	mux.Handle("PUT /orgs/{slug}/attestations/schemas/{id}/logo", admin(respond.HandlerFunc(h.putSchemaLogo)))
 	mux.Handle("PATCH /orgs/{slug}/attestations/schemas/{id}", admin(respond.HandlerFunc(h.updateSchema)))
 	mux.Handle("DELETE /orgs/{slug}/attestations/schemas/{id}", admin(respond.HandlerFunc(h.deleteSchema)))
 
@@ -230,6 +234,9 @@ func (h *Handler) listSchemas(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("listing attestation schemas: %w", err)
 	}
+	for i := range schemas {
+		schemas[i].LogoURI = schemaLogoURL(org.Slug, schemas[i])
+	}
 	respond.JSON(w, r, http.StatusOK, schemas)
 	return nil
 }
@@ -247,6 +254,7 @@ func (h *Handler) getSchema(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("getting attestation schema: %w", err)
 	}
+	sc.LogoURI = schemaLogoURL(org.Slug, sc)
 	respond.JSON(w, r, http.StatusOK, sc)
 	return nil
 }
@@ -270,8 +278,28 @@ func (h *Handler) schemaIssuerConfig(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return fmt.Errorf("getting attestation schema: %w", err)
 	}
-	respond.JSON(w, r, http.StatusOK, BuildIssuerConfig(sc, h.issuerURL))
+	logoURI, err := h.schemaLogoDataURI(r.Context(), org.ID, sc)
+	if err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, BuildIssuerConfig(sc, h.issuerURL, logoURI))
 	return nil
+}
+
+// schemaLogoDataURI resolves a schema's stored image as a data: URI for embedding
+// in the generated issuer config, or "" when the schema has no image.
+func (h *Handler) schemaLogoDataURI(ctx context.Context, orgID uuid.UUID, sc Schema) (string, error) {
+	if !sc.HasLogo {
+		return "", nil
+	}
+	logo, err := h.schemas.GetSchemaLogo(ctx, orgID, sc.ID)
+	if errors.Is(err, ErrNoSchemaLogo) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("getting attestation schema logo: %w", err)
+	}
+	return logoDataURI(logo), nil
 }
 
 // issuerBundle returns the full Veramo issuer GitOps bundle for the org: the
@@ -289,7 +317,17 @@ func (h *Handler) issuerBundle(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("listing attestation schemas: %w", err)
 	}
-	respond.JSON(w, r, http.StatusOK, BuildIssuerBundle(instance, displayName, logoURI, schemas))
+	schemaLogos := make(map[uuid.UUID]string)
+	for _, sc := range schemas {
+		dataURI, err := h.schemaLogoDataURI(r.Context(), org.ID, sc)
+		if err != nil {
+			return err
+		}
+		if dataURI != "" {
+			schemaLogos[sc.ID] = dataURI
+		}
+	}
+	respond.JSON(w, r, http.StatusOK, BuildIssuerBundle(instance, displayName, logoURI, schemas, schemaLogos))
 	return nil
 }
 
@@ -309,6 +347,7 @@ func (h *Handler) createSchema(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("creating attestation schema: %w", err)
 	}
+	sc.LogoURI = schemaLogoURL(org.Slug, sc)
 	respond.JSON(w, r, http.StatusCreated, sc)
 	return nil
 }
@@ -333,6 +372,7 @@ func (h *Handler) updateSchema(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("updating attestation schema: %w", err)
 	}
+	sc.LogoURI = schemaLogoURL(org.Slug, sc)
 	respond.JSON(w, r, http.StatusOK, sc)
 	return nil
 }

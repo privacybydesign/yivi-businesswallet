@@ -949,6 +949,15 @@ export const en = {
       displayName: "Display name",
       displayNameRequired: "Enter a display name.",
       displayNames: "Display names per language",
+      image: "Credential image",
+      imageChoose: "Choose file",
+      imageRemove: "Remove",
+      imageHint:
+        "Shown on the credential card in the wallet. PNG, JPEG, GIF, WebP or SVG, up to 512 KB.",
+      imageTypeInvalid:
+        "The image must be a PNG, JPEG, GIF, WebP or SVG image.",
+      imageTooLarge: "The image must be 512 KB or smaller.",
+      imagePreviewAlt: "Credential image preview",
       credentialConfigId: "Credential configuration ID",
       credentialConfigRequired: "Enter a credential configuration ID.",
       translationLang: "Language",
@@ -985,6 +994,7 @@ export const en = {
       issuerConfigMetadata:
         "Metadata fragment — merge into credential_configurations_supported in conf/metadata/<instance>.json",
       issuerConfigVct: "VCT document — add as conf/vct/<name>.json",
+      issuerConfigImage: "Credential image embedded in the config:",
       issuerConfigError: "Could not load the issuer config.",
     },
     templateForm: {

@@ -969,6 +969,15 @@ export const nl: Translation<typeof en> = {
       displayName: "Weergavenaam",
       displayNameRequired: "Voer een weergavenaam in.",
       displayNames: "Weergavenamen per taal",
+      image: "Credentialafbeelding",
+      imageChoose: "Bestand kiezen",
+      imageRemove: "Verwijderen",
+      imageHint:
+        "Wordt getoond op de credentialkaart in de wallet. PNG, JPEG, GIF, WebP of SVG, tot 512 KB.",
+      imageTypeInvalid:
+        "De afbeelding moet een PNG-, JPEG-, GIF-, WebP- of SVG-afbeelding zijn.",
+      imageTooLarge: "De afbeelding mag maximaal 512 KB zijn.",
+      imagePreviewAlt: "Voorbeeld van credentialafbeelding",
       credentialConfigId: "Credentialconfiguratie-ID",
       credentialConfigRequired: "Voer een credentialconfiguratie-ID in.",
       translationLang: "Taal",
@@ -1005,6 +1014,7 @@ export const nl: Translation<typeof en> = {
       issuerConfigMetadata:
         "Metadatafragment — voeg samen in credential_configurations_supported in conf/metadata/<instance>.json",
       issuerConfigVct: "VCT-document — voeg toe als conf/vct/<name>.json",
+      issuerConfigImage: "Credentialafbeelding ingesloten in de configuratie:",
       issuerConfigError: "De uitgeverconfiguratie kon niet worden geladen.",
     },
     templateForm: {

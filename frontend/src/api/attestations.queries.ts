@@ -23,6 +23,7 @@ import {
   suspendAttestationKey,
   updateAttestationSchema,
   updateAttestationTemplate,
+  uploadAttestationSchemaLogo,
 } from "./attestations";
 import type {
   AttestationClaim,
@@ -32,6 +33,7 @@ import type {
   AttestationSchema,
   AttestationSchemaInput,
   AttestationSchemaUpdate,
+  SchemaLogoChange,
   AttestationTemplate,
   AttestationTemplateInput,
   AttestationTemplateUpdate,
@@ -233,6 +235,32 @@ export function useUpdateAttestationSchemaMutation(
       });
       void queryClient.invalidateQueries({
         queryKey: attestationTemplatesQueryKey(slug),
+      });
+    },
+  });
+}
+
+// Uploads or clears a schema's credential image. The parent schema mutation
+// already toasts on save, so this one is silent — it only refreshes the schemas
+// query and the schema's issuer config so the preview reflects the new image.
+export function useUploadAttestationSchemaLogoMutation(
+  slug: string,
+): UseMutationResult<
+  AttestationSchema,
+  Error,
+  { schemaId: string; change: Exclude<SchemaLogoChange, "keep"> }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ schemaId, change }) =>
+      uploadAttestationSchemaLogo(slug, schemaId, change),
+    meta: { suppressErrorToast: true },
+    onSuccess: (_data, { schemaId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: attestationSchemasQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: attestationSchemaIssuerConfigQueryKey(slug, schemaId),
       });
     },
   });

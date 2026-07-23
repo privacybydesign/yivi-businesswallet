@@ -56,6 +56,13 @@ recipient step and the delivery route. On issue, the created offer is persisted
   the generated GitOps fragment. If the issuer's `BEARER_TOKEN` is ever enabled,
   the same `BuildIssuerConfig` mapping can drive a runtime `PUT/POST /api/credentials`
   push instead.
+- **A schema can carry a per-credential image.** Besides the issuer-level logo, a
+  schema stores an optional credential image (`attestation_schemas.logo_bytes`/
+  `logo_content_type`, mirroring the issuer-logo pipeline): uploaded/cleared via
+  `PUT .../attestations/schemas/{id}/logo` (multipart, admin) and previewed at
+  `GET .../attestations/schemas/{id}/logo`. `BuildIssuerConfig`/`BuildIssuerBundle`
+  embed it as a `data:` URI in the per-credential `display[].logo`, so a wallet can
+  render a distinct image per credential type on the credential card.
 - **Issuer instance is per-organization.** Each org has its own Veramo issuer
   instance (the `{instance}` path segment): a new `org_issuer_settings` slice
   (`internal/issuersettings`, org settings → **Issuer** tab) stores the instance
