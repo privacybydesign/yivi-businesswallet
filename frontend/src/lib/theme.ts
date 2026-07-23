@@ -404,20 +404,35 @@ interface ModeValue {
 
 // statusPair derives a status role from its seed: a chip background (the seed
 // mixed toward the mode's base, pale in light / dark in dark mode) and a solid
-// foreground colour nudged to clear AA against that chip. Both modes are
-// AA-safe by construction (the solid is forced past the 4.5:1 floor).
-function statusPair(seed: string): { light: ModeValue; dark: ModeValue } {
+// foreground/icon colour. The solid is nudged past the WCAG-AA floor against the
+// WORST-CASE background it actually lands on in that mode — not just its own
+// chip. `text-error` / `text-success` / `text-warning` render the solid bare on
+// the surface tiers (--yb-surface etc.) all over the app, and a surface seed
+// tints those tiers; in dark mode a tinted surface is lighter than the chip, so
+// light-on-light there would fall below AA if we only gated on the chip. So the
+// candidates are the chip PLUS every (possibly tinted) surface tier, and we gate
+// on the darkest of them in light mode / the lightest in dark mode. Both modes
+// stay AA-safe by construction on every background the solid can sit on.
+function statusPair(
+  seed: string,
+  surfaces: ReturnType<typeof surfaceTiers>,
+): { solid: ModeValue; bg: ModeValue } {
   const lightBg = mix(LIGHT.surface, seed, STATUS_BG_TINT_LIGHT);
   const darkBg = mix(DARK.surface2, seed, STATUS_BG_TINT_DARK);
+  const lightWorst = extremeBackground(
+    [...Object.values(surfaces.light), lightBg],
+    "darkest",
+  );
+  const darkWorst = extremeBackground(
+    [...Object.values(surfaces.dark), darkBg],
+    "lightest",
+  );
   return {
-    light: {
-      light: adjustToContrast(seed, lightBg, "darken"),
-      dark: lightBg,
+    solid: {
+      light: adjustToContrast(seed, lightWorst, "darken"),
+      dark: adjustToContrast(seed, darkWorst, "lighten"),
     },
-    dark: {
-      light: adjustToContrast(seed, darkBg, "lighten"),
-      dark: darkBg,
-    },
+    bg: { light: lightBg, dark: darkBg },
   };
 }
 
@@ -478,25 +493,28 @@ export function resolveThemeCss(
     out[LINK] = { light: link.light, dark: link.dark };
   }
 
-  // Semantic status roles.
+  // Semantic status roles. The solid is gated against the surface tiers it
+  // renders on (see statusPair), so it needs the theme's (possibly tinted)
+  // surfaces.
+  const statusSurfaces = surfaceTiers(theme);
   const success = theme?.successColor ?? "";
   if (parseHex(success)) {
-    const p = statusPair(success);
-    out[SUCCESS] = { light: p.light.light, dark: p.dark.light };
-    out[SUCCESS_BG] = { light: p.light.dark, dark: p.dark.dark };
+    const p = statusPair(success, statusSurfaces);
+    out[SUCCESS] = p.solid;
+    out[SUCCESS_BG] = p.bg;
   }
   const warning = theme?.warningColor ?? "";
   if (parseHex(warning)) {
-    const p = statusPair(warning);
-    out[WARNING] = { light: p.light.light, dark: p.dark.light };
-    out[WARNING_FG] = { light: p.light.light, dark: p.dark.light };
-    out[WARNING_BG] = { light: p.light.dark, dark: p.dark.dark };
+    const p = statusPair(warning, statusSurfaces);
+    out[WARNING] = p.solid;
+    out[WARNING_FG] = p.solid;
+    out[WARNING_BG] = p.bg;
   }
   const error = theme?.errorColor ?? "";
   if (parseHex(error)) {
-    const p = statusPair(error);
-    out[ERROR] = { light: p.light.light, dark: p.dark.light };
-    out[ERROR_BG] = { light: p.light.dark, dark: p.dark.dark };
+    const p = statusPair(error, statusSurfaces);
+    out[ERROR] = p.solid;
+    out[ERROR_BG] = p.bg;
   }
 
   return out;

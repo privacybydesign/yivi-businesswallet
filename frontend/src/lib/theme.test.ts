@@ -203,6 +203,57 @@ describe("resolveThemeCss", () => {
     },
   );
 
+  // Regression: text-error/-success/-warning render the status SOLID bare on the
+  // surface tiers (--yb-surface etc.), not only on its chip. A surface seed tints
+  // those tiers — lighter in dark mode — so a solid cleared only against its
+  // (darker) chip would fall below AA on the lighter surface. Pin the solid at AA
+  // against every tinted surface tier AND its chip, in both modes, with a surface
+  // seed set. #ffffff is the worst case (it lightens the dark surfaces most).
+  const SURFACE_SEEDS = ["#ffffff", "#1d4e89", "#ba3354", "#0a0a0a"];
+  const STATUS_ROLES = [
+    ["--yb-success", "--yb-success-bg"],
+    ["--yb-warning", "--yb-warning-bg"],
+    ["--yb-error", "--yb-error-bg"],
+  ] as const;
+
+  it.each(SURFACE_SEEDS)(
+    "keeps status solids AA on the tinted surfaces they sit on, both modes (surface %s)",
+    (surfaceColor) => {
+      const css = resolveThemeCss(
+        theme({
+          surfaceColor,
+          successColor: "#1a7f37",
+          warningColor: "#b06f00",
+          errorColor: "#bd1919",
+        }),
+      );
+      const lightSurfaces = [
+        css["--yb-surface"].light,
+        css["--yb-surface-2"].light,
+        css["--yb-surface-3"].light,
+      ];
+      const darkSurfaces = [
+        css["--yb-surface"].dark,
+        css["--yb-surface-2"].dark,
+        css["--yb-surface-3"].dark,
+      ];
+      for (const [solidKey, bgKey] of STATUS_ROLES) {
+        const solid = css[solidKey];
+        const bg = css[bgKey];
+        for (const bgLight of [bg.light, ...lightSurfaces]) {
+          expect(contrastRatio(solid.light, bgLight)!).toBeGreaterThanOrEqual(
+            AA_CONTRAST,
+          );
+        }
+        for (const bgDark of [bg.dark, ...darkSurfaces]) {
+          expect(contrastRatio(solid.dark, bgDark)!).toBeGreaterThanOrEqual(
+            AA_CONTRAST,
+          );
+        }
+      }
+    },
+  );
+
   it("gives warning a foreground alongside its chip background", () => {
     const css = resolveThemeCss(theme({ warningColor: "#eba73b" }));
     expect(Object.keys(css).sort()).toEqual([
