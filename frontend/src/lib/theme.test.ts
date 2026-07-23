@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   AA_CONTRAST,
+  buildThemeCss,
   contrastRatio,
   resolveLinkTheme,
+  resolveThemeCss,
   resolveThemeTokens,
   shouldApplyOrgTheme,
 } from "./theme";
@@ -18,6 +20,13 @@ function theme(overrides: Partial<OrgTheme>): OrgTheme {
     configured: true,
     primaryColor: "",
     accentColor: "",
+    textColor: "",
+    surfaceColor: "",
+    borderColor: "",
+    linkColor: "",
+    successColor: "",
+    warningColor: "",
+    errorColor: "",
     logoUri: "",
     ...overrides,
   };
@@ -130,6 +139,96 @@ describe("resolveLinkTheme", () => {
     // the seed itself (no needless darkening).
     const link = resolveLinkTheme(theme({ accentColor: "#ba3354" }));
     expect(link?.light).toBe("#ba3354");
+  });
+
+  it("prefers an explicit link seed over the accent", () => {
+    const fromAccent = resolveLinkTheme(theme({ accentColor: "#1d4e89" }));
+    const fromLink = resolveLinkTheme(
+      theme({ accentColor: "#1d4e89", linkColor: "#0a7d3a" }),
+    );
+    expect(fromLink).not.toEqual(fromAccent);
+  });
+});
+
+// resolveThemeCss derives the mode-aware palette (surface/border/text/link/
+// status) from the extra seeds. Every derived text/status pair must clear WCAG-AA
+// in BOTH light and dark mode, since the whole point of deriving (rather than
+// storing) these is to guarantee legibility on the surfaces they land on. If the
+// derivation drifts below the floor, a tenant could ship an unreadable theme —
+// so pin it here for a spread of seeds.
+describe("resolveThemeCss", () => {
+  const SEEDS = ["#ba3354", "#1d4e89", "#00973a", "#eba73b", "#0a0a0a"];
+
+  it("returns nothing for an unset theme", () => {
+    expect(resolveThemeCss(theme({}))).toEqual({});
+    expect(buildThemeCss(theme({}))).toBe("");
+    expect(buildThemeCss(null)).toBe("");
+  });
+
+  it("emits the three surface tiers when a surface seed is set", () => {
+    const css = resolveThemeCss(theme({ surfaceColor: "#1d4e89" }));
+    expect(Object.keys(css).sort()).toEqual([
+      "--yb-surface",
+      "--yb-surface-2",
+      "--yb-surface-3",
+    ]);
+  });
+
+  it.each(SEEDS)("derives AA-legible ink in both modes (%s)", (seed) => {
+    // Ink is gated against the worst-case surface tier in each mode; when no
+    // surface seed is set those are the design defaults (darkest light surface
+    // #f5f2ef; lightest dark surface #252322).
+    const css = resolveThemeCss(theme({ textColor: seed }));
+    const ink = css["--yb-ink"];
+    expect(contrastRatio(ink.light, "#f5f2ef")!).toBeGreaterThanOrEqual(
+      AA_CONTRAST,
+    );
+    expect(contrastRatio(ink.dark, "#252322")!).toBeGreaterThanOrEqual(
+      AA_CONTRAST,
+    );
+  });
+
+  it.each(SEEDS)(
+    "derives status colours that clear AA on their chip in both modes (%s)",
+    (seed) => {
+      const css = resolveThemeCss(theme({ successColor: seed }));
+      const solid = css["--yb-success"];
+      const bg = css["--yb-success-bg"];
+      expect(contrastRatio(solid.light, bg.light)!).toBeGreaterThanOrEqual(
+        AA_CONTRAST,
+      );
+      expect(contrastRatio(solid.dark, bg.dark)!).toBeGreaterThanOrEqual(
+        AA_CONTRAST,
+      );
+    },
+  );
+
+  it("gives warning a foreground alongside its chip background", () => {
+    const css = resolveThemeCss(theme({ warningColor: "#eba73b" }));
+    expect(Object.keys(css).sort()).toEqual([
+      "--yb-warning",
+      "--yb-warning-bg",
+      "--yb-warning-fg",
+    ]);
+    expect(
+      contrastRatio(
+        css["--yb-warning-fg"].light,
+        css["--yb-warning-bg"].light,
+      )!,
+    ).toBeGreaterThanOrEqual(AA_CONTRAST);
+  });
+});
+
+// buildThemeCss serialises the mode-aware map into a stylesheet the pre-paint
+// script (index.html) and the runtime apply both inject. The doubled
+// `:root:root` selector must win over index.css by specificity, and the dark
+// half must live under a prefers-color-scheme media query.
+describe("buildThemeCss", () => {
+  it("wraps the dark values in a prefers-color-scheme media query", () => {
+    const css = buildThemeCss(theme({ successColor: "#00973a" }));
+    expect(css).toContain(":root:root{");
+    expect(css).toContain("@media (prefers-color-scheme: dark){:root:root{");
+    expect(css).toContain("--yb-success:");
   });
 });
 

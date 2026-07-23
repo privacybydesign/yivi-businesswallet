@@ -2440,9 +2440,11 @@ paths:
       summary: Update the organisation theme
       description: >-
         Requires an administrator role in the organisation. Sent as
-        multipart/form-data: string fields primaryColor and accentColor, an
-        optional logo image file that replaces the logo, and removeLogo=true to
-        clear it. Omitting both leaves the existing logo untouched.
+        multipart/form-data: the palette colour string fields (primaryColor,
+        accentColor, textColor, surfaceColor, borderColor, linkColor,
+        successColor, warningColor, errorColor), an optional logo image file that
+        replaces the logo, and removeLogo=true to clear it. Omitting both leaves
+        the existing logo untouched.
       requestBody:
         required: true
         content:
@@ -2456,6 +2458,27 @@ paths:
                 accentColor:
                   type: string
                   description: Accent colour as a 6-digit hex string; empty clears it.
+                textColor:
+                  type: string
+                  description: Text colour as a 6-digit hex string; empty clears it.
+                surfaceColor:
+                  type: string
+                  description: Surface colour as a 6-digit hex string; empty clears it.
+                borderColor:
+                  type: string
+                  description: Border colour as a 6-digit hex string; empty clears it.
+                linkColor:
+                  type: string
+                  description: Link colour as a 6-digit hex string; empty clears it.
+                successColor:
+                  type: string
+                  description: Success colour as a 6-digit hex string; empty clears it.
+                warningColor:
+                  type: string
+                  description: Warning colour as a 6-digit hex string; empty clears it.
+                errorColor:
+                  type: string
+                  description: Error colour as a 6-digit hex string; empty clears it.
                 logo:
                   type: string
                   format: binary

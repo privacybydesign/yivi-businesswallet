@@ -19,6 +19,12 @@ func TestValidateColorsAcceptsEmptyAndWellFormedValues(t *testing.T) {
 		{PrimaryColor: "#1d4e89"}, // primary only
 		{PrimaryColor: "#000000", AccentColor: "#FFFFFF"}, // mixed case hex
 		{PrimaryColor: "#ba3354", AccentColor: "#9a2744"},
+		{ // full palette set
+			PrimaryColor: "#1d4e89", AccentColor: "#ba3354", TextColor: "#111827",
+			SurfaceColor: "#ffffff", BorderColor: "#e5e7eb", LinkColor: "#2563eb",
+			SuccessColor: "#16a34a", WarningColor: "#d97706", ErrorColor: "#dc2626",
+		},
+		{TextColor: "#abcdef", SuccessColor: "#012345"}, // a couple of the new fields only
 	}
 	for _, in := range inputs {
 		if err := validateColors(in); err != nil {
@@ -33,6 +39,8 @@ func TestValidateColorsRejectsMalformedValues(t *testing.T) {
 		"missing hash": {PrimaryColor: "1d4e89"},
 		"non-hex char": {PrimaryColor: "#gggggg"},
 		"bad accent":   {AccentColor: "red"},
+		"bad success":  {SuccessColor: "#12345"},
+		"bad text":     {TextColor: "green"},
 	}
 	for name, in := range cases {
 		t.Run(name, func(t *testing.T) {

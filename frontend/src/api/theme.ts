@@ -10,22 +10,44 @@ export const themeSchema = z.object({
   configured: z.boolean(),
   primaryColor: z.string(),
   accentColor: z.string(),
+  textColor: z.string(),
+  surfaceColor: z.string(),
+  borderColor: z.string(),
+  linkColor: z.string(),
+  successColor: z.string(),
+  warningColor: z.string(),
+  errorColor: z.string(),
   logoUri: z.string(),
   updatedAt: z.string().optional(),
 });
 
 export type OrgTheme = z.infer<typeof themeSchema>;
 
+// The palette colours a tenant can set, beyond the logo. Each is a CSS hex
+// string ("" when unset); the frontend maps them onto its design tokens. Kept in
+// step with the backend SettingsInput form fields.
+export const THEME_COLOR_FIELDS = [
+  "primaryColor",
+  "accentColor",
+  "textColor",
+  "surfaceColor",
+  "borderColor",
+  "linkColor",
+  "successColor",
+  "warningColor",
+  "errorColor",
+] as const;
+
+export type ThemeColorField = (typeof THEME_COLOR_FIELDS)[number];
+
 // The logo change to apply when saving: a File uploads a new logo, "remove"
 // clears the current one, and "keep" leaves it untouched (so colours can be
 // changed on their own).
 export type LogoChange = File | "keep" | "remove";
 
-export interface OrgThemeInput {
-  primaryColor: string;
-  accentColor: string;
+export type OrgThemeInput = Record<ThemeColorField, string> & {
   logo: LogoChange;
-}
+};
 
 function base(slug: string): string {
   return `/api/v1/orgs/${encodeURIComponent(slug)}`;
@@ -56,8 +78,9 @@ export async function updateOrgTheme(
   signal?: AbortSignal,
 ): Promise<OrgTheme> {
   const form = new FormData();
-  form.append("primaryColor", input.primaryColor);
-  form.append("accentColor", input.accentColor);
+  for (const field of THEME_COLOR_FIELDS) {
+    form.append(field, input[field]);
+  }
   if (input.logo instanceof File) {
     form.append("logo", input.logo);
   } else if (input.logo === "remove") {

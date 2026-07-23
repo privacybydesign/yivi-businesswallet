@@ -95,6 +95,13 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
 	in := SettingsInput{
 		PrimaryColor: strings.TrimSpace(r.FormValue("primaryColor")),
 		AccentColor:  strings.TrimSpace(r.FormValue("accentColor")),
+		TextColor:    strings.TrimSpace(r.FormValue("textColor")),
+		SurfaceColor: strings.TrimSpace(r.FormValue("surfaceColor")),
+		BorderColor:  strings.TrimSpace(r.FormValue("borderColor")),
+		LinkColor:    strings.TrimSpace(r.FormValue("linkColor")),
+		SuccessColor: strings.TrimSpace(r.FormValue("successColor")),
+		WarningColor: strings.TrimSpace(r.FormValue("warningColor")),
+		ErrorColor:   strings.TrimSpace(r.FormValue("errorColor")),
 	}
 	if err := validateColors(in); err != nil {
 		return err
@@ -239,6 +246,27 @@ func validateColors(in SettingsInput) error {
 	}
 	if in.AccentColor != "" && !colorPattern.MatchString(in.AccentColor) {
 		return badRequest("invalid_input", "accentColor must be a hex colour like #1d4e89")
+	}
+	if in.TextColor != "" && !colorPattern.MatchString(in.TextColor) {
+		return badRequest("invalid_input", "textColor must be a hex colour like #1d4e89")
+	}
+	if in.SurfaceColor != "" && !colorPattern.MatchString(in.SurfaceColor) {
+		return badRequest("invalid_input", "surfaceColor must be a hex colour like #1d4e89")
+	}
+	if in.BorderColor != "" && !colorPattern.MatchString(in.BorderColor) {
+		return badRequest("invalid_input", "borderColor must be a hex colour like #1d4e89")
+	}
+	if in.LinkColor != "" && !colorPattern.MatchString(in.LinkColor) {
+		return badRequest("invalid_input", "linkColor must be a hex colour like #1d4e89")
+	}
+	if in.SuccessColor != "" && !colorPattern.MatchString(in.SuccessColor) {
+		return badRequest("invalid_input", "successColor must be a hex colour like #1d4e89")
+	}
+	if in.WarningColor != "" && !colorPattern.MatchString(in.WarningColor) {
+		return badRequest("invalid_input", "warningColor must be a hex colour like #1d4e89")
+	}
+	if in.ErrorColor != "" && !colorPattern.MatchString(in.ErrorColor) {
+		return badRequest("invalid_input", "errorColor must be a hex colour like #1d4e89")
 	}
 	return nil
 }
