@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { request } from "./http";
+import { absoluteApiUrl, request } from "./http";
 
 // The value types an attribute may declare, mirroring the backend's
 // SupportedAttributeTypes allow-list. The schema editor offers these as a
@@ -153,7 +153,9 @@ export function resolveSubjectSource(
 }
 
 // A credential schema: the shape of an attestation (its VCT + attributes),
-// independent of any issuance defaults.
+// independent of any issuance defaults. logoUri is the API path serving the
+// uploaded credential image for the admin builder preview ("" when none); the
+// generated issuer config bundle embeds the image as a data: URI for wallets.
 export const attestationSchemaSchema = z.object({
   id: z.string(),
   organizationId: z.string(),
@@ -165,6 +167,7 @@ export const attestationSchemaSchema = z.object({
   subjectType: attestationSubjectTypeSchema,
   qualified: z.boolean(),
   status: z.string(),
+  logoUri: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -172,6 +175,18 @@ export const attestationSchemaSchema = z.object({
 export type AttestationSchema = z.infer<typeof attestationSchemaSchema>;
 
 const attestationSchemaListSchema = z.array(attestationSchemaSchema);
+
+// The credential-image change to apply after saving a schema: a File uploads a
+// new image, "remove" clears the current one, and "keep" leaves it untouched.
+export type SchemaLogoChange = File | "keep" | "remove";
+
+// The backend returns the image as a path on the API; make it absolute so an
+// <img> loads it from the API origin even when the SPA is served elsewhere.
+function withAbsoluteLogo(schema: AttestationSchema): AttestationSchema {
+  return schema.logoUri
+    ? { ...schema, logoUri: absoluteApiUrl(schema.logoUri) }
+    : schema;
+}
 
 // A template pairs a schema with issuance defaults (validity, key material,
 // prefilled attributes) and is enriched server-side with the schema's fields.
@@ -398,52 +413,89 @@ function base(slug: string): string {
   return `/api/v1/orgs/${encodeURIComponent(slug)}/attestations`;
 }
 
-export function getAttestationSchemas(
+export async function getAttestationSchemas(
   slug: string,
   signal?: AbortSignal,
 ): Promise<AttestationSchema[]> {
-  return request(`${base(slug)}/schemas`, {
+  const schemas = await request(`${base(slug)}/schemas`, {
     schema: attestationSchemaListSchema,
     signal,
   });
+  return schemas.map(withAbsoluteLogo);
 }
 
-export function getAttestationSchema(
+export async function getAttestationSchema(
   slug: string,
   schemaId: string,
   signal?: AbortSignal,
 ): Promise<AttestationSchema> {
-  return request(`${base(slug)}/schemas/${encodeURIComponent(schemaId)}`, {
-    schema: attestationSchemaSchema,
-    signal,
-  });
+  const schema = await request(
+    `${base(slug)}/schemas/${encodeURIComponent(schemaId)}`,
+    {
+      schema: attestationSchemaSchema,
+      signal,
+    },
+  );
+  return withAbsoluteLogo(schema);
 }
 
-export function createAttestationSchema(
+export async function createAttestationSchema(
   slug: string,
   input: AttestationSchemaInput,
   signal?: AbortSignal,
 ): Promise<AttestationSchema> {
-  return request(`${base(slug)}/schemas`, {
+  const schema = await request(`${base(slug)}/schemas`, {
     schema: attestationSchemaSchema,
     method: "POST",
     body: input,
     signal,
   });
+  return withAbsoluteLogo(schema);
 }
 
-export function updateAttestationSchema(
+export async function updateAttestationSchema(
   slug: string,
   schemaId: string,
   input: AttestationSchemaUpdate,
   signal?: AbortSignal,
 ): Promise<AttestationSchema> {
-  return request(`${base(slug)}/schemas/${encodeURIComponent(schemaId)}`, {
-    schema: attestationSchemaSchema,
-    method: "PATCH",
-    body: input,
-    signal,
-  });
+  const schema = await request(
+    `${base(slug)}/schemas/${encodeURIComponent(schemaId)}`,
+    {
+      schema: attestationSchemaSchema,
+      method: "PATCH",
+      body: input,
+      signal,
+    },
+  );
+  return withAbsoluteLogo(schema);
+}
+
+// Uploads, replaces or clears a schema's credential image via the multipart logo
+// sub-resource. A File replaces the image; "remove" clears it; "keep" is a no-op
+// the caller should skip.
+export async function uploadAttestationSchemaLogo(
+  slug: string,
+  schemaId: string,
+  change: Exclude<SchemaLogoChange, "keep">,
+  signal?: AbortSignal,
+): Promise<AttestationSchema> {
+  const form = new FormData();
+  if (change instanceof File) {
+    form.append("logo", change);
+  } else {
+    form.append("removeLogo", "true");
+  }
+  const schema = await request(
+    `${base(slug)}/schemas/${encodeURIComponent(schemaId)}/logo`,
+    {
+      schema: attestationSchemaSchema,
+      method: "PUT",
+      body: form,
+      signal,
+    },
+  );
+  return withAbsoluteLogo(schema);
 }
 
 // The Veramo issuer GitOps config generated from a schema: the metadata fragment

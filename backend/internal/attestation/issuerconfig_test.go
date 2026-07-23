@@ -38,7 +38,7 @@ func sampleSchema() Schema {
 }
 
 func TestBuildIssuerConfigMapsCredentialAndClaimDisplay(t *testing.T) {
-	cfg := BuildIssuerConfig(sampleSchema(), "https://issuer.example/test-issuer")
+	cfg := BuildIssuerConfig(sampleSchema(), "https://issuer.example/test-issuer", "")
 
 	if cfg.CredentialConfigID != "nl.caesar.employee" {
 		t.Fatalf("credentialConfigId: got %q", cfg.CredentialConfigID)
@@ -93,8 +93,53 @@ func TestBuildIssuerConfigMapsCredentialAndClaimDisplay(t *testing.T) {
 	}
 }
 
+// TestBuildIssuerConfigEmbedsCredentialLogo checks the per-credential image is
+// attached to every language of the credential display (both the top-level and
+// credential_metadata display), as a data: URI, so a wallet renders it on the
+// credential card.
+func TestBuildIssuerConfigEmbedsCredentialLogo(t *testing.T) {
+	const logoURI = "data:image/png;base64,AAAA"
+	cfg := BuildIssuerConfig(sampleSchema(), "https://issuer.example/test-issuer", logoURI)
+	entry := cfg.Metadata["nl.caesar.employee"]
+
+	for _, display := range [][]localeDisplay{entry.Display, entry.CredentialMetadata.Display} {
+		if len(display) != 2 {
+			t.Fatalf("expected 2 display entries, got %d", len(display))
+		}
+		for _, d := range display {
+			if d.Logo == nil {
+				t.Fatalf("credential display entry %q missing logo", d.Locale)
+			}
+			if d.Logo.URI != logoURI {
+				t.Fatalf("logo uri: got %q want %q", d.Logo.URI, logoURI)
+			}
+		}
+	}
+
+	// No image -> no logo attached.
+	plain := BuildIssuerConfig(sampleSchema(), "https://issuer.example/test-issuer", "")
+	if plain.Metadata["nl.caesar.employee"].Display[0].Logo != nil {
+		t.Fatalf("expected no logo when no image is provided")
+	}
+}
+
+// TestBuildIssuerConfigLogoWithoutDisplayNames synthesises a default-language
+// display entry so an image is not dropped when a schema declares no display names.
+func TestBuildIssuerConfigLogoWithoutDisplayNames(t *testing.T) {
+	s := sampleSchema()
+	s.Display = nil
+	cfg := BuildIssuerConfig(s, "", "data:image/png;base64,AAAA")
+	display := cfg.Metadata["nl.caesar.employee"].Display
+	if len(display) != 1 {
+		t.Fatalf("expected 1 synthesised display entry, got %d", len(display))
+	}
+	if display[0].Name != s.DisplayName || display[0].Locale != defaultVctLanguage || display[0].Logo == nil {
+		t.Fatalf("synthesised display entry wrong: %+v", display[0])
+	}
+}
+
 func TestBuildIssuerConfigVCTDocument(t *testing.T) {
-	cfg := BuildIssuerConfig(sampleSchema(), "https://issuer.example/test-issuer")
+	cfg := BuildIssuerConfig(sampleSchema(), "https://issuer.example/test-issuer", "")
 
 	if cfg.VCT.Path != "/vct/nl-caesar-employee" {
 		t.Fatalf("vct path: got %q", cfg.VCT.Path)
@@ -128,7 +173,7 @@ func TestBuildIssuerBundle(t *testing.T) {
 			Display:            []LocalizedName{{Lang: "en", Name: "Approved supplier"}},
 		},
 	}
-	bundle := BuildIssuerBundle("yivi", "Yivi B.V.", "data:image/png;base64,AAAA", schemas)
+	bundle := BuildIssuerBundle("yivi", "Yivi B.V.", "data:image/png;base64,AAAA", schemas, nil)
 
 	if bundle.Instance != "yivi" {
 		t.Fatalf("instance: got %q", bundle.Instance)
@@ -178,7 +223,7 @@ func TestBuildIssuerBundle(t *testing.T) {
 // TestBuildIssuerConfigJSONShape locks the emitted JSON keys to the exact names
 // the Veramo issuer's conf/metadata/<instance>.json expects.
 func TestBuildIssuerConfigJSONShape(t *testing.T) {
-	cfg := BuildIssuerConfig(sampleSchema(), "https://issuer.example/test-issuer")
+	cfg := BuildIssuerConfig(sampleSchema(), "https://issuer.example/test-issuer", "")
 	raw, err := json.Marshal(cfg.Metadata["nl.caesar.employee"])
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

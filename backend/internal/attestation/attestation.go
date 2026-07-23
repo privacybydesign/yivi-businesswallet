@@ -18,6 +18,7 @@ import (
 var (
 	ErrSchemaNotFound        = errors.New("attestation: schema not found")
 	ErrSchemaVctTaken        = errors.New("attestation: schema vct already exists")
+	ErrNoSchemaLogo          = errors.New("attestation: schema has no logo")
 	ErrTemplateNotFound      = errors.New("attestation: template not found")
 	ErrKeyNotFound           = errors.New("attestation: key not found")
 	ErrIssuedNotFound        = errors.New("attestation: issued attestation not found")
@@ -90,6 +91,12 @@ func isSupportedAttributeType(t string) bool {
 }
 
 // Schema is a credential-type definition an organization can issue.
+//
+// LogoURI is the API path that serves an uploaded credential image for the admin
+// preview (set by the handler, "" when none is stored); HasLogo reports whether
+// an image is stored (populated on read, not part of the wire shape). The
+// wallet-facing issuer config bundle embeds the image as a data: URI instead
+// (see BuildIssuerConfig).
 type Schema struct {
 	ID                 uuid.UUID       `json:"id"`
 	OrganizationID     uuid.UUID       `json:"organizationId"`
@@ -101,8 +108,25 @@ type Schema struct {
 	Display            []LocalizedName `json:"display,omitempty"`
 	Qualified          bool            `json:"qualified"`
 	Status             string          `json:"status"`
+	LogoURI            string          `json:"logoUri"`
+	HasLogo            bool            `json:"-"`
 	CreatedAt          time.Time       `json:"createdAt"`
 	UpdatedAt          time.Time       `json:"updatedAt"`
+}
+
+// Logo is an uploaded credential image held in the store.
+type Logo struct {
+	Bytes       []byte
+	ContentType string
+}
+
+// LogoUpdate describes what to do with a schema's stored image when applying an
+// upload. Replace true with a non-empty Logo stores it; Replace true with an
+// empty Logo clears it. (Replace false is unused today — the upload endpoint
+// always carries an intent — but mirrors issuersettings.LogoUpdate.)
+type LogoUpdate struct {
+	Replace bool
+	Logo    Logo
 }
 
 // Key is a signing key-material reference (never the private key itself).

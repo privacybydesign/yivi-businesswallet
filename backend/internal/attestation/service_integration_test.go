@@ -3,8 +3,12 @@
 package attestation_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -265,6 +269,91 @@ func TestTemplateAttributeSourcesRoundTrip(t *testing.T) {
 	}
 	if len(updated.AttributeSources) != 0 {
 		t.Fatalf("AttributeSources after clear = %v, want empty", updated.AttributeSources)
+	}
+}
+
+// TestSchemaLogoRoundTrip stores, replaces and clears a schema's credential image
+// and checks it is embedded into the generated issuer config as a data: URI.
+func TestSchemaLogoRoundTrip(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+
+	// A 1x1 PNG so http.DetectContentType recognises image/png.
+	png := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+		0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
+	}
+
+	schema, err := e.store.CreateSchema(ctx, e.orgID, attestation.Schema{
+		VCT:                "nl.caesar.card",
+		DisplayName:        "Card",
+		CredentialConfigID: "nl.caesar.card",
+		SubjectType:        attestation.SubjectNaturalPerson,
+		Attributes:         []attestation.AttributeDef{{Key: "email", Label: "E-mail", Type: "string", Required: true}},
+		Display:            []attestation.LocalizedName{{Lang: "en", Name: "Card"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateSchema: %v", err)
+	}
+	if schema.HasLogo {
+		t.Fatalf("new schema should have no image")
+	}
+	if _, err := e.store.GetSchemaLogo(ctx, e.orgID, schema.ID); !errors.Is(err, attestation.ErrNoSchemaLogo) {
+		t.Fatalf("GetSchemaLogo on empty = %v, want ErrNoSchemaLogo", err)
+	}
+
+	// Store an image; it round-trips and flags HasLogo.
+	updated, err := e.store.SetSchemaLogo(ctx, e.orgID, schema.ID, attestation.LogoUpdate{
+		Replace: true, Logo: attestation.Logo{Bytes: png, ContentType: "image/png"},
+	})
+	if err != nil {
+		t.Fatalf("SetSchemaLogo: %v", err)
+	}
+	if !updated.HasLogo {
+		t.Fatalf("schema should have an image after upload")
+	}
+	logo, err := e.store.GetSchemaLogo(ctx, e.orgID, schema.ID)
+	if err != nil {
+		t.Fatalf("GetSchemaLogo: %v", err)
+	}
+	if !bytes.Equal(logo.Bytes, png) || logo.ContentType != "image/png" {
+		t.Fatalf("logo round-trip mismatch: type=%q len=%d", logo.ContentType, len(logo.Bytes))
+	}
+
+	// The image reaches the generated issuer config as a data: URI.
+	stored, err := e.store.GetSchema(ctx, e.orgID, schema.ID)
+	if err != nil {
+		t.Fatalf("GetSchema: %v", err)
+	}
+	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(logo.Bytes)
+	cfg := attestation.BuildIssuerConfig(stored, "", dataURI)
+	raw, err := json.Marshal(cfg.Metadata)
+	if err != nil {
+		t.Fatalf("marshal issuer config: %v", err)
+	}
+	if !strings.Contains(string(raw), dataURI) {
+		t.Fatalf("issuer config credential display missing embedded image: %s", raw)
+	}
+
+	// Clearing the image resets HasLogo and returns ErrNoSchemaLogo.
+	cleared, err := e.store.SetSchemaLogo(ctx, e.orgID, schema.ID, attestation.LogoUpdate{Replace: true})
+	if err != nil {
+		t.Fatalf("SetSchemaLogo clear: %v", err)
+	}
+	if cleared.HasLogo {
+		t.Fatalf("schema should have no image after clear")
+	}
+	if _, err := e.store.GetSchemaLogo(ctx, e.orgID, schema.ID); !errors.Is(err, attestation.ErrNoSchemaLogo) {
+		t.Fatalf("GetSchemaLogo after clear = %v, want ErrNoSchemaLogo", err)
+	}
+
+	// A missing schema is distinguished from a missing image.
+	if _, err := e.store.GetSchemaLogo(ctx, e.orgID, uuid.New()); !errors.Is(err, attestation.ErrSchemaNotFound) {
+		t.Fatalf("GetSchemaLogo unknown schema = %v, want ErrSchemaNotFound", err)
+	}
+	if _, err := e.store.SetSchemaLogo(ctx, e.orgID, uuid.New(), attestation.LogoUpdate{Replace: true}); !errors.Is(err, attestation.ErrSchemaNotFound) {
+		t.Fatalf("SetSchemaLogo unknown schema = %v, want ErrSchemaNotFound", err)
 	}
 }
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import type {
@@ -6,12 +6,14 @@ import type {
   AttestationSchema,
   AttestationSubjectType,
   LocalizedName,
+  SchemaLogoChange,
 } from "../api/attestations";
 import { SUPPORTED_ATTRIBUTE_TYPES } from "../api/attestations";
 import {
   useAttestationSchemaIssuerConfigQuery,
   useCreateAttestationSchemaMutation,
   useUpdateAttestationSchemaMutation,
+  useUploadAttestationSchemaLogoMutation,
 } from "../api/attestations.queries";
 import { Button, Modal } from "../ui";
 import { control } from "../lib/attestation-form";
@@ -26,6 +28,17 @@ const SUBJECT_TYPES: readonly AttestationSubjectType[] = [
   SUBJECT_NATURAL_PERSON,
   SUBJECT_ORGANIZATION,
 ];
+
+// Keep the accepted types and size cap in step with the backend detectLogoType
+// allowlist and MaxLogoBytes (internal/attestation/schema_logo.go).
+const ACCEPTED_LOGO_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+];
+const MAX_LOGO_BYTES = 512 * 1024;
 
 // A per-language display entry as edited in the form: a BCP-47 language tag and
 // the shown text. Converted to the API's {lang,name} / {lang,label} shapes on
@@ -90,6 +103,7 @@ export function AttestationSchemaForm({
   const isEdit = schema !== undefined;
   const create = useCreateAttestationSchemaMutation(slug);
   const update = useUpdateAttestationSchemaMutation(slug);
+  const uploadLogo = useUploadAttestationSchemaLogoMutation(slug);
 
   const [vct, setVct] = useState(schema?.vct ?? "");
   const [displayName, setDisplayName] = useState(schema?.displayName ?? "");
@@ -111,6 +125,20 @@ export function AttestationSchemaForm({
   );
   const [attempted, setAttempted] = useState(false);
   const [showIssuerConfig, setShowIssuerConfig] = useState(false);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [newLogoUrl, setNewLogoUrl] = useState<string | null>(null);
+  const [removeLogo, setRemoveLogo] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+
+  // The object URL for a freshly picked file is created in the change handler
+  // (not render), so this effect only revokes the previous one when it changes
+  // or the form unmounts.
+  useEffect(() => {
+    if (!newLogoUrl) {
+      return;
+    }
+    return () => URL.revokeObjectURL(newLogoUrl);
+  }, [newLogoUrl]);
 
   const issuerConfig = useAttestationSchemaIssuerConfigQuery(
     slug,
@@ -118,9 +146,47 @@ export function AttestationSchemaForm({
     isEdit && showIssuerConfig,
   );
 
-  const pending = create.isPending || update.isPending;
-  const mutationError = create.error ?? update.error;
-  const showError = create.isError || update.isError;
+  const pending = create.isPending || update.isPending || uploadLogo.isPending;
+  const mutationError = create.error ?? update.error ?? uploadLogo.error;
+  const showError = create.isError || update.isError || uploadLogo.isError;
+
+  const hasStoredLogo = (schema?.logoUri ?? "") !== "";
+  const showStoredLogo = hasStoredLogo && !removeLogo && logoFile === null;
+  const logoPreviewSrc = logoFile
+    ? newLogoUrl
+    : showStoredLogo
+      ? (schema?.logoUri ?? null)
+      : null;
+
+  function handleLogoSelect(file: File | null): void {
+    if (!file) {
+      return;
+    }
+    if (!ACCEPTED_LOGO_TYPES.includes(file.type)) {
+      setLogoError(t("attestations.schemaForm.imageTypeInvalid"));
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setLogoError(t("attestations.schemaForm.imageTooLarge"));
+      return;
+    }
+    setLogoError(null);
+    setRemoveLogo(false);
+    setLogoFile(file);
+    setNewLogoUrl(URL.createObjectURL(file));
+  }
+
+  function handleLogoRemove(): void {
+    setLogoError(null);
+    setLogoFile(null);
+    setNewLogoUrl(null);
+    setRemoveLogo(true);
+  }
+
+  // The image change to apply after the schema is saved. "keep" is a no-op the
+  // submit handler skips (the logo endpoint needs an existing schema id).
+  const logoChange: SchemaLogoChange =
+    logoFile ?? (removeLogo ? "remove" : "keep");
 
   const trimmedVct = vct.trim();
   const trimmedName = displayName.trim();
@@ -161,7 +227,9 @@ export function AttestationSchemaForm({
     setRows((current) => current.filter((_, i) => i !== index));
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
+  async function handleSubmit(
+    event: React.FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault();
     setAttempted(true);
     if (pending) {
@@ -175,36 +243,43 @@ export function AttestationSchemaForm({
     ) {
       return;
     }
-    if (isEdit && schema) {
-      update.mutate(
-        {
-          schemaId: schema.id,
-          input: {
-            displayName: trimmedName,
-            credentialConfigId: trimmedConfig,
-            attributes,
-            display,
-            subjectType,
-            qualified,
-            status: status.trim() || DEFAULT_STATUS,
-          },
-        },
-        { onSuccess: onClose },
-      );
-    } else {
-      create.mutate(
-        {
-          vct: trimmedVct,
-          displayName: trimmedName,
-          credentialConfigId: trimmedConfig,
-          attributes,
-          display,
-          subjectType,
-          qualified,
-          status: status.trim() || DEFAULT_STATUS,
-        },
-        { onSuccess: onClose },
-      );
+    try {
+      // Save the schema first, then apply the image to the saved id (the logo
+      // endpoint is a sub-resource of an existing schema). Errors surface via the
+      // mutation state; mutateAsync rejects, so the catch just stops here.
+      const saved =
+        isEdit && schema
+          ? await update.mutateAsync({
+              schemaId: schema.id,
+              input: {
+                displayName: trimmedName,
+                credentialConfigId: trimmedConfig,
+                attributes,
+                display,
+                subjectType,
+                qualified,
+                status: status.trim() || DEFAULT_STATUS,
+              },
+            })
+          : await create.mutateAsync({
+              vct: trimmedVct,
+              displayName: trimmedName,
+              credentialConfigId: trimmedConfig,
+              attributes,
+              display,
+              subjectType,
+              qualified,
+              status: status.trim() || DEFAULT_STATUS,
+            });
+      if (logoChange !== "keep") {
+        await uploadLogo.mutateAsync({
+          schemaId: saved.id,
+          change: logoChange,
+        });
+      }
+      onClose();
+    } catch {
+      // The failing mutation's error is rendered below; keep the form open.
     }
   }
 
@@ -234,7 +309,7 @@ export function AttestationSchemaForm({
     >
       <form
         id={FORM_ID}
-        onSubmit={handleSubmit}
+        onSubmit={(event) => void handleSubmit(event)}
         noValidate
         className="flex flex-col gap-4"
       >
@@ -303,6 +378,50 @@ export function AttestationSchemaForm({
             textLabel={t("attestations.schemaForm.displayName")}
             textPlaceholder={t("attestations.schemaForm.displayName")}
           />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-ink-soft text-[12px] font-semibold">
+            {t("attestations.schemaForm.image")}
+          </span>
+          <div className="flex items-center gap-2">
+            <label className="rounded-yivi border-line-strong bg-surface text-ink hover:bg-surface-3 focus-within:border-ink focus-within:ring-ink/10 inline-flex h-9 cursor-pointer items-center border px-3 text-[13px] font-medium transition-colors focus-within:ring-3">
+              <input
+                type="file"
+                accept={ACCEPTED_LOGO_TYPES.join(",")}
+                className="sr-only"
+                onChange={(event) =>
+                  handleLogoSelect(event.target.files?.[0] ?? null)
+                }
+              />
+              {t("attestations.schemaForm.imageChoose")}
+            </label>
+            {(logoFile !== null || showStoredLogo) && (
+              <Button variant="ghost" size="sm" onClick={handleLogoRemove}>
+                {t("attestations.schemaForm.imageRemove")}
+              </Button>
+            )}
+            {logoPreviewSrc && (
+              <img
+                src={logoPreviewSrc}
+                alt={t("attestations.schemaForm.imagePreviewAlt")}
+                className="max-h-9 max-w-[120px]"
+              />
+            )}
+          </div>
+          {logoFile && (
+            <span className="text-ink-soft truncate text-[12px]">
+              {logoFile.name}
+            </span>
+          )}
+          <span className="text-muted text-[11px]">
+            {t("attestations.schemaForm.imageHint")}
+          </span>
+          {logoError && (
+            <span role="alert" className="text-error text-[12px]">
+              {logoError}
+            </span>
+          )}
         </div>
 
         <Field
@@ -474,6 +593,18 @@ export function AttestationSchemaForm({
                 )}
                 {issuerConfig.data && (
                   <div className="flex flex-col gap-3">
+                    {logoPreviewSrc && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-ink-soft text-[12px]">
+                          {t("attestations.schemaForm.issuerConfigImage")}
+                        </span>
+                        <img
+                          src={logoPreviewSrc}
+                          alt={t("attestations.schemaForm.imagePreviewAlt")}
+                          className="max-h-9 max-w-[120px]"
+                        />
+                      </div>
+                    )}
                     <JsonSnippet
                       title={t("attestations.schemaForm.issuerConfigMetadata")}
                       value={issuerConfig.data.metadata}

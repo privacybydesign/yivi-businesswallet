@@ -1027,6 +1027,80 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/schemas/{id}/logo:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    get:
+      tags: [attestation]
+      summary: Get an attestation schema credential image
+      description: >-
+        Serves the uploaded credential image bytes for the admin builder preview.
+        Requires an administrator role in the organisation. Returns 404 when no
+        image is set.
+      responses:
+        '2XX':
+          description: The credential image bytes.
+          content:
+            image/png: {}
+            image/jpeg: {}
+            image/gif: {}
+            image/webp: {}
+            image/svg+xml: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [attestation]
+      summary: Update an attestation schema credential image
+      description: >-
+        Requires an administrator role in the organisation. Sent as
+        multipart/form-data: an image file in the "logo" field replaces the
+        credential image, and removeLogo=true clears it.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                logo:
+                  type: string
+                  format: binary
+                  description: Credential image (PNG, JPEG, GIF, WebP or SVG) that replaces the current one.
+                removeLogo:
+                  type: string
+                  description: Set to "true" to clear the stored image.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: The uploaded image is too large.
   /api/v1/orgs/{slug}/attestations/templates:
     parameters:
       - name: slug
