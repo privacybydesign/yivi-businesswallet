@@ -48,6 +48,13 @@ const COLOR_GROUPS = [
     ],
   },
   {
+    groupKey: "themeSettings.navGroup",
+    fields: [
+      { field: "sidebarColor", labelKey: "themeSettings.sidebarColor" },
+      { field: "topbarColor", labelKey: "themeSettings.topbarColor" },
+    ],
+  },
+  {
     groupKey: "themeSettings.paletteGroup",
     fields: [
       { field: "textColor", labelKey: "themeSettings.textColor" },
@@ -63,6 +70,27 @@ const COLOR_GROUPS = [
   groupKey: string;
   fields: ReadonlyArray<{ field: ThemeColorField; labelKey: string }>;
 }>;
+
+// Curated body-font options. Values are full font-family stacks; each is either
+// a bundled font (Open Sans, Alexandria) shipped with its open licence, or a
+// system/web-safe stack rendered from the client's own fonts — so nothing is
+// distributed by us and there is no commercial-licence exposure. The default
+// (Open Sans) stores "" so an unset theme keeps the app default. Names are
+// proper nouns and stay untranslated.
+const FONT_OPTIONS = [
+  { name: "Open Sans", value: "" },
+  { name: "Alexandria", value: '"Alexandria", system-ui, sans-serif' },
+  {
+    name: "System UI",
+    value: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+  },
+  { name: "Helvetica / Arial", value: '"Helvetica Neue", Arial, sans-serif' },
+  { name: "Georgia", value: 'Georgia, "Times New Roman", serif' },
+  {
+    name: "Monospace",
+    value: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+  },
+] as const;
 
 const ALL_COLOR_FIELDS = COLOR_GROUPS.flatMap((g) =>
   g.fields.map((f) => f.field),
@@ -171,6 +199,7 @@ function ThemeForm({
   const [colors, setColors] = useState<Colors>(() =>
     colorsFromSettings(settings),
   );
+  const [fontFamily, setFontFamily] = useState(settings.fontFamily);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [newLogoUrl, setNewLogoUrl] = useState<string | null>(null);
   const [removeLogo, setRemoveLogo] = useState(false);
@@ -247,7 +276,7 @@ function ThemeForm({
       acc[field] = colors[field].trim();
       return acc;
     }, {} as Colors);
-    save.mutate({ ...trimmed, logo });
+    save.mutate({ ...trimmed, fontFamily, logo });
   }
 
   const previewPrimary = primaryActive ? primary : DEFAULT_PRIMARY;
@@ -278,6 +307,29 @@ function ThemeForm({
           </React.Fragment>
         ))}
 
+        <span className={GROUP_LABEL}>
+          {t("themeSettings.typographyGroup")}
+        </span>
+        <span className={EYEBROW}>{t("themeSettings.font")}</span>
+        <select
+          className={`${CONTROL} max-w-[220px]`}
+          value={fontFamily}
+          onChange={(event) => setFontFamily(event.target.value)}
+          aria-label={t("themeSettings.font")}
+          style={{ fontFamily: fontFamily || undefined }}
+        >
+          {FONT_OPTIONS.map((option) => (
+            <option
+              key={option.name}
+              value={option.value}
+              style={{ fontFamily: option.value || undefined }}
+            >
+              {option.name}
+            </option>
+          ))}
+        </select>
+
+        <span className={GROUP_LABEL}>{t("themeSettings.logoGroup")}</span>
         <span className={EYEBROW}>{t("themeSettings.logo")}</span>
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">

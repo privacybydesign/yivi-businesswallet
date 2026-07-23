@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -24,7 +25,17 @@ import (
 // it, so the format is fixed rather than accepting arbitrary CSS colour syntax.
 var colorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
+// fontFamilyPattern constrains a body font to a CSS font-family list: only
+// letters, digits, spaces, commas, single and double quotes, and hyphens. This
+// value is injected into a CSS custom property on the frontend, so it must reject
+// anything that could break out of the declaration (`;{}()/*` etc.) — the allowed
+// set covers a comma-separated family list like "Open Sans", system-ui, sans-serif.
+var fontFamilyPattern = regexp.MustCompile(`^[A-Za-z0-9 ,'"\-]+$`)
+
 const (
+	// maxFontFamilyLen caps a font-family list. A comma-separated fallback stack
+	// is short; 120 runes is ample while keeping the CSS custom property bounded.
+	maxFontFamilyLen = 120
 	// MaxLogoBytes caps an uploaded logo. A logo shows at ~22px tall next to the
 	// wordmark, so an optimised PNG/SVG is a few KiB; 512 KiB leaves ample room
 	// without letting the theme carry a large image.
@@ -102,6 +113,9 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
 		SuccessColor: strings.TrimSpace(r.FormValue("successColor")),
 		WarningColor: strings.TrimSpace(r.FormValue("warningColor")),
 		ErrorColor:   strings.TrimSpace(r.FormValue("errorColor")),
+		SidebarColor: strings.TrimSpace(r.FormValue("sidebarColor")),
+		TopbarColor:  strings.TrimSpace(r.FormValue("topbarColor")),
+		FontFamily:   strings.TrimSpace(r.FormValue("fontFamily")),
 	}
 	if err := validateColors(in); err != nil {
 		return err
@@ -267,6 +281,17 @@ func validateColors(in SettingsInput) error {
 	}
 	if in.ErrorColor != "" && !colorPattern.MatchString(in.ErrorColor) {
 		return badRequest("invalid_input", "errorColor must be a hex colour like #1d4e89")
+	}
+	if in.SidebarColor != "" && !colorPattern.MatchString(in.SidebarColor) {
+		return badRequest("invalid_input", "sidebarColor must be a hex colour like #1d4e89")
+	}
+	if in.TopbarColor != "" && !colorPattern.MatchString(in.TopbarColor) {
+		return badRequest("invalid_input", "topbarColor must be a hex colour like #1d4e89")
+	}
+	if in.FontFamily != "" {
+		if utf8.RuneCountInString(in.FontFamily) > maxFontFamilyLen || !fontFamilyPattern.MatchString(in.FontFamily) {
+			return badRequest("invalid_input", "fontFamily must be a comma-separated font-family list")
+		}
 	}
 	return nil
 }

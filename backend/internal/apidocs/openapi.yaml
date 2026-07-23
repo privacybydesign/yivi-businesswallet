@@ -2442,9 +2442,10 @@ paths:
         Requires an administrator role in the organisation. Sent as
         multipart/form-data: the palette colour string fields (primaryColor,
         accentColor, textColor, surfaceColor, borderColor, linkColor,
-        successColor, warningColor, errorColor), an optional logo image file that
-        replaces the logo, and removeLogo=true to clear it. Omitting both leaves
-        the existing logo untouched.
+        successColor, warningColor, errorColor), the navigation chrome colours
+        (sidebarColor, topbarColor), a body font (fontFamily), an optional logo
+        image file that replaces the logo, and removeLogo=true to clear it.
+        Omitting both leaves the existing logo untouched.
       requestBody:
         required: true
         content:
@@ -2479,6 +2480,15 @@ paths:
                 errorColor:
                   type: string
                   description: Error colour as a 6-digit hex string; empty clears it.
+                sidebarColor:
+                  type: string
+                  description: Sidebar colour as a 6-digit hex string; empty clears it.
+                topbarColor:
+                  type: string
+                  description: Top bar colour as a 6-digit hex string; empty clears it.
+                fontFamily:
+                  type: string
+                  description: CSS font-family list (e.g. "Open Sans", sans-serif); empty uses the default.
                 logo:
                   type: string
                   format: binary

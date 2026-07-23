@@ -27,6 +27,9 @@ function theme(overrides: Partial<OrgTheme>): OrgTheme {
     successColor: "",
     warningColor: "",
     errorColor: "",
+    sidebarColor: "",
+    topbarColor: "",
+    fontFamily: "",
     logoUri: "",
     ...overrides,
   };
@@ -298,5 +301,86 @@ describe("shouldApplyOrgTheme", () => {
     // resets to the default look.
     expect(shouldApplyOrgTheme(theme({}))).toBe(true);
     expect(shouldApplyOrgTheme(null)).toBe(true);
+  });
+});
+
+// Navigation chrome (sidebar / top bar) is a mode-safe brand fill applied inline
+// via resolveThemeTokens. Its foreground must clear WCAG-AA on the chrome
+// background for EVERY seed — including mid-tones where a plain light/dark pick
+// would dip below the floor — since nav labels are normal-size text and the
+// chrome background isn't gated at save time. Also pins the derived companions.
+describe("resolveThemeTokens navigation chrome", () => {
+  // A spread including mid-tones (#808080, #6b7f9e) that are the hard cases for
+  // AA, plus a light and a dark seed.
+  const CHROME_SEEDS = ["#1a2b4c", "#808080", "#6b7f9e", "#f2f2f2", "#0a0a0a"];
+
+  it("emits no chrome tokens when the seeds are unset", () => {
+    const tokens = resolveThemeTokens(theme({}));
+    for (const name of [
+      "--yb-sidebar",
+      "--yb-sidebar-fg",
+      "--yb-topbar",
+      "--yb-topbar-fg",
+    ]) {
+      expect(tokens[name]).toBeUndefined();
+    }
+  });
+
+  it.each(CHROME_SEEDS)(
+    "derives an AA-legible sidebar foreground (%s)",
+    (seed) => {
+      const tokens = resolveThemeTokens(theme({ sidebarColor: seed }));
+      expect(tokens["--yb-sidebar"]).toBe(seed);
+      expect(Object.keys(tokens).sort()).toEqual([
+        "--yb-sidebar",
+        "--yb-sidebar-active",
+        "--yb-sidebar-fg",
+        "--yb-sidebar-fg-soft",
+        "--yb-sidebar-line",
+      ]);
+      expect(
+        contrastRatio(tokens["--yb-sidebar-fg"], seed)!,
+      ).toBeGreaterThanOrEqual(AA_CONTRAST);
+    },
+  );
+
+  it.each(CHROME_SEEDS)(
+    "derives an AA-legible top-bar foreground (%s)",
+    (seed) => {
+      const tokens = resolveThemeTokens(theme({ topbarColor: seed }));
+      expect(
+        contrastRatio(tokens["--yb-topbar-fg"], seed)!,
+      ).toBeGreaterThanOrEqual(AA_CONTRAST);
+    },
+  );
+});
+
+// The body font is a mode-agnostic override applied inline, but the stored value
+// is injected as a CSS custom property, so resolveThemeTokens must only emit a
+// sanitised font-family string (defense-in-depth alongside backend validation).
+describe("resolveThemeTokens font family", () => {
+  it("emits a curated font-family value", () => {
+    const tokens = resolveThemeTokens(
+      theme({ fontFamily: '"Alexandria", system-ui, sans-serif' }),
+    );
+    expect(tokens["--yb-font-sans"]).toBe(
+      '"Alexandria", system-ui, sans-serif',
+    );
+  });
+
+  it("drops a value carrying CSS-injection punctuation", () => {
+    expect(
+      resolveThemeTokens(theme({ fontFamily: "Arial; } body { color: red }" }))[
+        "--yb-font-sans"
+      ],
+    ).toBeUndefined();
+  });
+
+  it("drops an over-long value", () => {
+    expect(
+      resolveThemeTokens(theme({ fontFamily: "a".repeat(200) }))[
+        "--yb-font-sans"
+      ],
+    ).toBeUndefined();
   });
 });

@@ -39,6 +39,7 @@ func TestSaveThenGetRoundtripsColours(t *testing.T) {
 	in := themesettings.SettingsInput{
 		PrimaryColor: "#1d4e89", AccentColor: "#ba3354",
 		TextColor: "#111827", SuccessColor: "#16a34a",
+		SidebarColor: "#0f172a", FontFamily: `"Open Sans", sans-serif`,
 	}
 	saved, err := store.Save(ctx, orgID, in, themesettings.LogoUpdate{})
 	if err != nil {
@@ -46,7 +47,9 @@ func TestSaveThenGetRoundtripsColours(t *testing.T) {
 	}
 	if !saved.Configured || saved.PrimaryColor != in.PrimaryColor ||
 		saved.AccentColor != in.AccentColor || saved.TextColor != in.TextColor ||
-		saved.SuccessColor != in.SuccessColor || saved.HasLogo {
+		saved.SuccessColor != in.SuccessColor ||
+		saved.SidebarColor != in.SidebarColor || saved.FontFamily != in.FontFamily ||
+		saved.HasLogo {
 		t.Fatalf("Save returned %+v, want the saved colours and no logo", saved)
 	}
 	if saved.UpdatedAt == nil {
@@ -61,7 +64,9 @@ func TestSaveThenGetRoundtripsColours(t *testing.T) {
 	// (pointer identity would differ even when the values match).
 	if got.Configured != saved.Configured || got.PrimaryColor != saved.PrimaryColor ||
 		got.AccentColor != saved.AccentColor || got.TextColor != saved.TextColor ||
-		got.SuccessColor != saved.SuccessColor || got.HasLogo != saved.HasLogo ||
+		got.SuccessColor != saved.SuccessColor ||
+		got.SidebarColor != saved.SidebarColor || got.FontFamily != saved.FontFamily ||
+		got.HasLogo != saved.HasLogo ||
 		got.UpdatedAt == nil || !got.UpdatedAt.Equal(*saved.UpdatedAt) {
 		t.Errorf("GetSettings = %+v, want %+v", got, saved)
 	}

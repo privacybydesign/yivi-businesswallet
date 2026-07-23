@@ -99,6 +99,27 @@
   --yb-primary-hover: #3a3939;
   --yb-primary-fg: #ffffff;
 
+  /* Navigation chrome (sidebar + top bar). Defaults reference the working
+     surface/ink/line tokens, so nav and content share a look — and follow the
+     surface tint — until an org sets sidebar/topbar colours to differentiate the
+     navigation from the working surface. When set, the theme engine overrides
+     these inline with a brand fill + its readable foreground (see lib/theme.ts),
+     so they win in both light and dark mode. */
+  --yb-sidebar: var(--yb-surface);
+  --yb-sidebar-fg: var(--yb-ink);
+  --yb-sidebar-fg-soft: var(--yb-ink-soft);
+  --yb-sidebar-active: var(--yb-surface-3);
+  --yb-sidebar-line: var(--yb-line);
+  --yb-topbar: var(--yb-surface);
+  --yb-topbar-fg: var(--yb-ink);
+  --yb-topbar-fg-soft: var(--yb-ink-soft);
+  --yb-topbar-line: var(--yb-line);
+
+  /* Body font family — overridable per org (mode-safe; set inline by the theme
+     engine). Headings keep --font-display (Alexandria). */
+  --yb-font-sans:
+    "Open Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
   /* Radii & elevation */
   --yb-radius: 8px;
   --yb-radius-sm: 6px;
@@ -179,10 +200,19 @@
   --color-primary-hover: var(--yb-primary-hover);
   --color-primary-fg: var(--yb-primary-fg);
 
+  --color-sidebar: var(--yb-sidebar);
+  --color-sidebar-fg: var(--yb-sidebar-fg);
+  --color-sidebar-fg-soft: var(--yb-sidebar-fg-soft);
+  --color-sidebar-active: var(--yb-sidebar-active);
+  --color-sidebar-line: var(--yb-sidebar-line);
+  --color-topbar: var(--yb-topbar);
+  --color-topbar-fg: var(--yb-topbar-fg);
+  --color-topbar-fg-soft: var(--yb-topbar-fg-soft);
+  --color-topbar-line: var(--yb-topbar-line);
+
   --font-display:
     "Alexandria", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-sans:
-    "Open Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: var(--yb-font-sans);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   --radius-yivi: var(--yb-radius);

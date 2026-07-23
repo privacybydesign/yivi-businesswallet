@@ -28,13 +28,55 @@ const PRIMARY_FG = "--yb-primary-fg";
 const ACCENT = "--yb-brand";
 const ACCENT_600 = "--yb-brand-600";
 
+// Navigation chrome (sidebar + top bar) and the body font are also mode-safe: a
+// chrome colour is a self-contained fill with its own readable foreground that
+// works in both modes, and a font family is mode-agnostic — so all are applied
+// inline alongside the brand fills.
+const SIDEBAR = "--yb-sidebar";
+const SIDEBAR_FG = "--yb-sidebar-fg";
+const SIDEBAR_FG_SOFT = "--yb-sidebar-fg-soft";
+const SIDEBAR_ACTIVE = "--yb-sidebar-active";
+const SIDEBAR_LINE = "--yb-sidebar-line";
+const TOPBAR = "--yb-topbar";
+const TOPBAR_FG = "--yb-topbar-fg";
+const TOPBAR_FG_SOFT = "--yb-topbar-fg-soft";
+const TOPBAR_LINE = "--yb-topbar-line";
+const FONT_SANS = "--yb-font-sans";
+
 const THEMED_PROPERTIES = [
   PRIMARY,
   PRIMARY_HOVER,
   PRIMARY_FG,
   ACCENT,
   ACCENT_600,
+  SIDEBAR,
+  SIDEBAR_FG,
+  SIDEBAR_FG_SOFT,
+  SIDEBAR_ACTIVE,
+  SIDEBAR_LINE,
+  TOPBAR,
+  TOPBAR_FG,
+  TOPBAR_FG_SOFT,
+  TOPBAR_LINE,
+  FONT_SANS,
 ] as const;
+
+// How a chrome seed derives its companions: the soft foreground fades the
+// readable foreground toward the background; the active/hover fill and the
+// border nudge the background toward the foreground so they stay visible on the
+// chrome in both light and dark.
+const CHROME_FG_SOFT_MIX = 0.32;
+const CHROME_ACTIVE_MIX = 0.12;
+const CHROME_LINE_MIX = 0.18;
+
+// isSafeFontFamily gates a stored font-family string before it is set as a CSS
+// custom property (defense-in-depth alongside the backend's own validation):
+// only letters, digits, spaces, commas, quotes and hyphens, and a sane length,
+// so no value can carry CSS-injection punctuation (;{}()/*).
+const FONT_FAMILY_PATTERN = /^[A-Za-z0-9 ,'"-]{1,120}$/;
+function isSafeFontFamily(value: string): boolean {
+  return FONT_FAMILY_PATTERN.test(value);
+}
 
 // --- Mode-aware roles (shipped via the <style> block) ---
 const LINK = "--yb-link";
@@ -87,6 +129,8 @@ export const COLOR_FIELD_DEFAULTS = {
   successColor: "#00973a",
   warningColor: "#eba73b",
   errorColor: "#bd1919",
+  sidebarColor: "#faf8f6",
+  topbarColor: "#faf8f6",
 } as const;
 
 // --- Default neutral anchors, mirrored from index.css ---
@@ -177,6 +221,20 @@ export function readableForeground(background: string): string {
   return dark > light ? DARK_FG : LIGHT_FG;
 }
 
+// readableForegroundAA is like readableForeground but GUARANTEES the WCAG-AA
+// floor: for a mid-tone background neither near-white nor the warm-dark ink may
+// reach 4.5:1, so the dark candidate is pushed toward pure black until it clears
+// AA, then whichever candidate has the most contrast wins. Since pure black or
+// pure white clears ~4.5:1 against any background, the result is always AA — used
+// for the navigation chrome, whose backgrounds aren't gated at save time (unlike
+// the primary button, which is).
+export function readableForegroundAA(background: string): string {
+  const dark = adjustToContrast(DARK_FG, background, "darken");
+  const lightRatio = contrastRatio(LIGHT_FG, background) ?? 0;
+  const darkRatio = contrastRatio(dark, background) ?? 0;
+  return darkRatio >= lightRatio ? dark : LIGHT_FG;
+}
+
 function darken(hex: string, amount: number): string {
   const rgb = parseHex(hex);
   if (!rgb) {
@@ -255,6 +313,33 @@ export function resolveThemeTokens(
   if (parseHex(accent)) {
     tokens[ACCENT] = accent;
     tokens[ACCENT_600] = darken(accent, ACCENT_DARKEN);
+  }
+
+  // Navigation chrome: each seed is a brand fill with a readable foreground, a
+  // faded soft foreground, and a nudged active/border shade so nav elements
+  // stay legible on the coloured chrome (in both modes).
+  const sidebar = theme?.sidebarColor ?? "";
+  if (parseHex(sidebar)) {
+    const fg = readableForegroundAA(sidebar);
+    tokens[SIDEBAR] = sidebar;
+    tokens[SIDEBAR_FG] = fg;
+    tokens[SIDEBAR_FG_SOFT] = mix(fg, sidebar, CHROME_FG_SOFT_MIX);
+    tokens[SIDEBAR_ACTIVE] = mix(sidebar, fg, CHROME_ACTIVE_MIX);
+    tokens[SIDEBAR_LINE] = mix(sidebar, fg, CHROME_LINE_MIX);
+  }
+
+  const topbar = theme?.topbarColor ?? "";
+  if (parseHex(topbar)) {
+    const fg = readableForegroundAA(topbar);
+    tokens[TOPBAR] = topbar;
+    tokens[TOPBAR_FG] = fg;
+    tokens[TOPBAR_FG_SOFT] = mix(fg, topbar, CHROME_FG_SOFT_MIX);
+    tokens[TOPBAR_LINE] = mix(topbar, fg, CHROME_LINE_MIX);
+  }
+
+  const font = theme?.fontFamily ?? "";
+  if (isSafeFontFamily(font)) {
+    tokens[FONT_SANS] = font;
   }
 
   return tokens;

@@ -17,6 +17,9 @@ export const themeSchema = z.object({
   successColor: z.string(),
   warningColor: z.string(),
   errorColor: z.string(),
+  sidebarColor: z.string(),
+  topbarColor: z.string(),
+  fontFamily: z.string(),
   logoUri: z.string(),
   updatedAt: z.string().optional(),
 });
@@ -36,6 +39,8 @@ export const THEME_COLOR_FIELDS = [
   "successColor",
   "warningColor",
   "errorColor",
+  "sidebarColor",
+  "topbarColor",
 ] as const;
 
 export type ThemeColorField = (typeof THEME_COLOR_FIELDS)[number];
@@ -45,7 +50,10 @@ export type ThemeColorField = (typeof THEME_COLOR_FIELDS)[number];
 // changed on their own).
 export type LogoChange = File | "keep" | "remove";
 
+// fontFamily is a CSS font-family string (not a colour), so it lives outside the
+// colour-field record; "" uses the default.
 export type OrgThemeInput = Record<ThemeColorField, string> & {
+  fontFamily: string;
   logo: LogoChange;
 };
 
@@ -81,6 +89,7 @@ export async function updateOrgTheme(
   for (const field of THEME_COLOR_FIELDS) {
     form.append(field, input[field]);
   }
+  form.append("fontFamily", input.fontFamily);
   if (input.logo instanceof File) {
     form.append("logo", input.logo);
   } else if (input.logo === "remove") {
