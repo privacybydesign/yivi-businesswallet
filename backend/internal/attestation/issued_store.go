@@ -76,7 +76,7 @@ func (s *Store) GetIssued(ctx context.Context, orgID, id uuid.UUID) (Issued, err
 // CreateOffered persists a new offered attestation and audits, in one tx — before
 // the issuer offer is created. A later issuer failure marks the row failed; the
 // ledger entry is never lost (Art 5(1)(m)).
-func (s *Store) CreateOffered(ctx context.Context, orgID uuid.UUID, in IssueInput, detail TemplateDetail, issuedBy uuid.UUID, expiresAt *time.Time, claimToken, delivery string) (Issued, error) {
+func (s *Store) CreateOffered(ctx context.Context, orgID uuid.UUID, in IssueInput, detail TemplateDetail, issuedBy *uuid.UUID, expiresAt *time.Time, claimToken, delivery string) (Issued, error) {
 	attrs, err := marshalJSON(in.Attributes)
 	if err != nil {
 		return Issued{}, err

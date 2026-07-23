@@ -17,7 +17,9 @@ import {
   getHeldAttestationClaims,
   getIssuedAttestation,
   getIssuedAttestations,
+  getOnboardingAttestations,
   issueAttestation,
+  setOnboardingAttestations,
   revokeAttestationKey,
   revokeIssuedAttestation,
   suspendAttestationKey,
@@ -42,6 +44,7 @@ import type {
   IssuedAttestation,
   IssueAttestationInput,
   IssueResult,
+  OnboardingAttestation,
 } from "./attestations";
 import { toast } from "../lib/toast";
 
@@ -75,6 +78,12 @@ export function attestationTemplatesQueryKey(slug: string): readonly string[] {
 
 export function attestationKeysQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "attestations", "keys"];
+}
+
+export function onboardingAttestationsQueryKey(
+  slug: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "onboarding"];
 }
 
 export function issuedAttestationsQueryKey(slug: string): readonly string[] {
@@ -154,6 +163,37 @@ export function useAttestationTemplatesQuery(
     queryKey: attestationTemplatesQueryKey(slug),
     queryFn: ({ signal }) => getAttestationTemplates(slug, signal),
     enabled: enabled && slug !== "",
+  });
+}
+
+export function useOnboardingAttestationsQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<OnboardingAttestation[], Error> {
+  return useQuery({
+    queryKey: onboardingAttestationsQueryKey(slug),
+    queryFn: ({ signal }) => getOnboardingAttestations(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+export function useSetOnboardingAttestationsMutation(
+  slug: string,
+): UseMutationResult<
+  OnboardingAttestation[],
+  Error,
+  { templateIds: string[] }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ templateIds }) =>
+      setOnboardingAttestations(slug, templateIds),
+    meta: { suppressErrorToast: true },
+    onSuccess: (set) => {
+      toast.success(t("toasts.onboardingAttestationsUpdated"));
+      queryClient.setQueryData(onboardingAttestationsQueryKey(slug), set);
+    },
   });
 }
 

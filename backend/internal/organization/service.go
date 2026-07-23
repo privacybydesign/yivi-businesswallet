@@ -41,9 +41,10 @@ type identityDiscloser interface {
 }
 
 type Service struct {
-	users     userStore
-	store     invitationStore
-	discloser identityDiscloser
+	users      userStore
+	store      invitationStore
+	discloser  identityDiscloser
+	onboarding OnboardingIssuer
 }
 
 func NewService(users userStore, store invitationStore, discloser identityDiscloser) *Service {
@@ -176,6 +177,12 @@ func (s *Service) acceptResolved(ctx context.Context, inv Invitation, disclosure
 		return AcceptOutcome{}, err
 	}
 	at.Status = AcceptAccepted
+
+	// Auto-issue the organization's configured onboarding attestations to the new
+	// member. Best-effort and non-fatal: the accept has already committed, so a
+	// failure here is logged by the issuer, never surfaced to the caller.
+	s.issueOnboarding(ctx, inv, u.ID, string(disclosed.Email), disclosed.Phone)
+
 	return at, nil
 }
 

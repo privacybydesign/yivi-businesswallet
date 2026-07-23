@@ -174,6 +174,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.issuerSettingsUpdated");
     case "theme.settings_updated":
       return t("auditLog.actions.themeSettingsUpdated");
+    case "onboarding.settings_updated":
+      return t("auditLog.actions.onboardingSettingsUpdated");
     default:
       return action;
   }
@@ -225,6 +227,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.orgIssuerSettings");
     case "org_theme_settings":
       return t("auditLog.targets.orgThemeSettings");
+    case "org_onboarding_attestations":
+      return t("auditLog.targets.orgOnboardingAttestations");
     default:
       return targetType;
   }

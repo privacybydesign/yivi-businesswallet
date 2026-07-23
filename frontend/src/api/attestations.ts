@@ -214,6 +214,21 @@ export type AttestationTemplate = z.infer<typeof attestationTemplateSchema>;
 
 const attestationTemplateListSchema = z.array(attestationTemplateSchema);
 
+// An onboarding attestation is one template in the org's auto-issue set: the
+// credentials issued to a new member when they accept an invitation.
+export const onboardingAttestationSchema = z.object({
+  templateId: z.string(),
+  name: z.string(),
+  vct: z.string(),
+  displayName: z.string(),
+  subjectType: attestationSubjectTypeSchema,
+  position: z.number(),
+});
+
+export type OnboardingAttestation = z.infer<typeof onboardingAttestationSchema>;
+
+const onboardingAttestationListSchema = z.array(onboardingAttestationSchema);
+
 // Signing key material used to issue attestations: either wallet-managed or a
 // qualified certificate held by a provider.
 export const attestationKeySchema = z.object({
@@ -596,6 +611,29 @@ export function deleteAttestationTemplate(
   return request(`${base(slug)}/templates/${encodeURIComponent(templateId)}`, {
     schema: z.void(),
     method: "DELETE",
+    signal,
+  });
+}
+
+export function getOnboardingAttestations(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<OnboardingAttestation[]> {
+  return request(`${base(slug)}/onboarding`, {
+    schema: onboardingAttestationListSchema,
+    signal,
+  });
+}
+
+export function setOnboardingAttestations(
+  slug: string,
+  templateIds: string[],
+  signal?: AbortSignal,
+): Promise<OnboardingAttestation[]> {
+  return request(`${base(slug)}/onboarding`, {
+    schema: onboardingAttestationListSchema,
+    method: "PUT",
+    body: { templateIds },
     signal,
   });
 }

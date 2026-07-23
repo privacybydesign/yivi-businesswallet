@@ -35,6 +35,11 @@ var (
 	// ErrUnknownAttributeSource guards template attribute-source bindings: a bound
 	// value must be a source token valid for the schema's subject type.
 	ErrUnknownAttributeSource = errors.New("attestation: unknown attribute source token")
+
+	// ErrOnboardingSubject rejects binding a non-natural-person template to the
+	// onboarding auto-issue set: onboarding issues to the accepting member (a
+	// natural person), so an organization-subject template can never apply.
+	ErrOnboardingSubject = errors.New("attestation: onboarding auto-issue is only supported for natural-person templates")
 )
 
 // LocalizedName and LocalizedLabel model the SD-JWT VC type metadata `display`
@@ -182,6 +187,20 @@ type TemplateDetail struct {
 	SubjectType        string
 	SchemaAttributes   []AttributeDef
 	Qualified          bool
+}
+
+// OnboardingAttestation is one entry in an organization's onboarding auto-issue
+// set: an attestation template automatically issued to a new member when they
+// accept an invitation. It is enriched with the schema identity so the invite
+// screen renders the same chips as the Templates tab. Position is the
+// admin-defined order within the set.
+type OnboardingAttestation struct {
+	TemplateID  uuid.UUID `json:"templateId"`
+	Name        string    `json:"name"`
+	VCT         string    `json:"vct"`
+	DisplayName string    `json:"displayName"`
+	SubjectType string    `json:"subjectType"`
+	Position    int       `json:"position"`
 }
 
 // Issued is one row of the issuance ledger (the Issued tab / Art 5(1)(m) log).

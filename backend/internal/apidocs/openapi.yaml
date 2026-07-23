@@ -1101,6 +1101,62 @@ paths:
           $ref: '#/components/responses/NotFound'
         '413':
           description: The uploaded image is too large.
+  /api/v1/orgs/{slug}/attestations/onboarding:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [attestation]
+      summary: List the onboarding auto-issue set
+      description: >-
+        The attestation templates automatically issued to a new member when they
+        accept an invitation. Requires an administrator role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [attestation]
+      summary: Replace the onboarding auto-issue set
+      description: >-
+        Replaces the set of templates auto-issued on onboarding, in the given
+        order. Each must be one of the organisation's own natural-person
+        templates. Requires an administrator role in the organisation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/attestations/templates:
     parameters:
       - name: slug

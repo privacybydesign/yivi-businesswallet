@@ -445,6 +445,28 @@ irmago-owned credential, it does not duplicate the claims:
 > **without** the cgo `sqlcipher` package (the `CGO_ENABLED=0` Alpine build + `go test
 > -race` both forbid it).
 
+### 6.6 `org_onboarding_attestations` — the onboarding auto-issue set
+
+The per-org set of templates automatically issued to a new member when they
+accept an invitation (onboarding). It replaces the earlier hardcoded member-invite
+UI stub (two literal tags + a disabled "Add more"). Presence of a row means
+"auto-issue this template on onboarding"; `position` orders the set as the admin
+arranged it.
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `organization_id` | uuid FK→organizations | `ON DELETE CASCADE` |
+| `template_id` | uuid FK→attestation_templates | `ON DELETE CASCADE`; one of the org's own templates |
+| `position` | int | admin-defined order within the set |
+| `created_at` | timestamptz | |
+
+`UNIQUE (organization_id, template_id)`. Only **natural-person** templates may be
+added (onboarding issues to the accepting member, a natural person); an
+organization-subject template is rejected (`attestation.ErrOnboardingSubject`).
+The set is edited from the member-invite screen (admin) and is per-org, so a
+change applies to every future onboarding, not just the current invitation.
+
 ---
 
 ## 7. Qualified vs non-qualified, and chained attestations
@@ -537,6 +559,34 @@ secure channel (not a claim link) and redeeming it via the holder's OpenID4VCI
 flow — is designed in [`oid4vci-over-qerds.md`](./oid4vci-over-qerds.md) (pre-auth
 vs. authorization-code grants for business wallets).
 
+### 9.6 Auto-issue on onboarding (member accept)
+
+An org admin configures the onboarding auto-issue set (§6.6) from the member-invite
+screen. When a member **accepts** an invitation and their identity is disclosed
+(`organization/accept.go` → `acceptResolved`, the point that already proves email
+ownership and mints the session), the backend issues each configured template to
+that member:
+
+- The organization service holds an optional `OnboardingIssuer` seam, wired in at
+  boot after the attestation service is constructed (setter, mirroring the inbound
+  QERDS consumer, because the org service is built first). The concrete
+  implementation is `attestation.OnboardingIssuer`.
+- For each configured template it resolves the attribute values from the member's
+  onboarding context — the template's `attribute_sources` bindings mapped onto the
+  member's known fields (`member.givenNames`, `member.email`, `member.role`,
+  `member.jobTitle`, `member.department`, …), overriding the static
+  `default_attributes` — then reuses the normal `Service.Issue` path (offer +
+  e-mail claim link, audited). Auto-issued rows have a **null `issued_by_user_id`**
+  (system-initiated, no admin actor).
+- Issuance is **best-effort and non-fatal**: it runs after the accept has
+  committed, and any failure (one template, or the whole set) is logged, never
+  surfaced to the accepting member — consistent with the existing offer-delivery
+  model.
+
+Fields with no value known at accept time (`member.preferredName`, and all `org.*`
+tokens, which never apply to a member) resolve to `""`; a binding that resolves
+empty falls back to the template's static default or is simply omitted.
+
 ---
 
 ## 10. HTTP API
@@ -547,6 +597,7 @@ All org-scoped (`auth.RequireUser` → `organization.Handler.Authorize`, org via
 
 **Schemas** (admin): `GET|POST .../attestations/schemas`, `GET|PATCH|DELETE .../attestations/schemas/{id}`
 **Templates** (admin): `GET|POST .../attestations/templates`, `GET|PATCH|DELETE .../attestations/templates/{id}`
+**Onboarding set** (admin): `GET .../attestations/onboarding` (the auto-issue set, §6.6), `PUT .../attestations/onboarding` (replace with `{templateIds: [...]}`, in order)
 **Issued ledger** (member read; admin issue/revoke):
 - `GET  .../attestations` — the Issued tab (filter by template/status/recipient)
 - `POST .../attestations` — issue (§9.3) → `202 {id, status, offerUri}`

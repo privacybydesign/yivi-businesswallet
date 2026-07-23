@@ -7,6 +7,11 @@ import {
   useOrganizationDepartmentsQuery,
   useOrganizationQuery,
 } from "../api/organization.queries";
+import {
+  useAttestationTemplatesQuery,
+  useOnboardingAttestationsQuery,
+  useSetOnboardingAttestationsMutation,
+} from "../api/attestations.queries";
 import { ApiError } from "../api/http";
 import { Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
@@ -146,6 +151,100 @@ function Field({
         </span>
       )}
     </div>
+  );
+}
+
+// OnboardingAttestationsCard configures which of the organization's attestation
+// templates are auto-issued to a new member on onboarding. The set is per-org
+// (persisted), so a change here applies to every future onboarding, not just
+// this invitation. Only natural-person templates can be auto-issued to a member.
+function OnboardingAttestationsCard({
+  slug,
+}: {
+  slug: string;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const onboarding = useOnboardingAttestationsQuery(slug);
+  const templates = useAttestationTemplatesQuery(slug);
+  const save = useSetOnboardingAttestationsMutation(slug);
+
+  const configured = onboarding.data ?? [];
+  const configuredIds = configured.map((a) => a.templateId);
+  const configuredSet = new Set(configuredIds);
+  const available = (templates.data ?? []).filter(
+    (tmpl) =>
+      tmpl.subjectType === "natural_person" && !configuredSet.has(tmpl.id),
+  );
+  const hasPersonTemplates =
+    configured.length > 0 ||
+    (templates.data ?? []).some(
+      (tmpl) => tmpl.subjectType === "natural_person",
+    );
+
+  const add = (templateId: string): void => {
+    if (templateId === "") {
+      return;
+    }
+    save.mutate({ templateIds: [...configuredIds, templateId] });
+  };
+  const remove = (templateId: string): void => {
+    save.mutate({
+      templateIds: configuredIds.filter((id) => id !== templateId),
+    });
+  };
+
+  return (
+    <Card className="p-5">
+      <div className={EYEBROW}>{t("memberInvite.attestations")}</div>
+      <p className="text-muted mt-1 text-[12px]">
+        {t("memberInvite.attestationsHint")}
+      </p>
+
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {configured.map((a) => (
+          <Tag key={a.templateId} tone="blue">
+            {a.displayName || a.name}
+            <button
+              type="button"
+              onClick={() => remove(a.templateId)}
+              disabled={save.isPending}
+              aria-label={t("memberInvite.removeAttestation", {
+                name: a.displayName || a.name,
+              })}
+              className="-mr-0.5 ml-0.5 inline-flex items-center rounded-full p-0.5 transition-opacity focus-visible:ring-2 focus-visible:ring-current/40 focus-visible:outline-none disabled:opacity-40"
+            >
+              <Icon name="close" size={12} />
+            </button>
+          </Tag>
+        ))}
+        {configured.length === 0 && (
+          <span className="text-muted text-[12px]">
+            {t("memberInvite.attestationsEmpty")}
+          </span>
+        )}
+      </div>
+
+      {!hasPersonTemplates ? (
+        <p className="text-muted mt-3 text-[12px]">
+          {t("memberInvite.attestationsNoTemplates")}
+        </p>
+      ) : (
+        <select
+          aria-label={t("memberInvite.addMore")}
+          className={[control(false), "mt-3"].join(" ")}
+          value=""
+          disabled={save.isPending || available.length === 0}
+          onChange={(e) => add(e.target.value)}
+        >
+          <option value="">{t("memberInvite.addMore")}</option>
+          {available.map((tmpl) => (
+            <option key={tmpl.id} value={tmpl.id}>
+              {tmpl.displayName || tmpl.name}
+            </option>
+          ))}
+        </select>
+      )}
+    </Card>
   );
 }
 
@@ -400,27 +499,7 @@ export default function MemberInvite(): React.JSX.Element | null {
             )}
           </Card>
 
-          <Card className="p-5">
-            <div className="flex items-center justify-between">
-              <div className={EYEBROW}>{t("memberInvite.attestations")}</div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                icon="add"
-                disabled
-                title={t("common.comingSoon")}
-              >
-                {t("memberInvite.addMore")}
-              </Button>
-            </div>
-            <div className="mt-2.5 flex flex-wrap gap-2">
-              <Tag tone="blue">
-                {t("memberInvite.attMemberOf", { org: orgName })}
-              </Tag>
-              <Tag tone="blue">{t("memberInvite.attCorporateEmail")}</Tag>
-            </div>
-          </Card>
+          <OnboardingAttestationsCard slug={slug} />
         </div>
 
         <div className="flex flex-col gap-4">

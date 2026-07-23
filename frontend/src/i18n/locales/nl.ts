@@ -368,6 +368,7 @@ export const nl: Translation<typeof en> = {
     emailSettingsSaved: "E-mailinstellingen opgeslagen",
     emailTestSent: "Test-e-mail verstuurd",
     issuerSettingsSaved: "Uitgever-instellingen opgeslagen",
+    onboardingAttestationsUpdated: "Onboarding-attestaties bijgewerkt",
     wscaActivated: "Houder-wallet geactiveerd",
     wscaRotated: "Wallet-geheim geroteerd",
     themeSaved: "Branding bijgewerkt",
@@ -451,6 +452,7 @@ export const nl: Translation<typeof en> = {
       orgEmailSettings: "E-mailinstellingen",
       orgIssuerSettings: "Uitgever-instellingen",
       orgThemeSettings: "Thema-instellingen",
+      orgOnboardingAttestations: "Onboarding-attestaties",
     },
     actions: {
       orgCreated: "Organisatie aangemaakt",
@@ -510,6 +512,7 @@ export const nl: Translation<typeof en> = {
       emailSettingsUpdated: "E-mailinstellingen bijgewerkt",
       issuerSettingsUpdated: "Uitgever-instellingen bijgewerkt",
       themeSettingsUpdated: "Thema-instellingen bijgewerkt",
+      onboardingSettingsUpdated: "Onboarding-attestaties bijgewerkt",
     },
   },
   memberInvite: {
@@ -542,9 +545,13 @@ export const nl: Translation<typeof en> = {
     roleAdmin: "Beheerder",
     attestations:
       "Attestaties die bij onboarding automatisch worden uitgegeven",
+    attestationsHint:
+      "Geldt voor elk nieuw lid van deze organisatie, niet alleen voor deze uitnodiging.",
+    attestationsEmpty: "Er worden nog geen attestaties automatisch uitgegeven.",
+    attestationsNoTemplates:
+      "Maak een attestatiesjabloon voor een natuurlijk persoon om er een uit te geven.",
     addMore: "Meer toevoegen",
-    attMemberOf: "Lid van {{org}}",
-    attCorporateEmail: "Zakelijk e-mailadres",
+    removeAttestation: "{{name}} verwijderen",
     preview: {
       open: "E-mail voorbeeld",
       title: "Welkom bij {{org}} op Yivi",

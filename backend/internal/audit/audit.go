@@ -81,6 +81,8 @@ const (
 	IssuerSettingsUpdated = "issuer.settings_updated"
 
 	ThemeSettingsUpdated = "theme.settings_updated"
+
+	OnboardingSettingsUpdated = "onboarding.settings_updated"
 )
 
 const (
@@ -112,6 +114,8 @@ const (
 	TargetIssuerSettings = "org_issuer_settings"
 
 	TargetThemeSettings = "org_theme_settings"
+
+	TargetOnboardingSettings = "org_onboarding_attestations"
 )
 
 type Actor struct {
