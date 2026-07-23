@@ -871,6 +871,7 @@ export const en = {
     newTemplate: "New template",
     issue: "Issue attestation",
     qualified: "Qualified",
+    credentialImageAlt: "Credential image",
     loadError: "Could not load attestations: {{message}}",
     tabs: {
       templates: "Templates",

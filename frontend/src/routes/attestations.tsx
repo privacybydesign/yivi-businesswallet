@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
@@ -95,6 +95,16 @@ export default function Attestations(): React.JSX.Element {
 
   const formatWhen = useWhenFormatter();
 
+  // A template carries its schema's fields but not the credential image, so map
+  // each schema id to its logo URL (absolute, "" when none) for the templates tab.
+  const schemaLogos = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const schema of schemas.data ?? []) {
+      if (schema.logoUri) map.set(schema.id, schema.logoUri);
+    }
+    return map;
+  }, [schemas.data]);
+
   const setTab = (value: Tab): void => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -161,6 +171,7 @@ export default function Attestations(): React.JSX.Element {
               <TemplatesTab
                 slug={slug}
                 templates={templates.data ?? []}
+                schemaLogos={schemaLogos}
                 pending={templates.isPending}
                 error={templates.error}
                 onIssue={(template) => setModal({ kind: "issue", template })}
@@ -259,6 +270,7 @@ function ErrorCard({ message }: { message: string }): React.JSX.Element {
 function TemplatesTab({
   slug,
   templates,
+  schemaLogos,
   pending,
   error,
   onIssue,
@@ -266,6 +278,7 @@ function TemplatesTab({
 }: {
   slug: string;
   templates: AttestationTemplate[];
+  schemaLogos: Map<string, string>;
   pending: boolean;
   error: Error | null;
   onIssue: (template: AttestationTemplate) => void;
@@ -306,15 +319,25 @@ function TemplatesTab({
         {templates.map((template) => {
           const chips = template.attributes.slice(0, CHIP_LIMIT);
           const extra = template.attributes.length - chips.length;
+          const logoUri = schemaLogos.get(template.schemaId);
           return (
             <Card key={template.id} className="flex flex-col gap-3 p-4">
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-ink truncate font-semibold">
-                    {template.name}
-                  </div>
-                  <div className="text-ink-soft truncate font-mono text-[12px]">
-                    {template.vct}
+                <div className="flex min-w-0 items-center gap-3">
+                  {logoUri && (
+                    <img
+                      src={logoUri}
+                      alt={t("attestations.credentialImageAlt")}
+                      className="border-line bg-surface h-10 w-10 shrink-0 rounded-md border object-contain"
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-ink truncate font-semibold">
+                      {template.name}
+                    </div>
+                    <div className="text-ink-soft truncate font-mono text-[12px]">
+                      {template.vct}
+                    </div>
                   </div>
                 </div>
                 {template.qualified && (
@@ -783,12 +806,21 @@ function SchemasTab({
           {schemas.map((schema) => (
             <Card key={schema.id} className="flex flex-col gap-2.5 p-4">
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-ink truncate font-semibold">
-                    {schema.displayName}
-                  </div>
-                  <div className="text-ink-soft truncate font-mono text-[12px]">
-                    {schema.vct}
+                <div className="flex min-w-0 items-center gap-3">
+                  {schema.logoUri && (
+                    <img
+                      src={schema.logoUri}
+                      alt={t("attestations.credentialImageAlt")}
+                      className="border-line bg-surface h-10 w-10 shrink-0 rounded-md border object-contain"
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-ink truncate font-semibold">
+                      {schema.displayName}
+                    </div>
+                    <div className="text-ink-soft truncate font-mono text-[12px]">
+                      {schema.vct}
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">

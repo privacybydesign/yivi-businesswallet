@@ -891,6 +891,7 @@ export const nl: Translation<typeof en> = {
     newTemplate: "Nieuw sjabloon",
     issue: "Attestatie uitgeven",
     qualified: "Gekwalificeerd",
+    credentialImageAlt: "Credentialafbeelding",
     loadError: "Attestaties laden mislukt: {{message}}",
     tabs: {
       templates: "Sjablonen",
