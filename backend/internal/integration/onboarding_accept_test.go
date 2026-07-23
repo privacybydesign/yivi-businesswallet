@@ -95,6 +95,41 @@ func TestAcceptAutoIssuesOnboardingAttestations(t *testing.T) {
 	}
 }
 
+// TestApproveIdentityReviewAutoIssuesOnboardingAttestations: admitting a member
+// through the identity-review approval path (name mismatch approved by an admin)
+// issues the org's configured onboarding attestations, exactly like the happy
+// accept path — the same join event, the same outcome.
+func TestApproveIdentityReviewAutoIssuesOnboardingAttestations(t *testing.T) {
+	env := setup(t, "boss@example.test")
+	orgID := env.createOrg("Acme", "acme")
+	env.configureOnboarding(orgID)
+	env.seedPendingReview(orgID, "changed@example.test")
+
+	// Nothing is issued while the review is still pending.
+	if n, _ := env.issuedForRecipient(orgID, "changed@example.test"); n != 0 {
+		t.Fatalf("issued before approval = %d, want 0", n)
+	}
+
+	env.login("boss@example.test")
+	reviewID := env.listReviews()[0].ID
+	resp := env.do(http.MethodPost, "/api/v1/admin/identity-reviews/"+reviewID.String()+"/approve", nil)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("approve = %d, want 200", resp.StatusCode)
+	}
+
+	n, email := env.issuedForRecipient(orgID, "changed@example.test")
+	if n != 1 {
+		t.Fatalf("issued after approval = %d, want 1", n)
+	}
+	if email != "changed@example.test" {
+		t.Errorf("resolved email attribute = %q, want the member e-mail", email)
+	}
+	if c := env.auditCount(orgID, audit.AttestationIssued); c != 1 {
+		t.Errorf("attestation.issued events = %d, want 1", c)
+	}
+}
+
 // TestAcceptWithNoOnboardingSetIssuesNothing: with no configured set, accepting
 // an invitation issues nothing (and still succeeds).
 func TestAcceptWithNoOnboardingSetIssuesNothing(t *testing.T) {

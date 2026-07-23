@@ -255,5 +255,18 @@ func (s *Service) ListIdentityReviews(ctx context.Context) ([]IdentityReview, er
 }
 
 func (s *Service) ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error) {
-	return s.store.ResolveIdentityReview(ctx, reviewID, reviewerID, approve)
+	outcome, err := s.store.ResolveIdentityReview(ctx, reviewID, reviewerID, approve)
+	if err != nil {
+		return outcome, err
+	}
+
+	// An approval admits a new member exactly like the happy accept path, so it
+	// gets the same onboarding auto-issuance. Best-effort and non-fatal: the
+	// approval has already committed, so a failure here is logged by the issuer,
+	// never surfaced to the caller.
+	if outcome.onboardingMember != nil {
+		s.issueOnboardingMember(ctx, *outcome.onboardingMember)
+	}
+
+	return outcome, nil
 }

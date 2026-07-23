@@ -582,6 +582,14 @@ that member:
   committed, and any failure (one template, or the whole set) is logged, never
   surfaced to the accepting member — consistent with the existing offer-delivery
   model.
+- Both join paths issue the set, since both are the same event (a member joins
+  the org). The happy accept fires it from `acceptResolved`; the
+  **identity-review approval** path (an admin approves a name mismatch, admitting
+  the member from `Store.ResolveIdentityReview`) fires it from
+  `Service.ResolveIdentityReview` after the approval transaction commits, building
+  the member from the held invitation and the approved (disclosed) identity. A
+  member joining an org gets the same onboarding attestations regardless of which
+  path admitted them.
 
 Fields with no value known at accept time (`member.preferredName`, and all `org.*`
 tokens, which never apply to a member) resolve to `""`; a binding that resolves

@@ -32,6 +32,11 @@ type ResolveOutcome struct {
 	Approved         bool
 	OrganizationSlug string
 	OrganizationName string
+	// onboardingMember is set when an approval admits a new member, carrying the
+	// context the service needs to auto-issue the org's onboarding attestations
+	// after the transaction commits. It is nil for rejections. Unexported: only
+	// the service (same package) consumes it, never the HTTP layer.
+	onboardingMember *OnboardingMember
 }
 
 type ReviewState string
@@ -144,10 +149,12 @@ func (s *Store) ResolveIdentityReview(ctx context.Context, reviewID, reviewerID 
 
 		var inv Invitation
 		err = q.QueryRow(ctx, `
-			SELECT i.organization_id, o.name, o.slug, i.email, i.role, i.job_title, i.department_id
-			FROM invitations i JOIN organizations o ON o.id = i.organization_id
+			SELECT i.organization_id, o.name, o.slug, i.email, i.role, i.job_title, i.department_id, d.name
+			FROM invitations i
+			JOIN organizations o ON o.id = i.organization_id
+			LEFT JOIN departments d ON d.id = i.department_id
 			WHERE i.id = $1`, invitationID).
-			Scan(&inv.OrganizationID, &inv.OrganizationName, &inv.OrganizationSlug, &inv.Email, &inv.Role, &inv.JobTitle, &inv.DepartmentID)
+			Scan(&inv.OrganizationID, &inv.OrganizationName, &inv.OrganizationSlug, &inv.Email, &inv.Role, &inv.JobTitle, &inv.DepartmentID, &inv.DepartmentName)
 		if err != nil {
 			return fmt.Errorf("organization: read held invitation %s: %w", invitationID, err)
 		}
@@ -196,7 +203,27 @@ func (s *Store) ResolveIdentityReview(ctx context.Context, reviewID, reviewerID 
 			return fmt.Errorf("organization: approve delete invitation %s: %w", invitationID, err)
 		}
 
-		outcome = ResolveOutcome{Approved: true, OrganizationSlug: inv.OrganizationSlug, OrganizationName: inv.OrganizationName}
+		// Same event as the happy accept path (a member joins the org), so the
+		// same onboarding attestations must be issued. The disclosed name was just
+		// approved and written to the user, so it — not the invited name — is the
+		// member's identity here.
+		outcome = ResolveOutcome{
+			Approved:         true,
+			OrganizationSlug: inv.OrganizationSlug,
+			OrganizationName: inv.OrganizationName,
+			onboardingMember: &OnboardingMember{
+				OrganizationID:   inv.OrganizationID,
+				OrganizationName: inv.OrganizationName,
+				UserID:           userID,
+				GivenNames:       cleaned.GivenNames,
+				LastName:         cleaned.LastName,
+				Email:            inv.Email,
+				Phone:            deref(phone),
+				Role:             inv.Role,
+				JobTitle:         deref(inv.JobTitle),
+				DepartmentName:   deref(inv.DepartmentName),
+			},
+		}
 		return nil
 	})
 	return outcome, err

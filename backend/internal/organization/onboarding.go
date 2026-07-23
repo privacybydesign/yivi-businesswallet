@@ -47,10 +47,7 @@ func (s *Service) SetOnboardingIssuer(issuer OnboardingIssuer) {
 // has just accepted, when an issuer is wired. It builds the neutral member
 // context from the invitation and the disclosed identity.
 func (s *Service) issueOnboarding(ctx context.Context, inv Invitation, userID uuid.UUID, email, phone string) {
-	if s.onboarding == nil {
-		return
-	}
-	s.onboarding.IssueOnboarding(ctx, OnboardingMember{
+	s.issueOnboardingMember(ctx, OnboardingMember{
 		OrganizationID:   inv.OrganizationID,
 		OrganizationName: inv.OrganizationName,
 		UserID:           userID,
@@ -62,6 +59,17 @@ func (s *Service) issueOnboarding(ctx context.Context, inv Invitation, userID uu
 		JobTitle:         deref(inv.JobTitle),
 		DepartmentName:   deref(inv.DepartmentName),
 	})
+}
+
+// issueOnboardingMember fires the configured onboarding attestations for a
+// prebuilt member context, when an issuer is wired. It backs both join paths:
+// the happy accept (issueOnboarding) and the identity-review approval, which
+// builds its own member from the held invitation and disclosed identity.
+func (s *Service) issueOnboardingMember(ctx context.Context, member OnboardingMember) {
+	if s.onboarding == nil {
+		return
+	}
+	s.onboarding.IssueOnboarding(ctx, member)
 }
 
 func deref(s *string) string {
