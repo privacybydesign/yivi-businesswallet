@@ -221,6 +221,7 @@ type Issued struct {
 	ClaimedAt       *time.Time        `json:"claimedAt,omitempty"`
 	ExpiresAt       *time.Time        `json:"expiresAt,omitempty"`
 	RevokedAt       *time.Time        `json:"revokedAt,omitempty"`
+	CancelledAt     *time.Time        `json:"cancelledAt,omitempty"`
 	CreatedAt       time.Time         `json:"createdAt"`
 	UpdatedAt       time.Time         `json:"updatedAt"`
 }

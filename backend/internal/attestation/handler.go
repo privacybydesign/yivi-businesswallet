@@ -55,6 +55,7 @@ type issuanceService interface {
 	Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUID, orgName string, in IssueInput) (IssueResult, error)
 	Status(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
+	Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ClaimStatus(ctx context.Context, token string) (ClaimView, error)
 	DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
 	ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([]HeldListView, error)
@@ -146,10 +147,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/attestations/keys/{id}/suspend", admin(respond.HandlerFunc(h.suspendKey)))
 	mux.Handle("POST /orgs/{slug}/attestations/keys/{id}/revoke", admin(respond.HandlerFunc(h.revokeKey)))
 
-	// Issuance ledger (member read; admin issue/revoke).
+	// Issuance ledger (member read; admin issue/cancel/revoke).
 	mux.Handle("GET /orgs/{slug}/attestations", member(respond.HandlerFunc(h.listIssued)))
 	mux.Handle("POST /orgs/{slug}/attestations", admin(respond.HandlerFunc(h.issue)))
 	mux.Handle("GET /orgs/{slug}/attestations/{id}", member(respond.HandlerFunc(h.getIssued)))
+	mux.Handle("POST /orgs/{slug}/attestations/{id}/cancel", admin(respond.HandlerFunc(h.cancel)))
 	mux.Handle("POST /orgs/{slug}/attestations/{id}/revoke", admin(respond.HandlerFunc(h.revoke)))
 
 	// Held credentials (member read; admin delete). Art 5(1)(a) "store, select".
@@ -898,9 +900,28 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) error {
 	case errors.Is(err, ErrIssuedNotFound):
 		return notFound("attestation_not_found", "attestation not found")
 	case errors.Is(err, ErrNotOfferable):
-		return &respond.APIError{Status: http.StatusConflict, Code: "not_revocable", Message: "attestation is not in a revocable state"}
+		return &respond.APIError{Status: http.StatusConflict, Code: "not_revocable", Message: "only a claimed credential can be revoked"}
 	case err != nil:
 		return fmt.Errorf("revoking attestation: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, issued)
+	return nil
+}
+
+func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseID(r, "id", "attestation")
+	if err != nil {
+		return err
+	}
+	org := organization.OrgFromContext(r.Context())
+	issued, err := h.service.Cancel(r.Context(), org.ID, id)
+	switch {
+	case errors.Is(err, ErrIssuedNotFound):
+		return notFound("attestation_not_found", "attestation not found")
+	case errors.Is(err, ErrNotOfferable):
+		return &respond.APIError{Status: http.StatusConflict, Code: "not_cancellable", Message: "only an unclaimed offer can be cancelled"}
+	case err != nil:
+		return fmt.Errorf("cancelling attestation offer: %w", err)
 	}
 	respond.JSON(w, r, http.StatusOK, issued)
 	return nil

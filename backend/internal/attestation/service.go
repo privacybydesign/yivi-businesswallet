@@ -42,6 +42,7 @@ type issuedStore interface {
 	MarkClaimed(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	GetIssued(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
+	Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	GetClaim(ctx context.Context, token string) (claimRow, error)
 }
 
@@ -253,9 +254,16 @@ func (s *Service) ClaimStatus(ctx context.Context, token string) (ClaimView, err
 	}, nil
 }
 
-// Revoke revokes an issued attestation (Art 6(2)).
+// Revoke revokes an already-claimed attestation (Art 6(2)). Offers that were
+// never claimed are withdrawn via Cancel instead.
 func (s *Service) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
 	return s.store.Revoke(ctx, orgID, id)
+}
+
+// Cancel withdraws an unclaimed offer. Nothing was ever held, so this is a
+// cancellation, not a revocation, and never publishes to the Token Status List.
+func (s *Service) Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
+	return s.store.Cancel(ctx, orgID, id)
 }
 
 // DeleteHeld removes a held credential the organization no longer wants to keep

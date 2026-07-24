@@ -12,6 +12,7 @@ import {
   useAttestationKeysQuery,
   useAttestationSchemasQuery,
   useAttestationTemplatesQuery,
+  useCancelIssuedAttestationMutation,
   useDeleteAttestationSchemaMutation,
   useDeleteAttestationTemplateMutation,
   useDeleteHeldAttestationMutation,
@@ -45,6 +46,7 @@ function issuedTone(status: string): IssuedTone {
     case "revoked":
     case "failed":
       return "red";
+    case "cancelled":
     case "expired":
       return "default";
     default:
@@ -438,6 +440,7 @@ function IssuedTab({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const revoke = useRevokeIssuedAttestationMutation(slug);
+  const cancel = useCancelIssuedAttestationMutation(slug);
   const columnCount = isAdmin ? ISSUED_COLUMN_COUNT : ISSUED_COLUMN_COUNT - 1;
 
   if (error) {
@@ -498,7 +501,16 @@ function IssuedTab({
                 </Table.Cell>
                 {isAdmin && (
                   <Table.Cell className="text-right">
-                    {(row.status === "offered" || row.status === "claimed") && (
+                    {row.status === "offered" && (
+                      <Button
+                        variant="dangerGhost"
+                        size="sm"
+                        onClick={() => cancel.mutate({ issuedId: row.id })}
+                      >
+                        {t("attestations.issued.cancel")}
+                      </Button>
+                    )}
+                    {row.status === "claimed" && (
                       <Button
                         variant="dangerGhost"
                         size="sm"

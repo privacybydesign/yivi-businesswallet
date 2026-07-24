@@ -1313,6 +1313,50 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/{id}/cancel:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [attestation]
+      summary: Cancel an unclaimed attestation offer
+      description: >-
+        Withdraws an offer that was never claimed (status `offered`), setting it
+        to `cancelled`. Nothing was held, so this is not a revocation and never
+        touches the Token Status List. Requires an administrator role. Returns
+        409 when the attestation is not an unclaimed offer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/attestations/{id}/revoke:
     parameters:
       - name: slug
@@ -1329,8 +1373,13 @@ paths:
         description: Resource identifier.
     post:
       tags: [attestation]
-      summary: Revoke an issued attestation
-      description: Requires an administrator role in the organisation.
+      summary: Revoke a claimed attestation
+      description: >-
+        Revokes an already-claimed credential (status `claimed`), setting it to
+        `revoked`. This is the path backed by the issuer's IETF Token Status
+        List. Unclaimed offers are withdrawn via cancel instead. Requires an
+        administrator role. Returns 409 when the attestation is not a claimed
+        credential.
       requestBody:
         required: true
         content:

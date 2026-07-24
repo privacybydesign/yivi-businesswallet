@@ -15,7 +15,7 @@ import (
 
 const issuedColumns = `id, organization_id, template_id, schema_vct, recipient_kind,
 	recipient_user_id, recipient_ref, attributes, qualified, status, delivery, issuance_id,
-	issued_by_user_id, claimed_at, expires_at, revoked_at, created_at, updated_at`
+	issued_by_user_id, claimed_at, expires_at, revoked_at, cancelled_at, created_at, updated_at`
 
 func scanIssued(row rowScanner) (Issued, error) {
 	var (
@@ -25,7 +25,7 @@ func scanIssued(row rowScanner) (Issued, error) {
 	if err := row.Scan(
 		&i.ID, &i.OrganizationID, &i.TemplateID, &i.SchemaVCT, &i.RecipientKind,
 		&i.RecipientUserID, &i.RecipientRef, &attrsRaw, &i.Qualified, &i.Status, &i.Delivery, &i.IssuanceID,
-		&i.IssuedByUserID, &i.ClaimedAt, &i.ExpiresAt, &i.RevokedAt, &i.CreatedAt, &i.UpdatedAt,
+		&i.IssuedByUserID, &i.ClaimedAt, &i.ExpiresAt, &i.RevokedAt, &i.CancelledAt, &i.CreatedAt, &i.UpdatedAt,
 	); err != nil {
 		return Issued{}, err
 	}
@@ -184,16 +184,18 @@ func (s *Store) MarkClaimed(ctx context.Context, orgID, id uuid.UUID) (Issued, e
 	return out, err
 }
 
-// Revoke transitions a claimed/offered attestation to revoked and audits, in one
-// tx. Already-terminal (revoked/expired/failed) rows return ErrNotOfferable.
+// Revoke transitions a claimed attestation to revoked and audits, in one tx.
+// Only already-claimed credentials are revocable — an unclaimed offer is
+// withdrawn via Cancel, not revoked. Rows in any other state (offered, revoked,
+// cancelled, expired, failed) return ErrNotOfferable.
 func (s *Store) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
 	var out Issued
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE issued_attestations SET status = $3, revoked_at = now(), updated_at = now()
-			WHERE organization_id = $1 AND id = $2 AND status IN ($4, $5)
+			WHERE organization_id = $1 AND id = $2 AND status = $4
 			RETURNING ` + issuedColumns
 		var err error
-		out, err = scanIssued(q.QueryRow(ctx, update, orgID, id, StatusRevoked, StatusOffered, StatusClaimed))
+		out, err = scanIssued(q.QueryRow(ctx, update, orgID, id, StatusRevoked, StatusClaimed))
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Distinguish "not found" from "not in a revocable state".
 			if _, getErr := s.getIssuedTx(ctx, q, orgID, id); errors.Is(getErr, ErrIssuedNotFound) {
@@ -205,6 +207,35 @@ func (s *Store) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 			return fmt.Errorf("attestation: revoke %s: %w", id, err)
 		}
 		return s.audit.Record(ctx, q, audit.AttestationRevoked,
+			audit.Target{Type: audit.TargetIssuedAttestation, ID: out.ID.String(), OrgID: &orgID},
+			audit.Updated(nil, map[string]any{"status": out.Status}))
+	})
+	return out, err
+}
+
+// Cancel transitions an unclaimed offer to cancelled and audits, in one tx.
+// Only offers (status 'offered') can be cancelled — nothing was ever held, so
+// this is not a revocation and never touches the Token Status List. Rows in any
+// other state (claimed, revoked, cancelled, expired, failed) return ErrNotOfferable.
+func (s *Store) Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
+	var out Issued
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		const update = `UPDATE issued_attestations SET status = $3, cancelled_at = now(), updated_at = now()
+			WHERE organization_id = $1 AND id = $2 AND status = $4
+			RETURNING ` + issuedColumns
+		var err error
+		out, err = scanIssued(q.QueryRow(ctx, update, orgID, id, StatusCancelled, StatusOffered))
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Distinguish "not found" from "not in a cancellable state".
+			if _, getErr := s.getIssuedTx(ctx, q, orgID, id); errors.Is(getErr, ErrIssuedNotFound) {
+				return ErrIssuedNotFound
+			}
+			return ErrNotOfferable
+		}
+		if err != nil {
+			return fmt.Errorf("attestation: cancel %s: %w", id, err)
+		}
+		return s.audit.Record(ctx, q, audit.AttestationOfferCancelled,
 			audit.Target{Type: audit.TargetIssuedAttestation, ID: out.ID.String(), OrgID: &orgID},
 			audit.Updated(nil, map[string]any{"status": out.Status}))
 	})

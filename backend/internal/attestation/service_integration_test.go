@@ -380,7 +380,9 @@ func TestDataMinimisationRejectsUndeclaredAttribute(t *testing.T) {
 	}
 }
 
-// TestRevoke flips an issued attestation to revoked.
+// TestRevoke reserves revocation for already-claimed credentials: an unclaimed
+// offer cannot be revoked (that is Cancel's job), and a claimed one flips to
+// revoked exactly once.
 func TestRevoke(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
@@ -394,6 +396,13 @@ func TestRevoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
+	// An offer that was never claimed is not revocable.
+	if _, err := e.service.Revoke(ctx, e.orgID, result.ID); !errors.Is(err, attestation.ErrNotOfferable) {
+		t.Fatalf("expected ErrNotOfferable revoking an unclaimed offer, got %v", err)
+	}
+	if _, err := e.store.MarkClaimed(ctx, e.orgID, result.ID); err != nil {
+		t.Fatalf("MarkClaimed: %v", err)
+	}
 	revoked, err := e.service.Revoke(ctx, e.orgID, result.ID)
 	if err != nil {
 		t.Fatalf("Revoke: %v", err)
@@ -403,5 +412,51 @@ func TestRevoke(t *testing.T) {
 	}
 	if _, err := e.service.Revoke(ctx, e.orgID, result.ID); !errors.Is(err, attestation.ErrNotOfferable) {
 		t.Fatalf("expected ErrNotOfferable on re-revoke, got %v", err)
+	}
+}
+
+// TestCancelOffer withdraws an unclaimed offer as a cancellation (not a
+// revocation) and refuses to cancel an already-claimed credential.
+func TestCancelOffer(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	templateID := personTemplate(t, ctx, e.store, e.orgID)
+
+	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
+		TemplateID: templateID,
+		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "c@example.com"},
+		Attributes: map[string]string{"email": "c@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	cancelled, err := e.service.Cancel(ctx, e.orgID, result.ID)
+	if err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if cancelled.Status != attestation.StatusCancelled || cancelled.CancelledAt == nil {
+		t.Fatalf("expected cancelled, got %+v", cancelled)
+	}
+	if cancelled.RevokedAt != nil {
+		t.Fatalf("cancelling an offer must not set revoked_at, got %+v", cancelled)
+	}
+	if _, err := e.service.Cancel(ctx, e.orgID, result.ID); !errors.Is(err, attestation.ErrNotOfferable) {
+		t.Fatalf("expected ErrNotOfferable on re-cancel, got %v", err)
+	}
+
+	// A claimed credential is revoked, never cancelled.
+	claimable, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
+		TemplateID: templateID,
+		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "d@example.com"},
+		Attributes: map[string]string{"email": "d@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if _, err := e.store.MarkClaimed(ctx, e.orgID, claimable.ID); err != nil {
+		t.Fatalf("MarkClaimed: %v", err)
+	}
+	if _, err := e.service.Cancel(ctx, e.orgID, claimable.ID); !errors.Is(err, attestation.ErrNotOfferable) {
+		t.Fatalf("expected ErrNotOfferable cancelling a claimed credential, got %v", err)
 	}
 }
