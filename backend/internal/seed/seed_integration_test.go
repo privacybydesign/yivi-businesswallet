@@ -13,6 +13,10 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
 
+// localAddressDomain mirrors the QERDS default address domain used in local dev
+// (config.defaultQerdsDefaultAddressDomain).
+const localAddressDomain = "qerds.localhost"
+
 // TestEnsureYiviOrganizationSeedsAndIsIdempotent covers the staging org seed: the
 // Yivi organisation is present after one run with its team as admins, its three
 // attestation schemas and its issuer settings; re-running does not duplicate any
@@ -22,7 +26,7 @@ func TestEnsureYiviOrganizationSeedsAndIsIdempotent(t *testing.T) {
 	pool, dsn := testdb.Fresh(t)
 	ctx := context.Background()
 
-	first, err := seed.EnsureYiviOrganization(ctx, dsn)
+	first, err := seed.EnsureYiviOrganization(ctx, dsn, localAddressDomain)
 	if err != nil {
 		t.Fatalf("first EnsureYiviOrganization: %v", err)
 	}
@@ -34,7 +38,7 @@ func TestEnsureYiviOrganizationSeedsAndIsIdempotent(t *testing.T) {
 	}
 
 	// Re-run: the staging deploy runs the seed every time, so this must be safe.
-	second, err := seed.EnsureYiviOrganization(ctx, dsn)
+	second, err := seed.EnsureYiviOrganization(ctx, dsn, localAddressDomain)
 	if err != nil {
 		t.Fatalf("second EnsureYiviOrganization: %v", err)
 	}
@@ -76,7 +80,7 @@ func TestEnsureKVKRegisterOrganizationSeedsAndIsIdempotent(t *testing.T) {
 	pool, dsn := testdb.Fresh(t)
 	ctx := context.Background()
 
-	first, err := seed.EnsureKVKRegisterOrganization(ctx, dsn)
+	first, err := seed.EnsureKVKRegisterOrganization(ctx, dsn, localAddressDomain)
 	if err != nil {
 		t.Fatalf("first EnsureKVKRegisterOrganization: %v", err)
 	}
@@ -87,7 +91,7 @@ func TestEnsureKVKRegisterOrganizationSeedsAndIsIdempotent(t *testing.T) {
 		t.Fatalf("kvk number = %q, want %q", first.KVKNumber, registryprovider.RegisterKVKNumber)
 	}
 
-	second, err := seed.EnsureKVKRegisterOrganization(ctx, dsn)
+	second, err := seed.EnsureKVKRegisterOrganization(ctx, dsn, localAddressDomain)
 	if err != nil {
 		t.Fatalf("second EnsureKVKRegisterOrganization: %v", err)
 	}
@@ -101,6 +105,36 @@ func TestEnsureKVKRegisterOrganizationSeedsAndIsIdempotent(t *testing.T) {
 	// Its nl.kvk.registration schema and issuer settings, not duplicated on re-run.
 	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM attestation_schemas WHERE organization_id = $1", first.ID)
 	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM org_issuer_settings WHERE organization_id = $1", first.ID)
+}
+
+// TestEnsureYiviOrganizationUsesConfiguredDomain is the regression for issue #104:
+// the seeded Yivi org's QERDS address must be built from the configured address
+// domain, not the hardcoded qerds.localhost. With a staging-style domain the
+// digital address and the default qerds_addresses row must both use it.
+func TestEnsureYiviOrganizationUsesConfiguredDomain(t *testing.T) {
+	pool, dsn := testdb.Fresh(t)
+	ctx := context.Background()
+
+	const domain = "qerds.staging.yivi.app"
+	const want = "yivi@" + domain
+
+	org, err := seed.EnsureYiviOrganization(ctx, dsn, domain)
+	if err != nil {
+		t.Fatalf("EnsureYiviOrganization: %v", err)
+	}
+	if org.DigitalAddress != want {
+		t.Fatalf("digital address = %q, want %q", org.DigitalAddress, want)
+	}
+
+	var addr string
+	if err := pool.QueryRow(ctx,
+		"SELECT address FROM qerds_addresses WHERE organization_id = $1 AND is_default = true",
+		org.ID).Scan(&addr); err != nil {
+		t.Fatalf("query default qerds address: %v", err)
+	}
+	if addr != want {
+		t.Fatalf("default qerds address = %q, want %q", addr, want)
+	}
 }
 
 func assertCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, want int, query string, args ...any) {

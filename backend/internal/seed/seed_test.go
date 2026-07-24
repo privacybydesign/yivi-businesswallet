@@ -1,11 +1,39 @@
 package seed
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 )
+
+// TestQerdsAddressUsesConfiguredDomain pins that a seeded org's QERDS address is
+// assembled from the configured domain, so staging can seed real addresses
+// (qerds.staging.yivi.app) instead of the hardcoded qerds.localhost (issue #104).
+func TestQerdsAddressUsesConfiguredDomain(t *testing.T) {
+	if got, want := qerdsAddress("yivi", "qerds.staging.yivi.app"), "yivi@qerds.staging.yivi.app"; got != want {
+		t.Errorf("qerdsAddress(staging) = %q, want %q", got, want)
+	}
+	if got, want := qerdsAddress("yivi", "qerds.localhost"), "yivi@qerds.localhost"; got != want {
+		t.Errorf("qerdsAddress(local) = %q, want %q", got, want)
+	}
+}
+
+// TestDemoOrgAddressLocalPartsHaveNoDomain guards that the org fixtures store only
+// the local-part: a stray "@domain" here would be double-appended by qerdsAddress
+// and would also pin the domain back to a literal, defeating the fix.
+func TestDemoOrgAddressLocalPartsHaveNoDomain(t *testing.T) {
+	orgs := append([]demoOrganization{kvkRegisterOrg}, demoOrganizations...)
+	for _, o := range orgs {
+		if o.addressLocal == "" {
+			t.Errorf("demo org %q has an empty addressLocal", o.slug)
+		}
+		if strings.Contains(o.addressLocal, "@") {
+			t.Errorf("demo org %q addressLocal = %q, want a bare local-part with no domain", o.slug, o.addressLocal)
+		}
+	}
+}
 
 // TestDemoOrgsMatchRegister guards the reconciliation: every seeded demo company's
 // KVK identity and primary representative must exist in the register's fake API
