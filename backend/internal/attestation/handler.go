@@ -44,8 +44,15 @@ type issuedReader interface {
 	ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error)
 }
 
+// onboardingStore reads and replaces an org's onboarding auto-issue set (the
+// templates issued to a new member on accept). Implemented by the attestation Store.
+type onboardingStore interface {
+	ListOnboardingAttestations(ctx context.Context, orgID uuid.UUID) ([]OnboardingAttestation, error)
+	SetOnboardingAttestations(ctx context.Context, orgID uuid.UUID, templateIDs []uuid.UUID) ([]OnboardingAttestation, error)
+}
+
 type issuanceService interface {
-	Issue(ctx context.Context, orgID, issuedBy uuid.UUID, orgName string, in IssueInput) (IssueResult, error)
+	Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUID, orgName string, in IssueInput) (IssueResult, error)
 	Status(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ClaimStatus(ctx context.Context, token string) (ClaimView, error)
@@ -79,6 +86,7 @@ type Handler struct {
 	held           heldStore
 	service        issuanceService
 	issuerSettings issuerSettingsReader
+	onboarding     onboardingStore
 	issuerURL      string
 	requireUser    func(http.Handler) http.Handler
 	authorize      func(http.Handler) http.Handler
@@ -89,7 +97,7 @@ type Handler struct {
 // be empty (the generated config's issuer field is then left for the operator).
 // issuerSettings resolves an org's issuer instance + branding for the per-org
 // bundle generator (see issuerBundle).
-func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, held heldStore, service issuanceService, issuerSettings issuerSettingsReader, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, held heldStore, service issuanceService, issuerSettings issuerSettingsReader, onboarding onboardingStore, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		schemas:        schemas,
 		templates:      templates,
@@ -98,6 +106,7 @@ func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, iss
 		held:           held,
 		service:        service,
 		issuerSettings: issuerSettings,
+		onboarding:     onboarding,
 		issuerURL:      issuerURL,
 		requireUser:    requireUser,
 		authorize:      authorize,
@@ -131,6 +140,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/attestations/templates/{id}", admin(respond.HandlerFunc(h.getTemplate)))
 	mux.Handle("PATCH /orgs/{slug}/attestations/templates/{id}", admin(respond.HandlerFunc(h.updateTemplate)))
 	mux.Handle("DELETE /orgs/{slug}/attestations/templates/{id}", admin(respond.HandlerFunc(h.deleteTemplate)))
+
+	// Onboarding auto-issue set (admin): the templates issued to a new member on accept.
+	mux.Handle("GET /orgs/{slug}/attestations/onboarding", admin(respond.HandlerFunc(h.listOnboarding)))
+	mux.Handle("PUT /orgs/{slug}/attestations/onboarding", admin(respond.HandlerFunc(h.putOnboarding)))
 
 	// Key material (admin).
 	mux.Handle("GET /orgs/{slug}/attestations/keys", admin(respond.HandlerFunc(h.listKeys)))
@@ -526,6 +539,51 @@ func (h *Handler) listTemplates(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+type onboardingRequest struct {
+	TemplateIDs []string `json:"templateIds"`
+}
+
+// listOnboarding returns the org's onboarding auto-issue set.
+func (h *Handler) listOnboarding(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	set, err := h.onboarding.ListOnboardingAttestations(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("listing onboarding attestations: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, set)
+	return nil
+}
+
+// putOnboarding replaces the org's onboarding auto-issue set with the given
+// templates, in order. Each must be one of the org's own natural-person templates.
+func (h *Handler) putOnboarding(w http.ResponseWriter, r *http.Request) error {
+	var req onboardingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return badRequest("invalid_body", "invalid request body")
+	}
+	templateIDs := make([]uuid.UUID, len(req.TemplateIDs))
+	for i, raw := range req.TemplateIDs {
+		id, err := uuid.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			return badRequest("invalid_input", "invalid templateId")
+		}
+		templateIDs[i] = id
+	}
+
+	org := organization.OrgFromContext(r.Context())
+	set, err := h.onboarding.SetOnboardingAttestations(r.Context(), org.ID, templateIDs)
+	switch {
+	case errors.Is(err, ErrTemplateNotFound):
+		return notFound("template_not_found", "template not found")
+	case errors.Is(err, ErrOnboardingSubject):
+		return badRequest("onboarding_subject_mismatch", "onboarding auto-issue is only supported for natural-person templates")
+	case err != nil:
+		return fmt.Errorf("updating onboarding attestations: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, set)
+	return nil
+}
+
 func (h *Handler) getTemplate(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r, "id", "template")
 	if err != nil {
@@ -795,7 +853,7 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) error {
 
 	org := organization.OrgFromContext(r.Context())
 	actor := auth.UserFromContext(r.Context())
-	result, err := h.service.Issue(r.Context(), org.ID, actor.ID, org.Name, IssueInput{
+	result, err := h.service.Issue(r.Context(), org.ID, &actor.ID, org.Name, IssueInput{
 		TemplateID:     templateID,
 		Recipient:      Recipient{Kind: req.Recipient.Kind, UserID: userID, Ref: ref},
 		Attributes:     req.Attributes,

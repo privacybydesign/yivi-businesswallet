@@ -66,6 +66,7 @@ go test -race ./...
 ```
 
 - `go test -race ./...` is DB-free (the integration suite is tag-gated and skips without a database). CI also runs the integration job: `go test -tags=integration -race ./...` against a real Postgres — run it when touching stores, migrations, or the audit seam. See `.ai/conventions/BACKEND.md` for the `TEST_DATABASE_URL` setup.
+- The default `go build`/`go vet`/`go test` do **not** compile `//go:build integration` files (`*_integration_test.go`, `internal/integration/`). Changing an exported backend signature (e.g. a handler `NewHandler`, a `Service` method) can pass local verify and still break the CI integration job because those callers aren't recompiled. After any such change, run `go vet -tags=integration ./...` — it compiles them without needing a database.
 - `golangci-lint`, `air`, and `goose` are pinned `tool` directives in `backend/go.mod` — invoke via `go tool <name>`, never assume a global install.
 
 ## Assumptions & Validation

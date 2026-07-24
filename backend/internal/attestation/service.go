@@ -36,7 +36,7 @@ type issuerInstanceResolver interface {
 // through the store directly from the handler.
 type issuedStore interface {
 	GetTemplateDetail(ctx context.Context, orgID, id uuid.UUID) (TemplateDetail, error)
-	CreateOffered(ctx context.Context, orgID uuid.UUID, in IssueInput, detail TemplateDetail, issuedBy uuid.UUID, expiresAt *time.Time, claimToken, delivery string) (Issued, error)
+	CreateOffered(ctx context.Context, orgID uuid.UUID, in IssueInput, detail TemplateDetail, issuedBy *uuid.UUID, expiresAt *time.Time, claimToken, delivery string) (Issued, error)
 	SetOffer(ctx context.Context, orgID, id uuid.UUID, issuanceID, offerURI, txCode string) error
 	MarkFailed(ctx context.Context, orgID, id uuid.UUID) error
 	MarkClaimed(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
@@ -122,7 +122,10 @@ func (s *Service) instanceFor(ctx context.Context, orgID uuid.UUID) string {
 // channel the schema's subject type dictates: e-mail for a natural person, QERDS
 // for an organization. Delivery failures are non-fatal — the offer still exists
 // and the issuing UI shows its QR — but they are logged.
-func (s *Service) Issue(ctx context.Context, orgID, issuedBy uuid.UUID, orgName string, in IssueInput) (IssueResult, error) {
+// issuedBy is the admin who issued the attestation, or nil for a
+// system-initiated issuance (the onboarding auto-issue path, which has no admin
+// actor); the ledger's issued_by_user_id is nullable to record that.
+func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUID, orgName string, in IssueInput) (IssueResult, error) {
 	detail, err := s.store.GetTemplateDetail(ctx, orgID, in.TemplateID)
 	if err != nil {
 		return IssueResult{}, err

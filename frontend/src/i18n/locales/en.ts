@@ -355,6 +355,7 @@ export const en = {
     emailSettingsSaved: "E-mail settings saved",
     emailTestSent: "Test e-mail sent",
     issuerSettingsSaved: "Issuer settings saved",
+    onboardingAttestationsUpdated: "Onboarding attestations updated",
     wscaActivated: "Holder wallet activated",
     wscaRotated: "Wallet secret rotated",
     themeSaved: "Branding updated",
@@ -438,6 +439,7 @@ export const en = {
       orgEmailSettings: "Email settings",
       orgIssuerSettings: "Issuer settings",
       orgThemeSettings: "Theme settings",
+      orgOnboardingAttestations: "Onboarding attestations",
     },
     actions: {
       orgCreated: "Created organization",
@@ -496,6 +498,7 @@ export const en = {
       emailSettingsUpdated: "Updated email settings",
       issuerSettingsUpdated: "Updated issuer settings",
       themeSettingsUpdated: "Updated theme settings",
+      onboardingSettingsUpdated: "Updated onboarding attestations",
     },
   },
   memberInvite: {
@@ -528,9 +531,13 @@ export const en = {
     roleMember: "Member",
     roleAdmin: "Admin",
     attestations: "Attestations to auto-issue on onboarding",
+    attestationsHint:
+      "Applies to every new member of this organization, not just this invitation.",
+    attestationsEmpty: "No attestations are auto-issued yet.",
+    attestationsNoTemplates:
+      "Create a natural-person attestation template to auto-issue one.",
     addMore: "Add more",
-    attMemberOf: "Member of {{org}}",
-    attCorporateEmail: "Corporate e-mail",
+    removeAttestation: "Remove {{name}}",
     preview: {
       open: "Preview e-mail",
       title: "Welcome to {{org}} on Yivi",

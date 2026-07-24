@@ -129,7 +129,7 @@ func TestIssuePersonEmailsAndClaims(t *testing.T) {
 	ctx := context.Background()
 	templateID := personTemplate(t, ctx, e.store, e.orgID)
 
-	result, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "anna@example.com"},
 		Attributes: map[string]string{"email": "anna@example.com", "department": "Platform"},
@@ -168,7 +168,7 @@ func TestIssuePersonQrMethodSkipsEmail(t *testing.T) {
 	ctx := context.Background()
 	templateID := personTemplate(t, ctx, e.store, e.orgID)
 
-	result, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID:     templateID,
 		Recipient:      attestation.Recipient{Kind: attestation.RecipientMember, Ref: "anna@example.com"},
 		Attributes:     map[string]string{"email": "anna@example.com"},
@@ -194,7 +194,7 @@ func TestIssueOrganizationDeliversOverQerds(t *testing.T) {
 	ctx := context.Background()
 	templateID := orgTemplate(t, ctx, e.store, e.orgID)
 
-	_, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientOrganization, Ref: "supplier@qerds.example"},
 		Attributes: map[string]string{"name": "Supplier B.V."},
@@ -216,7 +216,7 @@ func TestRecipientKindMustMatchSubjectType(t *testing.T) {
 	ctx := context.Background()
 	templateID := orgTemplate(t, ctx, e.store, e.orgID)
 
-	_, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "a@b.com"},
 		Attributes: map[string]string{"name": "X"},
@@ -363,7 +363,7 @@ func TestDataMinimisationRejectsUndeclaredAttribute(t *testing.T) {
 	ctx := context.Background()
 	templateID := personTemplate(t, ctx, e.store, e.orgID)
 
-	_, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "x@example.com"},
 		Attributes: map[string]string{"email": "x@example.com", "salary": "secret"},
@@ -386,7 +386,7 @@ func TestRevoke(t *testing.T) {
 	ctx := context.Background()
 	templateID := personTemplate(t, ctx, e.store, e.orgID)
 
-	result, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "z@example.com"},
 		Attributes: map[string]string{"email": "z@example.com"},
