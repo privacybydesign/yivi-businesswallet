@@ -57,7 +57,9 @@ the Axis-A checks are the seams #27 fills behind this signature, which does not 
 
 Migrated to `RequirePermission` in this slice:
 - `internal/organization` — member management (`members:*`) and the org audit log (`audit:read`).
-- `internal/qerds` — address provisioning (`qerds:provision_address`).
+- `internal/qerds` — address provisioning (`qerds:provision_address`). `qerds:send` is in the
+  matrix (admin, `qerds_operator`) but its route `POST /orgs/{slug}/qerds/messages` is not gated yet —
+  it stays open to any member until a later slice, so the matrix is not yet fully enforced for QERDS.
 - `internal/attestation` — issue / cancel-offer / revoke (`attestations:{issue,cancel_offer,revoke}`);
   schema/template/key management stays admin-only (`manage_templates` / `manage_keys`).
 
