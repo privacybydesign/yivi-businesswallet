@@ -130,7 +130,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 		stubEmailNotifier{}, stubQerdsNotifier{}, attestationStore, eudiholder.NewStubHolder(), "http://app.test",
 	)
 	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, "", requireUser, orgHandler.Authorize)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, "", requireUser, orgHandler.Authorize)
 
 	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler))
 	t.Cleanup(srv.Close)

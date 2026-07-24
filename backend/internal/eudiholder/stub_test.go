@@ -70,7 +70,7 @@ func TestStubHolderRedeem(t *testing.T) {
 
 	// A redeemed credential exposes its disclosed attributes (the stub attaches a
 	// synthetic payload so the held-detail view has data in dev/CI).
-	claims, err := h.Claims(ctx, org, got.Ref, got.VCT)
+	claims, err := h.Claims(ctx, org, got.Ref, got.VCT, "en")
 	if err != nil {
 		t.Fatalf("claims: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestStubHolderRedeem(t *testing.T) {
 	}
 
 	// The vct fallback resolves the same credential when the ref is unknown.
-	viaVCT, err := h.Claims(ctx, org, "", got.VCT)
+	viaVCT, err := h.Claims(ctx, org, "", got.VCT, "en")
 	if err != nil {
 		t.Fatalf("claims by vct: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestStubHolderRedeem(t *testing.T) {
 	}
 
 	// Claims for an unknown ref and vct yields an empty attribute set, not an error.
-	empty, err := h.Claims(ctx, org, "does-not-exist", "")
+	empty, err := h.Claims(ctx, org, "does-not-exist", "", "en")
 	if err != nil {
 		t.Fatalf("claims unknown ref: %v", err)
 	}

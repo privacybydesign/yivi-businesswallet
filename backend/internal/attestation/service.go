@@ -49,6 +49,7 @@ type issuedStore interface {
 // engine-backed delete flow (read the ref, then soft-delete the audited index
 // row). Backed by the attestation store.
 type heldMutator interface {
+	ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error)
 	GetHeld(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error)
 	SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
 }
@@ -60,7 +61,8 @@ type heldMutator interface {
 // the concrete engine (stub or irmago).
 type holderEngine interface {
 	Delete(ctx context.Context, orgID uuid.UUID, ref string) error
-	Claims(ctx context.Context, orgID uuid.UUID, ref, vct string) (eudiholder.HeldCredential, error)
+	Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (eudiholder.HeldCredential, error)
+	Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]eudiholder.HeldDisplay, error)
 }
 
 // emailNotifier delivers a person-facing "your credential is ready" e-mail.
@@ -279,26 +281,46 @@ func (s *Service) DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error {
 // attributes and the issuer's human display name are read from the holder engine,
 // where the credential material and its metadata live (§6.5). Issuer is the issuer
 // identifier (a URL); IssuerName is its display name, falling back to the
-// identifier when the credential carried no issuer display metadata.
+// identifier when the credential carried no issuer display metadata. DisplayName /
+// LogoURI are the credential's own type-metadata title and logo resolved for the
+// request's language (both empty when the credential carried no credential-level
+// display metadata, so the frontend falls back to the VCT-derived name and shows
+// no logo).
 type HeldClaimsView struct {
-	ID         uuid.UUID                  `json:"id"`
-	VCT        string                     `json:"vct"`
-	Issuer     string                     `json:"issuer"`
-	IssuerName string                     `json:"issuerName"`
-	Source     string                     `json:"source"`
-	ReceivedAt time.Time                  `json:"receivedAt"`
-	Attributes []eudiholder.HeldAttribute `json:"attributes"`
+	ID          uuid.UUID                  `json:"id"`
+	VCT         string                     `json:"vct"`
+	Issuer      string                     `json:"issuer"`
+	IssuerName  string                     `json:"issuerName"`
+	DisplayName string                     `json:"displayName"`
+	LogoURI     string                     `json:"logoUri"`
+	Source      string                     `json:"source"`
+	ReceivedAt  time.Time                  `json:"receivedAt"`
+	Attributes  []eudiholder.HeldAttribute `json:"attributes"`
+}
+
+// HeldListView is one held-credential index row enriched with the credential's
+// localized type-metadata title and logo (resolved from the holder engine for the
+// request's language), so the held-list table can show a friendly, localized name
+// and a logo without a per-row claims fetch. DisplayName / LogoURI are empty when
+// the credential carried no credential-level display metadata (the frontend then
+// falls back to the VCT-derived name and shows no logo).
+type HeldListView struct {
+	HeldAttestation
+	DisplayName string `json:"displayName"`
+	LogoURI     string `json:"logoUri"`
 }
 
 // HeldClaims returns a held credential's disclosed attributes for the detail view,
 // after confirming the organization holds it (the index row is the source of truth
-// for existence). Returns ErrHeldNotFound when the row is absent or already deleted.
-func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID) (HeldClaimsView, error) {
+// for existence). lang is the request's active language (a BCP-47 tag); the
+// credential title, attribute labels and issuer name are resolved in it. Returns
+// ErrHeldNotFound when the row is absent or already deleted.
+func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang string) (HeldClaimsView, error) {
 	held, err := s.held.GetHeld(ctx, orgID, id)
 	if err != nil {
 		return HeldClaimsView{}, err
 	}
-	cred, err := s.holder.Claims(ctx, orgID, held.CredentialRef, held.VCT)
+	cred, err := s.holder.Claims(ctx, orgID, held.CredentialRef, held.VCT, lang)
 	if err != nil {
 		return HeldClaimsView{}, fmt.Errorf("attestation: held claims %s from engine: %w", id, err)
 	}
@@ -307,14 +329,38 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID) (HeldClai
 		issuerName = held.Issuer
 	}
 	return HeldClaimsView{
-		ID:         held.ID,
-		VCT:        held.VCT,
-		Issuer:     held.Issuer,
-		IssuerName: issuerName,
-		Source:     held.Source,
-		ReceivedAt: held.ReceivedAt,
-		Attributes: cred.Attributes,
+		ID:          held.ID,
+		VCT:         held.VCT,
+		Issuer:      held.Issuer,
+		IssuerName:  issuerName,
+		DisplayName: cred.DisplayName,
+		LogoURI:     cred.LogoURI,
+		Source:      held.Source,
+		ReceivedAt:  held.ReceivedAt,
+		Attributes:  cred.Attributes,
 	}, nil
+}
+
+// ListHeld returns an organization's active held credentials enriched with each
+// credential's localized type-metadata title and logo (resolved from the holder
+// engine for lang, the request's active language), so the held-list table shows a
+// friendly, localized name and logo without a per-row claims fetch. A row keeps
+// empty DisplayName / LogoURI when its credential carried no display metadata.
+func (s *Service) ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([]HeldListView, error) {
+	held, err := s.held.ListHeld(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	displays, err := s.holder.Displays(ctx, orgID, lang)
+	if err != nil {
+		return nil, fmt.Errorf("attestation: held displays org %s from engine: %w", orgID, err)
+	}
+	views := make([]HeldListView, len(held))
+	for i, h := range held {
+		d := displays[h.VCT]
+		views[i] = HeldListView{HeldAttestation: h, DisplayName: d.DisplayName, LogoURI: d.LogoURI}
+	}
+	return views, nil
 }
 
 // reconcile reports whether the issuer says the credential has been issued. A

@@ -585,7 +585,7 @@ function HeldTab({
             </Table.State>
           ) : (
             rows.map((row) => {
-              const name = credentialDisplayName(row.vct);
+              const name = row.displayName || credentialDisplayName(row.vct);
               return (
                 <Table.Row
                   key={row.id}
@@ -602,11 +602,22 @@ function HeldTab({
                   className="hover:bg-surface-2 focus-visible:bg-surface-2 cursor-pointer outline-none"
                 >
                   <Table.Cell className="min-w-0">
-                    <div className="text-ink truncate font-semibold">
-                      {name}
-                    </div>
-                    <div className="text-ink-soft truncate font-mono text-[12px]">
-                      {row.vct}
+                    <div className="flex min-w-0 items-center gap-3">
+                      {row.logoUri && (
+                        <img
+                          src={row.logoUri}
+                          alt={t("attestations.credentialImageAlt")}
+                          className="border-line bg-surface h-8 w-8 shrink-0 rounded-md border object-contain"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-ink truncate font-semibold">
+                          {name}
+                        </div>
+                        <div className="text-ink-soft truncate font-mono text-[12px]">
+                          {row.vct}
+                        </div>
+                      </div>
                     </div>
                   </Table.Cell>
                   <Table.Cell className="text-ink-soft truncate">
@@ -644,7 +655,9 @@ function HeldTab({
         <ConfirmDialog
           title={t("attestations.held.delete")}
           message={t("attestations.held.confirmDelete", {
-            name: credentialDisplayName(pendingDelete.vct),
+            name:
+              pendingDelete.displayName ||
+              credentialDisplayName(pendingDelete.vct),
           })}
           confirmLabel={t("attestations.held.delete")}
           busy={remove.isPending}
@@ -675,12 +688,23 @@ function HeldDetailModal({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const claims = useHeldAttestationClaimsQuery(slug, held.id);
-  const name = credentialDisplayName(held.vct);
+  const name =
+    claims.data?.displayName ||
+    held.displayName ||
+    credentialDisplayName(held.vct);
+  const logoUri = claims.data?.logoUri || held.logoUri;
   const attributes = claims.data?.attributes ?? [];
 
   return (
     <Modal title={name} closeLabel={t("common.close")} onClose={onClose}>
       <div className="flex flex-col gap-5">
+        {logoUri && (
+          <img
+            src={logoUri}
+            alt={t("attestations.credentialImageAlt")}
+            className="border-line bg-surface h-12 w-12 shrink-0 rounded-md border object-contain"
+          />
+        )}
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
           <dt className="text-ink-soft">
             {t("attestations.held.columns.issuer")}

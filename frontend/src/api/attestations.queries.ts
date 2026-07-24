@@ -101,15 +101,27 @@ export function attestationClaimQueryKey(token: string): readonly string[] {
   return ["attestations", "claim", token];
 }
 
-export function heldAttestationsQueryKey(slug: string): readonly string[] {
-  return ["organizations", "detail", slug, "attestations", "held"];
+export function heldAttestationsQueryKey(
+  slug: string,
+  lang: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "held", lang];
 }
 
 export function heldAttestationClaimsQueryKey(
   slug: string,
   heldId: string,
+  lang: string,
 ): readonly string[] {
-  return ["organizations", "detail", slug, "attestations", "held", heldId];
+  return [
+    "organizations",
+    "detail",
+    slug,
+    "attestations",
+    "held",
+    heldId,
+    lang,
+  ];
 }
 
 // Public claim polling: re-fetches while the attestation is still offered so the
@@ -475,9 +487,11 @@ export function useHeldAttestationsQuery(
   slug: string,
   enabled = true,
 ): UseQueryResult<HeldAttestation[], Error> {
+  const { i18n } = useTranslation();
+  const lang = i18n.language;
   return useQuery({
-    queryKey: heldAttestationsQueryKey(slug),
-    queryFn: ({ signal }) => getHeldAttestations(slug, signal),
+    queryKey: heldAttestationsQueryKey(slug, lang),
+    queryFn: ({ signal }) => getHeldAttestations(slug, lang, signal),
     enabled: enabled && slug !== "",
   });
 }
@@ -489,9 +503,12 @@ export function useHeldAttestationClaimsQuery(
   heldId: string,
   enabled = true,
 ): UseQueryResult<HeldAttestationClaims, Error> {
+  const { i18n } = useTranslation();
+  const lang = i18n.language;
   return useQuery({
-    queryKey: heldAttestationClaimsQueryKey(slug, heldId),
-    queryFn: ({ signal }) => getHeldAttestationClaims(slug, heldId, signal),
+    queryKey: heldAttestationClaimsQueryKey(slug, heldId, lang),
+    queryFn: ({ signal }) =>
+      getHeldAttestationClaims(slug, heldId, lang, signal),
     enabled: enabled && slug !== "" && heldId !== "",
   });
 }
@@ -505,8 +522,10 @@ export function useDeleteHeldAttestationMutation(
     mutationFn: ({ heldId }) => deleteHeldAttestation(slug, heldId),
     onSuccess: () => {
       toast.success(t("toasts.attestationHeldDeleted"));
+      // Prefix match (no language) invalidates the held list across every cached
+      // language, not just the active one.
       void queryClient.invalidateQueries({
-        queryKey: heldAttestationsQueryKey(slug),
+        queryKey: ["organizations", "detail", slug, "attestations", "held"],
       });
     },
   });
