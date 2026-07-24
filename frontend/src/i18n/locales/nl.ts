@@ -874,8 +874,8 @@ export const nl: Translation<typeof en> = {
         "De aangetekende-bezorgingsadressen die aan je organisatie zijn toegewezen",
       heading: "Digitale adressen",
       description:
-        "Elke organisatie krijgt minstens één uniek digitaal adres toegewezen voor aangetekende bezorging.",
-      localPartPlaceholder: "bijv. legal (standaard de org-slug)",
+        "Elke organisatie krijgt minstens één uniek digitaal adres toegewezen voor aangetekende bezorging. Nieuwe adressen moeten binnen de naamruimte van je organisatie vallen (de slug).",
+      localPartPlaceholder: "bijv. {{slug}}.legal (standaard {{slug}})",
       add: "Adres toevoegen",
       adding: "Toevoegen…",
       empty: "Nog geen digitale adressen toegewezen.",
@@ -883,6 +883,8 @@ export const nl: Translation<typeof en> = {
       setDefault: "Als standaard instellen",
       loadError: "Adressen laden mislukt: {{message}}",
       taken: "Dat digitale adres is al in gebruik.",
+      outsideNamespace:
+        "Een digitaal adres moet binnen de naamruimte van je organisatie vallen (de slug).",
       error: "Er is iets misgegaan: {{message}}",
     },
     contacts: {

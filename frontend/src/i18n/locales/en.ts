@@ -854,8 +854,8 @@ export const en = {
         "The registered-delivery addresses assigned to your organization",
       heading: "Digital addresses",
       description:
-        "Each organization is assigned at least one unique digital address for registered delivery.",
-      localPartPlaceholder: "e.g. legal (defaults to the org slug)",
+        "Each organization is assigned at least one unique digital address for registered delivery. New addresses must sit within your organization's namespace (its slug).",
+      localPartPlaceholder: "e.g. {{slug}}.legal (defaults to {{slug}})",
       add: "Add address",
       adding: "Adding…",
       empty: "No digital addresses provisioned yet.",
@@ -863,6 +863,8 @@ export const en = {
       setDefault: "Set as default",
       loadError: "Could not load addresses: {{message}}",
       taken: "That digital address is already taken.",
+      outsideNamespace:
+        "A digital address must be within your organization's namespace (its slug).",
       error: "Something went wrong: {{message}}",
     },
     contacts: {
