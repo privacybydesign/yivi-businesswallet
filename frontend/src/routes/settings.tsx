@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { useParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
@@ -24,6 +23,18 @@ const TABS = [
   { key: "wallets", labelKey: "settings.tabWallets" },
 ] as const;
 
+type TabKey = (typeof TABS)[number]["key"];
+
+const DEFAULT_TAB: TabKey = TABS[0].key;
+
+// The active tab is addressable via ?tab=<key> so links can deep-link to a
+// specific panel (e.g. ?tab=wallets for WSCA activation); an unknown or missing
+// value falls back to the first tab.
+function readTab(params: URLSearchParams): TabKey {
+  const value = params.get("tab");
+  return TABS.find((item) => item.key === value)?.key ?? DEFAULT_TAB;
+}
+
 export default function Settings(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug } = useParams();
@@ -31,7 +42,20 @@ export default function Settings(): React.JSX.Element {
   const slug = orgSlug!;
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
-  const [tab, setTab] = useState("org");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = readTab(searchParams);
+
+  const setTab = (value: TabKey): void => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === DEFAULT_TAB) next.delete("tab");
+        else next.set("tab", value);
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   return (
     <>

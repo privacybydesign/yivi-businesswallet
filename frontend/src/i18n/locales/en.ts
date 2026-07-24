@@ -888,6 +888,12 @@ export const en = {
     qualified: "Qualified",
     credentialImageAlt: "Credential image",
     loadError: "Could not load attestations: {{message}}",
+    walletActivation: {
+      badge: "Action needed",
+      title: "Activate your organization wallet",
+      body: "Credentials offered to your organization cannot be received until you activate the organization wallet. An offer that arrives first is kept and delivered once the wallet is active.",
+      action: "Activate wallet",
+    },
     tabs: {
       templates: "Templates",
       issued: "Issued",

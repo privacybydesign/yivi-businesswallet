@@ -908,6 +908,12 @@ export const nl: Translation<typeof en> = {
     qualified: "Gekwalificeerd",
     credentialImageAlt: "Credentialafbeelding",
     loadError: "Attestaties laden mislukt: {{message}}",
+    walletActivation: {
+      badge: "Actie nodig",
+      title: "Activeer de wallet van je organisatie",
+      body: "Credentials die aan je organisatie worden aangeboden, kunnen pas worden ontvangen als je de wallet van de organisatie activeert. Een aanbod dat eerder binnenkomt, blijft bewaard en wordt afgeleverd zodra de wallet actief is.",
+      action: "Wallet activeren",
+    },
     tabs: {
       templates: "Sjablonen",
       issued: "Uitgegeven",
