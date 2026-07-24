@@ -22,6 +22,12 @@ import type {
 } from "./qerds";
 import { toast } from "../lib/toast";
 
+// Inbound delivery is automatic on the backend (poll worker / webhook push), so
+// the list is re-fetched on an interval to surface a newly received message
+// without a manual "Check inbox". The default `refetchIntervalInBackground:
+// false` pauses this while the tab is hidden, so it costs nothing when unwatched.
+const MESSAGES_REFETCH_INTERVAL_MS = 30_000;
+
 export function qerdsMessagesQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "qerds", "messages"];
 }
@@ -45,6 +51,7 @@ export function useQerdsMessagesQuery(
     queryKey: qerdsMessagesQueryKey(slug),
     queryFn: ({ signal }) => getQerdsMessages(slug, signal),
     enabled: enabled && slug !== "",
+    refetchInterval: MESSAGES_REFETCH_INTERVAL_MS,
   });
 }
 

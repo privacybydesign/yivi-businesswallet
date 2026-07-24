@@ -775,6 +775,9 @@ export const en = {
     loadError: "Could not load messages: {{message}}",
     emptyInbox: "No messages received yet.",
     emptyOutbox: "No messages sent yet.",
+    unread_one: "{{count}} unread message",
+    unread_other: "{{count}} unread messages",
+    unreadItem: "Unread",
     tabs: {
       inbox: "Inbox",
       outbox: "Sent",
