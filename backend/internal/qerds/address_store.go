@@ -124,6 +124,30 @@ func (s *Store) ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, 
 	return addresses, nil
 }
 
+// OrgIDsWithAddresses returns the distinct organizations that have at least one
+// digital address. Used by the background poll worker to know which orgs to poll.
+func (s *Store) OrgIDsWithAddresses(ctx context.Context) ([]uuid.UUID, error) {
+	const query = `SELECT DISTINCT organization_id FROM qerds_addresses`
+	rows, err := s.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("qerds: list orgs with addresses: %w", err)
+	}
+	defer rows.Close()
+
+	orgIDs := []uuid.UUID{}
+	for rows.Next() {
+		var orgID uuid.UUID
+		if err := rows.Scan(&orgID); err != nil {
+			return nil, fmt.Errorf("qerds: list orgs with addresses scan: %w", err)
+		}
+		orgIDs = append(orgIDs, orgID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("qerds: list orgs with addresses rows: %w", err)
+	}
+	return orgIDs, nil
+}
+
 // OrgByAddress resolves the organization that owns a digital address. Used by
 // the inbound webhook, which is keyed on recipient address, not org slug.
 func (s *Store) OrgByAddress(ctx context.Context, address string) (uuid.UUID, error) {

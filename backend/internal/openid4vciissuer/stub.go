@@ -13,8 +13,8 @@ const stubIssuanceIDBytes = 16
 // StubIssuer is an in-process issuer for dev / CI (ATTESTATION_ISSUER=stub). It
 // returns a deterministic-shaped offer and reports the credential as issued
 // immediately, so the whole offer -> claim loop runs offline. It is the issuer
-// equivalent of the QERDS StubProvider and the faked verifier. Selected by
-// config, never code.
+// equivalent of the faked verifier (QERDS has no such stub — it requires a real
+// provider). Selected by config, never code.
 type StubIssuer struct{}
 
 func NewStubIssuer() StubIssuer { return StubIssuer{} }

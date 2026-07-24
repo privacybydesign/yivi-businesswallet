@@ -70,6 +70,19 @@ services:
       ATTESTATION_ISSUER_INSTANCE: ${ATTESTATION_ISSUER_INSTANCE:-}
       ATTESTATION_ISSUER_ADMIN_TOKEN: ${ATTESTATION_ISSUER_ADMIN_TOKEN:-}
       ATTESTATION_ISSUER_PING_CREDENTIAL: ${ATTESTATION_ISSUER_PING_CREDENTIAL:-}
+      # QERDS: a real provider connection is REQUIRED (no in-process stub). The
+      # backend fails to boot when the provider or its URL is unset. (Left as
+      # plain passthrough rather than a Compose `:?` guard so the dev override,
+      # which is interpolated alongside this file, can default them instead.)
+      # See .ai/features/qerds.md §8.
+      QERDS_PROVIDER: ${QERDS_PROVIDER:-}
+      QERDS_PROVIDER_URL: ${QERDS_PROVIDER_URL:-}
+      QERDS_AUTH_TOKEN: ${QERDS_AUTH_TOKEN:-}
+      # Inbound delivery: push (webhook), poll (background worker) or both.
+      QERDS_INBOUND_MODE: ${QERDS_INBOUND_MODE:-push}
+      QERDS_POLL_INTERVAL: ${QERDS_POLL_INTERVAL:-5m}
+      # Required when the inbound mode enables push (push or both).
+      QERDS_WEBHOOK_SECRET: ${QERDS_WEBHOOK_SECRET:-}
     depends_on:
       db:
         condition: service_healthy

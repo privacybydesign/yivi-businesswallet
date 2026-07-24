@@ -44,11 +44,18 @@ services:
       ATTESTATION_HOLDER_WSCA_KEK: ${ATTESTATION_HOLDER_WSCA_KEK:-}
       ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR: ${ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR:-/tmp/eudiholder-wsca}
       ATTESTATION_HOLDER_WSCA_INSECURE: ${ATTESTATION_HOLDER_WSCA_INSECURE:-}
-      # QERDS transport: stub by default. Set QERDS_PROVIDER=domibus (+ URL) in
-      # .env to drive the real Domibus AS4 access point (run with --profile domibus).
-      QERDS_PROVIDER: ${QERDS_PROVIDER:-stub}
-      QERDS_PROVIDER_URL: ${QERDS_PROVIDER_URL:-}
+      # QERDS: a real provider connection is REQUIRED — there is no in-process
+      # stub, so the backend fails to boot without one. Dev uses the local Domibus
+      # AS4 bench, which is opt-in behind the `domibus` profile: bring it up first
+      #   docker compose --profile domibus up
+      # See .ai/features/qerds.md §9. Dev defaults to poll inbound (no public
+      # webhook to receive push), so no webhook secret is needed here.
+      QERDS_PROVIDER: ${QERDS_PROVIDER:-domibus}
+      QERDS_PROVIDER_URL: ${QERDS_PROVIDER_URL:-http://domibus:8080/domibus/services/backend}
       QERDS_AUTH_TOKEN: ${QERDS_AUTH_TOKEN:-}
+      QERDS_INBOUND_MODE: ${QERDS_INBOUND_MODE:-poll}
+      QERDS_POLL_INTERVAL: ${QERDS_POLL_INTERVAL:-30s}
+      QERDS_WEBHOOK_SECRET: ${QERDS_WEBHOOK_SECRET:-}
       QERDS_DOMIBUS_FROM_PARTY: ${QERDS_DOMIBUS_FROM_PARTY:-}
       QERDS_DOMIBUS_TO_PARTY: ${QERDS_DOMIBUS_TO_PARTY:-}
     depends_on:

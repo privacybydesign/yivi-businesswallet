@@ -3,6 +3,8 @@ package qerds
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -10,9 +12,63 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 )
 
+// fakeProvider is a test-local QERDS provider: Send loops the message into the
+// recipient's inbox so a Fetch on the receiving address returns it, exercising
+// the whole send/receive/evidence flow without the deleted in-process stub or a
+// real provider. It is a test double, not shipped code.
+type fakeProvider struct {
+	mu    sync.Mutex
+	inbox map[qerdsprovider.Address][]qerdsprovider.InboundMessage
+	seq   int
+}
+
+func newFakeProvider() *fakeProvider {
+	return &fakeProvider{inbox: map[qerdsprovider.Address][]qerdsprovider.InboundMessage{}}
+}
+
+func (p *fakeProvider) ResolveAddress(_ context.Context, identifier string) (qerdsprovider.Address, error) {
+	return qerdsprovider.Address(identifier), nil
+}
+
+func (p *fakeProvider) Send(_ context.Context, msg qerdsprovider.OutboundMessage) (qerdsprovider.SendReceipt, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.seq++
+	ref := fmt.Sprintf("fake-%d", p.seq)
+	delivery := qerdsprovider.Evidence{Type: qerdsprovider.EvidenceDelivery, ProviderRef: ref}
+	p.inbox[msg.Recipient] = append(p.inbox[msg.Recipient], qerdsprovider.InboundMessage{
+		ProviderRef: ref,
+		Sender:      msg.Sender,
+		Recipient:   msg.Recipient,
+		Subject:     msg.Subject,
+		Body:        msg.Body,
+		Attachments: msg.Attachments,
+		Evidence:    []qerdsprovider.Evidence{delivery},
+	})
+	return qerdsprovider.SendReceipt{
+		ProviderRef: ref,
+		Status:      qerdsprovider.StatusDelivered,
+		Evidence: []qerdsprovider.Evidence{
+			{Type: qerdsprovider.EvidenceSubmissionAcceptance, ProviderRef: ref},
+			delivery,
+		},
+	}, nil
+}
+
+func (p *fakeProvider) Fetch(_ context.Context, addr qerdsprovider.Address) ([]qerdsprovider.InboundMessage, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	msgs := p.inbox[addr]
+	delete(p.inbox, addr)
+	return msgs, nil
+}
+
 // fakeStore is an in-memory messageStore + addressStore for DB-free service tests.
 type fakeStore struct {
 	defaultAddr         Address
+	orgIDs              []uuid.UUID
 	messages            []Message
 	sent                map[uuid.UUID]qerdsprovider.SendReceipt
 	seenRefs            map[string]bool
@@ -86,9 +142,13 @@ func (f *fakeStore) OrgByAddress(_ context.Context, _ string) (uuid.UUID, error)
 	return uuid.Nil, ErrAddressNotFound
 }
 
+func (f *fakeStore) OrgIDsWithAddresses(_ context.Context) ([]uuid.UUID, error) {
+	return f.orgIDs, nil
+}
+
 func TestServiceSendAndPollRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	prov := qerdsprovider.NewStubProvider()
+	prov := newFakeProvider()
 
 	orgA := uuid.New()
 	orgB := uuid.New()
@@ -124,12 +184,12 @@ func TestServiceSendAndPollRoundTrip(t *testing.T) {
 	if received != 1 {
 		t.Fatalf("received = %d, want 1", received)
 	}
-	// The stub loops the attachment through to the recipient's inbox.
+	// The provider loops the attachment through to the recipient's inbox.
 	if len(storeB.inboundAttachments) != 1 || storeB.inboundAttachments[0].Filename != "filing.pdf" {
 		t.Fatalf("inbound attachments = %+v, want the looped-back attachment", storeB.inboundAttachments)
 	}
 
-	// Stub inbox is drained; a second poll yields nothing new.
+	// The inbox is drained on fetch; a second poll yields nothing new.
 	again, err := svcB.Poll(ctx, orgB)
 	if err != nil {
 		t.Fatalf("Poll (again): %v", err)
@@ -141,7 +201,7 @@ func TestServiceSendAndPollRoundTrip(t *testing.T) {
 
 func TestServiceSendWithoutSenderAddress(t *testing.T) {
 	ctx := context.Background()
-	prov := qerdsprovider.NewStubProvider()
+	prov := newFakeProvider()
 	store := newFakeStore("") // no default address
 	svc := NewService(store, store, prov)
 
@@ -153,7 +213,7 @@ func TestServiceSendWithoutSenderAddress(t *testing.T) {
 
 func TestServiceSendWithChosenSender(t *testing.T) {
 	ctx := context.Background()
-	prov := qerdsprovider.NewStubProvider()
+	prov := newFakeProvider()
 	store := newFakeStore("alice@qerds.localhost")
 	svc := NewService(store, store, prov)
 
@@ -169,5 +229,46 @@ func TestServiceSendWithChosenSender(t *testing.T) {
 	// Sending from an address the org does not own is rejected.
 	if _, err := svc.Send(ctx, uuid.New(), "eve@qerds.localhost", "bob@qerds.localhost", "hi", "", nil); !errors.Is(err, ErrSenderNotOwned) {
 		t.Fatalf("err = %v, want ErrSenderNotOwned", err)
+	}
+}
+
+// TestServicePollAll checks the background poll worker's fan-out: PollAll polls
+// every org reported by OrgIDsWithAddresses and sums what each stored.
+func TestServicePollAll(t *testing.T) {
+	ctx := context.Background()
+	prov := newFakeProvider()
+
+	orgA := uuid.New()
+	orgB := uuid.New()
+	// One shared store standing in for two orgs that both have an address; the
+	// poll worker drives every org OrgIDsWithAddresses returns.
+	store := newFakeStore("alice@qerds.localhost")
+	store.orgIDs = []uuid.UUID{orgA, orgB}
+	svc := NewService(store, store, prov)
+
+	// Two messages waiting in the polled address's inbox.
+	sender := newFakeStore("carol@qerds.localhost")
+	sendSvc := NewService(sender, sender, prov)
+	for _, subject := range []string{"one", "two"} {
+		if _, err := sendSvc.Send(ctx, uuid.New(), "", "alice@qerds.localhost", subject, "", nil); err != nil {
+			t.Fatalf("Send %q: %v", subject, err)
+		}
+	}
+
+	received, err := svc.PollAll(ctx)
+	if err != nil {
+		t.Fatalf("PollAll: %v", err)
+	}
+	if received != 2 {
+		t.Fatalf("received = %d, want 2", received)
+	}
+
+	// Inbox drained: a second sweep stores nothing new.
+	again, err := svc.PollAll(ctx)
+	if err != nil {
+		t.Fatalf("PollAll (again): %v", err)
+	}
+	if again != 0 {
+		t.Fatalf("second PollAll received = %d, want 0", again)
 	}
 }
