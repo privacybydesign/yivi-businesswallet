@@ -365,6 +365,7 @@ export const nl: Translation<typeof en> = {
     attestationKeyRevoked: "Sleutel ingetrokken",
     attestationIssued: "Attestatie uitgegeven",
     attestationRevoked: "Attestatie ingetrokken",
+    attestationOfferCancelled: "Aanbod geannuleerd",
     emailSettingsSaved: "E-mailinstellingen opgeslagen",
     emailTestSent: "Test-e-mail verstuurd",
     issuerSettingsSaved: "Uitgever-instellingen opgeslagen",
@@ -505,6 +506,7 @@ export const nl: Translation<typeof en> = {
       attestationIssued: "Attestatie uitgegeven",
       attestationClaimed: "Attestatie geclaimd",
       attestationRevoked: "Attestatie ingetrokken",
+      attestationOfferCancelled: "Attestatieaanbod geannuleerd",
       attestationKeyAdded: "Attestatiesleutel toegevoegd",
       attestationKeySuspended: "Attestatiesleutel opgeschort",
       attestationKeyRevoked: "Attestatiesleutel ingetrokken",
@@ -944,6 +946,7 @@ export const nl: Translation<typeof en> = {
     },
     issued: {
       empty: "Nog geen attestaties uitgegeven.",
+      cancel: "Aanbod annuleren",
       revoke: "Intrekken",
       columns: {
         recipient: "Ontvanger",

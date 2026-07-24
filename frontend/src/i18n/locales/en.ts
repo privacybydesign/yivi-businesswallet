@@ -352,6 +352,7 @@ export const en = {
     attestationKeyRevoked: "Key revoked",
     attestationIssued: "Attestation issued",
     attestationRevoked: "Attestation revoked",
+    attestationOfferCancelled: "Offer cancelled",
     emailSettingsSaved: "E-mail settings saved",
     emailTestSent: "Test e-mail sent",
     issuerSettingsSaved: "Issuer settings saved",
@@ -491,6 +492,7 @@ export const en = {
       attestationIssued: "Issued attestation",
       attestationClaimed: "Claimed attestation",
       attestationRevoked: "Revoked attestation",
+      attestationOfferCancelled: "Cancelled attestation offer",
       attestationKeyAdded: "Added attestation key",
       attestationKeySuspended: "Suspended attestation key",
       attestationKeyRevoked: "Revoked attestation key",
@@ -924,6 +926,7 @@ export const en = {
     },
     issued: {
       empty: "No attestations issued yet.",
+      cancel: "Cancel offer",
       revoke: "Revoke",
       columns: {
         recipient: "Recipient",

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
+  cancelIssuedAttestation,
   createAttestationKey,
   createAttestationSchema,
   createAttestationTemplate,
@@ -473,6 +474,26 @@ export function useRevokeIssuedAttestationMutation(
     meta: { suppressErrorToast: true },
     onSuccess: (_data, { issuedId }) => {
       toast.success(t("toasts.attestationRevoked"));
+      void queryClient.invalidateQueries({
+        queryKey: issuedAttestationsQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: issuedAttestationQueryKey(slug, issuedId),
+      });
+    },
+  });
+}
+
+export function useCancelIssuedAttestationMutation(
+  slug: string,
+): UseMutationResult<IssuedAttestation, Error, { issuedId: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ issuedId }) => cancelIssuedAttestation(slug, issuedId),
+    meta: { suppressErrorToast: true },
+    onSuccess: (_data, { issuedId }) => {
+      toast.success(t("toasts.attestationOfferCancelled"));
       void queryClient.invalidateQueries({
         queryKey: issuedAttestationsQueryKey(slug),
       });

@@ -228,7 +228,7 @@ Slice layout (house convention):
 ```
 internal/attestation/
   handler.go        HTTP: parse, authz-in-context, status mapping, respond.*
-  service.go        orchestration: issue flow, offer lifecycle, receive/hold, revoke
+  service.go        orchestration: issue flow, offer lifecycle, receive/hold, cancel, revoke
   schema_store.go   pgx CRUD for credential-type schemas
   template_store.go pgx CRUD for issuance templates
   issued_store.go   pgx CRUD for the issued-attestation ledger
@@ -353,12 +353,12 @@ One row per issuance attempt; the transaction log the regulation requires
 | `recipient_ref` | text | email / digital address / name shown in the UI |
 | `attributes` | jsonb | the exact attribute values issued (source of the "attributes" step) |
 | `qualified` | boolean | snapshot of whether a qualified seal was used |
-| `status` | text CHECK | `offered` \| `claimed` \| `expired` \| `revoked` \| `failed` |
+| `status` | text CHECK | `offered` \| `claimed` \| `expired` \| `revoked` \| `cancelled` \| `failed` |
 | `issuance_id` | text | opaque id into `openid4vciissuer` (correlation key) |
 | `linked_attestation_id` | uuid FK→issued_attestations NULL | chained/linked (Art 5(1)(g)) |
 | `qualified_timestamp` | timestamptz NULL | when a QTST anchors the seal (if qualified) |
 | `issued_by_user_id` | uuid FK→users NULL | the admin/member who issued it |
-| `claimed_at` / `expires_at` / `revoked_at` | timestamptz NULL | lifecycle stamps |
+| `claimed_at` / `expires_at` / `revoked_at` / `cancelled_at` | timestamptz NULL | lifecycle stamps |
 | `created_at` / `updated_at` | timestamptz | |
 
 ### 6.4 `attestation_keys` — key material (sidebar "Key material")
@@ -499,7 +499,8 @@ issued_attestations:
   offered ──(wallet claims)────▶ claimed       (OpenID4VCI handshake done, VC delivered)
   offered ──(TTL elapses)──────▶ expired
   offered ──(issuer error)─────▶ failed        (retryable — offer can be re-created)
-  claimed ──(owner/holder)─────▶ revoked        (Art 6(2) — validity revoked)
+  offered ──(admin cancels)────▶ cancelled     (offer withdrawn — nothing was held, no Token Status List)
+  claimed ──(admin revokes)────▶ revoked        (Art 6(2) — validity revoked, published to Token Status List)
 
 attestation_keys:  active ──▶ suspended | revoked   (compromise, QTSP drop-off)
 held_attestations: received ──▶ deleted (soft)      (owner delete, Art 5(1)(a))
@@ -540,10 +541,18 @@ delivered over **QERDS** to their digital address (reusing the `qerds` send path
 by email. The service polls `Result`; on claim → `claimed` + `claimed_at` + audit; on
 TTL → `expired`.
 
-### 9.4 Revoke an issued attestation (admin, Art 6(2))
-`POST .../attestations/{id}/revoke` → `status → revoked`, `revoked_at`, propagate
-revocation to the issuer's status list (StatusList2021-style; provider seam call),
-audit. Revocation propagation to external validators beyond the status list is v2.
+### 9.4 Withdraw: cancel an offer vs revoke a claimed credential (admin)
+Two distinct terminal withdrawals, because they are different events:
+- **Cancel an unclaimed offer** — `POST .../attestations/{id}/cancel` → `status → cancelled`,
+  `cancelled_at`, audit `attestation.offer_cancelled`. Only rows in `offered` are
+  cancellable. Nothing was ever held, so this is not a revocation and never touches
+  the Token Status List (returns 409 `not_cancellable` otherwise).
+- **Revoke a claimed credential** (Art 6(2)) — `POST .../attestations/{id}/revoke` →
+  `status → revoked`, `revoked_at`, audit `attestation.revoked`. Only rows in `claimed`
+  are revocable (returns 409 `not_revocable` otherwise). This is the path that
+  propagates to the issuer's IETF Token Status List (`draft-ietf-oauth-status-list`;
+  provider seam call, wired in #76). Propagation to external validators beyond the
+  status list is v2.
 
 ### 9.5 Receive / hold (holder side, Art 5(1)(a))
 Inbound EAAs land in the org's **irmago EUDI holder engine** (§6.5) with a
@@ -606,11 +615,12 @@ All org-scoped (`auth.RequireUser` → `organization.Handler.Authorize`, org via
 **Schemas** (admin): `GET|POST .../attestations/schemas`, `GET|PATCH|DELETE .../attestations/schemas/{id}`
 **Templates** (admin): `GET|POST .../attestations/templates`, `GET|PATCH|DELETE .../attestations/templates/{id}`
 **Onboarding set** (admin): `GET .../attestations/onboarding` (the auto-issue set, §6.6), `PUT .../attestations/onboarding` (replace with `{templateIds: [...]}`, in order)
-**Issued ledger** (member read; admin issue/revoke):
+**Issued ledger** (member read; admin issue/cancel/revoke):
 - `GET  .../attestations` — the Issued tab (filter by template/status/recipient)
 - `POST .../attestations` — issue (§9.3) → `202 {id, status, offerUri}`
 - `GET  .../attestations/{id}` — poll one issuance `{status, claimedAt?, offerUri?}`
-- `POST .../attestations/{id}/revoke` — admin
+- `POST .../attestations/{id}/cancel` — admin, cancel an unclaimed offer (§9.4)
+- `POST .../attestations/{id}/revoke` — admin, revoke a claimed credential (§9.4)
 **Key material** (admin): `GET|POST .../attestations/keys`, `POST .../attestations/keys/{id}/suspend|revoke`
 **Held** (member read; admin delete): `GET .../attestations/held`, `DELETE .../attestations/held/{id}`
 **Export** (Art 5(1)(l)): `GET .../attestations/export` — structured, machine-readable
@@ -642,7 +652,7 @@ invalidation cascades. The screen is the mockup:
 
 - **Audit** (`internal/audit`): new actions `SchemaCreated/Updated`,
   `TemplateCreated/Updated/Archived`, `AttestationIssued`, `AttestationClaimed`,
-  `AttestationRevoked`, `KeyMaterialAdded/Suspended/Revoked`, `HeldAttestationDeleted`;
+  `AttestationRevoked`, `AttestationOfferCancelled`, `KeyMaterialAdded/Suspended/Revoked`, `HeldAttestationDeleted`;
   new targets `TargetAttestationSchema`, `TargetAttestationTemplate`,
   `TargetIssuedAttestation`, `TargetAttestationKey`, `TargetHeldAttestation`. Standard
   `{before, after}` envelope; store readable values, never ids. Every mutation in-tx.
