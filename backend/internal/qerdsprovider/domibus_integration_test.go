@@ -68,6 +68,42 @@ func newProvider(base string) *qerdsprovider.DomibusProvider {
 	)
 }
 
+const (
+	// pmodeReloadWindow bounds how long sendAwaitingPMode retries the transient
+	// post-upload PMode race (see its doc comment).
+	pmodeReloadWindow = 30 * time.Second
+	pmodeRetryDelay   = time.Second
+	// pmodeMismatchMarker is the ebMS error name Domibus returns while the just-
+	// uploaded PMode has not yet reached the submit path (EBMS:0010).
+	pmodeMismatchMarker = "ProcessingModeMismatch"
+)
+
+// sendAwaitingPMode submits msg, retrying ONLY the transient
+// "ProcessingModeMismatch: PMode could not be found" fault until the PMode is
+// live or pmodeReloadWindow elapses. uploadPMode persists the PMode
+// synchronously (the /rest/pmode POST returns 200) but the MSH submit path
+// picks it up via an async PModeProvider refresh, so the first submit after a
+// fresh CI boot can race ahead of that reload and be rejected with EBMS:0010.
+// Such a submit is rejected outright (nothing is queued), so retrying is safe —
+// it cannot double-deliver. Any other error fails the test immediately.
+func sendAwaitingPMode(ctx context.Context, t *testing.T, provider *qerdsprovider.DomibusProvider, msg qerdsprovider.OutboundMessage) qerdsprovider.SendReceipt {
+	t.Helper()
+	deadline := time.Now().Add(pmodeReloadWindow)
+	for {
+		receipt, err := provider.Send(ctx, msg)
+		if err == nil {
+			return receipt
+		}
+		if !strings.Contains(err.Error(), pmodeMismatchMarker) {
+			t.Fatalf("Send: %v", err)
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			t.Fatalf("Send: PMode still not loaded after %s: %v", pmodeReloadWindow, err)
+		}
+		time.Sleep(pmodeRetryDelay)
+	}
+}
+
 // TestDomibusProviderSendIntegration exercises the real DomibusProvider against a
 // live Domibus AS4 access point: it provisions Domibus, pings the WS plugin, and
 // submits a message, asserting Domibus accepts it and returns a provider ref.
@@ -83,15 +119,12 @@ func TestDomibusProviderSendIntegration(t *testing.T) {
 		t.Fatalf("Ping: %v", err)
 	}
 
-	receipt, err := provider.Send(ctx, qerdsprovider.OutboundMessage{
+	receipt := sendAwaitingPMode(ctx, t, provider, qerdsprovider.OutboundMessage{
 		Sender:    "sender@qerds.localhost",
 		Recipient: "recipient@qerds.localhost",
 		Subject:   "integration test",
 		Body:      "hello from the QERDS Domibus integration test",
 	})
-	if err != nil {
-		t.Fatalf("Send: %v", err)
-	}
 	if receipt.ProviderRef == "" {
 		t.Error("Send returned an empty ProviderRef; expected the Domibus message id")
 	}
@@ -121,14 +154,12 @@ func TestDomibusProviderInboundRoundTripIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	if _, err := provider.Send(ctx, qerdsprovider.OutboundMessage{
+	sendAwaitingPMode(ctx, t, provider, qerdsprovider.OutboundMessage{
 		Sender:    "sender@qerds.localhost",
 		Recipient: recipient,
 		Subject:   subject,
 		Body:      body,
-	}); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
+	})
 
 	// AS4 delivery is async; poll Fetch until the message lands (or time out).
 	var got *qerdsprovider.InboundMessage

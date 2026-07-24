@@ -127,6 +127,8 @@ edge.
 
 - **`qerds_addresses`** — `(id, org_id FK, address unique, is_default, provider_ref, provisioned_at,
   created_at)`. Art 6(1)(j) allows ≥1 address per owner; model as a set from day one.
+  **Ownership / namespace rule (see §4.1)** — provisioning is constrained to the org's own verified
+  namespace, so one org can never claim a local part that belongs to another.
 - **`qerds_messages`** — `(id, org_id FK, direction ['outbound'|'inbound'], sender_address,
   recipient_address, subject, provider_ref unique, status, submitted_at, delivered_at,
   qualified_timestamp_send, created_at, updated_at)`. `provider_ref` is the correlation key into
@@ -142,6 +144,29 @@ edge.
 - **`qerds_evidence`** — **append-only**. `(id, message_id FK, evidence_type, provider_ref,
   qualified_timestamp, raw_evidence bytea, verified_at, created_at)`. Never updated, only inserted.
   Backs the Art 5(1)(n) "access, store and verify" dashboard.
+
+### 4.1 Address ownership / namespace rule
+
+A QERDS digital address is a legally significant (eIDAS / QERDS) routing identity, so provisioning
+must not let one org claim a local part that belongs to another. The check lives in the handler
+(`namespacedLocalPart`, `handler.go`), which has the resolved org from context:
+
+- An org's **verified claim** is its `slug` — KVK-validated at bootstrap (`wallet.OpenWallet` →
+  `registry.Consult`) and unique per deployment (`organizations.slug`).
+- The org owns the local part **equal to its slug** plus any **subdivision beneath it**: `acme`,
+  `acme.sales`, `acme.sales.eu`. The auto-provisioned bootstrap address (`slug@domain`) is the bare
+  slug, so it fits the same rule.
+- The client-supplied `localPart` is lower-cased and must be either the slug itself or
+  `<slug>.<label>` where each dot-separated label matches the slug grammar (`[a-z0-9]` segments
+  joined by single hyphens). An empty value defaults to the bare slug. Anything else is rejected
+  with `400 address_outside_namespace`.
+- Because a slug can never contain the `.` separator, a local part inside one org's namespace can
+  never collide with another org's slug or namespace — closing the cross-org squatting hole. Global
+  `address` uniqueness in the store (`ErrAddressTaken`) remains the second-line guard against a
+  same-namespace race.
+
+Verifying control of a fully free-form local part (out-of-band proof) is deliberately out of scope
+for now; the slug namespace is the identity the deployment already validates.
 
 ### Delivery state machine (`status.go`)
 

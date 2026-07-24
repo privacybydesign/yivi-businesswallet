@@ -20,6 +20,8 @@ var (
 	ErrAddressTaken       = errors.New("qerds: digital address already taken")
 	ErrSenderNotOwned     = errors.New("qerds: sender address not owned by organization")
 
+	ErrAddressOutsideNamespace = errors.New("qerds: address is outside the organization namespace")
+
 	ErrContactNotFound     = errors.New("qerds: contact not found")
 	ErrContactAddressTaken = errors.New("qerds: contact address already saved")
 )

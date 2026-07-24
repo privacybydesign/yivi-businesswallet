@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -301,6 +302,38 @@ type provisionAddressRequest struct {
 	Default   bool   `json:"default"`
 }
 
+// addressNamespaceSeparator delimits an organization's verified slug namespace
+// from an optional subdivision in a QERDS local part (e.g. "acme.sales"). Slugs
+// are [a-z0-9-] (organization.ValidateSlug) and never contain it, so a local
+// part inside one org's namespace can never collide with another org's slug or
+// namespace.
+const addressNamespaceSeparator = "."
+
+// namespaceSuffixPattern matches the part after "<slug><separator>": one or more
+// slug-shaped labels joined by the separator (e.g. "sales", "sales.eu"). It
+// mirrors organization.ValidateSlug's per-label grammar.
+var namespaceSuffixPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$`)
+
+// namespacedLocalPart resolves the local part an org may provision from the
+// admin-supplied input, constraining it to the org's own verified namespace. An
+// org's verified claim is its slug (KVK-validated and unique per deployment at
+// bootstrap); it owns the local part equal to that slug plus any subdivision
+// beneath it ("acme", "acme.sales"). An empty input defaults to the bare slug.
+// Anything outside the namespace is rejected with ErrAddressOutsideNamespace,
+// closing the cross-org squatting hole: one org can never provision a local
+// part that belongs to (or collides with) another org's slug or namespace.
+func namespacedLocalPart(slug, input string) (string, error) {
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input == "" || input == slug {
+		return slug, nil
+	}
+	suffix, ok := strings.CutPrefix(input, slug+addressNamespaceSeparator)
+	if !ok || !namespaceSuffixPattern.MatchString(suffix) {
+		return "", ErrAddressOutsideNamespace
+	}
+	return input, nil
+}
+
 func (h *Handler) provisionAddress(w http.ResponseWriter, r *http.Request) error {
 	var req provisionAddressRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -308,9 +341,12 @@ func (h *Handler) provisionAddress(w http.ResponseWriter, r *http.Request) error
 	}
 
 	org := organization.OrgFromContext(r.Context())
-	localPart := strings.TrimSpace(req.LocalPart)
-	if localPart == "" {
-		localPart = org.Slug
+	localPart, err := namespacedLocalPart(org.Slug, req.LocalPart)
+	if errors.Is(err, ErrAddressOutsideNamespace) {
+		return badRequest("address_outside_namespace", "digital address must be within your organization's namespace")
+	}
+	if err != nil {
+		return fmt.Errorf("resolving qerds address namespace: %w", err)
 	}
 	address := localPart + "@" + h.addressDomain
 
