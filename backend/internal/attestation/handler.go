@@ -116,6 +116,18 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	admin := func(next http.Handler) http.Handler {
 		return h.requireUser(h.authorize(organization.RequireOrgAdmin(next)))
 	}
+	// Issuing, cancelling an offer and revoking are the attestation-issuer
+	// surface: an admin holds all of attestations:*, an attestation_issuer holds
+	// exactly these three. Schema/template/key management stays admin-only
+	// (manage_templates / manage_keys), which an attestation_issuer does not hold.
+	perm := func(action string) func(http.Handler) http.Handler {
+		return func(next http.Handler) http.Handler {
+			return h.requireUser(h.authorize(organization.RequirePermission(organization.ResourceAttestations, action)(next)))
+		}
+	}
+	issue := perm(organization.ActionIssue)
+	cancelOffer := perm(organization.ActionCancelOffer)
+	revoke := perm(organization.ActionRevoke)
 
 	// Schemas (admin).
 	mux.Handle("GET /orgs/{slug}/attestations/schemas", admin(respond.HandlerFunc(h.listSchemas)))
@@ -149,10 +161,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	// Issuance ledger (member read; admin issue/cancel/revoke).
 	mux.Handle("GET /orgs/{slug}/attestations", member(respond.HandlerFunc(h.listIssued)))
-	mux.Handle("POST /orgs/{slug}/attestations", admin(respond.HandlerFunc(h.issue)))
+	mux.Handle("POST /orgs/{slug}/attestations", issue(respond.HandlerFunc(h.issue)))
 	mux.Handle("GET /orgs/{slug}/attestations/{id}", member(respond.HandlerFunc(h.getIssued)))
-	mux.Handle("POST /orgs/{slug}/attestations/{id}/cancel", admin(respond.HandlerFunc(h.cancel)))
-	mux.Handle("POST /orgs/{slug}/attestations/{id}/revoke", admin(respond.HandlerFunc(h.revoke)))
+	mux.Handle("POST /orgs/{slug}/attestations/{id}/cancel", cancelOffer(respond.HandlerFunc(h.cancel)))
+	mux.Handle("POST /orgs/{slug}/attestations/{id}/revoke", revoke(respond.HandlerFunc(h.revoke)))
 
 	// Held credentials (member read; admin delete). Art 5(1)(a) "store, select".
 	mux.Handle("GET /orgs/{slug}/attestations/held", member(respond.HandlerFunc(h.listHeld)))

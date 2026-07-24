@@ -114,24 +114,32 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /invite/{token}/accept", respond.HandlerFunc(h.acceptInvite))
 	mux.Handle("POST /invite/{token}/decline", respond.HandlerFunc(h.declineInvite))
 
+	// members can read the org they belong to (role stashed by Authorize);
+	// managing members is the members:* surface, which admin holds in full and
+	// auditor holds read-only. Renaming the org and the department structure
+	// have no distinct functional role, so they stay on the admin gate.
+	requirePerm := func(resource, action string, h http.Handler) http.Handler {
+		return orgScoped(RequirePermission(resource, action)(h))
+	}
+
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
 	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))
-	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
-	mux.Handle("GET /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.member))))
-	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.invite))))
-	mux.Handle("PATCH /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMember))))
-	mux.Handle("DELETE /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.offboardMember))))
-	mux.Handle("GET /orgs/{slug}/members/{userId}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberAuditEvents))))
+	mux.Handle("GET /orgs/{slug}/members", requirePerm(ResourceMembers, ActionRead, respond.HandlerFunc(h.members)))
+	mux.Handle("GET /orgs/{slug}/members/{userId}", requirePerm(ResourceMembers, ActionRead, respond.HandlerFunc(h.member)))
+	mux.Handle("POST /orgs/{slug}/members", requirePerm(ResourceMembers, ActionInvite, respond.HandlerFunc(h.invite)))
+	mux.Handle("PATCH /orgs/{slug}/members/{userId}", requirePerm(ResourceMembers, ActionChangeRole, respond.HandlerFunc(h.updateMember)))
+	mux.Handle("DELETE /orgs/{slug}/members/{userId}", requirePerm(ResourceMembers, ActionRevoke, respond.HandlerFunc(h.offboardMember)))
+	mux.Handle("GET /orgs/{slug}/members/{userId}/audit-events", requirePerm(ResourceMembers, ActionRead, respond.HandlerFunc(h.memberAuditEvents)))
 
-	mux.Handle("POST /orgs/{slug}/invitations/{id}/resend", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.resendInvitation))))
-	mux.Handle("DELETE /orgs/{slug}/invitations/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.revokeInvitation))))
+	mux.Handle("POST /orgs/{slug}/invitations/{id}/resend", requirePerm(ResourceMembers, ActionInvite, respond.HandlerFunc(h.resendInvitation)))
+	mux.Handle("DELETE /orgs/{slug}/invitations/{id}", requirePerm(ResourceMembers, ActionRevoke, respond.HandlerFunc(h.revokeInvitation)))
 
 	mux.Handle("GET /orgs/{slug}/departments", orgScoped(respond.HandlerFunc(h.listDepartments)))
 	mux.Handle("POST /orgs/{slug}/departments", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.createDepartment))))
 	mux.Handle("PATCH /orgs/{slug}/departments/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateDepartment))))
 	mux.Handle("DELETE /orgs/{slug}/departments/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.deleteDepartment))))
 
-	mux.Handle("GET /orgs/{slug}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.auditEvents))))
+	mux.Handle("GET /orgs/{slug}/audit-events", requirePerm(ResourceAudit, ActionRead, respond.HandlerFunc(h.auditEvents)))
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {

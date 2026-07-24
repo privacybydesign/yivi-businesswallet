@@ -48,6 +48,31 @@ func (h *Handler) Authorize(next http.Handler) http.Handler {
 	})
 }
 
+// RequirePermission gates a route on a single {resource}:{action} permission
+// from the RBAC matrix (permissions.go). It reads the effective role stashed by
+// Authorize — never the request — resolves it against the compiled role ->
+// permission map, and forbids the request when the permission is absent.
+//
+// This is the enforcement seam #27 extends: v1 checks role -> permission with
+// org-wide scope and no validity window, so the shape stays fixed when scope
+// narrowing, validity windows and Axis-A (mandate) checks are added behind it.
+func RequirePermission(resource, action string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !HasPermission(roleFromContext(r.Context()), resource, action) {
+				respond.Error(w, r, http.StatusForbidden, "forbidden", "forbidden")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireOrgAdmin gates on the administrative-mandate role. It is retained as a
+// thin alias over the RBAC layer while the remaining slices migrate to
+// RequirePermission (rbac-model.md); the routes still on it (wallet lifecycle,
+// org settings, department structure) either have no distinct functional role
+// or are Axis-A-gated and stay admin-only.
 func RequireOrgAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if roleFromContext(r.Context()) != RoleAdmin {

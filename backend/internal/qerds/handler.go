@@ -96,8 +96,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/qerds/poll", orgScoped(respond.HandlerFunc(h.poll)))
 
 	mux.Handle("GET /orgs/{slug}/qerds/addresses", orgScoped(respond.HandlerFunc(h.listAddresses)))
-	mux.Handle("POST /orgs/{slug}/qerds/addresses", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.provisionAddress))))
-	mux.Handle("POST /orgs/{slug}/qerds/addresses/{id}/default", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.setDefaultAddress))))
+	provisionAddress := organization.RequirePermission(organization.ResourceQERDS, organization.ActionProvisionAddress)
+	mux.Handle("POST /orgs/{slug}/qerds/addresses", orgScoped(provisionAddress(respond.HandlerFunc(h.provisionAddress))))
+	mux.Handle("POST /orgs/{slug}/qerds/addresses/{id}/default", orgScoped(provisionAddress(respond.HandlerFunc(h.setDefaultAddress))))
 
 	mux.Handle("GET /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.listContacts)))
 	mux.Handle("POST /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.createContact)))

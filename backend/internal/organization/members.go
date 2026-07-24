@@ -133,8 +133,8 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) error {
 	if role == "" {
 		role = RoleMember
 	}
-	if role != RoleMember && role != RoleAdmin {
-		return badRequest("invalid_role", "role must be member or admin")
+	if !IsAssignableRole(role) {
+		return badRequest("invalid_role", "role must be one of: "+assignableRolesText())
 	}
 
 	var deptID *uuid.UUID
@@ -238,8 +238,8 @@ func (h *Handler) updateMember(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_body", "invalid request body")
 	}
 
-	if req.Role != nil && *req.Role != RoleMember && *req.Role != RoleAdmin {
-		return badRequest("invalid_role", "role must be member or admin")
+	if req.Role != nil && !IsAssignableRole(*req.Role) {
+		return badRequest("invalid_role", "role must be one of: "+assignableRolesText())
 	}
 
 	var deptID *uuid.UUID

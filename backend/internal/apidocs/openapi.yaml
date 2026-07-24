@@ -605,7 +605,7 @@ paths:
     post:
       tags: [attestation]
       summary: Issue an attestation
-      description: Requires an administrator role in the organisation.
+      description: Requires the attestations:issue permission (administrator or attestation issuer).
       requestBody:
         required: true
         content:
@@ -1333,8 +1333,9 @@ paths:
       description: >-
         Withdraws an offer that was never claimed (status `offered`), setting it
         to `cancelled`. Nothing was held, so this is not a revocation and never
-        touches the Token Status List. Requires an administrator role. Returns
-        409 when the attestation is not an unclaimed offer.
+        touches the Token Status List. Requires the attestations:cancel_offer
+        permission (administrator or attestation issuer). Returns 409 when the
+        attestation is not an unclaimed offer.
       requestBody:
         required: true
         content:
@@ -1377,9 +1378,9 @@ paths:
       description: >-
         Revokes an already-claimed credential (status `claimed`), setting it to
         `revoked`. This is the path backed by the issuer's IETF Token Status
-        List. Unclaimed offers are withdrawn via cancel instead. Requires an
-        administrator role. Returns 409 when the attestation is not a claimed
-        credential.
+        List. Unclaimed offers are withdrawn via cancel instead. Requires the
+        attestations:revoke permission (administrator or attestation issuer).
+        Returns 409 when the attestation is not a claimed credential.
       requestBody:
         required: true
         content:
@@ -1413,7 +1414,7 @@ paths:
     get:
       tags: [organizations]
       summary: List organisation audit events
-      description: Requires an administrator role in the organisation.
+      description: Requires the audit:read permission (administrator or auditor).
       responses:
         '2XX':
           description: Successful response.
@@ -1903,7 +1904,7 @@ paths:
     get:
       tags: [organizations]
       summary: List organisation members
-      description: Requires an administrator role in the organisation.
+      description: Requires the members:read permission (administrator or auditor).
       responses:
         '2XX':
           description: Successful response.
@@ -1960,7 +1961,7 @@ paths:
     get:
       tags: [organizations]
       summary: Get an organisation member
-      description: Requires an administrator role in the organisation.
+      description: Requires the members:read permission (administrator or auditor).
       responses:
         '2XX':
           description: Successful response.
@@ -2034,7 +2035,7 @@ paths:
     get:
       tags: [organizations]
       summary: List audit events for a member
-      description: Requires an administrator role in the organisation.
+      description: Requires the members:read permission (administrator or auditor).
       responses:
         '2XX':
           description: Successful response.
@@ -2291,7 +2292,7 @@ paths:
     post:
       tags: [qerds]
       summary: Provision a QERDS address
-      description: Requires an administrator role in the organisation.
+      description: Requires the qerds:provision_address permission (administrator or QERDS operator).
       requestBody:
         required: true
         content:
@@ -2331,7 +2332,7 @@ paths:
     post:
       tags: [qerds]
       summary: Set the default QERDS address
-      description: Requires an administrator role in the organisation.
+      description: Requires the qerds:provision_address permission (administrator or QERDS operator).
       requestBody:
         required: true
         content:

@@ -135,6 +135,42 @@ func TestAuthorize(t *testing.T) {
 	})
 }
 
+func TestRequirePermission(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	tests := []struct {
+		name     string
+		role     string
+		resource string
+		action   string
+		want     int
+	}{
+		{"admin invites", RoleAdmin, ResourceMembers, ActionInvite, http.StatusOK},
+		{"member cannot invite", RoleMember, ResourceMembers, ActionInvite, http.StatusForbidden},
+		{"member cannot read directory", RoleMember, ResourceMembers, ActionRead, http.StatusForbidden},
+		{"auditor reads directory", RoleAuditor, ResourceMembers, ActionRead, http.StatusOK},
+		{"auditor cannot invite", RoleAuditor, ResourceMembers, ActionInvite, http.StatusForbidden},
+		{"issuer issues", RoleAttestationIssuer, ResourceAttestations, ActionIssue, http.StatusOK},
+		{"issuer cannot manage keys", RoleAttestationIssuer, ResourceAttestations, ActionManageKeys, http.StatusForbidden},
+		{"operator provisions", RoleQerdsOperator, ResourceQERDS, ActionProvisionAddress, http.StatusOK},
+		{"admin cannot grant mandate", RoleAdmin, ResourceMandates, ActionGrant, http.StatusForbidden},
+		{"empty role forbidden", "", ResourceMembers, ActionRead, http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req = req.WithContext(contextWithRole(req.Context(), tt.role))
+			rec := httptest.NewRecorder()
+
+			RequirePermission(tt.resource, tt.action)(next).ServeHTTP(rec, req)
+
+			if rec.Code != tt.want {
+				t.Errorf("status = %d, want %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+
 func TestRequireOrgAdmin(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 

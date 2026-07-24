@@ -8,8 +8,15 @@ import (
 )
 
 const (
-	RoleAdmin  = "admin"
-	RoleMember = "member"
+	// Functional roles (Axis B, rbac-model.md). RoleAdmin holds the
+	// administrative-mandate surface; the three roles below are additive,
+	// scoped to one resource domain each. Mandate-granting and wallet-lifecycle
+	// capabilities are Axis-A-gated and belong to no functional role.
+	RoleAdmin             = "admin"
+	RoleMember            = "member"
+	RoleAttestationIssuer = "attestation_issuer"
+	RoleQerdsOperator     = "qerds_operator"
+	RoleAuditor           = "auditor"
 
 	StatusActive  = "active"
 	StatusInvited = "invited"
