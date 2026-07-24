@@ -47,13 +47,13 @@ func run() error {
 		}
 		if *orgOnly {
 			slog.Info("provisioning Yivi organisation")
-			if _, err := seed.EnsureYiviOrganization(ctx, cfg.DatabaseDSN); err != nil {
+			if _, err := seed.EnsureYiviOrganization(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
 				return err
 			}
 			slog.Info("Yivi organisation provisioning complete")
 
 			slog.Info("provisioning KVK register organisation")
-			if _, err := seed.EnsureKVKRegisterOrganization(ctx, cfg.DatabaseDSN); err != nil {
+			if _, err := seed.EnsureKVKRegisterOrganization(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
 				return err
 			}
 			slog.Info("KVK register organisation provisioning complete")
@@ -62,7 +62,7 @@ func run() error {
 	}
 
 	slog.Info("running database seed")
-	if err := seed.Run(ctx, cfg.DatabaseDSN); err != nil {
+	if err := seed.Run(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
 		return err
 	}
 	slog.Info("database seed complete")

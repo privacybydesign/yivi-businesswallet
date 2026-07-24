@@ -37,16 +37,16 @@ const (
 // fake API), so a seeded user resolves to a real representative entry and the
 // seeded data never drifts from the register — enforced by TestDemoOrgsMatchRegister.
 type demoOrganization struct {
-	name      string // legal name
-	slug      string
-	kvkNumber string
-	euid      string
-	address   string
-	repGiven  string
-	repFamily string
-	repKind   string
-	repAuth   string
-	repDOB    string // "2006-01-02"
+	name         string // legal name
+	slug         string
+	kvkNumber    string
+	euid         string
+	addressLocal string // local-part of the QERDS address; the domain is the configured default
+	repGiven     string
+	repFamily    string
+	repKind      string
+	repAuth      string
+	repDOB       string // "2006-01-02"
 }
 
 type demoUser struct {
@@ -74,7 +74,7 @@ type demoMembership struct {
 // (EnsureYiviOrganization), so both paths create an identical Yivi wallet.
 var yiviOrg = demoOrganization{
 	name: "Yivi B.V.", slug: demoOrgSlug, kvkNumber: "90000010", euid: "NL.KVK.90000010",
-	address: "yivi@qerds.localhost", repGiven: "Johannes Hendrik", repFamily: "Janssen",
+	addressLocal: "yivi", repGiven: "Johannes Hendrik", repFamily: "Janssen",
 	repKind: "bestuurder", repAuth: "sole", repDOB: "1979-05-14",
 }
 
@@ -98,15 +98,15 @@ var yiviTeam = []demoUser{
 var kvkRegisterOrg = demoOrganization{
 	name: registryprovider.RegisterLegalName, slug: registryprovider.RegisterSlug,
 	kvkNumber: registryprovider.RegisterKVKNumber, euid: registryprovider.RegisterEUID,
-	address: "kvk@qerds.localhost",
+	addressLocal: "kvk",
 }
 
 // Anchor data: recognizable accounts/orgs that must stay stable so developers
 // can log in predictably. Volume and variety are generated with the faker.
 var demoOrganizations = []demoOrganization{
 	yiviOrg,
-	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NL.KVK.90000020", address: "firsty@qerds.localhost", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly", repDOB: "1985-11-22"},
-	{name: "Radboud Universiteit", slug: "radboud-universiteit", kvkNumber: "90000030", euid: "NL.KVK.90000030", address: "radboud@qerds.localhost", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
+	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NL.KVK.90000020", addressLocal: "firsty", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly", repDOB: "1985-11-22"},
+	{name: "Radboud Universiteit", slug: "radboud-universiteit", kvkNumber: "90000030", euid: "NL.KVK.90000030", addressLocal: "radboud", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
 }
 
 var demoUsers = []demoUser{
@@ -126,7 +126,7 @@ var demoMemberships = []demoMembership{
 	{email: "user@yivi.app", slug: "firsty", role: "member", jobTitle: "Account Manager", department: "Sales"},
 }
 
-func Run(ctx context.Context, dsn string) error {
+func Run(ctx context.Context, dsn, addressDomain string) error {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return fmt.Errorf("seed: connect: %w", err)
@@ -139,7 +139,7 @@ func Run(ctx context.Context, dsn string) error {
 
 	// The KVK register participant must exist so its consult decisions have an
 	// audit log to be recorded against (registryprovider.SeededRegistry).
-	kvkOrg, err := ensureOrg(ctx, pool, kvkRegisterOrg)
+	kvkOrg, err := ensureOrg(ctx, pool, kvkRegisterOrg, addressDomain)
 	if err != nil {
 		return err
 	}
@@ -154,7 +154,7 @@ func Run(ctx context.Context, dsn string) error {
 
 	orgsBySlug := map[string]organization.Organization{}
 	for _, o := range demoOrganizations {
-		org, err := ensureOrg(ctx, pool, o)
+		org, err := ensureOrg(ctx, pool, o, addressDomain)
 		if err != nil {
 			return err
 		}
@@ -230,24 +230,34 @@ func Run(ctx context.Context, dsn string) error {
 	return spreadAuditTimestamps(ctx, pool, demoOrg.ID)
 }
 
+// qerdsAddress assembles an org's QERDS digital address from its local-part and
+// the configured default address domain (e.g. "yivi" + "qerds.localhost" ->
+// "yivi@qerds.localhost"). Keeping the domain configurable lets staging seed real
+// addresses (qerds.staging.yivi.app) while local dev keeps qerds.localhost.
+func qerdsAddress(localPart, domain string) string {
+	return localPart + "@" + domain
+}
+
 // ensureOrg creates the demo organization/business wallet (identity + default
-// QERDS address + one representative). Idempotent: ON CONFLICT (slug) returns the
-// existing row, and the address/representation inserts are guarded.
-func ensureOrg(ctx context.Context, pool *pgxpool.Pool, o demoOrganization) (organization.Organization, error) {
+// QERDS address + one representative). The QERDS address is built from the org's
+// local-part and the configured addressDomain. Idempotent: ON CONFLICT (slug)
+// returns the existing row, and the address/representation inserts are guarded.
+func ensureOrg(ctx context.Context, pool *pgxpool.Pool, o demoOrganization, addressDomain string) (organization.Organization, error) {
+	address := qerdsAddress(o.addressLocal, addressDomain)
 	var org organization.Organization
 	err := pool.QueryRow(ctx, `
 		INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug
 		RETURNING id, name, slug, kvk_number, euid, digital_address, status, bootstrapped_at`,
-		o.name, o.slug, o.kvkNumber, o.euid, o.address).Scan(
+		o.name, o.slug, o.kvkNumber, o.euid, address).Scan(
 		&org.ID, &org.Name, &org.Slug, &org.KVKNumber, &org.EUID, &org.DigitalAddress, &org.Status, &org.BootstrappedAt)
 	if err != nil {
 		return organization.Organization{}, fmt.Errorf("seed: ensure org %q: %w", o.slug, err)
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO qerds_addresses (organization_id, address, is_default) VALUES ($1, $2, true)
-		ON CONFLICT (address) DO NOTHING`, org.ID, o.address); err != nil {
+		ON CONFLICT (address) DO NOTHING`, org.ID, address); err != nil {
 		return organization.Organization{}, fmt.Errorf("seed: qerds address %q: %w", o.slug, err)
 	}
 	// The KVK register org (repKind == "") is the authentic source, not a
@@ -308,14 +318,14 @@ func EnsurePlatformAdmins(ctx context.Context, dsn string, emails []string) erro
 // without polluting a shared environment with demo data. It exists so staging
 // starts with a realistic organisation instead of an empty database or one that
 // has to be created by hand through the UI each time.
-func EnsureYiviOrganization(ctx context.Context, dsn string) (organization.Organization, error) {
+func EnsureYiviOrganization(ctx context.Context, dsn, addressDomain string) (organization.Organization, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return organization.Organization{}, fmt.Errorf("seed: connect: %w", err)
 	}
 	defer pool.Close()
 
-	org, err := ensureOrg(ctx, pool, yiviOrg)
+	org, err := ensureOrg(ctx, pool, yiviOrg, addressDomain)
 	if err != nil {
 		return organization.Organization{}, err
 	}
@@ -357,14 +367,14 @@ func EnsureYiviOrganization(ctx context.Context, dsn string) (organization.Organ
 // The schema + issuer settings are local DB rows only — no call to the hosted
 // issuer at seed time — so a missing GitOps "kvk" instance does not fail the
 // seed; only runtime issuance would need it.
-func EnsureKVKRegisterOrganization(ctx context.Context, dsn string) (organization.Organization, error) {
+func EnsureKVKRegisterOrganization(ctx context.Context, dsn, addressDomain string) (organization.Organization, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return organization.Organization{}, fmt.Errorf("seed: connect: %w", err)
 	}
 	defer pool.Close()
 
-	org, err := ensureOrg(ctx, pool, kvkRegisterOrg)
+	org, err := ensureOrg(ctx, pool, kvkRegisterOrg, addressDomain)
 	if err != nil {
 		return organization.Organization{}, err
 	}
