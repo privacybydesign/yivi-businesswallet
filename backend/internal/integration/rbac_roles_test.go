@@ -10,27 +10,33 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
 
-// TestAuditorReadsMemberDirectoryMemberCannot exercises the RequirePermission
-// seam through a real route: the members list is gated on members:read, which
-// the new auditor role holds but a plain member does not. This is the finer-role
-// half of the RBAC model — a read-only role that sees more than a member without
-// being an admin.
-func TestAuditorReadsMemberDirectoryMemberCannot(t *testing.T) {
+// TestAuditorReadsMemberDirectory and TestMemberCannotReadMemberDirectory
+// exercise the RequirePermission seam through a real route: the members list is
+// gated on members:read, which the new auditor role holds but a plain member
+// does not. Together they show the finer-role half of the model — a read-only
+// role that sees more than a member without being an admin. They are two tests,
+// not one, because the harness authenticates a single acting user per test.
+func TestAuditorReadsMemberDirectory(t *testing.T) {
 	env := setup(t)
-	orgID := env.adminOf("acme", "Acme", "boss@example.test")
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("auditor@example.test")
+	env.addMembership(me.ID, orgID, organization.RoleAuditor)
 
-	auditor := env.login("auditor@example.test")
-	env.addMembership(auditor.ID, orgID, organization.RoleAuditor)
 	resp := env.do(http.MethodGet, "/api/v1/orgs/acme/members", nil)
-	_ = resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("auditor list members = %d, want 200", resp.StatusCode)
 	}
+}
 
-	member := env.login("member@example.test")
-	env.addMembership(member.ID, orgID, organization.RoleMember)
-	resp = env.do(http.MethodGet, "/api/v1/orgs/acme/members", nil)
-	_ = resp.Body.Close()
+func TestMemberCannotReadMemberDirectory(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("member@example.test")
+	env.addMembership(me.ID, orgID, organization.RoleMember)
+
+	resp := env.do(http.MethodGet, "/api/v1/orgs/acme/members", nil)
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("member list members = %d, want 403", resp.StatusCode)
 	}
