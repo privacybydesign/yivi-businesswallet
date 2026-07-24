@@ -28,6 +28,7 @@ import { Button, Card, ConfirmDialog, Modal, Table, Tag, TopBar } from "../ui";
 import { AttestationIssueWizard } from "./attestations-issue";
 import { AttestationSchemaForm } from "./attestations-schema-form";
 import { AttestationTemplateForm } from "./attestations-template-form";
+import { WscaActivationNotice } from "./wsca-activation-notice";
 
 const ISSUED_COLUMN_COUNT = 5;
 const CHIP_LIMIT = 3;
@@ -167,6 +168,8 @@ export default function Attestations(): React.JSX.Element {
           </Card>
         ) : (
           <div className="flex flex-col gap-5">
+            <WscaActivationNotice slug={slug} isAdmin={isAdmin} />
+
             {tab === "templates" && (
               <TemplatesTab
                 slug={slug}
