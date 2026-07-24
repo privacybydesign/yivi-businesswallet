@@ -231,10 +231,11 @@ export default function Qerds(): React.JSX.Element {
                         <Table.Cell>
                           <div className="flex items-center gap-2.5">
                             {unread ? (
-                              <span
-                                className="bg-link h-2 w-2 shrink-0 rounded-full"
-                                aria-label={t("qerds.unreadItem")}
-                              />
+                              <span className="bg-link h-2 w-2 shrink-0 rounded-full">
+                                <span className="sr-only">
+                                  {t("qerds.unreadItem")}
+                                </span>
+                              </span>
                             ) : (
                               <Icon
                                 name="email"
