@@ -57,7 +57,8 @@ type issuanceService interface {
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ClaimStatus(ctx context.Context, token string) (ClaimView, error)
 	DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
-	HeldClaims(ctx context.Context, orgID, id uuid.UUID) (HeldClaimsView, error)
+	ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([]HeldListView, error)
+	HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang string) (HeldClaimsView, error)
 }
 
 // issuerSettingsReader resolves an org's issuer instance name (defaulted to the
@@ -71,19 +72,14 @@ type issuerSettingsReader interface {
 // tabs + key material). Org routes compose the injected requireUser + authorize
 // middleware; write/manage routes additionally require org admin.
 //
-// heldStore is the read surface over the org's held-credential index; deletion
-// runs through the service (it also removes the credential from the holder
-// engine, §6.5), so only the list read lives here.
-type heldStore interface {
-	ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error)
-}
-
+// The held-credential list read runs through the service (it enriches each row
+// with the credential's localized display metadata from the holder engine, §6.5),
+// as does deletion (it also removes the credential from the engine).
 type Handler struct {
 	schemas        schemaStore
 	templates      templateStore
 	keys           keyStore
 	issued         issuedReader
-	held           heldStore
 	service        issuanceService
 	issuerSettings issuerSettingsReader
 	onboarding     onboardingStore
@@ -97,13 +93,12 @@ type Handler struct {
 // be empty (the generated config's issuer field is then left for the operator).
 // issuerSettings resolves an org's issuer instance + branding for the per-org
 // bundle generator (see issuerBundle).
-func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, held heldStore, service issuanceService, issuerSettings issuerSettingsReader, onboarding onboardingStore, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, service issuanceService, issuerSettings issuerSettingsReader, onboarding onboardingStore, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		schemas:        schemas,
 		templates:      templates,
 		keys:           keys,
 		issued:         issued,
-		held:           held,
 		service:        service,
 		issuerSettings: issuerSettings,
 		onboarding:     onboarding,
@@ -185,9 +180,26 @@ func (h *Handler) claim(w http.ResponseWriter, r *http.Request) error {
 
 // --- Held credentials ---
 
+// defaultLanguage is the language held-credential display metadata is resolved in
+// when the request names none — matching the frontend's default and the "en"
+// preference the engine already fell back to before localization.
+const defaultLanguage = "en"
+
+// requestLanguage reads the active app language from the `lang` query parameter
+// (a BCP-47 tag such as "en" or "nl", sent by the frontend from i18next), so the
+// held-credential title, labels and issuer name follow the user's language. It
+// falls back to defaultLanguage when the parameter is absent or blank; the engine
+// resolves an unknown tag to its English/first entry, so no allow-list is needed.
+func requestLanguage(r *http.Request) string {
+	if lang := strings.TrimSpace(r.URL.Query().Get("lang")); lang != "" {
+		return lang
+	}
+	return defaultLanguage
+}
+
 func (h *Handler) listHeld(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
-	held, err := h.held.ListHeld(r.Context(), org.ID)
+	held, err := h.service.ListHeld(r.Context(), org.ID, requestLanguage(r))
 	if err != nil {
 		return fmt.Errorf("listing held attestations: %w", err)
 	}
@@ -201,7 +213,7 @@ func (h *Handler) heldClaims(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_id", "invalid held attestation id")
 	}
 	org := organization.OrgFromContext(r.Context())
-	view, err := h.service.HeldClaims(r.Context(), org.ID, id)
+	view, err := h.service.HeldClaims(r.Context(), org.ID, id, requestLanguage(r))
 	switch {
 	case errors.Is(err, ErrHeldNotFound):
 		return notFound("held_not_found", "held attestation not found")

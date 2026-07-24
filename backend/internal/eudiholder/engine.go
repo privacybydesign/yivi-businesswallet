@@ -206,7 +206,7 @@ func (e *Engine) Delete(ctx context.Context, orgID uuid.UUID, ref string) error 
 // (session.buildOfferedCredentials leaves CredentialInstanceIds empty), so a
 // stored ref can be empty. A ref+vct that resolves to no batch yields an empty
 // slice (the held index owns existence).
-func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct string) (HeldCredential, error) {
+func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (HeldCredential, error) {
 	batch, ok, err := e.claimsBatch(ctx, orgID, ref, vct)
 	if err != nil {
 		return HeldCredential{}, err
@@ -214,12 +214,50 @@ func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct string) (
 	if !ok {
 		return HeldCredential{Attributes: []HeldAttribute{}}, nil
 	}
-	labels, order := claimLabels(batch.CredentialMetadata)
+	labels, order := claimLabels(batch.CredentialMetadata, lang)
 	attributes, err := assembleAttributes(batch.ProcessedSdJwtPayload, labels, order)
 	if err != nil {
 		return HeldCredential{}, err
 	}
-	return HeldCredential{IssuerName: issuerDisplayName(batch.IssuerDisplay), Attributes: attributes}, nil
+	name, logoURI := credentialDisplay(batch.CredentialMetadata, lang)
+	return HeldCredential{
+		IssuerName:  issuerDisplayName(batch.IssuerDisplay, lang),
+		DisplayName: name,
+		LogoURI:     logoURI,
+		Attributes:  attributes,
+	}, nil
+}
+
+// Displays resolves, for every credential an organization holds, its localized
+// type-metadata title and logo keyed by verifiable-credential type — the held-list
+// view's source for per-row titles and logos, so the table does not need a per-row
+// claims fetch. Credentials of the same vct share one display (it is a property of
+// the type), so the map is keyed by vct. An org that holds nothing yields an empty
+// (non-nil) map.
+func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]HeldDisplay, error) {
+	eng, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	var batches []models.CredentialBatch
+	if err := eng.Db().WithContext(ctx).
+		Preload("CredentialMetadata.Display").
+		Find(&batches).Error; err != nil {
+		return nil, fmt.Errorf("eudiholder: displays org %s: %w", orgID, err)
+	}
+	displays := make(map[string]HeldDisplay, len(batches))
+	for i := range batches {
+		vct := batches[i].VerifiableCredentialType
+		if vct == "" {
+			continue
+		}
+		if _, seen := displays[vct]; seen {
+			continue
+		}
+		name, logoURI := credentialDisplay(batches[i].CredentialMetadata, lang)
+		displays[vct] = HeldDisplay{DisplayName: name, LogoURI: logoURI}
+	}
+	return displays, nil
 }
 
 // claimsBatch loads the credential batch for a held credential, with its claim
@@ -238,7 +276,9 @@ func (e *Engine) claimsBatch(ctx context.Context, orgID uuid.UUID, ref, vct stri
 			Select("credential_batch_id").
 			Where("id = ?", id)
 		var batch models.CredentialBatch
-		err = base.WithContext(ctx).Preload("CredentialMetadata.Claims.Display").
+		err = base.WithContext(ctx).
+			Preload("CredentialMetadata.Display").
+			Preload("CredentialMetadata.Claims.Display").
 			Where("id = (?)", batchID).First(&batch).Error
 		if err == nil {
 			return batch, true, nil
@@ -294,7 +334,9 @@ func (e *Engine) batchByVCT(ctx context.Context, orgID uuid.UUID, vct string) (m
 	}
 	var batch models.CredentialBatch
 	err = eng.Db().WithContext(ctx).
-		Preload("Instances").Preload("CredentialMetadata.Claims.Display").
+		Preload("Instances").
+		Preload("CredentialMetadata.Display").
+		Preload("CredentialMetadata.Claims.Display").
 		Where("verifiable_credential_type = ?", vct).First(&batch).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return models.CredentialBatch{}, false, nil
@@ -310,7 +352,8 @@ func (e *Engine) batchByVCT(ctx context.Context, orgID uuid.UUID, vct string) (m
 // single-segment claim paths (the flat top-level attributes the detail view shows);
 // nested-path claims are skipped (their values render as JSON under the parent).
 // Returns empty results when meta is nil (the credential carried no metadata).
-func claimLabels(meta *models.CredentialMetadata) (map[string]string, []string) {
+// Labels are resolved in the requested language (see pickLocaleName).
+func claimLabels(meta *models.CredentialMetadata, lang string) (map[string]string, []string) {
 	labels := map[string]string{}
 	order := []string{}
 	if meta == nil {
@@ -333,20 +376,48 @@ func claimLabels(meta *models.CredentialMetadata) (map[string]string, []string) 
 		for i, d := range claim.Display {
 			names[i] = localeName{name: d.Name, locale: d.Locale}
 		}
-		labels[key] = pickLocaleName(names)
+		labels[key] = pickLocaleName(names, lang)
 	}
 	return labels, order
 }
 
-// issuerDisplayName resolves a credential's issuer metadata display name, empty
-// when the credential carried no issuer display (the caller falls back to the
-// issuer identifier).
-func issuerDisplayName(displays []models.IssuerMetadataDisplay) string {
+// issuerDisplayName resolves a credential's issuer metadata display name in the
+// requested language, empty when the credential carried no issuer display (the
+// caller falls back to the issuer identifier).
+func issuerDisplayName(displays []models.IssuerMetadataDisplay, lang string) string {
 	names := make([]localeName, len(displays))
 	for i, d := range displays {
 		names[i] = localeName{name: d.Name, locale: d.Locale}
 	}
-	return pickLocaleName(names)
+	return pickLocaleName(names, lang)
+}
+
+// credentialDisplay resolves a credential's type-metadata title and logo URI for
+// the requested language from its CredentialMetadata.Display rows. Name and logo
+// are picked independently (the logo is taken from the same display entry as the
+// chosen name, falling back to the first entry that carries a logo), so a name-only
+// localized entry still yields a logo when another entry provides one. Both are
+// empty when meta is nil or carries no display rows (the caller then falls back to
+// the VCT-derived name and shows no logo).
+func credentialDisplay(meta *models.CredentialMetadata, lang string) (name, logoURI string) {
+	if meta == nil {
+		return "", ""
+	}
+	names := make([]localeName, len(meta.Display))
+	for i, d := range meta.Display {
+		names[i] = localeName{name: d.Name, locale: d.Locale}
+	}
+	name = pickLocaleName(names, lang)
+	chosen := pickLocaleIndex(names, lang)
+	if chosen >= 0 && meta.Display[chosen].LogoURI != "" {
+		return name, meta.Display[chosen].LogoURI
+	}
+	for _, d := range meta.Display {
+		if d.LogoURI != "" {
+			return name, d.LogoURI
+		}
+	}
+	return name, ""
 }
 
 // localeName is a display name paired with its (optional) locale, the common shape
@@ -356,25 +427,55 @@ type localeName struct {
 	locale datatypes.NullString
 }
 
-// pickLocaleName chooses a display name, preferring an English locale, then a
-// locale-less entry, else the first. Returns "" when there are no entries.
-func pickLocaleName(names []localeName) string {
-	var fallback string
-	for _, n := range names {
+// pickLocaleName chooses a display name for the requested language. Returns ""
+// when there are no entries. See pickLocaleIndex for the selection order.
+func pickLocaleName(names []localeName, lang string) string {
+	i := pickLocaleIndex(names, lang)
+	if i < 0 {
+		return ""
+	}
+	return names[i].name
+}
+
+// pickLocaleIndex chooses the index of the display entry to render for the
+// requested language, preferring (in order): an entry whose locale matches the
+// requested language's base tag (so "nl" matches "nl" and "nl-NL"), then an English
+// locale, then a locale-less entry, else the first entry. Returns -1 when there are
+// no entries. lang is a BCP-47 tag or base tag ("en", "nl", "nl-NL"); an empty lang
+// falls straight through to the English/locale-less/first order (preserving the
+// pre-localization behaviour).
+func pickLocaleIndex(names []localeName, lang string) int {
+	base := strings.ToLower(lang)
+	if i := strings.IndexByte(base, '-'); i >= 0 {
+		base = base[:i]
+	}
+	english, unlocalized, first := -1, -1, -1
+	for i, n := range names {
+		if first < 0 {
+			first = i
+		}
 		if !n.locale.Valid || n.locale.V == "" {
-			if fallback == "" {
-				fallback = n.name
+			if unlocalized < 0 {
+				unlocalized = i
 			}
 			continue
 		}
-		if strings.HasPrefix(strings.ToLower(n.locale.V), "en") {
-			return n.name
+		loc := strings.ToLower(n.locale.V)
+		if base != "" && (loc == base || strings.HasPrefix(loc, base+"-")) {
+			return i
 		}
-		if fallback == "" {
-			fallback = n.name
+		if english < 0 && strings.HasPrefix(loc, "en") {
+			english = i
 		}
 	}
-	return fallback
+	switch {
+	case english >= 0:
+		return english
+	case unlocalized >= 0:
+		return unlocalized
+	default:
+		return first
+	}
 }
 
 // Close releases every per-org engine.

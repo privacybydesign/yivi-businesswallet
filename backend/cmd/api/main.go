@@ -380,7 +380,7 @@ func run() error {
 	// an invitation. Wired via a setter (like the inbound QERDS consumer) because
 	// the org service is constructed before the attestation service.
 	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
 
 	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
 	// sealed-secret store + keystore layout with the holder redeem path so a wallet

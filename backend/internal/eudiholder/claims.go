@@ -18,10 +18,26 @@ type HeldAttribute struct {
 // HeldCredential is a held credential's display metadata and disclosed attributes,
 // assembled from the holder engine for the detail view. IssuerName is the issuer's
 // metadata display label (empty when the credential carried none, so the caller
-// falls back to the issuer identifier); Attributes are display-ordered and labelled.
+// falls back to the issuer identifier); DisplayName / LogoURI are the credential's
+// own type-metadata title and logo resolved for the requested language (both empty
+// when the credential carried no credential-level display metadata, so the caller
+// falls back to the VCT-derived name and shows no logo); Attributes are
+// display-ordered and labelled.
 type HeldCredential struct {
-	IssuerName string          `json:"issuerName"`
-	Attributes []HeldAttribute `json:"attributes"`
+	IssuerName  string          `json:"issuerName"`
+	DisplayName string          `json:"displayName"`
+	LogoURI     string          `json:"logoUri"`
+	Attributes  []HeldAttribute `json:"attributes"`
+}
+
+// HeldDisplay is a held credential's localized presentation metadata (its
+// type-metadata title and logo) without its disclosed attributes — the lightweight
+// shape the held-list view needs so each row's title and logo do not require the
+// per-row claims fetch. Both fields are empty when the credential carried no
+// credential-level display metadata.
+type HeldDisplay struct {
+	DisplayName string
+	LogoURI     string
 }
 
 // reservedClaims are the registered JWT / SD-JWT VC claims that carry protocol

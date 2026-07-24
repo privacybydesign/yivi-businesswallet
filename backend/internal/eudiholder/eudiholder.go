@@ -70,8 +70,17 @@ type Holder interface {
 	// instance id is not populated, so a stored ref can be empty. An unresolvable
 	// ref+vct yields an empty slice, not an error: the held_attestations index owns
 	// existence (a caller resolves the row first), while the engine holds the
-	// claims. Used by the held-credential detail view (Art 5(1)(a) "store, select").
-	Claims(ctx context.Context, orgID uuid.UUID, ref, vct string) (HeldCredential, error)
+	// claims. lang is the request's active language (a BCP-47 tag); the credential
+	// title, attribute labels and issuer name are resolved in it. Used by the
+	// held-credential detail view (Art 5(1)(a) "store, select").
+	Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (HeldCredential, error)
+
+	// Displays resolves, for every credential the organization holds, its localized
+	// type-metadata title and logo keyed by verifiable-credential type, resolved for
+	// lang (the request's active language). It backs the held-list view so each row
+	// shows a friendly, localized name and logo without a per-row Claims fetch. An
+	// org that holds nothing yields an empty (non-nil) map.
+	Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]HeldDisplay, error)
 
 	// Close releases all per-organization engines.
 	Close() error

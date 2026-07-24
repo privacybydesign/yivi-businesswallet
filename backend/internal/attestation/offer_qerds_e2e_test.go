@@ -192,7 +192,7 @@ func TestCredentialOfferOverQERDSEndToEnd(t *testing.T) {
 	}
 
 	// Display side: the held credential's attributes resolve from the holder engine.
-	cred, err := holder.Claims(ctx, ruOrg, rec.CredentialRef, rec.VCT)
+	cred, err := holder.Claims(ctx, ruOrg, rec.CredentialRef, rec.VCT, "en")
 	if err != nil {
 		t.Fatalf("claims: %v", err)
 	}

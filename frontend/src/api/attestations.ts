@@ -274,7 +274,10 @@ export type IssuedAttestation = z.infer<typeof issuedAttestationSchema>;
 const issuedAttestationListSchema = z.array(issuedAttestationSchema);
 
 // A credential the organization HOLDS (the "Received" facet). The claims live in
-// the holder engine; this is the thin org-scoped index over it.
+// the holder engine; this is the thin org-scoped index over it. displayName and
+// logoUri are the credential's own type-metadata title and logo, resolved by the
+// backend for the request's language ("" when the credential carried no such
+// metadata — the UI then falls back to the VCT-derived name and shows no logo).
 export const heldAttestationSchema = z.object({
   id: z.string(),
   organizationId: z.string(),
@@ -285,6 +288,8 @@ export const heldAttestationSchema = z.object({
   sourceMessageId: z.string().optional(),
   receivedAt: z.string(),
   createdAt: z.string(),
+  displayName: z.string().default(""),
+  logoUri: z.string().default(""),
 });
 
 export type HeldAttestation = z.infer<typeof heldAttestationSchema>;
@@ -309,6 +314,8 @@ export const heldAttestationClaimsSchema = z.object({
   vct: z.string(),
   issuer: z.string(),
   issuerName: z.string(),
+  displayName: z.string().default(""),
+  logoUri: z.string().default(""),
   source: z.string(),
   receivedAt: z.string(),
   attributes: z.array(heldAttributeSchema),
@@ -391,11 +398,15 @@ export interface IssueAttestationInput {
   deliveryMethod?: "email" | "qr";
 }
 
+// lang is the active app language (from i18next); the backend resolves the
+// held credentials' titles and logos in it, so switching language re-fetches
+// localized metadata.
 export function getHeldAttestations(
   slug: string,
+  lang: string,
   signal?: AbortSignal,
 ): Promise<HeldAttestation[]> {
-  return request(`${base(slug)}/held`, {
+  return request(`${base(slug)}/held?lang=${encodeURIComponent(lang)}`, {
     schema: heldAttestationListSchema,
     signal,
   });
@@ -404,12 +415,16 @@ export function getHeldAttestations(
 export function getHeldAttestationClaims(
   slug: string,
   heldId: string,
+  lang: string,
   signal?: AbortSignal,
 ): Promise<HeldAttestationClaims> {
-  return request(`${base(slug)}/held/${encodeURIComponent(heldId)}/claims`, {
-    schema: heldAttestationClaimsSchema,
-    signal,
-  });
+  return request(
+    `${base(slug)}/held/${encodeURIComponent(heldId)}/claims?lang=${encodeURIComponent(lang)}`,
+    {
+      schema: heldAttestationClaimsSchema,
+      signal,
+    },
+  );
 }
 
 export function deleteHeldAttestation(

@@ -97,7 +97,7 @@ func TestEngineStoreDeleteRoundTrip(t *testing.T) {
 	}
 
 	// Claims decodes the stored payload's attributes and strips the registered vct.
-	claims, err := eng.Claims(ctx, org, ref, "nl.kvk.registration")
+	claims, err := eng.Claims(ctx, org, ref, "nl.kvk.registration", "en")
 	if err != nil {
 		t.Fatalf("claims: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestEngineStoreDeleteRoundTrip(t *testing.T) {
 
 	// The vct fallback recovers the batch when the instance ref is empty — the
 	// case irmago's redemption produces (unpopulated CredentialInstanceIds).
-	viaVCT, err := eng.Claims(ctx, org, "", "nl.kvk.registration")
+	viaVCT, err := eng.Claims(ctx, org, "", "nl.kvk.registration", "en")
 	if err != nil {
 		t.Fatalf("claims by vct: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestEngineStoreDeleteRoundTrip(t *testing.T) {
 		t.Fatalf("expected 0 batches after delete, got %d", got)
 	}
 	// Claims for a now-absent ref and vct yields an empty attribute set, not an error.
-	if got, err := eng.Claims(ctx, org, ref, "nl.kvk.registration"); err != nil {
+	if got, err := eng.Claims(ctx, org, ref, "nl.kvk.registration", "en"); err != nil {
 		t.Fatalf("claims after delete: %v", err)
 	} else if len(got.Attributes) != 0 {
 		t.Fatalf("claims after delete = %v, want empty", got.Attributes)

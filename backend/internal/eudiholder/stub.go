@@ -79,7 +79,10 @@ func (h *StubHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI strin
 // recovery of an empty ref). An unknown org/ref/vct yields an empty map (matches
 // the engine contract, so the held-detail flow behaves the same under stub and
 // irmago).
-func (h *StubHolder) Claims(_ context.Context, orgID uuid.UUID, ref, vct string) (HeldCredential, error) {
+// The stub records no credential-level display metadata, so lang is accepted for
+// interface parity but ignored (DisplayName / LogoURI stay empty and the caller
+// falls back to the VCT-derived name and shows no logo).
+func (h *StubHolder) Claims(_ context.Context, orgID uuid.UUID, ref, vct, _ string) (HeldCredential, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	found, ok := h.creds[orgID][ref]
@@ -101,6 +104,21 @@ func (h *StubHolder) Claims(_ context.Context, orgID uuid.UUID, ref, vct string)
 	// The stub records no issuer display metadata, so IssuerName is left empty and
 	// the caller falls back to the issuer identifier.
 	return HeldCredential{Attributes: attributes}, nil
+}
+
+// Displays returns an entry per held vct with empty display metadata: the stub
+// records no credential-level type-metadata, so every held-list row falls back to
+// its VCT-derived name and shows no logo (matches the engine contract shape).
+func (h *StubHolder) Displays(_ context.Context, orgID uuid.UUID, _ string) (map[string]HeldDisplay, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	displays := make(map[string]HeldDisplay)
+	for _, cred := range h.creds[orgID] {
+		if cred.VCT != "" {
+			displays[cred.VCT] = HeldDisplay{}
+		}
+	}
+	return displays, nil
 }
 
 // Delete removes the credential; an absent ref is a no-op (matches the engine
