@@ -15,6 +15,7 @@ backend/      Go HTTP API (stdlib net/http, Go 1.22+ pattern routing)
   internal/migrate/      embedded goose migrations/*.sql
   internal/audit/        transactional audit-event seam (Recorder write side, Reader read side)
   internal/organization/ domain slice (orgs + memberships + invitations + audit log + org-scoped authz)
+  internal/consent/      consent & approval layer (approval queue + code-first policy engine)
   internal/respond/      JSON response helpers, HandlerFunc adapter, ApiError
   internal/seed/         dev seed logic
   internal/server/       router assembly, middleware, lifecycle

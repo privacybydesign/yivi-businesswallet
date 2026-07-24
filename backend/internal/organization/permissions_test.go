@@ -16,18 +16,23 @@ var wantRolePermissions = map[string][]string{
 		"qerds:read", "qerds:provision_address", "qerds:send",
 		"settings:read", "settings:manage_theming", "settings:manage_issuer", "settings:manage_smtp",
 		"audit:read",
+		"approvals:read", "approvals:decide", "approvals:decide_dual",
+		"policies:read", "policies:author", "policies:revoke",
 	},
 	RoleMember: {
 		"attestations:read", "qerds:read",
 	},
 	RoleAttestationIssuer: {
 		"attestations:read", "attestations:issue", "attestations:cancel_offer", "attestations:revoke",
+		"approvals:read", "approvals:decide", "policies:read",
 	},
 	RoleQerdsOperator: {
 		"qerds:read", "qerds:provision_address", "qerds:send",
+		"approvals:read", "approvals:decide", "policies:read",
 	},
 	RoleAuditor: {
 		"members:read", "attestations:read", "qerds:read", "settings:read", "audit:read",
+		"approvals:read", "policies:read",
 	},
 }
 
@@ -86,6 +91,25 @@ func TestAuditorIsReadOnly(t *testing.T) {
 	}
 }
 
+// TestPolicyAuthorAndDualDecideAreAdminOnly locks in the two consent-layer
+// guardrails from consent-approval-layer.md: authoring a policy pre-approves a
+// whole class of actions (an administrative-mandate act), and completing a
+// four-eyes decision alone must be reserved — so only admin may hold
+// policies:author or approvals:decide_dual.
+func TestPolicyAuthorAndDualDecideAreAdminOnly(t *testing.T) {
+	for role := range rolePermissions {
+		if role == RoleAdmin {
+			continue
+		}
+		if HasPermission(role, ResourcePolicies, ActionAuthor) {
+			t.Errorf("role %q holds policies:author; only admin may author policies", role)
+		}
+		if HasPermission(role, ResourceApprovals, ActionDecideDual) {
+			t.Errorf("role %q holds approvals:decide_dual; only admin may complete a four-eyes decision", role)
+		}
+	}
+}
+
 func TestHasPermission(t *testing.T) {
 	tests := []struct {
 		role     string
@@ -104,6 +128,19 @@ func TestHasPermission(t *testing.T) {
 		{RoleQerdsOperator, ResourceMembers, ActionInvite, false},
 		{RoleAuditor, ResourceAudit, ActionRead, true},
 		{RoleAuditor, ResourceMembers, ActionInvite, false},
+		// Consent surface: admin holds the full set; the decider roles decide and
+		// read policies but neither author policies nor act as the second
+		// four-eyes approver; the auditor reads only.
+		{RoleAdmin, ResourceApprovals, ActionDecideDual, true},
+		{RoleAdmin, ResourcePolicies, ActionAuthor, true},
+		{RoleAttestationIssuer, ResourceApprovals, ActionDecide, true},
+		{RoleAttestationIssuer, ResourceApprovals, ActionDecideDual, false},
+		{RoleAttestationIssuer, ResourcePolicies, ActionAuthor, false},
+		{RoleQerdsOperator, ResourceApprovals, ActionDecide, true},
+		{RoleQerdsOperator, ResourcePolicies, ActionRevoke, false},
+		{RoleAuditor, ResourceApprovals, ActionRead, true},
+		{RoleAuditor, ResourceApprovals, ActionDecide, false},
+		{RoleMember, ResourceApprovals, ActionRead, false},
 		{"", ResourceMembers, ActionRead, false},
 		{"nonexistent", ResourceAttestations, ActionRead, false},
 	}
