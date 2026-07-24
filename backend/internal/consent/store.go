@@ -102,8 +102,15 @@ func (s *Store) Enqueue(ctx context.Context, orgID uuid.UUID, p EnqueueParams) (
 			// protects against approving without dual control, not declining.
 			status, mode, policyID, action = StatusDeclined, ModePolicyAuto, &matched.ID, audit.ApprovalAutoDeclined
 		case matched != nil && matched.Effect == EffectAutoApprove && !dual:
-			status, mode, policyID, action = StatusApproved, ModePolicyAuto, &matched.ID, audit.ApprovalAutoApproved
-			subset = resolveApprovedSubset(*matched, p.Requested)
+			// Only auto-approve when the policy grants a non-empty subset. A policy
+			// whose ApproveSubset is disjoint from this request's attributes approves
+			// nothing, and an "approved nothing" record is exactly what the human path
+			// forbids (validateSubset -> ErrEmptySubset). Leave such an item pending
+			// for a human rather than slipping an empty approval past that guard.
+			if approved := resolveApprovedSubset(*matched, p.Requested); len(approved) > 0 {
+				status, mode, policyID, action = StatusApproved, ModePolicyAuto, &matched.ID, audit.ApprovalAutoApproved
+				subset = approved
+			}
 		case dual:
 			mode = ModeFourEyes
 		}
@@ -147,7 +154,16 @@ func (s *Store) Decide(ctx context.Context, orgID, requestID, approverID uuid.UU
 		}
 
 		if !approve {
-			return s.resolve(ctx, q, &out, req, StatusDeclined, approverID, nil, req.DecidedSubset, audit.ApprovalDeclined)
+			// A decline needs only one subject. But on a four-eyes item that already
+			// carries a first approval, the decliner is a distinct second actor:
+			// record them as the dual decider so the audit attributes the decline to
+			// them, instead of silently keeping the first approver as decided_by
+			// (resolve COALESCEs decided_by) and dropping the decliner entirely.
+			decidedBy, dualBy := approverID, (*uuid.UUID)(nil)
+			if req.Mode == ModeFourEyes && req.DecidedBy != nil && *req.DecidedBy != approverID {
+				decidedBy, dualBy = *req.DecidedBy, &approverID
+			}
+			return s.resolve(ctx, q, &out, req, StatusDeclined, decidedBy, dualBy, req.DecidedSubset, audit.ApprovalDeclined)
 		}
 		if err := validateSubset(subset, req.Requested); err != nil {
 			return err

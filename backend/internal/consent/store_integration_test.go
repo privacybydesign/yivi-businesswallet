@@ -115,6 +115,48 @@ func TestEnqueueAutoApprovePolicy(t *testing.T) {
 	}
 }
 
+func TestEnqueueAutoApproveEmptySubsetStaysPending(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := consent.NewStore(pool, audit.NewDBRecorder())
+	ctx := context.Background()
+	orgID := createOrg(t, pool, "acme")
+	admin := createUser(t, pool, "admin@example.test")
+
+	// The policy matches on counterparty but narrows approval to an attribute this
+	// request never asked for, so resolving its subset against the request yields
+	// nothing: the policy would auto-approve an empty disclosure.
+	if _, err := store.CreatePolicy(ctx, orgID, admin, consent.PolicySpec{
+		Kind:                consent.KindPresentation,
+		CounterpartyPattern: "*",
+		Effect:              consent.EffectAutoApprove,
+		ApproveSubset:       []string{"bsn"},
+	}); err != nil {
+		t.Fatalf("CreatePolicy: %v", err)
+	}
+
+	req, err := store.Enqueue(ctx, orgID, enqueueParams(consent.KindPresentation, "verifier.example", "email", "name"))
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	// An "approved nothing" record is exactly what the human path forbids; the item
+	// must fall to a human instead of being auto-approved with an empty subset.
+	if req.Status != consent.StatusPending || req.Mode != consent.ModeHumanApproved {
+		t.Errorf("status/mode = %s/%s, want pending/human_approved", req.Status, req.Mode)
+	}
+	if len(req.DecidedSubset) != 0 {
+		t.Errorf("decidedSubset = %v, want empty", req.DecidedSubset)
+	}
+	if req.PolicyID != nil {
+		t.Errorf("policyId = %v, want nil (no effective auto-approve)", req.PolicyID)
+	}
+	if got := countEvents(t, pool, audit.ApprovalAutoApproved, orgID); got != 0 {
+		t.Errorf("approval.auto_approved events = %d, want 0", got)
+	}
+	if got := countEvents(t, pool, audit.ApprovalRequested, orgID); got != 1 {
+		t.Errorf("approval.requested events = %d, want 1", got)
+	}
+}
+
 func TestEnqueueAutoDeclinePolicy(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := consent.NewStore(pool, audit.NewDBRecorder())
@@ -354,6 +396,46 @@ func TestFourEyesFlow(t *testing.T) {
 	}
 	if got := countEvents(t, pool, audit.ApprovalApproved, orgID); got != 1 {
 		t.Errorf("approval.approved events = %d, want 1", got)
+	}
+}
+
+func TestFourEyesDeclineAfterFirstApprovalAttributesDecliner(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := consent.NewStore(pool, audit.NewDBRecorder())
+	ctx := context.Background()
+	orgID := createOrg(t, pool, "acme")
+	first := createUser(t, pool, "first@example.test")
+	second := createUser(t, pool, "second@example.test")
+
+	req, err := store.Enqueue(ctx, orgID, consent.EnqueueParams{
+		Kind: consent.KindPresentation, Counterparty: "verifier.example",
+		Requested: []string{"email", "name"}, ExpiresAt: time.Now().Add(time.Hour), ForceDualControl: true,
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if _, err := store.Decide(ctx, orgID, req.ID, first, true, []string{"email"}); err != nil {
+		t.Fatalf("first Decide: %v", err)
+	}
+
+	// A distinct second actor declines through Decide (a decline never needs
+	// DecideDual). The item resolves, and the decline must be attributed to the
+	// decliner, not silently kept against the first approver.
+	declined, err := store.Decide(ctx, orgID, req.ID, second, false, nil)
+	if err != nil {
+		t.Fatalf("second Decide decline: %v", err)
+	}
+	if declined.Status != consent.StatusDeclined {
+		t.Errorf("status = %s, want declined", declined.Status)
+	}
+	if declined.DecidedBy == nil || *declined.DecidedBy != first {
+		t.Errorf("decidedBy = %v, want the first approver %s", declined.DecidedBy, first)
+	}
+	if declined.DualDecidedBy == nil || *declined.DualDecidedBy != second {
+		t.Errorf("dualDecidedBy = %v, want the decliner %s", declined.DualDecidedBy, second)
+	}
+	if got := countEvents(t, pool, audit.ApprovalDeclined, orgID); got != 1 {
+		t.Errorf("approval.declined events = %d, want 1", got)
 	}
 }
 
