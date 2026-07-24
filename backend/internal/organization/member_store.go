@@ -223,7 +223,10 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 		return Member{}, fmt.Errorf("organization: read membership user %s org %s: %w", userID, orgID, err)
 	}
 
-	if role != nil && *role == RoleMember && current == RoleAdmin {
+	// Any demotion off the admin role (to member or a finer functional role)
+	// removes an administrator, so the last-admin guard must fire for all of
+	// them, not only a demotion to member.
+	if role != nil && *role != RoleAdmin && current == RoleAdmin {
 		admins, err := lockAndCountAdmins(ctx, tx, orgID)
 		if err != nil {
 			return Member{}, err
