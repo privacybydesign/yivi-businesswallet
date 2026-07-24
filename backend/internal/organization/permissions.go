@@ -25,6 +25,14 @@ const (
 	ResourceSettings       = "settings"
 	ResourceRelyingParties = "relying_parties"
 	ResourceAudit          = "audit"
+
+	// Consent & approval layer (consent-approval-layer.md, #113). approvals is
+	// the decision surface over the approval queue; policies is the authoring
+	// surface for auto-approve/auto-decline rules. Neither is Axis-A-gated —
+	// approving a disclosure or acceptance is a functional act inside the
+	// administrative-mandate space, not a mandate grant.
+	ResourceApprovals = "approvals"
+	ResourcePolicies  = "policies"
 )
 
 // Actions. Read is shared across resources; the rest are namespaced by the
@@ -65,6 +73,20 @@ const (
 	// relying parties (#27 follow-up; enumerated but granted to no role in v1)
 	ActionAuthorise = "authorise"
 	ActionManage    = "manage"
+
+	// approvals (consent-approval-layer.md). ActionDecide approves/declines a
+	// pending item; ActionDecideDual is the distinct second-approver capability
+	// for a four-eyes item, deliberately separate from ActionDecide so a role can
+	// originate an approval without being allowed to complete a dual-control one
+	// alone. ActionRead sees the queue.
+	ActionDecide     = "decide"
+	ActionDecideDual = "decide_dual"
+
+	// policies (consent-approval-layer.md). ActionAuthor creates/edits an
+	// auto-approve/auto-decline rule — admin-only, because a policy pre-approves a
+	// whole class of future actions. ActionRevoke (shared with members/attestations)
+	// revokes a policy; ActionRead sees them.
+	ActionAuthor = "author"
 )
 
 // Permission is a "{resource}:{action}" key. Use Perm to build one.
@@ -102,6 +124,14 @@ var rolePermissions = map[string]map[string]struct{}{
 		Perm(ResourceSettings, ActionManageIssuer),
 		Perm(ResourceSettings, ActionManageSMTP),
 		Perm(ResourceAudit, ActionRead),
+		// The full consent surface: decide any item (including as the second
+		// four-eyes approver) and author/revoke policies.
+		Perm(ResourceApprovals, ActionRead),
+		Perm(ResourceApprovals, ActionDecide),
+		Perm(ResourceApprovals, ActionDecideDual),
+		Perm(ResourcePolicies, ActionRead),
+		Perm(ResourcePolicies, ActionAuthor),
+		Perm(ResourcePolicies, ActionRevoke),
 	),
 	RoleMember: permSet(
 		Perm(ResourceAttestations, ActionRead),
@@ -112,11 +142,20 @@ var rolePermissions = map[string]map[string]struct{}{
 		Perm(ResourceAttestations, ActionIssue),
 		Perm(ResourceAttestations, ActionCancelOffer),
 		Perm(ResourceAttestations, ActionRevoke),
+		// May decide items and read policies, but not author them or act as the
+		// second four-eyes approver. Item-kind scoping (issuance only) rides #115's
+		// resource-type scope, enforced org-wide in v1.
+		Perm(ResourceApprovals, ActionRead),
+		Perm(ResourceApprovals, ActionDecide),
+		Perm(ResourcePolicies, ActionRead),
 	),
 	RoleQerdsOperator: permSet(
 		Perm(ResourceQERDS, ActionRead),
 		Perm(ResourceQERDS, ActionProvisionAddress),
 		Perm(ResourceQERDS, ActionSend),
+		Perm(ResourceApprovals, ActionRead),
+		Perm(ResourceApprovals, ActionDecide),
+		Perm(ResourcePolicies, ActionRead),
 	),
 	RoleAuditor: permSet(
 		Perm(ResourceMembers, ActionRead),
@@ -124,6 +163,10 @@ var rolePermissions = map[string]map[string]struct{}{
 		Perm(ResourceQERDS, ActionRead),
 		Perm(ResourceSettings, ActionRead),
 		Perm(ResourceAudit, ActionRead),
+		// Read-only over the consent surface too: sees the queue and the policies,
+		// never a decider or author (mirrors its *:read-only rule).
+		Perm(ResourceApprovals, ActionRead),
+		Perm(ResourcePolicies, ActionRead),
 	),
 }
 

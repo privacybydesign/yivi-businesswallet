@@ -84,6 +84,21 @@ const (
 	ThemeSettingsUpdated = "theme.settings_updated"
 
 	OnboardingSettingsUpdated = "onboarding.settings_updated"
+
+	// Consent & approval layer (consent-approval-layer.md, #113). Every path an
+	// approval takes — queued for a human, decided, expired, or auto-decided by a
+	// policy — writes one event; authoring, editing and revoking a policy each
+	// audit too, since a policy is itself a durable, revocable authorisation.
+	ApprovalRequested    = "approval.requested"
+	ApprovalApproved     = "approval.approved"
+	ApprovalDeclined     = "approval.declined"
+	ApprovalExpired      = "approval.expired"
+	ApprovalAutoApproved = "approval.auto_approved"
+	ApprovalAutoDeclined = "approval.auto_declined"
+
+	PolicyCreated = "policy.created"
+	PolicyUpdated = "policy.updated"
+	PolicyRevoked = "policy.revoked"
 )
 
 const (
@@ -117,6 +132,9 @@ const (
 	TargetThemeSettings = "org_theme_settings"
 
 	TargetOnboardingSettings = "org_onboarding_attestations"
+
+	TargetApprovalRequest = "approval_request"
+	TargetPolicy          = "policy"
 )
 
 type Actor struct {

@@ -47,6 +47,15 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "attestation.key_suspended": { icon: "warning", tone: "amber" },
   "attestation.key_revoked": { icon: "close", tone: "red" },
   "email.settings_updated": { icon: "settings", tone: "blue" },
+  "approval.requested": { icon: "time", tone: "amber" },
+  "approval.approved": { icon: "valid", tone: "green" },
+  "approval.declined": { icon: "close", tone: "red" },
+  "approval.expired": { icon: "time", tone: "slate" },
+  "approval.auto_approved": { icon: "valid", tone: "green" },
+  "approval.auto_declined": { icon: "close", tone: "amber" },
+  "policy.created": { icon: "add", tone: "green" },
+  "policy.updated": { icon: "edit", tone: "blue" },
+  "policy.revoked": { icon: "close", tone: "red" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -179,6 +188,24 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.themeSettingsUpdated");
     case "onboarding.settings_updated":
       return t("auditLog.actions.onboardingSettingsUpdated");
+    case "approval.requested":
+      return t("auditLog.actions.approvalRequested");
+    case "approval.approved":
+      return t("auditLog.actions.approvalApproved");
+    case "approval.declined":
+      return t("auditLog.actions.approvalDeclined");
+    case "approval.expired":
+      return t("auditLog.actions.approvalExpired");
+    case "approval.auto_approved":
+      return t("auditLog.actions.approvalAutoApproved");
+    case "approval.auto_declined":
+      return t("auditLog.actions.approvalAutoDeclined");
+    case "policy.created":
+      return t("auditLog.actions.policyCreated");
+    case "policy.updated":
+      return t("auditLog.actions.policyUpdated");
+    case "policy.revoked":
+      return t("auditLog.actions.policyRevoked");
     default:
       return action;
   }
@@ -232,6 +259,10 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.orgThemeSettings");
     case "org_onboarding_attestations":
       return t("auditLog.targets.orgOnboardingAttestations");
+    case "approval_request":
+      return t("auditLog.targets.approvalRequest");
+    case "policy":
+      return t("auditLog.targets.policy");
     default:
       return targetType;
   }
