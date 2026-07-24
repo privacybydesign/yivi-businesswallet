@@ -794,6 +794,9 @@ export const nl: Translation<typeof en> = {
     loadError: "Berichten laden mislukt: {{message}}",
     emptyInbox: "Nog geen berichten ontvangen.",
     emptyOutbox: "Nog geen berichten verstuurd.",
+    unread_one: "{{count}} ongelezen bericht",
+    unread_other: "{{count}} ongelezen berichten",
+    unreadItem: "Ongelezen",
     tabs: {
       inbox: "Postvak IN",
       outbox: "Verzonden",

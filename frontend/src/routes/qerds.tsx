@@ -8,6 +8,12 @@ import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { useWhenFormatter } from "../lib/format-when";
 import { qerdsStatusTone } from "../lib/qerds";
+import {
+  loadSeenIds,
+  pruneSeen,
+  saveSeenIds,
+  unreadInboundIds,
+} from "../lib/qerds-unread";
 import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
 import * as React from "react";
 
@@ -42,6 +48,50 @@ export default function Qerds(): React.JSX.Element {
       ? message.direction === "inbound"
       : message.direction === "outbound",
   );
+
+  const inboundIds = React.useMemo(
+    () =>
+      (messages.data ?? [])
+        .filter((message) => message.direction === "inbound")
+        .map((message) => message.id),
+    [messages.data],
+  );
+
+  // Which inbound messages this browser has already seen. null until the first
+  // load resolves, so we can baseline a first visit (everything already seen)
+  // instead of flashing the whole inbox as new.
+  const [seen, setSeen] = React.useState<string[] | null>(() =>
+    loadSeenIds(slug),
+  );
+
+  // Baseline and prune the seen set whenever the inbox contents change, using
+  // the "adjust state during render" pattern rather than an effect: a first
+  // visit baselines the whole inbox as already seen, and later fetches drop ids
+  // that have left the inbox so the stored set stays bounded by the inbox size.
+  const inboundKey = inboundIds.join(",");
+  const [trackedKey, setTrackedKey] = React.useState<string | null>(null);
+  if (messages.data !== undefined && trackedKey !== inboundKey) {
+    setTrackedKey(inboundKey);
+    setSeen((prev) => pruneSeen(prev ?? inboundIds, inboundIds));
+  }
+
+  // Persist the seen set (side effect only, never a state update).
+  React.useEffect(() => {
+    if (seen !== null) saveSeenIds(slug, seen);
+  }, [slug, seen]);
+
+  const unreadIds = React.useMemo(
+    () => new Set(unreadInboundIds(inboundIds, seen ?? inboundIds)),
+    [inboundIds, seen],
+  );
+
+  const markSeen = (id: string): void => {
+    setSeen((prev) => {
+      const current = prev ?? inboundIds;
+      if (current.includes(id)) return current;
+      return [...current, id];
+    });
+  };
 
   const setBox = (value: Box): void => {
     setSearchParams((prev) => {
@@ -114,7 +164,7 @@ export default function Qerds(): React.JSX.Element {
                     type="button"
                     onClick={() => setBox(value)}
                     className={[
-                      "h-[26px] cursor-pointer rounded-md px-2.5 text-[12.5px] font-semibold transition-colors",
+                      "inline-flex h-[26px] cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-semibold transition-colors",
                       box === value
                         ? "bg-surface text-ink shadow-sm"
                         : "text-ink-soft hover:text-ink",
@@ -123,6 +173,16 @@ export default function Qerds(): React.JSX.Element {
                     {value === "inbox"
                       ? t("qerds.tabs.inbox")
                       : t("qerds.tabs.outbox")}
+                    {value === "inbox" && unreadIds.size > 0 && (
+                      <span
+                        className="bg-highlight text-link inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[11px] font-semibold"
+                        aria-label={t("qerds.unread", {
+                          count: unreadIds.size,
+                        })}
+                      >
+                        {unreadIds.size}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -157,41 +217,57 @@ export default function Qerds(): React.JSX.Element {
                       : t("qerds.emptyOutbox")}
                   </Table.State>
                 ) : (
-                  rows.map((message) => (
-                    <Table.Row
-                      key={message.id}
-                      onClick={() =>
-                        void navigate(`/${slug}/qerds/${message.id}`)
-                      }
-                      className="hover:bg-surface-3 cursor-pointer transition-colors"
-                    >
-                      <Table.Cell>
-                        <div className="flex items-center gap-2.5">
-                          <Icon
-                            name="email"
-                            size={15}
-                            className="text-ink-soft shrink-0"
-                          />
-                          <span className="text-ink block truncate">
-                            {message.subject}
-                          </span>
-                        </div>
-                      </Table.Cell>
-                      <Table.Cell className="text-ink-soft truncate font-mono text-[12.5px]">
-                        {box === "inbox"
-                          ? message.senderAddress
-                          : message.recipientAddress}
-                      </Table.Cell>
-                      <Table.Cell>
-                        <Tag tone={qerdsStatusTone(message.status)} dot>
-                          <span className="capitalize">{message.status}</span>
-                        </Tag>
-                      </Table.Cell>
-                      <Table.Cell className="text-ink-soft text-[12.5px]">
-                        {formatWhen(message.createdAt)}
-                      </Table.Cell>
-                    </Table.Row>
-                  ))
+                  rows.map((message) => {
+                    const unread = box === "inbox" && unreadIds.has(message.id);
+                    return (
+                      <Table.Row
+                        key={message.id}
+                        onClick={() => {
+                          markSeen(message.id);
+                          void navigate(`/${slug}/qerds/${message.id}`);
+                        }}
+                        className="hover:bg-surface-3 cursor-pointer transition-colors"
+                      >
+                        <Table.Cell>
+                          <div className="flex items-center gap-2.5">
+                            {unread ? (
+                              <span
+                                className="bg-link h-2 w-2 shrink-0 rounded-full"
+                                aria-label={t("qerds.unreadItem")}
+                              />
+                            ) : (
+                              <Icon
+                                name="email"
+                                size={15}
+                                className="text-ink-soft shrink-0"
+                              />
+                            )}
+                            <span
+                              className={[
+                                "block truncate",
+                                unread ? "text-ink font-semibold" : "text-ink",
+                              ].join(" ")}
+                            >
+                              {message.subject}
+                            </span>
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell className="text-ink-soft truncate font-mono text-[12.5px]">
+                          {box === "inbox"
+                            ? message.senderAddress
+                            : message.recipientAddress}
+                        </Table.Cell>
+                        <Table.Cell>
+                          <Tag tone={qerdsStatusTone(message.status)} dot>
+                            <span className="capitalize">{message.status}</span>
+                          </Tag>
+                        </Table.Cell>
+                        <Table.Cell className="text-ink-soft text-[12.5px]">
+                          {formatWhen(message.createdAt)}
+                        </Table.Cell>
+                      </Table.Row>
+                    );
+                  })
                 )}
               </Table.Body>
             </Table>

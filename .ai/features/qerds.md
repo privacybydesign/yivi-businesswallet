@@ -194,6 +194,12 @@ attachment picker (multipart upload, client-side size/count limits mirroring the
 attachment list on the detail view with credentialed download, and address management in org
 settings.
 
+Because inbound delivery is automatic on the backend (poll worker / webhook push), the inbox does
+not depend on the manual "Check inbox" action to surface a new message: the messages query
+re-fetches on an interval (paused while the tab is hidden), and inbound messages that arrived since
+this browser last opened them show an unread count on the Inbox tab plus a marker on the row.
+Unread state is per-browser (localStorage) — an arrival signal, not an org-wide read receipt.
+
 ---
 
 ## 8. Config & deploy
