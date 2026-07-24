@@ -69,7 +69,7 @@ None of these are Axis-A-gated. Approving a disclosure or acceptance is a functi
 
 ## The approval queue
 
-**There is already a queued-human-approval precedent in the org slice: identity review.** An invitation-accept whose disclosed name mismatches lands a `pending` row in `identity_reviews`; an admin resolves it approve/reject; every transition audits through the same `InTx` + `audit.Record` seam (`internal/organization/identity_review_store.go`, states `pending` / approved / rejected, actions `user.identity_review_{required,approved,rejected}`). The approval queue is the same shape, generalised to two payload kinds.
+**There is already a queued-human-approval precedent in the org slice: identity review.** An invitation-accept whose disclosed name mismatches lands a `pending` row in `identity_reviews`; an admin resolves it approve/reject; every transition audits through the same `InTx` + `audit.Record` seam (`internal/organization/identity_review_store.go`). Only `pending` and `rejected` are persisted `ReviewState` values — an approval creates the membership and cascade-deletes the review row, so "approved" survives as the `user.identity_review_approved` audit action, not as a stored status (actions `user.identity_review_{required,approved,rejected}`). The approval queue is the same shape, generalised to two payload kinds — and, unlike the identity-review precedent, it will legitimately persist an `approved`/`declined` status rather than deleting the row, since the decided item is itself the record to audit against.
 
 A pending item carries enough to review the decision **and** to reconstruct it for audit:
 
@@ -143,7 +143,7 @@ inbound request (presentation | issuance)
 - **Who may approve:** functional-role permissions (`approvals:*`), not Axis A. Approving is an administrative-mandate act, not a mandate grant.
 - **Who may author policy:** admin only (`policies:author`) — a policy pre-approves a class of actions.
 - **Four-eyes as a permission:** `decide_dual` is distinct from `decide`, and dual-control is a floor a policy cannot waive.
-- **Queue model:** generalise the `identity_reviews` pending → approved/rejected + audit precedent to two payload kinds; attribute-level (subset) decisions.
+- **Queue model:** generalise the `identity_reviews` pending → rejected (approve deletes the row) + audit precedent to two payload kinds, but persist the decided status here; attribute-level (subset) decisions.
 - **Policy matcher:** structured model now; matcher is code-first (table-driven test), DB-backed editable policies deferred, mirroring #115's permissions-as-code decision.
 - **Scope/validity:** reuse #115's scope + `valid_from`/`valid_until` fields on grants and policies; enforce org-wide in v1, narrowing is #27.
 
