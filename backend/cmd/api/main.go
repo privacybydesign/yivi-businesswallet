@@ -326,6 +326,10 @@ func run() error {
 	postguardClient := postguard.NewClient(cfg.PostGuardSidecarURL, cfg.PostGuardSharedSecret, &http.Client{Timeout: postguardHTTPTimeout})
 	postguardService := postguard.NewService(postguardStore, postguardClient, postguardNotifier{email: emailService}, cfg.PostGuardWebsiteURL)
 	postguardHandler := postguard.NewHandler(postguardService, requireUser, orgHandler.Authorize)
+	slog.Info("postguard environment",
+		slog.String("websiteUrl", cfg.PostGuardWebsiteURL),
+		slog.String("pkgUrl", cfg.PostGuardPkgURL),
+		slog.String("cryptifyUrl", cfg.PostGuardCryptifyURL))
 
 	attIssuer, err := newAttestationIssuer(cfg)
 	if err != nil {

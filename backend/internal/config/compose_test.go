@@ -1,0 +1,46 @@
+package config
+
+import (
+	"os"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
+
+// composePath is the root Compose file, from this package's directory.
+const composePath = "../../../compose.yaml"
+
+// TestComposePassesPostGuardURLsToBackend guards the passthrough itself. Compose
+// does not forward a root .env variable into a container unless the service
+// declares it, so a variable this package reads but compose.yaml omits is set in
+// .env, looks configured, and silently keeps the built-in default.
+func TestComposePassesPostGuardURLsToBackend(t *testing.T) {
+	raw, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", composePath, err)
+	}
+	var file struct {
+		Services map[string]struct {
+			Environment map[string]string `yaml:"environment"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("parse %s: %v", composePath, err)
+	}
+	backend, ok := file.Services["backend"]
+	if !ok {
+		t.Fatal("compose.yaml has no backend service")
+	}
+
+	for _, key := range []string{envPostGuardWebsiteURL, envPostGuardPkgURL, envPostGuardCryptifyURL} {
+		value, ok := backend.Environment[key]
+		if !ok {
+			t.Errorf("backend service does not pass %s through; setting it in .env would do nothing", key)
+			continue
+		}
+		// The empty default keeps the Go-side default authoritative.
+		if want := "${" + key + ":-}"; value != want {
+			t.Errorf("backend %s = %q, want %q", key, value, want)
+		}
+	}
+}

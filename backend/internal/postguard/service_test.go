@@ -10,20 +10,21 @@ import (
 
 // fakeStore records calls and returns canned values.
 type fakeStore struct {
-	setKey       string
-	setErr       error
-	setEncSecret string
-	setEncErr    error
-	setEncCalls  int
-	decrypted    string
-	decryptErr   error
-	recorded     SentFile
-	recordErr    error
-	recordCalls  int
-	delivery     NotificationDelivery
-	deliveryErr  error
-	setDelivery  NotificationDelivery
-	setDeliveryN int
+	setKey           string
+	setErr           error
+	setEncSecret     string
+	setEncErr        error
+	setEncCalls      int
+	decrypted        string
+	decryptErr       error
+	recorded         SentFile
+	recordedLinkBase string
+	recordErr        error
+	recordCalls      int
+	delivery         NotificationDelivery
+	deliveryErr      error
+	setDelivery      NotificationDelivery
+	setDeliveryN     int
 }
 
 func (f *fakeStore) EncryptionKeyInfo(context.Context, uuid.UUID) (EncryptionKeyInfo, error) {
@@ -64,9 +65,10 @@ func (f *fakeStore) SetNotificationDelivery(_ context.Context, _ uuid.UUID, meth
 	return nil
 }
 
-func (f *fakeStore) RecordSentFile(_ context.Context, _, _ uuid.UUID, s SentFile) (SentFile, error) {
+func (f *fakeStore) RecordSentFile(_ context.Context, _, _ uuid.UUID, s SentFile, notificationLinkBase string) (SentFile, error) {
 	f.recordCalls++
 	f.recorded = s
+	f.recordedLinkBase = notificationLinkBase
 	return s, f.recordErr
 }
 func (f *fakeStore) ListSentFiles(context.Context, uuid.UUID) ([]SentFile, error) { return nil, nil }
@@ -236,6 +238,9 @@ func TestSendPostGuardDeliveryUsesSidecarNotify(t *testing.T) {
 	if st.recordCalls != 1 {
 		t.Errorf("record called %d times, want 1", st.recordCalls)
 	}
+	if st.recordedLinkBase != "" {
+		t.Errorf("PostGuard delivery: we build no link, got recorded base %q", st.recordedLinkBase)
+	}
 }
 
 func TestSendSMTPDeliveryNotifiesOverOwnSMTP(t *testing.T) {
@@ -268,6 +273,32 @@ func TestSendSMTPDeliveryNotifiesOverOwnSMTP(t *testing.T) {
 	}
 	if st.recordCalls != 1 {
 		t.Errorf("record called %d times, want 1", st.recordCalls)
+	}
+	if want := "https://postguard.eu"; st.recordedLinkBase != want {
+		t.Errorf("recorded link base = %q, want %q", st.recordedLinkBase, want)
+	}
+}
+
+// A deployment pointed at staging must hand recipients a staging link — the
+// production website cannot resolve a UUID created in staging storage.
+func TestSendSMTPDeliveryLinksToConfiguredWebsite(t *testing.T) {
+	st := &fakeStore{decrypted: "PG-key", delivery: NotifySMTP}
+	snd := &fakeSender{uuid: "cryptify-abc"}
+	notif := &fakeNotifier{}
+	svc := NewService(st, snd, notif, "https://staging.postguard.eu")
+
+	if _, err := svc.Send(context.Background(), uuid.New(), uuid.New(), SendInput{
+		Recipients: []string{"a@b.nl"},
+		Files:      []FileBlob{{Name: "f", Data: []byte("x")}},
+		Notify:     true,
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if want := "https://staging.postguard.eu/download?uuid=cryptify-abc"; notif.gotDownloadURL != want {
+		t.Errorf("download URL = %q, want %q", notif.gotDownloadURL, want)
+	}
+	if want := "https://staging.postguard.eu"; st.recordedLinkBase != want {
+		t.Errorf("recorded link base = %q, want %q", st.recordedLinkBase, want)
 	}
 }
 
