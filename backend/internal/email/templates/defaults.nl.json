@@ -3,6 +3,14 @@
     "footer": "Verstuurd door {{orgName}} met de Yivi Business Wallet.",
     "linkFallback": "Of open deze link:"
   },
+  "samples": {
+    "credentialName": "Medewerkerspas",
+    "claimUrl": "https://wallet.example.org/claim/voorbeeld",
+    "txCode": "123456",
+    "acceptUrl": "https://wallet.example.org/invite/voorbeeld",
+    "message": "Hierbij het bestand dat we bespraken.",
+    "downloadUrl": "https://postguard.example/download?uuid=voorbeeld"
+  },
   "templates": {
     "credential_offer": {
       "subject": "{{orgName}} heeft je een credential uitgegeven: {{credentialName}}",

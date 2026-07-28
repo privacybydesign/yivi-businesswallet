@@ -7,12 +7,27 @@ package email
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
 // ErrNotConfigured means the organization has no usable (present + enabled) SMTP
 // configuration, so mail cannot be sent.
 var ErrNotConfigured = errors.New("email: smtp not configured for organization")
+
+// InvalidTemplateError reports a tenant template that does not satisfy
+// ValidateTemplate. It carries the reason separately from the wrapping prose so a
+// handler can answer 400 naming the offending field — which is what the editor
+// shows beside the input — instead of turning a save mistake into a 500.
+type InvalidTemplateError struct {
+	Reason error
+}
+
+func (e *InvalidTemplateError) Error() string {
+	return fmt.Sprintf("email: invalid template: %v", e.Reason)
+}
+
+func (e *InvalidTemplateError) Unwrap() error { return e.Reason }
 
 // Settings is the non-secret view of an org's SMTP configuration (never the
 // password). Configured is false when no row exists yet.

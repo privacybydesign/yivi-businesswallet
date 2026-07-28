@@ -58,13 +58,188 @@ export function updateEmailSettings(
 
 export function sendTestEmail(
   slug: string,
-  input: { to: string },
+  input: TestEmailInput,
   signal?: AbortSignal,
 ): Promise<void> {
   return request(`${base(slug)}/test`, {
     schema: z.void(),
     method: "POST",
     body: input,
+    signal,
+  });
+}
+
+// A test send without a kind is the SMTP self-test in the deployment's default
+// language; with one it is a real specimen of that cause, rendered from the org's
+// own template.
+export interface TestEmailInput {
+  to: string;
+  kind?: MailTemplateKind;
+  locale?: MailLocale;
+}
+
+// Transactional mail templates. Kinds and locales are a closed backend set
+// (backend/internal/email/catalog.go), so the frontend never invents one: it
+// renders the matrix the list endpoint returns.
+export const MAIL_TEMPLATE_KINDS = [
+  "credential_offer",
+  "invitation",
+  "postguard_file",
+  "smtp_test",
+] as const;
+
+export type MailTemplateKind = (typeof MAIL_TEMPLATE_KINDS)[number];
+
+export const MAIL_LOCALES = ["en", "nl"] as const;
+
+export type MailLocale = (typeof MAIL_LOCALES)[number];
+
+const mailTemplateKindSchema = z.enum(MAIL_TEMPLATE_KINDS);
+const mailLocaleSchema = z.enum(MAIL_LOCALES);
+
+// A template is prose plus a call to action, never HTML: the mail-client-safe
+// layout is the backend shell's. Every field may reference the kind's variables
+// as {{name}} placeholders.
+export const mailTemplateSchema = z.object({
+  subject: z.string(),
+  preheader: z.string().optional().default(""),
+  headline: z.string(),
+  paragraphs: z.array(z.string()).optional().default([]),
+  ctaLabel: z.string().optional().default(""),
+  ctaUrl: z.string().optional().default(""),
+  linkFallback: z.string().optional().default(""),
+  note: z.string().optional().default(""),
+  footer: z.string().optional().default(""),
+});
+
+export type MailTemplate = z.infer<typeof mailTemplateSchema>;
+
+export const mailTemplateVariableSchema = z.object({
+  name: z.string(),
+  // A URL variable is the only kind of variable that may stand in for the call to
+  // action's link.
+  isUrl: z.boolean(),
+});
+
+export type MailTemplateVariable = z.infer<typeof mailTemplateVariableSchema>;
+
+const mailTemplateSummarySchema = z.object({
+  locale: mailLocaleSchema,
+  customized: z.boolean(),
+  subject: z.string(),
+  updatedAt: z.string().optional(),
+});
+
+export type MailTemplateSummary = z.infer<typeof mailTemplateSummarySchema>;
+
+const mailTemplateKindSummarySchema = z.object({
+  kind: mailTemplateKindSchema,
+  variables: z.array(mailTemplateVariableSchema),
+  locales: z.array(mailTemplateSummarySchema),
+});
+
+export type MailTemplateKindSummary = z.infer<
+  typeof mailTemplateKindSummarySchema
+>;
+
+export const mailTemplateListSchema = z.object({
+  kinds: z.array(mailTemplateKindSummarySchema),
+});
+
+export type MailTemplateList = z.infer<typeof mailTemplateListSchema>;
+
+export const mailTemplateDetailSchema = z.object({
+  kind: mailTemplateKindSchema,
+  locale: mailLocaleSchema,
+  customized: z.boolean(),
+  updatedAt: z.string().optional(),
+  template: mailTemplateSchema,
+  // The shipped copy this template reverts to, so the editor can offer a revert
+  // and show what the default says.
+  default: mailTemplateSchema,
+  variables: z.array(mailTemplateVariableSchema),
+});
+
+export type MailTemplateDetail = z.infer<typeof mailTemplateDetailSchema>;
+
+export const mailPreviewSchema = z.object({
+  subject: z.string(),
+  html: z.string(),
+  text: z.string(),
+});
+
+export type MailPreview = z.infer<typeof mailPreviewSchema>;
+
+export interface MailTemplateRef {
+  kind: MailTemplateKind;
+  locale: MailLocale;
+}
+
+function templatePath(slug: string, ref: MailTemplateRef): string {
+  return `${base(slug)}/templates/${ref.kind}/${ref.locale}`;
+}
+
+export function getMailTemplates(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<MailTemplateList> {
+  return request(`${base(slug)}/templates`, {
+    schema: mailTemplateListSchema,
+    signal,
+  });
+}
+
+export function getMailTemplate(
+  slug: string,
+  ref: MailTemplateRef,
+  signal?: AbortSignal,
+): Promise<MailTemplateDetail> {
+  return request(templatePath(slug, ref), {
+    schema: mailTemplateDetailSchema,
+    signal,
+  });
+}
+
+export function updateMailTemplate(
+  slug: string,
+  ref: MailTemplateRef,
+  template: MailTemplate,
+  signal?: AbortSignal,
+): Promise<MailTemplateDetail> {
+  return request(templatePath(slug, ref), {
+    schema: mailTemplateDetailSchema,
+    method: "PUT",
+    body: template,
+    signal,
+  });
+}
+
+// Reverting drops the org's own copy, so the response carries the shipped default
+// that is now in force again.
+export function resetMailTemplate(
+  slug: string,
+  ref: MailTemplateRef,
+  signal?: AbortSignal,
+): Promise<MailTemplateDetail> {
+  return request(templatePath(slug, ref), {
+    schema: mailTemplateDetailSchema,
+    method: "DELETE",
+    signal,
+  });
+}
+
+// The backend renders the preview so it cannot drift from what is delivered.
+// Passing no template previews what is currently in force.
+export function previewMailTemplate(
+  slug: string,
+  ref: MailTemplateRef,
+  template: MailTemplate | null,
+  signal?: AbortSignal,
+): Promise<MailPreview> {
+  return request(`${base(slug)}/templates/${ref.kind}/preview`, {
+    schema: mailPreviewSchema,
+    method: "POST",
+    body: { locale: ref.locale, template },
     signal,
   });
 }

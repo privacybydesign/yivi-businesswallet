@@ -5,6 +5,7 @@ import { accessMessage } from "../lib/access-message";
 import { Card, TopBar } from "../ui";
 import { DepartmentSettings } from "./department-settings";
 import { EmailSettingsPanel } from "./email-settings";
+import { EmailTemplatesPanel } from "./email-templates";
 import { IssuerSettingsPanel } from "./issuer-settings";
 import { OrgProfileSettings } from "./org-profile-settings";
 import { PostguardApiKeyCard } from "./postguard-api-key";
@@ -18,6 +19,7 @@ const TABS = [
   { key: "org", labelKey: "settings.tabOrg" },
   { key: "branding", labelKey: "settings.tabBranding" },
   { key: "email", labelKey: "settings.tabEmail" },
+  { key: "mailTemplates", labelKey: "settings.tabMailTemplates" },
   { key: "issuer", labelKey: "settings.tabIssuer" },
   { key: "postguard", labelKey: "settings.tabPostguard" },
   { key: "wallets", labelKey: "settings.tabWallets" },
@@ -108,6 +110,8 @@ export default function Settings(): React.JSX.Element {
           <ThemeSettingsPanel slug={slug} />
         ) : tab === "email" ? (
           <EmailSettingsPanel slug={slug} />
+        ) : tab === "mailTemplates" ? (
+          <EmailTemplatesPanel slug={slug} />
         ) : tab === "issuer" ? (
           <IssuerSettingsPanel slug={slug} />
         ) : tab === "postguard" ? (

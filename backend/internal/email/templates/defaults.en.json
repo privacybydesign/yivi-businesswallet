@@ -3,6 +3,14 @@
     "footer": "Sent by {{orgName}} with the Yivi Business Wallet.",
     "linkFallback": "Or open this link:"
   },
+  "samples": {
+    "credentialName": "Employee badge",
+    "claimUrl": "https://wallet.example.org/claim/sample",
+    "txCode": "123456",
+    "acceptUrl": "https://wallet.example.org/invite/sample",
+    "message": "Here is the file we discussed.",
+    "downloadUrl": "https://postguard.example/download?uuid=sample"
+  },
   "templates": {
     "credential_offer": {
       "subject": "{{orgName}} has issued you a credential: {{credentialName}}",

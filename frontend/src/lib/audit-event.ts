@@ -47,6 +47,8 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "attestation.key_suspended": { icon: "warning", tone: "amber" },
   "attestation.key_revoked": { icon: "close", tone: "red" },
   "email.settings_updated": { icon: "settings", tone: "blue" },
+  "email.template_updated": { icon: "email", tone: "blue" },
+  "email.template_reset": { icon: "email", tone: "amber" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -173,6 +175,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.attestationHeldDeleted");
     case "email.settings_updated":
       return t("auditLog.actions.emailSettingsUpdated");
+    case "email.template_updated":
+      return t("auditLog.actions.emailTemplateUpdated");
+    case "email.template_reset":
+      return t("auditLog.actions.emailTemplateReset");
     case "issuer.settings_updated":
       return t("auditLog.actions.issuerSettingsUpdated");
     case "theme.settings_updated":
@@ -226,6 +232,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.heldAttestation");
     case "org_email_settings":
       return t("auditLog.targets.orgEmailSettings");
+    case "org_email_template":
+      return t("auditLog.targets.orgEmailTemplate");
     case "org_issuer_settings":
       return t("auditLog.targets.orgIssuerSettings");
     case "org_theme_settings":

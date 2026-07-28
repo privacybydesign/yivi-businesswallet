@@ -107,8 +107,8 @@ func TestSendWithoutADefaultLocaleFallsBackToEnglish(t *testing.T) {
 	sender := &recordingSender{}
 	svc := newTestService(sender, nil, "")
 
-	if err := svc.SendTest(context.Background(), uuid.New(), "admin@example.org", "Acme BV"); err != nil {
-		t.Fatalf("SendTest: %v", err)
+	if err := svc.SendSpecimen(context.Background(), uuid.New(), KindSMTPTest, "", "admin@example.org", "Acme BV"); err != nil {
+		t.Fatalf("SendSpecimen: %v", err)
 	}
 	if got := sender.sent[0].Subject; got != "Test e-mail from your Business Wallet" {
 		t.Errorf("subject = %q", got)
@@ -174,5 +174,140 @@ func TestSendRejectsARelativeLink(t *testing.T) {
 	}
 	if len(sender.sent) != 0 {
 		t.Error("a message was sent despite the invalid link")
+	}
+}
+
+type stubTemplates struct {
+	tpl Template
+	err error
+	// calls records the (kind, locale) pairs asked for, so a test can check the
+	// send resolved the language it meant to.
+	calls []string
+}
+
+func (s *stubTemplates) ResolveTemplate(_ context.Context, _ uuid.UUID, kind Kind, locale Locale) (Template, error) {
+	s.calls = append(s.calls, string(kind)+"/"+string(locale))
+	if s.err != nil {
+		return Template{}, s.err
+	}
+	return s.tpl, nil
+}
+
+// The point of the whole editing slice: a tenant's saved copy is what goes out.
+func TestSendUsesTheOrganizationsOwnTemplate(t *testing.T) {
+	sender := &recordingSender{}
+	templates := &stubTemplates{tpl: Template{
+		Subject:  "A credential from {{orgName}}",
+		Headline: "{{credentialName}} is waiting",
+		CTALabel: "Open your wallet",
+		CTAURL:   "{{claimUrl}}",
+		Footer:   "Sent by {{orgName}}.",
+	}}
+	svc := newTestService(sender, nil, LocaleEN)
+	svc.templates = templates
+
+	err := svc.SendCredentialOffer(context.Background(), uuid.New(),
+		"person@example.org", "Acme BV", "Employee badge", "https://wallet.example.org/claim/abc", "123456")
+	if err != nil {
+		t.Fatalf("SendCredentialOffer: %v", err)
+	}
+	if got := sender.sent[0].Subject; got != "A credential from Acme BV" {
+		t.Errorf("subject = %q, want the org's own copy", got)
+	}
+	if len(templates.calls) != 1 || templates.calls[0] != "credential_offer/en" {
+		t.Errorf("template lookups = %v, want one for credential_offer/en", templates.calls)
+	}
+}
+
+// A template lookup that fails is a database problem, not a reason to drop the
+// message: the shipped default still says something correct.
+func TestSendFallsBackToTheShippedTemplateWhenTheLookupFails(t *testing.T) {
+	sender := &recordingSender{}
+	svc := newTestService(sender, nil, LocaleEN)
+	svc.templates = &stubTemplates{err: errors.New("database down")}
+
+	if err := svc.SendInvitation(context.Background(), uuid.New(),
+		"person@example.org", "Acme BV", "https://wallet.example.org/invite/abc"); err != nil {
+		t.Fatalf("SendInvitation: %v", err)
+	}
+	shipped, _ := DefaultTemplate(KindInvitation, LocaleEN)
+	if len(sender.sent) != 1 {
+		t.Fatalf("sent %d messages, want 1", len(sender.sent))
+	}
+	if !strings.Contains(sender.sent[0].Subject, "Acme BV") || sender.sent[0].Subject == "" {
+		t.Errorf("subject = %q, want the shipped default rendered", sender.sent[0].Subject)
+	}
+	if shipped.Subject == "" {
+		t.Fatal("the shipped invitation default has no subject")
+	}
+}
+
+// An admin previews copy before the org has an SMTP server, so a preview must not
+// go through the settings lookup at all.
+func TestPreviewNeedsNoSMTPConfiguration(t *testing.T) {
+	svc := &Service{settings: stubSettings{ok: false}, sender: &recordingSender{}, defaultLocale: LocaleEN}
+
+	body, err := svc.Preview(context.Background(), uuid.New(), KindCredentialOffer, LocaleNL, nil, "Acme BV")
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	shipped, _ := DefaultTemplate(KindCredentialOffer, LocaleNL)
+	if body.Subject == "" || body.HTMLBody == "" || body.TextBody == "" {
+		t.Fatalf("Preview returned an incomplete body: %+v", body)
+	}
+	if !strings.Contains(body.HTMLBody, `<html lang="nl"`) {
+		t.Error("the preview is not marked as Dutch")
+	}
+	if shipped.Subject == "" {
+		t.Fatal("the shipped Dutch credential-offer default has no subject")
+	}
+}
+
+// The editor previews unsaved edits, so a supplied draft wins over what is stored.
+func TestPreviewRendersTheSuppliedDraftInsteadOfTheStoredOne(t *testing.T) {
+	svc := newTestService(&recordingSender{}, nil, LocaleEN)
+	svc.templates = &stubTemplates{tpl: Template{Subject: "Stored", Headline: "Stored"}}
+
+	draft := Template{Subject: "Draft for {{orgName}}", Headline: "Draft"}
+	body, err := svc.Preview(context.Background(), uuid.New(), KindSMTPTest, LocaleEN, &draft, "Acme BV")
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if body.Subject != "Draft for Acme BV" {
+		t.Errorf("subject = %q, want the draft", body.Subject)
+	}
+}
+
+// A draft the tenant is still typing is refused as an invalid template, not as an
+// internal error, so the editor can show the reason beside the field.
+func TestPreviewReportsAnInvalidDraftAsInvalidTemplate(t *testing.T) {
+	svc := newTestService(&recordingSender{}, nil, LocaleEN)
+
+	draft := Template{Subject: "Hello", Headline: "Hello {{nope}}"}
+	_, err := svc.Preview(context.Background(), uuid.New(), KindSMTPTest, LocaleEN, &draft, "Acme BV")
+	if _, ok := errors.AsType[*InvalidTemplateError](err); !ok {
+		t.Fatalf("err = %v, want an InvalidTemplateError", err)
+	}
+}
+
+// A specimen is a real send of one cause, rendered from the org's own copy.
+func TestSendSpecimenUsesTheKindsSampleVariables(t *testing.T) {
+	sender := &recordingSender{}
+	svc := newTestService(sender, nil, LocaleEN)
+
+	if err := svc.SendSpecimen(context.Background(), uuid.New(),
+		KindCredentialOffer, LocaleNL, "admin@example.org", "Acme BV"); err != nil {
+		t.Fatalf("SendSpecimen: %v", err)
+	}
+	if len(sender.sent) != 1 {
+		t.Fatalf("sent %d messages, want 1", len(sender.sent))
+	}
+	msg := sender.sent[0]
+	if msg.To != "admin@example.org" {
+		t.Errorf("to = %q", msg.To)
+	}
+	sample, _ := SampleVariables(KindCredentialOffer, LocaleNL, "Acme BV")
+	if !strings.Contains(msg.TextBody, sample[varCredentialName]) {
+		t.Errorf("the sample credential name is missing from the specimen:\n%s", msg.TextBody)
 	}
 }

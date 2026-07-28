@@ -23,22 +23,32 @@ type brandSource interface {
 	MailBrandSeeds(ctx context.Context, orgID uuid.UUID) (Seeds, error)
 }
 
+// templateSource resolves the template a send uses: the organization's own edit
+// when it has one, the shipped default otherwise (implemented by *Store). Like
+// branding, a lookup failure falls back to the shipped copy rather than dropping
+// the message.
+type templateSource interface {
+	ResolveTemplate(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale) (Template, error)
+}
+
 // Service sends transactional e-mail using an org's resolved SMTP config. It owns
 // no message copy: every body comes from the template catalogue (catalog.go),
 // rendered into the branded, mail-client-safe shell (shell.go).
 type Service struct {
-	settings config
-	sender   mailer.Sender
-	brand    brandSource
+	settings  config
+	sender    mailer.Sender
+	brand     brandSource
+	templates templateSource
 	// defaultLocale is the deployment's fallback mail language, used when the
 	// recipient's own preference is unknown.
 	defaultLocale Locale
 }
 
 // NewService builds the mail service. brand may be nil, in which case every
-// message renders in the default Yivi palette.
+// message renders in the default Yivi palette. The settings store doubles as the
+// template source, so a tenant's edited copy is what a send renders.
 func NewService(settings *Store, sender mailer.Sender, brand brandSource, defaultLocale Locale) *Service {
-	return &Service{settings: settings, sender: sender, brand: brand, defaultLocale: defaultLocale}
+	return &Service{settings: settings, sender: sender, brand: brand, templates: settings, defaultLocale: defaultLocale}
 }
 
 // SendCredentialOffer notifies a natural-person recipient that a credential is
@@ -77,18 +87,64 @@ func (s *Service) SendPostguardNotification(ctx context.Context, orgID uuid.UUID
 	})
 }
 
-// SendTest sends a specimen message to verify an org's SMTP configuration. It
-// renders through the same catalogue and shell as real mail, so the branded
-// layout an admin checks is the one a recipient gets.
-func (s *Service) SendTest(ctx context.Context, orgID uuid.UUID, to, orgName string) error {
-	return s.send(ctx, orgID, KindSMTPTest, []string{to}, map[string]string{
-		varOrgName: orgName,
-	})
+// SendSpecimen sends a sample of one kind to a single address, rendered from the
+// org's own template (or the shipped default) with the kind's sample variables, so
+// an admin can check a real, fully branded message of that cause against their own
+// inbox rather than against a browser preview. KindSMTPTest is the SMTP self-test.
+// An empty locale means the deployment default. Returns ErrNotConfigured when the
+// org has no usable SMTP settings.
+func (s *Service) SendSpecimen(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, to, orgName string) error {
+	resolved := s.locale(locale)
+	vars, ok := SampleVariables(kind, resolved, orgName)
+	if !ok {
+		return fmt.Errorf("email: unknown mail kind %q", kind)
+	}
+	return s.sendLocalized(ctx, orgID, kind, resolved, []string{to}, vars)
+}
+
+// Preview renders one message without sending it, from the template the caller
+// supplies (a tenant's unsaved draft) or the org's stored one when tpl is nil, so
+// the editor's preview and a delivered message come out of the same renderer.
+// Needs no SMTP configuration: an org previews its copy before it has a server.
+func (s *Service) Preview(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, tpl *Template, orgName string) (Body, error) {
+	locale = s.locale(locale)
+	vars, ok := SampleVariables(kind, locale, orgName)
+	if !ok {
+		return Body{}, fmt.Errorf("email: unknown mail kind %q", kind)
+	}
+	var resolved Template
+	if tpl != nil {
+		resolved = *tpl
+	} else {
+		stored, err := s.templateFor(ctx, orgID, kind, locale)
+		if err != nil {
+			return Body{}, err
+		}
+		resolved = stored
+	}
+	body, err := Render(kind, locale, resolved, s.brandFor(ctx, orgID), vars)
+	if err != nil {
+		return Body{}, &InvalidTemplateError{Reason: err}
+	}
+	return body, nil
 }
 
 // send resolves the org's SMTP config, locale, template and branding, renders the
 // message once and delivers it to every recipient.
 func (s *Service) send(ctx context.Context, orgID uuid.UUID, kind Kind, recipients []string, vars map[string]string) error {
+	return s.sendLocalized(ctx, orgID, kind, s.locale(""), recipients, vars)
+}
+
+// locale resolves an explicit preference against the deployment default. Empty
+// means "no preference". Per-recipient and per-org language preferences are not
+// stored yet, so the deployment default is the only other preference there is;
+// ResolveLocale already takes them in recipient -> org -> en order for when they
+// are (see .ai/features/email-templates.md).
+func (s *Service) locale(preference Locale) Locale {
+	return ResolveLocale(string(preference), string(s.defaultLocale))
+}
+
+func (s *Service) sendLocalized(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, recipients []string, vars map[string]string) error {
 	cfg, ok, err := s.settings.configFor(ctx, orgID)
 	if err != nil {
 		return err
@@ -97,14 +153,9 @@ func (s *Service) send(ctx context.Context, orgID uuid.UUID, kind Kind, recipien
 		return ErrNotConfigured
 	}
 
-	// Per-recipient and per-org language preferences are not stored yet, so the
-	// deployment default is the only preference there is; ResolveLocale already
-	// takes them in recipient -> org -> en order for when they are (see
-	// .ai/features/email-templates.md).
-	locale := ResolveLocale(string(s.defaultLocale))
-	tpl, ok := DefaultTemplate(kind, locale)
-	if !ok {
-		return fmt.Errorf("email: no template for kind %q", kind)
+	tpl, err := s.templateFor(ctx, orgID, kind, locale)
+	if err != nil {
+		return err
 	}
 
 	body, err := Render(kind, locale, tpl, s.brandFor(ctx, orgID), vars)
@@ -123,6 +174,26 @@ func (s *Service) send(ctx context.Context, orgID uuid.UUID, kind Kind, recipien
 		}
 	}
 	return nil
+}
+
+// templateFor resolves the template to render: the org's own edit when it has
+// one, the shipped default otherwise. A lookup failure logs and falls back to the
+// shipped copy for the same reason branding does — a message in the default
+// wording still delivers, a message not sent breaks the flow it belongs to.
+func (s *Service) templateFor(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale) (Template, error) {
+	if s.templates != nil {
+		tpl, err := s.templates.ResolveTemplate(ctx, orgID, kind, locale)
+		if err == nil {
+			return tpl, nil
+		}
+		slog.WarnContext(ctx, "resolving the organization's mail template failed, sending the shipped default",
+			"org_id", orgID, "kind", kind, "locale", locale, "error", err)
+	}
+	tpl, ok := DefaultTemplate(kind, locale)
+	if !ok {
+		return Template{}, fmt.Errorf("email: no template for kind %q", kind)
+	}
+	return tpl, nil
 }
 
 // brandFor resolves the org's palette, falling back to the default Yivi look when

@@ -26,7 +26,7 @@ tags:
   - name: postguard
     description: PostGuard attribute-based encryption settings and files.
   - name: email
-    description: Per-organisation email settings.
+    description: Per-organisation email settings and transactional mail templates.
   - name: issuer-settings
     description: Per-organisation issuer settings.
   - name: wsca
@@ -1598,6 +1598,171 @@ paths:
       tags: [email]
       summary: Send a test email
       description: Requires an administrator role in the organisation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/email/templates:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [email]
+      summary: List the transactional mail templates
+      description: >-
+        Returns every mail kind with its allowed placeholder variables and, per
+        locale, whether the organisation has customised that template or is using
+        the shipped default. Requires an administrator role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/email/templates/{kind}/{locale}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [credential_offer, invitation, postguard_file, smtp_test]
+        description: Mail cause. The set is fixed by the backend catalogue.
+      - name: locale
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [en, nl]
+        description: Mail language.
+    get:
+      tags: [email]
+      summary: Get one mail template
+      description: >-
+        Returns the template in force, the shipped default it may be reverted to,
+        and the placeholder variables this kind allows. Requires an administrator
+        role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [email]
+      summary: Save one mail template
+      description: >-
+        Stores the organisation's own copy for this kind and locale. The body is
+        prose, never HTML; every `{{placeholder}}` must be a variable this kind
+        declares, and the call-to-action URL must be a single URL variable or an
+        absolute http(s) URL. Requires an administrator role in the organisation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [email]
+      summary: Revert one mail template to the shipped default
+      description: >-
+        Drops the organisation's own copy so the shipped default is used again.
+        404 when this template was not customised. Requires an administrator role
+        in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/email/templates/{kind}/preview:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [credential_offer, invitation, postguard_file, smtp_test]
+        description: Mail cause. The set is fixed by the backend catalogue.
+    post:
+      tags: [email]
+      summary: Render a mail template without sending it
+      description: >-
+        Renders the supplied draft (or the template in force when none is given)
+        with the kind's sample variables and the organisation's branding, and
+        returns the subject and both MIME parts. Requires an administrator role in
+        the organisation.
       requestBody:
         required: true
         content:

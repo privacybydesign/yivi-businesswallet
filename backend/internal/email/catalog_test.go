@@ -162,3 +162,95 @@ func TestEveryKindDeclaresOrgName(t *testing.T) {
 		}
 	}
 }
+
+// Every kind's sample variables must render its shipped copy, in every locale:
+// they are what the editor's preview and the "send me a specimen" button use, so
+// a missing or non-absolute sample would only surface as a broken preview.
+func TestSampleVariablesRenderEveryKindInEveryLocale(t *testing.T) {
+	for _, locale := range Locales() {
+		for _, kind := range Kinds() {
+			vars, ok := SampleVariables(kind, locale, "Acme BV")
+			if !ok {
+				t.Errorf("locale %q: no sample variables for kind %q", locale, kind)
+				continue
+			}
+			declared, _ := VariablesFor(kind)
+			if len(vars) != len(declared) {
+				t.Errorf("locale %q kind %q: %d sample values for %d declared variables", locale, kind, len(vars), len(declared))
+			}
+			tpl, _ := DefaultTemplate(kind, locale)
+			if _, err := Render(kind, locale, tpl, resolveBrand(Seeds{}), vars); err != nil {
+				t.Errorf("locale %q kind %q: %v", locale, kind, err)
+			}
+		}
+	}
+}
+
+// A preview that renamed the tenant would not be showing what a recipient gets,
+// so orgName is the one sample value the caller supplies.
+func TestSampleVariablesUseTheRealOrganizationName(t *testing.T) {
+	vars, ok := SampleVariables(KindCredentialOffer, LocaleEN, "Acme BV")
+	if !ok {
+		t.Fatal("SampleVariables reported an unknown kind")
+	}
+	if vars[varOrgName] != "Acme BV" {
+		t.Errorf("orgName = %q, want the real organization name", vars[varOrgName])
+	}
+	if vars[varCredentialName] == "" {
+		t.Error("credentialName has no stand-in value")
+	}
+}
+
+func TestSampleVariablesRejectsAnUnknownKind(t *testing.T) {
+	if _, ok := SampleVariables("not_a_kind", LocaleEN, "Acme BV"); ok {
+		t.Error("SampleVariables accepted an unknown kind")
+	}
+}
+
+// An unsupported locale falls back to the shipped English catalogue rather than
+// returning nothing, the same way DefaultTemplate does.
+func TestSampleVariablesFallBackForAnUnsupportedLocale(t *testing.T) {
+	vars, ok := SampleVariables(KindCredentialOffer, "de", "Acme BV")
+	if !ok {
+		t.Fatal("SampleVariables reported an unknown kind")
+	}
+	english, _ := SampleVariables(KindCredentialOffer, LocaleEN, "Acme BV")
+	if vars[varCredentialName] != english[varCredentialName] {
+		t.Errorf("credentialName = %q, want the English stand-in %q", vars[varCredentialName], english[varCredentialName])
+	}
+}
+
+// validateSamples is what keeps a leftover or missing stand-in out of the shipped
+// files; the loader runs it, so this pins the rules it enforces.
+func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
+	complete := map[string]string{
+		varCredentialName: "Employee badge",
+		varClaimURL:       "https://wallet.example.org/claim/sample",
+		varTxCode:         "123456",
+		varAcceptURL:      "https://wallet.example.org/invite/sample",
+		varMessage:        "Here is the file.",
+		varDownloadURL:    "https://postguard.example/download?uuid=sample",
+	}
+	if err := validateSamples(complete); err != nil {
+		t.Fatalf("validateSamples on the complete set = %v, want nil", err)
+	}
+
+	cases := map[string]func(map[string]string){
+		"missing sample":   func(m map[string]string) { delete(m, varTxCode) },
+		"empty sample":     func(m map[string]string) { m[varMessage] = "" },
+		"relative URL":     func(m map[string]string) { m[varClaimURL] = "/claim/sample" },
+		"unknown leftover": func(m map[string]string) { m["inviterName"] = "Ada" },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			broken := map[string]string{}
+			for k, v := range complete {
+				broken[k] = v
+			}
+			mutate(broken)
+			if err := validateSamples(broken); err == nil {
+				t.Errorf("validateSamples(%v) = nil, want an error", broken)
+			}
+		})
+	}
+}
