@@ -1,0 +1,44 @@
+{
+  "shell": {
+    "footer": "Verstuurd door {{orgName}} met de Yivi Business Wallet.",
+    "linkFallback": "Of open deze link:"
+  },
+  "templates": {
+    "credential_offer": {
+      "subject": "{{orgName}} heeft je een credential uitgegeven: {{credentialName}}",
+      "headline": "{{orgName}} heeft je een credential uitgegeven",
+      "paragraphs": [
+        "{{credentialName}} staat klaar om aan je wallet toe te voegen."
+      ],
+      "ctaLabel": "Voeg het toe aan je wallet",
+      "ctaUrl": "{{claimUrl}}",
+      "note": "Je wallet vraagt om deze code: {{txCode}}"
+    },
+    "invitation": {
+      "subject": "Je bent uitgenodigd voor {{orgName}}",
+      "headline": "Je bent uitgenodigd voor {{orgName}}",
+      "paragraphs": [
+        "{{orgName}} nodigt je uit om lid te worden op de Business Wallet."
+      ],
+      "ctaLabel": "Uitnodiging accepteren",
+      "ctaUrl": "{{acceptUrl}}"
+    },
+    "postguard_file": {
+      "subject": "{{orgName}} heeft je een versleuteld bestand gestuurd",
+      "headline": "{{orgName}} heeft je een versleuteld bestand gestuurd met PostGuard",
+      "paragraphs": [
+        "{{message}}"
+      ],
+      "ctaLabel": "Open het bestand",
+      "ctaUrl": "{{downloadUrl}}",
+      "note": "Je opent het bestand door te bewijzen dat dit e-mailadres van jou is."
+    },
+    "smtp_test": {
+      "subject": "Test-e-mail van je Business Wallet",
+      "headline": "Je SMTP-instellingen werken",
+      "paragraphs": [
+        "Dit is een testbericht verstuurd vanuit {{orgName}}. Het gebruikt dezelfde opmaak en huisstijl als de e-mail die je ontvangers krijgen."
+      ]
+    }
+  }
+}

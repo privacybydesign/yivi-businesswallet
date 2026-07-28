@@ -1,0 +1,44 @@
+{
+  "shell": {
+    "footer": "Sent by {{orgName}} with the Yivi Business Wallet.",
+    "linkFallback": "Or open this link:"
+  },
+  "templates": {
+    "credential_offer": {
+      "subject": "{{orgName}} has issued you a credential: {{credentialName}}",
+      "headline": "{{orgName}} has issued you a credential",
+      "paragraphs": [
+        "{{credentialName}} is ready to be added to your wallet."
+      ],
+      "ctaLabel": "Add it to your wallet",
+      "ctaUrl": "{{claimUrl}}",
+      "note": "Your wallet will ask for this code: {{txCode}}"
+    },
+    "invitation": {
+      "subject": "You have been invited to join {{orgName}}",
+      "headline": "You have been invited to join {{orgName}}",
+      "paragraphs": [
+        "{{orgName}} invited you to become a member on the Business Wallet."
+      ],
+      "ctaLabel": "Accept the invitation",
+      "ctaUrl": "{{acceptUrl}}"
+    },
+    "postguard_file": {
+      "subject": "{{orgName}} has sent you an encrypted file",
+      "headline": "{{orgName}} has sent you an encrypted file with PostGuard",
+      "paragraphs": [
+        "{{message}}"
+      ],
+      "ctaLabel": "Open the file",
+      "ctaUrl": "{{downloadUrl}}",
+      "note": "You open the file by proving ownership of this e-mail address."
+    },
+    "smtp_test": {
+      "subject": "Test e-mail from your Business Wallet",
+      "headline": "Your SMTP settings work",
+      "paragraphs": [
+        "This is a test message sent from {{orgName}}. It uses the same layout and branding as the mail your recipients get."
+      ]
+    }
+  }
+}
