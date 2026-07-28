@@ -281,7 +281,14 @@ func run() error {
 		return err
 	}
 	emailStore := email.NewStore(pool, audit.NewDBRecorder(), emailCipher)
-	emailService := email.NewService(emailStore, mailer.New())
+	mailLocale, ok := email.ParseLocale(cfg.MailDefaultLocale)
+	if !ok {
+		return fmt.Errorf("MAIL_DEFAULT_LOCALE: unsupported locale %q (supported: %v)", cfg.MailDefaultLocale, email.Locales())
+	}
+	// Mail reuses the org's app palette (themesettings), so a tenant configures its
+	// branding once and outbound mail follows.
+	themeSettingsStore := themesettings.NewStore(pool, audit.NewDBRecorder())
+	emailService := email.NewService(emailStore, mailer.New(), mailBranding{theme: themeSettingsStore}, mailLocale)
 
 	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins)
 
@@ -349,7 +356,6 @@ func run() error {
 	}
 	wscaStore := wsca.NewStore(pool, wscaCipher)
 
-	themeSettingsStore := themesettings.NewStore(pool, audit.NewDBRecorder())
 	themeSettingsHandler := themesettings.NewHandler(themeSettingsStore, requireUser, orgHandler.Authorize)
 
 	attHolder, err := newAttestationHolder(cfg, wscaStore)
@@ -439,6 +445,30 @@ func run() error {
 
 	slog.Info("server stopped")
 	return nil
+}
+
+// mailBranding adapts the theme-settings store to the mail service's branding
+// seam. Outbound mail is branded from the same org_theme_settings row as the app
+// shell, so there is exactly one place a tenant configures its look; the mail
+// service keeps its own Seeds type so internal/email does not depend on the
+// theming slice.
+type mailBranding struct {
+	theme *themesettings.Store
+}
+
+func (b mailBranding) MailBrandSeeds(ctx context.Context, orgID uuid.UUID) (email.Seeds, error) {
+	settings, err := b.theme.GetSettings(ctx, orgID)
+	if err != nil {
+		return email.Seeds{}, err
+	}
+	return email.Seeds{
+		PrimaryColor: settings.PrimaryColor,
+		TextColor:    settings.TextColor,
+		SurfaceColor: settings.SurfaceColor,
+		BorderColor:  settings.BorderColor,
+		LinkColor:    settings.LinkColor,
+		FontFamily:   settings.FontFamily,
+	}, nil
 }
 
 // postguardNotifier adapts the e-mail service to the PostGuard "own SMTP"

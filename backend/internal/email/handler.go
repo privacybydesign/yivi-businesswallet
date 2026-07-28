@@ -25,7 +25,7 @@ type settingsStore interface {
 }
 
 type tester interface {
-	SendTest(ctx context.Context, orgID uuid.UUID, to string) error
+	SendTest(ctx context.Context, orgID uuid.UUID, to, orgName string) error
 }
 
 // Handler serves org-scoped SMTP settings (admin only).
@@ -114,7 +114,7 @@ func (h *Handler) sendTest(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := organization.OrgFromContext(r.Context())
-	if err := h.service.SendTest(r.Context(), org.ID, req.To); errors.Is(err, ErrNotConfigured) {
+	if err := h.service.SendTest(r.Context(), org.ID, req.To, org.Name); errors.Is(err, ErrNotConfigured) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "not_configured", Message: "SMTP is not configured or is disabled"}
 	} else if err != nil {
 		return fmt.Errorf("sending test email: %w", err)

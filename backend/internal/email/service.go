@@ -3,7 +3,7 @@ package email
 import (
 	"context"
 	"fmt"
-	"html"
+	"log/slog"
 
 	"github.com/google/uuid"
 
@@ -15,33 +15,41 @@ type config interface {
 	configFor(ctx context.Context, orgID uuid.UUID) (mailer.Config, bool, error)
 }
 
-// Service sends transactional e-mail using an org's resolved SMTP config.
+// brandSource resolves an organization's presentational branding seeds (its theme
+// palette and font) so mail carries the same look as the app. A failure here must
+// never block a send: mail without the tenant's palette is a cosmetic loss, mail
+// not sent is a broken flow.
+type brandSource interface {
+	MailBrandSeeds(ctx context.Context, orgID uuid.UUID) (Seeds, error)
+}
+
+// Service sends transactional e-mail using an org's resolved SMTP config. It owns
+// no message copy: every body comes from the template catalogue (catalog.go),
+// rendered into the branded, mail-client-safe shell (shell.go).
 type Service struct {
 	settings config
 	sender   mailer.Sender
+	brand    brandSource
+	// defaultLocale is the deployment's fallback mail language, used when the
+	// recipient's own preference is unknown.
+	defaultLocale Locale
 }
 
-func NewService(settings *Store, sender mailer.Sender) *Service {
-	return &Service{settings: settings, sender: sender}
+// NewService builds the mail service. brand may be nil, in which case every
+// message renders in the default Yivi palette.
+func NewService(settings *Store, sender mailer.Sender, brand brandSource, defaultLocale Locale) *Service {
+	return &Service{settings: settings, sender: sender, brand: brand, defaultLocale: defaultLocale}
 }
 
 // SendCredentialOffer notifies a natural-person recipient that a credential is
 // ready, linking to the claim page. Returns ErrNotConfigured when the org has no
 // usable SMTP settings.
 func (s *Service) SendCredentialOffer(ctx context.Context, orgID uuid.UUID, to, orgName, credentialName, claimURL, txCode string) error {
-	cfg, ok, err := s.settings.configFor(ctx, orgID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrNotConfigured
-	}
-	subject := fmt.Sprintf("%s has issued you a credential: %s", orgName, credentialName)
-	return s.sender.Send(cfg, mailer.Message{
-		To:       to,
-		Subject:  subject,
-		TextBody: offerText(orgName, credentialName, claimURL, txCode),
-		HTMLBody: offerHTML(orgName, credentialName, claimURL, txCode),
+	return s.send(ctx, orgID, KindCredentialOffer, []string{to}, map[string]string{
+		varOrgName:        orgName,
+		varCredentialName: credentialName,
+		varClaimURL:       claimURL,
+		varTxCode:         txCode,
 	})
 }
 
@@ -49,19 +57,9 @@ func (s *Service) SendCredentialOffer(ctx context.Context, orgID uuid.UUID, to, 
 // linking to the accept page. Returns ErrNotConfigured when the org has no
 // usable SMTP settings.
 func (s *Service) SendInvitation(ctx context.Context, orgID uuid.UUID, to, orgName, acceptURL string) error {
-	cfg, ok, err := s.settings.configFor(ctx, orgID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrNotConfigured
-	}
-	subject := fmt.Sprintf("You have been invited to join %s", orgName)
-	return s.sender.Send(cfg, mailer.Message{
-		To:       to,
-		Subject:  subject,
-		TextBody: inviteText(orgName, acceptURL),
-		HTMLBody: inviteHTML(orgName, acceptURL),
+	return s.send(ctx, orgID, KindInvitation, []string{to}, map[string]string{
+		varOrgName:   orgName,
+		varAcceptURL: acceptURL,
 	})
 }
 
@@ -72,6 +70,25 @@ func (s *Service) SendInvitation(ctx context.Context, orgID uuid.UUID, to, orgNa
 // org has no usable SMTP settings; on a per-recipient send failure it stops and
 // returns that error.
 func (s *Service) SendPostguardNotification(ctx context.Context, orgID uuid.UUID, recipients []string, orgName, message, downloadURL string) error {
+	return s.send(ctx, orgID, KindPostguardFile, recipients, map[string]string{
+		varOrgName:     orgName,
+		varMessage:     message,
+		varDownloadURL: downloadURL,
+	})
+}
+
+// SendTest sends a specimen message to verify an org's SMTP configuration. It
+// renders through the same catalogue and shell as real mail, so the branded
+// layout an admin checks is the one a recipient gets.
+func (s *Service) SendTest(ctx context.Context, orgID uuid.UUID, to, orgName string) error {
+	return s.send(ctx, orgID, KindSMTPTest, []string{to}, map[string]string{
+		varOrgName: orgName,
+	})
+}
+
+// send resolves the org's SMTP config, locale, template and branding, renders the
+// message once and delivers it to every recipient.
+func (s *Service) send(ctx context.Context, orgID uuid.UUID, kind Kind, recipients []string, vars map[string]string) error {
 	cfg, ok, err := s.settings.configFor(ctx, orgID)
 	if err != nil {
 		return err
@@ -79,13 +96,28 @@ func (s *Service) SendPostguardNotification(ctx context.Context, orgID uuid.UUID
 	if !ok {
 		return ErrNotConfigured
 	}
-	subject := fmt.Sprintf("%s has sent you an encrypted file", orgName)
+
+	// Per-recipient and per-org language preferences are not stored yet, so the
+	// deployment default is the only preference there is; ResolveLocale already
+	// takes them in recipient -> org -> en order for when they are (see
+	// .ai/features/email-templates.md).
+	locale := ResolveLocale(string(s.defaultLocale))
+	tpl, ok := DefaultTemplate(kind, locale)
+	if !ok {
+		return fmt.Errorf("email: no template for kind %q", kind)
+	}
+
+	body, err := Render(kind, locale, tpl, s.brandFor(ctx, orgID), vars)
+	if err != nil {
+		return err
+	}
+
 	for _, to := range recipients {
 		if err := s.sender.Send(cfg, mailer.Message{
 			To:       to,
-			Subject:  subject,
-			TextBody: postguardText(orgName, message, downloadURL),
-			HTMLBody: postguardHTML(orgName, message, downloadURL),
+			Subject:  body.Subject,
+			TextBody: body.TextBody,
+			HTMLBody: body.HTMLBody,
 		}); err != nil {
 			return err
 		}
@@ -93,73 +125,17 @@ func (s *Service) SendPostguardNotification(ctx context.Context, orgID uuid.UUID
 	return nil
 }
 
-// SendTest sends a minimal message to verify an org's SMTP configuration.
-func (s *Service) SendTest(ctx context.Context, orgID uuid.UUID, to string) error {
-	cfg, ok, err := s.settings.configFor(ctx, orgID)
+// brandFor resolves the org's palette, falling back to the default Yivi look when
+// there is no brand source or it errors: an unbranded mail still delivers.
+func (s *Service) brandFor(ctx context.Context, orgID uuid.UUID) Brand {
+	if s.brand == nil {
+		return resolveBrand(Seeds{})
+	}
+	seeds, err := s.brand.MailBrandSeeds(ctx, orgID)
 	if err != nil {
-		return err
+		slog.WarnContext(ctx, "resolving mail branding failed, sending with the default palette",
+			"org_id", orgID, "error", err)
+		return resolveBrand(Seeds{})
 	}
-	if !ok {
-		return ErrNotConfigured
-	}
-	return s.sender.Send(cfg, mailer.Message{
-		To:       to,
-		Subject:  "Test e-mail from your Business Wallet",
-		TextBody: "This is a test message confirming your SMTP settings work.",
-		HTMLBody: "<p>This is a test message confirming your SMTP settings work.</p>",
-	})
-}
-
-func offerText(orgName, credentialName, claimURL, txCode string) string {
-	body := fmt.Sprintf("%s has issued you a credential: %s.\n\nAdd it to your wallet:\n%s\n", orgName, credentialName, claimURL)
-	if txCode != "" {
-		body += fmt.Sprintf("\nYour wallet will ask for this code: %s\n", txCode)
-	}
-	return body
-}
-
-func offerHTML(orgName, credentialName, claimURL, txCode string) string {
-	code := ""
-	if txCode != "" {
-		code = fmt.Sprintf(`<p>Your wallet will ask for this code: <strong>%s</strong></p>`, html.EscapeString(txCode))
-	}
-	return fmt.Sprintf(
-		`<p><strong>%s</strong> has issued you a credential: <strong>%s</strong>.</p>`+
-			`<p><a href="%s">Add it to your wallet</a></p>%s`,
-		html.EscapeString(orgName), html.EscapeString(credentialName), html.EscapeString(claimURL), code,
-	)
-}
-
-func postguardText(orgName, message, downloadURL string) string {
-	body := fmt.Sprintf("%s has sent you an encrypted file with PostGuard.\n\n", orgName)
-	if message != "" {
-		body += fmt.Sprintf("Message:\n%s\n\n", message)
-	}
-	body += fmt.Sprintf("Open it:\n%s\n\nYou unlock the file by proving ownership of this e-mail address.\n", downloadURL)
-	return body
-}
-
-func postguardHTML(orgName, message, downloadURL string) string {
-	msg := ""
-	if message != "" {
-		msg = fmt.Sprintf(`<p style="white-space:pre-wrap">%s</p>`, html.EscapeString(message))
-	}
-	return fmt.Sprintf(
-		`<p><strong>%s</strong> has sent you an encrypted file with PostGuard.</p>%s`+
-			`<p><a href="%s">Open the file</a></p>`+
-			`<p>You unlock the file by proving ownership of this e-mail address.</p>`,
-		html.EscapeString(orgName), msg, html.EscapeString(downloadURL),
-	)
-}
-
-func inviteText(orgName, acceptURL string) string {
-	return fmt.Sprintf("You have been invited to join %s on the Business Wallet.\n\nAccept the invitation:\n%s\n", orgName, acceptURL)
-}
-
-func inviteHTML(orgName, acceptURL string) string {
-	return fmt.Sprintf(
-		`<p>You have been invited to join <strong>%s</strong> on the Business Wallet.</p>`+
-			`<p><a href="%s">Accept the invitation</a></p>`,
-		html.EscapeString(orgName), html.EscapeString(acceptURL),
-	)
+	return resolveBrand(seeds)
 }

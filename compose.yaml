@@ -63,6 +63,9 @@ services:
       # Encrypts per-org SMTP passwords at rest (hex 32 bytes). Optional: without
       # it, orgs can only configure passwordless (e.g. relay) SMTP.
       EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY:-}
+      # Language outbound transactional mail falls back to (en or nl). Compose does
+      # not forward a root .env variable unless it is declared here.
+      MAIL_DEFAULT_LOCALE: ${MAIL_DEFAULT_LOCALE:-}
       # Attestation issuer (OpenID4VCI). Defaults to the in-process stub; set to
       # `veramo` with a URL/instance/token to issue real credentials.
       ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}

@@ -66,11 +66,16 @@ const (
 	envAppBaseURL = "APP_BASE_URL"
 	// EMAIL_ENCRYPTION_KEY (hex 32 bytes) encrypts per-org SMTP passwords at rest.
 	envEmailEncryptionKey = "EMAIL_ENCRYPTION_KEY"
+	// MAIL_DEFAULT_LOCALE is the language outbound transactional mail falls back to
+	// when the recipient's own preference is unknown. Must be a locale the mail
+	// catalogue ships (internal/email); cmd/api rejects anything else at boot.
+	envMailDefaultLocale = "MAIL_DEFAULT_LOCALE"
 	// STATIC_DIR points at the built frontend; when set the API also serves it as
 	// an SPA on "/". Unset in dev (Vite serves the frontend).
 	envStaticDir = "STATIC_DIR"
 
 	defaultAppBaseURL = "http://localhost:5173"
+	defaultMailLocale = "en"
 
 	// PostGuard: the internal sidecar that performs encrypt-and-upload, the shared
 	// secret the backend presents to it, and the deployment master key that wraps
@@ -201,6 +206,8 @@ type Config struct {
 
 	AppBaseURL         string
 	EmailEncryptionKey string
+	// MailDefaultLocale is the fallback language for outbound transactional mail.
+	MailDefaultLocale string
 
 	// StaticDir is the directory holding the built frontend (index.html + assets).
 	// When set, the API server also serves it as an SPA on "/"; empty disables
@@ -327,6 +334,7 @@ func Load() (Config, error) {
 
 		AppBaseURL:         envOrDefault(envAppBaseURL, defaultAppBaseURL),
 		EmailEncryptionKey: os.Getenv(envEmailEncryptionKey),
+		MailDefaultLocale:  envOrDefault(envMailDefaultLocale, defaultMailLocale),
 		StaticDir:          os.Getenv(envStaticDir),
 
 		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
