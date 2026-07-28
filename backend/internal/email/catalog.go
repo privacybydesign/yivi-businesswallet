@@ -46,7 +46,9 @@ const (
 
 // Variable is one substitutable value of a kind. URL variables are additionally
 // checked to be absolute http(s) before substitution, because they end up in an
-// href and a relative or javascript: value would be worse than a missing link.
+// href and a relative or javascript: value would be worse than a missing link. A
+// literal ctaUrl gets the same check at save time (validateCTAURL); only a URL
+// variable may stand in for one.
 type Variable struct {
 	Name  string
 	IsURL bool

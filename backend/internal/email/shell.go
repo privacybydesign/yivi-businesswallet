@@ -72,26 +72,38 @@ func renderHTML(c content, b Brand) string {
 		)
 	}
 
-	if c.ctaURL != "" && !c.ctaLabel.empty() {
+	// The call to action hangs off the URL alone, not off the label. A label that
+	// references a variable can collapse at render time (resolveBlock), and dropping
+	// the whole block then would send a message with no way to act on it — so the
+	// button goes and the bare URL stays.
+	if c.ctaURL != "" {
 		href := attr(c.ctaURL)
+		fmt.Fprint(&body, `<tr><td style="padding:24px 28px 0 28px;">`)
 		linkPrefix := ""
-		if !c.linkFallback.empty() {
-			linkPrefix = c.linkFallback.html + "<br />"
-		}
-		fmt.Fprintf(&body,
-			`<tr><td style="padding:24px 28px 0 28px;">`+
+		linkMargin := "0"
+		if !c.ctaLabel.empty() {
+			fmt.Fprintf(&body,
 				`<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>`+
-				`<td bgcolor="%s" style="background-color:%s;border-radius:%s;">`+
-				`<a href="%s" style="display:inline-block;padding:12px 22px;font-family:%s;font-size:%s;line-height:%s;font-weight:600;color:%s;text-decoration:none;">%s</a>`+
-				`</td></tr></table>`+
-				// The bare URL below the button is what makes the mail usable when a
-				// client refuses to render the button, or when the recipient wants to
-				// see where the link goes before following it.
-				`<p style="margin:12px 0 0 0;font-family:%s;font-size:%s;line-height:%s;color:%s;">%s<a href="%s" style="color:%s;">%s</a></p>`+
+					`<td bgcolor="%s" style="background-color:%s;border-radius:%s;">`+
+					`<a href="%s" style="display:inline-block;padding:12px 22px;font-family:%s;font-size:%s;line-height:%s;font-weight:600;color:%s;text-decoration:none;">%s</a>`+
+					`</td></tr></table>`,
+				attr(b.Button), attr(b.Button), buttonRadius,
+				href, attr(b.FontFamily), bodyFontSize, bodyLineHeight, attr(b.ButtonText), c.ctaLabel.html,
+			)
+			// The introduction ("Or open this link:") only reads right as an
+			// alternative to a button; without one the bare link stands alone.
+			if !c.linkFallback.empty() {
+				linkPrefix = c.linkFallback.html + "<br />"
+			}
+			linkMargin = "12px 0 0 0"
+		}
+		// The bare URL below the button is what makes the mail usable when a client
+		// refuses to render the button, or when the recipient wants to see where the
+		// link goes before following it.
+		fmt.Fprintf(&body,
+			`<p style="margin:%s;font-family:%s;font-size:%s;line-height:%s;color:%s;">%s<a href="%s" style="color:%s;">%s</a></p>`+
 				`</td></tr>`,
-			attr(b.Button), attr(b.Button), buttonRadius,
-			href, attr(b.FontFamily), bodyFontSize, bodyLineHeight, attr(b.ButtonText), c.ctaLabel.html,
-			attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), linkPrefix,
+			linkMargin, attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), linkPrefix,
 			href, attr(b.Link), html.EscapeString(c.ctaURL),
 		)
 	}
@@ -147,8 +159,13 @@ func renderText(c content) string {
 	for _, p := range c.paragraphs {
 		writeParagraph(&out, p.text)
 	}
-	if c.ctaURL != "" && !c.ctaLabel.empty() {
-		writeParagraph(&out, fmt.Sprintf("%s:\n%s", c.ctaLabel.text, c.ctaURL))
+	// Same reasoning as renderHTML: a collapsed label loses its line, not the link.
+	if c.ctaURL != "" {
+		if c.ctaLabel.empty() {
+			writeParagraph(&out, c.ctaURL)
+		} else {
+			writeParagraph(&out, fmt.Sprintf("%s:\n%s", c.ctaLabel.text, c.ctaURL))
+		}
 	}
 	writeParagraph(&out, c.note.text)
 	if !c.footer.empty() {

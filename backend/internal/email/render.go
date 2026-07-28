@@ -73,7 +73,45 @@ func ValidateTemplate(kind Kind, tpl Template) error {
 	if (tpl.CTALabel == "") != (tpl.CTAURL == "") {
 		return fmt.Errorf("ctaLabel and ctaUrl: set both or neither")
 	}
+	if err := validateCTAURL(tpl.CTAURL, variables); err != nil {
+		return fmt.Errorf("ctaUrl: %w", err)
+	}
 	return nil
+}
+
+// validateCTAURL closes the gap between the two shapes a call-to-action URL may
+// take. The placeholder check above only asks whether a referenced variable is
+// declared, and the IsURL check in Render only sees variable *values* — so a
+// template whose ctaUrl is the literal "javascript:alert(1)" would otherwise reach
+// an href unexamined. A ctaUrl is therefore exactly one of:
+//
+//   - a single declared URL variable ("{{claimUrl}}"), whose value Render checks;
+//   - an absolute http(s) literal with no placeholders at all.
+//
+// Anything mixed (a literal with a placeholder spliced into it, a non-URL variable)
+// is rejected: it cannot be checked without rendering, and no shipped default needs
+// it. Tightening this later is easy; loosening it after tenants have saved templates
+// is not.
+func validateCTAURL(value string, variables []Variable) error {
+	if value == "" {
+		return nil
+	}
+	if match := placeholderPattern.FindStringSubmatch(value); match != nil {
+		if match[0] != value {
+			return fmt.Errorf("must be either a single URL variable or an absolute http(s) URL, not a mix")
+		}
+		for _, v := range variables {
+			if v.Name == match[1] {
+				if !v.IsURL {
+					return fmt.Errorf("variable %q is not a URL variable", v.Name)
+				}
+				return nil
+			}
+		}
+		// An undeclared placeholder is already reported by validatePlaceholders.
+		return nil
+	}
+	return validateAbsoluteHTTPURL(value)
 }
 
 // validatePlaceholders rejects an undeclared placeholder, and any leftover "{{"
@@ -123,6 +161,13 @@ func Render(kind Kind, locale Locale, tpl Template, brand Brand, vars map[string
 
 	content := resolveContent(tpl, vars)
 	content.locale = locale
+	// The resolved URL is what actually lands in the href, so it is checked here
+	// too rather than only in its two source shapes.
+	if content.ctaURL != "" {
+		if err := validateAbsoluteHTTPURL(content.ctaURL); err != nil {
+			return Body{}, fmt.Errorf("email: kind %q: ctaUrl: %w", kind, err)
+		}
+	}
 	return Body{
 		Subject:  content.subject,
 		HTMLBody: renderHTML(content, brand),
@@ -139,9 +184,10 @@ func declares(variables []Variable, name string) bool {
 	return false
 }
 
-// validateAbsoluteHTTPURL requires a parseable absolute http(s) URL with a host,
-// so a template's call to action can never link to a relative path or a
-// javascript:/data: scheme.
+// validateAbsoluteHTTPURL requires a parseable absolute http(s) URL with a host.
+// Applied to every URL variable and to the resolved ctaUrl (and, for a literal
+// ctaUrl, at save time via validateCTAURL), so a call to action can never link to a
+// relative path or a javascript:/data: scheme.
 func validateAbsoluteHTTPURL(value string) error {
 	if value == "" {
 		return fmt.Errorf("must not be empty")

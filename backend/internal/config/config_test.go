@@ -88,6 +88,44 @@ func TestLoadRejectsNonAbsolutePostGuardWebsiteURL(t *testing.T) {
 	}
 }
 
+// internal/email refuses to render a link that is not an absolute http(s) URL, and
+// the claim/invite links are APP_BASE_URL plus a path. A scheme-less value used to
+// boot clean and then fail every credential-offer and invitation send.
+func TestLoadRejectsNonAbsoluteAppBaseURL(t *testing.T) {
+	for _, raw := range []string{"wallet.example.org", "/claim", "ftp://wallet.example.org", "http://"} {
+		t.Run(raw, func(t *testing.T) {
+			_, err := loadWith(t, map[string]string{envAppBaseURL: raw})
+			if err == nil {
+				t.Fatalf("Load succeeded for %s=%q, want an error", envAppBaseURL, raw)
+			}
+			if !strings.Contains(err.Error(), envAppBaseURL) {
+				t.Errorf("error = %v, want it to name %s", err, envAppBaseURL)
+			}
+			if !strings.Contains(err.Error(), "absolute http(s) URL") {
+				t.Errorf("error = %v, want it to name the URL requirement", err)
+			}
+		})
+	}
+}
+
+func TestLoadAcceptsAppBaseURLDefaultAndOverride(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AppBaseURL != defaultAppBaseURL {
+		t.Errorf("app base URL = %q, want the default %q", cfg.AppBaseURL, defaultAppBaseURL)
+	}
+
+	cfg, err = loadWith(t, map[string]string{envAppBaseURL: "https://wallet.example.org/"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AppBaseURL != "https://wallet.example.org/" {
+		t.Errorf("app base URL = %q, want the value as configured", cfg.AppBaseURL)
+	}
+}
+
 func TestLoadAcceptsPostGuardURLsWithTrailingSlashAndPort(t *testing.T) {
 	cfg, err := loadWith(t, map[string]string{
 		envPostGuardPkgURL:      "http://localhost:8081",

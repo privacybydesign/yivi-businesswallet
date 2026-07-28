@@ -31,7 +31,7 @@
       ],
       "ctaLabel": "Open the file",
       "ctaUrl": "{{downloadUrl}}",
-      "note": "You unlock the file by proving ownership of this e-mail address."
+      "note": "You open the file by proving ownership of this e-mail address."
     },
     "smtp_test": {
       "subject": "Test e-mail from your Business Wallet",

@@ -63,7 +63,9 @@ const (
 	envAttestationHolderWSCAInsecure    = "ATTESTATION_HOLDER_WSCA_INSECURE"
 
 	// APP_BASE_URL is the public base URL of the frontend, used to build links in
-	// outbound e-mail / QERDS messages (e.g. the credential claim page).
+	// outbound e-mail / QERDS messages (e.g. the credential claim page). Validated
+	// as an absolute http(s) URL at load, because those links are built by
+	// concatenation and internal/email refuses to render a relative one.
 	envAppBaseURL = "APP_BASE_URL"
 	// EMAIL_ENCRYPTION_KEY (hex 32 bytes) encrypts per-org SMTP passwords at rest.
 	envEmailEncryptionKey = "EMAIL_ENCRYPTION_KEY"
@@ -307,6 +309,15 @@ func Load() (Config, error) {
 		}
 	}
 
+	// Outbound mail and QERDS messages build their links by concatenating onto
+	// APP_BASE_URL, and internal/email refuses to render a link that is not an
+	// absolute http(s) URL. Without this check a scheme-less value boots clean and
+	// then fails every credential offer and invitation at send time.
+	appBaseURL := envOrDefault(envAppBaseURL, defaultAppBaseURL)
+	if err := requireAbsoluteHTTPURL(envAppBaseURL, appBaseURL); err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		DatabaseDSN: dsn,
 		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
@@ -355,7 +366,7 @@ func Load() (Config, error) {
 		AttestationHolderWSCAInsecure: strings.EqualFold(
 			os.Getenv(envAttestationHolderWSCAInsecure), "true"),
 
-		AppBaseURL:         envOrDefault(envAppBaseURL, defaultAppBaseURL),
+		AppBaseURL:         appBaseURL,
 		EmailEncryptionKey: os.Getenv(envEmailEncryptionKey),
 		MailDefaultLocale:  envOrDefault(envMailDefaultLocale, defaultMailLocale),
 		StaticDir:          os.Getenv(envStaticDir),
@@ -418,18 +429,32 @@ func loadPostGuardURLs() (postGuardURLs, error) {
 // the host label naming the service within its environment and is stripped when
 // present; the website carries no such label, so it passes an empty one.
 func postGuardEnvironment(key, raw, serviceLabel string) (string, error) {
+	if err := requireAbsoluteHTTPURL(key, raw); err != nil {
+		return "", err
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", fmt.Errorf("config: %s %q: %w", key, raw, err)
-	}
-	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return "", fmt.Errorf("config: %s %q must be an absolute http(s) URL", key, raw)
 	}
 	host := strings.ToLower(u.Hostname())
 	if serviceLabel != "" {
 		host = strings.TrimPrefix(host, serviceLabel)
 	}
 	return host, nil
+}
+
+// requireAbsoluteHTTPURL rejects a configured URL that cannot be used as a link
+// base: a relative path, a missing or non-http(s) scheme, or a missing host. Shared
+// so every URL variable reports the same requirement in the same words.
+func requireAbsoluteHTTPURL(key, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("config: %s %q: %w", key, raw, err)
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("config: %s %q must be an absolute http(s) URL", key, raw)
+	}
+	return nil
 }
 
 func parseList(raw string) []string {

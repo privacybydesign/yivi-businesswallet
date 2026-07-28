@@ -170,6 +170,86 @@ func TestRenderRejectsNonAbsoluteHTTPURLs(t *testing.T) {
 	}
 }
 
+// The placeholder allowlist only covers {{variables}} and the IsURL check only sees
+// variable *values*, so a ctaUrl written as a literal used to reach the href
+// unexamined — a tenant-authored "javascript:..." would have been delivered.
+func TestValidateTemplateRejectsAnUnsafeLiteralCTAURL(t *testing.T) {
+	for _, bad := range []string{
+		"javascript:alert(document.domain)",
+		"data:text/html,<script>alert(1)</script>",
+		"/claim/abc",
+		"wallet.example.org/claim",
+		"https://",
+		// A literal with a placeholder spliced in cannot be checked without
+		// rendering, so it is rejected rather than trusted.
+		"https://wallet.example.org/claim/{{claimUrl}}",
+		// A non-URL variable is not checked as a URL, so it may not be the href.
+		"{{credentialName}}",
+	} {
+		t.Run(bad, func(t *testing.T) {
+			tpl, _ := DefaultTemplate(KindCredentialOffer, LocaleEN)
+			tpl.CTAURL = bad
+
+			if err := ValidateTemplate(KindCredentialOffer, tpl); err == nil {
+				t.Fatalf("ctaUrl %q was accepted by ValidateTemplate", bad)
+			}
+			if _, err := Render(KindCredentialOffer, LocaleEN, tpl, resolveBrand(Seeds{}), offerVars()); err == nil {
+				t.Fatalf("ctaUrl %q rendered", bad)
+			}
+		})
+	}
+}
+
+func TestValidateTemplateAcceptsBothSafeCTAURLShapes(t *testing.T) {
+	for _, good := range []string{"{{claimUrl}}", "https://wallet.example.org/claim", "http://localhost:5173/claim"} {
+		t.Run(good, func(t *testing.T) {
+			tpl, _ := DefaultTemplate(KindCredentialOffer, LocaleEN)
+			tpl.CTAURL = good
+
+			if err := ValidateTemplate(KindCredentialOffer, tpl); err != nil {
+				t.Fatalf("ctaUrl %q was rejected: %v", good, err)
+			}
+			body, err := Render(KindCredentialOffer, LocaleEN, tpl, resolveBrand(Seeds{}), offerVars())
+			if err != nil {
+				t.Fatalf("ctaUrl %q: Render: %v", good, err)
+			}
+			want := good
+			if good == "{{claimUrl}}" {
+				want = offerVars()[varClaimURL]
+			}
+			if !strings.Contains(body.HTMLBody, want) || !strings.Contains(body.TextBody, want) {
+				t.Errorf("ctaUrl %q did not reach both parts", good)
+			}
+		})
+	}
+}
+
+// A CTA label that references a variable collapses when that variable is empty
+// (resolveBlock). Dropping the button then is right; dropping the link with it
+// leaves the recipient no way to act on the message.
+func TestRenderKeepsTheBareURLWhenTheCTALabelCollapses(t *testing.T) {
+	tpl, _ := DefaultTemplate(KindCredentialOffer, LocaleEN)
+	tpl.CTALabel = "Add {{credentialName}} to your wallet"
+	vars := offerVars()
+	vars[varCredentialName] = ""
+
+	body := renderOffer(t, tpl, vars)
+
+	claimURL := offerVars()[varClaimURL]
+	for name, part := range map[string]string{"html": body.HTMLBody, "text": body.TextBody} {
+		if !strings.Contains(part, claimURL) {
+			t.Errorf("the %s part lost the call-to-action URL with the label:\n%s", name, part)
+		}
+	}
+	if strings.Contains(body.HTMLBody, "Add  to your wallet") {
+		t.Errorf("the collapsed label was rendered anyway:\n%s", body.HTMLBody)
+	}
+	// Without a button, "Or open this link:" has nothing to be an alternative to.
+	if strings.Contains(body.HTMLBody, "Or open this link:") {
+		t.Errorf("the bare-link introduction survived without a button:\n%s", body.HTMLBody)
+	}
+}
+
 func TestRenderRequiresExactlyTheKindsVariables(t *testing.T) {
 	tpl, _ := DefaultTemplate(KindCredentialOffer, LocaleEN)
 

@@ -78,12 +78,20 @@ kind's declared variables and nothing else:
   save time and again at render time, never a silent blank;
 - values are escaped per part (HTML-escaped in the HTML alternative, raw in the text one), and
   the template prose is escaped the same way, so tenant text cannot introduce markup;
-- URL variables must parse as absolute `http(s)` URLs with a host, so a call to action can never
-  be relative or a `javascript:` scheme;
+- URL variables must parse as absolute `http(s)` URLs with a host;
+- `ctaUrl` is the one field that lands in an `href`, so it is a closed shape: either a single
+  declared URL variable (`{{claimUrl}}`, whose value gets the check above) or an absolute
+  `http(s)` literal with no placeholders. A literal with a placeholder spliced into it, or a
+  non-URL variable, is a save-time error — neither can be checked without rendering. The resolved
+  URL is checked once more before the shell writes it. Together that is what makes a relative,
+  `javascript:` or `data:` call to action unreachable, whether the tenant wrote a variable or a
+  literal;
 - the subject is collapsed to a single line before `internal/mailer`'s header sanitising sees it;
 - a block whose every placeholder resolves to an empty value is dropped whole, which is how an
   optional part disappears instead of leaving a dangling label ("Your wallet will ask for this
-  code: " with no code).
+  code: " with no code). The call to action is the exception: a `ctaLabel` that collapses loses
+  the button, but the bare URL stays, because a message with no way to act on it is worse than a
+  message with an unlabelled link.
 
 ## 4. Branding: one place to configure, mirrored in Go
 
