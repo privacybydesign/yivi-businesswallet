@@ -30,7 +30,10 @@ import (
 // alternative below is generated from the same resolved content, so the two parts
 // can never say different things.
 
-// Layout constants of the content column.
+// Layout constants of the content column. The radii are the design system's
+// --yb-radius / --yb-radius-sm (8px / 6px). Body text runs 15px rather than the
+// app's 14px: mail is read once, often on a phone, with no zoom controls to hand,
+// and 600px is the column width every mail client is built around.
 const (
 	shellWidth      = 600
 	shellPadding    = "24px 28px"
