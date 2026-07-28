@@ -702,16 +702,16 @@ export const en = {
   mailTemplates: {
     title: "Mail templates",
     intro:
-      "Edit the wording of the mail this organization sends. Each cause has its own template per language; a template you have not edited uses the shipped default, and the branding comes from the Branding tab.",
+      "Edit the wording of the mail this organization sends. Every message has its own template per language, and a template you have not edited uses the default wording. The branding comes from the Branding tab.",
     language: "Language",
-    cause: "Cause",
-    state: "Template",
+    message: "Message",
+    status: "Status",
     edit: "Edit",
     customized: "Edited",
     default: "Default",
     variables: "Variables",
     variablesHint:
-      "Click a variable to insert it where you last typed. Only these are filled in for this cause.",
+      "Click a variable to insert it where you last typed. Only these are filled in for this message.",
     fields: {
       subject: "Subject",
       preheader: "Preview line",
@@ -735,7 +735,7 @@ export const en = {
       invitation: "Sent to someone invited to join this organization.",
       postguard_file:
         "Sent to a recipient of an encrypted file, when this organization mails through its own SMTP server.",
-      smtp_test: "The specimen an admin sends to check the SMTP settings.",
+      smtp_test: "The test an admin sends to check the SMTP settings.",
     },
     locales: {
       en: "English",
@@ -750,28 +750,27 @@ export const en = {
     previewSubject: "Subject:",
     previewFrameTitle: "Rendered message",
     previewEmpty: "Refresh the preview to see the message.",
-    previewShowsSaved: "Fix the fields above to preview your changes.",
-    previewSubjectMissing: "No subject",
+    previewBlocked: "Fix the fields above to preview your changes.",
     refreshPreview: "Refresh preview",
     showText: "Plain text",
     showHtml: "Rendered",
     revert: "Revert to default",
     revertTitle: "Revert this template?",
     revertConfirm:
-      "The shipped default wording is used again for this cause and language. Your version is not kept.",
-    sendSpecimen: "Send a specimen",
-    sendSpecimenHint:
-      "Sends a real message of this cause, with sample values, so you can check it in an inbox.",
-    specimenRecipient: "Recipient address",
-    send: "Send",
-    specimenNotConfigured:
-      "Configure and save the SMTP settings before sending a specimen.",
-    specimenError: "Could not send the specimen: {{message}}",
+      "The default wording is used again for this message and language. Your version is not kept.",
+    sendTest: "Send a test",
+    sendTestHint:
+      "Sends this message with sample values, so you can check it in an inbox.",
+    testRecipient: "Recipient address",
+    send: "Send test",
+    testNotConfigured:
+      "Configure and save the SMTP settings before sending a test.",
+    testError: "Could not send the test: {{message}}",
     problems: {
       unknownPlaceholder:
-        "{{placeholder}} is not a variable of this cause, so it would not be filled in.",
+        "{{placeholder}} is not a variable of this message, so it would not be filled in.",
       malformedPlaceholder:
-        "A placeholder is written wrong. Use two braces around the variable name, without spaces inside it.",
+        "One of the placeholders is written incorrectly. Put two braces around the variable name, with no spaces inside it.",
       required: "This field is required.",
       ctaPair: "Fill in both the button label and the button link, or neither.",
       ctaUrlShape:

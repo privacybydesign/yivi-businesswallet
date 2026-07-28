@@ -720,16 +720,16 @@ export const nl: Translation<typeof en> = {
   mailTemplates: {
     title: "E-mailteksten",
     intro:
-      "Pas de tekst aan van de e-mail die deze organisatie verstuurt. Elke aanleiding heeft een eigen tekst per taal; een tekst die je niet hebt aangepast gebruikt de standaardtekst, en de huisstijl komt uit het tabblad Huisstijl.",
+      "Pas de tekst aan van de e-mail die deze organisatie verstuurt. Elk bericht heeft een eigen tekst per taal, en een tekst die je niet hebt aangepast gebruikt de standaardtekst. De huisstijl komt uit het tabblad Huisstijl.",
     language: "Taal",
-    cause: "Aanleiding",
-    state: "Tekst",
+    message: "Bericht",
+    status: "Status",
     edit: "Aanpassen",
     customized: "Aangepast",
     default: "Standaard",
     variables: "Variabelen",
     variablesHint:
-      "Klik op een variabele om die toe te voegen waar je het laatst typte. Alleen deze worden voor deze aanleiding ingevuld.",
+      "Klik op een variabele om die toe te voegen waar je het laatst typte. Alleen deze worden voor dit bericht ingevuld.",
     fields: {
       subject: "Onderwerp",
       preheader: "Voorbeeldregel",
@@ -755,7 +755,7 @@ export const nl: Translation<typeof en> = {
       postguard_file:
         "Gaat naar de ontvanger van een versleuteld bestand, als deze organisatie via de eigen SMTP-server mailt.",
       smtp_test:
-        "Het testbericht dat een beheerder verstuurt om de SMTP-instellingen te controleren.",
+        "De test die een beheerder verstuurt om de SMTP-instellingen te controleren.",
     },
     locales: {
       en: "Engels",
@@ -770,29 +770,28 @@ export const nl: Translation<typeof en> = {
     previewSubject: "Onderwerp:",
     previewFrameTitle: "Weergegeven bericht",
     previewEmpty: "Vernieuw het voorbeeld om het bericht te zien.",
-    previewShowsSaved:
+    previewBlocked:
       "Herstel de velden hierboven om je wijzigingen te bekijken.",
-    previewSubjectMissing: "Geen onderwerp",
     refreshPreview: "Voorbeeld vernieuwen",
     showText: "Platte tekst",
     showHtml: "Weergegeven",
     revert: "Terug naar standaard",
     revertTitle: "Deze tekst terugzetten?",
     revertConfirm:
-      "Voor deze aanleiding en taal wordt weer de standaardtekst gebruikt. Jouw versie wordt niet bewaard.",
-    sendSpecimen: "Testbericht versturen",
-    sendSpecimenHint:
-      "Verstuurt een echt bericht van deze aanleiding, met voorbeeldwaarden, zodat je het in een inbox kunt bekijken.",
-    specimenRecipient: "E-mailadres van de ontvanger",
-    send: "Versturen",
-    specimenNotConfigured:
-      "Stel de SMTP-instellingen in en sla ze op voordat je een testbericht verstuurt.",
-    specimenError: "Kon het testbericht niet versturen: {{message}}",
+      "Voor dit bericht en deze taal wordt weer de standaardtekst gebruikt. Jouw versie wordt niet bewaard.",
+    sendTest: "Test versturen",
+    sendTestHint:
+      "Verstuurt dit bericht met voorbeeldwaarden, zodat je het in een inbox kunt bekijken.",
+    testRecipient: "E-mailadres van de ontvanger",
+    send: "Test versturen",
+    testNotConfigured:
+      "Stel de SMTP-instellingen in en sla ze op voordat je een test verstuurt.",
+    testError: "Kon de test niet versturen: {{message}}",
     problems: {
       unknownPlaceholder:
-        "{{placeholder}} is geen variabele van deze aanleiding en wordt dus niet ingevuld.",
+        "{{placeholder}} is geen variabele van dit bericht en wordt dus niet ingevuld.",
       malformedPlaceholder:
-        "Een variabele is verkeerd geschreven. Gebruik twee accolades om de naam, zonder spaties erin.",
+        "Een van de variabelen is verkeerd geschreven. Zet twee accolades om de naam, zonder spaties erin.",
       required: "Dit veld is verplicht.",
       ctaPair: "Vul zowel de knoptekst als de knoplink in, of geen van beide.",
       ctaUrlShape:

@@ -486,7 +486,7 @@ function TemplateEditor({
 
           {problems.length > 0 && (
             <p className="text-ink-soft text-[12.5px]">
-              {t("mailTemplates.previewShowsSaved")}
+              {t("mailTemplates.previewBlocked")}
             </p>
           )}
           {preview.isError && (
@@ -531,9 +531,9 @@ function TemplateEditor({
           )}
 
           <div className="border-line rounded-yivi border p-3">
-            <span className={EYEBROW}>{t("mailTemplates.sendSpecimen")}</span>
+            <span className={EYEBROW}>{t("mailTemplates.sendTest")}</span>
             <p className="text-ink-soft mt-1 text-[12.5px]">
-              {t("mailTemplates.sendSpecimenHint")}
+              {t("mailTemplates.sendTestHint")}
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               <div className="min-w-[200px] flex-1">
@@ -541,7 +541,7 @@ function TemplateEditor({
                   type="email"
                   value={testTo ?? me.data?.email ?? ""}
                   onChange={(event) => setTestTo(event.target.value)}
-                  aria-label={t("mailTemplates.specimenRecipient")}
+                  aria-label={t("mailTemplates.testRecipient")}
                   autoComplete="off"
                 />
               </div>
@@ -560,8 +560,8 @@ function TemplateEditor({
                 {errorCode(test.error) === "not_configured" &&
                 test.error instanceof ApiError &&
                 test.error.status === CONFLICT_STATUS
-                  ? t("mailTemplates.specimenNotConfigured")
-                  : t("mailTemplates.specimenError", {
+                  ? t("mailTemplates.testNotConfigured")
+                  : t("mailTemplates.testError", {
                       message: test.error.message,
                     })}
               </p>
@@ -695,11 +695,11 @@ export function EmailTemplatesPanel({
         <div className="mt-4">
           <Table>
             <Table.Head>
-              <Table.HeaderCell>{t("mailTemplates.cause")}</Table.HeaderCell>
+              <Table.HeaderCell>{t("mailTemplates.message")}</Table.HeaderCell>
               <Table.HeaderCell>
                 {t("mailTemplates.fields.subject")}
               </Table.HeaderCell>
-              <Table.HeaderCell>{t("mailTemplates.state")}</Table.HeaderCell>
+              <Table.HeaderCell>{t("mailTemplates.status")}</Table.HeaderCell>
               <Table.HeaderCell srOnly>
                 {t("mailTemplates.edit")}
               </Table.HeaderCell>
