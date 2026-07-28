@@ -1,9 +1,9 @@
 # Transactional mail templates and the branded mail shell
 
-**Status:** rendering layer implemented (this is the first slice of #132). Tenant editing,
-storage and the editor UI are not built yet; see §7.
-**Slice:** `internal/email` composition only. The SMTP transport (`internal/mailer`) and the
-per-org SMTP settings model are untouched.
+**Status:** rendering layer and tenant editing implemented (#132). Per-org/per-recipient locale
+and the logo in the mail header are still open; see §9.
+**Slice:** `internal/email` composition and the per-org template overrides, plus the editor UI.
+The SMTP transport (`internal/mailer`) and the per-org SMTP settings model are untouched.
 
 ---
 
@@ -19,7 +19,8 @@ Now `service.go` owns no copy at all. A send is:
 
 ```
 caller ─▶ Service.send(kind, vars)
-             ├─ DefaultTemplate(kind, locale)   catalog.go   copy, as data
+             ├─ Store.ResolveTemplate           templatestore.go  the org's edit,
+             │    └─ DefaultTemplate(kind, locale)  catalog.go     else shipped copy
              ├─ brandSource.MailBrandSeeds()    (org_theme_settings, via cmd/api)
              ├─ resolveBrand(seeds)             brand.go     WCAG-AA palette
              └─ Render(kind, locale, tpl, brand, vars)
@@ -142,21 +143,79 @@ against the shipped locales at boot in `cmd/api`, so a typo fails the deploy rat
 send). Neither a per-user language preference nor a per-org default is stored yet; when either
 lands it becomes an earlier argument to the same call, and nothing else moves.
 
-## 7. Not built yet
+## 7. Tenant editing
 
-The remainder of #132, in the order it makes sense to land:
+`org_email_templates` holds one row per `(organization, kind, locale)` an org has **actually
+edited**. There is no row for a cause a tenant has not touched, which is the whole design:
 
-1. **Tenant editing** — `org_email_templates` migration (`(org_id, kind, locale)` unique),
-   store, `GET|PUT|DELETE /orgs/{slug}/email/templates/{kind}/{locale}` (DELETE reverts to the
-   shipped default), a `POST .../preview` that renders with sample variables, `kind` on
-   `POST /email/test`, `email.template_updated` / `email.template_reset` audit actions with their
-   `en`/`nl` translations and `audit-event.ts` case, and the OpenAPI spec. `ValidateTemplate` is
-   already the save-time check this needs.
-2. **Editor UI** — a templates section beside `email-settings.tsx` / `theme-settings.tsx`, with a
-   variable palette per kind, inline validation, and a live preview driven by the backend preview
-   endpoint so preview and delivery cannot drift.
-3. **Per-org and per-recipient locale** — the two earlier arguments to `ResolveLocale`.
-4. **The logo in the mail header.** Open decision, deliberately not invented here. The header
+- a send resolves through `Store.ResolveTemplate` — the org's row when it exists, the shipped
+  default otherwise — so improving `templates/defaults.<locale>.json` still reaches every org
+  that has not customised that cause;
+- **reverting is a `DELETE`**, not a write of the current default. Writing the default back would
+  freeze today's wording into the tenant's row and quietly opt them out of every later
+  improvement;
+- each `(kind, locale)` is independent: an org can rewrite the Dutch invitation and keep the
+  English one shipped.
+
+`SaveTemplate` calls `ValidateTemplate` before it writes, so the rules of §3 are save-time rules,
+not send-time surprises. A refusal comes back as `email.InvalidTemplateError`, which carries the
+reason separately from the wrapping prose so the handler can answer `400 invalid_template` with
+the field named — that string is what the editor shows beside the input.
+
+A template lookup that fails logs and falls back to the shipped copy, for the same reason a failed
+brand lookup does (§4): mail in the default wording still delivers, mail not sent breaks the flow
+it belongs to.
+
+### Routes (org-admin, beside the SMTP settings)
+
+| route | does |
+|---|---|
+| `GET /orgs/{slug}/email/templates` | the whole kind × locale matrix, each cell marked customised or default, plus each kind's variable allowlist |
+| `GET|PUT|DELETE /orgs/{slug}/email/templates/{kind}/{locale}` | read / save / revert one cell; every response carries both the template in force and the shipped default |
+| `POST /orgs/{slug}/email/templates/{kind}/preview` | render a draft (or what is in force) with sample variables and the org's branding, returning the subject and both MIME parts |
+| `POST /orgs/{slug}/email/test` | now takes an optional `kind` + `locale`, so an admin can send a real specimen of one cause instead of only the SMTP self-test |
+
+Kinds and locales are closed backend sets, so a value outside them is a **404** (a request for
+something that does not exist), not a 400. Audit: `email.template_updated` /
+`email.template_reset` against `org_email_template`, with the target id `kind/locale` — the row's
+UUID changes on a revert-then-edit, whereas `(kind, locale)` is what an admin reading the log
+recognises.
+
+### Sample values
+
+A preview and a specimen send need stand-ins for every variable except `orgName`, which is the
+real organization name (a preview that renamed the tenant would not be showing what a recipient
+gets). Those stand-ins are copy, so they live in `templates/defaults.<locale>.json` under
+`samples` and are checked at package init: a variable with no sample, an empty one, or a URL
+sample that is not absolute `http(s)` panics at init, and a sample for a variable no kind declares
+is rejected as a leftover.
+
+## 8. The editor UI
+
+`frontend/src/routes/email-templates.tsx`, a tab on the Settings page beside e-mail and branding.
+It lists the causes for one language at a time, with a customised/default badge, and opens one
+template at a time.
+
+- **The preview is the backend's.** `POST .../preview` returns the same HTML a recipient gets, and
+  the editor drops it into a fully sandboxed `<iframe srcDoc>` (`sandbox=""`, so no script and no
+  navigation). The alternative — rendering the layout again in React — would be a second shell to
+  keep in step with `shell.go`, and it would be the one nobody tests against a real inbox.
+- **`frontend/src/lib/mail-template.ts` mirrors the validation rules** so a tenant sees the
+  problem beside the field they are typing in. It is a convenience, not the gate: the backend's
+  400 is surfaced verbatim, and the mirror never rejects anything the backend would accept. The
+  two have to be kept in step — `mail-template.test.ts` pins the mirror's half.
+- The variable palette offers exactly the kind's declared variables and inserts at the caret of
+  the last focused field, so nobody has to type the brace syntax or guess what is available.
+- Saving is disabled while a draft has problems or is unchanged; reverting is behind a
+  `ConfirmDialog` because the tenant's version is not kept.
+
+## 9. Not built yet
+
+The remainder of #132:
+
+1. **Per-org and per-recipient locale** — the two earlier arguments to `ResolveLocale`. The editor
+   already keys templates per locale, so this is only about *choosing* the locale for a send.
+2. **The logo in the mail header.** Open decision, deliberately not invented here. The header
    currently renders the org name as a text wordmark. `GET /orgs/{slug}/theme/logo` is
    member-gated and a mail recipient is by definition not a member, so a hotlink would resolve to
    403. The two options:
@@ -167,14 +226,18 @@ The remainder of #132, in the order it makes sense to land:
      needs `mailer.Message` to grow an inline-attachment part (multipart/related), which the
      issue lists as out of scope for the transport.
 
-## 8. Files
+## 10. Files
 
 | file | holds |
 |---|---|
-| `catalog.go` | kinds, their variable allowlists, locales, `Template`, embedded defaults |
+| `catalog.go` | kinds, their variable allowlists, locales, `Template`, embedded defaults and samples |
 | `templates/defaults.{en,nl}.json` | the shipped copy, per locale |
 | `render.go` | validation, placeholder substitution, escaping, URL checks |
 | `shell.go` | the mail-client-safe branded layout, both parts |
 | `brand.go` | `org_theme_settings` seeds → an AA-guaranteed mail palette |
-| `service.go` | resolves SMTP config + locale + template + brand, then sends |
+| `service.go` | resolves SMTP config + locale + template + brand, then sends; `Preview`, `SendSpecimen` |
+| `templatestore.go` | the per-org overrides: list / get / save / revert, and `ResolveTemplate` |
+| `templatehandler.go` | the tenant-editing routes and their request/response shapes |
 | `cmd/api/main.go` | `mailBranding`, the adapter from the theming slice to `brandSource` |
+| `frontend/src/routes/email-templates.tsx` | the editor tab |
+| `frontend/src/lib/mail-template.ts` | the client-side mirror of the validation rules |

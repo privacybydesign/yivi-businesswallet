@@ -78,6 +78,8 @@ const (
 	AttestationHeldDeleted     = "attestation.held_deleted"
 
 	EmailSettingsUpdated = "email.settings_updated"
+	EmailTemplateUpdated = "email.template_updated"
+	EmailTemplateReset   = "email.template_reset"
 
 	IssuerSettingsUpdated = "issuer.settings_updated"
 
@@ -111,6 +113,7 @@ const (
 	TargetHeldAttestation     = "held_attestation"
 
 	TargetEmailSettings = "org_email_settings"
+	TargetEmailTemplate = "org_email_template"
 
 	TargetIssuerSettings = "org_issuer_settings"
 

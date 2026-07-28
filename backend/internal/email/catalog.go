@@ -182,19 +182,30 @@ type shellDefaults struct {
 // defaultsFile is the on-disk shape of templates/defaults.<locale>.json.
 type defaultsFile struct {
 	Shell     shellDefaults     `json:"shell"`
+	Samples   map[string]string `json:"samples"`
 	Templates map[Kind]Template `json:"templates"`
 }
 
 //go:embed templates/defaults.*.json
 var defaultTemplatesFS embed.FS
 
-// defaultTemplates holds the shipped default of every kind in every locale, with
-// the locale's shell footer already applied. Loaded once at init: the files are
-// committed data, so a missing kind or an undeclared placeholder is a build-time
-// mistake, and failing loudly beats sending a blank mail.
-var defaultTemplates = mustLoadDefaults()
+// defaults holds everything the shipped catalogue files carry, per locale.
+type defaults struct {
+	templates map[Kind]Template
+	// samples are the stand-in variable values a preview or a specimen send uses,
+	// keyed by variable name. They are copy, so they live in the same per-locale
+	// file as the templates rather than in Go.
+	samples map[string]string
+}
 
-func mustLoadDefaults() map[Locale]map[Kind]Template {
+// shippedDefaults holds the shipped default of every kind in every locale, with
+// the locale's shell footer already applied, plus that locale's sample values.
+// Loaded once at init: the files are committed data, so a missing kind, an
+// undeclared placeholder or a missing sample is a build-time mistake, and failing
+// loudly beats sending a blank mail.
+var shippedDefaults = mustLoadDefaults()
+
+func mustLoadDefaults() map[Locale]defaults {
 	loaded, err := loadDefaults()
 	if err != nil {
 		panic(fmt.Sprintf("email: loading default templates: %v", err))
@@ -202,8 +213,8 @@ func mustLoadDefaults() map[Locale]map[Kind]Template {
 	return loaded
 }
 
-func loadDefaults() (map[Locale]map[Kind]Template, error) {
-	out := make(map[Locale]map[Kind]Template, len(supportedLocales))
+func loadDefaults() (map[Locale]defaults, error) {
+	out := make(map[Locale]defaults, len(supportedLocales))
 	for _, locale := range supportedLocales {
 		name := fmt.Sprintf("templates/defaults.%s.json", locale)
 		raw, err := defaultTemplatesFS.ReadFile(name)
@@ -241,19 +252,82 @@ func loadDefaults() (map[Locale]map[Kind]Template, error) {
 				return nil, fmt.Errorf("%s: unknown kind %q", name, kind)
 			}
 		}
-		out[locale] = byKind
+		if err := validateSamples(file.Samples); err != nil {
+			return nil, fmt.Errorf("%s: samples: %w", name, err)
+		}
+		out[locale] = defaults{templates: byKind, samples: file.Samples}
 	}
 	return out, nil
+}
+
+// validateSamples holds the shipped sample values to the same rules a real send
+// obeys: every variable a kind declares needs a stand-in (except orgName, which a
+// preview fills with the real organization name), a URL variable's stand-in has to
+// be an absolute http(s) URL, and a sample for a variable no kind declares is a
+// leftover worth failing on rather than carrying.
+func validateSamples(samples map[string]string) error {
+	declared := map[string]Variable{}
+	for _, kind := range Kinds() {
+		variables, _ := VariablesFor(kind)
+		for _, v := range variables {
+			declared[v.Name] = v
+			if v.Name == varOrgName {
+				continue
+			}
+			value, ok := samples[v.Name]
+			if !ok || value == "" {
+				return fmt.Errorf("no sample value for %q (declared by kind %q)", v.Name, kind)
+			}
+			if v.IsURL {
+				if err := validateAbsoluteHTTPURL(value); err != nil {
+					return fmt.Errorf("sample for %q: %w", v.Name, err)
+				}
+			}
+		}
+	}
+	for name := range samples {
+		if _, ok := declared[name]; !ok {
+			return fmt.Errorf("sample %q is not a variable of any kind", name)
+		}
+	}
+	return nil
+}
+
+// localeDefaults returns the shipped catalogue for a locale, falling back to
+// DefaultLocale for a locale that has no shipped copy.
+func localeDefaults(locale Locale) defaults {
+	shipped, ok := shippedDefaults[locale]
+	if !ok {
+		return shippedDefaults[DefaultLocale]
+	}
+	return shipped
 }
 
 // DefaultTemplate returns the shipped default for a kind in a locale, falling
 // back to DefaultLocale for a locale that has no shipped copy. The second result
 // is false only for an unknown kind.
 func DefaultTemplate(kind Kind, locale Locale) (Template, bool) {
-	byKind, ok := defaultTemplates[locale]
-	if !ok {
-		byKind = defaultTemplates[DefaultLocale]
-	}
-	tpl, ok := byKind[kind]
+	tpl, ok := localeDefaults(locale).templates[kind]
 	return tpl, ok
+}
+
+// SampleVariables returns stand-in values for every variable a kind declares, for
+// a preview or a specimen send. orgName is the real organization name — a preview
+// that renamed the tenant would not be showing what a recipient gets. The second
+// result is false for an unknown kind.
+func SampleVariables(kind Kind, locale Locale, orgName string) (map[string]string, bool) {
+	variables, ok := VariablesFor(kind)
+	if !ok {
+		return nil, false
+	}
+	samples := localeDefaults(locale).samples
+	out := make(map[string]string, len(variables))
+	for _, v := range variables {
+		if v.Name == varOrgName {
+			out[v.Name] = orgName
+			continue
+		}
+		out[v.Name] = samples[v.Name]
+	}
+	return out, true
 }

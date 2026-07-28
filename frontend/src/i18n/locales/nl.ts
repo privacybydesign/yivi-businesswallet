@@ -368,6 +368,8 @@ export const nl: Translation<typeof en> = {
     attestationOfferCancelled: "Aanbod geannuleerd",
     emailSettingsSaved: "E-mailinstellingen opgeslagen",
     emailTestSent: "Test-e-mail verstuurd",
+    mailTemplateSaved: "E-mailtekst opgeslagen",
+    mailTemplateReset: "E-mailtekst teruggezet naar de standaard",
     issuerSettingsSaved: "Uitgever-instellingen opgeslagen",
     onboardingAttestationsUpdated: "Onboarding-attestaties bijgewerkt",
     wscaActivated: "Houder-wallet geactiveerd",
@@ -451,6 +453,7 @@ export const nl: Translation<typeof en> = {
       attestationKey: "Attestatiesleutel",
       heldAttestation: "Ontvangen credential",
       orgEmailSettings: "E-mailinstellingen",
+      orgEmailTemplate: "E-mailtekst",
       orgIssuerSettings: "Uitgever-instellingen",
       orgThemeSettings: "Thema-instellingen",
       orgOnboardingAttestations: "Onboarding-attestaties",
@@ -512,6 +515,8 @@ export const nl: Translation<typeof en> = {
       attestationKeyRevoked: "Attestatiesleutel ingetrokken",
       attestationHeldDeleted: "Ontvangen credential verwijderd",
       emailSettingsUpdated: "E-mailinstellingen bijgewerkt",
+      emailTemplateUpdated: "E-mailtekst bijgewerkt",
+      emailTemplateReset: "E-mailtekst teruggezet naar de standaard",
       issuerSettingsUpdated: "Uitgever-instellingen bijgewerkt",
       themeSettingsUpdated: "Thema-instellingen bijgewerkt",
       onboardingSettingsUpdated: "Onboarding-attestaties bijgewerkt",
@@ -604,6 +609,7 @@ export const nl: Translation<typeof en> = {
     tabOrg: "Organisatie",
     tabBranding: "Branding",
     tabEmail: "E-mail",
+    tabMailTemplates: "E-mailteksten",
     tabIssuer: "Uitgever",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
@@ -710,6 +716,92 @@ export const nl: Translation<typeof en> = {
     logoPreviewAlt: "Logovoorbeeld",
     loadError: "Branding laden mislukt: {{message}}",
     saveError: "Branding opslaan mislukt: {{message}}",
+  },
+  mailTemplates: {
+    title: "E-mailteksten",
+    intro:
+      "Pas de tekst aan van de e-mail die deze organisatie verstuurt. Elke aanleiding heeft een eigen tekst per taal; een tekst die je niet hebt aangepast gebruikt de standaardtekst, en de huisstijl komt uit het tabblad Huisstijl.",
+    language: "Taal",
+    cause: "Aanleiding",
+    state: "Tekst",
+    edit: "Aanpassen",
+    customized: "Aangepast",
+    default: "Standaard",
+    variables: "Variabelen",
+    variablesHint:
+      "Klik op een variabele om die toe te voegen waar je het laatst typte. Alleen deze worden voor deze aanleiding ingevuld.",
+    fields: {
+      subject: "Onderwerp",
+      preheader: "Voorbeeldregel",
+      headline: "Kop",
+      paragraphs: "Alinea's",
+      ctaLabel: "Knoptekst",
+      ctaUrl: "Knoplink",
+      linkFallback: "Introductie bij de link",
+      note: "Afsluitende opmerking",
+      footer: "Voettekst",
+    },
+    kinds: {
+      credential_offer: "Credential uitgegeven",
+      invitation: "Uitnodiging voor lidmaatschap",
+      postguard_file: "Versleuteld bestand",
+      smtp_test: "SMTP-test",
+    },
+    kindDescriptions: {
+      credential_offer:
+        "Gaat naar een persoon als deze organisatie een credential aan die persoon uitgeeft.",
+      invitation:
+        "Gaat naar iemand die is uitgenodigd om lid te worden van deze organisatie.",
+      postguard_file:
+        "Gaat naar de ontvanger van een versleuteld bestand, als deze organisatie via de eigen SMTP-server mailt.",
+      smtp_test:
+        "Het testbericht dat een beheerder verstuurt om de SMTP-instellingen te controleren.",
+    },
+    locales: {
+      en: "Engels",
+      nl: "Nederlands",
+    },
+    addParagraph: "Alinea toevoegen",
+    removeParagraph: "Alinea {{number}} verwijderen",
+    paragraphNumber: "Alinea {{number}}",
+    ctaHint:
+      "De knoplink is één linkvariabele of een volledig https://-adres. Laat beide velden leeg voor een bericht zonder knop.",
+    preview: "Voorbeeld",
+    previewSubject: "Onderwerp:",
+    previewFrameTitle: "Weergegeven bericht",
+    previewEmpty: "Vernieuw het voorbeeld om het bericht te zien.",
+    previewShowsSaved:
+      "Herstel de velden hierboven om je wijzigingen te bekijken.",
+    previewSubjectMissing: "Geen onderwerp",
+    refreshPreview: "Voorbeeld vernieuwen",
+    showText: "Platte tekst",
+    showHtml: "Weergegeven",
+    revert: "Terug naar standaard",
+    revertTitle: "Deze tekst terugzetten?",
+    revertConfirm:
+      "Voor deze aanleiding en taal wordt weer de standaardtekst gebruikt. Jouw versie wordt niet bewaard.",
+    sendSpecimen: "Testbericht versturen",
+    sendSpecimenHint:
+      "Verstuurt een echt bericht van deze aanleiding, met voorbeeldwaarden, zodat je het in een inbox kunt bekijken.",
+    specimenRecipient: "E-mailadres van de ontvanger",
+    send: "Versturen",
+    specimenNotConfigured:
+      "Stel de SMTP-instellingen in en sla ze op voordat je een testbericht verstuurt.",
+    specimenError: "Kon het testbericht niet versturen: {{message}}",
+    problems: {
+      unknownPlaceholder:
+        "{{placeholder}} is geen variabele van deze aanleiding en wordt dus niet ingevuld.",
+      malformedPlaceholder:
+        "Een variabele is verkeerd geschreven. Gebruik twee accolades om de naam, zonder spaties erin.",
+      required: "Dit veld is verplicht.",
+      ctaPair: "Vul zowel de knoptekst als de knoplink in, of geen van beide.",
+      ctaUrlShape:
+        "Gebruik één linkvariabele op zichzelf, of een volledig https://-adres.",
+    },
+    loadError: "Kon de e-mailteksten niet laden: {{message}}",
+    saveError: "Kon de tekst niet opslaan: {{message}}",
+    resetError: "Kon de tekst niet terugzetten: {{message}}",
+    previewError: "Kon het voorbeeld niet weergeven: {{message}}",
   },
   emailSettings: {
     title: "E-mailbezorging",
