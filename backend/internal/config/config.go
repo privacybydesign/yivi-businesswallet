@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -79,10 +80,22 @@ const (
 	envPostGuardSidecarURL    = "POSTGUARD_SIDECAR_URL"
 	envPostGuardSharedSecret  = "POSTGUARD_SHARED_SECRET"
 	envPostGuardEncryptionKey = "POSTGUARD_KEY_ENCRYPTION_KEY"
-	// POSTGUARD_WEBSITE_URL is the public PostGuard website the recipient download
-	// link points at; used only for the "own SMTP" notification path.
-	envPostGuardWebsiteURL     = "POSTGUARD_WEBSITE_URL"
-	defaultPostGuardWebsiteURL = "https://postguard.eu"
+	// The three endpoints that together aim a deployment at one PostGuard
+	// environment: the key service and the storage the sidecar uploads through,
+	// and the public website the recipient download link points at (used only for
+	// the "own SMTP" notification path). The backend consumes only the website;
+	// it reads the other two to refuse a combination that mixes environments.
+	envPostGuardPkgURL          = "POSTGUARD_PKG_URL"
+	envPostGuardCryptifyURL     = "POSTGUARD_CRYPTIFY_URL"
+	envPostGuardWebsiteURL      = "POSTGUARD_WEBSITE_URL"
+	defaultPostGuardPkgURL      = "https://pkg.postguard.eu"
+	defaultPostGuardCryptifyURL = "https://storage.postguard.eu"
+	defaultPostGuardWebsiteURL  = "https://postguard.eu"
+
+	// Host labels naming a PostGuard service within its environment, stripped to
+	// compare the three URLs: pkg.staging.postguard.eu -> staging.postguard.eu.
+	postGuardPkgLabel      = "pkg."
+	postGuardCryptifyLabel = "storage."
 
 	// Domibus WS-plugin ebMS3 addressing. Defaults match the parties in the
 	// Domibus sample PMode so a blue -> red self-send works out of the box.
@@ -210,6 +223,11 @@ type Config struct {
 	PostGuardSidecarURL    string
 	PostGuardSharedSecret  string
 	PostGuardEncryptionKey string
+	// PostGuardPkgURL and PostGuardCryptifyURL are the key service and storage the
+	// sidecar uploads through. The backend does not call them; it holds them so a
+	// deployment that mixes PostGuard environments fails at startup.
+	PostGuardPkgURL      string
+	PostGuardCryptifyURL string
 	// PostGuardWebsiteURL is the public base URL of the PostGuard website the
 	// recipient download link points at (e.g. https://postguard.eu/download?uuid=…).
 	// Used only for the "own SMTP" notification path, where the backend composes
@@ -263,6 +281,11 @@ func Load() (Config, error) {
 		if attestationIssuerInstance == "" {
 			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerInstance, envAttestationIssuer, IssuerStub)
 		}
+	}
+
+	postguardURLs, err := loadPostGuardURLs()
+	if err != nil {
+		return Config{}, err
 	}
 
 	attestationHolder := envOrDefault(envAttestationHolder, defaultAttestationHolder)
@@ -332,10 +355,73 @@ func Load() (Config, error) {
 		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
 		PostGuardSharedSecret:  os.Getenv(envPostGuardSharedSecret),
 		PostGuardEncryptionKey: os.Getenv(envPostGuardEncryptionKey),
-		PostGuardWebsiteURL:    envOrDefault(envPostGuardWebsiteURL, defaultPostGuardWebsiteURL),
+		PostGuardPkgURL:        postguardURLs.pkg,
+		PostGuardCryptifyURL:   postguardURLs.cryptify,
+		PostGuardWebsiteURL:    postguardURLs.website,
 
 		PlatformAdminEmails: parseList(os.Getenv(envPlatformAdminEmails)),
 	}, nil
+}
+
+// postGuardURLs holds the three endpoints that aim a deployment at one PostGuard
+// environment.
+type postGuardURLs struct {
+	pkg      string
+	cryptify string
+	website  string
+}
+
+// loadPostGuardURLs reads the three PostGuard endpoints and refuses a combination
+// that mixes environments. "Upload to staging, link to production" is otherwise
+// silent: the notification is delivered and only the recipient finds out the
+// download link is dead.
+func loadPostGuardURLs() (postGuardURLs, error) {
+	urls := postGuardURLs{
+		pkg:      envOrDefault(envPostGuardPkgURL, defaultPostGuardPkgURL),
+		cryptify: envOrDefault(envPostGuardCryptifyURL, defaultPostGuardCryptifyURL),
+		website:  envOrDefault(envPostGuardWebsiteURL, defaultPostGuardWebsiteURL),
+	}
+
+	pkgEnv, err := postGuardEnvironment(envPostGuardPkgURL, urls.pkg, postGuardPkgLabel)
+	if err != nil {
+		return postGuardURLs{}, err
+	}
+	cryptifyEnv, err := postGuardEnvironment(envPostGuardCryptifyURL, urls.cryptify, postGuardCryptifyLabel)
+	if err != nil {
+		return postGuardURLs{}, err
+	}
+	websiteEnv, err := postGuardEnvironment(envPostGuardWebsiteURL, urls.website, "")
+	if err != nil {
+		return postGuardURLs{}, err
+	}
+
+	if pkgEnv != websiteEnv || cryptifyEnv != websiteEnv {
+		return postGuardURLs{}, fmt.Errorf(
+			"config: PostGuard URLs name different environments (%s=%q, %s=%q, %s=%q); switch all three together",
+			envPostGuardPkgURL, urls.pkg,
+			envPostGuardCryptifyURL, urls.cryptify,
+			envPostGuardWebsiteURL, urls.website)
+	}
+	return urls, nil
+}
+
+// postGuardEnvironment validates one PostGuard URL as an absolute http(s) URL and
+// reduces it to the environment host the three are compared on. serviceLabel is
+// the host label naming the service within its environment and is stripped when
+// present; the website carries no such label, so it passes an empty one.
+func postGuardEnvironment(key, raw, serviceLabel string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("config: %s %q: %w", key, raw, err)
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", fmt.Errorf("config: %s %q must be an absolute http(s) URL", key, raw)
+	}
+	host := strings.ToLower(u.Hostname())
+	if serviceLabel != "" {
+		host = strings.TrimPrefix(host, serviceLabel)
+	}
+	return host, nil
 }
 
 func parseList(raw string) []string {

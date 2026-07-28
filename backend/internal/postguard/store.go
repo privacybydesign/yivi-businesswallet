@@ -279,7 +279,11 @@ func (s *Store) DecryptedAPIKey(ctx context.Context, orgID uuid.UUID) (string, e
 // --- Sent files ---------------------------------------------------------
 
 // RecordSentFile persists a sent-file record and audits the transfer.
-func (s *Store) RecordSentFile(ctx context.Context, orgID uuid.UUID, senderUserID uuid.UUID, f SentFile) (SentFile, error) {
+// notificationLinkBase is the PostGuard website base the recipient download link
+// was built on, empty when PostGuard's own service notified the recipients. It is
+// audited so a deployment pointed at the wrong environment is diagnosable from the
+// org's audit log instead of from a recipient's complaint.
+func (s *Store) RecordSentFile(ctx context.Context, orgID uuid.UUID, senderUserID uuid.UUID, f SentFile, notificationLinkBase string) (SentFile, error) {
 	var expiresAfter *string
 	if f.ExpiresAfter != "" {
 		expiresAfter = &f.ExpiresAfter
@@ -293,14 +297,18 @@ func (s *Store) RecordSentFile(ctx context.Context, orgID uuid.UUID, senderUserI
 			Scan(&f.ID, &f.Status, &f.CreatedAt); err != nil {
 			return fmt.Errorf("postguard: record sent file org %s: %w", orgID, err)
 		}
+		detail := map[string]any{
+			"fileName":     f.FileName,
+			"sizeBytes":    f.SizeBytes,
+			"recipients":   f.Recipients,
+			"cryptifyUuid": f.CryptifyUUID,
+		}
+		if notificationLinkBase != "" {
+			detail["notificationLinkBase"] = notificationLinkBase
+		}
 		return s.audit.Record(ctx, q, audit.PostGuardFileSent,
 			audit.Target{Type: audit.TargetPostGuardFile, ID: f.ID.String(), OrgID: &orgID},
-			audit.Created(map[string]any{
-				"fileName":     f.FileName,
-				"sizeBytes":    f.SizeBytes,
-				"recipients":   f.Recipients,
-				"cryptifyUuid": f.CryptifyUUID,
-			}))
+			audit.Created(detail))
 	})
 	return f, err
 }

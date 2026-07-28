@@ -20,7 +20,7 @@ type store interface {
 	DecryptedAPIKey(ctx context.Context, orgID uuid.UUID) (string, error)
 	NotificationDelivery(ctx context.Context, orgID uuid.UUID) (NotificationDelivery, error)
 	SetNotificationDelivery(ctx context.Context, orgID uuid.UUID, method NotificationDelivery) error
-	RecordSentFile(ctx context.Context, orgID, senderUserID uuid.UUID, f SentFile) (SentFile, error)
+	RecordSentFile(ctx context.Context, orgID, senderUserID uuid.UUID, f SentFile, notificationLinkBase string) (SentFile, error)
 	ListSentFiles(ctx context.Context, orgID uuid.UUID) ([]SentFile, error)
 }
 
@@ -150,7 +150,9 @@ func (s *Service) Send(ctx context.Context, orgID, senderUserID uuid.UUID, in Se
 	// Own-SMTP path: compose and deliver the notification via the org's SMTP
 	// config before recording, mirroring how a failed upload returns before the
 	// transfer is recorded. A missing SMTP config surfaces as ErrSMTPNotConfigured.
+	notificationLinkBase := ""
 	if in.Notify && delivery == NotifySMTP {
+		notificationLinkBase = s.websiteBase()
 		if err := s.notifier.SendPostguardNotification(ctx, orgID, in.Recipients, in.OrgName, in.Message, s.downloadURL(uuidStr)); err != nil {
 			return SentFile{}, err
 		}
@@ -167,15 +169,19 @@ func (s *Service) Send(ctx context.Context, orgID, senderUserID uuid.UUID, in Se
 		Recipients:   in.Recipients,
 		CryptifyUUID: uuidStr,
 		ExpiresAfter: in.ExpiresAfter,
-	})
+	}, notificationLinkBase)
+}
+
+// websiteBase is the PostGuard website base recipient links are built on.
+func (s *Service) websiteBase() string {
+	return strings.TrimRight(s.websiteURL, "/")
 }
 
 // downloadURL builds the recipient-facing PostGuard link for a sealed package.
 // Files-mode uploads resolve at "<website>/download?uuid=<uuid>" — the same page
 // PostGuard's own notification links to.
 func (s *Service) downloadURL(cryptifyUUID string) string {
-	base := strings.TrimRight(s.websiteURL, "/")
-	return fmt.Sprintf("%s/download?uuid=%s", base, url.QueryEscape(cryptifyUUID))
+	return fmt.Sprintf("%s/download?uuid=%s", s.websiteBase(), url.QueryEscape(cryptifyUUID))
 }
 
 // displayName names a transfer by its single file, or "<first> (+N more)".
