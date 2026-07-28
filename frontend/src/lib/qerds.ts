@@ -1,17 +1,16 @@
 export type QerdsStatusTone = "default" | "green" | "amber" | "red" | "blue";
 
-// Maps a message status to a Tag tone. Delivered/read/accepted read as success,
-// submitted as in-flight, received as informational, failed/expired as error.
+// Maps a message status to a Tag tone. Delivered/read/accepted/received read as
+// success, submitted as in-flight, failed/expired as error.
 export function qerdsStatusTone(status: string): QerdsStatusTone {
   switch (status) {
     case "delivered":
     case "read":
     case "accepted":
+    case "received":
       return "green";
     case "submitted":
       return "amber";
-    case "received":
-      return "blue";
     case "failed":
     case "expired":
       return "red";
