@@ -97,19 +97,41 @@ export type MailLocale = (typeof MAIL_LOCALES)[number];
 const mailTemplateKindSchema = z.enum(MAIL_TEMPLATE_KINDS);
 const mailLocaleSchema = z.enum(MAIL_LOCALES);
 
-// A template is prose plus a call to action, never HTML: the mail-client-safe
-// layout is the backend shell's. Every field may reference the kind's variables
-// as {{name}} placeholders.
+// The block types a layout may be composed of. A closed backend set
+// (backend/internal/email/catalog.go): every type renders through the
+// mail-client-safe shell, so a tenant composes blocks, never HTML.
+export const MAIL_BLOCK_TYPES = [
+  "logo",
+  "heading",
+  "paragraph",
+  "button",
+  "divider",
+  "footer",
+] as const;
+
+export type MailBlockType = (typeof MAIL_BLOCK_TYPES)[number];
+
+// One layout block. Which fields apply depends on the type: text belongs to
+// heading, paragraph and footer blocks; label, url and linkFallback to button
+// blocks; logo and divider carry nothing. The backend rejects a field on a block
+// type it does not belong to.
+export const mailBlockSchema = z.object({
+  type: z.enum(MAIL_BLOCK_TYPES),
+  text: z.string().optional().default(""),
+  label: z.string().optional().default(""),
+  url: z.string().optional().default(""),
+  linkFallback: z.string().optional().default(""),
+});
+
+export type MailBlock = z.infer<typeof mailBlockSchema>;
+
+// A template is a subject plus an ordered block layout, never HTML: the
+// mail-client-safe markup is the backend shell's. Every text field may reference
+// the kind's variables as {{name}} placeholders.
 export const mailTemplateSchema = z.object({
   subject: z.string(),
   preheader: z.string().optional().default(""),
-  headline: z.string(),
-  paragraphs: z.array(z.string()).optional().default([]),
-  ctaLabel: z.string().optional().default(""),
-  ctaUrl: z.string().optional().default(""),
-  linkFallback: z.string().optional().default(""),
-  note: z.string().optional().default(""),
-  footer: z.string().optional().default(""),
+  blocks: z.array(mailBlockSchema),
 });
 
 export type MailTemplate = z.infer<typeof mailTemplateSchema>;

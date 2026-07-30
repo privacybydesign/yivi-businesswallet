@@ -42,8 +42,13 @@ func TestEveryKindHasADefaultTemplatePerLocale(t *testing.T) {
 			if err := ValidateTemplate(kind, tpl); err != nil {
 				t.Errorf("locale %q kind %q: %v", locale, kind, err)
 			}
-			if tpl.Footer == "" || tpl.LinkFallback == "" {
-				t.Errorf("locale %q kind %q: shell defaults were not applied", locale, kind)
+			for i, blk := range tpl.Blocks {
+				if blk.Type == BlockFooter && blk.Text == "" {
+					t.Errorf("locale %q kind %q: blocks[%d]: the shell footer was not applied", locale, kind, i)
+				}
+				if blk.Type == BlockButton && blk.LinkFallback == "" {
+					t.Errorf("locale %q kind %q: blocks[%d]: the shell linkFallback was not applied", locale, kind, i)
+				}
 			}
 		}
 	}
@@ -78,8 +83,10 @@ func TestDutchDefaultsDifferFromEnglish(t *testing.T) {
 		if en.Subject == nl.Subject {
 			t.Errorf("kind %q: the nl subject is identical to en (%q)", kind, en.Subject)
 		}
-		if en.Headline == nl.Headline {
-			t.Errorf("kind %q: the nl headline is identical to en (%q)", kind, en.Headline)
+		enHeading := en.Blocks[blockIndex(t, en, BlockHeading)].Text
+		nlHeading := nl.Blocks[blockIndex(t, nl, BlockHeading)].Text
+		if enHeading == nlHeading {
+			t.Errorf("kind %q: the nl heading is identical to en (%q)", kind, enHeading)
 		}
 	}
 }

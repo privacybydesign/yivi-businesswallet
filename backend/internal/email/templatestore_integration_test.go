@@ -37,20 +37,23 @@ func TestSaveTemplateRoundtripsAndTakesOverFromTheDefault(t *testing.T) {
 	ctx := context.Background()
 
 	in := email.Template{
-		Subject:    "{{orgName}} invites you",
-		Preheader:  "One click to join",
-		Headline:   "Join {{orgName}}",
-		Paragraphs: []string{"We would like you on board.", "It takes a minute."},
-		CTALabel:   "Accept",
-		CTAURL:     "{{acceptUrl}}",
-		Note:       "Questions? Reply to this message.",
-		Footer:     "Sent by {{orgName}}.",
+		Subject:   "{{orgName}} invites you",
+		Preheader: "One click to join",
+		Blocks: []email.Block{
+			{Type: email.BlockLogo},
+			{Type: email.BlockHeading, Text: "Join {{orgName}}"},
+			{Type: email.BlockParagraph, Text: "We would like you on board."},
+			{Type: email.BlockDivider},
+			{Type: email.BlockParagraph, Text: "It takes a minute."},
+			{Type: email.BlockButton, Label: "Accept", URL: "{{acceptUrl}}", LinkFallback: "Or open this link:"},
+			{Type: email.BlockFooter, Text: "Sent by {{orgName}}."},
+		},
 	}
 	saved, err := store.SaveTemplate(ctx, orgID, email.KindInvitation, email.LocaleEN, in)
 	if err != nil {
 		t.Fatalf("SaveTemplate: %v", err)
 	}
-	if saved.Template.Subject != in.Subject || len(saved.Template.Paragraphs) != len(in.Paragraphs) {
+	if saved.Template.Subject != in.Subject || len(saved.Template.Blocks) != len(in.Blocks) {
 		t.Fatalf("SaveTemplate returned %+v, want the saved copy", saved.Template)
 	}
 	if saved.UpdatedAt.IsZero() {
@@ -61,8 +64,15 @@ func TestSaveTemplateRoundtripsAndTakesOverFromTheDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveTemplate: %v", err)
 	}
-	if resolved.Subject != in.Subject || resolved.Paragraphs[1] != in.Paragraphs[1] {
-		t.Errorf("resolved = %+v, want the org's own copy", resolved)
+	// The whole layout must round-trip through the JSONB column: every block, in
+	// order, with every field.
+	if len(resolved.Blocks) != len(in.Blocks) {
+		t.Fatalf("resolved %d blocks, want %d", len(resolved.Blocks), len(in.Blocks))
+	}
+	for i, blk := range in.Blocks {
+		if resolved.Blocks[i] != blk {
+			t.Errorf("blocks[%d] = %+v, want %+v", i, resolved.Blocks[i], blk)
+		}
 	}
 
 	// A different locale is customised independently.
@@ -76,25 +86,6 @@ func TestSaveTemplateRoundtripsAndTakesOverFromTheDefault(t *testing.T) {
 	}
 }
 
-// A template with no paragraphs must round-trip: the TEXT[] column is NOT NULL,
-// so a nil slice has to be written as an empty array rather than as NULL.
-func TestSaveTemplateAcceptsNoParagraphs(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	store := email.NewStore(pool, audit.NopRecorder{}, nil)
-	orgID := makeOrg(t, pool, "acme")
-
-	saved, err := store.SaveTemplate(context.Background(), orgID, email.KindSMTPTest, email.LocaleEN, email.Template{
-		Subject:  "It works",
-		Headline: "Your SMTP settings work",
-	})
-	if err != nil {
-		t.Fatalf("SaveTemplate: %v", err)
-	}
-	if len(saved.Template.Paragraphs) != 0 {
-		t.Errorf("Paragraphs = %v, want none", saved.Template.Paragraphs)
-	}
-}
-
 func TestSaveTemplateRejectsAnUnknownPlaceholder(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := email.NewStore(pool, audit.NopRecorder{}, nil)
@@ -102,8 +93,8 @@ func TestSaveTemplateRejectsAnUnknownPlaceholder(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := store.SaveTemplate(ctx, orgID, email.KindInvitation, email.LocaleEN, email.Template{
-		Subject:  "Join {{orgName}}",
-		Headline: "Hello {{recipientName}}",
+		Subject: "Join {{orgName}}",
+		Blocks:  []email.Block{{Type: email.BlockHeading, Text: "Hello {{recipientName}}"}},
 	})
 	if _, ok := errors.AsType[*email.InvalidTemplateError](err); !ok {
 		t.Fatalf("err = %v, want an InvalidTemplateError", err)
@@ -120,8 +111,8 @@ func TestDeleteTemplateRevertsToTheShippedDefault(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := store.SaveTemplate(ctx, orgID, email.KindSMTPTest, email.LocaleEN, email.Template{
-		Subject:  "Ours",
-		Headline: "Ours",
+		Subject: "Ours",
+		Blocks:  []email.Block{{Type: email.BlockHeading, Text: "Ours"}},
 	}); err != nil {
 		t.Fatalf("SaveTemplate: %v", err)
 	}
@@ -161,8 +152,8 @@ func TestListTemplatesReturnsOnlyCustomizedCells(t *testing.T) {
 
 	for _, locale := range []email.Locale{email.LocaleEN, email.LocaleNL} {
 		if _, err := store.SaveTemplate(ctx, orgID, email.KindSMTPTest, locale, email.Template{
-			Subject:  "Ours",
-			Headline: "Ours",
+			Subject: "Ours",
+			Blocks:  []email.Block{{Type: email.BlockHeading, Text: "Ours"}},
 		}); err != nil {
 			t.Fatalf("SaveTemplate(%s): %v", locale, err)
 		}
@@ -191,8 +182,8 @@ func TestTemplatesAreScopedToTheirOrganization(t *testing.T) {
 	other := makeOrg(t, pool, "other")
 
 	if _, err := store.SaveTemplate(ctx, acme, email.KindSMTPTest, email.LocaleEN, email.Template{
-		Subject:  "Acme only",
-		Headline: "Acme only",
+		Subject: "Acme only",
+		Blocks:  []email.Block{{Type: email.BlockHeading, Text: "Acme only"}},
 	}); err != nil {
 		t.Fatalf("SaveTemplate: %v", err)
 	}

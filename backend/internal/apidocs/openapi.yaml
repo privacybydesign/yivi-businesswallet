@@ -1695,9 +1695,11 @@ paths:
       summary: Save one mail template
       description: >-
         Stores the organisation's own copy for this kind and locale. The body is
-        prose, never HTML; every `{{placeholder}}` must be a variable this kind
-        declares, and the call-to-action URL must be a single URL variable or an
-        absolute http(s) URL. Requires an administrator role in the organisation.
+        a subject plus an ordered layout of typed blocks (logo, heading,
+        paragraph, button, divider, footer), never HTML; every `{{placeholder}}`
+        must be a variable this kind declares, and a button URL must be a single
+        URL variable or an absolute http(s) URL. Requires an administrator role
+        in the organisation.
       requestBody:
         required: true
         content:

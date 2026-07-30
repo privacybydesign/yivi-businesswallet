@@ -25,10 +25,11 @@ import (
 //     and the palette is chosen (dark text on a near-white card, foregrounds nudged
 //     toward black) to survive that. There is no dark override to serve.
 //
-// Because the shell owns all markup, a tenant editing a template edits prose
-// only: there is no way for tenant input to break the layout, and the text/plain
-// alternative below is generated from the same resolved content, so the two parts
-// can never say different things.
+// Because the shell owns all markup, a tenant composing a layout composes typed
+// blocks only: every block type renders through the same fixed markup, so there
+// is no way for tenant input to break the layout, and the text/plain alternative
+// below is generated from the same resolved content, so the two parts can never
+// say different things.
 
 // Layout constants of the content column. The radii are the design system's
 // --yb-radius / --yb-radius-sm (8px / 6px). Body text runs 15px rather than the
@@ -45,83 +46,35 @@ const (
 	smallLineHeight = "20px"
 )
 
-// renderHTML wraps the resolved content in the branded shell.
+// blockSpacing is the vertical gap above each block type, tuned so a heading
+// reads as a section start and a button gets room to be a target. The first
+// block of the layout gets none.
+func blockSpacing(typ BlockType) string {
+	switch typ {
+	case BlockHeading:
+		return "20px"
+	case BlockButton, BlockFooter:
+		return "24px"
+	case BlockDivider, BlockLogo:
+		return "20px"
+	default: // BlockParagraph
+		return "16px"
+	}
+}
+
+// renderHTML wraps the resolved content in the branded shell: the card, one row
+// per resolved block.
 func renderHTML(c content, b Brand) string {
 	var body strings.Builder
 
-	// Header: the sending organization's own name, as a text wordmark. The uploaded
-	// theme logo is deliberately not here yet — it needs a delivery path that works
-	// for a recipient who is not a member of the org, which is an open decision
-	// (see .ai/features/email-templates.md).
-	if c.headerName != "" {
-		fmt.Fprintf(&body,
-			`<tr><td style="padding:24px 28px 0 28px;font-family:%s;font-size:%s;line-height:%s;font-weight:600;color:%s;">%s</td></tr>`,
-			attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), c.headerName,
-		)
-	}
-
-	fmt.Fprintf(&body,
-		`<tr><td style="padding:12px 28px 0 28px;font-family:%s;font-size:20px;line-height:28px;font-weight:600;color:%s;">%s</td></tr>`,
-		attr(b.FontFamily), attr(b.Text), c.headline.html,
-	)
-
-	for _, p := range c.paragraphs {
-		fmt.Fprintf(&body,
-			`<tr><td style="padding:16px 28px 0 28px;font-family:%s;font-size:%s;line-height:%s;color:%s;">%s</td></tr>`,
-			attr(b.FontFamily), bodyFontSize, bodyLineHeight, attr(b.Text), p.html,
-		)
-	}
-
-	// The call to action hangs off the URL alone, not off the label. A label that
-	// references a variable can collapse at render time (resolveBlock), and dropping
-	// the whole block then would send a message with no way to act on it — so the
-	// button goes and the bare URL stays.
-	if c.ctaURL != "" {
-		href := attr(c.ctaURL)
-		fmt.Fprint(&body, `<tr><td style="padding:24px 28px 0 28px;">`)
-		linkPrefix := ""
-		linkMargin := "0"
-		if !c.ctaLabel.empty() {
-			fmt.Fprintf(&body,
-				`<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>`+
-					`<td bgcolor="%s" style="background-color:%s;border-radius:%s;">`+
-					`<a href="%s" style="display:inline-block;padding:12px 22px;font-family:%s;font-size:%s;line-height:%s;font-weight:600;color:%s;text-decoration:none;">%s</a>`+
-					`</td></tr></table>`,
-				attr(b.Button), attr(b.Button), buttonRadius,
-				href, attr(b.FontFamily), bodyFontSize, bodyLineHeight, attr(b.ButtonText), c.ctaLabel.html,
-			)
-			// The introduction ("Or open this link:") only reads right as an
-			// alternative to a button; without one the bare link stands alone.
-			if !c.linkFallback.empty() {
-				linkPrefix = c.linkFallback.html + "<br />"
-			}
-			linkMargin = "12px 0 0 0"
+	for i, blk := range c.blocks {
+		spacing := blockSpacing(blk.typ)
+		if i == 0 {
+			spacing = "0"
 		}
-		// The bare URL below the button is what makes the mail usable when a client
-		// refuses to render the button, or when the recipient wants to see where the
-		// link goes before following it.
-		fmt.Fprintf(&body,
-			`<p style="margin:%s;font-family:%s;font-size:%s;line-height:%s;color:%s;">%s<a href="%s" style="color:%s;">%s</a></p>`+
-				`</td></tr>`,
-			linkMargin, attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), linkPrefix,
-			href, attr(b.Link), html.EscapeString(c.ctaURL),
-		)
-	}
-
-	if !c.note.empty() {
-		fmt.Fprintf(&body,
-			`<tr><td style="padding:20px 28px 0 28px;font-family:%s;font-size:%s;line-height:%s;color:%s;">%s</td></tr>`,
-			attr(b.FontFamily), bodyFontSize, bodyLineHeight, attr(b.Text), c.note.html,
-		)
-	}
-
-	if !c.footer.empty() {
-		fmt.Fprintf(&body,
-			`<tr><td style="padding:%s;"><div style="border-top:1px solid %s;padding-top:16px;font-family:%s;font-size:%s;line-height:%s;color:%s;">%s</div></td></tr>`,
-			shellPadding, attr(b.Border), attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), c.footer.html,
-		)
-	} else {
-		fmt.Fprintf(&body, `<tr><td style="padding:%s;"></td></tr>`, shellPadding)
+		fmt.Fprintf(&body, `<tr><td style="padding:%s 0 0 0;">`, spacing)
+		renderBlockHTML(&body, blk, c, b)
+		fmt.Fprint(&body, `</td></tr>`)
 	}
 
 	locale := c.locale
@@ -136,7 +89,11 @@ func renderHTML(c content, b Brand) string {
 <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" bgcolor="%s" style="background-color:%s;">
 <tr><td align="center" style="padding:24px 12px;">
 <table role="presentation" width="%d" cellpadding="0" cellspacing="0" border="0" bgcolor="%s" style="width:100%%;max-width:%dpx;background-color:%s;border:1px solid %s;border-radius:%s;">
+<tr><td style="padding:%s;">
+<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0">
 %s
+</table>
+</td></tr>
 </table>
 </td></tr>
 </table>
@@ -147,34 +104,99 @@ func renderHTML(c content, b Brand) string {
 		attr(b.Page), html.EscapeString(c.preheader),
 		attr(b.Page), attr(b.Page),
 		shellWidth, attr(b.Card), shellWidth, attr(b.Card), attr(b.Border), cardRadius,
+		shellPadding,
 		body.String(),
 	)
 }
 
+// renderBlockHTML writes the markup of one resolved block into its table cell.
+func renderBlockHTML(body *strings.Builder, blk resolvedBlock, c content, b Brand) {
+	switch blk.typ {
+	case BlockLogo:
+		// The organization's wordmark. The uploaded theme logo is deliberately not
+		// here yet — it needs a delivery path that works for a recipient who is not
+		// a member of the org, which is an open decision (see
+		// .ai/features/email-templates.md).
+		fmt.Fprintf(body,
+			`<div style="font-family:%s;font-size:%s;line-height:%s;font-weight:600;color:%s;">%s</div>`,
+			attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), c.orgName.html,
+		)
+	case BlockHeading:
+		fmt.Fprintf(body,
+			`<div style="font-family:%s;font-size:20px;line-height:28px;font-weight:600;color:%s;">%s</div>`,
+			attr(b.FontFamily), attr(b.Text), blk.text.html,
+		)
+	case BlockParagraph:
+		fmt.Fprintf(body,
+			`<div style="font-family:%s;font-size:%s;line-height:%s;color:%s;">%s</div>`,
+			attr(b.FontFamily), bodyFontSize, bodyLineHeight, attr(b.Text), blk.text.html,
+		)
+	case BlockButton:
+		// The call to action hangs off the URL alone, not off the label. A label
+		// that references a variable can collapse at render time (resolveProse), and
+		// dropping the whole block then would send a message with no way to act on
+		// it — so the button goes and the bare URL stays.
+		href := attr(blk.url)
+		linkPrefix := ""
+		linkMargin := "0"
+		if !blk.label.empty() {
+			fmt.Fprintf(body,
+				`<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>`+
+					`<td bgcolor="%s" style="background-color:%s;border-radius:%s;">`+
+					`<a href="%s" style="display:inline-block;padding:12px 22px;font-family:%s;font-size:%s;line-height:%s;font-weight:600;color:%s;text-decoration:none;">%s</a>`+
+					`</td></tr></table>`,
+				attr(b.Button), attr(b.Button), buttonRadius,
+				href, attr(b.FontFamily), bodyFontSize, bodyLineHeight, attr(b.ButtonText), blk.label.html,
+			)
+			// The introduction ("Or open this link:") only reads right as an
+			// alternative to a button; without one the bare link stands alone.
+			if !blk.linkFallback.empty() {
+				linkPrefix = blk.linkFallback.html + "<br />"
+			}
+			linkMargin = "12px 0 0 0"
+		}
+		// The bare URL below the button is what makes the mail usable when a client
+		// refuses to render the button, or when the recipient wants to see where the
+		// link goes before following it.
+		fmt.Fprintf(body,
+			`<p style="margin:%s;font-family:%s;font-size:%s;line-height:%s;color:%s;">%s<a href="%s" style="color:%s;">%s</a></p>`,
+			linkMargin, attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), linkPrefix,
+			href, attr(b.Link), html.EscapeString(blk.url),
+		)
+	case BlockDivider:
+		fmt.Fprintf(body, `<div style="border-top:1px solid %s;font-size:1px;line-height:1px;">&nbsp;</div>`, attr(b.Border))
+	case BlockFooter:
+		fmt.Fprintf(body,
+			`<div style="border-top:1px solid %s;padding-top:16px;font-family:%s;font-size:%s;line-height:%s;color:%s;">%s</div>`,
+			attr(b.Border), attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), blk.text.html,
+		)
+	}
+}
+
 // renderText renders the plain-text alternative from the same resolved content, so
-// a recipient whose client shows text/plain gets the same message.
+// a recipient whose client shows text/plain gets the same message. A divider is
+// decorative and has no text rendering.
 func renderText(c content) string {
 	var out strings.Builder
-	writeParagraph(&out, c.headline.text)
-	for _, p := range c.paragraphs {
-		writeParagraph(&out, p.text)
-	}
-	// Same reasoning as renderHTML: a collapsed label loses its line, not the link.
-	if c.ctaURL != "" {
-		if c.ctaLabel.empty() {
-			writeParagraph(&out, c.ctaURL)
-		} else {
-			writeParagraph(&out, fmt.Sprintf("%s:\n%s", c.ctaLabel.text, c.ctaURL))
+	for _, blk := range c.blocks {
+		switch blk.typ {
+		case BlockLogo:
+			writeParagraph(&out, c.orgName.text)
+		case BlockHeading, BlockParagraph, BlockFooter:
+			writeParagraph(&out, blk.text.text)
+		case BlockButton:
+			// Same reasoning as renderBlockHTML: a collapsed label loses its line,
+			// not the link.
+			if blk.label.empty() {
+				writeParagraph(&out, blk.url)
+			} else {
+				writeParagraph(&out, fmt.Sprintf("%s:\n%s", blk.label.text, blk.url))
+			}
+		case BlockDivider:
+			// Nothing to say.
 		}
 	}
-	writeParagraph(&out, c.note.text)
-	if !c.footer.empty() {
-		// No "-- " signature marker: clients that honour it would fold the footer
-		// away, and the footer is where the recipient learns who sent this.
-		out.WriteString(strings.TrimSpace(c.footer.text))
-		out.WriteString("\n")
-	}
-	return out.String()
+	return strings.TrimRight(out.String(), "\n") + "\n"
 }
 
 func writeParagraph(out *strings.Builder, text string) {

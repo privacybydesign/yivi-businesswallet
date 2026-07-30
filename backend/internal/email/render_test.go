@@ -23,9 +23,22 @@ func renderOffer(t *testing.T, tpl Template, vars map[string]string) Body {
 	return body
 }
 
+// blockIndex finds the first block of a type, failing the test when the shipped
+// layout does not carry one.
+func blockIndex(t *testing.T, tpl Template, typ BlockType) int {
+	t.Helper()
+	for i, blk := range tpl.Blocks {
+		if blk.Type == typ {
+			return i
+		}
+	}
+	t.Fatalf("no %s block in the template", typ)
+	return -1
+}
+
 func TestValidateTemplateRejectsUnknownPlaceholder(t *testing.T) {
 	tpl, _ := DefaultTemplate(KindInvitation, LocaleEN)
-	tpl.Paragraphs = append(tpl.Paragraphs, "Signed, {{inviterName}}")
+	tpl.Blocks = append(tpl.Blocks, Block{Type: BlockParagraph, Text: "Signed, {{inviterName}}"})
 
 	err := ValidateTemplate(KindInvitation, tpl)
 	if err == nil {
@@ -40,14 +53,14 @@ func TestValidateTemplateRejectsUnknownPlaceholder(t *testing.T) {
 // this check it would be delivered to the recipient verbatim.
 func TestValidateTemplateRejectsMalformedPlaceholder(t *testing.T) {
 	tpl, _ := DefaultTemplate(KindInvitation, LocaleEN)
-	tpl.Headline = "Hello {{ org name }}"
+	tpl.Blocks[blockIndex(t, tpl, BlockHeading)].Text = "Hello {{ org name }}"
 
 	if err := ValidateTemplate(KindInvitation, tpl); err == nil {
 		t.Fatal("a malformed placeholder was accepted")
 	}
 }
 
-func TestValidateTemplateRequiresSubjectHeadlineAndPairedCTA(t *testing.T) {
+func TestValidateTemplateRequiresSubjectAndBlockContent(t *testing.T) {
 	base, _ := DefaultTemplate(KindInvitation, LocaleEN)
 
 	blankSubject := base
@@ -56,21 +69,91 @@ func TestValidateTemplateRequiresSubjectHeadlineAndPairedCTA(t *testing.T) {
 		t.Error("an empty subject was accepted")
 	}
 
-	blankHeadline := base
-	blankHeadline.Headline = ""
-	if err := ValidateTemplate(KindInvitation, blankHeadline); err == nil {
-		t.Error("an empty headline was accepted")
+	noBlocks := base
+	noBlocks.Blocks = nil
+	if err := ValidateTemplate(KindInvitation, noBlocks); err == nil {
+		t.Error("a layout with no blocks was accepted")
 	}
 
-	halfCTA := base
-	halfCTA.CTAURL = ""
-	if err := ValidateTemplate(KindInvitation, halfCTA); err == nil {
-		t.Error("a call-to-action label without a URL was accepted")
+	blankHeading, _ := DefaultTemplate(KindInvitation, LocaleEN)
+	blankHeading.Blocks[blockIndex(t, blankHeading, BlockHeading)].Text = " "
+	if err := ValidateTemplate(KindInvitation, blankHeading); err == nil {
+		t.Error("a heading block with no text was accepted")
+	}
+
+	blankLabel, _ := DefaultTemplate(KindInvitation, LocaleEN)
+	blankLabel.Blocks[blockIndex(t, blankLabel, BlockButton)].Label = ""
+	if err := ValidateTemplate(KindInvitation, blankLabel); err == nil {
+		t.Error("a button block without a label was accepted")
+	}
+
+	blankURL, _ := DefaultTemplate(KindInvitation, LocaleEN)
+	blankURL.Blocks[blockIndex(t, blankURL, BlockButton)].URL = ""
+	if err := ValidateTemplate(KindInvitation, blankURL); err == nil {
+		t.Error("a button block without a URL was accepted")
+	}
+}
+
+// A layout of only decoration (logo, divider, footer) says nothing; a message
+// needs at least one heading or paragraph.
+func TestValidateTemplateRequiresAHeadingOrParagraph(t *testing.T) {
+	tpl := Template{Subject: "s", Blocks: []Block{
+		{Type: BlockLogo},
+		{Type: BlockDivider},
+		{Type: BlockFooter, Text: "Sent by {{orgName}}."},
+	}}
+	if err := ValidateTemplate(KindSMTPTest, tpl); err == nil {
+		t.Fatal("a layout without a heading or paragraph was accepted")
+	}
+}
+
+func TestValidateTemplateCapsTheBlockCount(t *testing.T) {
+	tpl := Template{Subject: "s"}
+	for range maxBlocks + 1 {
+		tpl.Blocks = append(tpl.Blocks, Block{Type: BlockParagraph, Text: "p"})
+	}
+	if err := ValidateTemplate(KindSMTPTest, tpl); err == nil {
+		t.Fatalf("a layout of %d blocks was accepted", maxBlocks+1)
+	}
+	tpl.Blocks = tpl.Blocks[:maxBlocks]
+	if err := ValidateTemplate(KindSMTPTest, tpl); err != nil {
+		t.Fatalf("a layout of exactly %d blocks was rejected: %v", maxBlocks, err)
+	}
+}
+
+// A field set on a block type it does not belong to is a save mistake, not
+// content to drop silently at render time.
+func TestValidateTemplateRejectsFieldsOnTheWrongBlockType(t *testing.T) {
+	cases := map[string]Block{
+		"text on a button":     {Type: BlockButton, Label: "Go", URL: "https://example.org", Text: "stray"},
+		"label on a paragraph": {Type: BlockParagraph, Text: "p", Label: "stray"},
+		"url on a heading":     {Type: BlockHeading, Text: "h", URL: "https://example.org"},
+		"text on a divider":    {Type: BlockDivider, Text: "stray"},
+		"label on a logo":      {Type: BlockLogo, Label: "stray"},
+	}
+	for name, blk := range cases {
+		t.Run(name, func(t *testing.T) {
+			tpl := Template{Subject: "s", Blocks: []Block{{Type: BlockParagraph, Text: "p"}, blk}}
+			if err := ValidateTemplate(KindSMTPTest, tpl); err == nil {
+				t.Fatal("a block with a stray field was accepted")
+			}
+		})
+	}
+}
+
+func TestValidateTemplateRejectsAnUnknownBlockType(t *testing.T) {
+	tpl := Template{Subject: "s", Blocks: []Block{
+		{Type: BlockParagraph, Text: "p"},
+		{Type: BlockType("gif"), Text: "x"},
+	}}
+	if err := ValidateTemplate(KindSMTPTest, tpl); err == nil {
+		t.Fatal("an unknown block type was accepted")
 	}
 }
 
 func TestValidateTemplateRejectsUnknownKind(t *testing.T) {
-	if err := ValidateTemplate(Kind("nope"), Template{Subject: "s", Headline: "h"}); err == nil {
+	tpl := Template{Subject: "s", Blocks: []Block{{Type: BlockHeading, Text: "h"}}}
+	if err := ValidateTemplate(Kind("nope"), tpl); err == nil {
 		t.Fatal("an unknown kind was accepted")
 	}
 }
@@ -96,11 +179,11 @@ func TestRenderEscapesValuesInHTMLAndLeavesTextRaw(t *testing.T) {
 	}
 }
 
-// The template text itself is prose, not markup, so a tenant writing "<b>" gets a
+// The block text itself is prose, not markup, so a tenant writing "<b>" gets a
 // literal "<b>" rather than bold text.
 func TestRenderEscapesTemplateProseToo(t *testing.T) {
 	tpl, _ := DefaultTemplate(KindCredentialOffer, LocaleEN)
-	tpl.Paragraphs = []string{"<b>{{credentialName}}</b> is ready."}
+	tpl.Blocks[blockIndex(t, tpl, BlockParagraph)].Text = "<b>{{credentialName}}</b> is ready."
 
 	body := renderOffer(t, tpl, offerVars())
 
@@ -171,9 +254,9 @@ func TestRenderRejectsNonAbsoluteHTTPURLs(t *testing.T) {
 }
 
 // The placeholder allowlist only covers {{variables}} and the IsURL check only sees
-// variable *values*, so a ctaUrl written as a literal used to reach the href
-// unexamined — a tenant-authored "javascript:..." would have been delivered.
-func TestValidateTemplateRejectsAnUnsafeLiteralCTAURL(t *testing.T) {
+// variable *values*, so a button URL written as a literal would otherwise reach the
+// href unexamined — a tenant-authored "javascript:..." would have been delivered.
+func TestValidateTemplateRejectsAnUnsafeLiteralButtonURL(t *testing.T) {
 	for _, bad := range []string{
 		"javascript:alert(document.domain)",
 		"data:text/html,<script>alert(1)</script>",
@@ -188,48 +271,48 @@ func TestValidateTemplateRejectsAnUnsafeLiteralCTAURL(t *testing.T) {
 	} {
 		t.Run(bad, func(t *testing.T) {
 			tpl, _ := DefaultTemplate(KindCredentialOffer, LocaleEN)
-			tpl.CTAURL = bad
+			tpl.Blocks[blockIndex(t, tpl, BlockButton)].URL = bad
 
 			if err := ValidateTemplate(KindCredentialOffer, tpl); err == nil {
-				t.Fatalf("ctaUrl %q was accepted by ValidateTemplate", bad)
+				t.Fatalf("button URL %q was accepted by ValidateTemplate", bad)
 			}
 			if _, err := Render(KindCredentialOffer, LocaleEN, tpl, resolveBrand(Seeds{}), offerVars()); err == nil {
-				t.Fatalf("ctaUrl %q rendered", bad)
+				t.Fatalf("button URL %q rendered", bad)
 			}
 		})
 	}
 }
 
-func TestValidateTemplateAcceptsBothSafeCTAURLShapes(t *testing.T) {
+func TestValidateTemplateAcceptsBothSafeButtonURLShapes(t *testing.T) {
 	for _, good := range []string{"{{claimUrl}}", "https://wallet.example.org/claim", "http://localhost:5173/claim"} {
 		t.Run(good, func(t *testing.T) {
 			tpl, _ := DefaultTemplate(KindCredentialOffer, LocaleEN)
-			tpl.CTAURL = good
+			tpl.Blocks[blockIndex(t, tpl, BlockButton)].URL = good
 
 			if err := ValidateTemplate(KindCredentialOffer, tpl); err != nil {
-				t.Fatalf("ctaUrl %q was rejected: %v", good, err)
+				t.Fatalf("button URL %q was rejected: %v", good, err)
 			}
 			body, err := Render(KindCredentialOffer, LocaleEN, tpl, resolveBrand(Seeds{}), offerVars())
 			if err != nil {
-				t.Fatalf("ctaUrl %q: Render: %v", good, err)
+				t.Fatalf("button URL %q: Render: %v", good, err)
 			}
 			want := good
 			if good == "{{claimUrl}}" {
 				want = offerVars()[varClaimURL]
 			}
 			if !strings.Contains(body.HTMLBody, want) || !strings.Contains(body.TextBody, want) {
-				t.Errorf("ctaUrl %q did not reach both parts", good)
+				t.Errorf("button URL %q did not reach both parts", good)
 			}
 		})
 	}
 }
 
-// A CTA label that references a variable collapses when that variable is empty
-// (resolveBlock). Dropping the button then is right; dropping the link with it
+// A button label that references a variable collapses when that variable is empty
+// (resolveProse). Dropping the button then is right; dropping the link with it
 // leaves the recipient no way to act on the message.
-func TestRenderKeepsTheBareURLWhenTheCTALabelCollapses(t *testing.T) {
+func TestRenderKeepsTheBareURLWhenTheButtonLabelCollapses(t *testing.T) {
 	tpl, _ := DefaultTemplate(KindCredentialOffer, LocaleEN)
-	tpl.CTALabel = "Add {{credentialName}} to your wallet"
+	tpl.Blocks[blockIndex(t, tpl, BlockButton)].Label = "Add {{credentialName}} to your wallet"
 	vars := offerVars()
 	vars[varCredentialName] = ""
 
@@ -268,7 +351,7 @@ func TestRenderRequiresExactlyTheKindsVariables(t *testing.T) {
 
 func TestRenderRejectsAnInvalidTemplate(t *testing.T) {
 	tpl, _ := DefaultTemplate(KindCredentialOffer, LocaleEN)
-	tpl.Note = "Code: {{secret}}"
+	tpl.Blocks = append(tpl.Blocks, Block{Type: BlockParagraph, Text: "Code: {{secret}}"})
 	if _, err := Render(KindCredentialOffer, LocaleEN, tpl, resolveBrand(Seeds{}), offerVars()); err == nil {
 		t.Fatal("a template with an undeclared placeholder rendered")
 	}
@@ -291,6 +374,84 @@ func TestRenderProducesBothPartsWithTheCallToAction(t *testing.T) {
 		if !strings.Contains(part, "Add it to your wallet") {
 			t.Errorf("the %s part does not carry the call to action:\n%s", name, part)
 		}
+	}
+}
+
+// The layout is the tenant's: blocks must render in the order they were composed,
+// in both parts, or the designer's reordering is decoration.
+func TestRenderFollowsTheBlockOrder(t *testing.T) {
+	// The explicit preheader keeps the hidden inbox line from repeating the
+	// heading at the top of the document, which would defeat the order check.
+	tpl := Template{Subject: "Order test", Preheader: "Order preview", Blocks: []Block{
+		{Type: BlockParagraph, Text: "First paragraph"},
+		{Type: BlockButton, Label: "Act now", URL: "https://wallet.example.org/claim/abc"},
+		{Type: BlockHeading, Text: "Heading after the button"},
+		{Type: BlockParagraph, Text: "Closing paragraph"},
+	}}
+	body, err := Render(KindSMTPTest, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{varOrgName: "Acme BV"})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for name, part := range map[string]string{"html": body.HTMLBody, "text": body.TextBody} {
+		order := []string{"First paragraph", "Act now", "Heading after the button", "Closing paragraph"}
+		last := -1
+		for _, needle := range order {
+			at := strings.Index(part, needle)
+			if at < 0 {
+				t.Fatalf("the %s part is missing %q:\n%s", name, needle, part)
+			}
+			if at < last {
+				t.Errorf("the %s part renders %q out of layout order:\n%s", name, needle, part)
+			}
+			last = at
+		}
+	}
+}
+
+// The logo block is the org wordmark and the divider is decoration: the wordmark
+// must reach both parts, the divider only the HTML one.
+func TestRenderLogoAndDividerBlocks(t *testing.T) {
+	tpl := Template{Subject: "s", Blocks: []Block{
+		{Type: BlockLogo},
+		{Type: BlockParagraph, Text: "Body"},
+		{Type: BlockDivider},
+		{Type: BlockFooter, Text: "Small print"},
+	}}
+	body, err := Render(KindSMTPTest, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{varOrgName: "Acme BV"})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(body.HTMLBody, "Acme BV") || !strings.Contains(body.TextBody, "Acme BV") {
+		t.Error("the logo block did not render the organization wordmark in both parts")
+	}
+	if !strings.Contains(body.HTMLBody, "border-top") {
+		t.Errorf("the divider did not render a rule:\n%s", body.HTMLBody)
+	}
+	if !strings.Contains(body.HTMLBody, "Small print") || !strings.Contains(body.TextBody, "Small print") {
+		t.Error("the footer block is missing from a part")
+	}
+}
+
+// An empty preheader falls back to the first heading so the inbox list never
+// shows a blank line — and the fallback must follow the layout, not a fixed field.
+func TestRenderPreheaderFallsBackToTheFirstHeading(t *testing.T) {
+	tpl := Template{Subject: "s", Blocks: []Block{
+		{Type: BlockParagraph, Text: "Leading paragraph"},
+		{Type: BlockHeading, Text: "The heading"},
+	}}
+	body, err := Render(KindSMTPTest, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{varOrgName: "Acme BV"})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(body.HTMLBody, ">The heading</div>") {
+		t.Fatalf("missing heading:\n%s", body.HTMLBody)
+	}
+	// The preheader div is the hidden first element; the heading text must appear
+	// in it (before the card renders it again).
+	preheaderAt := strings.Index(body.HTMLBody, "The heading")
+	cardAt := strings.LastIndex(body.HTMLBody, "The heading")
+	if preheaderAt == cardAt {
+		t.Errorf("the preheader did not fall back to the heading:\n%s", body.HTMLBody)
 	}
 }
 
@@ -326,5 +487,18 @@ func TestRenderKeepsTheShippedSubjects(t *testing.T) {
 		if body.Subject != tc.want {
 			t.Errorf("%s subject = %q, want %q", tc.kind, body.Subject, tc.want)
 		}
+	}
+}
+
+// DefaultTemplate hands out shared package state; a caller editing the returned
+// blocks must not be able to edit the shipped default for everyone after it.
+func TestDefaultTemplateReturnsACopy(t *testing.T) {
+	tpl, _ := DefaultTemplate(KindInvitation, LocaleEN)
+	original := tpl.Blocks[blockIndex(t, tpl, BlockHeading)].Text
+	tpl.Blocks[blockIndex(t, tpl, BlockHeading)].Text = "mutated"
+
+	fresh, _ := DefaultTemplate(KindInvitation, LocaleEN)
+	if got := fresh.Blocks[blockIndex(t, fresh, BlockHeading)].Text; got != original {
+		t.Fatalf("mutating a returned template changed the shipped default: %q", got)
 	}
 }

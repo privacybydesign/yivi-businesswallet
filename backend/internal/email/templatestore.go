@@ -2,6 +2,7 @@ package email
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -29,8 +30,7 @@ type TemplateOverride struct {
 
 // templateColumns is the projection every read below shares, in the order
 // scanTemplate expects.
-const templateColumns = `kind, locale, subject, preheader, headline, paragraphs,
-	cta_label, cta_url, link_fallback, note, footer, updated_at`
+const templateColumns = `kind, locale, subject, preheader, blocks, updated_at`
 
 // ListTemplates returns the org's customised templates, ordered by kind then
 // locale. Kinds and locales the org has not edited are absent rather than
@@ -84,20 +84,19 @@ func (s *Store) SaveTemplate(ctx context.Context, orgID uuid.UUID, kind Kind, lo
 	if err := ValidateTemplate(kind, tpl); err != nil {
 		return TemplateOverride{}, &InvalidTemplateError{Reason: err}
 	}
-	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+	blocks, err := json.Marshal(tpl.Blocks)
+	if err != nil {
+		return TemplateOverride{}, fmt.Errorf("email: save template org %s kind %s locale %s: encoding blocks: %w", orgID, kind, locale, err)
+	}
+	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		const upsert = `INSERT INTO org_email_templates
-			(organization_id, kind, locale, subject, preheader, headline, paragraphs,
-			 cta_label, cta_url, link_fallback, note, footer)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			(organization_id, kind, locale, subject, preheader, blocks)
+			VALUES ($1, $2, $3, $4, $5, $6)
 			ON CONFLICT (organization_id, kind, locale) DO UPDATE SET
 				subject = EXCLUDED.subject, preheader = EXCLUDED.preheader,
-				headline = EXCLUDED.headline, paragraphs = EXCLUDED.paragraphs,
-				cta_label = EXCLUDED.cta_label, cta_url = EXCLUDED.cta_url,
-				link_fallback = EXCLUDED.link_fallback, note = EXCLUDED.note,
-				footer = EXCLUDED.footer, updated_at = now()`
+				blocks = EXCLUDED.blocks, updated_at = now()`
 		if _, err := q.Exec(ctx, upsert, orgID, string(kind), string(locale),
-			tpl.Subject, tpl.Preheader, tpl.Headline, paragraphsArg(tpl.Paragraphs),
-			tpl.CTALabel, tpl.CTAURL, tpl.LinkFallback, tpl.Note, tpl.Footer); err != nil {
+			tpl.Subject, tpl.Preheader, blocks); err != nil {
 			return fmt.Errorf("email: save template org %s kind %s locale %s: %w", orgID, kind, locale, err)
 		}
 		return s.audit.Record(ctx, q, audit.EmailTemplateUpdated,
@@ -169,33 +168,28 @@ func templateTargetID(kind Kind, locale Locale) string {
 	return fmt.Sprintf("%s/%s", kind, locale)
 }
 
-// paragraphsArg keeps a nil slice out of the TEXT[] column, which is NOT NULL.
-func paragraphsArg(paragraphs []string) []string {
-	if paragraphs == nil {
-		return []string{}
-	}
-	return paragraphs
-}
-
 // row is the shared shape of pgx.Row and pgx.Rows for a single-record scan.
 type row interface {
 	Scan(dest ...any) error
 }
 
 // scanTemplate reads one row. Kind and Locale are scanned as plain strings and
-// converted, rather than relying on pgx to map TEXT onto a named string type.
+// converted, rather than relying on pgx to map TEXT onto a named string type; the
+// block layout is decoded from its JSONB column explicitly for the same reason.
 func scanTemplate(r row) (TemplateOverride, error) {
 	var (
 		out    TemplateOverride
 		kind   string
 		locale string
+		blocks []byte
 	)
 	err := r.Scan(&kind, &locale, &out.Template.Subject, &out.Template.Preheader,
-		&out.Template.Headline, &out.Template.Paragraphs, &out.Template.CTALabel,
-		&out.Template.CTAURL, &out.Template.LinkFallback, &out.Template.Note,
-		&out.Template.Footer, &out.UpdatedAt)
+		&blocks, &out.UpdatedAt)
 	if err != nil {
 		return TemplateOverride{}, err
+	}
+	if err := json.Unmarshal(blocks, &out.Template.Blocks); err != nil {
+		return TemplateOverride{}, fmt.Errorf("decoding blocks: %w", err)
 	}
 	out.Kind = Kind(kind)
 	out.Locale = Locale(locale)

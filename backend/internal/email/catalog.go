@@ -144,36 +144,70 @@ func ResolveLocale(preferences ...string) Locale {
 	return DefaultLocale
 }
 
-// Template is the content of one kind in one locale: the parts a tenant edits.
-// It carries no HTML — the mail-client-safe layout is the shell's job (see
-// shell.go), so a template holds prose plus a call to action. Every field may
+// BlockType names one kind of building block a template layout is composed of.
+// The set is closed: every type renders through the mail-client-safe shell
+// (shell.go), which is what keeps a tenant-composed layout deliverable — there is
+// no free-form HTML block and never will be.
+type BlockType string
+
+const (
+	// BlockLogo renders the organization's wordmark. Where (and whether) it
+	// appears is the layout's call.
+	BlockLogo BlockType = "logo"
+	// BlockHeading is a prominent line, rendered larger than body text.
+	BlockHeading BlockType = "heading"
+	// BlockParagraph is one paragraph of body text.
+	BlockParagraph BlockType = "paragraph"
+	// BlockButton is the call to action: a button plus the bare URL under it, for
+	// clients that will not render the button.
+	BlockButton BlockType = "button"
+	// BlockDivider is a horizontal rule between blocks.
+	BlockDivider BlockType = "divider"
+	// BlockFooter is small print under a rule, in muted text.
+	BlockFooter BlockType = "footer"
+)
+
+// BlockTypes returns every block type, in the order the editor offers them.
+func BlockTypes() []BlockType {
+	return []BlockType{BlockLogo, BlockHeading, BlockParagraph, BlockButton, BlockDivider, BlockFooter}
+}
+
+// Block is one building block of a template layout. Which fields apply depends
+// on Type — ValidateTemplate rejects a field set on a block type it does not
+// belong to, so a stored block never carries stray content. Text fields may
 // reference the kind's variables as {{name}} placeholders.
+type Block struct {
+	Type BlockType `json:"type"`
+	// Text is the prose of a heading, paragraph or footer block.
+	Text string `json:"text,omitempty"`
+	// Label and URL are a button block's call to action. URL is either a single
+	// declared URL variable or an absolute http(s) literal (see validateButtonURL).
+	Label string `json:"label,omitempty"`
+	URL   string `json:"url,omitempty"`
+	// LinkFallback introduces the bare URL printed under the button. Empty means
+	// the bare URL stands alone.
+	LinkFallback string `json:"linkFallback,omitempty"`
+}
+
+// Template is the content of one kind in one locale: the parts a tenant edits.
+// It carries no HTML — a template is a subject plus an ordered block layout, and
+// the mail-client-safe markup every block renders to is the shell's job (see
+// shell.go). Every text field may reference the kind's variables as {{name}}
+// placeholders.
 type Template struct {
 	// Subject is the single-line subject.
 	Subject string `json:"subject"`
 	// Preheader is the short line clients show next to the subject in the inbox
-	// list. Empty falls back to the headline.
+	// list. Empty falls back to the first heading (or paragraph) of the layout.
 	Preheader string `json:"preheader,omitempty"`
-	// Headline is the message's opening line, rendered larger than body text.
-	Headline string `json:"headline"`
-	// Paragraphs are the body paragraphs, in order.
-	Paragraphs []string `json:"paragraphs,omitempty"`
-	// CTALabel and CTAURL are the call to action. Both empty means no button.
-	CTALabel string `json:"ctaLabel,omitempty"`
-	CTAURL   string `json:"ctaUrl,omitempty"`
-	// LinkFallback introduces the bare call-to-action URL printed under the button,
-	// for a client that will not render it. Empty falls back to the locale's shell
-	// value.
-	LinkFallback string `json:"linkFallback,omitempty"`
-	// Note is a closing remark below the call to action.
-	Note string `json:"note,omitempty"`
-	// Footer is the small print under the rule. Empty falls back to the locale's
-	// shell footer.
-	Footer string `json:"footer,omitempty"`
+	// Blocks is the layout, in reading order.
+	Blocks []Block `json:"blocks"`
 }
 
-// shellDefaults holds the shell parts shared by every template of a locale, so a
-// kind only spells out what is specific to it.
+// shellDefaults holds the block content shared by every template of a locale, so
+// a kind only spells out what is specific to it: a shipped footer block with no
+// text gets the locale's footer, and a shipped button block with no linkFallback
+// gets the locale's introduction line.
 type shellDefaults struct {
 	Footer       string `json:"footer"`
 	LinkFallback string `json:"linkFallback"`
@@ -236,11 +270,13 @@ func loadDefaults() (map[Locale]defaults, error) {
 			if !ok {
 				return nil, fmt.Errorf("%s: no template for kind %q", name, kind)
 			}
-			if tpl.Footer == "" {
-				tpl.Footer = file.Shell.Footer
-			}
-			if tpl.LinkFallback == "" {
-				tpl.LinkFallback = file.Shell.LinkFallback
+			for i, blk := range tpl.Blocks {
+				if blk.Type == BlockFooter && blk.Text == "" {
+					tpl.Blocks[i].Text = file.Shell.Footer
+				}
+				if blk.Type == BlockButton && blk.LinkFallback == "" {
+					tpl.Blocks[i].LinkFallback = file.Shell.LinkFallback
+				}
 			}
 			if err := ValidateTemplate(kind, tpl); err != nil {
 				return nil, fmt.Errorf("%s: kind %q: %w", name, kind, err)
@@ -305,9 +341,16 @@ func localeDefaults(locale Locale) defaults {
 
 // DefaultTemplate returns the shipped default for a kind in a locale, falling
 // back to DefaultLocale for a locale that has no shipped copy. The second result
-// is false only for an unknown kind.
+// is false only for an unknown kind. The block slice is a copy: the shipped
+// defaults are shared package state, and a caller must not be able to edit them
+// through the returned value.
 func DefaultTemplate(kind Kind, locale Locale) (Template, bool) {
 	tpl, ok := localeDefaults(locale).templates[kind]
+	if ok {
+		blocks := make([]Block, len(tpl.Blocks))
+		copy(blocks, tpl.Blocks)
+		tpl.Blocks = blocks
+	}
 	return tpl, ok
 }
 

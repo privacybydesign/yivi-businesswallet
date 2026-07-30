@@ -702,7 +702,7 @@ export const en = {
   mailTemplates: {
     title: "Mail templates",
     intro:
-      "Edit the wording of the mail this organization sends. Every message has its own template per language, and a template you have not edited uses the default wording. The branding comes from the Branding tab.",
+      "Compose the mail this organization sends from blocks. Every message has its own layout per language, and a message you have not edited uses the default. The branding comes from the Branding tab.",
     language: "Language",
     message: "Message",
     status: "Status",
@@ -715,13 +715,25 @@ export const en = {
     fields: {
       subject: "Subject",
       preheader: "Preview line",
-      headline: "Headline",
-      paragraphs: "Paragraphs",
-      ctaLabel: "Button label",
-      ctaUrl: "Button link",
-      linkFallback: "Link introduction",
-      note: "Closing note",
+    },
+    layout: "Layout",
+    blocks: {
+      logo: "Logo",
+      heading: "Heading",
+      paragraph: "Paragraph",
+      button: "Button",
+      divider: "Divider",
       footer: "Footer",
+    },
+    blockFields: {
+      text: "Text",
+      label: "Button label",
+      url: "Button link",
+      linkFallback: "Link introduction",
+    },
+    blockHints: {
+      logo: "Shows the organization name in the mail's branding.",
+      divider: "A horizontal line between blocks.",
     },
     kinds: {
       credential_offer: "Credential offer",
@@ -741,11 +753,12 @@ export const en = {
       en: "English",
       nl: "Dutch",
     },
-    addParagraph: "Add paragraph",
-    removeParagraph: "Remove paragraph {{number}}",
-    paragraphNumber: "Paragraph {{number}}",
-    ctaHint:
-      "The button link is either one link variable or a full https:// address. Leave both fields empty for a message without a button.",
+    addBlock: "Add block",
+    removeBlock: "Remove block {{number}}",
+    moveBlockUp: "Move block {{number}} up",
+    moveBlockDown: "Move block {{number}} down",
+    buttonHint:
+      "The button link is either one link variable or a full https:// address. The link introduction is the small line above the plain link shown under the button.",
     preview: "Preview",
     previewSubject: "Subject:",
     previewFrameTitle: "Rendered message",
@@ -772,9 +785,11 @@ export const en = {
       malformedPlaceholder:
         "One of the placeholders is written incorrectly. Put two braces around the variable name, with no spaces inside it.",
       required: "This field is required.",
-      ctaPair: "Fill in both the button label and the button link, or neither.",
-      ctaUrlShape:
+      buttonUrlShape:
         "Use one link variable on its own, or a full https:// address.",
+      noBlocks: "Add at least one block to the layout.",
+      needsContent: "The layout needs at least one heading or paragraph.",
+      tooManyBlocks: "A layout can have at most {{max}} blocks.",
     },
     loadError: "Could not load the mail templates: {{message}}",
     saveError: "Could not save the template: {{message}}",

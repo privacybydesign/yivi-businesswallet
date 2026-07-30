@@ -14,38 +14,43 @@
   "templates": {
     "credential_offer": {
       "subject": "{{orgName}} has issued you a credential: {{credentialName}}",
-      "headline": "{{orgName}} has issued you a credential",
-      "paragraphs": [
-        "{{credentialName}} is ready to be added to your wallet."
-      ],
-      "ctaLabel": "Add it to your wallet",
-      "ctaUrl": "{{claimUrl}}",
-      "note": "Your wallet will ask for this code: {{txCode}}"
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} has issued you a credential" },
+        { "type": "paragraph", "text": "{{credentialName}} is ready to be added to your wallet." },
+        { "type": "button", "label": "Add it to your wallet", "url": "{{claimUrl}}" },
+        { "type": "paragraph", "text": "Your wallet will ask for this code: {{txCode}}" },
+        { "type": "footer" }
+      ]
     },
     "invitation": {
       "subject": "You have been invited to join {{orgName}}",
-      "headline": "You have been invited to join {{orgName}}",
-      "paragraphs": [
-        "{{orgName}} invited you to become a member on the Business Wallet."
-      ],
-      "ctaLabel": "Accept the invitation",
-      "ctaUrl": "{{acceptUrl}}"
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "You have been invited to join {{orgName}}" },
+        { "type": "paragraph", "text": "{{orgName}} invited you to become a member on the Business Wallet." },
+        { "type": "button", "label": "Accept the invitation", "url": "{{acceptUrl}}" },
+        { "type": "footer" }
+      ]
     },
     "postguard_file": {
       "subject": "{{orgName}} has sent you an encrypted file",
-      "headline": "{{orgName}} has sent you an encrypted file with PostGuard",
-      "paragraphs": [
-        "{{message}}"
-      ],
-      "ctaLabel": "Open the file",
-      "ctaUrl": "{{downloadUrl}}",
-      "note": "You open the file by proving ownership of this e-mail address."
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} has sent you an encrypted file with PostGuard" },
+        { "type": "paragraph", "text": "{{message}}" },
+        { "type": "button", "label": "Open the file", "url": "{{downloadUrl}}" },
+        { "type": "paragraph", "text": "You open the file by proving ownership of this e-mail address." },
+        { "type": "footer" }
+      ]
     },
     "smtp_test": {
       "subject": "Test e-mail from your Business Wallet",
-      "headline": "Your SMTP settings work",
-      "paragraphs": [
-        "This is a test message sent from {{orgName}}. It uses the same layout and branding as the mail your recipients get."
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Your SMTP settings work" },
+        { "type": "paragraph", "text": "This is a test message sent from {{orgName}}. It uses the same layout and branding as the mail your recipients get." },
+        { "type": "footer" }
       ]
     }
   }

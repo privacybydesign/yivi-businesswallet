@@ -17,14 +17,11 @@ import (
 // an org's copy for a kind/locale pair that already exists, which is why an
 // unknown kind or locale is a 404 rather than a 400.
 
-// maxTemplateBody caps a template save/preview payload. A template is prose with a
-// handful of short fields; 64 KiB is far above any real message and keeps a
-// runaway body out of the JSON decoder.
+// maxTemplateBody caps a template save/preview payload. A template is a subject
+// plus a bounded block layout of prose; 64 KiB is far above any real message and
+// keeps a runaway body out of the JSON decoder. The block count itself is capped
+// by ValidateTemplate (maxBlocks, render.go).
 const maxTemplateBody = 64 << 10
-
-// maxParagraphs caps how many body paragraphs one template may carry, so the
-// editor's "add paragraph" cannot grow a message without bound.
-const maxParagraphs = 12
 
 // templateSummary is one cell of the kind × locale matrix in the list response.
 type templateSummary struct {
@@ -148,9 +145,6 @@ func (h *Handler) putTemplate(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	tpl = trimTemplate(tpl)
-	if len(tpl.Paragraphs) > maxParagraphs {
-		return badRequest("invalid_input", fmt.Sprintf("a template may have at most %d paragraphs", maxParagraphs))
-	}
 
 	org := organization.OrgFromContext(r.Context())
 	if _, err := h.store.SaveTemplate(r.Context(), org.ID, kind, locale, tpl); err != nil {
@@ -301,23 +295,22 @@ func decodeTemplateBody(w http.ResponseWriter, r *http.Request, into any) error 
 }
 
 // trimTemplate normalises tenant input the way the settings forms do: surrounding
-// whitespace is never meaningful in a mail field, and an empty paragraph would
-// render as a blank gap.
+// whitespace is never meaningful in a mail field. Blocks are trimmed, not
+// dropped — a block the tenant added but left empty comes back as a validation
+// error naming it, rather than vanishing from the layout on save.
 func trimTemplate(tpl Template) Template {
 	out := Template{
-		Subject:      strings.TrimSpace(tpl.Subject),
-		Preheader:    strings.TrimSpace(tpl.Preheader),
-		Headline:     strings.TrimSpace(tpl.Headline),
-		CTALabel:     strings.TrimSpace(tpl.CTALabel),
-		CTAURL:       strings.TrimSpace(tpl.CTAURL),
-		LinkFallback: strings.TrimSpace(tpl.LinkFallback),
-		Note:         strings.TrimSpace(tpl.Note),
-		Footer:       strings.TrimSpace(tpl.Footer),
+		Subject:   strings.TrimSpace(tpl.Subject),
+		Preheader: strings.TrimSpace(tpl.Preheader),
 	}
-	for _, paragraph := range tpl.Paragraphs {
-		if trimmed := strings.TrimSpace(paragraph); trimmed != "" {
-			out.Paragraphs = append(out.Paragraphs, trimmed)
-		}
+	for _, blk := range tpl.Blocks {
+		out.Blocks = append(out.Blocks, Block{
+			Type:         blk.Type,
+			Text:         strings.TrimSpace(blk.Text),
+			Label:        strings.TrimSpace(blk.Label),
+			URL:          strings.TrimSpace(blk.URL),
+			LinkFallback: strings.TrimSpace(blk.LinkFallback),
+		})
 	}
 	return out
 }
