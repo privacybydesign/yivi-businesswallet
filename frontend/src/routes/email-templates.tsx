@@ -426,7 +426,9 @@ function TemplateEditor({
   // it, which is why this reads the DOM node rather than re-deriving from state.
   function insert(name: string): void {
     const element = focused.current;
-    if (!element) {
+    // A detached element means the focused block was removed; its data-block-index
+    // would address whichever block took its place.
+    if (!element || !element.isConnected) {
       return;
     }
     const { value, caret } = insertPlaceholder(
