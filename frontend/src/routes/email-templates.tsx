@@ -349,11 +349,9 @@ function toTemplate(draft: Draft): MailTemplate {
 function TemplateEditor({
   slug,
   detail,
-  onClose,
 }: {
   slug: string;
   detail: MailTemplateDetail;
-  onClose: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const ref: MailTemplateRef = { kind: detail.kind, locale: detail.locale };
@@ -495,9 +493,6 @@ function TemplateEditor({
           ) : (
             <Tag>{t("mailTemplates.default")}</Tag>
           )}
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            {t("common.close")}
-          </Button>
         </div>
       </div>
 
@@ -737,18 +732,16 @@ function TemplateEditor({
 function TemplateRow({
   summary,
   locale,
-  selected,
   onSelect,
 }: {
   summary: MailTemplateKindSummary;
   locale: MailLocale;
-  selected: boolean;
   onSelect: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const cell = summary.locales.find((entry) => entry.locale === locale);
   return (
-    <Table.Row className={selected ? "bg-surface-2" : undefined}>
+    <Table.Row>
       <Table.Cell>
         <span className="font-medium">
           {t(`mailTemplates.kinds.${summary.kind}`)}
@@ -787,6 +780,44 @@ export function EmailTemplatesPanel({
     slug,
     selected ? { kind: selected, locale } : null,
   );
+
+  // Editing one template replaces the list with a detail view rather than opening
+  // beneath it, so the editor reads as its own page with a single way back. The
+  // language toggle carries over from the list, so the detail edits the cell the
+  // tenant was looking at.
+  if (selected !== null) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="arrow_back"
+            onClick={() => setSelected(null)}
+          >
+            {t("mailTemplates.backToList")}
+          </Button>
+        </div>
+        {detail.isError ? (
+          <Card className="p-6">
+            <p role="alert" className="text-error text-[14px]">
+              {t("mailTemplates.loadError", { message: detail.error.message })}
+            </p>
+          </Card>
+        ) : detail.isPending ? (
+          <Card className="p-6">
+            <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
+          </Card>
+        ) : (
+          <TemplateEditor
+            key={`${detail.data.kind}/${detail.data.locale}/${detail.data.updatedAt ?? "default"}`}
+            slug={slug}
+            detail={detail.data}
+          />
+        )}
+      </div>
+    );
+  }
 
   if (templates.isError) {
     return (
@@ -853,7 +884,6 @@ export function EmailTemplatesPanel({
                   key={summary.kind}
                   summary={summary}
                   locale={locale}
-                  selected={selected === summary.kind}
                   onSelect={() => setSelected(summary.kind)}
                 />
               ))}
@@ -861,27 +891,6 @@ export function EmailTemplatesPanel({
           </Table>
         </div>
       </Card>
-
-      {selected !== null && detail.isError && (
-        <Card className="p-6">
-          <p role="alert" className="text-error text-[14px]">
-            {t("mailTemplates.loadError", { message: detail.error.message })}
-          </p>
-        </Card>
-      )}
-      {selected !== null && detail.isPending && (
-        <Card className="p-6">
-          <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
-        </Card>
-      )}
-      {selected !== null && detail.data && (
-        <TemplateEditor
-          key={`${detail.data.kind}/${detail.data.locale}/${detail.data.updatedAt ?? "default"}`}
-          slug={slug}
-          detail={detail.data}
-          onClose={() => setSelected(null)}
-        />
-      )}
     </div>
   );
 }

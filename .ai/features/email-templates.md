@@ -1,9 +1,10 @@
 # Transactional mail templates and the branded mail shell
 
-**Status:** rendering layer, tenant editing and the block-based WYSIWYG designer implemented
-(#132). Per-org/per-recipient locale and the uploaded logo image in mail are still open; see §9.
+**Status:** rendering layer, tenant editing, the block-based WYSIWYG designer and the uploaded
+logo image in mail implemented (#132). Per-org/per-recipient locale is still open; see §9.
 **Slice:** `internal/email` composition and the per-org template overrides, plus the editor UI.
-The SMTP transport (`internal/mailer`) and the per-org SMTP settings model are untouched.
+The SMTP transport (`internal/mailer`) grew inline-image (multipart/related) support for the logo;
+the per-org SMTP settings model is untouched.
 
 ---
 
@@ -233,16 +234,18 @@ The remainder of #132:
 
 1. **Per-org and per-recipient locale** — the two earlier arguments to `ResolveLocale`. The editor
    already keys templates per locale, so this is only about *choosing* the locale for a send.
-2. **The uploaded logo image in mail.** Open decision, deliberately not invented here. The
-   `logo` block currently renders the org name as a text wordmark. `GET /orgs/{slug}/theme/logo` is
-   member-gated and a mail recipient is by definition not a member, so a hotlink would resolve to
-   403. The two options:
-   - a publicly fetchable, versioned logo path (no membership check, cacheable) — also fixes the
-     pre-auth branding gap where `/login` can only replay a cached palette, but it is an
-     authorisation change and therefore a maintainer's call;
-   - embed the logo as a MIME `cid:` part — no new public surface and it renders offline, but it
-     needs `mailer.Message` to grow an inline-attachment part (multipart/related), which the
-     issue lists as out of scope for the transport.
+
+The uploaded logo image in mail is now **built** (the `cid:` route): the `logo` block embeds the
+org's uploaded logo as a `multipart/related` inline part (`Content-ID: <orglogo>`), so it renders in
+clients that block remote images and offline, with no new public surface. `mailer.Message` grew an
+`Inline []InlineImage` for this. The block still falls back to the org name as a text wordmark when
+no logo is set, and the org name is the image's `alt` text so an images-off client shows the sender.
+The editor preview cannot resolve `cid:` inside its sandboxed iframe, so `Service.Preview` swaps the
+reference for a `data:` URI (`inlinePreviewLogo`) — the same bytes, shown the way a frame can render
+them, so preview and delivery still show the same image. The logo image is only fetched for a layout
+that actually has a logo block (`brandWithLogo` / `templateHasLogoBlock`). A publicly fetchable logo
+path (which would also fix the pre-auth `/login` branding gap) was the alternative and remains a
+possible future authorisation change, but is not needed for mail.
 
 ## 10. Files
 

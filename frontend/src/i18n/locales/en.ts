@@ -707,6 +707,7 @@ export const en = {
     message: "Message",
     status: "Status",
     edit: "Edit",
+    backToList: "Mail templates",
     customized: "Edited",
     default: "Default",
     variables: "Variables",

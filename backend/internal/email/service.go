@@ -21,6 +21,9 @@ type config interface {
 // not sent is a broken flow.
 type brandSource interface {
 	MailBrandSeeds(ctx context.Context, orgID uuid.UUID) (Seeds, error)
+	// MailLogo resolves the org's uploaded logo image, or an empty Logo when none is
+	// set. Like the palette, a failure here is cosmetic and must not block a send.
+	MailLogo(ctx context.Context, orgID uuid.UUID) (Logo, error)
 }
 
 // templateSource resolves the template a send uses: the organization's own edit
@@ -122,11 +125,13 @@ func (s *Service) Preview(ctx context.Context, orgID uuid.UUID, kind Kind, local
 		}
 		resolved = stored
 	}
-	body, err := Render(kind, locale, resolved, s.brandFor(ctx, orgID), vars)
+	body, err := Render(kind, locale, resolved, s.brandWithLogo(ctx, orgID, resolved), vars)
 	if err != nil {
 		return Body{}, &InvalidTemplateError{Reason: err}
 	}
-	return body, nil
+	// The preview iframe cannot resolve cid:, so the logo rides inline as a data:
+	// URI instead — the same image, shown the way a sandboxed frame can render it.
+	return inlinePreviewLogo(body), nil
 }
 
 // send resolves the org's SMTP config, locale, template and branding, renders the
@@ -158,9 +163,18 @@ func (s *Service) sendLocalized(ctx context.Context, orgID uuid.UUID, kind Kind,
 		return err
 	}
 
-	body, err := Render(kind, locale, tpl, s.brandFor(ctx, orgID), vars)
+	body, err := Render(kind, locale, tpl, s.brandWithLogo(ctx, orgID, tpl), vars)
 	if err != nil {
 		return err
+	}
+
+	var inline []mailer.InlineImage
+	if body.InlineLogo != nil {
+		inline = []mailer.InlineImage{{
+			ContentID:   body.InlineLogo.ContentID,
+			ContentType: body.InlineLogo.ContentType,
+			Bytes:       body.InlineLogo.Bytes,
+		}}
 	}
 
 	for _, to := range recipients {
@@ -169,6 +183,7 @@ func (s *Service) sendLocalized(ctx context.Context, orgID uuid.UUID, kind Kind,
 			Subject:  body.Subject,
 			TextBody: body.TextBody,
 			HTMLBody: body.HTMLBody,
+			Inline:   inline,
 		}); err != nil {
 			return err
 		}
@@ -209,4 +224,31 @@ func (s *Service) brandFor(ctx context.Context, orgID uuid.UUID) Brand {
 		return resolveBrand(Seeds{})
 	}
 	return resolveBrand(seeds)
+}
+
+// brandWithLogo resolves the palette and, only when the layout actually has a logo
+// block, the org's logo image — so a template without one never triggers a logo
+// read. A logo fetch failure is cosmetic (the block falls back to the wordmark) and
+// never blocks the send.
+func (s *Service) brandWithLogo(ctx context.Context, orgID uuid.UUID, tpl Template) Brand {
+	brand := s.brandFor(ctx, orgID)
+	if templateHasLogoBlock(tpl) {
+		brand.Logo = s.logoFor(ctx, orgID)
+	}
+	return brand
+}
+
+// logoFor resolves the org's logo image, returning an empty Logo (the wordmark
+// fallback) when there is no brand source, none is set, or the lookup fails.
+func (s *Service) logoFor(ctx context.Context, orgID uuid.UUID) Logo {
+	if s.brand == nil {
+		return Logo{}
+	}
+	logo, err := s.brand.MailLogo(ctx, orgID)
+	if err != nil {
+		slog.WarnContext(ctx, "resolving the mail logo failed, sending without the logo image",
+			"org_id", orgID, "error", err)
+		return Logo{}
+	}
+	return logo
 }

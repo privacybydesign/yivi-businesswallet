@@ -35,12 +35,18 @@ func (r *recordingSender) Send(_ mailer.Config, msg mailer.Message) error {
 }
 
 type stubBrand struct {
-	seeds Seeds
-	err   error
+	seeds   Seeds
+	err     error
+	logo    Logo
+	logoErr error
 }
 
 func (s stubBrand) MailBrandSeeds(context.Context, uuid.UUID) (Seeds, error) {
 	return s.seeds, s.err
+}
+
+func (s stubBrand) MailLogo(context.Context, uuid.UUID) (Logo, error) {
+	return s.logo, s.logoErr
 }
 
 func newTestService(sender mailer.Sender, brand brandSource, locale Locale) *Service {

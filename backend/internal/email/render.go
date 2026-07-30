@@ -1,6 +1,7 @@
 package email
 
 import (
+	"encoding/base64"
 	"fmt"
 	"html"
 	"net/url"
@@ -34,6 +35,20 @@ type Body struct {
 	Subject  string
 	HTMLBody string
 	TextBody string
+	// InlineLogo is the org logo the HTML references as cid:<ContentID>, set when
+	// the layout has a logo block and the org has an uploaded logo; nil otherwise.
+	// Delivery attaches it as a related MIME part; the editor preview inlines it as
+	// a data: URI instead (inlinePreviewLogo), since a sandboxed iframe has no MIME
+	// parts to resolve cid: against.
+	InlineLogo *InlineImage
+}
+
+// InlineImage is an image embedded in the message and referenced from the HTML by
+// cid:<ContentID>.
+type InlineImage struct {
+	ContentID   string
+	ContentType string
+	Bytes       []byte
 }
 
 // ValidateTemplate reports whether the template is sendable: every placeholder is
@@ -225,11 +240,58 @@ func Render(kind Kind, locale Locale, tpl Template, brand Brand, vars map[string
 			}
 		}
 	}
-	return Body{
+	body := Body{
 		Subject:  content.subject,
 		HTMLBody: renderHTML(content, brand),
 		TextBody: renderText(content),
-	}, nil
+	}
+	// The logo is attached only when the layout actually references it, so an
+	// unreferenced part never rides along.
+	if brand.Logo.present() && hasLogoBlock(content) {
+		body.InlineLogo = &InlineImage{
+			ContentID:   logoContentID,
+			ContentType: brand.Logo.ContentType,
+			Bytes:       brand.Logo.Bytes,
+		}
+	}
+	return body, nil
+}
+
+// hasLogoBlock reports whether the resolved layout has a logo block to embed into.
+func hasLogoBlock(c content) bool {
+	for _, blk := range c.blocks {
+		if blk.typ == BlockLogo {
+			return true
+		}
+	}
+	return false
+}
+
+// templateHasLogoBlock reports whether an unresolved template has a logo block, so
+// the service can skip fetching the logo image for a layout that would not use it.
+func templateHasLogoBlock(tpl Template) bool {
+	for _, blk := range tpl.Blocks {
+		if blk.Type == BlockLogo {
+			return true
+		}
+	}
+	return false
+}
+
+// inlinePreviewLogo rewrites the rendered HTML so the logo image, which delivery
+// references as a cid: MIME part, shows in the editor's sandboxed preview iframe —
+// which has no MIME parts to resolve cid: against. The bytes are identical; only
+// the transport differs, so preview and delivery still show the same image. The
+// returned body carries no attachment, since a preview sends nothing.
+func inlinePreviewLogo(body Body) Body {
+	if body.InlineLogo == nil {
+		return body
+	}
+	dataURI := "data:" + body.InlineLogo.ContentType + ";base64," +
+		base64.StdEncoding.EncodeToString(body.InlineLogo.Bytes)
+	body.HTMLBody = strings.Replace(body.HTMLBody, "cid:"+body.InlineLogo.ContentID, dataURI, 1)
+	body.InlineLogo = nil
+	return body
 }
 
 func declares(variables []Variable, name string) bool {

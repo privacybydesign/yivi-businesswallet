@@ -44,7 +44,14 @@ const (
 	bodyLineHeight  = "24px"
 	smallFontSize   = "13px"
 	smallLineHeight = "20px"
+	// logoHeight bounds the rendered logo; width follows the image's aspect ratio.
+	// A header logo reads at roughly this height in the app chrome too.
+	logoHeight = 40
 )
+
+// logoContentID keys the org logo as an inline MIME part; the HTML references it as
+// cid:orglogo and the transport attaches it under Content-ID: <orglogo>.
+const logoContentID = "orglogo"
 
 // blockSpacing is the vertical gap above each block type, tuned so a heading
 // reads as a section start and a button gets room to be a target. The first
@@ -113,14 +120,21 @@ func renderHTML(c content, b Brand) string {
 func renderBlockHTML(body *strings.Builder, blk resolvedBlock, c content, b Brand) {
 	switch blk.typ {
 	case BlockLogo:
-		// The organization's wordmark. The uploaded theme logo is deliberately not
-		// here yet — it needs a delivery path that works for a recipient who is not
-		// a member of the org, which is an open decision (see
-		// .ai/features/email-templates.md).
-		fmt.Fprintf(body,
-			`<div style="font-family:%s;font-size:%s;line-height:%s;font-weight:600;color:%s;">%s</div>`,
-			attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), c.orgName.html,
-		)
+		// The organization's uploaded logo, embedded as an inline image (cid:) so it
+		// renders in clients that block remote images and offline. The org name is the
+		// alt text, so a client with images off still shows who sent the message. When
+		// no logo is set the block falls back to the org name as a text wordmark.
+		if b.Logo.present() {
+			fmt.Fprintf(body,
+				`<img src="cid:%s" alt="%s" height="%d" style="display:block;height:%dpx;width:auto;max-width:100%%;border:0;outline:none;text-decoration:none;" />`,
+				logoContentID, attr(c.orgName.text), logoHeight, logoHeight,
+			)
+		} else {
+			fmt.Fprintf(body,
+				`<div style="font-family:%s;font-size:%s;line-height:%s;font-weight:600;color:%s;">%s</div>`,
+				attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), c.orgName.html,
+			)
+		}
 	case BlockHeading:
 		fmt.Fprintf(body,
 			`<div style="font-family:%s;font-size:20px;line-height:28px;font-weight:600;color:%s;">%s</div>`,

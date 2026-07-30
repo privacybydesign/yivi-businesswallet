@@ -725,6 +725,7 @@ export const nl: Translation<typeof en> = {
     message: "Bericht",
     status: "Status",
     edit: "Aanpassen",
+    backToList: "E-mailteksten",
     customized: "Aangepast",
     default: "Standaard",
     variables: "Variabelen",
