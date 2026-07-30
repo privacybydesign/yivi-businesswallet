@@ -624,7 +624,10 @@ All org-scoped (`auth.RequireUser` → `organization.Handler.Authorize`, org via
 **Key material** (admin): `GET|POST .../attestations/keys`, `POST .../attestations/keys/{id}/suspend|revoke`
 **Held** (member read; admin delete): `GET .../attestations/held`, `DELETE .../attestations/held/{id}`
 **Export** (Art 5(1)(l)): `GET .../attestations/export` — structured, machine-readable
-(issued + held), admin.
+(issued + held), admin. The bundle contract (manifest schema, format profile,
+container, versioning) is [`export.md`](./export.md); the unified org-scoped endpoint
+is `GET /api/v1/orgs/{slug}/export`, and whether this per-slice route survives
+alongside it is an open decision there (§8).
 
 The recipient wallet's OpenID4VCI callbacks hit the **hosted issuer**, not our routes.
 
@@ -660,7 +663,12 @@ invalidation cascades. The screen is the mockup:
   issued; the schema is the allow-list. The verify side (`auth-openid4vp.md`) already
   enforces selective disclosure on presentation.
 - **Export** (Art 5(1)(l)): a structured machine-readable dump of issued + held EAAs
-  and their ledger/evidence, for portability and service termination.
+  and their ledger/evidence, for portability and service termination. The bundle it
+  goes into is specified in [`export.md`](./export.md): a ZIP with a top-level
+  `manifest.json`, the `attestations` section carrying `issued.json` + `held.json` +
+  the referenced schemas/templates/key references, and held credential material as
+  native SD-JWT VC files. That doc also fixes what never leaves: `claim_token`,
+  `offer_uri`, `tx_code`, `IssuanceID` and any key material (export.md §7).
 
 ---
 
