@@ -76,7 +76,9 @@ func (c *Channel) ID() notifications.ChannelID { return notifications.ChannelEma
 // The deadline on ctx bounds the two lookups but not the sending: mailer.Sender
 // takes no context and sets a dial timeout only, so a relay that accepts the
 // connection and then stalls keeps this call running past the dispatcher's notify
-// timeout. Do not read the deadline as a bound on how long Notify takes.
+// timeout. Do not read the deadline as a bound on how long Notify takes — the
+// dispatcher walks away at it and abandons this goroutine, which then lives until
+// the SMTP conversation gives up on its own.
 func (c *Channel) Notify(ctx context.Context, e notifications.Event) error {
 	org, err := c.orgs.GetByID(ctx, e.OrgID)
 	if err != nil {
