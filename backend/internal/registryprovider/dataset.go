@@ -29,7 +29,7 @@ type Registration struct {
 // DemoRegistrations is the seeded fake KVK API: the deterministic set of known
 // company registrations the register matches consults against.
 //
-// The first three entries' KVK numbers and primary representatives are the single
+// The seeded entries' KVK numbers and primary representatives are the single
 // source of truth the seed reuses for its demo organisations, so the seeded data
 // and the register flow never drift (TestDemoOrgsMatchRegister).
 //
@@ -58,6 +58,12 @@ var DemoRegistrations = []Registration{
 		KVKNumber: "90000030", LegalName: "Radboud Universiteit", EUID: "NL.KVK.90000030",
 		Representatives: []Representative{
 			{Kind: KindGevolmachtigde, GivenNames: "Anke", FamilyName: "Bakker", DateOfBirth: "1990-02-17", Authority: AuthorityBeperkt},
+			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
+		},
+	},
+	{
+		KVKNumber: "09220932", LegalName: "Gemeente Nijmegen", EUID: "NL.KVK.09220932",
+		Representatives: []Representative{
 			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
 		},
 	},
