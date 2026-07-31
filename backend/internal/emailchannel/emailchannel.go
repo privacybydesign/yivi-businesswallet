@@ -17,7 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -26,11 +25,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/notifications"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
-
-// auditLogPath is the app route the mail's call to action opens, under the org's
-// slug. The full record of the event lives there, behind the same access control
-// as every other org page.
-const auditLogPath = "/audit-log"
 
 // notificationMailer sends the rendered notification (implemented by
 // *email.Service).
@@ -65,7 +59,7 @@ type Channel struct {
 // the mail's audit-log link is built on; config.Load has already checked it is an
 // absolute http(s) URL, which is what the mail renderer requires of a link.
 func New(mail notificationMailer, orgs orgDirectory, appBaseURL string) *Channel {
-	return &Channel{mail: mail, orgs: orgs, appBaseURL: strings.TrimRight(appBaseURL, "/")}
+	return &Channel{mail: mail, orgs: orgs, appBaseURL: appBaseURL}
 }
 
 func (c *Channel) ID() notifications.ChannelID { return notifications.ChannelEmail }
@@ -98,7 +92,7 @@ func (c *Channel) Notify(ctx context.Context, e notifications.Event) error {
 		Action:     e.Action,
 		Details:    notifications.Summarize(e.Metadata),
 		OccurredAt: e.OccurredAt,
-		AuditURL:   c.appBaseURL + "/" + org.Slug + auditLogPath,
+		AuditURL:   notifications.AuditLogURL(c.appBaseURL, org.Slug),
 	})
 	switch {
 	case errors.Is(err, email.ErrNotConfigured):

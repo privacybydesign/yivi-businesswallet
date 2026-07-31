@@ -42,7 +42,21 @@ const (
 	// changeArrow separates an updated field's old value from its new one. It is a
 	// symbol rather than a word because this line carries no copy to translate.
 	changeArrow = " → "
+	// auditLogPath is the app route a notification's link opens, under the org's
+	// slug. The full record of the event lives there, behind the same access control
+	// as every other org page.
+	auditLogPath = "/audit-log"
 )
+
+// AuditLogURL is the link to an organization's audit log on the deployment's
+// frontend, which every channel puts in its message. It lives beside Summarize
+// for the same reason: what a notification shows of an event is one rule shared
+// by the channels, not a copy per channel. appBaseURL is the deployment's
+// frontend base URL — config.Load has already checked it is an absolute http(s)
+// URL — with or without a trailing slash.
+func AuditLogURL(appBaseURL, slug string) string {
+	return strings.TrimRight(appBaseURL, "/") + "/" + slug + auditLogPath
+}
 
 // Summarize renders an event's audit metadata as the lines a notification shows.
 // It returns "" when there is nothing worth stating, in which case the channel
