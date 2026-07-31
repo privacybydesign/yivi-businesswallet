@@ -18,6 +18,8 @@ type fakeRepo struct {
 	getBySlugErr  error
 	membership    Membership
 	membershipErr error
+	avatar        user.Avatar
+	avatarErr     error
 }
 
 func (f fakeRepo) List(context.Context) ([]Organization, error) { return nil, nil }
@@ -41,6 +43,10 @@ func (f fakeRepo) GetMembership(context.Context, uuid.UUID, uuid.UUID) (Membersh
 
 func (f fakeRepo) GetMember(context.Context, uuid.UUID, uuid.UUID) (Member, error) {
 	return Member{}, nil
+}
+
+func (f fakeRepo) GetMemberAvatar(context.Context, uuid.UUID, uuid.UUID) (user.Avatar, error) {
+	return f.avatar, f.avatarErr
 }
 
 func (f fakeRepo) ListMemberEntries(context.Context, uuid.UUID, MemberListParams) ([]MemberEntry, int, error) {

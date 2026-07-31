@@ -108,6 +108,12 @@ type Member struct {
 	// Verified reports that the member proved a passport/id-card identity when they
 	// joined; orthogonal to the active/invited status.
 	Verified bool `json:"verified"`
+	// AvatarURI is the API path serving this member's portrait photo, "" when they
+	// have not set one. Set by the handler from HasAvatar / AvatarUpdatedAt, which
+	// are the store's answer and never reach the client on their own.
+	AvatarURI       string     `json:"avatarUri"`
+	HasAvatar       bool       `json:"-"`
+	AvatarUpdatedAt *time.Time `json:"-"`
 }
 
 type MemberEntry struct {
@@ -127,6 +133,11 @@ type MemberEntry struct {
 	Phone          *string    `json:"phone"`
 	// Verified is always false for invited entries (no identity proven yet).
 	Verified bool `json:"verified"`
+	// AvatarURI is the API path serving this member's portrait photo, "" when they
+	// have not set one — always "" for an invited entry, which has no user row yet.
+	AvatarURI       string     `json:"avatarUri"`
+	HasAvatar       bool       `json:"-"`
+	AvatarUpdatedAt *time.Time `json:"-"`
 }
 
 type MemberListParams struct {

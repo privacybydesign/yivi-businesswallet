@@ -25,6 +25,7 @@ type repository interface {
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
+	GetMemberAvatar(ctx context.Context, orgID, userID uuid.UUID) (user.Avatar, error)
 	ListMemberEntries(ctx context.Context, orgID uuid.UUID, p MemberListParams) ([]MemberEntry, int, error)
 	RevokeInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error
 	// ResendInvitation rotates the invite token and extends the expiry, returning
@@ -118,6 +119,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))
 	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.member))))
+	mux.Handle("GET /orgs/{slug}/members/{userId}/avatar", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberAvatar))))
 	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.invite))))
 	mux.Handle("PATCH /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMember))))
 	mux.Handle("DELETE /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.offboardMember))))
