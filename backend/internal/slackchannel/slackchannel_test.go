@@ -16,6 +16,24 @@ func TestNormalizeWebhookURLAcceptsASlackWebhook(t *testing.T) {
 	}
 }
 
+// DNS is case-insensitive, so a webhook pasted with a capitalised host is the
+// same webhook. It is stored the way Slack writes it.
+func TestNormalizeWebhookURLFoldsTheHostsCase(t *testing.T) {
+	want := "https://hooks.slack.com/services/T000/B000/xxxxx"
+	for _, raw := range []string{
+		"https://HOOKS.SLACK.COM/services/T000/B000/xxxxx",
+		"https://Hooks.Slack.com/services/T000/B000/xxxxx",
+	} {
+		got, err := NormalizeWebhookURL(raw)
+		if err != nil {
+			t.Fatalf("NormalizeWebhookURL(%q): %v", raw, err)
+		}
+		if got != want {
+			t.Errorf("NormalizeWebhookURL(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
 // Clearing the webhook is submitted as an empty string, which is not an invalid
 // URL: the store reads it as "remove the stored one".
 func TestNormalizeWebhookURLAcceptsAnEmptyValue(t *testing.T) {

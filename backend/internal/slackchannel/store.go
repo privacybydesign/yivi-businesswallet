@@ -71,6 +71,10 @@ func (s *Store) Upsert(ctx context.Context, orgID uuid.UUID, in SettingsInput) (
 			return err
 		}
 
+		// What the row will hold once this save lands, decided before it is written so
+		// the stored state and the audited one cannot disagree.
+		after := nextState(before, in, setWebhook, webhookArg != nil)
+
 		// With setWebhook false the stored ciphertext is kept, so the enabled flag can
 		// be changed without re-pasting the URL.
 		const upsert = `INSERT INTO org_slack_settings
@@ -81,14 +85,10 @@ func (s *Store) Upsert(ctx context.Context, orgID uuid.UUID, in SettingsInput) (
 				                              ELSE org_slack_settings.webhook_url_ciphertext END,
 				enabled = EXCLUDED.enabled,
 				updated_at = now()`
-		if _, err := q.Exec(ctx, upsert, orgID, webhookArg, in.Enabled, setWebhook); err != nil {
+		if _, err := q.Exec(ctx, upsert, orgID, webhookArg, after.enabled, setWebhook); err != nil {
 			return fmt.Errorf("slackchannel: upsert settings org %s: %w", orgID, err)
 		}
 
-		after := state{enabled: in.Enabled, hasWebhook: before.hasWebhook}
-		if setWebhook {
-			after.hasWebhook = webhookArg != nil
-		}
 		// The URL itself is never audited: an audit event is read back by every org
 		// admin and exported, and the notification catalog hands metadata to outside
 		// systems. Whether one is set is what a reader needs.
@@ -111,6 +111,24 @@ type state struct {
 
 func (s state) auditSnapshot() map[string]any {
 	return map[string]any{"hasWebhook": s.hasWebhook, "enabled": s.enabled}
+}
+
+// nextState is the state a save leaves behind: the webhook it keeps, sets or
+// clears, and whether delivery is on. Delivery is clamped off when no webhook is
+// stored, because "enabled with nothing to post to" is not a state worth keeping
+// — the settings screen already refuses to offer it, GET would report it as on
+// while the screen renders it off, and it would silently become a live setting
+// the moment a URL is pasted. Only the API can ask for it; this is where both
+// sides are made to agree.
+func nextState(before state, in SettingsInput, setWebhook, hasNewWebhook bool) state {
+	next := state{enabled: in.Enabled, hasWebhook: before.hasWebhook}
+	if setWebhook {
+		next.hasWebhook = hasNewWebhook
+	}
+	if !next.hasWebhook {
+		next.enabled = false
+	}
+	return next
 }
 
 // lockedState reads (and locks) an org's current settings row. A missing row is

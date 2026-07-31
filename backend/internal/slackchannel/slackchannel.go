@@ -97,12 +97,19 @@ func NormalizeWebhookURL(raw string) (string, error) {
 	// Host carries the port, so a value that dresses another endpoint up as Slack
 	// ("hooks.slack.com:8080") does not match. Credentials in the URL are refused
 	// rather than sent: a real webhook has none, so their only use here is to make a
-	// different host read as Slack at a glance.
-	if parsed.Scheme != webhookScheme || parsed.Host != webhookHost || parsed.User != nil {
+	// different host read as Slack at a glance. The comparison folds case because DNS
+	// does: a capitalised paste is the same webhook, and refusing it would read as
+	// contradicting the value the admin is looking at — the error cannot quote it to
+	// show the difference.
+	if parsed.Scheme != webhookScheme || !strings.EqualFold(parsed.Host, webhookHost) || parsed.User != nil {
 		return "", ErrInvalidWebhookURL
 	}
 	if strings.Trim(parsed.Path, "/") == "" {
 		return "", ErrInvalidWebhookURL
 	}
-	return trimmed, nil
+	// Store the host as Slack writes it, so what is kept (and posted to) is one shape
+	// whatever was pasted. Only the host is rewritten; the path is the secret and is
+	// left exactly as given.
+	parsed.Host = webhookHost
+	return parsed.String(), nil
 }

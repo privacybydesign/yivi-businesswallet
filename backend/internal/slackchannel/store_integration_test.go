@@ -127,11 +127,29 @@ func TestUpsertWithAnEmptyURLClearsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	if got.HasWebhook {
-		t.Error("HasWebhook = true, want the webhook cleared")
+	if got.HasWebhook || got.Enabled {
+		t.Errorf("Upsert returned %+v, want the webhook cleared and delivery off with it", got)
 	}
 	if _, err := store.webhookFor(ctx, orgID); !errors.Is(err, ErrNotConfigured) {
 		t.Errorf("webhookFor = %v, want ErrNotConfigured after clearing the webhook", err)
+	}
+}
+
+// Delivery on with no webhook is a state the settings screen cannot render back:
+// GET would answer enabled with hasWebhook false, which it shows as switched off.
+// Only the API can ask for it, and the row is what both sides read, so it is
+// clamped here (see nextState).
+func TestUpsertCannotEnableWithoutAWebhook(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := newTestStore(t, pool, audit.NopRecorder{})
+	orgID := makeOrg(t, pool, "acme")
+
+	got, err := store.Upsert(context.Background(), orgID, SettingsInput{Enabled: true})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if got.Enabled || got.HasWebhook {
+		t.Errorf("Upsert returned %+v, want delivery off while no webhook is stored", got)
 	}
 }
 
