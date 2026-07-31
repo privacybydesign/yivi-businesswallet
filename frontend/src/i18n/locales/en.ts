@@ -766,6 +766,7 @@ export const en = {
     },
     kinds: {
       credential_offer: "Credential offer",
+      event_notification: "Event notification",
       invitation: "Member invitation",
       postguard_file: "Encrypted file",
       smtp_test: "SMTP test",
@@ -773,6 +774,8 @@ export const en = {
     kindDescriptions: {
       credential_offer:
         "Sent to a person when this organization issues them a credential.",
+      event_notification:
+        "Sent to this organization's admins when something happens that they subscribed to.",
       invitation: "Sent to someone invited to join this organization.",
       postguard_file:
         "Sent to a recipient of an encrypted file, when this organization mails through its own SMTP server.",

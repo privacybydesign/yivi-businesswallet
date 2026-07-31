@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -259,6 +260,71 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// The notification channels mail an org's admins, so this query has to hold to
+// exactly that: admins of this organization, not its plain members, not someone
+// who is only invited, and nobody from another organization.
+func TestListAdminEmails(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NopRecorder{})
+	ctx := context.Background()
+
+	org := makeOrg(t, pool, "Acme", "acme")
+	other := makeOrg(t, pool, "Globex", "globex")
+
+	newUser := func(email string) uuid.UUID {
+		var id uuid.UUID
+		if err := pool.QueryRow(ctx,
+			"INSERT INTO users (email, given_names, last_name) VALUES ($1, $2, $3) RETURNING id",
+			email, "Test", "User",
+		).Scan(&id); err != nil {
+			t.Fatalf("create user %s: %v", email, err)
+		}
+		return id
+	}
+
+	memberships := []struct {
+		email string
+		orgID uuid.UUID
+		role  string
+	}{
+		{"zoe@example.test", org.ID, organization.RoleAdmin},
+		{"alice@example.test", org.ID, organization.RoleAdmin},
+		{"bob@example.test", org.ID, organization.RoleMember},
+		{"dana@example.test", other.ID, organization.RoleAdmin},
+	}
+	for _, m := range memberships {
+		if _, err := store.AddMembership(ctx, m.orgID, newUser(m.email), m.role, nil, nil); err != nil {
+			t.Fatalf("AddMembership %s: %v", m.email, err)
+		}
+	}
+	if _, err := store.CreateInvitation(ctx, organization.Invitation{
+		OrganizationID: org.ID,
+		Email:          "carol@example.test",
+		Role:           organization.RoleAdmin,
+		GivenNames:     "Carol",
+		LastName:       "Clark",
+	}); err != nil {
+		t.Fatalf("CreateInvitation carol: %v", err)
+	}
+
+	got, err := store.ListAdminEmails(ctx, org.ID)
+	if err != nil {
+		t.Fatalf("ListAdminEmails: %v", err)
+	}
+	want := []string{"alice@example.test", "zoe@example.test"}
+	if !slices.Equal(got, want) {
+		t.Errorf("ListAdminEmails = %v, want %v", got, want)
+	}
+
+	empty, err := store.ListAdminEmails(ctx, uuid.New())
+	if err != nil {
+		t.Fatalf("ListAdminEmails for an unknown org: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("ListAdminEmails for an unknown org = %v, want none", empty)
+	}
 }
 
 // TestGetMemberAvatarIsScopedToTheOrganization is the access boundary: an avatar

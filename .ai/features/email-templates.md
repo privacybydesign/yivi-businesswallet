@@ -42,8 +42,17 @@ changing what a cause *says* is a data change.
 |---|---|---|
 | `credential_offer` | `attestation.Service` issues to a natural person | `orgName`, `credentialName`, `claimUrl`, `txCode` |
 | `invitation` | org admin invites a member | `orgName`, `acceptUrl` |
+| `event_notification` | the notification layer's e-mail channel (`internal/emailchannel`) | `orgName`, `eventName`, `eventDetails`, `eventTime`, `auditUrl` |
 | `postguard_file` | PostGuard "own SMTP" delivery | `orgName`, `message`, `downloadUrl` |
 | `smtp_test` | `POST /email/test` | `orgName` |
+
+`event_notification` is the one kind whose recipients are the organization's own admins rather than
+an outside person, and the one whose `eventName` is itself catalogue copy: `templates/defaults.<locale>.json`
+carries an `events` map from audit action to its name in that language, wording matched to the audit
+log's own labels, and `EventLabel` resolves it. Every locale names the same set of actions (checked at
+init) and that set is exactly the notification catalog (checked in `internal/emailchannel`). `eventDetails`
+is the only variable that may resolve to empty: its paragraph then drops out of the layout, as any
+all-empty text block does.
 
 The variable list is what a caller actually passes today. The issue also lists `inviterName` for
 the invitation; `organization.Handler` does not carry the inviter into the send, so declaring it
@@ -256,7 +265,8 @@ possible future authorisation change, but is not needed for mail.
 | `render.go` | validation (template + per block), placeholder substitution, escaping, URL checks |
 | `shell.go` | the mail-client-safe branded rendering of every block type, both parts |
 | `brand.go` | `org_theme_settings` seeds → an AA-guaranteed mail palette |
-| `service.go` | resolves SMTP config + locale + template + brand, then sends; `Preview`, `SendSpecimen` |
+| `service.go` | resolves SMTP config + locale + template + brand, then sends; `Preview`, `SendSpecimen`, `SendEventNotification` |
+| `internal/emailchannel/` | the notification layer's e-mail channel: recipients, the audit-log link, and how much metadata a notification repeats |
 | `templatestore.go` | the per-org overrides: list / get / save / revert, and `ResolveTemplate` |
 | `templatehandler.go` | the tenant-editing routes and their request/response shapes |
 | `cmd/api/main.go` | `mailBranding`, the adapter from the theming slice to `brandSource` |

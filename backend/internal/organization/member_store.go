@@ -77,6 +77,36 @@ func (s *Store) ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, err
 	return members, nil
 }
 
+// ListAdminEmails returns the addresses of the organization's admins, sorted. It
+// selects the address and nothing else: it exists for the notification channels
+// that mail an org's admins, which have no business loading anyone's name.
+func (s *Store) ListAdminEmails(ctx context.Context, orgID uuid.UUID) ([]string, error) {
+	const q = `
+		SELECT u.email
+		FROM memberships m
+		JOIN users u ON u.id = m.user_id
+		WHERE m.organization_id = $1 AND m.role = $2
+		ORDER BY u.email`
+	rows, err := s.db.Query(ctx, q, orgID, RoleAdmin)
+	if err != nil {
+		return nil, fmt.Errorf("organization: list admin emails org %s: %w", orgID, err)
+	}
+	defer rows.Close()
+
+	emails := []string{}
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, fmt.Errorf("organization: list admin emails scan: %w", err)
+		}
+		emails = append(emails, email)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("organization: list admin emails rows: %w", err)
+	}
+	return emails, nil
+}
+
 const defaultMemberSort = "name"
 
 var memberSortColumns = map[string][]string{

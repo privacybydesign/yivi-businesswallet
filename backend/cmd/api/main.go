@@ -21,6 +21,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/emailchannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
@@ -419,12 +420,13 @@ func run() error {
 	wscaWalletHandler := wscawallet.NewHandler(wscaActivator, requireUser, orgHandler.Authorize)
 
 	notificationsHandler := notifications.NewHandler(notificationStore, requireUser, orgHandler.Authorize)
-	// Drain the notification outbox out of band. No channel is registered yet — the
-	// e-mail, Slack and MS Teams handlers are their own slices — so for now a pass
-	// claims what the audit seam queued and delivers nothing; registering a channel
-	// is the only thing that changes.
-	notifications.NewDispatcher(notificationStore, notificationStore).
-		Start(ctx, notifications.DefaultPollInterval)
+	// Drain the notification outbox out of band, into the channels registered here.
+	// Slack and MS Teams are their own slices and are not wired up yet, so an org
+	// subscribed to one of those keeps the preference and is delivered nothing until
+	// it is (see notifications.Dispatcher).
+	dispatcher := notifications.NewDispatcher(notificationStore, notificationStore)
+	dispatcher.Register(emailchannel.New(emailService, orgStore, cfg.AppBaseURL))
+	dispatcher.Start(ctx, notifications.DefaultPollInterval)
 
 	handler := server.New(
 		pool,

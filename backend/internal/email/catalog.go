@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // The mail catalogue: one Kind per cause the backend sends mail for, each with a
@@ -30,6 +31,9 @@ const (
 	// KindSMTPTest is the specimen an admin sends to themselves to verify SMTP
 	// settings.
 	KindSMTPTest Kind = "smtp_test"
+	// KindEventNotification is the notification channel's message: one wallet event
+	// the organization subscribed to, mailed to its admins.
+	KindEventNotification Kind = "event_notification"
 )
 
 // Variable names. Every placeholder a template may use is one of these, declared
@@ -42,6 +46,10 @@ const (
 	varAcceptURL      = "acceptUrl"
 	varMessage        = "message"
 	varDownloadURL    = "downloadUrl"
+	varEventName      = "eventName"
+	varEventDetails   = "eventDetails"
+	varEventTime      = "eventTime"
+	varAuditURL       = "auditUrl"
 )
 
 // Variable is one substitutable value of a kind. URL variables are additionally
@@ -73,6 +81,13 @@ var kindVariables = map[Kind][]Variable{
 	},
 	KindSMTPTest: {
 		{Name: varOrgName},
+	},
+	KindEventNotification: {
+		{Name: varOrgName},
+		{Name: varEventName},
+		{Name: varEventDetails},
+		{Name: varEventTime},
+		{Name: varAuditURL, IsURL: true},
 	},
 }
 
@@ -217,6 +232,7 @@ type shellDefaults struct {
 type defaultsFile struct {
 	Shell     shellDefaults     `json:"shell"`
 	Samples   map[string]string `json:"samples"`
+	Events    map[string]string `json:"events"`
 	Templates map[Kind]Template `json:"templates"`
 }
 
@@ -230,6 +246,10 @@ type defaults struct {
 	// keyed by variable name. They are copy, so they live in the same per-locale
 	// file as the templates rather than in Go.
 	samples map[string]string
+	// events are the human names of the audit actions a notification mail can be
+	// about, keyed by audit action. Same reason as samples: it is copy, and the
+	// wording matches the audit log's own labels so a mail and the log read alike.
+	events map[string]string
 }
 
 // shippedDefaults holds the shipped default of every kind in every locale, with
@@ -291,9 +311,46 @@ func loadDefaults() (map[Locale]defaults, error) {
 		if err := validateSamples(file.Samples); err != nil {
 			return nil, fmt.Errorf("%s: samples: %w", name, err)
 		}
-		out[locale] = defaults{templates: byKind, samples: file.Samples}
+		if err := validateEventLabels(file.Events); err != nil {
+			return nil, fmt.Errorf("%s: events: %w", name, err)
+		}
+		out[locale] = defaults{templates: byKind, samples: file.Samples, events: file.Events}
+	}
+	// Which actions have a label is a property of the catalogue, not of a language:
+	// a locale missing one would leave that event unnotifiable in that language
+	// only, which is exactly the kind of gap nobody notices until it happens.
+	for _, locale := range supportedLocales {
+		for action := range out[DefaultLocale].events {
+			if _, ok := out[locale].events[action]; !ok {
+				return nil, fmt.Errorf("defaults.%s.json: events: no label for %q", locale, action)
+			}
+		}
+		for action := range out[locale].events {
+			if _, ok := out[DefaultLocale].events[action]; !ok {
+				return nil, fmt.Errorf("defaults.%s.json: events: %q has no %s label", locale, action, DefaultLocale)
+			}
+		}
 	}
 	return out, nil
+}
+
+// validateEventLabels holds the shipped event names to what a subject line needs:
+// a name per action, and not a blank one. Which actions need one is the
+// notification catalog's call, not this package's — the channel that maps an
+// audit action onto a mail owns that check (see internal/emailchannel).
+func validateEventLabels(events map[string]string) error {
+	if len(events) == 0 {
+		return fmt.Errorf("no event labels")
+	}
+	for action, label := range events {
+		if action == "" {
+			return fmt.Errorf("an event label has no action")
+		}
+		if strings.TrimSpace(label) == "" {
+			return fmt.Errorf("label for %q is empty", action)
+		}
+	}
+	return nil
 }
 
 // validateSamples holds the shipped sample values to the same rules a real send
@@ -352,6 +409,28 @@ func DefaultTemplate(kind Kind, locale Locale) (Template, bool) {
 		tpl.Blocks = blocks
 	}
 	return tpl, ok
+}
+
+// EventLabel returns the human name of an audit action for a notification mail,
+// falling back to DefaultLocale for a locale that has no shipped copy. The second
+// result is false for an action the catalogue has no label for; every locale
+// labels the same set of actions, so it does not depend on the locale.
+func EventLabel(action string, locale Locale) (string, bool) {
+	label, ok := localeDefaults(locale).events[action]
+	return label, ok
+}
+
+// LabelledEvents returns every audit action the catalogue has a name for, sorted.
+// The notification channel uses it to assert at test time that the events an org
+// can subscribe to all have mail copy.
+func LabelledEvents() []string {
+	events := localeDefaults(DefaultLocale).events
+	out := make([]string, 0, len(events))
+	for action := range events {
+		out = append(out, action)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // SampleVariables returns stand-in values for every variable a kind declares, for
