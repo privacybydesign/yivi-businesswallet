@@ -1,4 +1,4 @@
-package emailchannel
+package notifications
 
 import (
 	"encoding/json"
@@ -8,19 +8,22 @@ import (
 	"unicode/utf8"
 )
 
-// How much of an event's audit metadata a notification repeats.
+// How much of an event's audit metadata a notification repeats. Every channel
+// renders the same lines, so the same event reads the same in a mail and in a
+// Slack message.
 //
-// The metadata is handed to the channels verbatim, and the notification catalog
-// (internal/notifications) is the gate that decides which actions may leave the
-// audit log at all — so what is left here is presentation, not another filter.
-// The rules below keep that presentation honest:
+// The metadata is handed to the channels verbatim, and the catalog above is the
+// gate that decides which actions may leave the audit log at all — so what is
+// left here is presentation, not another filter. The rules below keep that
+// presentation honest:
 //
 //   - one "field: value" per line, sorted by field, so two notifications of the
 //     same action read the same way;
 //   - an {before, after} update shows the new value, with the old one before an
 //     arrow when both are set. A field the update cleared is left out rather than
 //     printed as its old value, which would read as if it were still in force;
-//   - a value is one line and bounded in length, because it lands in a mail;
+//   - a value is one line and bounded in length, because it lands in a mail or a
+//     chat message;
 //   - a field name is the metadata's own key and is not translated, while the copy
 //     around it is: a Dutch notification reads "Rol gewijzigd bij Acme BV" above
 //     "role: member → admin". Translating the keys would mean a second catalogue of
@@ -41,10 +44,10 @@ const (
 	changeArrow = " → "
 )
 
-// summarize renders an event's audit metadata as the lines the notification mail
-// shows. It returns "" when there is nothing worth stating, in which case the
-// template's details paragraph drops out of the message.
-func summarize(metadata map[string]any) string {
+// Summarize renders an event's audit metadata as the lines a notification shows.
+// It returns "" when there is nothing worth stating, in which case the channel
+// leaves the details out of the message entirely.
+func Summarize(metadata map[string]any) string {
 	before, after, updated := envelope(metadata)
 
 	names := make([]string, 0, len(before)+len(after))

@@ -6,8 +6,10 @@
 //
 // It holds no message copy and no SMTP knowledge of its own. What it owns is the
 // mapping from a recorded event onto the mail's variables: who is told (the org's
-// admins), what the message says the event was (the catalogue's name for the
-// audit action) and how much of the event's metadata it repeats (details.go).
+// admins) and what the message says the event was (the catalogue's name for the
+// audit action). How much of the event's metadata a notification repeats is the
+// notification layer's own rule, shared with every other channel
+// (notifications.Summarize).
 package emailchannel
 
 import (
@@ -94,7 +96,7 @@ func (c *Channel) Notify(ctx context.Context, e notifications.Event) error {
 
 	err = c.mail.SendEventNotification(ctx, e.OrgID, admins, org.Name, email.EventNotification{
 		Action:     e.Action,
-		Details:    summarize(e.Metadata),
+		Details:    notifications.Summarize(e.Metadata),
 		OccurredAt: e.OccurredAt,
 		AuditURL:   c.appBaseURL + "/" + org.Slug + auditLogPath,
 	})

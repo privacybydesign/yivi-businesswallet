@@ -54,6 +54,22 @@ func TestComposePassesPostGuardURLsToBackend(t *testing.T) {
 	}
 }
 
+// TestComposePassesSlackEncryptionKeyToBackend holds the Slack key to the same
+// passthrough rule. Without the declaration the key set in .env never reaches the
+// container, so every attempt to save a webhook URL is refused as if the
+// deployment had no key at all.
+func TestComposePassesSlackEncryptionKeyToBackend(t *testing.T) {
+	backendEnvironment := backendComposeEnvironment(t)
+
+	value, ok := backendEnvironment[envSlackEncryptionKey]
+	if !ok {
+		t.Fatalf("backend service does not pass %s through; setting it in .env would do nothing", envSlackEncryptionKey)
+	}
+	if want := "${" + envSlackEncryptionKey + ":-}"; value != want {
+		t.Errorf("backend %s = %q, want %q", envSlackEncryptionKey, value, want)
+	}
+}
+
 // TestComposePassesMailDefaultLocaleToBackend holds the mail fallback locale to
 // the same passthrough rule. Without the declaration the documented .env setting
 // is silently ignored and every unlocalised send falls back to English.
