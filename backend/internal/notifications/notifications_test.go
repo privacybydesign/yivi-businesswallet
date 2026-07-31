@@ -3,6 +3,8 @@ package notifications
 import (
 	"reflect"
 	"testing"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 )
 
 func TestCatalogHasNoDuplicatesAndAGroupPerEntry(t *testing.T) {
@@ -31,6 +33,21 @@ func TestSubscribable(t *testing.T) {
 	}
 	if Subscribable("nonsense.made_up") {
 		t.Error("an unknown action reported as subscribable")
+	}
+}
+
+// A rejected accept records the legal name or e-mail the person disclosed from
+// their passport, which the organization was not told and a channel must not
+// carry off to a webhook. It stays out of the catalog on purpose; see catalog.
+func TestARejectedAcceptCannotBeSubscribedTo(t *testing.T) {
+	if Subscribable(audit.MembershipAcceptRejected) {
+		t.Errorf("%s is subscribable, so its disclosed identity can reach a channel",
+			audit.MembershipAcceptRejected)
+	}
+	for _, e := range Catalog() {
+		if e.Event == audit.MembershipAcceptRejected {
+			t.Errorf("%s is in the catalog, so the settings screen offers it", e.Event)
+		}
 	}
 }
 

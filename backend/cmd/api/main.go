@@ -258,8 +258,12 @@ func run() error {
 	// Every store records audit events through this recorder: it writes the event
 	// like a plain audit.DBRecorder and, for an event an org can subscribe to,
 	// queues it for notification in the same transaction. A store handed a bare
-	// audit.NewDBRecorder() instead is invisible to notifications — which is what
-	// the seeder wants, and nothing else does.
+	// audit.NewDBRecorder() instead is invisible to notifications, so the two below
+	// are the only ones that get one: the seeder (seeding pages nobody) and the
+	// notification store itself, which cannot be handed a recorder that needs it.
+	// The consequence of that second exception is that a notification.* action
+	// would never notify — which is fine as long as none is in the catalog, and a
+	// reason to think twice before putting one there.
 	notificationStore := notifications.NewStore(pool, audit.NewDBRecorder())
 	recorder := notifications.NewRecorder(audit.NewDBRecorder(), notificationStore)
 

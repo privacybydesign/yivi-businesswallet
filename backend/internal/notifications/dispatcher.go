@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,12 @@ const (
 	// DefaultNotifyTimeout bounds one channel's delivery attempt. Without it a
 	// hung SMTP or webhook call would stall the whole pass.
 	DefaultNotifyTimeout = 15 * time.Second
+	// DefaultDeliverConcurrency is how many events a pass delivers at a time.
+	// Delivery within one event is sequential over its channels, so a pass costs
+	// at worst ceil(batch/concurrency) * channels * DefaultNotifyTimeout; without
+	// the fan-out a batch of hanging channels would take that times concurrency,
+	// during which nothing else drains.
+	DefaultDeliverConcurrency = 8
 )
 
 // Channel is one delivery route for a notification (e-mail, Slack, MS Teams).
@@ -25,6 +32,10 @@ const (
 // at startup. Notify is called once per subscribed event and must respect the
 // context deadline; returning an error is logged and the event moves on, it never
 // affects another channel or the action that caused the event.
+//
+// Notify must treat e as read-only, Metadata included: the same Event value (and
+// the same Metadata map) is handed to each channel subscribed to it, so mutating
+// it changes what the next channel sees.
 type Channel interface {
 	ID() ChannelID
 	Notify(ctx context.Context, e Event) error
@@ -48,6 +59,7 @@ type Dispatcher struct {
 	channels      map[ChannelID]Channel
 	batch         int
 	notifyTimeout time.Duration
+	concurrency   int
 }
 
 // NewDispatcher builds a dispatcher over the outbox. Channels are registered
@@ -60,6 +72,7 @@ func NewDispatcher(outbox outboxClaimer, subscriptions subscriptionReader) *Disp
 		channels:      map[ChannelID]Channel{},
 		batch:         DefaultClaimBatch,
 		notifyTimeout: DefaultNotifyTimeout,
+		concurrency:   DefaultDeliverConcurrency,
 	}
 }
 
@@ -99,25 +112,52 @@ func (d *Dispatcher) DispatchPending(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	settings := d.readSubscriptions(ctx, events)
 
-	// One settings lookup per org per pass: a burst of events usually belongs to
-	// the same organization.
+	// Deliver up to concurrency events at a time. Events are independent of each
+	// other, so a channel that sits on its deadline only delays the events sharing
+	// its slot instead of the whole batch.
+	sem := make(chan struct{}, d.concurrency)
+	var wg sync.WaitGroup
+	for _, e := range events {
+		channels := settings[e.OrgID].ChannelsFor(e.Action)
+		if len(channels) == 0 {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			d.deliver(ctx, e, channels)
+		}()
+	}
+	wg.Wait()
+	return len(events), nil
+}
+
+// readSubscriptions resolves the subscriptions of every org in the batch, one
+// lookup per org: a burst of events usually belongs to the same organization. A
+// read that fails is logged once and cached as the zero Settings, so the org's
+// remaining events in this pass notify nobody rather than re-querying a database
+// that is already in trouble — a full batch would otherwise cost one failed query
+// and one ERROR line per event, every tick, per replica. The next pass retries.
+func (d *Dispatcher) readSubscriptions(ctx context.Context, events []Event) map[uuid.UUID]Settings {
 	settings := map[uuid.UUID]Settings{}
 	for _, e := range events {
-		orgSettings, ok := settings[e.OrgID]
-		if !ok {
-			orgSettings, err = d.subscriptions.GetSettings(ctx, e.OrgID)
-			if err != nil {
-				slog.ErrorContext(ctx, "notifications: read subscriptions",
-					slog.String("organizationId", e.OrgID.String()),
-					slog.String("error", err.Error()))
-				continue
-			}
-			settings[e.OrgID] = orgSettings
+		if _, ok := settings[e.OrgID]; ok {
+			continue
 		}
-		d.deliver(ctx, e, orgSettings.ChannelsFor(e.Action))
+		orgSettings, err := d.subscriptions.GetSettings(ctx, e.OrgID)
+		if err != nil {
+			slog.ErrorContext(ctx, "notifications: read subscriptions",
+				slog.String("organizationId", e.OrgID.String()),
+				slog.String("error", err.Error()))
+			orgSettings = Settings{}
+		}
+		settings[e.OrgID] = orgSettings
 	}
-	return len(events), nil
+	return settings
 }
 
 // deliver sends one event to each subscribed channel in turn.

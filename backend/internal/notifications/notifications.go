@@ -10,8 +10,8 @@
 //     (Settings/SettingsInput, org-admin-gated Handler, audited on change);
 //   - Recorder — an audit.Recorder decorator that enqueues a subscribable event
 //     on the notification outbox in the same transaction as the event itself;
-//   - Dispatcher — claims outbox rows out of band and fans each one out to the
-//     channels the org subscribed to.
+//   - Dispatcher — claims outbox rows out of band and fans them out, a few events
+//     at a time, to the channels the org subscribed to.
 //
 // Going through the outbox rather than notifying inline is what satisfies the two
 // hard rules: a notification is only ever sent for an action that committed (a
@@ -88,14 +88,28 @@ type CatalogEntry struct {
 // membership, wallet, QERDS, PostGuard and attestation families. The remaining
 // audit actions (settings changes, the org lifecycle, identity review) are
 // deliberately absent — they are administrative bookkeeping nobody asked to be
-// paged about, and leaving them out keeps the settings screen readable. Adding
-// one is a one-line change here.
+// paged about, and leaving them out keeps the settings screen readable.
+//
+// Adding an entry is a one-line change here, but it is a data-minimisation
+// decision, not a display one: the Dispatcher hands a subscribed event's audit
+// metadata to the channels unchanged, and a channel is an outside system (an SMTP
+// relay, a Slack or Microsoft webhook). So an action whose metadata is more than
+// the subscribing organization needs to see does not belong in this list.
+//
+// audit.MembershipAcceptRejected is the case that settles it and is left out on
+// purpose: organization.Service records it when a disclosure does not match the
+// invitation, with the legal name or e-mail the person disclosed from their
+// passport or ID card as the "after" side. That is exactly the record the audit
+// log exists for and exactly what must not be posted to a webhook, so the failed
+// attempt stays in the audit log where an admin can read it under access control.
+// audit.MembershipAccepted is in the list for the mirror-image reason: acceptance
+// only reaches that record once the disclosure matched the invitation, so its
+// metadata is the name the admin typed themselves.
 var catalog = []CatalogEntry{
 	{audit.MembershipInvited, GroupMembership},
 	{audit.MembershipInviteResent, GroupMembership},
 	{audit.MembershipInviteRevoked, GroupMembership},
 	{audit.MembershipAccepted, GroupMembership},
-	{audit.MembershipAcceptRejected, GroupMembership},
 	{audit.MembershipDeclined, GroupMembership},
 	{audit.MembershipRevoked, GroupMembership},
 	{audit.MembershipRoleChanged, GroupMembership},
@@ -221,6 +235,10 @@ func auditSnapshot(subs map[string][]ChannelID) map[string]any {
 
 // Event is one recorded audit event on its way to the channels: the outbox row
 // the Recorder enqueued, as the Dispatcher hands it to a Channel.
+//
+// Metadata is the audit metadata of the action verbatim — there is no per-channel
+// filtering seam, so what a channel may see is decided by what the catalog admits
+// (see catalog). A Channel must not modify it; see Channel.Notify.
 type Event struct {
 	ID          uuid.UUID
 	OrgID       uuid.UUID

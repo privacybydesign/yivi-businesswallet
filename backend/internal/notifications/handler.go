@@ -63,8 +63,13 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) error {
 // settingsRequest replaces the whole subscription document: an event the request
 // leaves out is unsubscribed. There is no partial update — the screen edits the
 // full set of checkboxes and saves it as one.
+//
+// Subscriptions is a pointer so a body that omits the key is distinguishable from
+// one that sends it empty. Both would normalize to the same empty document, but
+// only the second is someone asking to unsubscribe from everything; the first is
+// a malformed request, and accepting it would make a typo a silent full wipe.
 type settingsRequest struct {
-	Subscriptions map[string][]ChannelID `json:"subscriptions"`
+	Subscriptions *map[string][]ChannelID `json:"subscriptions"`
 }
 
 func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
@@ -85,10 +90,15 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
 // parseSettingsRequest decodes and validates the body into a normalized input.
 func parseSettingsRequest(r *http.Request) (SettingsInput, error) {
 	var req settingsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		return SettingsInput{}, badRequest("invalid_body", "invalid request body")
 	}
-	subs, err := Normalize(req.Subscriptions)
+	if req.Subscriptions == nil {
+		return SettingsInput{}, badRequest("invalid_input", "subscriptions is required")
+	}
+	subs, err := Normalize(*req.Subscriptions)
 	if err != nil {
 		return SettingsInput{}, badRequest("invalid_input", err.Error())
 	}

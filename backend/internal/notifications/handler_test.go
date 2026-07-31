@@ -52,6 +52,10 @@ func TestParseSettingsRequestRejectsBadInput(t *testing.T) {
 		"not json":        {`not json at all`, "invalid_body"},
 		"unknown event":   {`{"subscriptions":{"nonsense.made_up":["email"]}}`, "invalid_input"},
 		"unknown channel": {`{"subscriptions":{"membership.invited":["pigeon"]}}`, "invalid_input"},
+		// A body that never mentions subscriptions, or misspells the key, would
+		// otherwise normalize to an empty document and wipe the org's whole set.
+		"no subscriptions key": {`{}`, "invalid_input"},
+		"misspelled key":       {`{"subscription":{"membership.invited":["email"]}}`, "invalid_body"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

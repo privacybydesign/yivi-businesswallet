@@ -2252,13 +2252,17 @@ paths:
       description: >-
         Requires an administrator role in the organisation. Replaces the whole
         subscription document: an audit event the request leaves out is
-        unsubscribed. An unknown event or channel is rejected with 400.
+        unsubscribed. An unknown event or channel is rejected with 400, as is a
+        body that omits `subscriptions` — send it empty to unsubscribe from
+        everything.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [subscriptions]
+              additionalProperties: false
               properties:
                 subscriptions:
                   type: object

@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,26 +43,44 @@ func (s *stubSubscriptions) GetSettings(_ context.Context, orgID uuid.UUID) (Set
 	return s.byOrg[orgID], nil
 }
 
-// stubChannel records what it was handed and can fail or panic on demand.
+// stubChannel records what it was handed and can fail or panic on demand. A pass
+// delivers several events at a time, so the recording is mutex-guarded.
 type stubChannel struct {
-	id       ChannelID
+	id     ChannelID
+	err    error
+	panics bool
+
+	mu       sync.Mutex
 	got      []Event
-	err      error
-	panics   bool
 	deadline bool
 }
 
 func (c *stubChannel) ID() ChannelID { return c.id }
 
 func (c *stubChannel) Notify(ctx context.Context, e Event) error {
+	c.mu.Lock()
 	c.got = append(c.got, e)
 	if _, ok := ctx.Deadline(); ok {
 		c.deadline = true
 	}
+	c.mu.Unlock()
 	if c.panics {
 		panic("channel exploded")
 	}
 	return c.err
+}
+
+// received is what the channel was handed, in no particular order.
+func (c *stubChannel) received() []Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]Event(nil), c.got...)
+}
+
+func (c *stubChannel) sawDeadline() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.deadline
 }
 
 func event(orgID uuid.UUID, action string) Event {
@@ -91,13 +110,13 @@ func TestDispatchDeliversOnlyToSubscribedChannels(t *testing.T) {
 	if n != 1 {
 		t.Errorf("dispatched %d events, want 1", n)
 	}
-	if len(mail.got) != 1 || mail.got[0].ID != e.ID {
-		t.Errorf("email channel got %v, want the claimed event", mail.got)
+	if got := mail.received(); len(got) != 1 || got[0].ID != e.ID {
+		t.Errorf("email channel got %v, want the claimed event", got)
 	}
-	if len(slack.got) != 0 {
-		t.Errorf("slack channel got %v, want nothing (not subscribed)", slack.got)
+	if got := slack.received(); len(got) != 0 {
+		t.Errorf("slack channel got %v, want nothing (not subscribed)", got)
 	}
-	if !mail.deadline {
+	if !mail.sawDeadline() {
 		t.Error("the channel was called without a deadline")
 	}
 }
@@ -113,8 +132,8 @@ func TestDispatchSkipsAnUnsubscribedEvent(t *testing.T) {
 	if _, err := d.DispatchPending(context.Background()); err != nil {
 		t.Fatalf("DispatchPending: %v", err)
 	}
-	if len(mail.got) != 0 {
-		t.Errorf("email channel got %v, want nothing for an unsubscribed event", mail.got)
+	if got := mail.received(); len(got) != 0 {
+		t.Errorf("email channel got %v, want nothing for an unsubscribed event", got)
 	}
 }
 
@@ -141,8 +160,8 @@ func TestDispatchContinuesAfterAChannelFails(t *testing.T) {
 			if n != 1 {
 				t.Errorf("dispatched %d events, want 1", n)
 			}
-			if len(teams.got) != 1 {
-				t.Errorf("teams channel got %v, want the event despite the broken channel", teams.got)
+			if got := teams.received(); len(got) != 1 {
+				t.Errorf("teams channel got %v, want the event despite the broken channel", got)
 			}
 		})
 	}
@@ -161,8 +180,8 @@ func TestDispatchSkipsAChannelThatIsNotRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DispatchPending: %v", err)
 	}
-	if n != 1 || len(mail.got) != 1 {
-		t.Errorf("dispatched %d events with %d e-mails, want 1 and 1", n, len(mail.got))
+	if got := mail.received(); n != 1 || len(got) != 1 {
+		t.Errorf("dispatched %d events with %d e-mails, want 1 and 1", n, len(got))
 	}
 }
 
@@ -200,6 +219,83 @@ func TestDispatchReadsSubscriptionsOncePerOrgPerPass(t *testing.T) {
 	if subs.lookups != 1 {
 		t.Errorf("read subscriptions %d times, want 1 for three events of one org", subs.lookups)
 	}
+}
+
+// The once-per-org-per-pass budget has to hold when the read fails too, otherwise
+// a database blip costs one failed query and one ERROR line per queued event,
+// every tick, per replica — against a database that is already in trouble.
+func TestDispatchCachesAFailedSubscriptionsReadForThePass(t *testing.T) {
+	orgID := uuid.New()
+	subs := &stubSubscriptions{err: errors.New("database down")}
+	events := []Event{
+		event(orgID, "membership.invited"),
+		event(orgID, "membership.invited"),
+		event(orgID, "membership.revoked"),
+	}
+
+	mail := &stubChannel{id: ChannelEmail}
+	d := NewDispatcher(&stubOutbox{events: events}, subs)
+	d.Register(mail)
+
+	if _, err := d.DispatchPending(context.Background()); err != nil {
+		t.Fatalf("DispatchPending: %v", err)
+	}
+	if subs.lookups != 1 {
+		t.Errorf("read subscriptions %d times, want 1 failed read for three events of one org", subs.lookups)
+	}
+	if got := mail.received(); len(got) != 0 {
+		t.Errorf("email channel got %v, want nothing when the subscriptions are unknown", got)
+	}
+}
+
+// blockingChannel reports every arrival and returns only once released, so a test
+// can observe how many deliveries are in flight without a timing assumption.
+type blockingChannel struct {
+	id      ChannelID
+	arrived chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingChannel) ID() ChannelID { return c.id }
+
+func (c *blockingChannel) Notify(context.Context, Event) error {
+	c.arrived <- struct{}{}
+	<-c.release
+	return nil
+}
+
+// A pass delivers several events at a time, so a channel sitting on its deadline
+// delays the events sharing its slot instead of the whole batch.
+func TestDispatchDeliversEventsConcurrently(t *testing.T) {
+	orgID := uuid.New()
+	events := []Event{event(orgID, "membership.invited"), event(orgID, "membership.invited")}
+	channel := &blockingChannel{
+		id:      ChannelEmail,
+		arrived: make(chan struct{}, len(events)),
+		release: make(chan struct{}),
+	}
+
+	d := NewDispatcher(&stubOutbox{events: events}, subscribed(orgID, "membership.invited", ChannelEmail))
+	d.Register(channel)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := d.DispatchPending(context.Background()); err != nil {
+			t.Errorf("DispatchPending: %v", err)
+		}
+	}()
+
+	for i := range events {
+		select {
+		case <-channel.arrived:
+		case <-time.After(10 * time.Second):
+			close(channel.release)
+			t.Fatalf("%d of %d events were in delivery, want both at once", i, len(events))
+		}
+	}
+	close(channel.release)
+	<-done
 }
 
 func TestDispatchReportsAFailureToReadTheQueue(t *testing.T) {
