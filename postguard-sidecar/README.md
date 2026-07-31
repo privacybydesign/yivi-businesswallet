@@ -55,6 +55,16 @@ Success: `200 {"uuid":"<cryptify-id>"}`. Errors are JSON
 
 See `.env.example`. Only `PG_SIDECAR_TOKEN` is mandatory.
 
+## Observability
+
+On startup the sidecar logs the resolved `pkg` and `cryptify` endpoints. Each
+`POST /v1/send` additionally logs the endpoints it targets for that upload
+(`pkg=…`, `cryptify=…`) and, on success, the returned cryptify `uuid`. This makes
+the PostGuard environment a file is actually uploaded to visible per-request —
+the check for a sidecar aimed at a different environment than the backend expects
+(upload to staging while the mailed download link resolves against production).
+Recipient addresses and the API key are never logged.
+
 ## Development
 
 ```bash
