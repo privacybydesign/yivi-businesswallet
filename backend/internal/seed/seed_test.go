@@ -6,7 +6,47 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
+
+// TestPartnerOrgFixturesAreWellFormed guards the staging partner seed fixtures:
+// every org must carry a bare address local-part (no "@", else qerdsAddress
+// double-appends the domain), slugs and KVK numbers must be unique so no two
+// partners collide on ON CONFLICT (slug), every org must have at least one admin,
+// and every admin e-mail must parse (EnsurePartnerOrganizations parses them and
+// would fail the whole seed otherwise).
+func TestPartnerOrgFixturesAreWellFormed(t *testing.T) {
+	seenSlug := map[string]bool{}
+	seenKVK := map[string]bool{}
+	for _, p := range partnerOrganizations {
+		o := p.org
+		if o.slug == "" {
+			t.Errorf("partner org %q has an empty slug", o.name)
+		}
+		if o.addressLocal == "" || strings.Contains(o.addressLocal, "@") {
+			t.Errorf("partner org %q addressLocal = %q, want a bare local-part with no domain", o.slug, o.addressLocal)
+		}
+		if seenSlug[o.slug] {
+			t.Errorf("partner org slug %q is duplicated", o.slug)
+		}
+		seenSlug[o.slug] = true
+		if seenKVK[o.kvkNumber] {
+			t.Errorf("partner org KVK number %q is duplicated", o.kvkNumber)
+		}
+		seenKVK[o.kvkNumber] = true
+		if o.repKind != "" {
+			t.Errorf("partner org %q should carry no representative (we hold no register identity), got repKind %q", o.slug, o.repKind)
+		}
+		if len(p.team) == 0 {
+			t.Errorf("partner org %q has no team members to make admin", o.slug)
+		}
+		for _, m := range p.team {
+			if _, err := user.ParseEmail(m.email); err != nil {
+				t.Errorf("partner org %q member e-mail %q does not parse: %v", o.slug, m.email, err)
+			}
+		}
+	}
+}
 
 // TestQerdsAddressUsesConfiguredDomain pins that a seeded org's QERDS address is
 // assembled from the configured domain, so staging can seed real addresses

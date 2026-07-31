@@ -90,6 +90,68 @@ var yiviTeam = []demoUser{
 	{email: "d.mulder@yivi.app", givenNames: "Dibran", lastName: "Mulder"},
 }
 
+// partnerOrganization pairs a staging pilot organisation with the team
+// provisioned as its admins. Unlike the dev demo orgs these are real partner
+// organisations seeded only into staging (via `seed -partners`), never the dev
+// demo run nor the production `-org` seed. They carry no representative (repKind
+// is empty) because we hold no register identity for them, and they are
+// deliberately absent from the KVK register dataset: they are provisioned
+// directly, not opened through the register flow.
+type partnerOrganization struct {
+	org  demoOrganization
+	team []demoUser
+}
+
+// partnerOrganizations are the staging pilot partners. Every listed team member
+// is provisioned as an admin of their organisation (ensureTeamMember) so they can
+// manage it immediately. Keep slugs and addressLocal parts unique and bare (no
+// "@") — TestPartnerOrgFixturesAreWellFormed guards that.
+var partnerOrganizations = []partnerOrganization{
+	{
+		org: demoOrganization{name: "Anoigo Services B.V.", slug: "anoigo", kvkNumber: "84991011", euid: "NL.KVK.84991011", addressLocal: "anoigo"},
+		team: []demoUser{
+			{email: "jeroen.debeer@anoigo.nl", givenNames: "Jeroen", lastName: "de Beer"},
+			{email: "cristy.meddens@anoigo.nl", givenNames: "Cristy", lastName: "Meddens"},
+		},
+	},
+	{
+		org: demoOrganization{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NL.KVK.09220932", addressLocal: "nijmegen"},
+		team: []demoUser{
+			{email: "w.van.den.eeckhout@nijmegen.nl", givenNames: "Wendy", lastName: "van den Eeckhout"},
+			{email: "m.dessing@nijmegen.nl", givenNames: "Marnix", lastName: "Dessing"},
+		},
+	},
+	{
+		org: demoOrganization{name: "Ver.iD", slug: "ver-id", kvkNumber: "86662236", euid: "NL.KVK.86662236", addressLocal: "ver-id"},
+		team: []demoUser{
+			{email: "robert@ver.id", givenNames: "Robert", lastName: "van Altena"},
+			{email: "sten@ver.id", givenNames: "Sten", lastName: "Reijers"},
+			{email: "roger@ver.id", givenNames: "Roger", lastName: "Olivieira"},
+			{email: "tj@ver.id", givenNames: "Thomas Jan", lastName: "Geelen"},
+		},
+	},
+	{
+		org: demoOrganization{name: "PinkRoccade Local Government", slug: "pinkroccade", kvkNumber: "27322975", euid: "NL.KVK.27322975", addressLocal: "pinkroccade"},
+		team: []demoUser{
+			{email: "engelbert.wijnhoven@pinkroccade.nl", givenNames: "Engelbert", lastName: "Wijnhoven"},
+			{email: "annemarie.stel@pinkroccade.nl", givenNames: "Annemarie", lastName: "Stel"},
+		},
+	},
+	{
+		org: demoOrganization{name: "Stichting Nuts", slug: "nuts", kvkNumber: "73134562", euid: "NL.KVK.73134562", addressLocal: "nuts"},
+		team: []demoUser{
+			{email: "sergej.van.middendorp@nuts.nl", givenNames: "Sergej", lastName: "van Middendorp"},
+			{email: "roland@headease.nl", givenNames: "Roland", lastName: "Groen"},
+		},
+	},
+	{
+		org: demoOrganization{name: "Secumail B.V.", slug: "secumail", kvkNumber: "69887594", euid: "NL.KVK.69887594", addressLocal: "secumail"},
+		team: []demoUser{
+			{email: "yvonne@secumailer.com", givenNames: "Yvonne", lastName: "Hoogendoorn"},
+		},
+	},
+}
+
 // kvkRegisterOrg is the KVK register itself as a business-wallet participant: the
 // organisation the register's match/no-match decisions are audited against
 // (registryprovider.SeededRegistry). It is provisioned like any other org but has
@@ -107,6 +169,7 @@ var demoOrganizations = []demoOrganization{
 	yiviOrg,
 	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NL.KVK.90000020", addressLocal: "firsty", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly", repDOB: "1985-11-22"},
 	{name: "Radboud Universiteit", slug: "radboud-universiteit", kvkNumber: "90000030", euid: "NL.KVK.90000030", addressLocal: "radboud", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
+	{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NL.KVK.09220932", addressLocal: "nijmegen", repGiven: "Dibran", repFamily: "Mulder", repKind: "bestuurder", repAuth: "sole", repDOB: "1991-05-14"},
 }
 
 var demoUsers = []demoUser{
@@ -356,6 +419,43 @@ func EnsureYiviOrganization(ctx context.Context, dsn, addressDomain string) (org
 		slog.String("id", org.ID.String()),
 	)
 	return org, nil
+}
+
+// EnsurePartnerOrganizations provisions the staging pilot partner organisations
+// (identity + default QERDS address) and their teams as admins — and nothing
+// else: no representative, no demo members, no activity. Like
+// EnsureYiviOrganization every write is ON CONFLICT / existence guarded, so it is
+// idempotent and safe to run on every staging deploy. It is deliberately NOT part
+// of the `-org` seed (which also runs in production): these are pilot orgs that
+// belong in staging only, wired into the staging deploy via `seed -partners`.
+func EnsurePartnerOrganizations(ctx context.Context, dsn, addressDomain string) error {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("seed: connect: %w", err)
+	}
+	defer pool.Close()
+
+	users := user.NewStore(pool)
+	orgs := organization.NewStore(pool, audit.NewDBRecorder())
+
+	for _, p := range partnerOrganizations {
+		org, err := ensureOrg(ctx, pool, p.org, addressDomain)
+		if err != nil {
+			return err
+		}
+		// ensureTeamMember makes each listed member an admin of the org.
+		for _, m := range p.team {
+			if err := ensureTeamMember(ctx, users, orgs, org.ID, m); err != nil {
+				return err
+			}
+		}
+		slog.Info("ensured partner organisation",
+			slog.String("slug", org.Slug),
+			slog.String("id", org.ID.String()),
+			slog.Int("admins", len(p.team)),
+		)
+	}
+	return nil
 }
 
 // EnsureKVKRegisterOrganization provisions the KVK register participant (the
