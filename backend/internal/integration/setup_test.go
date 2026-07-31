@@ -116,7 +116,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	presentationStore := presentation.NewStore(pool, sessionTTL)
 	seedPresentation(t, pool, disclosureToken)
 	authService := auth.NewService(fake, presentationStore, userStore, sessionStore, orgStore)
-	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, admins)
+	authHandler := auth.NewHandler(authService, sessionStore, userStore, cookieCfg, admins)
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
 	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)

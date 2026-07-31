@@ -12,9 +12,9 @@ import {
   auditVisual,
   AUDIT_TONE_CLASSES,
 } from "../lib/audit-event";
-import { fullName } from "../lib/name";
+import { fullName, personInitials } from "../lib/name";
 import { useWhenFormatter } from "../lib/format-when";
-import { Button, Card, Icon, Table, TopBar } from "../ui";
+import { Avatar, Button, Card, Icon, Table, TopBar } from "../ui";
 import * as React from "react";
 
 const COLUMN_COUNT = 5;
@@ -138,6 +138,13 @@ export default function AuditLog(): React.JSX.Element {
                               >
                                 <Icon name={visual.icon} size={14} />
                               </span>
+                              {event.actor && (
+                                <Avatar
+                                  initials={personInitials(event.actor)}
+                                  src={event.actor.avatarUri}
+                                  fit="cover"
+                                />
+                              )}
                               <span className="text-ink truncate">
                                 {event.actor
                                   ? fullName(event.actor)

@@ -51,6 +51,7 @@ export const nl: Translation<typeof en> = {
     admin: "Beheer",
     platformAdmin: "Platformbeheerder",
     settings: "Instellingen",
+    profile: "Mijn profiel",
     logIn: "Inloggen",
     openMenu: "Menu openen",
     breadcrumb: "Kruimelpad",
@@ -104,6 +105,30 @@ export const nl: Translation<typeof en> = {
     back: "Terug naar uitnodigingen",
     underReview: "In behandeling",
     rejected: "Afgewezen",
+  },
+  profile: {
+    title: "Mijn profiel",
+    subtitle: "Je account en profielfoto",
+    photo: "Profielfoto",
+    photoIntro:
+      "Je foto wordt getoond op elke plek waar je in de app voorkomt, zoals ledenlijsten en het auditlogboek. Alleen mensen in jouw organisaties zien hem.",
+    photoAlt: "Jouw profielfoto",
+    photoChoose: "Foto kiezen",
+    photoReplace: "Foto vervangen",
+    photoRemove: "Foto verwijderen",
+    photoSave: "Foto opslaan",
+    photoHint:
+      "PNG, JPEG, GIF of WebP, maximaal 8 MB. De foto wordt vierkant uitgesneden, verkleind naar 256 pixels en opnieuw opgeslagen zonder cameragegevens zoals locatie.",
+    photoTypeInvalid:
+      "De foto moet een PNG, JPEG, GIF of WebP-afbeelding zijn.",
+    photoTooLarge: "De foto is groter dan 8 MB.",
+    photoEmpty: "Het fotobestand is leeg.",
+    photoSaveError: "Foto opslaan mislukt: {{message}}",
+    photoRemoveError: "Foto verwijderen mislukt: {{message}}",
+    account: "Account",
+    email: "E-mail",
+    accountHint:
+      "Je naam en e-mailadres komen uit de gegevens die je met je wallet hebt vrijgegeven en zijn hier niet te wijzigen.",
   },
   identityReviews: {
     title: "Identiteitscontroles",
@@ -375,6 +400,8 @@ export const nl: Translation<typeof en> = {
     wscaActivated: "Houder-wallet geactiveerd",
     wscaRotated: "Wallet-geheim geroteerd",
     themeSaved: "Branding bijgewerkt",
+    avatarSaved: "Profielfoto opgeslagen",
+    avatarRemoved: "Profielfoto verwijderd",
   },
   members: {
     title: "Leden",

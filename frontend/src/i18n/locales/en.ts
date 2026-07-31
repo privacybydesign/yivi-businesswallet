@@ -40,6 +40,7 @@ export const en = {
     admin: "Admin",
     platformAdmin: "Platform Admin",
     settings: "Settings",
+    profile: "My profile",
     logIn: "Log in",
     openMenu: "Open menu",
     breadcrumb: "Breadcrumb",
@@ -93,6 +94,29 @@ export const en = {
     back: "Back to invitations",
     underReview: "Under review",
     rejected: "Rejected",
+  },
+  profile: {
+    title: "My profile",
+    subtitle: "Your account and profile photo",
+    photo: "Profile photo",
+    photoIntro:
+      "Your photo is shown wherever you appear in the app, such as member lists and the audit log. Only people in your organizations can see it.",
+    photoAlt: "Your profile photo",
+    photoChoose: "Choose photo",
+    photoReplace: "Replace photo",
+    photoRemove: "Remove photo",
+    photoSave: "Save photo",
+    photoHint:
+      "PNG, JPEG, GIF or WebP, up to 8 MB. The photo is cropped square, scaled to 256 pixels and re-saved without camera data such as location.",
+    photoTypeInvalid: "The photo must be a PNG, JPEG, GIF or WebP image.",
+    photoTooLarge: "The photo is larger than 8 MB.",
+    photoEmpty: "The photo file is empty.",
+    photoSaveError: "Could not save the photo: {{message}}",
+    photoRemoveError: "Could not remove the photo: {{message}}",
+    account: "Account",
+    email: "E-mail",
+    accountHint:
+      "Your name and e-mail come from the credentials you disclosed with your wallet, so they cannot be edited here.",
   },
   identityReviews: {
     title: "Identity reviews",
@@ -362,6 +386,8 @@ export const en = {
     wscaActivated: "Holder wallet activated",
     wscaRotated: "Wallet secret rotated",
     themeSaved: "Branding updated",
+    avatarSaved: "Profile photo saved",
+    avatarRemoved: "Profile photo removed",
   },
   members: {
     title: "Members",

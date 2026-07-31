@@ -410,6 +410,74 @@ paths:
                 description: Response payload; shape depends on the endpoint.
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/v1/me/avatar:
+    get:
+      tags: [auth]
+      summary: Serve the authenticated user's own avatar
+      description: >-
+        Streams the stored portrait photo. Requires an authenticated session.
+        Returns 404 when no photo is set.
+      responses:
+        '2XX':
+          description: The avatar image bytes.
+          content:
+            image/jpeg: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [auth]
+      summary: Upload or replace the authenticated user's avatar
+      description: >-
+        Accepts a PNG, JPEG, GIF or WebP photo in the "avatar" file field, up to
+        8 MiB. The image is re-encoded to a 256x256 JPEG before it is stored, so
+        camera metadata (EXIF, including GPS) is dropped; the EXIF orientation is
+        applied to the pixels first. Returns the updated user.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+                  description: The photo to store as the avatar.
+              required: [avatar]
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: The uploaded photo is larger than the accepted maximum.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [auth]
+      summary: Remove the authenticated user's avatar
+      description: >-
+        Clears the stored photo, so the user falls back to their initials.
+        Returns the updated user.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/v1/me/invitations:
     get:
       tags: [organizations]
@@ -2211,6 +2279,40 @@ paths:
             application/json:
               schema:
                 description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/members/{userId}/avatar:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: User identifier.
+    get:
+      tags: [organizations]
+      summary: Serve a member's avatar
+      description: >-
+        Streams the member's portrait photo. Requires an administrator role in
+        the organisation, and the user must be a member of it. Returns 404 when
+        no photo is set.
+      responses:
+        '2XX':
+          description: The avatar image bytes.
+          content:
+            image/jpeg: {}
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

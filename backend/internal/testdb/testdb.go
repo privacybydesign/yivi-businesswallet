@@ -25,7 +25,12 @@ const (
 	envTestDatabaseURL = "TEST_DATABASE_URL"
 	namePrefix         = "ybw_test_"
 	maxNameBase        = 40
-	dropTimeout        = 10 * time.Second
+	// dropAttemptTimeout bounds a single drop attempt; dropAttempts retries cover a
+	// loaded CI Postgres, where the forced drop plus the admin connect it needs can
+	// transiently run long. A drop that loses this race is left behind, not failed:
+	// see dropDatabase.
+	dropAttemptTimeout = 20 * time.Second
+	dropAttempts       = 3
 )
 
 var dbCounter atomic.Int64
@@ -85,21 +90,38 @@ func createDatabase(t *testing.T, ctx context.Context, adminDSN, name string) {
 	}
 }
 
+// dropDatabase tears down a test database, best-effort. The database is uniquely
+// named and ephemeral, so a drop that loses a race with a loaded server must not
+// fail a test whose assertions already passed — teardown latency says nothing
+// about the code under test. Retry a few times to clean up under transient load,
+// then log and leave it behind rather than reporting a spurious failure.
 func dropDatabase(t *testing.T, adminDSN, name string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), dropTimeout)
+
+	var lastErr error
+	for attempt := 1; attempt <= dropAttempts; attempt++ {
+		if lastErr = tryDropDatabase(adminDSN, name); lastErr == nil {
+			return
+		}
+	}
+	t.Logf("testdb: drop database %q left behind after %d attempts (harmless, ephemeral): %v",
+		name, dropAttempts, lastErr)
+}
+
+func tryDropDatabase(adminDSN, name string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), dropAttemptTimeout)
 	defer cancel()
 
 	admin, err := pgx.Connect(ctx, adminDSN)
 	if err != nil {
-		t.Errorf("testdb: connect admin for drop: %v", err)
-		return
+		return fmt.Errorf("connect admin for drop: %w", err)
 	}
 	defer func() { _ = admin.Close(ctx) }()
 
 	if _, err := admin.Exec(ctx, fmt.Sprintf(`DROP DATABASE IF EXISTS %q WITH (FORCE)`, name)); err != nil {
-		t.Errorf("testdb: drop database %q: %v", name, err)
+		return fmt.Errorf("drop database %q: %w", name, err)
 	}
+	return nil
 }
 
 // uniqueName derives a valid, collision-free database name from the test name
