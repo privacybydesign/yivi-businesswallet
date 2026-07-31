@@ -3,6 +3,7 @@
 package organization_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 func strptr(s string) *string { return &s }
@@ -257,4 +259,101 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestGetMemberAvatarIsScopedToTheOrganization is the access boundary: an avatar
+// is personal data, so it must only be readable through an org the person is a
+// member of — a second org's admin gets the same answer as "no photo set".
+func TestGetMemberAvatarIsScopedToTheOrganization(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NopRecorder{})
+	users := user.NewStore(pool)
+	ctx := context.Background()
+
+	acme := makeOrg(t, pool, "Acme", "acme")
+	other := makeOrg(t, pool, "Other", "other")
+
+	var userID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO users (email, given_names, last_name) VALUES ($1, $2, $3) RETURNING id",
+		"alice@example.test", "Alice", "Anderson",
+	).Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := store.AddMembership(ctx, acme.ID, userID, organization.RoleMember, nil, nil); err != nil {
+		t.Fatalf("AddMembership: %v", err)
+	}
+
+	if _, err := store.GetMemberAvatar(ctx, acme.ID, userID); !errors.Is(err, user.ErrNoAvatar) {
+		t.Errorf("GetMemberAvatar before upload = %v, want user.ErrNoAvatar", err)
+	}
+
+	avatar := user.Avatar{Bytes: []byte{0xFF, 0xD8, 0xFF, 0xE0}, ContentType: user.AvatarContentType}
+	if _, err := users.SetAvatar(ctx, userID, avatar); err != nil {
+		t.Fatalf("SetAvatar: %v", err)
+	}
+
+	got, err := store.GetMemberAvatar(ctx, acme.ID, userID)
+	if err != nil {
+		t.Fatalf("GetMemberAvatar: %v", err)
+	}
+	if !bytes.Equal(got.Bytes, avatar.Bytes) || got.ContentType != avatar.ContentType {
+		t.Errorf("GetMemberAvatar = %+v, want %+v", got, avatar)
+	}
+
+	if _, err := store.GetMemberAvatar(ctx, other.ID, userID); !errors.Is(err, user.ErrNoAvatar) {
+		t.Errorf("GetMemberAvatar from a foreign org = %v, want user.ErrNoAvatar", err)
+	}
+}
+
+// TestListMemberEntriesReportsAvatars keeps the list query's has_avatar column
+// honest: an active member's photo shows, an invited entry has no user row and so
+// never claims one.
+func TestListMemberEntriesReportsAvatars(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NopRecorder{})
+	users := user.NewStore(pool)
+	ctx := context.Background()
+
+	org := makeOrg(t, pool, "Acme", "acme")
+
+	var userID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO users (email, given_names, last_name) VALUES ($1, $2, $3) RETURNING id",
+		"alice@example.test", "Alice", "Anderson",
+	).Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := store.AddMembership(ctx, org.ID, userID, organization.RoleMember, nil, nil); err != nil {
+		t.Fatalf("AddMembership: %v", err)
+	}
+	if _, err := store.CreateInvitation(ctx, organization.Invitation{
+		OrganizationID: org.ID,
+		Email:          "dave@example.test",
+		GivenNames:     "Dave",
+		LastName:       "Dijk",
+		Role:           organization.RoleMember,
+	}); err != nil {
+		t.Fatalf("CreateInvitation: %v", err)
+	}
+	if _, err := users.SetAvatar(ctx, userID, user.Avatar{Bytes: []byte{1, 2, 3}, ContentType: user.AvatarContentType}); err != nil {
+		t.Fatalf("SetAvatar: %v", err)
+	}
+
+	entries, _, err := store.ListMemberEntries(ctx, org.ID, organization.MemberListParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListMemberEntries: %v", err)
+	}
+	for _, e := range entries {
+		switch e.Status {
+		case organization.StatusActive:
+			if !e.HasAvatar || e.AvatarUpdatedAt == nil {
+				t.Errorf("active entry %s: hasAvatar = %v, updatedAt = %v; want true and a timestamp", e.Email, e.HasAvatar, e.AvatarUpdatedAt)
+			}
+		case organization.StatusInvited:
+			if e.HasAvatar {
+				t.Errorf("invited entry %s claims an avatar", e.Email)
+			}
+		}
+	}
 }

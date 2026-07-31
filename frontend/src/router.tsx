@@ -16,6 +16,7 @@ import Login from "./routes/login";
 import Register from "./routes/register";
 import InviteAccept from "./routes/invite-accept";
 import MyInvitations from "./routes/my-invitations";
+import Profile from "./routes/profile";
 import Enroll from "./routes/enroll";
 import IdentityReviews from "./routes/identity-reviews";
 import Dashboard from "./routes/dashboard";
@@ -93,6 +94,7 @@ const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
 const invitationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("myInvitations.title"),
 };
+const profileCrumb: RouteHandle = { crumb: ({ t }) => t("profile.title") };
 const enrollCrumb: RouteHandle = { crumb: ({ t }) => t("enroll.title") };
 const adminCrumb: RouteHandle = { crumb: ({ t }) => t("adminDashboard.title") };
 const reviewsCrumb: RouteHandle = {
@@ -122,6 +124,11 @@ export const router = createBrowserRouter([
                 path: "invitations",
                 Component: MyInvitations,
                 handle: invitationsCrumb,
+              },
+              {
+                path: "profile",
+                Component: Profile,
+                handle: profileCrumb,
               },
               {
                 path: "enroll",

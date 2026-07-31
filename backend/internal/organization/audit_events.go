@@ -9,6 +9,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 func (h *Handler) auditEvents(w http.ResponseWriter, r *http.Request) error {
@@ -37,8 +38,22 @@ func (h *Handler) auditEvents(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("listing audit events: %w", err)
 	}
+	addActorAvatarURIs(org.Slug, page.Events)
 	respond.JSON(w, r, http.StatusOK, page)
 	return nil
+}
+
+// addActorAvatarURIs points each event's actor at the org-scoped avatar endpoint,
+// so the log shows who acted with the same photo the member list does. The reader
+// is org-agnostic and cannot build that path itself.
+func addActorAvatarURIs(slug string, events []audit.Event) {
+	for i := range events {
+		actor := events[i].Actor
+		if actor == nil {
+			continue
+		}
+		actor.AvatarURI = user.AvatarURL(MemberAvatarPath(slug, actor.UserID), actor.HasAvatar, actor.AvatarUpdatedAt)
+	}
 }
 
 func (h *Handler) memberAuditEvents(w http.ResponseWriter, r *http.Request) error {
@@ -72,6 +87,7 @@ func (h *Handler) memberAuditEvents(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return fmt.Errorf("listing member audit events: %w", err)
 	}
+	addActorAvatarURIs(org.Slug, page.Events)
 	respond.JSON(w, r, http.StatusOK, page)
 	return nil
 }

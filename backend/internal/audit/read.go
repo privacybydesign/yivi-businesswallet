@@ -25,6 +25,13 @@ type EventActor struct {
 	PreferredName *string   `json:"preferredName"`
 	GivenNames    string    `json:"givenNames"`
 	LastName      string    `json:"lastName"`
+	// AvatarURI is the API path serving the actor's portrait photo, "" when they
+	// have not set one. The reader only reports whether one exists and when it
+	// changed (HasAvatar / AvatarUpdatedAt) — the path is org-scoped, so the
+	// org-scoped handler fills it in.
+	AvatarURI       string     `json:"avatarUri"`
+	HasAvatar       bool       `json:"-"`
+	AvatarUpdatedAt *time.Time `json:"-"`
 }
 
 type Event struct {
@@ -118,7 +125,8 @@ func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, afte
 
 	q := fmt.Sprintf(`
 		SELECT a.id, a.occurred_at, a.action, a.target_type, a.target_id, a.metadata,
-		       u.id, u.preferred_name, u.given_names, u.last_name
+		       u.id, u.preferred_name, u.given_names, u.last_name,
+		       u.avatar_bytes IS NOT NULL, u.avatar_updated_at
 		FROM audit_events a
 		LEFT JOIN users u ON u.id = a.actor_user_id
 		WHERE %s
@@ -134,25 +142,30 @@ func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, afte
 	events := []Event{}
 	for rows.Next() {
 		var (
-			e         Event
-			meta      []byte
-			actorID   *uuid.UUID
-			preferred *string
-			given     *string
-			last      *string
+			e            Event
+			meta         []byte
+			actorID      *uuid.UUID
+			preferred    *string
+			given        *string
+			last         *string
+			hasAvatar    *bool
+			avatarUpdate *time.Time
 		)
 		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.Action, &e.TargetType, &e.TargetID, &meta,
-			&actorID, &preferred, &given, &last); err != nil {
+			&actorID, &preferred, &given, &last, &hasAvatar, &avatarUpdate); err != nil {
 			return Page{}, fmt.Errorf("audit: list events scan: %w", err)
 		}
 		e.Metadata = meta
 		if actorID != nil {
-			e.Actor = &EventActor{UserID: *actorID, PreferredName: preferred}
+			e.Actor = &EventActor{UserID: *actorID, PreferredName: preferred, AvatarUpdatedAt: avatarUpdate}
 			if given != nil {
 				e.Actor.GivenNames = *given
 			}
 			if last != nil {
 				e.Actor.LastName = *last
+			}
+			if hasAvatar != nil {
+				e.Actor.HasAvatar = *hasAvatar
 			}
 		}
 		events = append(events, e)

@@ -277,7 +277,7 @@ func run() error {
 	orgStore := organization.NewStore(pool, recorder)
 	presentationStore := presentation.NewStore(pool, cfg.PresentationTTL)
 	authService := auth.NewService(verifier, presentationStore, userStore, sessionStore, orgStore)
-	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, platformAdmins)
+	authHandler := auth.NewHandler(authService, sessionStore, userStore, cookieCfg, platformAdmins)
 
 	startPruner(ctx, "sessions", cfg.SessionPruneEvery, sessionStore.DeleteExpired)
 	startPruner(ctx, "presentation_sessions", cfg.SessionPruneEvery, presentationStore.DeleteExpired)

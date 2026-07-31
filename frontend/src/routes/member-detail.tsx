@@ -252,7 +252,12 @@ export default function MemberDetail(): React.JSX.Element {
 
         <Card className="h-fit p-0">
           <div className="border-line flex flex-col items-center gap-3 border-b p-6">
-            <Avatar initials={personInitials(member)} size="lg" />
+            <Avatar
+              initials={personInitials(member)}
+              src={member.avatarUri}
+              size="lg"
+              fit="cover"
+            />
             <div className="text-center">
               <div className="font-display text-[18px] font-bold">
                 {fullName(member)}
