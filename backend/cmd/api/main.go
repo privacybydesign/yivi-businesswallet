@@ -475,6 +475,20 @@ func (b mailBranding) MailBrandSeeds(ctx context.Context, orgID uuid.UUID) (emai
 	}, nil
 }
 
+// MailLogo resolves the org's uploaded theme logo for embedding in mail. No logo
+// set is not an error: it returns an empty Logo and the logo block renders the org
+// name as a wordmark instead.
+func (b mailBranding) MailLogo(ctx context.Context, orgID uuid.UUID) (email.Logo, error) {
+	logo, err := b.theme.GetLogo(ctx, orgID)
+	if errors.Is(err, themesettings.ErrNoLogo) {
+		return email.Logo{}, nil
+	}
+	if err != nil {
+		return email.Logo{}, err
+	}
+	return email.Logo{Bytes: logo.Bytes, ContentType: logo.ContentType}, nil
+}
+
 // postguardNotifier adapts the e-mail service to the PostGuard "own SMTP"
 // notification seam, mapping the e-mail package's not-configured sentinel onto
 // PostGuard's so the handler reports a clear "configure your SMTP" error.

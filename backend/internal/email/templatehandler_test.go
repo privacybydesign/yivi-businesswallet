@@ -228,14 +228,15 @@ func TestGetTemplateReturnsTheShippedDefaultUntilCustomized(t *testing.T) {
 	}
 }
 
-func TestPutTemplateSavesTrimmedProseAndDropsBlankParagraphs(t *testing.T) {
+func TestPutTemplateSavesTrimmedBlocks(t *testing.T) {
 	store := newStubStore()
 	rec := serve(t, store, &stubMailService{}, http.MethodPut, "/orgs/acme/email/templates/invitation/en", Template{
-		Subject:    "  Join {{orgName}}  ",
-		Headline:   " Welcome ",
-		Paragraphs: []string{" We would like you on board. ", "   ", ""},
-		CTALabel:   "Accept",
-		CTAURL:     "{{acceptUrl}}",
+		Subject: "  Join {{orgName}}  ",
+		Blocks: []Block{
+			{Type: BlockHeading, Text: " Welcome "},
+			{Type: BlockParagraph, Text: " We would like you on board. "},
+			{Type: BlockButton, Label: " Accept ", URL: " {{acceptUrl}} "},
+		},
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
@@ -244,15 +245,37 @@ func TestPutTemplateSavesTrimmedProseAndDropsBlankParagraphs(t *testing.T) {
 		t.Fatalf("saved %d templates, want 1", len(store.saved))
 	}
 	saved := store.saved[0].Template
-	if saved.Subject != "Join {{orgName}}" || saved.Headline != "Welcome" {
+	if saved.Subject != "Join {{orgName}}" || saved.Blocks[0].Text != "Welcome" {
 		t.Errorf("saved %+v, want trimmed prose", saved)
 	}
-	if len(saved.Paragraphs) != 1 || saved.Paragraphs[0] != "We would like you on board." {
-		t.Errorf("paragraphs = %q, want the one non-blank paragraph", saved.Paragraphs)
+	if saved.Blocks[2].Label != "Accept" || saved.Blocks[2].URL != "{{acceptUrl}}" {
+		t.Errorf("button = %+v, want trimmed fields", saved.Blocks[2])
 	}
 	got := decodeInto[templateResponse](t, rec)
 	if !got.Customized || got.UpdatedAt == nil {
 		t.Errorf("response = %+v, want a customized template with an updatedAt", got)
+	}
+}
+
+// A block the tenant added but left blank must come back as a validation error
+// naming it, not vanish from the layout on save.
+func TestPutTemplateRejectsABlankBlock(t *testing.T) {
+	store := newStubStore()
+	rec := serve(t, store, &stubMailService{}, http.MethodPut, "/orgs/acme/email/templates/invitation/en", Template{
+		Subject: "Join {{orgName}}",
+		Blocks: []Block{
+			{Type: BlockHeading, Text: "Welcome"},
+			{Type: BlockParagraph, Text: "   "},
+		},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "blocks[1]") {
+		t.Errorf("body = %s, want the offending block named", rec.Body.String())
+	}
+	if len(store.saved) != 0 {
+		t.Error("a template with a blank block was saved")
 	}
 }
 
@@ -261,8 +284,8 @@ func TestPutTemplateSavesTrimmedProseAndDropsBlankParagraphs(t *testing.T) {
 func TestPutTemplateRejectsAnUnknownPlaceholderWith400(t *testing.T) {
 	store := newStubStore()
 	rec := serve(t, store, &stubMailService{}, http.MethodPut, "/orgs/acme/email/templates/invitation/en", Template{
-		Subject:  "Join {{orgName}}",
-		Headline: "Hello {{recipientName}}",
+		Subject: "Join {{orgName}}",
+		Blocks:  []Block{{Type: BlockHeading, Text: "Hello {{recipientName}}"}},
 	})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
@@ -276,15 +299,16 @@ func TestPutTemplateRejectsAnUnknownPlaceholderWith400(t *testing.T) {
 	}
 }
 
-// The call-to-action is the one field that reaches an href, so a literal
+// The button URL is the one field that reaches an href, so a literal
 // javascript: URL has to be refused at save time, not at send time.
-func TestPutTemplateRejectsAnUnsafeCallToActionURL(t *testing.T) {
+func TestPutTemplateRejectsAnUnsafeButtonURL(t *testing.T) {
 	store := newStubStore()
 	rec := serve(t, store, &stubMailService{}, http.MethodPut, "/orgs/acme/email/templates/invitation/en", Template{
-		Subject:  "Join {{orgName}}",
-		Headline: "Welcome",
-		CTALabel: "Accept",
-		CTAURL:   "javascript:alert(1)",
+		Subject: "Join {{orgName}}",
+		Blocks: []Block{
+			{Type: BlockHeading, Text: "Welcome"},
+			{Type: BlockButton, Label: "Accept", URL: "javascript:alert(1)"},
+		},
 	})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
@@ -294,16 +318,15 @@ func TestPutTemplateRejectsAnUnsafeCallToActionURL(t *testing.T) {
 	}
 }
 
-func TestPutTemplateRejectsTooManyParagraphs(t *testing.T) {
-	paragraphs := make([]string, maxParagraphs+1)
-	for i := range paragraphs {
-		paragraphs[i] = "Something to say."
+func TestPutTemplateRejectsTooManyBlocks(t *testing.T) {
+	blocks := make([]Block, maxBlocks+1)
+	for i := range blocks {
+		blocks[i] = Block{Type: BlockParagraph, Text: "Something to say."}
 	}
 	store := newStubStore()
 	rec := serve(t, store, &stubMailService{}, http.MethodPut, "/orgs/acme/email/templates/smtp_test/en", Template{
-		Subject:    "It works",
-		Headline:   "It works",
-		Paragraphs: paragraphs,
+		Subject: "It works",
+		Blocks:  blocks,
 	})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
@@ -317,7 +340,7 @@ func TestDeleteTemplateRevertsAndReturnsTheDefault(t *testing.T) {
 	store := newStubStore()
 	store.overrides[templateTargetID(KindSMTPTest, LocaleEN)] = TemplateOverride{
 		Kind: KindSMTPTest, Locale: LocaleEN,
-		Template: Template{Subject: "Ours", Headline: "Ours"},
+		Template: Template{Subject: "Ours", Blocks: []Block{{Type: BlockHeading, Text: "Ours"}}},
 	}
 
 	rec := serve(t, store, &stubMailService{}, http.MethodDelete, "/orgs/acme/email/templates/smtp_test/en", nil)
@@ -361,10 +384,11 @@ func TestPreviewRendersTheSuppliedDraft(t *testing.T) {
 	rec := serve(t, newStubStore(), service, http.MethodPost, "/orgs/acme/email/templates/invitation/preview", previewRequest{
 		Locale: "en",
 		Template: &Template{
-			Subject:  "Join {{orgName}} today",
-			Headline: "Welcome to {{orgName}}",
-			CTALabel: "Accept",
-			CTAURL:   "{{acceptUrl}}",
+			Subject: "Join {{orgName}} today",
+			Blocks: []Block{
+				{Type: BlockHeading, Text: "Welcome to {{orgName}}"},
+				{Type: BlockButton, Label: "Accept", URL: "{{acceptUrl}}"},
+			},
 		},
 	})
 	if rec.Code != http.StatusOK {
@@ -412,7 +436,7 @@ func TestPreviewRejectsAnUnsupportedLocale(t *testing.T) {
 func TestPreviewOfAnInvalidDraftIs400(t *testing.T) {
 	rec := serve(t, newStubStore(), &stubMailService{}, http.MethodPost, "/orgs/acme/email/templates/invitation/preview", previewRequest{
 		Locale:   "en",
-		Template: &Template{Subject: "Join us", Headline: "Hello {{nope}}"},
+		Template: &Template{Subject: "Join us", Blocks: []Block{{Type: BlockHeading, Text: "Hello {{nope}}"}}},
 	})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
@@ -483,7 +507,7 @@ func TestPutTemplateRejectsAnUnknownField(t *testing.T) {
 	handler.Register(mux)
 
 	req := httptest.NewRequest(http.MethodPut, "/orgs/acme/email/templates/smtp_test/en",
-		strings.NewReader(`{"subject":"It works","headline":"It works","htmlBody":"<script>"}`))
+		strings.NewReader(`{"subject":"It works","blocks":[{"type":"heading","text":"It works","htmlBody":"<script>"}]}`))
 	req = req.WithContext(adminContext(req.Context()))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -503,7 +527,7 @@ func TestInvalidTemplateErrorReportsTheReasonAsA400(t *testing.T) {
 	}
 
 	// Wrapped once on the way out of a store, as a real handler receives it.
-	wrapped := fmt.Errorf("saving: %w", &InvalidTemplateError{Reason: errors.New("headline: must not be empty")})
+	wrapped := fmt.Errorf("saving: %w", &InvalidTemplateError{Reason: errors.New("subject: must not be empty")})
 	err, ok = invalidTemplateError(wrapped)
 	if !ok {
 		t.Fatal("invalidTemplateError did not recognise an InvalidTemplateError")
@@ -515,7 +539,7 @@ func TestInvalidTemplateErrorReportsTheReasonAsA400(t *testing.T) {
 	if apiErr.Status != http.StatusBadRequest || apiErr.Code != "invalid_template" {
 		t.Errorf("apiErr = %+v, want a 400 invalid_template", apiErr)
 	}
-	if !strings.Contains(apiErr.Message, "headline") {
+	if !strings.Contains(apiErr.Message, "subject") {
 		t.Errorf("message = %q, want the field named", apiErr.Message)
 	}
 }

@@ -4,7 +4,10 @@ import type { TFunction } from "i18next";
 import * as React from "react";
 import { useMeQuery } from "../api/auth.queries";
 import {
+  MAIL_BLOCK_TYPES,
   MAIL_LOCALES,
+  type MailBlock,
+  type MailBlockType,
   type MailLocale,
   type MailTemplate,
   type MailTemplateDetail,
@@ -23,12 +26,16 @@ import {
 } from "../api/email.queries";
 import { ApiError } from "../api/http";
 import {
+  MAIL_BLOCK_FIELDS,
+  MAX_MAIL_BLOCKS,
   insertPlaceholder,
   mailTemplatesDiffer,
+  newMailBlock,
   placeholderFor,
   validateMailTemplate,
-  type MailTemplateField,
+  type MailBlockField,
   type MailTemplateProblem,
+  type MailTemplateTextField,
 } from "../lib/mail-template";
 import { Button, Card, ConfirmDialog, Input, Table, Tag } from "../ui";
 
@@ -43,27 +50,13 @@ const PREVIEW_HEIGHT = "h-[420px]";
 // Plausible address check only; the backend is the authority.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// The single-line fields, in the order the message reads. Paragraphs, which are a
-// list, are rendered separately between the headline and the call to action.
-const SINGLE_LINE_FIELDS = [
-  "subject",
-  "preheader",
-  "headline",
-] as const satisfies readonly MailTemplateField[];
+// The template-level fields above the block layout.
+const TEMPLATE_FIELDS = ["subject", "preheader"] as const;
 
-const CTA_FIELDS = [
-  "ctaLabel",
-  "ctaUrl",
-] as const satisfies readonly MailTemplateField[];
-
-const CLOSING_FIELDS = [
-  "note",
-  "linkFallback",
-  "footer",
-] as const satisfies readonly MailTemplateField[];
-
-// The multi-line fields get a textarea; the rest an input.
-const MULTILINE_FIELDS: readonly MailTemplateField[] = ["note"];
+// The block fields that take a whole sentence or more get a textarea; the rest
+// an input.
+const MULTILINE_BLOCK_FIELDS: readonly MailBlockField[] = ["text"];
+const SINGLE_LINE_BLOCK_TYPES: readonly MailBlockType[] = ["heading"];
 
 function errorCode(error: unknown): string | null {
   if (
@@ -104,28 +97,38 @@ function problemMessage(problem: MailTemplateProblem, t: TFunction): string {
       return t("mailTemplates.problems.malformedPlaceholder");
     case "required":
       return t("mailTemplates.problems.required");
-    case "ctaPair":
-      return t("mailTemplates.problems.ctaPair");
-    case "ctaUrlShape":
-      return t("mailTemplates.problems.ctaUrlShape");
+    case "buttonUrlShape":
+      return t("mailTemplates.problems.buttonUrlShape");
+    case "noBlocks":
+      return t("mailTemplates.problems.noBlocks");
+    case "needsContent":
+      return t("mailTemplates.problems.needsContent");
+    case "tooManyBlocks":
+      return t("mailTemplates.problems.tooManyBlocks", {
+        max: MAX_MAIL_BLOCKS,
+      });
   }
 }
 
-// FieldProblems renders every problem attached to one field (and, for
-// paragraphs, one paragraph).
+// FieldProblems renders every problem attached to one place: a template field,
+// one block's field, or the layout as a whole.
 function FieldProblems({
   problems,
   field,
-  paragraphIndex,
+  blockIndex,
+  blockField,
 }: {
   problems: readonly MailTemplateProblem[];
-  field: MailTemplateField;
-  paragraphIndex?: number;
+  field: MailTemplateTextField | "blocks";
+  blockIndex?: number;
+  blockField?: MailBlockField;
 }): React.JSX.Element | null {
   const { t } = useTranslation();
   const mine = problems.filter(
     (problem) =>
-      problem.field === field && problem.paragraphIndex === paragraphIndex,
+      problem.field === field &&
+      problem.blockIndex === blockIndex &&
+      problem.blockField === blockField,
   );
   if (mine.length === 0) {
     return null;
@@ -178,17 +181,177 @@ function VariablePalette({
   );
 }
 
+// BlockCard is one block of the layout: its type, its editable fields, and the
+// reorder/remove controls. Reordering is a pair of buttons rather than drag and
+// drop so it works with a keyboard and a screen reader.
+function BlockCard({
+  block,
+  index,
+  count,
+  problems,
+  onChange,
+  onMove,
+  onRemove,
+  onFocusField,
+}: {
+  block: MailBlock;
+  index: number;
+  count: number;
+  problems: readonly MailTemplateProblem[];
+  onChange: (field: MailBlockField, value: string) => void;
+  onMove: (direction: -1 | 1) => void;
+  onRemove: () => void;
+  onFocusField: (
+    element: HTMLInputElement | HTMLTextAreaElement | null,
+  ) => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const number = index + 1;
+  const fields = MAIL_BLOCK_FIELDS[block.type];
+
+  return (
+    <div className="border-line rounded-yivi border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className={EYEBROW}>
+          {t(`mailTemplates.blocks.${block.type}`)}
+        </span>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="chevron_up"
+            iconOnly
+            aria-label={t("mailTemplates.moveBlockUp", { number })}
+            disabled={index === 0}
+            onClick={() => onMove(-1)}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="chevron_down"
+            iconOnly
+            aria-label={t("mailTemplates.moveBlockDown", { number })}
+            disabled={index === count - 1}
+            onClick={() => onMove(1)}
+          />
+          <Button
+            variant="dangerGhost"
+            size="sm"
+            icon="delete"
+            iconOnly
+            aria-label={t("mailTemplates.removeBlock", { number })}
+            onClick={onRemove}
+          />
+        </div>
+      </div>
+
+      {fields.length === 0 ? (
+        <p className="text-ink-soft mt-1 text-[12.5px]">
+          {block.type === "logo"
+            ? t("mailTemplates.blockHints.logo")
+            : t("mailTemplates.blockHints.divider")}
+        </p>
+      ) : (
+        <div className="mt-2 flex flex-col gap-2">
+          {fields.map((field) => {
+            const id = `mail-block-${index}-${field}`;
+            const multiline =
+              MULTILINE_BLOCK_FIELDS.includes(field) &&
+              !SINGLE_LINE_BLOCK_TYPES.includes(block.type);
+            const shared = {
+              id,
+              name: field,
+              value: block[field],
+              "data-block-index": index,
+              "data-block-field": field,
+              onFocus: (
+                event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>,
+              ) => {
+                onFocusField(event.currentTarget);
+              },
+            };
+            return (
+              <div key={field} className="flex flex-col gap-1">
+                <label htmlFor={id} className={EYEBROW}>
+                  {t(`mailTemplates.blockFields.${field}`)}
+                </label>
+                {multiline ? (
+                  <textarea
+                    {...shared}
+                    className={`${CONTROL} min-h-20 py-2 leading-relaxed`}
+                    onChange={(event) => onChange(field, event.target.value)}
+                  />
+                ) : (
+                  <Input
+                    {...shared}
+                    onChange={(event) => onChange(field, event.target.value)}
+                    autoComplete="off"
+                  />
+                )}
+                <FieldProblems
+                  problems={problems}
+                  field="blocks"
+                  blockIndex={index}
+                  blockField={field}
+                />
+              </div>
+            );
+          })}
+          {block.type === "button" && (
+            <p className="text-ink-soft text-[12.5px]">
+              {t("mailTemplates.buttonHint")}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A block in the editor carries a stable client-side key, so React reconciles a
+// reordered list by identity rather than by position — with a bare index key,
+// moving a block would leave focus and per-node DOM state on the wrong block.
+interface DraftBlock extends MailBlock {
+  key: number;
+}
+
+interface Draft {
+  subject: string;
+  preheader: string;
+  blocks: DraftBlock[];
+}
+
+function seedDraft(template: MailTemplate): Draft {
+  return {
+    subject: template.subject,
+    preheader: template.preheader,
+    blocks: template.blocks.map((block, key) => ({ ...block, key })),
+  };
+}
+
+function toTemplate(draft: Draft): MailTemplate {
+  return {
+    subject: draft.subject,
+    preheader: draft.preheader,
+    blocks: draft.blocks.map((block) => ({
+      type: block.type,
+      text: block.text,
+      label: block.label,
+      url: block.url,
+      linkFallback: block.linkFallback,
+    })),
+  };
+}
+
 // TemplateEditor holds the draft for one kind × locale. It is remounted (via a key
 // on the loaded template) whenever the stored template changes, so the draft is
 // always seeded from what is in force.
 function TemplateEditor({
   slug,
   detail,
-  onClose,
 }: {
   slug: string;
   detail: MailTemplateDetail;
-  onClose: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const ref: MailTemplateRef = { kind: detail.kind, locale: detail.locale };
@@ -198,7 +361,9 @@ function TemplateEditor({
   const test = useSendTestEmailMutation(slug);
   const me = useMeQuery();
 
-  const [draft, setDraft] = useState<MailTemplate>(detail.template);
+  const [draft, setDraft] = useState<Draft>(() => seedDraft(detail.template));
+  // Keys handed to newly added blocks; the seed used 0..n-1.
+  const nextKey = useRef(detail.template.blocks.length);
   const [confirmReset, setConfirmReset] = useState(false);
   const [showText, setShowText] = useState(false);
   // null means "not typed in yet", so the field seeds from the signed-in address
@@ -208,34 +373,50 @@ function TemplateEditor({
   // insert. Kept in a ref: it must not re-render the form on every focus change.
   const focused = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
 
-  const problems = validateMailTemplate(draft, detail.variables);
-  const dirty = mailTemplatesDiffer(draft, detail.template);
+  const template = toTemplate(draft);
+  const problems = validateMailTemplate(template, detail.variables);
+  const dirty = mailTemplatesDiffer(template, detail.template);
   const recipient = (testTo ?? me.data?.email ?? "").trim();
 
-  function set(field: MailTemplateField, value: string): void {
-    if (field === "paragraphs") {
-      return;
-    }
+  function setField(field: (typeof TEMPLATE_FIELDS)[number], value: string) {
     setDraft((prev) => ({ ...prev, [field]: value }));
   }
 
-  function setParagraph(index: number, value: string): void {
+  function setBlockField(index: number, field: MailBlockField, value: string) {
     setDraft((prev) => ({
       ...prev,
-      paragraphs: prev.paragraphs.map((paragraph, i) =>
-        i === index ? value : paragraph,
+      blocks: prev.blocks.map((block, i) =>
+        i === index ? { ...block, [field]: value } : block,
       ),
     }));
   }
 
-  function addParagraph(): void {
-    setDraft((prev) => ({ ...prev, paragraphs: [...prev.paragraphs, ""] }));
-  }
-
-  function removeParagraph(index: number): void {
+  function addBlock(type: MailBlockType): void {
     setDraft((prev) => ({
       ...prev,
-      paragraphs: prev.paragraphs.filter((_, i) => i !== index),
+      blocks: [
+        ...prev.blocks,
+        { ...newMailBlock(type), key: nextKey.current++ },
+      ],
+    }));
+  }
+
+  function moveBlock(index: number, direction: -1 | 1): void {
+    setDraft((prev) => {
+      const target = index + direction;
+      if (target < 0 || target >= prev.blocks.length) {
+        return prev;
+      }
+      const blocks = [...prev.blocks];
+      [blocks[index], blocks[target]] = [blocks[target], blocks[index]];
+      return { ...prev, blocks };
+    });
+  }
+
+  function removeBlock(index: number): void {
+    setDraft((prev) => ({
+      ...prev,
+      blocks: prev.blocks.filter((_, i) => i !== index),
     }));
   }
 
@@ -243,7 +424,9 @@ function TemplateEditor({
   // it, which is why this reads the DOM node rather than re-deriving from state.
   function insert(name: string): void {
     const element = focused.current;
-    if (!element) {
+    // A detached element means the focused block was removed; its data-block-index
+    // would address whichever block took its place.
+    if (!element || !element.isConnected) {
       return;
     }
     const { value, caret } = insertPlaceholder(
@@ -251,11 +434,15 @@ function TemplateEditor({
       element.selectionStart,
       name,
     );
-    const index = element.dataset.paragraphIndex;
+    const index = element.dataset.blockIndex;
     if (index !== undefined) {
-      setParagraph(Number(index), value);
+      setBlockField(
+        Number(index),
+        element.dataset.blockField as MailBlockField,
+        value,
+      );
     } else {
-      set(element.name as MailTemplateField, value);
+      setField(element.name as (typeof TEMPLATE_FIELDS)[number], value);
     }
     // Restoring focus and caret after React has re-rendered the controlled value.
     requestAnimationFrame(() => {
@@ -268,11 +455,16 @@ function TemplateEditor({
     if (problems.length > 0 || save.isPending) {
       return;
     }
-    save.mutate(draft, { onSuccess: (saved) => setDraft(saved.template) });
+    save.mutate(template, {
+      onSuccess: (saved) => {
+        nextKey.current = saved.template.blocks.length;
+        setDraft(seedDraft(saved.template));
+      },
+    });
   }
 
   function handlePreview(): void {
-    preview.mutate(problems.length > 0 ? null : draft);
+    preview.mutate(problems.length > 0 ? null : template);
   }
 
   function handleTest(): void {
@@ -281,17 +473,6 @@ function TemplateEditor({
     }
     test.mutate({ to: recipient, kind: detail.kind, locale: detail.locale });
   }
-
-  const fieldProps = (field: MailTemplateField) => ({
-    name: field,
-    id: `mail-template-${field}`,
-    value: field === "paragraphs" ? "" : draft[field],
-    onFocus: (
-      event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>,
-    ) => {
-      focused.current = event.currentTarget;
-    },
-  });
 
   return (
     <Card className="p-7">
@@ -312,9 +493,6 @@ function TemplateEditor({
           ) : (
             <Tag>{t("mailTemplates.default")}</Tag>
           )}
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            {t("common.close")}
-          </Button>
         </div>
       </div>
 
@@ -322,110 +500,69 @@ function TemplateEditor({
         <div className="flex flex-col gap-3">
           <VariablePalette variables={detail.variables} onInsert={insert} />
 
-          {SINGLE_LINE_FIELDS.map((field) => (
+          {TEMPLATE_FIELDS.map((field) => (
             <div key={field} className="flex flex-col gap-1">
               <label htmlFor={`mail-template-${field}`} className={EYEBROW}>
                 {t(`mailTemplates.fields.${field}`)}
               </label>
               <Input
-                {...fieldProps(field)}
-                onChange={(event) => set(field, event.target.value)}
+                name={field}
+                id={`mail-template-${field}`}
+                value={draft[field]}
+                onFocus={(event) => {
+                  focused.current = event.currentTarget;
+                }}
+                onChange={(event) => setField(field, event.target.value)}
                 autoComplete="off"
               />
               <FieldProblems problems={problems} field={field} />
             </div>
           ))}
 
-          <div className="flex flex-col gap-1">
-            <span className={EYEBROW}>
-              {t("mailTemplates.fields.paragraphs")}
-            </span>
-            {draft.paragraphs.map((paragraph, index) => (
-              <div key={index} className="flex flex-col gap-1">
-                <div className="flex items-start gap-2">
-                  <textarea
-                    name="paragraphs"
-                    data-paragraph-index={index}
-                    aria-label={t("mailTemplates.paragraphNumber", {
-                      number: index + 1,
-                    })}
-                    className={`${CONTROL} min-h-20 py-2 leading-relaxed`}
-                    value={paragraph}
-                    onFocus={(event) => {
-                      focused.current = event.currentTarget;
-                    }}
-                    onChange={(event) =>
-                      setParagraph(index, event.target.value)
-                    }
-                  />
-                  <Button
-                    variant="dangerGhost"
-                    size="sm"
-                    icon="delete"
-                    iconOnly
-                    aria-label={t("mailTemplates.removeParagraph", {
-                      number: index + 1,
-                    })}
-                    onClick={() => removeParagraph(index)}
-                  />
-                </div>
-                <FieldProblems
-                  problems={problems}
-                  field="paragraphs"
-                  paragraphIndex={index}
-                />
-              </div>
+          <div className="flex flex-col gap-2">
+            <span className={EYEBROW}>{t("mailTemplates.layout")}</span>
+            <FieldProblems problems={problems} field="blocks" />
+            {draft.blocks.map((block, index) => (
+              <BlockCard
+                key={block.key}
+                block={block}
+                index={index}
+                count={draft.blocks.length}
+                problems={problems}
+                onChange={(field, value) => setBlockField(index, field, value)}
+                onMove={(direction) => moveBlock(index, direction)}
+                onRemove={() => removeBlock(index)}
+                onFocusField={(element) => {
+                  focused.current = element;
+                }}
+              />
             ))}
-            <div>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon="add"
-                onClick={addParagraph}
-              >
-                {t("mailTemplates.addParagraph")}
-              </Button>
-            </div>
           </div>
 
-          {CTA_FIELDS.map((field) => (
-            <div key={field} className="flex flex-col gap-1">
-              <label htmlFor={`mail-template-${field}`} className={EYEBROW}>
-                {t(`mailTemplates.fields.${field}`)}
-              </label>
-              <Input
-                {...fieldProps(field)}
-                onChange={(event) => set(field, event.target.value)}
-                autoComplete="off"
-              />
-              <FieldProblems problems={problems} field={field} />
+          <div className="flex flex-col gap-1">
+            <span className={EYEBROW}>{t("mailTemplates.addBlock")}</span>
+            <div className="flex flex-wrap gap-1.5">
+              {MAIL_BLOCK_TYPES.map((type) => (
+                <Button
+                  key={type}
+                  variant="secondary"
+                  size="sm"
+                  icon="add"
+                  disabled={draft.blocks.length >= MAX_MAIL_BLOCKS}
+                  onClick={() => addBlock(type)}
+                >
+                  {t(`mailTemplates.blocks.${type}`)}
+                </Button>
+              ))}
             </div>
-          ))}
-          <p className="text-ink-soft text-[12.5px]">
-            {t("mailTemplates.ctaHint")}
-          </p>
-
-          {CLOSING_FIELDS.map((field) => (
-            <div key={field} className="flex flex-col gap-1">
-              <label htmlFor={`mail-template-${field}`} className={EYEBROW}>
-                {t(`mailTemplates.fields.${field}`)}
-              </label>
-              {MULTILINE_FIELDS.includes(field) ? (
-                <textarea
-                  {...fieldProps(field)}
-                  className={`${CONTROL} min-h-20 py-2 leading-relaxed`}
-                  onChange={(event) => set(field, event.target.value)}
-                />
-              ) : (
-                <Input
-                  {...fieldProps(field)}
-                  onChange={(event) => set(field, event.target.value)}
-                  autoComplete="off"
-                />
-              )}
-              <FieldProblems problems={problems} field={field} />
-            </div>
-          ))}
+            {draft.blocks.length >= MAX_MAIL_BLOCKS && (
+              <p className="text-ink-soft text-[12.5px]">
+                {t("mailTemplates.problems.tooManyBlocks", {
+                  max: MAX_MAIL_BLOCKS,
+                })}
+              </p>
+            )}
+          </div>
 
           {save.isError && (
             <p role="alert" className="text-error text-[13px]">
@@ -580,7 +717,8 @@ function TemplateEditor({
           onConfirm={() => {
             reset.mutate(undefined, {
               onSuccess: (reverted) => {
-                setDraft(reverted.template);
+                nextKey.current = reverted.template.blocks.length;
+                setDraft(seedDraft(reverted.template));
                 setConfirmReset(false);
               },
             });
@@ -594,18 +732,16 @@ function TemplateEditor({
 function TemplateRow({
   summary,
   locale,
-  selected,
   onSelect,
 }: {
   summary: MailTemplateKindSummary;
   locale: MailLocale;
-  selected: boolean;
   onSelect: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const cell = summary.locales.find((entry) => entry.locale === locale);
   return (
-    <Table.Row className={selected ? "bg-surface-2" : undefined}>
+    <Table.Row>
       <Table.Cell>
         <span className="font-medium">
           {t(`mailTemplates.kinds.${summary.kind}`)}
@@ -628,7 +764,7 @@ function TemplateRow({
   );
 }
 
-// EmailTemplatesPanel is the mail-template editor, rendered as a tab on the
+// EmailTemplatesPanel is the mail-template designer, rendered as a tab on the
 // Settings page. Kinds and locales come from the backend catalogue, so the panel
 // renders the matrix it is given rather than a list of its own.
 export function EmailTemplatesPanel({
@@ -644,6 +780,44 @@ export function EmailTemplatesPanel({
     slug,
     selected ? { kind: selected, locale } : null,
   );
+
+  // Editing one template replaces the list with a detail view rather than opening
+  // beneath it, so the editor reads as its own page with a single way back. The
+  // language toggle carries over from the list, so the detail edits the cell the
+  // tenant was looking at.
+  if (selected !== null) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="arrow_back"
+            onClick={() => setSelected(null)}
+          >
+            {t("mailTemplates.backToList")}
+          </Button>
+        </div>
+        {detail.isError ? (
+          <Card className="p-6">
+            <p role="alert" className="text-error text-[14px]">
+              {t("mailTemplates.loadError", { message: detail.error.message })}
+            </p>
+          </Card>
+        ) : detail.isPending ? (
+          <Card className="p-6">
+            <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
+          </Card>
+        ) : (
+          <TemplateEditor
+            key={`${detail.data.kind}/${detail.data.locale}/${detail.data.updatedAt ?? "default"}`}
+            slug={slug}
+            detail={detail.data}
+          />
+        )}
+      </div>
+    );
+  }
 
   if (templates.isError) {
     return (
@@ -710,7 +884,6 @@ export function EmailTemplatesPanel({
                   key={summary.kind}
                   summary={summary}
                   locale={locale}
-                  selected={selected === summary.kind}
                   onSelect={() => setSelected(summary.kind)}
                 />
               ))}
@@ -718,27 +891,6 @@ export function EmailTemplatesPanel({
           </Table>
         </div>
       </Card>
-
-      {selected !== null && detail.isError && (
-        <Card className="p-6">
-          <p role="alert" className="text-error text-[14px]">
-            {t("mailTemplates.loadError", { message: detail.error.message })}
-          </p>
-        </Card>
-      )}
-      {selected !== null && detail.isPending && (
-        <Card className="p-6">
-          <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
-        </Card>
-      )}
-      {selected !== null && detail.data && (
-        <TemplateEditor
-          key={`${detail.data.kind}/${detail.data.locale}/${detail.data.updatedAt ?? "default"}`}
-          slug={slug}
-          detail={detail.data}
-          onClose={() => setSelected(null)}
-        />
-      )}
     </div>
   );
 }

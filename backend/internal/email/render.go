@@ -1,6 +1,7 @@
 package email
 
 import (
+	"encoding/base64"
 	"fmt"
 	"html"
 	"net/url"
@@ -10,18 +11,23 @@ import (
 
 // Rendering a template is deliberately NOT text/template or html/template
 // execution: a tenant-editable body must not be able to reach into the data model
-// or call methods. A template is prose with {{name}} placeholders, resolved
-// against the kind's declared variables and nothing else. Two consequences worth
-// keeping:
+// or call methods. A template is an ordered layout of typed blocks whose text
+// fields are prose with {{name}} placeholders, resolved against the kind's
+// declared variables and nothing else. Two consequences worth keeping:
 //
 //   - An undeclared placeholder is a validation error (at save time, and again at
 //     render time), never a silent blank.
 //   - Values are escaped per part: HTML-escaped in the HTML alternative, raw in
-//     the text alternative. The template text itself is escaped the same way, so
-//     tenant prose cannot introduce markup either.
+//     the text alternative. The block text itself is escaped the same way, so
+//     tenant prose cannot introduce markup.
 
 // placeholderPattern matches a {{name}} placeholder, tolerating inner spaces.
 var placeholderPattern = regexp.MustCompile(`\{\{\s*([A-Za-z][A-Za-z0-9]*)\s*\}\}`)
+
+// maxBlocks caps how many blocks one layout may carry, so the designer's "add
+// block" cannot grow a message without bound. Enforced by ValidateTemplate, which
+// also holds the shipped defaults to it at package init.
+const maxBlocks = 24
 
 // Body is a rendered message: the subject line plus both MIME alternatives. The
 // recipient address is the caller's business, so it is not part of this.
@@ -29,12 +35,26 @@ type Body struct {
 	Subject  string
 	HTMLBody string
 	TextBody string
+	// InlineLogo is the org logo the HTML references as cid:<ContentID>, set when
+	// the layout has a logo block and the org has an uploaded logo; nil otherwise.
+	// Delivery attaches it as a related MIME part; the editor preview inlines it as
+	// a data: URI instead (inlinePreviewLogo), since a sandboxed iframe has no MIME
+	// parts to resolve cid: against.
+	InlineLogo *InlineImage
 }
 
-// ValidateTemplate reports whether every placeholder in the template is a
-// declared variable of the kind, and that the parts a message cannot do without
-// are present. Callable without any variable values, so it is the check to run
-// when a tenant saves a template.
+// InlineImage is an image embedded in the message and referenced from the HTML by
+// cid:<ContentID>.
+type InlineImage struct {
+	ContentID   string
+	ContentType string
+	Bytes       []byte
+}
+
+// ValidateTemplate reports whether the template is sendable: every placeholder is
+// a declared variable of the kind, every block carries exactly the fields its
+// type has, and the layout says something. Callable without any variable values,
+// so it is the check to run when a tenant saves a template.
 func ValidateTemplate(kind Kind, tpl Template) error {
 	variables, ok := VariablesFor(kind)
 	if !ok {
@@ -45,18 +65,46 @@ func ValidateTemplate(kind Kind, tpl Template) error {
 		allowed[v.Name] = true
 	}
 
-	fields := map[string]string{
-		"subject":      tpl.Subject,
-		"preheader":    tpl.Preheader,
-		"headline":     tpl.Headline,
-		"ctaLabel":     tpl.CTALabel,
-		"ctaUrl":       tpl.CTAURL,
-		"linkFallback": tpl.LinkFallback,
-		"note":         tpl.Note,
-		"footer":       tpl.Footer,
+	if err := validatePlaceholders(tpl.Subject, allowed); err != nil {
+		return fmt.Errorf("subject: %w", err)
 	}
-	for i, p := range tpl.Paragraphs {
-		fields[fmt.Sprintf("paragraphs[%d]", i)] = p
+	if err := validatePlaceholders(tpl.Preheader, allowed); err != nil {
+		return fmt.Errorf("preheader: %w", err)
+	}
+	if strings.TrimSpace(tpl.Subject) == "" {
+		return fmt.Errorf("subject: must not be empty")
+	}
+
+	if len(tpl.Blocks) == 0 {
+		return fmt.Errorf("blocks: the layout must have at least one block")
+	}
+	if len(tpl.Blocks) > maxBlocks {
+		return fmt.Errorf("blocks: a layout may have at most %d blocks", maxBlocks)
+	}
+	saysSomething := false
+	for i, blk := range tpl.Blocks {
+		if err := validateBlock(blk, allowed, variables); err != nil {
+			return fmt.Errorf("blocks[%d]: %w", i, err)
+		}
+		if blk.Type == BlockHeading || blk.Type == BlockParagraph {
+			saysSomething = true
+		}
+	}
+	if !saysSomething {
+		return fmt.Errorf("blocks: the layout must have at least one heading or paragraph")
+	}
+	return nil
+}
+
+// validateBlock holds one block to its type's field set. A field set on a block
+// type it does not belong to is rejected rather than ignored: silently dropping
+// tenant content at render time would be worse than refusing the save.
+func validateBlock(blk Block, allowed map[string]bool, variables []Variable) error {
+	fields := map[string]string{
+		"text":         blk.Text,
+		"label":        blk.Label,
+		"url":          blk.URL,
+		"linkFallback": blk.LinkFallback,
 	}
 	for field, text := range fields {
 		if err := validatePlaceholders(text, allowed); err != nil {
@@ -64,26 +112,48 @@ func ValidateTemplate(kind Kind, tpl Template) error {
 		}
 	}
 
-	if strings.TrimSpace(tpl.Subject) == "" {
-		return fmt.Errorf("subject: must not be empty")
+	requireEmpty := func(names ...string) error {
+		for _, name := range names {
+			if fields[name] != "" {
+				return fmt.Errorf("%s: a %s block does not have this field", name, blk.Type)
+			}
+		}
+		return nil
 	}
-	if strings.TrimSpace(tpl.Headline) == "" {
-		return fmt.Errorf("headline: must not be empty")
-	}
-	if (tpl.CTALabel == "") != (tpl.CTAURL == "") {
-		return fmt.Errorf("ctaLabel and ctaUrl: set both or neither")
-	}
-	if err := validateCTAURL(tpl.CTAURL, variables); err != nil {
-		return fmt.Errorf("ctaUrl: %w", err)
+
+	switch blk.Type {
+	case BlockHeading, BlockParagraph, BlockFooter:
+		if err := requireEmpty("label", "url", "linkFallback"); err != nil {
+			return err
+		}
+		if strings.TrimSpace(blk.Text) == "" {
+			return fmt.Errorf("text: must not be empty")
+		}
+	case BlockButton:
+		if err := requireEmpty("text"); err != nil {
+			return err
+		}
+		if strings.TrimSpace(blk.Label) == "" {
+			return fmt.Errorf("label: must not be empty")
+		}
+		if err := validateButtonURL(blk.URL, variables); err != nil {
+			return fmt.Errorf("url: %w", err)
+		}
+	case BlockLogo, BlockDivider:
+		if err := requireEmpty("text", "label", "url", "linkFallback"); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("type: unknown block type %q", blk.Type)
 	}
 	return nil
 }
 
-// validateCTAURL closes the gap between the two shapes a call-to-action URL may
-// take. The placeholder check above only asks whether a referenced variable is
+// validateButtonURL closes the gap between the two shapes a button URL may take.
+// The placeholder check above only asks whether a referenced variable is
 // declared, and the IsURL check in Render only sees variable *values* — so a
-// template whose ctaUrl is the literal "javascript:alert(1)" would otherwise reach
-// an href unexamined. A ctaUrl is therefore exactly one of:
+// button whose url is the literal "javascript:alert(1)" would otherwise reach an
+// href unexamined. A button URL is therefore exactly one of:
 //
 //   - a single declared URL variable ("{{claimUrl}}"), whose value Render checks;
 //   - an absolute http(s) literal with no placeholders at all.
@@ -92,9 +162,9 @@ func ValidateTemplate(kind Kind, tpl Template) error {
 // is rejected: it cannot be checked without rendering, and no shipped default needs
 // it. Tightening this later is easy; loosening it after tenants have saved templates
 // is not.
-func validateCTAURL(value string, variables []Variable) error {
+func validateButtonURL(value string, variables []Variable) error {
 	if value == "" {
-		return nil
+		return fmt.Errorf("must not be empty")
 	}
 	if match := placeholderPattern.FindStringSubmatch(value); match != nil {
 		if match[0] != value {
@@ -163,16 +233,65 @@ func Render(kind Kind, locale Locale, tpl Template, brand Brand, vars map[string
 	content.locale = locale
 	// The resolved URL is what actually lands in the href, so it is checked here
 	// too rather than only in its two source shapes.
-	if content.ctaURL != "" {
-		if err := validateAbsoluteHTTPURL(content.ctaURL); err != nil {
-			return Body{}, fmt.Errorf("email: kind %q: ctaUrl: %w", kind, err)
+	for i, blk := range content.blocks {
+		if blk.typ == BlockButton {
+			if err := validateAbsoluteHTTPURL(blk.url); err != nil {
+				return Body{}, fmt.Errorf("email: kind %q: blocks[%d]: url: %w", kind, i, err)
+			}
 		}
 	}
-	return Body{
+	body := Body{
 		Subject:  content.subject,
 		HTMLBody: renderHTML(content, brand),
 		TextBody: renderText(content),
-	}, nil
+	}
+	// The logo is attached only when the layout actually references it, so an
+	// unreferenced part never rides along.
+	if brand.Logo.present() && hasLogoBlock(content) {
+		body.InlineLogo = &InlineImage{
+			ContentID:   logoContentID,
+			ContentType: brand.Logo.ContentType,
+			Bytes:       brand.Logo.Bytes,
+		}
+	}
+	return body, nil
+}
+
+// hasLogoBlock reports whether the resolved layout has a logo block to embed into.
+func hasLogoBlock(c content) bool {
+	for _, blk := range c.blocks {
+		if blk.typ == BlockLogo {
+			return true
+		}
+	}
+	return false
+}
+
+// templateHasLogoBlock reports whether an unresolved template has a logo block, so
+// the service can skip fetching the logo image for a layout that would not use it.
+func templateHasLogoBlock(tpl Template) bool {
+	for _, blk := range tpl.Blocks {
+		if blk.Type == BlockLogo {
+			return true
+		}
+	}
+	return false
+}
+
+// inlinePreviewLogo rewrites the rendered HTML so the logo image, which delivery
+// references as a cid: MIME part, shows in the editor's sandboxed preview iframe —
+// which has no MIME parts to resolve cid: against. The bytes are identical; only
+// the transport differs, so preview and delivery still show the same image. The
+// returned body carries no attachment, since a preview sends nothing.
+func inlinePreviewLogo(body Body) Body {
+	if body.InlineLogo == nil {
+		return body
+	}
+	dataURI := "data:" + body.InlineLogo.ContentType + ";base64," +
+		base64.StdEncoding.EncodeToString(body.InlineLogo.Bytes)
+	body.HTMLBody = strings.Replace(body.HTMLBody, "cid:"+body.InlineLogo.ContentID, dataURI, 1)
+	body.InlineLogo = nil
+	return body
 }
 
 func declares(variables []Variable, name string) bool {
@@ -185,9 +304,9 @@ func declares(variables []Variable, name string) bool {
 }
 
 // validateAbsoluteHTTPURL requires a parseable absolute http(s) URL with a host.
-// Applied to every URL variable and to the resolved ctaUrl (and, for a literal
-// ctaUrl, at save time via validateCTAURL), so a call to action can never link to a
-// relative path or a javascript:/data: scheme.
+// Applied to every URL variable and to the resolved button URL (and, for a
+// literal, at save time via validateButtonURL), so a call to action can never
+// link to a relative path or a javascript:/data: scheme.
 func validateAbsoluteHTTPURL(value string) error {
 	if value == "" {
 		return fmt.Errorf("must not be empty")
@@ -205,10 +324,25 @@ func validateAbsoluteHTTPURL(value string) error {
 	return nil
 }
 
-// block is one resolved piece of prose, in both renderings.
-type block struct {
+// prose is one resolved piece of text, in both renderings.
+type prose struct {
 	html string
 	text string
+}
+
+func (p prose) empty() bool { return strings.TrimSpace(p.text) == "" }
+
+// resolvedBlock is one layout block with its placeholders resolved, ready for the
+// shell to lay out.
+type resolvedBlock struct {
+	typ BlockType
+	// text is a heading, paragraph or footer block's prose.
+	text prose
+	// label, url and linkFallback belong to a button block. url is the resolved
+	// href, identical in both parts.
+	label        prose
+	url          string
+	linkFallback prose
 }
 
 // content is a template with its variables resolved, ready for the shell. Blocks
@@ -216,56 +350,67 @@ type block struct {
 // how an optional part (the wallet's transaction code, a sender's covering
 // message) disappears instead of leaving a dangling label.
 type content struct {
-	locale     Locale
-	subject    string
-	preheader  string
-	headerName string
-	headline   block
-	paragraphs []block
-	ctaLabel   block
-	ctaURL     string
-	// linkFallback introduces the bare call-to-action URL printed under the button.
-	linkFallback block
-	note         block
-	footer       block
+	locale    Locale
+	subject   string
+	preheader string
+	// orgName is the sending organization's name; the logo block renders it as the
+	// wordmark. Every kind declares orgName, so it is always present.
+	orgName prose
+	blocks  []resolvedBlock
 }
 
 func resolveContent(tpl Template, vars map[string]string) content {
 	out := content{
-		subject:      singleLine(substituteText(tpl.Subject, vars)),
-		headline:     resolveBlock(tpl.Headline, vars),
-		note:         resolveBlock(tpl.Note, vars),
-		footer:       resolveBlock(tpl.Footer, vars),
-		ctaLabel:     resolveBlock(tpl.CTALabel, vars),
-		linkFallback: resolveBlock(tpl.LinkFallback, vars),
-		preheader:    singleLine(substituteText(tpl.Preheader, vars)),
-		// Every kind declares orgName, so the shell can always name the sender in
-		// the header without the template spending a line on it.
-		headerName: escapeToHTML(vars[varOrgName]),
+		subject:   singleLine(substituteText(tpl.Subject, vars)),
+		preheader: singleLine(substituteText(tpl.Preheader, vars)),
+		orgName:   prose{html: escapeToHTML(vars[varOrgName]), text: vars[varOrgName]},
+	}
+	for _, blk := range tpl.Blocks {
+		resolved := resolvedBlock{typ: blk.Type}
+		switch blk.Type {
+		case BlockHeading, BlockParagraph, BlockFooter:
+			resolved.text = resolveProse(blk.Text, vars)
+			// A text block whose every placeholder resolved to an empty value is
+			// dropped whole: "Your wallet will ask for this code: {{txCode}}" must
+			// not be sent when there is no code.
+			if resolved.text.empty() {
+				continue
+			}
+		case BlockButton:
+			resolved.label = resolveProse(blk.Label, vars)
+			resolved.linkFallback = resolveProse(blk.LinkFallback, vars)
+			resolved.url = substituteText(blk.URL, vars)
+		case BlockLogo, BlockDivider:
+			// Nothing to resolve.
+		}
+		out.blocks = append(out.blocks, resolved)
+	}
+	// An empty preheader falls back to the layout's first heading, else its first
+	// paragraph, so the inbox list never shows a blank line.
+	if out.preheader == "" {
+		out.preheader = firstProse(out.blocks, BlockHeading)
 	}
 	if out.preheader == "" {
-		out.preheader = singleLine(out.headline.text)
-	}
-	if tpl.CTAURL != "" {
-		out.ctaURL = substituteText(tpl.CTAURL, vars)
-	}
-	for _, p := range tpl.Paragraphs {
-		if b := resolveBlock(p, vars); !b.empty() {
-			out.paragraphs = append(out.paragraphs, b)
-		}
+		out.preheader = firstProse(out.blocks, BlockParagraph)
 	}
 	return out
 }
 
-func (b block) empty() bool { return strings.TrimSpace(b.text) == "" }
+func firstProse(blocks []resolvedBlock, typ BlockType) string {
+	for _, blk := range blocks {
+		if blk.typ == typ {
+			return singleLine(blk.text.text)
+		}
+	}
+	return ""
+}
 
-// resolveBlock substitutes both renderings of one field. A field that references
-// at least one placeholder and whose every placeholder resolved to an empty value
-// collapses to an empty block, so the shell can omit it: "Your wallet will ask
-// for this code: {{txCode}}" must not be sent when there is no code.
-func resolveBlock(text string, vars map[string]string) block {
+// resolveProse substitutes both renderings of one text field. A field that
+// references at least one placeholder and whose every placeholder resolved to an
+// empty value collapses to empty prose, so the shell can omit it.
+func resolveProse(text string, vars map[string]string) prose {
 	if text == "" {
-		return block{}
+		return prose{}
 	}
 	names := placeholderPattern.FindAllStringSubmatch(text, -1)
 	if len(names) > 0 {
@@ -277,10 +422,10 @@ func resolveBlock(text string, vars map[string]string) block {
 			}
 		}
 		if allEmpty {
-			return block{}
+			return prose{}
 		}
 	}
-	return block{html: substituteHTML(text, vars), text: substituteText(text, vars)}
+	return prose{html: substituteHTML(text, vars), text: substituteText(text, vars)}
 }
 
 // substituteText resolves placeholders as-is, for the text/plain alternative.
@@ -290,9 +435,9 @@ func substituteText(text string, vars map[string]string) string {
 	})
 }
 
-// substituteHTML escapes the template text and every substituted value, then
-// turns newlines into line breaks. Escaping first is safe because HTML escaping
-// leaves the braces of a placeholder untouched.
+// substituteHTML escapes the block text and every substituted value, then turns
+// newlines into line breaks. Escaping first is safe because HTML escaping leaves
+// the braces of a placeholder untouched.
 func substituteHTML(text string, vars map[string]string) string {
 	escaped := escapeToHTML(text)
 	return placeholderPattern.ReplaceAllStringFunc(escaped, func(match string) string {

@@ -61,7 +61,23 @@ type Brand struct {
 	ButtonText string
 	// FontFamily is a CSS font-family list for the whole message.
 	FontFamily string
+	// Logo is the org's uploaded logo image. When present a logo block renders it
+	// as an inline image; when empty the block falls back to the org-name wordmark.
+	// It is not part of the palette derivation (resolveBrand leaves it zero); the
+	// service sets it only for a layout that actually has a logo block.
+	Logo Logo
 }
+
+// Logo is an org's uploaded logo image, ready to embed inline in mail. The zero
+// value means the org has no logo, so a logo block renders the org name as a text
+// wordmark instead of an image.
+type Logo struct {
+	Bytes       []byte
+	ContentType string
+}
+
+// present reports whether there is a usable image to embed.
+func (l Logo) present() bool { return len(l.Bytes) > 0 && l.ContentType != "" }
 
 // Default palette values, mirrored from COLOR_FIELD_DEFAULTS in
 // frontend/src/lib/theme.ts (themselves the index.css :root tokens). Mail from an

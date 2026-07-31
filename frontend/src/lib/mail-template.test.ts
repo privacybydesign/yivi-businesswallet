@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { MailTemplate, MailTemplateVariable } from "../api/email";
 import {
-  ctaUrlShapeIsValid,
+  MAX_MAIL_BLOCKS,
+  buttonUrlShapeIsValid,
   hasMalformedPlaceholder,
   insertPlaceholder,
   mailTemplatesDiffer,
+  newMailBlock,
   placeholdersIn,
   validateMailTemplate,
 } from "./mail-template";
@@ -18,13 +20,17 @@ function template(overrides: Partial<MailTemplate> = {}): MailTemplate {
   return {
     subject: "You have been invited to join {{orgName}}",
     preheader: "",
-    headline: "Join {{orgName}}",
-    paragraphs: ["{{orgName}} invited you."],
-    ctaLabel: "Accept the invitation",
-    ctaUrl: "{{acceptUrl}}",
-    linkFallback: "",
-    note: "",
-    footer: "",
+    blocks: [
+      { ...newMailBlock("logo") },
+      { ...newMailBlock("heading"), text: "Join {{orgName}}" },
+      { ...newMailBlock("paragraph"), text: "{{orgName}} invited you." },
+      {
+        ...newMailBlock("button"),
+        label: "Accept the invitation",
+        url: "{{acceptUrl}}",
+      },
+      { ...newMailBlock("footer"), text: "Sent by {{orgName}}." },
+    ],
     ...overrides,
   };
 }
@@ -50,82 +56,135 @@ describe("hasMalformedPlaceholder", () => {
 });
 
 describe("validateMailTemplate", () => {
-  it("accepts a template that only references declared variables", () => {
+  it("accepts a layout that only references declared variables", () => {
     expect(validateMailTemplate(template(), INVITATION_VARIABLES)).toEqual([]);
   });
 
-  it("names an undeclared placeholder and the field it is in", () => {
-    const problems = validateMailTemplate(
-      template({ headline: "Hello {{recipientName}}" }),
-      INVITATION_VARIABLES,
-    );
-    expect(problems).toEqual([
+  it("names an undeclared placeholder and the block it is in", () => {
+    const broken = template();
+    broken.blocks[1] = {
+      ...broken.blocks[1],
+      text: "Hello {{recipientName}}",
+    };
+    expect(validateMailTemplate(broken, INVITATION_VARIABLES)).toEqual([
       {
-        field: "headline",
+        field: "blocks",
         issue: "unknownPlaceholder",
         placeholder: "recipientName",
-        paragraphIndex: undefined,
+        blockIndex: 1,
+        blockField: "text",
       },
     ]);
   });
 
-  it("reports which paragraph an undeclared placeholder is in", () => {
+  it("requires a subject", () => {
     const problems = validateMailTemplate(
-      template({ paragraphs: ["Fine {{orgName}}", "Broken {{nope}}"] }),
+      template({ subject: "   " }),
+      INVITATION_VARIABLES,
+    );
+    expect(problems).toEqual([{ field: "subject", issue: "required" }]);
+  });
+
+  it("requires at least one block", () => {
+    const problems = validateMailTemplate(
+      template({ blocks: [] }),
+      INVITATION_VARIABLES,
+    );
+    expect(problems).toEqual([{ field: "blocks", issue: "noBlocks" }]);
+  });
+
+  it("requires at least one heading or paragraph", () => {
+    const problems = validateMailTemplate(
+      template({
+        blocks: [
+          newMailBlock("logo"),
+          { ...newMailBlock("footer"), text: "Small print" },
+        ],
+      }),
+      INVITATION_VARIABLES,
+    );
+    expect(problems).toEqual([{ field: "blocks", issue: "needsContent" }]);
+  });
+
+  it("caps the block count at the backend's maximum", () => {
+    const blocks = Array.from({ length: MAX_MAIL_BLOCKS + 1 }, () => ({
+      ...newMailBlock("paragraph"),
+      text: "Something to say.",
+    }));
+    const problems = validateMailTemplate(
+      template({ blocks }),
+      INVITATION_VARIABLES,
+    );
+    expect(problems).toEqual([{ field: "blocks", issue: "tooManyBlocks" }]);
+  });
+
+  it("requires text on a heading, paragraph or footer block", () => {
+    const problems = validateMailTemplate(
+      template({
+        blocks: [
+          { ...newMailBlock("heading"), text: "  " },
+          { ...newMailBlock("paragraph"), text: "Fine" },
+        ],
+      }),
+      INVITATION_VARIABLES,
+    );
+    expect(problems).toEqual([
+      { field: "blocks", issue: "required", blockIndex: 0, blockField: "text" },
+    ]);
+  });
+
+  it("requires both a label and a URL on a button block", () => {
+    const problems = validateMailTemplate(
+      template({
+        blocks: [
+          { ...newMailBlock("heading"), text: "Hi" },
+          newMailBlock("button"),
+        ],
+      }),
       INVITATION_VARIABLES,
     );
     expect(problems).toEqual([
       {
-        field: "paragraphs",
-        issue: "unknownPlaceholder",
-        placeholder: "nope",
-        paragraphIndex: 1,
+        field: "blocks",
+        issue: "required",
+        blockIndex: 1,
+        blockField: "label",
       },
+      { field: "blocks", issue: "required", blockIndex: 1, blockField: "url" },
     ]);
   });
 
-  it("requires a subject and a headline", () => {
-    const problems = validateMailTemplate(
-      template({ subject: "   ", headline: "" }),
-      INVITATION_VARIABLES,
-    );
-    expect(problems).toEqual([
-      { field: "subject", issue: "required" },
-      { field: "headline", issue: "required" },
-    ]);
-  });
-
-  it("requires the call-to-action label and URL together", () => {
-    const problems = validateMailTemplate(
-      template({ ctaLabel: "Accept", ctaUrl: "" }),
-      INVITATION_VARIABLES,
-    );
-    expect(problems).toEqual([{ field: "ctaUrl", issue: "ctaPair" }]);
-  });
-
-  it("flags a malformed placeholder", () => {
-    const problems = validateMailTemplate(
-      template({ note: "Code: {{ tx code }}" }),
-      INVITATION_VARIABLES,
-    );
-    expect(problems).toEqual([
+  it("flags an unsafe button URL on the block", () => {
+    const broken = template();
+    broken.blocks[3] = { ...broken.blocks[3], url: "javascript:alert(1)" };
+    expect(validateMailTemplate(broken, INVITATION_VARIABLES)).toEqual([
       {
-        field: "note",
-        issue: "malformedPlaceholder",
-        paragraphIndex: undefined,
+        field: "blocks",
+        issue: "buttonUrlShape",
+        blockIndex: 3,
+        blockField: "url",
       },
+    ]);
+  });
+
+  it("flags a malformed placeholder in the subject", () => {
+    const problems = validateMailTemplate(
+      template({ subject: "Code: {{ tx code }}" }),
+      INVITATION_VARIABLES,
+    );
+    expect(problems).toEqual([
+      { field: "subject", issue: "malformedPlaceholder" },
     ]);
   });
 });
 
-describe("ctaUrlShapeIsValid", () => {
-  it("accepts an empty value, a single URL variable and an absolute http(s) literal", () => {
-    expect(ctaUrlShapeIsValid("", INVITATION_VARIABLES)).toBe(true);
-    expect(ctaUrlShapeIsValid("{{acceptUrl}}", INVITATION_VARIABLES)).toBe(
+describe("buttonUrlShapeIsValid", () => {
+  it("accepts a single URL variable and an absolute http(s) literal", () => {
+    expect(buttonUrlShapeIsValid("{{acceptUrl}}", INVITATION_VARIABLES)).toBe(
       true,
     );
     expect(
-      ctaUrlShapeIsValid(
+      buttonUrlShapeIsValid(
         "https://wallet.example.org/join",
         INVITATION_VARIABLES,
       ),
@@ -133,24 +192,26 @@ describe("ctaUrlShapeIsValid", () => {
   });
 
   it("refuses a non-URL variable, a mix, a relative path and a javascript: URL", () => {
-    expect(ctaUrlShapeIsValid("{{orgName}}", INVITATION_VARIABLES)).toBe(false);
+    expect(buttonUrlShapeIsValid("{{orgName}}", INVITATION_VARIABLES)).toBe(
+      false,
+    );
     expect(
-      ctaUrlShapeIsValid(
+      buttonUrlShapeIsValid(
         "https://example.org/{{acceptUrl}}",
         INVITATION_VARIABLES,
       ),
     ).toBe(false);
-    expect(ctaUrlShapeIsValid("/join", INVITATION_VARIABLES)).toBe(false);
+    expect(buttonUrlShapeIsValid("/join", INVITATION_VARIABLES)).toBe(false);
     expect(
-      ctaUrlShapeIsValid("javascript:alert(1)", INVITATION_VARIABLES),
+      buttonUrlShapeIsValid("javascript:alert(1)", INVITATION_VARIABLES),
     ).toBe(false);
     expect(
-      ctaUrlShapeIsValid("data:text/html,<script>", INVITATION_VARIABLES),
+      buttonUrlShapeIsValid("data:text/html,<script>", INVITATION_VARIABLES),
     ).toBe(false);
   });
 
   it("refuses a placeholder that is not a declared variable", () => {
-    expect(ctaUrlShapeIsValid("{{nope}}", INVITATION_VARIABLES)).toBe(false);
+    expect(buttonUrlShapeIsValid("{{nope}}", INVITATION_VARIABLES)).toBe(false);
   });
 });
 
@@ -179,15 +240,26 @@ describe("mailTemplatesDiffer", () => {
     expect(mailTemplatesDiffer(template(), template())).toBe(false);
   });
 
-  it("is true for an edited field, an added paragraph or an edited paragraph", () => {
-    expect(mailTemplatesDiffer(template(), template({ note: "Hi" }))).toBe(
-      true,
-    );
+  it("is true for an edited subject, an added block or an edited block", () => {
     expect(
-      mailTemplatesDiffer(template(), template({ paragraphs: ["a", "b"] })),
+      mailTemplatesDiffer(template(), template({ subject: "Changed" })),
     ).toBe(true);
-    expect(
-      mailTemplatesDiffer(template(), template({ paragraphs: ["changed"] })),
-    ).toBe(true);
+
+    const added = template();
+    added.blocks = [...added.blocks, newMailBlock("divider")];
+    expect(mailTemplatesDiffer(template(), added)).toBe(true);
+
+    const edited = template();
+    edited.blocks[2] = { ...edited.blocks[2], text: "Changed" };
+    expect(mailTemplatesDiffer(template(), edited)).toBe(true);
+  });
+
+  it("is true when blocks are reordered", () => {
+    const reordered = template();
+    [reordered.blocks[1], reordered.blocks[2]] = [
+      reordered.blocks[2],
+      reordered.blocks[1],
+    ];
+    expect(mailTemplatesDiffer(template(), reordered)).toBe(true);
   });
 });

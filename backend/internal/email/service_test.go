@@ -35,12 +35,18 @@ func (r *recordingSender) Send(_ mailer.Config, msg mailer.Message) error {
 }
 
 type stubBrand struct {
-	seeds Seeds
-	err   error
+	seeds   Seeds
+	err     error
+	logo    Logo
+	logoErr error
 }
 
 func (s stubBrand) MailBrandSeeds(context.Context, uuid.UUID) (Seeds, error) {
 	return s.seeds, s.err
+}
+
+func (s stubBrand) MailLogo(context.Context, uuid.UUID) (Logo, error) {
+	return s.logo, s.logoErr
 }
 
 func newTestService(sender mailer.Sender, brand brandSource, locale Locale) *Service {
@@ -197,11 +203,12 @@ func (s *stubTemplates) ResolveTemplate(_ context.Context, _ uuid.UUID, kind Kin
 func TestSendUsesTheOrganizationsOwnTemplate(t *testing.T) {
 	sender := &recordingSender{}
 	templates := &stubTemplates{tpl: Template{
-		Subject:  "A credential from {{orgName}}",
-		Headline: "{{credentialName}} is waiting",
-		CTALabel: "Open your wallet",
-		CTAURL:   "{{claimUrl}}",
-		Footer:   "Sent by {{orgName}}.",
+		Subject: "A credential from {{orgName}}",
+		Blocks: []Block{
+			{Type: BlockHeading, Text: "{{credentialName}} is waiting"},
+			{Type: BlockButton, Label: "Open your wallet", URL: "{{claimUrl}}"},
+			{Type: BlockFooter, Text: "Sent by {{orgName}}."},
+		},
 	}}
 	svc := newTestService(sender, nil, LocaleEN)
 	svc.templates = templates
@@ -266,9 +273,9 @@ func TestPreviewNeedsNoSMTPConfiguration(t *testing.T) {
 // The editor previews unsaved edits, so a supplied draft wins over what is stored.
 func TestPreviewRendersTheSuppliedDraftInsteadOfTheStoredOne(t *testing.T) {
 	svc := newTestService(&recordingSender{}, nil, LocaleEN)
-	svc.templates = &stubTemplates{tpl: Template{Subject: "Stored", Headline: "Stored"}}
+	svc.templates = &stubTemplates{tpl: Template{Subject: "Stored", Blocks: []Block{{Type: BlockHeading, Text: "Stored"}}}}
 
-	draft := Template{Subject: "Draft for {{orgName}}", Headline: "Draft"}
+	draft := Template{Subject: "Draft for {{orgName}}", Blocks: []Block{{Type: BlockHeading, Text: "Draft"}}}
 	body, err := svc.Preview(context.Background(), uuid.New(), KindSMTPTest, LocaleEN, &draft, "Acme BV")
 	if err != nil {
 		t.Fatalf("Preview: %v", err)
@@ -283,7 +290,7 @@ func TestPreviewRendersTheSuppliedDraftInsteadOfTheStoredOne(t *testing.T) {
 func TestPreviewReportsAnInvalidDraftAsInvalidTemplate(t *testing.T) {
 	svc := newTestService(&recordingSender{}, nil, LocaleEN)
 
-	draft := Template{Subject: "Hello", Headline: "Hello {{nope}}"}
+	draft := Template{Subject: "Hello", Blocks: []Block{{Type: BlockHeading, Text: "Hello {{nope}}"}}}
 	_, err := svc.Preview(context.Background(), uuid.New(), KindSMTPTest, LocaleEN, &draft, "Acme BV")
 	if _, ok := errors.AsType[*InvalidTemplateError](err); !ok {
 		t.Fatalf("err = %v, want an InvalidTemplateError", err)

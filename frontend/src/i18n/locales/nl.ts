@@ -720,11 +720,12 @@ export const nl: Translation<typeof en> = {
   mailTemplates: {
     title: "E-mailteksten",
     intro:
-      "Pas de tekst aan van de e-mail die deze organisatie verstuurt. Elk bericht heeft een eigen tekst per taal, en een tekst die je niet hebt aangepast gebruikt de standaardtekst. De huisstijl komt uit het tabblad Huisstijl.",
+      "Stel de e-mail die deze organisatie verstuurt samen uit blokken. Elk bericht heeft een eigen indeling per taal, en een bericht dat je niet hebt aangepast gebruikt de standaardindeling. De huisstijl komt uit het tabblad Huisstijl.",
     language: "Taal",
     message: "Bericht",
     status: "Status",
     edit: "Aanpassen",
+    backToList: "E-mailteksten",
     customized: "Aangepast",
     default: "Standaard",
     variables: "Variabelen",
@@ -733,13 +734,25 @@ export const nl: Translation<typeof en> = {
     fields: {
       subject: "Onderwerp",
       preheader: "Voorbeeldregel",
-      headline: "Kop",
-      paragraphs: "Alinea's",
-      ctaLabel: "Knoptekst",
-      ctaUrl: "Knoplink",
-      linkFallback: "Introductie bij de link",
-      note: "Afsluitende opmerking",
+    },
+    layout: "Indeling",
+    blocks: {
+      logo: "Logo",
+      heading: "Kop",
+      paragraph: "Alinea",
+      button: "Knop",
+      divider: "Scheidingslijn",
       footer: "Voettekst",
+    },
+    blockFields: {
+      text: "Tekst",
+      label: "Knoptekst",
+      url: "Knoplink",
+      linkFallback: "Introductie bij de link",
+    },
+    blockHints: {
+      logo: "Toont de organisatienaam in de huisstijl van de e-mail.",
+      divider: "Een horizontale lijn tussen blokken.",
     },
     kinds: {
       credential_offer: "Credential uitgegeven",
@@ -761,11 +774,12 @@ export const nl: Translation<typeof en> = {
       en: "Engels",
       nl: "Nederlands",
     },
-    addParagraph: "Alinea toevoegen",
-    removeParagraph: "Alinea {{number}} verwijderen",
-    paragraphNumber: "Alinea {{number}}",
-    ctaHint:
-      "De knoplink is één linkvariabele of een volledig https://-adres. Laat beide velden leeg voor een bericht zonder knop.",
+    addBlock: "Blok toevoegen",
+    removeBlock: "Blok {{number}} verwijderen",
+    moveBlockUp: "Blok {{number}} omhoog verplaatsen",
+    moveBlockDown: "Blok {{number}} omlaag verplaatsen",
+    buttonHint:
+      "De knoplink is één linkvariabele of een volledig https://-adres. De introductie is de korte regel boven de kale link onder de knop.",
     preview: "Voorbeeld",
     previewSubject: "Onderwerp:",
     previewFrameTitle: "Weergegeven bericht",
@@ -793,9 +807,11 @@ export const nl: Translation<typeof en> = {
       malformedPlaceholder:
         "Een van de variabelen is verkeerd geschreven. Zet twee accolades om de naam, zonder spaties erin.",
       required: "Dit veld is verplicht.",
-      ctaPair: "Vul zowel de knoptekst als de knoplink in, of geen van beide.",
-      ctaUrlShape:
+      buttonUrlShape:
         "Gebruik één linkvariabele op zichzelf, of een volledig https://-adres.",
+      noBlocks: "Voeg minstens één blok toe aan de indeling.",
+      needsContent: "De indeling heeft minstens één kop of alinea nodig.",
+      tooManyBlocks: "Een indeling kan maximaal {{max}} blokken hebben.",
     },
     loadError: "Kon de e-mailteksten niet laden: {{message}}",
     saveError: "Kon de tekst niet opslaan: {{message}}",
