@@ -282,8 +282,13 @@ const catalogGoPath = fileURLToPath(
 );
 const catalogSource = readFileSync(catalogGoPath, "utf8");
 
+// The `Kind` type is optional in the pattern on purpose. Inside the catalogue's
+// `const` block a later kind may be written `KindFoo = "foo"` without repeating
+// the type — it is still an untyped string constant assignable to `Kind`, so it
+// compiles and can be served. Requiring the type here would skip it, and the
+// length assertion below would pass too, both lists being short by the same one.
 const backendKinds = [
-  ...catalogSource.matchAll(/^\s*Kind\w+\s+Kind\s*=\s*"([^"]+)"/gm),
+  ...catalogSource.matchAll(/^\s*Kind\w+(?:\s+Kind)?\s*=\s*"([^"]+)"/gm),
 ].map((m) => m[1]);
 
 // The copy is read out of en.ts rather than through t(), because t()'s key type
