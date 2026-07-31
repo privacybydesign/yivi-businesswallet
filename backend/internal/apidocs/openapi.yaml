@@ -33,6 +33,8 @@ tags:
     description: Per-organisation WSCA holder-wallet activation and rotation.
   - name: theme
     description: Per-organisation colour scheme and logo.
+  - name: notifications
+    description: Per-organisation notification subscriptions per audit event.
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -2209,6 +2211,75 @@ paths:
             application/json:
               schema:
                 description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/notifications/settings:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [notifications]
+      summary: Get the organisation notification subscriptions
+      description: >-
+        Requires an administrator role in the organisation. Returns the saved
+        subscriptions together with the catalogue they are chosen from: the
+        subscribable audit events (grouped as the settings screen shows them)
+        and the known channel identifiers.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [notifications]
+      summary: Replace the organisation notification subscriptions
+      description: >-
+        Requires an administrator role in the organisation. Replaces the whole
+        subscription document: an audit event the request leaves out is
+        unsubscribed. An unknown event or channel is rejected with 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subscriptions:
+                  type: object
+                  description: >-
+                    Audit action to the channels notified for it, e.g.
+                    {"membership.invited": ["email", "slack"]}. An event mapped
+                    to an empty list notifies nobody and is not stored.
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+                      enum: [email, slack, msteams]
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

@@ -86,6 +86,8 @@ const (
 	ThemeSettingsUpdated = "theme.settings_updated"
 
 	OnboardingSettingsUpdated = "onboarding.settings_updated"
+
+	NotificationSettingsUpdated = "notification.settings_updated"
 )
 
 const (
@@ -120,6 +122,8 @@ const (
 	TargetThemeSettings = "org_theme_settings"
 
 	TargetOnboardingSettings = "org_onboarding_attestations"
+
+	TargetNotificationSettings = "org_notification_settings"
 )
 
 type Actor struct {
@@ -132,7 +136,10 @@ func ContextWithActor(ctx context.Context, a Actor) context.Context {
 	return context.WithValue(ctx, ctxKey{}, a)
 }
 
-func actorFromContext(ctx context.Context) (Actor, bool) {
+// ActorFromContext returns the actor behind the current request, if one was
+// stashed by ContextWithActor. A decorating Recorder needs it to attribute what
+// it records; the plain write path uses it to fill actor_user_id.
+func ActorFromContext(ctx context.Context) (Actor, bool) {
 	a, ok := ctx.Value(ctxKey{}).(Actor)
 	return a, ok
 }
@@ -176,7 +183,7 @@ func (DBRecorder) Record(ctx context.Context, q database.Querier, action string,
 	}
 
 	var actorID *uuid.UUID
-	if a, ok := actorFromContext(ctx); ok {
+	if a, ok := ActorFromContext(ctx); ok {
 		actorID = &a.UserID
 	}
 
