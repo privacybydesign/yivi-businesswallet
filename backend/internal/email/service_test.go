@@ -25,14 +25,28 @@ func (s stubSettings) configFor(context.Context, uuid.UUID) (mailer.Config, bool
 type recordingSender struct {
 	sent []mailer.Message
 	err  error
+	// reject fails the send to one address, the way a relay rejects a mailbox that no
+	// longer exists while the rest of the list is deliverable.
+	reject map[string]error
 }
 
 func (r *recordingSender) Send(_ mailer.Config, msg mailer.Message) error {
 	if r.err != nil {
 		return r.err
 	}
+	if err := r.reject[msg.To]; err != nil {
+		return err
+	}
 	r.sent = append(r.sent, msg)
 	return nil
+}
+
+func (r *recordingSender) recipients() []string {
+	to := make([]string, 0, len(r.sent))
+	for _, msg := range r.sent {
+		to = append(to, msg.To)
+	}
+	return to
 }
 
 type stubBrand struct {
@@ -139,6 +153,25 @@ func TestSendPostguardNotificationMailsEveryRecipient(t *testing.T) {
 		if msg.To != recipients[i] {
 			t.Errorf("message %d went to %q, want %q", i, msg.To, recipients[i])
 		}
+	}
+}
+
+// The flows that send to a list and act on the error keep stopping at the first
+// failure — the caller retries the whole flow, so carrying on would mail the later
+// recipients twice. Only the notification path fans out past a failure.
+func TestSendPostguardNotificationStopsAtTheFirstFailure(t *testing.T) {
+	rejected := errors.New("550 no such mailbox")
+	sender := &recordingSender{reject: map[string]error{"b@example.org": rejected}}
+	svc := newTestService(sender, nil, LocaleEN)
+
+	err := svc.SendPostguardNotification(context.Background(), uuid.New(),
+		[]string{"a@example.org", "b@example.org", "c@example.org"},
+		"Acme BV", "", "https://postguard.example/download?uuid=1")
+	if !errors.Is(err, rejected) {
+		t.Fatalf("SendPostguardNotification = %v, want the rejection", err)
+	}
+	if got := sender.recipients(); len(got) != 1 || got[0] != "a@example.org" {
+		t.Errorf("delivered to %v, want only the recipient before the rejected one", got)
 	}
 }
 
@@ -298,8 +331,9 @@ func TestPreviewReportsAnInvalidDraftAsInvalidTemplate(t *testing.T) {
 	}
 }
 
-// A specimen is a real send of one cause, rendered from the org's own copy.
-func TestSendEventNotificationNamesTheEventInTheRecipientsLanguage(t *testing.T) {
+// Every admin of an org gets the same language: the deployment's default locale is
+// the only preference stored, so that is what names the event.
+func TestSendEventNotificationNamesTheEventInTheDeploymentLocale(t *testing.T) {
 	sender := &recordingSender{}
 	svc := newTestService(sender, nil, LocaleNL)
 
@@ -329,6 +363,34 @@ func TestSendEventNotificationNamesTheEventInTheRecipientsLanguage(t *testing.T)
 		if !strings.Contains(msg.TextBody, want) {
 			t.Errorf("the body is missing %q:\n%s", want, msg.TextBody)
 		}
+	}
+}
+
+// A notification has no second chance: the dispatcher claims the event off the
+// outbox before delivering it and never re-queues it. One rejected mailbox must
+// therefore cost its own recipient and not the admins after it, and the rejection
+// must still surface in the returned error.
+func TestSendEventNotificationDeliversPastARejectedRecipient(t *testing.T) {
+	rejected := errors.New("550 no such mailbox")
+	sender := &recordingSender{reject: map[string]error{"bob@acme.example": rejected}}
+	svc := newTestService(sender, nil, LocaleEN)
+
+	admins := []string{"ada@acme.example", "bob@acme.example", "zoe@acme.example"}
+	err := svc.SendEventNotification(context.Background(), uuid.New(), admins, "Acme BV", EventNotification{
+		Action:     "membership.invited",
+		OccurredAt: time.Date(2026, 1, 14, 9, 32, 0, 0, time.UTC),
+		AuditURL:   "https://wallet.example.org/acme/audit-log",
+	})
+	if !errors.Is(err, rejected) {
+		t.Fatalf("SendEventNotification = %v, want the rejection", err)
+	}
+	if !strings.Contains(err.Error(), "bob@acme.example") {
+		t.Errorf("err = %v, want it to name the rejected address", err)
+	}
+
+	delivered := sender.recipients()
+	if len(delivered) != 2 || delivered[0] != "ada@acme.example" || delivered[1] != "zoe@acme.example" {
+		t.Errorf("delivered to %v, want both deliverable admins", delivered)
 	}
 }
 
@@ -375,6 +437,7 @@ func TestSendEventNotificationRefusesAnUnnamedEvent(t *testing.T) {
 	}
 }
 
+// A specimen is a real send of one cause, rendered from the org's own copy.
 func TestSendSpecimenUsesTheKindsSampleVariables(t *testing.T) {
 	sender := &recordingSender{}
 	svc := newTestService(sender, nil, LocaleEN)

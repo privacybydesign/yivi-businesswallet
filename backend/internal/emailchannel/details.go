@@ -20,7 +20,12 @@ import (
 //   - an {before, after} update shows the new value, with the old one before an
 //     arrow when both are set. A field the update cleared is left out rather than
 //     printed as its old value, which would read as if it were still in force;
-//   - a value is one line and bounded in length, because it lands in a mail.
+//   - a value is one line and bounded in length, because it lands in a mail;
+//   - a field name is the metadata's own key and is not translated, while the copy
+//     around it is: a Dutch notification reads "Rol gewijzigd bij Acme BV" above
+//     "role: member → admin". Translating the keys would mean a second catalogue of
+//     field names per locale, kept in step with every audit.Record call, for lines
+//     whose full record is one click away in the audit log.
 const (
 	// maxDetailLines caps how many fields one notification lists. Audit metadata is
 	// written by this codebase and is a handful of fields per action, so this is a

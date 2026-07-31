@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -49,6 +50,13 @@ type Channel struct {
 	mail       notificationMailer
 	orgs       orgDirectory
 	appBaseURL string
+	// unconfigured remembers the orgs already warned about missing SMTP settings, so
+	// a misconfiguration costs one log line per org instead of one per event: a
+	// dispatch pass claims up to notifications.DefaultClaimBatch events, and the same
+	// org's whole batch would repeat the same line every tick, per replica. A channel
+	// sees no pass boundary, so the memo lives as long as the process; a restart or a
+	// deploy states the misconfiguration again.
+	unconfigured sync.Map
 }
 
 // New builds the channel. appBaseURL is the deployment's frontend base URL, which
@@ -64,6 +72,11 @@ func (c *Channel) ID() notifications.ChannelID { return notifications.ChannelEma
 // failures and return nil: an org with no admins has nobody to tell, and an org
 // that subscribed to e-mail without configuring SMTP is a misconfiguration to
 // warn about, not an error to log once per event at ERROR.
+//
+// The deadline on ctx bounds the two lookups but not the sending: mailer.Sender
+// takes no context and sets a dial timeout only, so a relay that accepts the
+// connection and then stalls keeps this call running past the dispatcher's notify
+// timeout. Do not read the deadline as a bound on how long Notify takes.
 func (c *Channel) Notify(ctx context.Context, e notifications.Event) error {
 	org, err := c.orgs.GetByID(ctx, e.OrgID)
 	if err != nil {
@@ -85,12 +98,21 @@ func (c *Channel) Notify(ctx context.Context, e notifications.Event) error {
 	})
 	switch {
 	case errors.Is(err, email.ErrNotConfigured):
-		slog.WarnContext(ctx, "notifications: e-mail is subscribed but SMTP is not configured",
-			slog.String("organizationId", e.OrgID.String()),
-			slog.String("action", e.Action))
+		c.warnUnconfigured(ctx, e.OrgID)
 		return nil
 	case err != nil:
 		return fmt.Errorf("emailchannel: notifying the admins of organization %s: %w", e.OrgID, err)
 	}
 	return nil
+}
+
+// warnUnconfigured reports an org that subscribed to e-mail without SMTP settings,
+// once per org (see Channel.unconfigured). The line names no event: what the admin
+// has to fix is the same whichever event ran into it.
+func (c *Channel) warnUnconfigured(ctx context.Context, orgID uuid.UUID) {
+	if _, warned := c.unconfigured.LoadOrStore(orgID, struct{}{}); warned {
+		return
+	}
+	slog.WarnContext(ctx, "notifications: e-mail is subscribed but SMTP is not configured",
+		slog.String("organizationId", orgID.String()))
 }

@@ -2,6 +2,7 @@ package email
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -92,8 +93,8 @@ func (s *Service) SendPostguardNotification(ctx context.Context, orgID uuid.UUID
 }
 
 // EventNotification is one recorded wallet event as the notification mail renders
-// it. Action is the audit action, which the catalogue turns into the recipient's
-// language (EventLabel); Details is the already-summarised description of what
+// it. Action is the audit action, which the catalogue turns into the deployment's
+// locale (EventLabel); Details is the already-summarised description of what
 // changed, one "field: value" per line, and may be empty, in which case the
 // template's details paragraph drops out.
 type EventNotification struct {
@@ -110,16 +111,23 @@ type EventNotification struct {
 const eventTimeLayout = "2006-01-02 15:04 UTC"
 
 // SendEventNotification tells an organization's admins about one event they
-// subscribed to. Returns ErrNotConfigured when the org has no usable SMTP
-// settings, and an error when the catalogue has no name for the action — a
-// notification that names the raw audit action would be worse than a logged gap.
+// subscribed to. Every admin is attempted even when one of them fails, and the
+// failures come back joined: the dispatcher claims an event off the outbox before
+// delivering it and never re-queues it, so one permanently rejecting mailbox would
+// otherwise cost the notification for every admin after it (sendToEach).
+//
+// The mail renders in the deployment's locale, the same one for every admin of the
+// org: neither a per-org nor a per-recipient language preference is stored yet.
+// Returns ErrNotConfigured when the org has no usable SMTP settings, and an error
+// when the catalogue has no name for the action — a notification that names the raw
+// audit action would be worse than a logged gap.
 func (s *Service) SendEventNotification(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string, n EventNotification) error {
 	locale := s.locale("")
 	name, ok := EventLabel(n.Action, locale)
 	if !ok {
 		return fmt.Errorf("email: no %s name for event %q", locale, n.Action)
 	}
-	return s.sendLocalized(ctx, orgID, KindEventNotification, locale, recipients, map[string]string{
+	return s.sendToEach(ctx, orgID, KindEventNotification, locale, recipients, map[string]string{
 		varOrgName:      orgName,
 		varEventName:    name,
 		varEventDetails: n.Details,
@@ -187,23 +195,64 @@ func (s *Service) locale(preference Locale) Locale {
 	return ResolveLocale(string(preference), string(s.defaultLocale))
 }
 
+// sendLocalized renders the message once and delivers it to every recipient,
+// stopping at the first failure: the flows that use it act on that error (a
+// credential offer, a PostGuard package) and the send is retried by retrying the
+// flow.
 func (s *Service) sendLocalized(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, recipients []string, vars map[string]string) error {
-	cfg, ok, err := s.settings.configFor(ctx, orgID)
+	cfg, msg, err := s.compose(ctx, orgID, kind, locale, vars)
 	if err != nil {
 		return err
 	}
+	for _, to := range recipients {
+		msg.To = to
+		if err := s.sender.Send(cfg, msg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sendToEach delivers to every recipient even when one of them fails, and returns
+// the failures joined, each naming the address it belongs to. It is for a message
+// with no second chance: there one rejecting mailbox has to cost its own recipient
+// and not the rest of the list, which is the opposite trade-off from sendLocalized.
+func (s *Service) sendToEach(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, recipients []string, vars map[string]string) error {
+	cfg, msg, err := s.compose(ctx, orgID, kind, locale, vars)
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, to := range recipients {
+		msg.To = to
+		if err := s.sender.Send(cfg, msg); err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", to, err))
+		}
+	}
+	return errors.Join(failures...)
+}
+
+// compose resolves the org's SMTP config, template and branding and renders the
+// message, ready to hand to the sender once per recipient. The returned message
+// carries no To: the caller sets it per recipient, so the body is rendered once
+// however many addresses it goes to.
+func (s *Service) compose(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, vars map[string]string) (mailer.Config, mailer.Message, error) {
+	cfg, ok, err := s.settings.configFor(ctx, orgID)
+	if err != nil {
+		return mailer.Config{}, mailer.Message{}, err
+	}
 	if !ok {
-		return ErrNotConfigured
+		return mailer.Config{}, mailer.Message{}, ErrNotConfigured
 	}
 
 	tpl, err := s.templateFor(ctx, orgID, kind, locale)
 	if err != nil {
-		return err
+		return mailer.Config{}, mailer.Message{}, err
 	}
 
 	body, err := Render(kind, locale, tpl, s.brandWithLogo(ctx, orgID, tpl), vars)
 	if err != nil {
-		return err
+		return mailer.Config{}, mailer.Message{}, err
 	}
 
 	var inline []mailer.InlineImage
@@ -214,19 +263,12 @@ func (s *Service) sendLocalized(ctx context.Context, orgID uuid.UUID, kind Kind,
 			Bytes:       body.InlineLogo.Bytes,
 		}}
 	}
-
-	for _, to := range recipients {
-		if err := s.sender.Send(cfg, mailer.Message{
-			To:       to,
-			Subject:  body.Subject,
-			TextBody: body.TextBody,
-			HTMLBody: body.HTMLBody,
-			Inline:   inline,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return cfg, mailer.Message{
+		Subject:  body.Subject,
+		TextBody: body.TextBody,
+		HTMLBody: body.HTMLBody,
+		Inline:   inline,
+	}, nil
 }
 
 // templateFor resolves the template to render: the org's own edit when it has

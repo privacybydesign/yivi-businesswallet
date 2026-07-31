@@ -1,8 +1,11 @@
 package emailchannel
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +15,14 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/notifications"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
+
+// installTestLogger captures what the channel logs, which is the whole of what a
+// tolerated misconfiguration produces.
+func installTestLogger(buf *bytes.Buffer) func() {
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(buf, nil)))
+	return func() { slog.SetDefault(prev) }
+}
 
 type sentMail struct {
 	orgID        uuid.UUID
@@ -128,16 +139,32 @@ func TestNotifySendsNothingWithoutAdmins(t *testing.T) {
 }
 
 // Subscribing to e-mail without configuring SMTP is a misconfiguration the admin
-// has to fix; every dispatch pass logging it at ERROR would not help them.
+// has to fix; every dispatch pass logging it at ERROR would not help them. One pass
+// claims up to a hundred events, so the warning is also per org rather than per
+// event: the same line a hundred times a tick is the noise readSubscriptions
+// already documents itself as avoiding.
 func TestNotifyToleratesUnconfiguredSMTP(t *testing.T) {
 	org := testOrg()
+	var logged bytes.Buffer
+	restore := installTestLogger(&logged)
+	defer restore()
+
 	channel := New(&recordingMailer{err: email.ErrNotConfigured}, stubDirectory{
 		org:    org,
 		admins: []string{"ada@acme.example"},
 	}, "https://wallet.example.org")
 
-	if err := channel.Notify(context.Background(), testEvent(org.ID)); err != nil {
-		t.Errorf("Notify = %v, want nil", err)
+	for i := range 3 {
+		if err := channel.Notify(context.Background(), testEvent(org.ID)); err != nil {
+			t.Errorf("Notify %d = %v, want nil", i, err)
+		}
+	}
+
+	if got := strings.Count(logged.String(), "SMTP is not configured"); got != 1 {
+		t.Errorf("warned %d times over 3 events, want once:\n%s", got, logged.String())
+	}
+	if !strings.Contains(logged.String(), org.ID.String()) {
+		t.Errorf("the warning does not name the organization:\n%s", logged.String())
 	}
 }
 
