@@ -124,8 +124,17 @@ func tryDropDatabase(adminDSN, name string) error {
 	return nil
 }
 
-// uniqueName derives a valid, collision-free database name from the test name
-// and a process-wide counter (no math/rand, which the harness disallows).
+// uniqueName derives a valid, collision-free database name from the test name,
+// the process id and a process-wide counter (no math/rand, which the harness
+// disallows).
+//
+// The process id is what makes the name unique *between* packages. `go test ./...`
+// runs one process per package, several at a time, and the counter restarts at 1
+// in each — so two packages that happen to name a test the same way (three of them
+// had a TestGetSettingsUnconfigured) would both ask for
+// ybw_test_testgetsettingsunconfigured_1 and the second one loses with "database
+// already exists". That is a race between packages, so it fails whichever package
+// is unlucky rather than the one whose test was added.
 func uniqueName(t *testing.T) string {
 	var b strings.Builder
 	b.WriteString(namePrefix)
@@ -141,7 +150,7 @@ func uniqueName(t *testing.T) string {
 	if len(base) > maxNameBase {
 		base = base[:maxNameBase]
 	}
-	return fmt.Sprintf("%s_%d", base, dbCounter.Add(1))
+	return fmt.Sprintf("%s_%d_%d", base, os.Getpid(), dbCounter.Add(1))
 }
 
 func withDatabase(dsn, name string) (string, error) {

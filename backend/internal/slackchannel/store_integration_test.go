@@ -33,7 +33,7 @@ func newTestStore(t *testing.T, pool *pgxpool.Pool, recorder audit.Recorder) *St
 	return NewStore(pool, recorder, cipher)
 }
 
-func TestGetSettingsUnconfigured(t *testing.T) {
+func TestGetSettingsWithoutASavedWebhook(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := newTestStore(t, pool, audit.NopRecorder{})
 	orgID := makeOrg(t, pool, "acme")
