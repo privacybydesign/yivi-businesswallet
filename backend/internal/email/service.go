@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -87,6 +88,43 @@ func (s *Service) SendPostguardNotification(ctx context.Context, orgID uuid.UUID
 		varOrgName:     orgName,
 		varMessage:     message,
 		varDownloadURL: downloadURL,
+	})
+}
+
+// EventNotification is one recorded wallet event as the notification mail renders
+// it. Action is the audit action, which the catalogue turns into the recipient's
+// language (EventLabel); Details is the already-summarised description of what
+// changed, one "field: value" per line, and may be empty, in which case the
+// template's details paragraph drops out.
+type EventNotification struct {
+	Action     string
+	Details    string
+	OccurredAt time.Time
+	// AuditURL links to the organization's audit log, where the full record is.
+	AuditURL string
+}
+
+// eventTimeLayout stamps the moment an event was recorded. It is UTC and
+// numeric-only on purpose: a notification goes to an organization's admins, who
+// may not share a locale, and this package's rule is that no copy lives in Go.
+const eventTimeLayout = "2006-01-02 15:04 UTC"
+
+// SendEventNotification tells an organization's admins about one event they
+// subscribed to. Returns ErrNotConfigured when the org has no usable SMTP
+// settings, and an error when the catalogue has no name for the action — a
+// notification that names the raw audit action would be worse than a logged gap.
+func (s *Service) SendEventNotification(ctx context.Context, orgID uuid.UUID, recipients []string, orgName string, n EventNotification) error {
+	locale := s.locale("")
+	name, ok := EventLabel(n.Action, locale)
+	if !ok {
+		return fmt.Errorf("email: no %s name for event %q", locale, n.Action)
+	}
+	return s.sendLocalized(ctx, orgID, KindEventNotification, locale, recipients, map[string]string{
+		varOrgName:      orgName,
+		varEventName:    name,
+		varEventDetails: n.Details,
+		varEventTime:    n.OccurredAt.UTC().Format(eventTimeLayout),
+		varAuditURL:     n.AuditURL,
 	})
 }
 

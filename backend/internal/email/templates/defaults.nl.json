@@ -9,7 +9,48 @@
     "txCode": "123456",
     "acceptUrl": "https://wallet.example.org/invite/voorbeeld",
     "message": "Hierbij het bestand dat we bespraken.",
-    "downloadUrl": "https://postguard.example/download?uuid=voorbeeld"
+    "downloadUrl": "https://postguard.example/download?uuid=voorbeeld",
+    "eventName": "Lid uitgenodigd",
+    "eventDetails": "email: sam@example.org\nrole: member",
+    "eventTime": "2026-01-14 09:32 UTC",
+    "auditUrl": "https://wallet.example.org/acme/audit-log"
+  },
+  "events": {
+    "membership.invited": "Lid uitgenodigd",
+    "membership.invite_resent": "Uitnodiging opnieuw verstuurd",
+    "membership.invite_revoked": "Uitnodiging ingetrokken",
+    "membership.accepted": "Uitnodiging geaccepteerd",
+    "membership.declined": "Uitnodiging geweigerd",
+    "membership.revoked": "Lidmaatschap ingetrokken",
+    "membership.role_changed": "Rol gewijzigd",
+    "membership.expired": "Uitnodiging verlopen",
+
+    "wallet.bootstrapped": "Wallet geïnitialiseerd",
+    "wallet.suspended": "Wallet opgeschort",
+    "wallet.revoked": "Wallet ingetrokken",
+    "wallet.representation_claimed": "Vertegenwoordiging geclaimd",
+    "wallet.representation_revoked": "Vertegenwoordiging ingetrokken",
+
+    "qerds.message_sent": "Beveiligd bericht verstuurd",
+    "qerds.message_received": "Beveiligd bericht ontvangen",
+    "qerds.address_provisioned": "Digitaal adres aangemaakt",
+    "qerds.address_default_changed": "Standaardadres gewijzigd",
+    "qerds.contact_added": "Contact toegevoegd",
+    "qerds.contact_deleted": "Contact verwijderd",
+
+    "postguard.file_sent": "Versleuteld bestand verstuurd",
+    "postguard.key_set": "PostGuard API-sleutel ingesteld",
+    "postguard.key_removed": "PostGuard API-sleutel verwijderd",
+    "postguard.encryption_key_set": "PostGuard-encryptiesleutel ingesteld",
+    "postguard.encryption_key_removed": "PostGuard-encryptiesleutel verwijderd",
+
+    "attestation.issued": "Attestatie uitgegeven",
+    "attestation.claimed": "Attestatie geclaimd",
+    "attestation.revoked": "Attestatie ingetrokken",
+    "attestation.offer_cancelled": "Attestatieaanbod geannuleerd",
+    "attestation.key_added": "Attestatiesleutel toegevoegd",
+    "attestation.key_suspended": "Attestatiesleutel opgeschort",
+    "attestation.key_revoked": "Attestatiesleutel ingetrokken"
   },
   "templates": {
     "credential_offer": {
@@ -41,6 +82,17 @@
         { "type": "paragraph", "text": "{{message}}" },
         { "type": "button", "label": "Open het bestand", "url": "{{downloadUrl}}" },
         { "type": "paragraph", "text": "Je opent het bestand door te bewijzen dat dit e-mailadres van jou is." },
+        { "type": "footer" }
+      ]
+    },
+    "event_notification": {
+      "subject": "{{eventName}} bij {{orgName}}",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{eventName}} bij {{orgName}}" },
+        { "type": "paragraph", "text": "Vastgelegd op {{eventTime}}." },
+        { "type": "paragraph", "text": "{{eventDetails}}" },
+        { "type": "button", "label": "Open het auditlogboek", "url": "{{auditUrl}}" },
         { "type": "footer" }
       ]
     },

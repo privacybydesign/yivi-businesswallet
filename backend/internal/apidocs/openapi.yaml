@@ -1663,7 +1663,7 @@ paths:
         required: true
         schema:
           type: string
-          enum: [credential_offer, invitation, postguard_file, smtp_test]
+          enum: [credential_offer, event_notification, invitation, postguard_file, smtp_test]
         description: Mail cause. The set is fixed by the backend catalogue.
       - name: locale
         in: path
@@ -1757,7 +1757,7 @@ paths:
         required: true
         schema:
           type: string
-          enum: [credential_offer, invitation, postguard_file, smtp_test]
+          enum: [credential_offer, event_notification, invitation, postguard_file, smtp_test]
         description: Mail cause. The set is fixed by the backend catalogue.
     post:
       tags: [email]

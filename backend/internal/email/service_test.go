@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -298,6 +299,82 @@ func TestPreviewReportsAnInvalidDraftAsInvalidTemplate(t *testing.T) {
 }
 
 // A specimen is a real send of one cause, rendered from the org's own copy.
+func TestSendEventNotificationNamesTheEventInTheRecipientsLanguage(t *testing.T) {
+	sender := &recordingSender{}
+	svc := newTestService(sender, nil, LocaleNL)
+
+	admins := []string{"ada@acme.example", "sam@acme.example"}
+	err := svc.SendEventNotification(context.Background(), uuid.New(), admins, "Acme BV", EventNotification{
+		Action:     "membership.invited",
+		Details:    "email: sam@example.org\nrole: member",
+		OccurredAt: time.Date(2026, 1, 14, 9, 32, 0, 0, time.UTC),
+		AuditURL:   "https://wallet.example.org/acme/audit-log",
+	})
+	if err != nil {
+		t.Fatalf("SendEventNotification: %v", err)
+	}
+
+	if len(sender.sent) != len(admins) {
+		t.Fatalf("sent %d messages, want %d", len(sender.sent), len(admins))
+	}
+	msg := sender.sent[0]
+	if msg.To != admins[0] {
+		t.Errorf("to = %q, want %q", msg.To, admins[0])
+	}
+	label, _ := EventLabel("membership.invited", LocaleNL)
+	if !strings.Contains(msg.Subject, label) {
+		t.Errorf("subject = %q, want the Dutch event name %q", msg.Subject, label)
+	}
+	for _, want := range []string{label, "role: member", "2026-01-14 09:32 UTC", "https://wallet.example.org/acme/audit-log"} {
+		if !strings.Contains(msg.TextBody, want) {
+			t.Errorf("the body is missing %q:\n%s", want, msg.TextBody)
+		}
+	}
+}
+
+// The details paragraph is the one part of the layout that is optional, so an
+// event with nothing to report must not leave a dangling empty line.
+func TestSendEventNotificationOmitsEmptyDetails(t *testing.T) {
+	sender := &recordingSender{}
+	svc := newTestService(sender, nil, LocaleEN)
+
+	err := svc.SendEventNotification(context.Background(), uuid.New(), []string{"ada@acme.example"},
+		"Acme BV", EventNotification{
+			Action:     "wallet.suspended",
+			OccurredAt: time.Now(),
+			AuditURL:   "https://wallet.example.org/acme/audit-log",
+		})
+	if err != nil {
+		t.Fatalf("SendEventNotification: %v", err)
+	}
+	if len(sender.sent) != 1 {
+		t.Fatalf("sent %d messages, want 1", len(sender.sent))
+	}
+	label, _ := EventLabel("wallet.suspended", LocaleEN)
+	if !strings.Contains(sender.sent[0].TextBody, label) {
+		t.Errorf("the body is missing the event name %q:\n%s", label, sender.sent[0].TextBody)
+	}
+}
+
+// A mail that named the raw audit action would be worse than a logged gap.
+func TestSendEventNotificationRefusesAnUnnamedEvent(t *testing.T) {
+	sender := &recordingSender{}
+	svc := newTestService(sender, nil, LocaleEN)
+
+	err := svc.SendEventNotification(context.Background(), uuid.New(), []string{"ada@acme.example"},
+		"Acme BV", EventNotification{
+			Action:     "organization.deleted",
+			OccurredAt: time.Now(),
+			AuditURL:   "https://wallet.example.org/acme/audit-log",
+		})
+	if err == nil {
+		t.Fatal("SendEventNotification on an unnamed event = nil, want an error")
+	}
+	if len(sender.sent) != 0 {
+		t.Errorf("sent %d messages, want none", len(sender.sent))
+	}
+}
+
 func TestSendSpecimenUsesTheKindsSampleVariables(t *testing.T) {
 	sender := &recordingSender{}
 	svc := newTestService(sender, nil, LocaleEN)

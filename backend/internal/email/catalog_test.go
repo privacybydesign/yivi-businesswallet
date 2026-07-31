@@ -24,6 +24,14 @@ func sampleVars(kind Kind) map[string]string {
 		}
 	case KindSMTPTest:
 		return map[string]string{varOrgName: "Acme BV"}
+	case KindEventNotification:
+		return map[string]string{
+			varOrgName:      "Acme BV",
+			varEventName:    "Invited member",
+			varEventDetails: "email: sam@example.org\nrole: member",
+			varEventTime:    "2026-01-14 09:32 UTC",
+			varAuditURL:     "https://wallet.example.org/acme/audit-log",
+		}
 	default:
 		return nil
 	}
@@ -132,9 +140,10 @@ func TestDefaultTemplateRejectsAnUnknownKind(t *testing.T) {
 
 func TestVariablesForDeclaresEveryURLVariable(t *testing.T) {
 	urlVars := map[Kind]string{
-		KindCredentialOffer: varClaimURL,
-		KindInvitation:      varAcceptURL,
-		KindPostguardFile:   varDownloadURL,
+		KindCredentialOffer:   varClaimURL,
+		KindInvitation:        varAcceptURL,
+		KindPostguardFile:     varDownloadURL,
+		KindEventNotification: varAuditURL,
 	}
 	for kind, name := range urlVars {
 		variables, ok := VariablesFor(kind)
@@ -208,6 +217,40 @@ func TestSampleVariablesUseTheRealOrganizationName(t *testing.T) {
 	}
 }
 
+// Event names are copy, so they live in the catalogue files and follow the same
+// locale rules as the templates. Which actions need one is the notification
+// catalog's call and is asserted in internal/emailchannel.
+func TestEventLabelsAreShippedPerLocale(t *testing.T) {
+	events := LabelledEvents()
+	if len(events) == 0 {
+		t.Fatal("the catalogue names no events")
+	}
+	for _, action := range events {
+		english, ok := EventLabel(action, LocaleEN)
+		if !ok || strings.TrimSpace(english) == "" {
+			t.Errorf("no English name for %q", action)
+		}
+		dutch, ok := EventLabel(action, LocaleNL)
+		if !ok || strings.TrimSpace(dutch) == "" {
+			t.Errorf("no Dutch name for %q", action)
+		}
+	}
+	// An unsupported locale falls back to the shipped English copy, as elsewhere.
+	fallback, ok := EventLabel(events[0], Locale("de"))
+	if !ok {
+		t.Fatalf("an unsupported locale returned no name for %q", events[0])
+	}
+	if english, _ := EventLabel(events[0], LocaleEN); fallback != english {
+		t.Errorf("name = %q, want the English name %q", fallback, english)
+	}
+}
+
+func TestEventLabelRejectsAnUnnamedAction(t *testing.T) {
+	if _, ok := EventLabel("organization.deleted", LocaleEN); ok {
+		t.Error("an action outside the notification catalog has a mail name")
+	}
+}
+
 func TestSampleVariablesRejectsAnUnknownKind(t *testing.T) {
 	if _, ok := SampleVariables("not_a_kind", LocaleEN, "Acme BV"); ok {
 		t.Error("SampleVariables accepted an unknown kind")
@@ -237,6 +280,10 @@ func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
 		varAcceptURL:      "https://wallet.example.org/invite/sample",
 		varMessage:        "Here is the file.",
 		varDownloadURL:    "https://postguard.example/download?uuid=sample",
+		varEventName:      "Invited member",
+		varEventDetails:   "role: member",
+		varEventTime:      "2026-01-14 09:32 UTC",
+		varAuditURL:       "https://wallet.example.org/acme/audit-log",
 	}
 	if err := validateSamples(complete); err != nil {
 		t.Fatalf("validateSamples on the complete set = %v, want nil", err)
