@@ -379,6 +379,8 @@ export const en = {
     attestationOfferCancelled: "Offer cancelled",
     emailSettingsSaved: "E-mail settings saved",
     emailTestSent: "Test e-mail sent",
+    slackSettingsSaved: "Slack settings saved",
+    slackTestSent: "Test notification sent",
     mailTemplateSaved: "Mail template saved",
     mailTemplateReset: "Mail template reverted to the default",
     issuerSettingsSaved: "Issuer settings saved",
@@ -471,6 +473,7 @@ export const en = {
       orgThemeSettings: "Theme settings",
       orgOnboardingAttestations: "Onboarding attestations",
       orgNotificationSettings: "Notification settings",
+      orgSlackSettings: "Slack settings",
     },
     actions: {
       orgCreated: "Created organization",
@@ -534,6 +537,7 @@ export const en = {
       themeSettingsUpdated: "Updated theme settings",
       onboardingSettingsUpdated: "Updated onboarding attestations",
       notificationSettingsUpdated: "Updated notification settings",
+      slackSettingsUpdated: "Updated Slack settings",
     },
   },
   memberInvite: {
@@ -623,6 +627,7 @@ export const en = {
     tabBranding: "Branding",
     tabEmail: "E-mail",
     tabMailTemplates: "Mail templates",
+    tabSlack: "Slack",
     tabIssuer: "Issuer",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
@@ -857,6 +862,31 @@ export const en = {
     testNotConfigured:
       "Configure and save the SMTP settings before sending a test.",
     testError: "Could not send the test e-mail: {{message}}",
+  },
+  slackSettings: {
+    loadError: "Could not load the Slack settings: {{message}}",
+    heading: "Slack webhook",
+    description:
+      "Events this organization subscribed to are posted into a Slack channel through an incoming webhook. Create one in Slack and paste its URL here.",
+    webhookUrl: "Webhook URL",
+    webhookPlaceholder: "https://hooks.slack.com/services/…",
+    webhookUnchanged: "Leave blank to keep the current webhook URL",
+    webhookStored:
+      "A webhook URL is stored. It is treated as a secret, so it is not shown again after saving.",
+    enabled: "Post notifications to this webhook",
+    enabledNeedsWebhook: "Add a webhook URL first.",
+    remove: "Remove webhook",
+    saveError: "Could not save the Slack settings: {{message}}",
+    noEncryptionKey:
+      "This deployment has no Slack encryption key, so a webhook URL cannot be stored. Ask the administrator to set one.",
+    testHeading: "Send a test notification",
+    testDescription:
+      "Post a test message to confirm it arrives in the right channel.",
+    sendTest: "Send test notification",
+    testNotConfigured:
+      "Save a webhook URL and switch posting on before sending a test.",
+    testRefused: "Slack did not accept the test notification: {{message}}",
+    testError: "Could not send the test notification: {{message}}",
   },
   departments: {
     heading: "Departments",
