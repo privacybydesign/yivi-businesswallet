@@ -298,6 +298,137 @@ func TestDispatchDeliversEventsConcurrently(t *testing.T) {
 	<-done
 }
 
+// wedgingChannel never returns, whatever its context says: the SMTP dial or
+// webhook POST that hangs on a half-open socket. A Channel is an interface
+// implemented outside this package, so honouring the deadline is a promise the
+// dispatcher cannot rely on and has to enforce itself.
+type wedgingChannel struct {
+	id      ChannelID
+	arrived chan struct{}
+	release chan struct{}
+}
+
+func (c *wedgingChannel) ID() ChannelID { return c.id }
+
+func (c *wedgingChannel) Notify(context.Context, Event) error {
+	c.arrived <- struct{}{}
+	<-c.release
+	return nil
+}
+
+// The notify deadline has to be enforced by the dispatcher, not merely offered:
+// a channel that ignores its context must be given up on so the channels behind
+// it in the same event still get their turn.
+func TestDispatchGivesUpOnAChannelThatIgnoresItsDeadline(t *testing.T) {
+	orgID := uuid.New()
+	wedged := &wedgingChannel{
+		id:      ChannelEmail,
+		arrived: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	defer close(wedged.release)
+	teams := &stubChannel{id: ChannelTeams}
+
+	d := NewDispatcher(&stubOutbox{events: []Event{event(orgID, "membership.invited")}},
+		subscribed(orgID, "membership.invited", ChannelEmail, ChannelTeams))
+	d.notifyTimeout = 50 * time.Millisecond
+	d.Register(wedged)
+	d.Register(teams)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := d.DispatchPending(context.Background()); err != nil {
+			t.Errorf("DispatchPending: %v", err)
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("DispatchPending never returned, want it to give up on the wedged channel")
+	}
+	if got := teams.received(); len(got) != 1 {
+		t.Errorf("teams channel got %v, want the event despite the wedged channel", got)
+	}
+}
+
+// The concurrency fan-out is a fixed number of slots, so wedged channels must not
+// be allowed to keep them: once every slot is held forever the pass never
+// returns, and the poll loop that awaits it stops ticking altogether.
+func TestDispatchKeepsDrainingWhenEverySlotWedges(t *testing.T) {
+	orgID := uuid.New()
+	wedged := &wedgingChannel{
+		id:      ChannelEmail,
+		arrived: make(chan struct{}, DefaultDeliverConcurrency+1),
+		release: make(chan struct{}),
+	}
+	defer close(wedged.release)
+
+	events := make([]Event, DefaultDeliverConcurrency+1)
+	for i := range events {
+		events[i] = event(orgID, "membership.invited")
+	}
+
+	d := NewDispatcher(&stubOutbox{events: events}, subscribed(orgID, "membership.invited", ChannelEmail))
+	d.notifyTimeout = 50 * time.Millisecond
+	d.Register(wedged)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := d.DispatchPending(context.Background()); err != nil {
+			t.Errorf("DispatchPending: %v", err)
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("DispatchPending never returned with %d wedged deliveries, want the pass to complete",
+			len(events))
+	}
+	if len(wedged.arrived) != len(events) {
+		t.Errorf("%d of %d events reached the channel, want every one attempted",
+			len(wedged.arrived), len(events))
+	}
+}
+
+// Cancelling the dispatcher has to release a pass that is waiting on a wedged
+// channel too, so shutdown does not hang on it.
+func TestDispatchStopsWaitingWhenTheContextIsCancelled(t *testing.T) {
+	orgID := uuid.New()
+	wedged := &wedgingChannel{
+		id:      ChannelEmail,
+		arrived: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	defer close(wedged.release)
+
+	d := NewDispatcher(&stubOutbox{events: []Event{event(orgID, "membership.invited")}},
+		subscribed(orgID, "membership.invited", ChannelEmail))
+	d.notifyTimeout = time.Hour
+	d.Register(wedged)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := d.DispatchPending(ctx); err != nil {
+			t.Errorf("DispatchPending: %v", err)
+		}
+	}()
+
+	<-wedged.arrived
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("DispatchPending never returned after cancellation, want the wedged wait abandoned")
+	}
+}
+
 func TestDispatchReportsAFailureToReadTheQueue(t *testing.T) {
 	d := NewDispatcher(&stubOutbox{err: errors.New("queue down")}, &stubSubscriptions{})
 	if _, err := d.DispatchPending(context.Background()); err == nil {
