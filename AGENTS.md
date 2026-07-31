@@ -57,6 +57,13 @@ string, so a new backend audit action must gain an `auditLog.actions.*` /
 `auditLog.targets.*` translation (and a `case` in `audit-event.ts`) or that test
 fails — the audit UI would otherwise render the raw dotted key.
 
+`src/lib/mail-template.test.ts` does the same for mail kinds: it parses the `Kind`
+constants out of `backend/internal/email/catalog.go` and asserts each one is in
+`MAIL_TEMPLATE_KINDS` (`src/api/email.ts`) with `mailTemplates.kinds.*` /
+`kindDescriptions.*` copy. That enum is the zod enum every mail-templates response
+is parsed through, so a kind the backend serves and the enum omits fails the whole
+list document and the settings screen stops loading — not just the new row.
+
 **Backend** (`cd backend`), in order:
 ```bash
 gofmt -l .                      # must print nothing

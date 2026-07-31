@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { MailTemplate, MailTemplateVariable } from "../api/email";
+import { MAIL_TEMPLATE_KINDS } from "../api/email";
+import { en } from "../i18n/locales/en";
 import {
   MAX_MAIL_BLOCKS,
   buttonUrlShapeIsValid,
@@ -261,5 +265,46 @@ describe("mailTemplatesDiffer", () => {
       reordered.blocks[1],
     ];
     expect(mailTemplatesDiffer(template(), reordered)).toBe(true);
+  });
+});
+
+// The backend catalogue is the source of truth for mail kinds
+// (backend/internal/email/catalog.go). MAIL_TEMPLATE_KINDS is the zod enum every
+// mail-templates response is parsed through, so a kind the backend returns and
+// the enum does not list fails the whole list document and takes the settings
+// screen down with it. This test parses the Go constants and asserts each one is
+// in the enum and has both its label and its description in en.ts, so adding a
+// cause on the backend can't leave the editor unable to load. nl.ts is typed
+// against en.ts, so the typecheck already fails on a missing Dutch twin.
+
+const catalogGoPath = fileURLToPath(
+  new URL("../../../backend/internal/email/catalog.go", import.meta.url),
+);
+const catalogSource = readFileSync(catalogGoPath, "utf8");
+
+const backendKinds = [
+  ...catalogSource.matchAll(/^\s*Kind\w+\s+Kind\s*=\s*"([^"]+)"/gm),
+].map((m) => m[1]);
+
+// The copy is read out of en.ts rather than through t(), because t()'s key type
+// is the union of the shipped keys and a raw string from the Go source is not
+// assignable to it.
+const kindLabels: Record<string, string> = en.mailTemplates.kinds;
+const kindDescriptions: Record<string, string> =
+  en.mailTemplates.kindDescriptions;
+
+describe("mail kinds backend/frontend parity", () => {
+  it("extracts the kinds from catalog.go", () => {
+    expect(backendKinds).toContain("invitation");
+    expect(backendKinds).toHaveLength(MAIL_TEMPLATE_KINDS.length);
+  });
+
+  it.each(backendKinds)("accepts the kind %s", (kind) => {
+    expect(MAIL_TEMPLATE_KINDS).toContain(kind);
+  });
+
+  it.each(backendKinds)("names and describes the kind %s", (kind) => {
+    expect(kindLabels[kind]).toBeTruthy();
+    expect(kindDescriptions[kind]).toBeTruthy();
   });
 });
