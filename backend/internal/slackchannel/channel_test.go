@@ -173,6 +173,37 @@ func TestDeliveryErrorsCarryNoWebhookURL(t *testing.T) {
 		assertNoSecret(t, err, secret)
 	})
 
+	t.Run("a proxy quoting the path percent-encoded", func(t *testing.T) {
+		// The same intermediary, writing the path the way a rewriting proxy commonly
+		// does: separators percent-encoded, so nothing matches the stored URL or its
+		// decoded path and the whole token would ride along.
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte("denied: path=" + strings.ReplaceAll(r.URL.Path, "/", "%2F")))
+		}))
+		defer server.Close()
+		channel := New(&stubWebhooks{url: server.URL + secret}, acmeDirectory(),
+			"https://wallet.example.org", email.LocaleEN)
+
+		err := channel.Notify(context.Background(), event())
+		assertNoSecret(t, err, secret)
+	})
+
+	t.Run("a proxy encoding in lower case", func(t *testing.T) {
+		// %2F and %2f are the same escape, and which one an intermediary writes is its
+		// own choice.
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte("denied: path=" + strings.ReplaceAll(r.URL.Path, "/", "%2f")))
+		}))
+		defer server.Close()
+		channel := New(&stubWebhooks{url: server.URL + secret}, acmeDirectory(),
+			"https://wallet.example.org", email.LocaleEN)
+
+		err := channel.Notify(context.Background(), event())
+		assertNoSecret(t, err, secret)
+	})
+
 	t.Run("an unreachable host", func(t *testing.T) {
 		// A closed port: Do fails, and its *url.Error names the whole URL.
 		closed := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
@@ -185,14 +216,24 @@ func TestDeliveryErrorsCarryNoWebhookURL(t *testing.T) {
 	})
 }
 
+// assertNoSecret fails if the webhook's path survived into the error in any of
+// the shapes an answer can quote it in. Checking the decoded path alone passes
+// over an encoded quote, which carries the same credential.
 func assertNoSecret(t *testing.T, err error, secret string) {
 	t.Helper()
 	var delivery *DeliveryError
 	if !errors.As(err, &delivery) {
 		t.Fatalf("err = %v, want a *DeliveryError", err)
 	}
-	if strings.Contains(delivery.Error(), strings.Trim(secret, "/")) {
-		t.Errorf("error = %q, want the webhook url redacted", delivery.Error())
+	path := strings.Trim(secret, "/")
+	for _, shape := range []string{
+		path,
+		strings.ReplaceAll(path, "/", "%2F"),
+		strings.ReplaceAll(path, "/", "%2f"),
+	} {
+		if strings.Contains(delivery.Error(), shape) {
+			t.Errorf("error = %q, want the webhook url redacted (found %q)", delivery.Error(), shape)
+		}
 	}
 }
 

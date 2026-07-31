@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,10 +23,6 @@ import (
 )
 
 const (
-	// auditLogPath is the app route the posted link opens, under the org's slug. The
-	// full record of the event lives there, behind the same access control as every
-	// other org page — the message itself repeats only what Summarize allows.
-	auditLogPath = "/audit-log"
 	// postTimeout bounds one webhook POST end to end. It sits under the dispatcher's
 	// notify timeout on purpose: the dispatcher abandons a channel that has not
 	// returned by then and leaks the goroutine until it does, so this channel owns a
@@ -77,7 +74,7 @@ func New(store webhookStore, orgs orgDirectory, appBaseURL string, locale email.
 	return &Channel{
 		store:      store,
 		orgs:       orgs,
-		appBaseURL: strings.TrimRight(appBaseURL, "/"),
+		appBaseURL: appBaseURL,
 		locale:     locale,
 		client: &http.Client{
 			Timeout: postTimeout,
@@ -109,7 +106,7 @@ func (c *Channel) Notify(ctx context.Context, e notifications.Event) error {
 	if err != nil {
 		return fmt.Errorf("slackchannel: organization %s: %w", e.OrgID, err)
 	}
-	msg, err := eventMessage(e, org.Name, c.auditURL(org.Slug), c.locale)
+	msg, err := eventMessage(e, org.Name, notifications.AuditLogURL(c.appBaseURL, org.Slug), c.locale)
 	if err != nil {
 		return err
 	}
@@ -158,10 +155,6 @@ func (c *Channel) post(ctx context.Context, webhook string, m message) error {
 	return nil
 }
 
-func (c *Channel) auditURL(slug string) string {
-	return c.appBaseURL + "/" + slug + auditLogPath
-}
-
 // warnUnconfigured reports an org subscribed to Slack without a usable webhook,
 // once per org (see Channel.unconfigured). The line names no event: what the admin
 // has to fix is the same whichever event ran into it.
@@ -187,15 +180,40 @@ func transportReason(err error) string {
 // own refusals never quote the URL, but the answer is not always Slack's: a proxy
 // in front of it may put the request URL in an error page of its own.
 func redact(reason, webhook string) string {
-	reason = strings.ReplaceAll(reason, webhook, redactedWebhook)
-	// The path is the secret half, and an answer may quote the URL in a shape of its
-	// own (a rewritten scheme, an added query), so it is removed on its own too.
-	if parsed, err := url.Parse(webhook); err == nil {
-		if path := strings.Trim(parsed.Path, "/"); path != "" {
-			reason = strings.ReplaceAll(reason, path, redactedWebhook)
-		}
+	for _, secret := range secretForms(webhook) {
+		reason = strings.ReplaceAll(reason, secret, redactedWebhook)
 	}
 	return reason
+}
+
+// secretForms lists the shapes the webhook can be quoted back in. Matching the
+// stored URL verbatim is not enough: the path is the secret half — whoever holds
+// it can post as the integration — and an intermediary that names the request it
+// refused writes that path in a shape of its own. Percent-encoding the separators
+// is the common one ("path=%2Fservices%2F…"), in either case, and neither is a
+// substring of the decoded path.
+func secretForms(webhook string) []string {
+	forms := []string{webhook}
+	parsed, err := url.Parse(webhook)
+	if err != nil {
+		return forms
+	}
+	// The decoded and the escaped path are kept apart by url.Parse and an answer may
+	// quote either; for a Slack webhook they are usually the same string, and a
+	// duplicate form only costs a second pass that matches nothing.
+	for _, path := range []string{parsed.Path, parsed.EscapedPath()} {
+		trimmed := strings.Trim(path, "/")
+		if trimmed == "" {
+			continue
+		}
+		forms = append(forms, trimmed,
+			strings.ReplaceAll(trimmed, "/", "%2F"),
+			strings.ReplaceAll(trimmed, "/", "%2f"))
+	}
+	// Longest first, so a form contained in a longer one does not blank out the part
+	// that would have matched the longer one and leave the rest of it standing.
+	sort.SliceStable(forms, func(i, j int) bool { return len(forms[i]) > len(forms[j]) })
+	return forms
 }
 
 // oneLine collapses whitespace, so a refusal stays one line of a log or an error.
