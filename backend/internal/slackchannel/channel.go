@@ -28,14 +28,49 @@ const (
 	// returned by then and leaks the goroutine until it does, so this channel owns a
 	// deadline of its own rather than relying on being walked away from.
 	postTimeout = 10 * time.Second
-	// maxReasonBytes bounds how much of Slack's refusal is read back. Slack answers a
-	// rejected post with a short token ("no_service", "invalid_payload"); this is a
-	// backstop against a proxy answering with an HTML error page instead.
+	// maxReasonBytes bounds how much of the answer is read back. Slack answers a
+	// rejected post with a short token ("no_service", "invalid_payload"), so this is
+	// the read's own bound against a proxy answering with an HTML error page instead —
+	// what such a page says is not repeated either way (see refusalReason).
 	maxReasonBytes = 200
 	// redactedWebhook stands in for the URL in a reason that quoted it back.
 	redactedWebhook = "[webhook url]"
+	// unknownRefusal replaces an answer that is not one of Slack's own refusals: it
+	// did not come from the endpoint this code talks to, so its bytes are not repeated
+	// (see refusalReason). It still says what the admin can act on — something between
+	// this deployment and Slack answered instead.
+	unknownRefusal  = "the answer was not one of Slack's refusals"
 	contentTypeJSON = "application/json"
 )
+
+// slackRefusals is every refusal Slack's incoming-webhook endpoint answers with,
+// as documented, and the only answers repeated into a reason. The endpoint's
+// refusals are a short, closed set of lowercase snake_case tokens; anything else
+// is an intermediary's own error document, whose bytes may quote the request URL
+// — and the URL is the credential. Allowlisting the answer is what keeps those
+// bytes out of a log line and the admin's screen, whatever shape they escape the
+// path in; redact is then a second pass over a string that cannot hold it.
+// A refusal Slack adds later reads as unknown until it is listed here, which
+// costs the reason's detail and leaks nothing.
+var slackRefusals = map[string]struct{}{
+	"action_prohibited":                       {},
+	"channel_is_archived":                     {},
+	"channel_not_found":                       {},
+	"invalid_blocks":                          {},
+	"invalid_blocks_format":                   {},
+	"invalid_payload":                         {},
+	"invalid_token":                           {},
+	"missing_text_or_fallback_or_attachments": {},
+	"no_service":                              {},
+	"no_service_id":                           {},
+	"no_team":                                 {},
+	"no_text":                                 {},
+	"posting_to_general_channel_denied":       {},
+	"rate_limited":                            {},
+	"team_disabled":                           {},
+	"too_many_attachments":                    {},
+	"user_not_found":                          {},
+}
 
 // webhookStore resolves the URL to post to (implemented by *Store).
 type webhookStore interface {
@@ -150,9 +185,22 @@ func (c *Channel) post(ctx context.Context, webhook string, m message) error {
 	// body is what lets the connection be reused.
 	answer, _ := io.ReadAll(io.LimitReader(resp.Body, maxReasonBytes))
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return &DeliveryError{Reason: redact(oneLine(resp.Status+": "+string(answer)), webhook)}
+		return &DeliveryError{Reason: redact(refusalReason(resp.Status, answer), webhook)}
 	}
 	return nil
+}
+
+// refusalReason says why the post was rejected, repeating the answer only when it
+// is one of Slack's own refusals (slackRefusals). Anything else is replaced whole:
+// it is an intermediary's document, and copying it into the reason is what carried
+// the webhook URL — in whatever shape that intermediary wrote it — into a log line
+// and the admin's screen. The status line is this side's own reading of the
+// response and is kept either way.
+func refusalReason(status string, answer []byte) string {
+	if _, known := slackRefusals[strings.TrimSpace(string(answer))]; known {
+		return oneLine(status + ": " + string(answer))
+	}
+	return oneLine(status) + ": " + unknownRefusal
 }
 
 // warnUnconfigured reports an org subscribed to Slack without a usable webhook,
@@ -176,9 +224,12 @@ func transportReason(err error) string {
 	return oneLine(err.Error())
 }
 
-// redact keeps the webhook out of a reason about to be logged or shown. Slack's
-// own refusals never quote the URL, but the answer is not always Slack's: a proxy
-// in front of it may put the request URL in an error page of its own.
+// redact keeps the webhook out of a reason about to be logged or shown. It is the
+// second line rather than the first: a refused post no longer repeats an answer
+// that is not Slack's own (refusalReason), so the bytes reaching here are this
+// side's own — a status line, or the transport failure net/http names the URL in.
+// It stays because that transport half really does carry the URL, and because a
+// reason built here later should not have to be safe on its own.
 func redact(reason, webhook string) string {
 	for _, secret := range secretForms(webhook) {
 		reason = strings.ReplaceAll(reason, secret, redactedWebhook)
@@ -186,12 +237,14 @@ func redact(reason, webhook string) string {
 	return reason
 }
 
-// secretForms lists the shapes the webhook can be quoted back in. Matching the
-// stored URL verbatim is not enough: the path is the secret half — whoever holds
-// it can post as the integration — and an intermediary that names the request it
-// refused writes that path in a shape of its own. Percent-encoding the separators
-// is the common one ("path=%2Fservices%2F…"), in either case, and neither is a
-// substring of the decoded path.
+// secretForms lists the shapes the webhook has been seen quoted back in, which is
+// not the same as all of them ("&#47;" and "%252F" are as writable as the rest) —
+// the reason refusalReason allowlists the answer instead of trusting this list.
+// Matching the stored URL verbatim is not enough: the path is the secret half —
+// whoever holds it can post as the integration — and something that names the
+// request it refused writes that path in a shape of its own. Percent-encoding the
+// separators is the common one ("path=%2Fservices%2F…"), in either case; a JSON
+// error document writes them "\/"; none is a substring of the decoded path.
 func secretForms(webhook string) []string {
 	forms := []string{webhook}
 	parsed, err := url.Parse(webhook)
@@ -208,7 +261,8 @@ func secretForms(webhook string) []string {
 		}
 		forms = append(forms, trimmed,
 			strings.ReplaceAll(trimmed, "/", "%2F"),
-			strings.ReplaceAll(trimmed, "/", "%2f"))
+			strings.ReplaceAll(trimmed, "/", "%2f"),
+			strings.ReplaceAll(trimmed, "/", `\/`))
 	}
 	// Longest first, so a form contained in a longer one does not blank out the part
 	// that would have matched the longer one and leave the rest of it standing.

@@ -152,6 +152,87 @@ func TestNotifyReportsARefusedWebhook(t *testing.T) {
 	}
 }
 
+// An answer that is not one of Slack's refusals came from something else, so it is
+// replaced whole rather than scrubbed: copying those bytes into the reason is what
+// carried the webhook URL to the admin's screen, in whichever shape the writer of
+// the bytes chose.
+func TestAnAnswerThatIsNotSlacksIsNotRepeated(t *testing.T) {
+	page := "<html>Access denied by the egress proxy, ref 41ba</html>"
+	server, _ := slackStub(t, http.StatusForbidden, page)
+	channel := New(&stubWebhooks{url: server.URL + "/services/T000/B000/xxx"},
+		acmeDirectory(), "https://wallet.example.org", email.LocaleEN)
+
+	var delivery *DeliveryError
+	if err := channel.Notify(context.Background(), event()); !errors.As(err, &delivery) {
+		t.Fatalf("Notify = %v, want a *DeliveryError", err)
+	}
+	if !strings.Contains(delivery.Reason, unknownRefusal) {
+		t.Errorf("Reason = %q, want it to report an answer that was not Slack's", delivery.Reason)
+	}
+	for _, unwanted := range []string{"Access denied", "egress proxy", "41ba", "<html>"} {
+		if strings.Contains(delivery.Reason, unwanted) {
+			t.Errorf("Reason = %q, want none of the answer repeated (found %q)", delivery.Reason, unwanted)
+		}
+	}
+	if !strings.Contains(delivery.Reason, "403") {
+		t.Errorf("Reason = %q, want the status this side read", delivery.Reason)
+	}
+}
+
+func TestRefusalReasonKeepsOnlySlacksOwnRefusals(t *testing.T) {
+	const status = "403 Forbidden"
+	for _, tc := range []struct {
+		name   string
+		answer string
+		want   string
+	}{
+		{"a documented refusal", "no_service", status + ": no_service"},
+		{"a refusal with the newline Slack sends", "invalid_payload\n", status + ": invalid_payload"},
+		{"an empty answer", "", status + ": " + unknownRefusal},
+		{"an html error page", "<html>denied</html>", status + ": " + unknownRefusal},
+		// A refusal Slack does not send, wrapped in bytes of someone else's choosing:
+		// containing an allowlisted token is not being one.
+		{"a document quoting a refusal", `{"error":"no_service","url":"…"}`, status + ": " + unknownRefusal},
+		{"a token this code does not know", "some_new_slack_refusal", status + ": " + unknownRefusal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := refusalReason(status, []byte(tc.answer)); got != tc.want {
+				t.Errorf("refusalReason(%q) = %q, want %q", tc.answer, got, tc.want)
+			}
+		})
+	}
+}
+
+// redact is the second pass now that the answer is allowlisted, and it still has
+// the transport error to strip — so it is pinned directly, on every shape it
+// claims: a reason assembled here later must not be the round that finds out.
+func TestRedactReplacesEveryShapeItCovers(t *testing.T) {
+	webhook := "https://" + webhookHost + "/services/T0SECRET/B0SECRET/tokentokentoken"
+	path := strings.TrimPrefix(webhook, "https://"+webhookHost+"/")
+	for _, tc := range []struct {
+		name   string
+		quoted string
+	}{
+		{"the url verbatim", webhook},
+		{"the decoded path", "/" + path},
+		{"the separators percent-encoded", strings.ReplaceAll(path, "/", "%2F")},
+		{"the separators encoded in lower case", strings.ReplaceAll(path, "/", "%2f")},
+		{"the separators json-escaped", strings.ReplaceAll(webhook, "/", `\/`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redact("Post "+tc.quoted+": dial tcp: i/o timeout", webhook)
+			if !strings.Contains(got, redactedWebhook) {
+				t.Errorf("redact(%q) = %q, want the url replaced", tc.quoted, got)
+			}
+			for _, shape := range secretShapes(path) {
+				if strings.Contains(got, shape) {
+					t.Errorf("redact(%q) = %q, want no webhook path left (found %q)", tc.quoted, got, shape)
+				}
+			}
+		})
+	}
+}
+
 // The reason reaches both a log line and an admin's screen, and the URL is the
 // workspace's secret — net/http puts it in every transport error, and an answer
 // from something other than Slack (a proxy) can quote it back.
@@ -204,6 +285,24 @@ func TestDeliveryErrorsCarryNoWebhookURL(t *testing.T) {
 		assertNoSecret(t, err, secret)
 	})
 
+	t.Run("a gateway answering a JSON error document", func(t *testing.T) {
+		// A JSON answer escapes the separators as "\/" (PHP's json_encode does it by
+		// default), which is a substring of none of the percent-encoded forms — the shape
+		// that got through the round that enumerated those.
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", contentTypeJSON)
+			w.WriteHeader(http.StatusForbidden)
+			quoted := strings.ReplaceAll("https://"+webhookHost+r.URL.Path, "/", `\/`)
+			_, _ = w.Write([]byte(`{"error":"denied","url":"` + quoted + `"}`))
+		}))
+		defer server.Close()
+		channel := New(&stubWebhooks{url: server.URL + secret}, acmeDirectory(),
+			"https://wallet.example.org", email.LocaleEN)
+
+		err := channel.Notify(context.Background(), event())
+		assertNoSecret(t, err, secret)
+	})
+
 	t.Run("an unreachable host", func(t *testing.T) {
 		// A closed port: Do fails, and its *url.Error names the whole URL.
 		closed := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
@@ -216,21 +315,32 @@ func TestDeliveryErrorsCarryNoWebhookURL(t *testing.T) {
 	})
 }
 
-// assertNoSecret fails if the webhook's path survived into the error in any of
-// the shapes an answer can quote it in. Checking the decoded path alone passes
-// over an encoded quote, which carries the same credential.
+// secretShapes lists the spellings of the webhook path an assertion has to look
+// for. It is deliberately longer than what any single guard replaces: whatever
+// this enumerates is all a test can ever notice, and each of the first two rounds
+// on this code passed because the shape that leaked was not in it.
+func secretShapes(secret string) []string {
+	path := strings.Trim(secret, "/")
+	return []string{
+		path,
+		strings.ReplaceAll(path, "/", "%2F"),
+		strings.ReplaceAll(path, "/", "%2f"),
+		strings.ReplaceAll(path, "/", `\/`),
+		strings.ReplaceAll(path, "/", "&#47;"),
+		strings.ReplaceAll(path, "/", "%252F"),
+	}
+}
+
+// assertNoSecret fails if the webhook's path survived into the error in any shape
+// an answer can quote it in. Checking the decoded path alone passes over an
+// encoded quote, which carries the same credential.
 func assertNoSecret(t *testing.T, err error, secret string) {
 	t.Helper()
 	var delivery *DeliveryError
 	if !errors.As(err, &delivery) {
 		t.Fatalf("err = %v, want a *DeliveryError", err)
 	}
-	path := strings.Trim(secret, "/")
-	for _, shape := range []string{
-		path,
-		strings.ReplaceAll(path, "/", "%2F"),
-		strings.ReplaceAll(path, "/", "%2f"),
-	} {
+	for _, shape := range secretShapes(secret) {
 		if strings.Contains(delivery.Error(), shape) {
 			t.Errorf("error = %q, want the webhook url redacted (found %q)", delivery.Error(), shape)
 		}

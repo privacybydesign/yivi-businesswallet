@@ -53,7 +53,9 @@ const (
 
 // DeliveryError reports a webhook Slack or the network refused. Reason is safe to
 // show an admin: it carries the status and Slack's own short refusal
-// ("no_service", "invalid_payload") or the transport failure, never the URL.
+// ("no_service", "invalid_payload") or the transport failure, never the URL. An
+// answer that is not one of Slack's refusals is replaced rather than repeated, so
+// the reason holds no bytes an intermediary chose (see refusalReason).
 type DeliveryError struct {
 	Reason string
 }

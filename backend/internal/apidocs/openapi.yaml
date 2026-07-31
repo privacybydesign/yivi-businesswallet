@@ -2481,7 +2481,9 @@ paths:
         Requires an administrator role in the organisation. Answers 204 when
         Slack accepted the message, 409 `not_configured` when the organisation has
         no stored webhook or has switched delivery off, and 502 `webhook_failed`
-        with Slack's own refusal when the post was not accepted.
+        with Slack's own refusal when the post was not accepted. An answer from
+        anything other than Slack is reported as such without repeating it: the
+        webhook URL is a secret, and an intermediary's error document can quote it.
       responses:
         '204':
           description: The test notification was accepted by Slack.
