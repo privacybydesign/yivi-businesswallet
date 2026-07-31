@@ -32,6 +32,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/useravatar"
 )
 
 const sessionTTL = time.Hour
@@ -85,6 +86,7 @@ func (stubQerdsNotifier) SendCredentialOffer(_ context.Context, _ uuid.UUID, _, 
 type meBody struct {
 	ID              uuid.UUID `json:"id"`
 	Email           string    `json:"email"`
+	AvatarURI       string    `json:"avatarUri"`
 	IsPlatformAdmin bool      `json:"isPlatformAdmin"`
 }
 
@@ -132,7 +134,9 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
 	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, "", requireUser, orgHandler.Authorize)
 
-	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler))
+	avatarHandler := useravatar.NewHandler(useravatar.NewStore(pool), requireUser, orgHandler.Authorize)
+
+	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, avatarHandler))
 	t.Cleanup(srv.Close)
 
 	jar, err := cookiejar.New(nil)

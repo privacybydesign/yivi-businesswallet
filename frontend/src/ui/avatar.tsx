@@ -1,5 +1,7 @@
+import { useState } from "react";
+
 type AvatarTone = "blue" | "rose" | "green" | "amber" | "violet" | "slate";
-type AvatarSize = "md" | "lg";
+type AvatarSize = "md" | "lg" | "xl";
 
 const TONE_CLASSES: Record<AvatarTone, string> = {
   blue: "bg-highlight text-link",
@@ -13,6 +15,7 @@ const TONE_CLASSES: Record<AvatarTone, string> = {
 const SIZE_CLASSES: Record<AvatarSize, string> = {
   md: "w-7 h-7 text-[11.5px]",
   lg: "w-12 h-12 text-[17px]",
+  xl: "w-20 h-20 text-[27px]",
 };
 
 const TONES = ["blue", "rose", "green", "amber", "violet", "slate"] as const;
@@ -40,14 +43,18 @@ function initialsFrom(name: string): string {
 
 // Either give a `name` (initials derived from its words, e.g. an org) or
 // pre-computed `initials` (e.g. a person's preferred + last initial). An optional
-// `src` renders that image (e.g. an org's uploaded logo) in place of the
-// initials, keeping the circular frame; `alt` labels it (initials stay
-// decorative). When `src` is empty the initials fallback is used.
+// `src` renders that image (e.g. an org's uploaded logo or a person's avatar
+// photo) in place of the initials, keeping the circular frame; `alt` labels it
+// (initials stay decorative). `fit` is "contain" for a logo that must not be
+// cropped and "cover" for a photo that should fill the circle. When `src` is
+// empty — or fails to load, which is what an avatar the caller may no longer be
+// allowed to read does — the initials fallback is used.
 type AvatarProps = {
   tone?: AvatarTone;
   size?: AvatarSize;
   src?: string;
   alt?: string;
+  fit?: "contain" | "cover";
 } & ({ name: string; initials?: string } | { name?: string; initials: string });
 
 export function Avatar({
@@ -57,14 +64,21 @@ export function Avatar({
   size = "md",
   src,
   alt,
+  fit = "contain",
 }: AvatarProps): React.JSX.Element {
-  if (src) {
+  // Remember which src failed rather than a bare boolean, so a later src (a
+  // replaced photo) is attempted instead of inheriting the previous failure.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+
+  if (src && src !== failedSrc) {
     return (
       <img
         src={src}
         alt={alt ?? ""}
+        onError={() => setFailedSrc(src)}
         className={[
-          "bg-surface-3 shrink-0 rounded-full object-contain",
+          "bg-surface-3 shrink-0 rounded-full",
+          fit === "cover" ? "object-cover" : "object-contain",
           SIZE_CLASSES[size],
         ].join(" ")}
       />

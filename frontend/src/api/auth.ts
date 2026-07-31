@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { withAbsoluteAvatar } from "./avatar";
 import { request } from "./http";
 
 export const meSchema = z.object({
@@ -7,6 +8,9 @@ export const meSchema = z.object({
   preferredName: z.string().nullable(),
   givenNames: z.string(),
   lastName: z.string(),
+  // The API path serving the user's own avatar photo ("" when they set none);
+  // made absolute below so an <img> loads it from the API origin.
+  avatarUri: z.string(),
   isPlatformAdmin: z.boolean(),
 });
 
@@ -66,22 +70,30 @@ export function getSessionStatus(
   }).then((r) => r.status);
 }
 
-export function claimAuthSession(
+export async function claimAuthSession(
   token: string,
   signal?: AbortSignal,
 ): Promise<ClaimResult> {
-  return request(`/api/v1/auth/session/${encodeURIComponent(token)}/claim`, {
-    schema: claimResultSchema,
-    method: "POST",
-    signal,
-  });
+  const result = await request(
+    `/api/v1/auth/session/${encodeURIComponent(token)}/claim`,
+    {
+      schema: claimResultSchema,
+      method: "POST",
+      signal,
+    },
+  );
+  // A claim that authenticated an existing user is cached as the `me` entry, so
+  // its avatar path needs the same absolute form getMe returns.
+  return "pendingInvitations" in result ? result : withAbsoluteAvatar(result);
 }
 
-export function getMe(signal?: AbortSignal): Promise<Me> {
-  return request("/api/v1/me", {
-    schema: meSchema,
-    signal,
-  });
+export async function getMe(signal?: AbortSignal): Promise<Me> {
+  return withAbsoluteAvatar(
+    await request("/api/v1/me", {
+      schema: meSchema,
+      signal,
+    }),
+  );
 }
 
 export function logout(signal?: AbortSignal): Promise<void> {

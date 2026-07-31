@@ -34,6 +34,7 @@ import PostguardSend from "./routes/postguard-send";
 import Attestations from "./routes/attestations";
 import Claim from "./routes/claim";
 import Settings from "./routes/settings";
+import Account from "./routes/account";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
 import NotFound from "./routes/not-found";
@@ -90,6 +91,7 @@ const postguardSendCrumb: RouteHandle = {
   crumb: ({ t }) => t("postguard.send.title"),
 };
 const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
+const accountCrumb: RouteHandle = { crumb: ({ t }) => t("account.title") };
 const invitationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("myInvitations.title"),
 };
@@ -127,6 +129,11 @@ export const router = createBrowserRouter([
                 path: "enroll",
                 Component: Enroll,
                 handle: enrollCrumb,
+              },
+              {
+                path: "account",
+                Component: Account,
+                handle: accountCrumb,
               },
               {
                 path: ":orgSlug",

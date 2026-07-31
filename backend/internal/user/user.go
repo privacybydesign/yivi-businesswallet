@@ -2,6 +2,7 @@ package user
 
 import (
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -17,4 +18,8 @@ type User struct {
 	PreferredName *string   `json:"preferredName"`
 	GivenNames    string    `json:"givenNames"`
 	LastName      string    `json:"lastName"`
+	// AvatarUpdatedAt is when the user last changed their avatar photo, or nil when
+	// they have none. It carries no image data — it is the marker that one exists
+	// and the version in AvatarURL — so it stays out of the JSON.
+	AvatarUpdatedAt *time.Time `json:"-"`
 }

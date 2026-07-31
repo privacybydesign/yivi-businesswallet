@@ -8,6 +8,7 @@ export const en = {
     copyFailed: "Could not copy to clipboard.",
     department: "Department",
     edit: "Edit",
+    email: "E-mail address",
     jobTitle: "Job title",
     language: "Language",
     languageName: {
@@ -362,6 +363,8 @@ export const en = {
     wscaActivated: "Holder wallet activated",
     wscaRotated: "Wallet secret rotated",
     themeSaved: "Branding updated",
+    avatarSaved: "Profile photo saved",
+    avatarRemoved: "Profile photo removed",
   },
   members: {
     title: "Members",
@@ -589,6 +592,25 @@ export const en = {
     noDepartment: "No department",
     lastAdmin:
       "This is the organization's only admin. Promote another member to admin first.",
+  },
+  account: {
+    title: "Account",
+    subtitle: "Your personal profile",
+    photo: "Profile photo",
+    photoIntro:
+      "Your photo is shown wherever you appear in the app: member lists and the audit log of every organization you are a member of.",
+    photoAlt: "Your profile photo",
+    photoChoose: "Choose a photo",
+    photoReplace: "Replace photo",
+    photoRemove: "Remove",
+    photoHint:
+      "Scaled down to {{size}} pixels in your browser and stripped of its metadata, including where it was taken.",
+    photoTooLarge: "That photo is too large. Pick a smaller one.",
+    photoUnreadable: "That file could not be read as an image.",
+    photoSaveError: "Could not save the photo: {{message}}",
+    details: "Details",
+    detailsIntro:
+      "Your name and e-mail address come from the identity you logged in with, so they cannot be changed here.",
   },
   settings: {
     title: "Settings",

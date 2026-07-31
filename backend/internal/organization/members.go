@@ -80,6 +80,7 @@ func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("listing members: %w", err)
 	}
+	fillEntryAvatarURIs(entries, org.Slug)
 
 	respond.JSON(w, r, http.StatusOK, memberListPage{Entries: entries, Total: total})
 	return nil
@@ -99,6 +100,7 @@ func (h *Handler) member(w http.ResponseWriter, r *http.Request) error {
 	case err != nil:
 		return fmt.Errorf("getting member: %w", err)
 	}
+	fillMemberAvatarURI(&member, org.Slug)
 
 	respond.JSON(w, r, http.StatusOK, member)
 	return nil

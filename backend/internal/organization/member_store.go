@@ -47,10 +47,11 @@ func (s *Store) GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Mem
 func (s *Store) ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, error) {
 	const q = `
 		SELECT u.id, u.email, u.preferred_name, u.given_names, u.last_name,
-		       m.role, m.job_title, m.department_id, d.name
+		       m.role, m.job_title, m.department_id, d.name, av.updated_at
 		FROM memberships m
 		JOIN users u ON u.id = m.user_id
 		LEFT JOIN departments d ON d.id = m.department_id
+		LEFT JOIN user_avatars av ON av.user_id = u.id
 		WHERE m.organization_id = $1
 		ORDER BY u.last_name, u.given_names`
 	rows, err := s.db.Query(ctx, q, orgID)
@@ -63,7 +64,7 @@ func (s *Store) ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member, err
 	for rows.Next() {
 		var m Member
 		if err := rows.Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.LastName,
-			&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName); err != nil {
+			&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName, &m.AvatarUpdatedAt); err != nil {
 			return nil, fmt.Errorf("organization: list members scan: %w", err)
 		}
 		members = append(members, m)
@@ -97,17 +98,19 @@ WITH entries AS (
 	       u.email, u.preferred_name, u.given_names, u.last_name,
 	       m.role, m.job_title, m.department_id, d.name AS department_name,
 	       NULL::timestamptz AS expires_at, NULL::uuid AS invited_by,
-	       m.phone, m.identity_verified AS verified
+	       m.phone, m.identity_verified AS verified, av.updated_at AS avatar_updated_at
 	FROM memberships m
 	JOIN users u ON u.id = m.user_id
 	LEFT JOIN departments d ON d.id = m.department_id
+	LEFT JOIN user_avatars av ON av.user_id = u.id
 	WHERE m.organization_id = $1 AND ($2 = '' OR $2 = '%[1]s')
 	UNION ALL
 	SELECT '%[2]s'::text AS status, NULL::uuid AS user_id, i.id AS invitation_id,
 	       i.email, NULL::text AS preferred_name, i.invited_given_names, i.invited_last_name,
 	       i.role, i.job_title, i.department_id, d.name AS department_name,
 	       i.expires_at, i.invited_by,
-	       NULL::text AS phone, false AS verified
+	       NULL::text AS phone, false AS verified,
+	       NULL::timestamptz AS avatar_updated_at
 	FROM invitations i
 	LEFT JOIN departments d ON d.id = i.department_id
 	WHERE i.organization_id = $1 AND ($2 = '' OR $2 = '%[2]s')
@@ -155,7 +158,8 @@ func (s *Store) ListMemberEntries(ctx context.Context, orgID uuid.UUID, p Member
 
 	q := memberEntriesCTE + `
 SELECT status, user_id, invitation_id, email, preferred_name, given_names, last_name,
-       role, job_title, department_id, department_name, expires_at, invited_by, phone, verified
+       role, job_title, department_id, department_name, expires_at, invited_by, phone, verified,
+       avatar_updated_at
 FROM entries` + memberSearchWhere + "\nORDER BY " + memberOrderBy(p.Sort, p.Desc) + "\nLIMIT $4 OFFSET $5"
 
 	rows, err := s.db.Query(ctx, q, orgID, p.Status, pattern, p.Limit, p.Offset)
@@ -169,7 +173,7 @@ FROM entries` + memberSearchWhere + "\nORDER BY " + memberOrderBy(p.Sort, p.Desc
 		var e MemberEntry
 		if err := rows.Scan(&e.Status, &e.UserID, &e.InvitationID, &e.Email, &e.PreferredName,
 			&e.GivenNames, &e.LastName, &e.Role, &e.JobTitle, &e.DepartmentID, &e.DepartmentName,
-			&e.ExpiresAt, &e.InvitedBy, &e.Phone, &e.Verified); err != nil {
+			&e.ExpiresAt, &e.InvitedBy, &e.Phone, &e.Verified, &e.AvatarUpdatedAt); err != nil {
 			return nil, 0, fmt.Errorf("organization: list member entries scan: %w", err)
 		}
 		entries = append(entries, e)
@@ -184,14 +188,16 @@ FROM entries` + memberSearchWhere + "\nORDER BY " + memberOrderBy(p.Sort, p.Desc
 func (s *Store) GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error) {
 	const q = `
 		SELECT u.id, u.email, u.preferred_name, u.given_names, u.last_name,
-		       m.role, m.job_title, m.department_id, d.name, m.phone, m.identity_verified
+		       m.role, m.job_title, m.department_id, d.name, m.phone, m.identity_verified,
+		       av.updated_at
 		FROM memberships m
 		JOIN users u ON u.id = m.user_id
 		LEFT JOIN departments d ON d.id = m.department_id
+		LEFT JOIN user_avatars av ON av.user_id = u.id
 		WHERE m.organization_id = $1 AND m.user_id = $2`
 	var m Member
 	err := s.db.QueryRow(ctx, q, orgID, userID).Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.LastName,
-		&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName, &m.Phone, &m.Verified)
+		&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName, &m.Phone, &m.Verified, &m.AvatarUpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Member{}, ErrNotMember
 	}

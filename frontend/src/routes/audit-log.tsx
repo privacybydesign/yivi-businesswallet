@@ -12,9 +12,9 @@ import {
   auditVisual,
   AUDIT_TONE_CLASSES,
 } from "../lib/audit-event";
-import { fullName } from "../lib/name";
+import { fullName, personInitials } from "../lib/name";
 import { useWhenFormatter } from "../lib/format-when";
-import { Button, Card, Icon, Table, TopBar } from "../ui";
+import { Avatar, Button, Card, Icon, Table, TopBar } from "../ui";
 import * as React from "react";
 
 const COLUMN_COUNT = 5;
@@ -130,14 +130,18 @@ export default function AuditLog(): React.JSX.Element {
                           </Table.Cell>
                           <Table.Cell>
                             <div className="flex items-center gap-2.5">
-                              <span
-                                className={[
-                                  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-                                  AUDIT_TONE_CLASSES[visual.tone],
-                                ].join(" ")}
-                              >
-                                <Icon name={visual.icon} size={14} />
-                              </span>
+                              {event.actor ? (
+                                <Avatar
+                                  initials={personInitials(event.actor)}
+                                  src={event.actor.avatarUri || undefined}
+                                  fit="cover"
+                                />
+                              ) : (
+                                <Avatar
+                                  name={t("auditLog.system")}
+                                  tone="slate"
+                                />
+                              )}
                               <span className="text-ink truncate">
                                 {event.actor
                                   ? fullName(event.actor)
@@ -146,9 +150,19 @@ export default function AuditLog(): React.JSX.Element {
                             </div>
                           </Table.Cell>
                           <Table.Cell>
-                            <span className="font-semibold">
-                              {auditActionLabel(event.action, t)}
-                            </span>
+                            <div className="flex items-center gap-2.5">
+                              <span
+                                className={[
+                                  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                                  AUDIT_TONE_CLASSES[visual.tone],
+                                ].join(" ")}
+                              >
+                                <Icon name={visual.icon} size={14} />
+                              </span>
+                              <span className="font-semibold">
+                                {auditActionLabel(event.action, t)}
+                              </span>
+                            </div>
                           </Table.Cell>
                           <Table.Cell className="text-ink-soft">
                             {auditTargetLabel(event.targetType, t)}

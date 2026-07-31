@@ -19,6 +19,7 @@ export const nl: Translation<typeof en> = {
     copyFailed: "Kopiëren naar klembord mislukt.",
     department: "Afdeling",
     edit: "Bewerken",
+    email: "E-mailadres",
     jobTitle: "Functie",
     language: "Taal",
     languageName: {
@@ -375,6 +376,8 @@ export const nl: Translation<typeof en> = {
     wscaActivated: "Houder-wallet geactiveerd",
     wscaRotated: "Wallet-geheim geroteerd",
     themeSaved: "Branding bijgewerkt",
+    avatarSaved: "Profielfoto opgeslagen",
+    avatarRemoved: "Profielfoto verwijderd",
   },
   members: {
     title: "Leden",
@@ -604,6 +607,25 @@ export const nl: Translation<typeof en> = {
     noDepartment: "Geen afdeling",
     lastAdmin:
       "Dit is de enige beheerder van de organisatie. Maak eerst een ander lid beheerder.",
+  },
+  account: {
+    title: "Account",
+    subtitle: "Je persoonlijke profiel",
+    photo: "Profielfoto",
+    photoIntro:
+      "Je foto wordt overal getoond waar je in de app voorkomt: in ledenlijsten en in het auditlogboek van elke organisatie waar je lid van bent.",
+    photoAlt: "Je profielfoto",
+    photoChoose: "Kies een foto",
+    photoReplace: "Foto vervangen",
+    photoRemove: "Verwijderen",
+    photoHint:
+      "Wordt in je browser verkleind naar {{size}} pixels en van metadata ontdaan, inclusief waar de foto is gemaakt.",
+    photoTooLarge: "Die foto is te groot. Kies een kleinere.",
+    photoUnreadable: "Dat bestand kon niet als afbeelding worden gelezen.",
+    photoSaveError: "Foto opslaan mislukt: {{message}}",
+    details: "Gegevens",
+    detailsIntro:
+      "Je naam en e-mailadres komen uit de identiteit waarmee je bent ingelogd en kun je hier niet wijzigen.",
   },
   settings: {
     title: "Instellingen",

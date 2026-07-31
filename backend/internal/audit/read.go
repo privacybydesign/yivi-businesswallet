@@ -25,6 +25,13 @@ type EventActor struct {
 	PreferredName *string   `json:"preferredName"`
 	GivenNames    string    `json:"givenNames"`
 	LastName      string    `json:"lastName"`
+	// AvatarUpdatedAt is when the actor last changed their avatar photo, or nil
+	// when they have none. The reader only knows user ids, so the caller that has
+	// the organisation slug turns this into AvatarURI.
+	AvatarUpdatedAt *time.Time `json:"-"`
+	// AvatarURI is the path serving the actor's avatar photo, or "" when they have
+	// none or the caller did not fill it in.
+	AvatarURI string `json:"avatarUri"`
 }
 
 type Event struct {
@@ -118,9 +125,10 @@ func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, afte
 
 	q := fmt.Sprintf(`
 		SELECT a.id, a.occurred_at, a.action, a.target_type, a.target_id, a.metadata,
-		       u.id, u.preferred_name, u.given_names, u.last_name
+		       u.id, u.preferred_name, u.given_names, u.last_name, av.updated_at
 		FROM audit_events a
 		LEFT JOIN users u ON u.id = a.actor_user_id
+		LEFT JOIN user_avatars av ON av.user_id = u.id
 		WHERE %s
 		  AND ($%d::timestamptz IS NULL OR (a.occurred_at, a.id) < ($%d, $%d::uuid))
 		ORDER BY a.occurred_at DESC, a.id DESC
@@ -134,20 +142,21 @@ func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, afte
 	events := []Event{}
 	for rows.Next() {
 		var (
-			e         Event
-			meta      []byte
-			actorID   *uuid.UUID
-			preferred *string
-			given     *string
-			last      *string
+			e             Event
+			meta          []byte
+			actorID       *uuid.UUID
+			preferred     *string
+			given         *string
+			last          *string
+			avatarUpdated *time.Time
 		)
 		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.Action, &e.TargetType, &e.TargetID, &meta,
-			&actorID, &preferred, &given, &last); err != nil {
+			&actorID, &preferred, &given, &last, &avatarUpdated); err != nil {
 			return Page{}, fmt.Errorf("audit: list events scan: %w", err)
 		}
 		e.Metadata = meta
 		if actorID != nil {
-			e.Actor = &EventActor{UserID: *actorID, PreferredName: preferred}
+			e.Actor = &EventActor{UserID: *actorID, PreferredName: preferred, AvatarUpdatedAt: avatarUpdated}
 			if given != nil {
 				e.Actor.GivenNames = *given
 			}

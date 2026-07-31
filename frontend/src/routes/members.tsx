@@ -340,7 +340,11 @@ export default function Members(): React.JSX.Element {
                       >
                         <Table.Cell>
                           <div className="flex items-center gap-2.5">
-                            <Avatar initials={personInitials(member)} />
+                            <Avatar
+                              initials={personInitials(member)}
+                              src={member.avatarUri || undefined}
+                              fit="cover"
+                            />
                             <div className="min-w-0">
                               {pending ? (
                                 <span className="text-ink block truncate">

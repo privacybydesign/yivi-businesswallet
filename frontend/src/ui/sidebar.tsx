@@ -1,4 +1,4 @@
-import { NavLink, useMatches } from "react-router";
+import { Link, NavLink, useMatches } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { IconName } from "./icon";
 import type { Me } from "../api/auth";
@@ -159,15 +159,26 @@ export function Sidebar({
       </nav>
 
       <div className="border-sidebar-line flex items-center gap-2.5 border-t px-3.5 py-2.5">
-        <Avatar initials={personInitials(me)} />
-        <div className="min-w-0 flex-1">
-          <div className="text-sidebar-fg truncate text-[12.5px] font-semibold">
-            {fullName(me)}
+        <Link
+          to="/account"
+          onClick={onNavigate}
+          title={t("account.title")}
+          className="hover:bg-sidebar-active -mx-1 flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1 transition-colors"
+        >
+          <Avatar
+            initials={personInitials(me)}
+            src={me.avatarUri || undefined}
+            fit="cover"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="text-sidebar-fg truncate text-[12.5px] font-semibold">
+              {fullName(me)}
+            </div>
+            <div className="text-sidebar-fg-soft text-[10.5px] capitalize">
+              {roleLabel}
+            </div>
           </div>
-          <div className="text-sidebar-fg-soft text-[10.5px] capitalize">
-            {roleLabel}
-          </div>
-        </div>
+        </Link>
         <button
           type="button"
           onClick={onLogout}

@@ -38,6 +38,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/useravatar"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wscawallet"
@@ -375,6 +376,10 @@ func run() error {
 
 	themeSettingsHandler := themesettings.NewHandler(themeSettingsStore, requireUser, orgHandler.Authorize)
 
+	// A user's avatar photo is their own, global to the deployment; the org-scoped
+	// read route is authorised by orgHandler.Authorize like every other org route.
+	avatarHandler := useravatar.NewHandler(useravatar.NewStore(pool), requireUser, orgHandler.Authorize)
+
 	attHolder, err := newAttestationHolder(cfg, wscaStore)
 	if err != nil {
 		return err
@@ -437,6 +442,7 @@ func run() error {
 		emailHandler,
 		issuerSettingsHandler,
 		themeSettingsHandler,
+		avatarHandler,
 		attestationHandler,
 		wscaWalletHandler,
 		notificationsHandler,

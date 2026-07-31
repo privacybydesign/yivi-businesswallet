@@ -104,6 +104,7 @@ func (h *Handler) meResponse(u user.User) meResponse {
 		PreferredName:   u.PreferredName,
 		GivenNames:      u.GivenNames,
 		LastName:        u.LastName,
+		AvatarURI:       user.AvatarURL(u.AvatarUpdatedAt),
 		IsPlatformAdmin: h.admins.Has(u.Email),
 	}
 }
@@ -133,10 +134,13 @@ type statusResponse struct {
 }
 
 type meResponse struct {
-	ID              uuid.UUID `json:"id"`
-	Email           string    `json:"email"`
-	PreferredName   *string   `json:"preferredName"`
-	GivenNames      string    `json:"givenNames"`
-	LastName        string    `json:"lastName"`
-	IsPlatformAdmin bool      `json:"isPlatformAdmin"`
+	ID            uuid.UUID `json:"id"`
+	Email         string    `json:"email"`
+	PreferredName *string   `json:"preferredName"`
+	GivenNames    string    `json:"givenNames"`
+	LastName      string    `json:"lastName"`
+	// AvatarURI is the path serving the user's own avatar photo, or "" when they
+	// have not set one (the frontend then falls back to their initials).
+	AvatarURI       string `json:"avatarUri"`
+	IsPlatformAdmin bool   `json:"isPlatformAdmin"`
 }

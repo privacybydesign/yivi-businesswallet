@@ -410,6 +410,72 @@ paths:
                 description: Response payload; shape depends on the endpoint.
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/v1/me/avatar:
+    get:
+      tags: [auth]
+      summary: Serve the authenticated user's avatar photo
+      description: >-
+        Serves the stored avatar image bytes. Requires an authenticated session.
+        Returns 404 when no photo is set.
+      responses:
+        '2XX':
+          description: The avatar image bytes.
+          content:
+            image/png: {}
+            image/jpeg: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [auth]
+      summary: Upload the authenticated user's avatar photo
+      description: >-
+        Replaces the user's avatar photo. Requires an authenticated session. Sent
+        as multipart/form-data with a single "photo" file part: a PNG or JPEG of
+        at most 1024x1024 pixels and 512 KiB. The image is re-encoded before it
+        is stored, which strips its metadata (EXIF location included). Returns
+        the versioned path the new photo is served from.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: The portrait photo to store, as a PNG or JPEG.
+              required: [photo]
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: The photo is larger than the accepted maximum.
+    delete:
+      tags: [auth]
+      summary: Remove the authenticated user's avatar photo
+      description: >-
+        Requires an authenticated session. Removing a photo that is not set is
+        not an error.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/v1/me/invitations:
     get:
       tags: [organizations]
@@ -2180,6 +2246,42 @@ paths:
             application/json:
               schema:
                 description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/members/{userId}/avatar:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: User identifier.
+    get:
+      tags: [organizations]
+      summary: Serve a member's avatar photo
+      description: >-
+        Serves the member's stored avatar image bytes. Requires an administrator
+        role in the organisation, which is also the only role that sees the
+        member lists and audit log the photo appears in. Returns 404 when the
+        user has no photo or is not a member of this organisation.
+      responses:
+        '2XX':
+          description: The avatar image bytes.
+          content:
+            image/png: {}
+            image/jpeg: {}
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
