@@ -25,6 +25,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/notifications"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
@@ -254,6 +255,18 @@ func run() error {
 		return err
 	}
 
+	// Every store records audit events through this recorder: it writes the event
+	// like a plain audit.DBRecorder and, for an event an org can subscribe to,
+	// queues it for notification in the same transaction. A store handed a bare
+	// audit.NewDBRecorder() instead is invisible to notifications, so the two below
+	// are the only ones that get one: the seeder (seeding pages nobody) and the
+	// notification store itself, which cannot be handed a recorder that needs it.
+	// The consequence of that second exception is that a notification.* action
+	// would never notify — which is fine as long as none is in the catalog, and a
+	// reason to think twice before putting one there.
+	notificationStore := notifications.NewStore(pool, audit.NewDBRecorder())
+	recorder := notifications.NewRecorder(audit.NewDBRecorder(), notificationStore)
+
 	userStore := user.NewStore(pool)
 	sessionStore := session.NewStore(pool, cfg.SessionTTL)
 	cookieCfg := auth.CookieConfig{
@@ -261,7 +274,7 @@ func run() error {
 		MaxAge: int(cfg.SessionTTL.Seconds()),
 	}
 	platformAdmins := auth.NewPlatformAdmins(cfg.PlatformAdminEmails)
-	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
+	orgStore := organization.NewStore(pool, recorder)
 	presentationStore := presentation.NewStore(pool, cfg.PresentationTTL)
 	authService := auth.NewService(verifier, presentationStore, userStore, sessionStore, orgStore)
 	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, platformAdmins)
@@ -280,14 +293,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	emailStore := email.NewStore(pool, audit.NewDBRecorder(), emailCipher)
+	emailStore := email.NewStore(pool, recorder, emailCipher)
 	mailLocale, ok := email.ParseLocale(cfg.MailDefaultLocale)
 	if !ok {
 		return fmt.Errorf("MAIL_DEFAULT_LOCALE: unsupported locale %q (supported: %v)", cfg.MailDefaultLocale, email.Locales())
 	}
 	// Mail reuses the org's app palette (themesettings), so a tenant configures its
 	// branding once and outbound mail follows.
-	themeSettingsStore := themesettings.NewStore(pool, audit.NewDBRecorder())
+	themeSettingsStore := themesettings.NewStore(pool, recorder)
 	emailService := email.NewService(emailStore, mailer.New(), mailBranding{theme: themeSettingsStore}, mailLocale)
 
 	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins)
@@ -303,11 +316,11 @@ func run() error {
 	if err := qerdsProv.Ping(qerdsProbeCtx); err != nil {
 		return fmt.Errorf("qerds provider ping: %w", err)
 	}
-	qerdsStore := qerds.NewStore(pool, audit.NewDBRecorder())
+	qerdsStore := qerds.NewStore(pool, recorder)
 	qerdsService := qerds.NewService(qerdsStore, qerdsStore, qerdsProv)
 	qerdsHandler := qerds.NewHandler(qerdsService, qerdsStore, qerdsStore, qerdsStore, requireUser, orgHandler.Authorize, cfg.QerdsWebhookSecret, cfg.QerdsDefaultAddressDomain)
 
-	registry, err := newRegistryProvider(cfg, pool, audit.NewDBRecorder())
+	registry, err := newRegistryProvider(cfg, pool, recorder)
 	if err != nil {
 		return err
 	}
@@ -318,7 +331,7 @@ func run() error {
 	if err := registry.Ping(registryProbeCtx); err != nil {
 		return fmt.Errorf("wallet registry ping: %w", err)
 	}
-	walletStore := wallet.NewStore(pool, audit.NewDBRecorder())
+	walletStore := wallet.NewStore(pool, recorder)
 	walletService := wallet.NewService(walletStore, registry, authService, userStore, qerdsStore, cfg.QerdsDefaultAddressDomain)
 	walletHandler := wallet.NewHandler(walletService, sessionIssuer, requireUser, orgHandler.Authorize)
 
@@ -329,7 +342,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	postguardStore := postguard.NewStore(pool, audit.NewDBRecorder(), postguardCipher)
+	postguardStore := postguard.NewStore(pool, recorder, postguardCipher)
 	postguardClient := postguard.NewClient(cfg.PostGuardSidecarURL, cfg.PostGuardSharedSecret, &http.Client{Timeout: postguardHTTPTimeout})
 	postguardService := postguard.NewService(postguardStore, postguardClient, postguardNotifier{email: emailService}, cfg.PostGuardWebsiteURL)
 	postguardHandler := postguard.NewHandler(postguardService, requireUser, orgHandler.Authorize)
@@ -351,7 +364,7 @@ func run() error {
 	}
 	emailHandler := email.NewHandler(emailStore, emailService, requireUser, orgHandler.Authorize)
 
-	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())
+	issuerSettingsStore := issuersettings.NewStore(pool, recorder)
 	issuerSettingsHandler := issuersettings.NewHandler(issuerSettingsStore, requireUser, orgHandler.Authorize)
 
 	wscaCipher, err := crypto.NewCipher(cfg.AttestationHolderWSCAKEK)
@@ -379,7 +392,7 @@ func run() error {
 		}
 	}()
 
-	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
+	attestationStore := attestation.NewStore(pool, recorder)
 	// An inbound QERDS message carrying an OpenID4VCI credential offer is redeemed
 	// into the org's holder engine and indexed (source=qerds).
 	qerdsService.SetInboundConsumer(attestation.NewOfferReceiver(attHolder, attestationStore))
@@ -405,6 +418,14 @@ func run() error {
 	)
 	wscaWalletHandler := wscawallet.NewHandler(wscaActivator, requireUser, orgHandler.Authorize)
 
+	notificationsHandler := notifications.NewHandler(notificationStore, requireUser, orgHandler.Authorize)
+	// Drain the notification outbox out of band. No channel is registered yet — the
+	// e-mail, Slack and MS Teams handlers are their own slices — so for now a pass
+	// claims what the audit seam queued and delivers nothing; registering a channel
+	// is the only thing that changes.
+	notifications.NewDispatcher(notificationStore, notificationStore).
+		Start(ctx, notifications.DefaultPollInterval)
+
 	handler := server.New(
 		pool,
 		cfg.StaticDir,
@@ -418,6 +439,7 @@ func run() error {
 		themeSettingsHandler,
 		attestationHandler,
 		wscaWalletHandler,
+		notificationsHandler,
 	)
 
 	httpServer := &http.Server{

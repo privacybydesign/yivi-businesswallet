@@ -49,6 +49,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "email.settings_updated": { icon: "settings", tone: "blue" },
   "email.template_updated": { icon: "email", tone: "blue" },
   "email.template_reset": { icon: "email", tone: "amber" },
+  "notification.settings_updated": { icon: "settings", tone: "blue" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -185,6 +186,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.themeSettingsUpdated");
     case "onboarding.settings_updated":
       return t("auditLog.actions.onboardingSettingsUpdated");
+    case "notification.settings_updated":
+      return t("auditLog.actions.notificationSettingsUpdated");
     default:
       return action;
   }
@@ -240,6 +243,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.orgThemeSettings");
     case "org_onboarding_attestations":
       return t("auditLog.targets.orgOnboardingAttestations");
+    case "org_notification_settings":
+      return t("auditLog.targets.orgNotificationSettings");
     default:
       return targetType;
   }

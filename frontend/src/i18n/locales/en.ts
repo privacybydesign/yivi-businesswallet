@@ -444,6 +444,7 @@ export const en = {
       orgIssuerSettings: "Issuer settings",
       orgThemeSettings: "Theme settings",
       orgOnboardingAttestations: "Onboarding attestations",
+      orgNotificationSettings: "Notification settings",
     },
     actions: {
       orgCreated: "Created organization",
@@ -506,6 +507,7 @@ export const en = {
       issuerSettingsUpdated: "Updated issuer settings",
       themeSettingsUpdated: "Updated theme settings",
       onboardingSettingsUpdated: "Updated onboarding attestations",
+      notificationSettingsUpdated: "Updated notification settings",
     },
   },
   memberInvite: {

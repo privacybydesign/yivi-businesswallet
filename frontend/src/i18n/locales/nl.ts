@@ -457,6 +457,7 @@ export const nl: Translation<typeof en> = {
       orgIssuerSettings: "Uitgever-instellingen",
       orgThemeSettings: "Thema-instellingen",
       orgOnboardingAttestations: "Onboarding-attestaties",
+      orgNotificationSettings: "Notificatie-instellingen",
     },
     actions: {
       orgCreated: "Organisatie aangemaakt",
@@ -520,6 +521,7 @@ export const nl: Translation<typeof en> = {
       issuerSettingsUpdated: "Uitgever-instellingen bijgewerkt",
       themeSettingsUpdated: "Thema-instellingen bijgewerkt",
       onboardingSettingsUpdated: "Onboarding-attestaties bijgewerkt",
+      notificationSettingsUpdated: "Notificatie-instellingen bijgewerkt",
     },
   },
   memberInvite: {
