@@ -266,9 +266,11 @@ func run() error {
 	// Every store records audit events through this recorder: it writes the event
 	// like a plain audit.DBRecorder and, for an event an org can subscribe to,
 	// queues it for notification in the same transaction. A store handed a bare
-	// audit.NewDBRecorder() instead is invisible to notifications, so the two below
-	// are the only ones that get one: the seeder (seeding pages nobody) and the
-	// notification store itself, which cannot be handed a recorder that needs it.
+	// audit.NewDBRecorder() instead is invisible to notifications, so only three get
+	// one: the seeder (seeding pages nobody), the notification store itself, which
+	// cannot be handed a recorder that needs it, and the organization store the
+	// provisioning sync writes through (a bulk directory import would otherwise page
+	// every admin once per person — see below).
 	// The consequence of that second exception is that a notification.* action
 	// would never notify — which is fine as long as none is in the catalog, and a
 	// reason to think twice before putting one there.
@@ -458,7 +460,16 @@ func run() error {
 		return err
 	}
 	provisioningStore := provisioning.NewStore(pool, recorder, provisioningCipher)
-	provisioningService := provisioning.NewService(provisioningStore, orgStore, orgStore, emailService, cfg.AppBaseURL)
+	// The sync writes memberships through its own organization store, built on the
+	// plain audit recorder rather than the notifications one. Its changes are
+	// audited exactly like a hand-made invite or off-boarding; they just do not page
+	// anybody. membership.invited, membership.revoked and membership.role_changed
+	// are all in the notifications catalogue, so a first run against a directory of
+	// five hundred people would mail every admin five hundred times for one act of
+	// configuration — and every leaver sweep after that in bursts. Same exception,
+	// and the same reason, as internal/seed. Pass `recorder` here to reverse it.
+	provisioningOrgStore := organization.NewStore(pool, audit.NewDBRecorder())
+	provisioningService := provisioning.NewService(provisioningStore, provisioningOrgStore, provisioningOrgStore, emailService, cfg.AppBaseURL)
 	provisioningService.Register(provisioner.NewEntra(&http.Client{Timeout: provisioningHTTPTimeout}))
 	provisioningHandler := provisioning.NewHandler(provisioningStore, provisioningService, requireUser, orgHandler.Authorize)
 	provisioning.NewScheduler(provisioningStore, provisioningService).Start(ctx, provisioning.DefaultSyncInterval)

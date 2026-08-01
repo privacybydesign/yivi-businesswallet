@@ -160,6 +160,16 @@ The three run actions are deliberately **not** in the notifications catalogue
 failed run's metadata is the source's own error text. If an org asks to be paged on a failed sync, it
 needs a metadata shape decided for that purpose first.
 
+A provisioned change is audited but does **not** notify. The sync writes memberships through an
+`organization.Store` built on the plain `audit.DBRecorder` rather than the notifications one
+(`cmd/api`), so its `membership.*` and `department.*` events never reach the notification outbox.
+The reason is volume, not secrecy: those three actions are all in the catalogue, so a first run
+against a directory of five hundred people would mail every admin five hundred times for one act of
+configuration, and every leaver sweep after that would arrive in bursts. This is the third
+documented exception to "every store gets the shared recorder", beside the seeder and the
+notification store itself, and it is one argument to reverse if an organisation would rather be
+paged about provisioned joiners and leavers.
+
 ## 5. Configuration
 
 Deployment: `PROVISIONING_ENCRYPTION_KEY` (hex 32 bytes) encrypts each organisation's directory
