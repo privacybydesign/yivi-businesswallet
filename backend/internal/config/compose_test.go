@@ -84,3 +84,19 @@ func TestComposePassesMailDefaultLocaleToBackend(t *testing.T) {
 		t.Errorf("backend %s = %q, want %q", envMailDefaultLocale, value, want)
 	}
 }
+
+// TestComposePassesProvisioningEncryptionKeyToBackend holds the directory
+// provisioning key to the same passthrough rule. Without the declaration the
+// documented .env setting is silently ignored, and every attempt to save a
+// directory client secret is refused with "no encryption key configured".
+func TestComposePassesProvisioningEncryptionKeyToBackend(t *testing.T) {
+	backendEnvironment := backendComposeEnvironment(t)
+
+	value, ok := backendEnvironment[envProvisioningEncryptionKey]
+	if !ok {
+		t.Fatalf("backend service does not pass %s through; setting it in .env would do nothing", envProvisioningEncryptionKey)
+	}
+	if want := "${" + envProvisioningEncryptionKey + ":-}"; value != want {
+		t.Errorf("backend %s = %q, want %q", envProvisioningEncryptionKey, value, want)
+	}
+}

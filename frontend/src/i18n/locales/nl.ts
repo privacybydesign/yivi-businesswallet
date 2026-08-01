@@ -488,6 +488,7 @@ export const nl: Translation<typeof en> = {
       orgOnboardingAttestations: "Onboarding-attestaties",
       orgNotificationSettings: "Notificatie-instellingen",
       orgSlackSettings: "Slack-instellingen",
+      orgProvisioningSettings: "Provisioning-instellingen",
     },
     actions: {
       orgCreated: "Organisatie aangemaakt",
@@ -496,6 +497,7 @@ export const nl: Translation<typeof en> = {
       memberInvited: "Lid uitgenodigd",
       inviteResent: "Uitnodiging opnieuw verstuurd",
       inviteRevoked: "Uitnodiging ingetrokken",
+      inviteUpdated: "Uitnodiging bijgewerkt",
       inviteAccepted: "Uitnodiging geaccepteerd",
       acceptRejected: "Acceptatiepoging afgewezen",
       inviteDeclined: "Uitnodiging geweigerd",
@@ -553,6 +555,9 @@ export const nl: Translation<typeof en> = {
       onboardingSettingsUpdated: "Onboarding-attestaties bijgewerkt",
       notificationSettingsUpdated: "Notificatie-instellingen bijgewerkt",
       slackSettingsUpdated: "Slack-instellingen bijgewerkt",
+      provisioningSettingsUpdated: "Provisioning-instellingen bijgewerkt",
+      provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
+      provisioningRunFailed: "Directorysynchronisatie mislukt",
     },
   },
   memberInvite: {

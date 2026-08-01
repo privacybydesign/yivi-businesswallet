@@ -37,6 +37,8 @@ tags:
     description: Per-organisation notification subscriptions per audit event.
   - name: slack
     description: Per-organisation Slack incoming-webhook notification settings.
+  - name: provisioning
+    description: Per-organisation user and department provisioning from an identity directory.
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -2708,6 +2710,144 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/provisioning/settings:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [provisioning]
+      summary: Get the organisation directory provisioning configuration
+      description: >-
+        Requires an administrator role in the organisation. Returns the saved
+        configuration together with the source identifiers this deployment can
+        configure, and the outcome of the last sync. The stored client secret is
+        never returned; `hasClientSecret` reports whether one is set.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [provisioning]
+      summary: Replace the organisation directory provisioning configuration
+      description: >-
+        Requires an administrator role in the organisation. Replaces the whole
+        configuration. Omitting `clientSecret` keeps the stored secret; sending
+        it empty clears it. A body that omits `adminGroupIds` is rejected with
+        400 — send it empty to map nobody to the administrator role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source, adminGroupIds]
+              additionalProperties: false
+              properties:
+                enabled:
+                  type: boolean
+                  description: Whether the scheduled sync runs for this organisation.
+                source:
+                  type: string
+                  enum: [entra]
+                  description: Directory source identifier.
+                tenantId:
+                  type: string
+                  description: >-
+                    Directory tenant. For Entra, the tenant GUID or domain.
+                clientId:
+                  type: string
+                  description: App registration the sync authenticates as.
+                clientSecret:
+                  type: string
+                  nullable: true
+                  description: >-
+                    Write-only. Omit to keep the stored secret, send empty to
+                    clear it.
+                groupId:
+                  type: string
+                  description: >-
+                    Group whose members are in scope. Empty means the whole
+                    directory.
+                adminGroupIds:
+                  type: array
+                  description: >-
+                    Groups whose members are provisioned as organisation
+                    administrators. Everyone else becomes a member.
+                  items:
+                    type: string
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/provisioning/sync:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [provisioning]
+      summary: Run a directory sync now
+      description: >-
+        Requires an administrator role in the organisation. Reads the source and
+        reconciles it synchronously, answering with what the run did. 409 when
+        provisioning is not configured, disabled, or names a source this
+        deployment has no driver for; 502 when the source could not be read or
+        answered with no accounts at all (which is refused rather than obeyed,
+        because it would deprovision the whole organisation).
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            Provisioning is not configured, disabled, or names a source this
+            deployment has no driver for.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: The source could not be read, or returned no accounts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/qerds/addresses:
     parameters:
       - name: slug

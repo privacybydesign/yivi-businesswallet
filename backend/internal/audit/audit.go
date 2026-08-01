@@ -19,6 +19,7 @@ const (
 	MembershipInvited        = "membership.invited"
 	MembershipInviteResent   = "membership.invite_resent"
 	MembershipInviteRevoked  = "membership.invite_revoked"
+	MembershipInviteUpdated  = "membership.invite_updated"
 	MembershipAccepted       = "membership.accepted"
 	MembershipAcceptRejected = "membership.accept_rejected"
 	MembershipDeclined       = "membership.declined"
@@ -90,6 +91,10 @@ const (
 	NotificationSettingsUpdated = "notification.settings_updated"
 
 	SlackSettingsUpdated = "slack.settings_updated"
+
+	ProvisioningSettingsUpdated = "provisioning.settings_updated"
+	ProvisioningRunCompleted    = "provisioning.run_completed"
+	ProvisioningRunFailed       = "provisioning.run_failed"
 )
 
 const (
@@ -128,6 +133,8 @@ const (
 	TargetNotificationSettings = "org_notification_settings"
 
 	TargetSlackSettings = "org_slack_settings"
+
+	TargetProvisioningSettings = "org_provisioning_settings"
 )
 
 type Actor struct {

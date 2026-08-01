@@ -76,6 +76,9 @@ services:
       # Language outbound transactional mail falls back to (en or nl). Compose does
       # not forward a root .env variable unless it is declared here.
       MAIL_DEFAULT_LOCALE: ${MAIL_DEFAULT_LOCALE:-}
+      # Encrypts the per-org directory client secret at rest (hex 32 bytes).
+      # Without it an org cannot store one, so directory provisioning stays off.
+      PROVISIONING_ENCRYPTION_KEY: ${PROVISIONING_ENCRYPTION_KEY:-}
       # Attestation issuer (OpenID4VCI). Defaults to the in-process stub; set to
       # `veramo` with a URL/instance/token to issue real credentials.
       ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}

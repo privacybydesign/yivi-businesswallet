@@ -215,6 +215,39 @@ FROM entries` + memberSearchWhere + "\nORDER BY " + memberOrderBy(p.Sort, p.Desc
 	return entries, total, nil
 }
 
+// MemberEntryByEmail resolves one e-mail address to the organisation's member
+// entry for it — an active membership or a pending invitation — and returns
+// ErrNotMember when the address belongs to neither.
+//
+// It reuses the member-list CTE because "is this person already in the org?" has
+// exactly the same two answers the list unions together, and the directory sync
+// (internal/provisioning) has to ask it per source account. ORDER BY status
+// resolves the case where both exist to the active membership ('active' sorts
+// before 'invited'), which is the stronger of the two.
+func (s *Store) MemberEntryByEmail(ctx context.Context, orgID uuid.UUID, email string) (MemberEntry, error) {
+	q := memberEntriesCTE + `
+SELECT status, user_id, invitation_id, email, preferred_name, given_names, last_name,
+       role, job_title, department_id, department_name, expires_at, invited_by, phone, verified,
+       has_avatar, avatar_updated_at
+FROM entries
+WHERE lower(email) = lower($3)
+ORDER BY status
+LIMIT 1`
+
+	var e MemberEntry
+	err := s.db.QueryRow(ctx, q, orgID, "", email).Scan(&e.Status, &e.UserID, &e.InvitationID,
+		&e.Email, &e.PreferredName, &e.GivenNames, &e.LastName, &e.Role, &e.JobTitle,
+		&e.DepartmentID, &e.DepartmentName, &e.ExpiresAt, &e.InvitedBy, &e.Phone, &e.Verified,
+		&e.HasAvatar, &e.AvatarUpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MemberEntry{}, ErrNotMember
+	}
+	if err != nil {
+		return MemberEntry{}, fmt.Errorf("organization: member entry by email org %s: %w", orgID, err)
+	}
+	return e, nil
+}
+
 func (s *Store) GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error) {
 	const q = `
 		SELECT u.id, u.email, u.preferred_name, u.given_names, u.last_name,

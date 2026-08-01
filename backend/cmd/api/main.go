@@ -32,6 +32,8 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/postguard"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/provisioner"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/provisioning"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
@@ -62,6 +64,10 @@ const (
 
 	// PostGuard uploads can be large; allow a generous client timeout.
 	postguardHTTPTimeout = 60 * time.Second
+
+	// A directory read is a handful of paged calls to somebody else's API; the
+	// per-organisation deadline in provisioning.Scheduler bounds the whole sync.
+	provisioningHTTPTimeout = 30 * time.Second
 
 	serverAddr = ":8080"
 
@@ -442,6 +448,21 @@ func run() error {
 	dispatcher.Register(slackChannel)
 	dispatcher.Start(ctx, notifications.DefaultPollInterval)
 
+	// Directory provisioning. Unlike the verifier/QERDS/registry there is no boot
+	// gate: the source is configured per organisation, not per deployment, so
+	// there is nothing to probe at startup and a tenant with an expired secret
+	// must not fail everyone else's deploy. A run's outcome lands on the org's
+	// settings row and in its audit log instead.
+	provisioningCipher, err := crypto.NewCipher(cfg.ProvisioningEncryptionKey)
+	if err != nil {
+		return err
+	}
+	provisioningStore := provisioning.NewStore(pool, recorder, provisioningCipher)
+	provisioningService := provisioning.NewService(provisioningStore, orgStore, orgStore, emailService, cfg.AppBaseURL)
+	provisioningService.Register(provisioner.NewEntra(&http.Client{Timeout: provisioningHTTPTimeout}))
+	provisioningHandler := provisioning.NewHandler(provisioningStore, provisioningService, requireUser, orgHandler.Authorize)
+	provisioning.NewScheduler(provisioningStore, provisioningService).Start(ctx, provisioning.DefaultSyncInterval)
+
 	handler := server.New(
 		pool,
 		cfg.StaticDir,
@@ -457,6 +478,7 @@ func run() error {
 		wscaWalletHandler,
 		notificationsHandler,
 		slackHandler,
+		provisioningHandler,
 	)
 
 	httpServer := &http.Server{
