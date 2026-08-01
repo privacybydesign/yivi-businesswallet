@@ -59,6 +59,20 @@ var (
 	ErrEmptyDirectory = errors.New("provisioning: source returned no accounts")
 )
 
+// SourceError wraps a failure that belongs to the directory source: it could not
+// be reached, refused the credential, or answered with something the driver could
+// not read. Everything else a sync can fail on is ours — a database error in the
+// reconciler, say — and the two are answered differently, because telling an
+// admin their source is at fault sends them to check credentials that are fine.
+//
+// It adds no text of its own: the driver's message is what lands in
+// Settings.LastRunError for the admin to read.
+type SourceError struct{ Err error }
+
+func (e *SourceError) Error() string { return e.Err.Error() }
+
+func (e *SourceError) Unwrap() error { return e.Err }
+
 // Run statuses recorded on the settings row after a sync.
 const (
 	RunSucceeded = "succeeded"

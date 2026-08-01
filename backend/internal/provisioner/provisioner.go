@@ -94,9 +94,14 @@ type Directory struct {
 	People []Person
 }
 
-// Provisioner reads a directory source. Fetch must respect the context deadline
-// and must not modify anything in the source; provisioning is a one-way sync
-// into us.
+// Provisioner reads a directory source. Fetch should respect the context
+// deadline and must not modify anything in the source; provisioning is a one-way
+// sync into us.
+//
+// The deadline is asked for, not relied on: internal/provisioning stops waiting
+// for a Fetch that outlives it rather than trusting every driver to return. A
+// driver that ignores the context therefore delays nothing but itself, but it
+// does leak the goroutine it is blocked on, so honour it.
 type Provisioner interface {
 	ID() SourceID
 	Fetch(ctx context.Context, cfg Config) (Directory, error)

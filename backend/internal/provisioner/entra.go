@@ -226,9 +226,17 @@ func (e *Entra) adminIDs(ctx context.Context, token string, groupIDs []string) (
 }
 
 // collectionURL is the first page of a user collection: the members of a group,
-// or every user when groupID is empty. The /microsoft.graph.user segment is an
-// OData cast — a group's members can be groups or service principals too, and
-// the cast makes Graph return only the people.
+// or every user when groupID is empty.
+//
+// transitiveMembers rather than members: nesting is ordinary in a directory (an
+// "All staff" group holding one group per department) and members returns only
+// the direct ones. For the scoping group that would fail loudly — no direct users
+// trips ErrEmptyDirectory — but for an admin group it would fail silently,
+// resolving nobody and provisioning every admin as a plain member.
+//
+// The /microsoft.graph.user segment is an OData cast — a group's members can be
+// groups or service principals too, and the cast makes Graph return only the
+// people.
 func (e *Entra) collectionURL(groupID, selection string) string {
 	query := url.Values{
 		"$select": {selection},
@@ -237,7 +245,7 @@ func (e *Entra) collectionURL(groupID, selection string) string {
 	if groupID == "" {
 		return e.graphBaseURL + "/users?" + query
 	}
-	return e.graphBaseURL + "/groups/" + url.PathEscape(groupID) + "/members/microsoft.graph.user?" + query
+	return e.graphBaseURL + "/groups/" + url.PathEscape(groupID) + "/transitiveMembers/microsoft.graph.user?" + query
 }
 
 // eachPage walks an OData collection, handing each page's raw value array to fn

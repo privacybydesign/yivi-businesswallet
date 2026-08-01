@@ -2,10 +2,12 @@ package provisioning
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"maps"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -73,7 +75,16 @@ func (f *fakeSettings) MemberLinks(context.Context, uuid.UUID, provisioner.Sourc
 	return out, nil
 }
 
+// LinkMember enforces both indexes provisioned_members has: the primary key it
+// upserts on, and the unique one on (organization, source, lower(email)). A
+// violation of the second is a plain error there, not an upsert, and a double
+// that let two links hold one address would hide the run it aborts.
 func (f *fakeSettings) LinkMember(_ context.Context, _ uuid.UUID, _ provisioner.SourceID, externalID, email string) error {
+	for _, link := range f.memberLinks {
+		if link.ExternalID != externalID && strings.EqualFold(link.Email, email) {
+			return errors.New(`duplicate key value violates unique constraint "idx_provisioned_members_email"`)
+		}
+	}
 	f.memberLinks[externalID] = Link{ExternalID: externalID, Email: email}
 	return nil
 }
@@ -597,6 +608,163 @@ func TestSyncRejectsASourceThisDeploymentCannotDrive(t *testing.T) {
 	if !errors.Is(err, ErrUnknownSource) {
 		t.Fatalf("err = %v, want ErrUnknownSource", err)
 	}
+}
+
+func TestSyncReplacesASourceAccountOnAMailboxItAlreadyOwned(t *testing.T) {
+	// The person declined the invitation their first source account got them, so
+	// the link outlives what it pointed at. The account is then deleted in the
+	// source and re-created on the same mailbox — a new object id, one snapshot.
+	h := newHarness(t, person("old-1", "ada@example.org", "Ada", "Lovelace"))
+	h.sync(t)
+	delete(h.members.entries, "ada@example.org")
+
+	h.source.directory = provisioner.Directory{People: []provisioner.Person{
+		person("new-1", "ada@example.org", "Ada", "Lovelace"),
+	}}
+	result, err := h.service.Sync(context.Background(), h.orgID)
+	if err != nil {
+		// Only one link may hold an address. Inviting before the departed account
+		// lets go of it makes the link write fail, which aborts the whole run and
+		// leaves the invitation it had just created with nothing owning it.
+		t.Fatalf("Sync: %v", err)
+	}
+
+	if result.MembersInvited != 1 {
+		t.Errorf("membersInvited = %d, want the replacement account provisioned", result.MembersInvited)
+	}
+	if _, ok := h.settings.memberLinks["old-1"]; ok {
+		t.Error("the departed account still holds the address")
+	}
+	if link, ok := h.settings.memberLinks["new-1"]; !ok || link.Email != "ada@example.org" {
+		t.Errorf("links = %+v, want the mailbox owned by the new account", h.settings.memberLinks)
+	}
+	if _, ok := h.members.entries["ada@example.org"]; !ok {
+		t.Error("no invitation for the replacement account")
+	}
+}
+
+func TestSyncSkipsAnAddressAnotherSourceAccountStillHolds(t *testing.T) {
+	// Same collision, but the old account is still listed in the source, so the
+	// run cannot let go of its link. There is nothing to do but report it.
+	h := newHarness(t, person("old-1", "ada@example.org", "Ada", "Lovelace"))
+	h.sync(t)
+	delete(h.members.entries, "ada@example.org")
+
+	h.source.directory = provisioner.Directory{People: []provisioner.Person{
+		person("new-1", "ada@example.org", "Ada", "Lovelace"),
+		person("old-1", "ada@example.org", "Ada", "Lovelace"),
+	}}
+	result, err := h.service.Sync(context.Background(), h.orgID)
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	if result.MembersInvited != 0 {
+		t.Errorf("membersInvited = %d; the address is not free to invite into", result.MembersInvited)
+	}
+	if !skippedFor(result, SkipConflict) || !skippedFor(result, SkipRemovedLocally) {
+		t.Errorf("skipped = %+v, want both accounts reported", result.Skipped)
+	}
+	if len(h.members.entries) != 0 {
+		t.Errorf("entries = %+v, want no invitation created", h.members.entries)
+	}
+}
+
+func TestSyncStopsWaitingForADriverThatIgnoresTheDeadline(t *testing.T) {
+	h := newHarness(t)
+	blocked := &blockingSource{released: make(chan struct{})}
+	// Not deferred through t.Cleanup only: the goroutine must be let go before the
+	// test binary decides it is finished with this package.
+	t.Cleanup(func() { close(blocked.released) })
+	h.service.Register(blocked)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := h.service.Sync(ctx, h.orgID); done <- err }()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err = %v, want the deadline", err)
+		}
+	case <-time.After(2 * time.Second):
+		// A Provisioner is an interface other sources implement. context.WithTimeout
+		// around the call bounds nothing the driver does not opt into, and one that
+		// blocks would hold every organisation behind it in the scheduler's pass.
+		t.Fatal("Sync is still waiting on a driver that ignores its context")
+	}
+
+	// The run that ran out of time is the one the admin needs to see, so recording
+	// it must not travel on the context that just expired.
+	if len(h.settings.runs) != 1 || h.settings.runs[0].err == nil {
+		t.Errorf("runs = %+v, want the timed-out run recorded as a failure", h.settings.runs)
+	}
+}
+
+func TestSyncSurvivesADriverThatPanics(t *testing.T) {
+	h := newHarness(t)
+	h.service.Register(panickingSource{})
+
+	_, err := h.service.Sync(context.Background(), h.orgID)
+	if err == nil || !strings.Contains(err.Error(), "panicked") {
+		// The driver runs on its own goroutine, so the recover has to be there too:
+		// a panic with nobody to catch it takes the whole API down.
+		t.Fatalf("err = %v, want the panic reported as a failed run", err)
+	}
+}
+
+func TestSyncDoesNotMirrorADepartmentForSomebodyItWillNotProvision(t *testing.T) {
+	ada := person("u1", "ada@example.org", "Ada", "Lovelace")
+	ada.Department = "Legal"
+	disabled := person("u2", "bob@example.org", "Bob", "Baker")
+	disabled.Department = "Ghosts"
+	disabled.Active = false
+	nameless := provisioner.Person{ExternalID: "u3", Email: "cyd@example.org", Active: true, Department: "Limbo"}
+	h := newHarness(t, ada, disabled, nameless)
+
+	result := h.sync(t)
+
+	// Departments are never deleted here, so one mirrored for a person the run does
+	// not provision stays in the organisation's list, empty, for good.
+	if result.DepartmentsCreated != 1 {
+		t.Errorf("departmentsCreated = %d, want only the one with somebody in it", result.DepartmentsCreated)
+	}
+	if len(h.members.departments) != 1 || h.members.departments[0].Name != "Legal" {
+		t.Errorf("departments = %+v, want only Legal", h.members.departments)
+	}
+}
+
+func TestSyncAnswersWithAnEmptySkipList(t *testing.T) {
+	h := newHarness(t, person("u1", "ada@example.org", "Ada", "Lovelace"))
+
+	body, err := json.Marshal(h.sync(t))
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	// A client should not have to tell "nothing was skipped" apart from null.
+	if !strings.Contains(string(body), `"skipped":[]`) {
+		t.Errorf("body = %s, want an empty skip list", body)
+	}
+}
+
+// blockingSource is a driver that never returns and never looks at the context,
+// which is what the seam has to survive.
+type blockingSource struct{ released chan struct{} }
+
+func (blockingSource) ID() provisioner.SourceID { return provisioner.SourceEntra }
+
+func (b blockingSource) Fetch(context.Context, provisioner.Config) (provisioner.Directory, error) {
+	<-b.released
+	return provisioner.Directory{}, nil
+}
+
+type panickingSource struct{}
+
+func (panickingSource) ID() provisioner.SourceID { return provisioner.SourceEntra }
+
+func (panickingSource) Fetch(context.Context, provisioner.Config) (provisioner.Directory, error) {
+	panic("a driver dereferenced something it should not have")
 }
 
 // accept turns a pending invitation into an accepted membership, the way the

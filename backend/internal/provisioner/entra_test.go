@@ -103,7 +103,7 @@ func (g *graphServer) asked(prefix string) bool {
 func TestEntraFetchMapsPeopleAndResolvesAdmins(t *testing.T) {
 	g, entra := newGraphServer(t)
 
-	groupPath := "/graph/groups/staff-group/members/microsoft.graph.user"
+	groupPath := "/graph/groups/staff-group/transitiveMembers/microsoft.graph.user"
 	g.pages[groupPath+"?%24select="+selectEscaped(personSelect)+"&%24top=999"] = `{
 		"value": [
 			{"id": "u1", "mail": "Ada@example.org", "givenName": " Ada ", "surname": "Lovelace",
@@ -112,7 +112,7 @@ func TestEntraFetchMapsPeopleAndResolvesAdmins(t *testing.T) {
 			 "accountEnabled": false}
 		]
 	}`
-	g.pages["/graph/groups/admins/members/microsoft.graph.user?%24select=id&%24top=999"] = `{"value": [{"id": "u1"}]}`
+	g.pages["/graph/groups/admins/transitiveMembers/microsoft.graph.user?%24select=id&%24top=999"] = `{"value": [{"id": "u1"}]}`
 
 	directory, err := entra.Fetch(context.Background(), Config{
 		TenantID:      "tenant",
@@ -155,6 +155,12 @@ func TestEntraFetchMapsPeopleAndResolvesAdmins(t *testing.T) {
 	}
 	if g.asked("/graph/users") {
 		t.Error("a configured group must scope the read; the whole directory was requested")
+	}
+	// Nesting is ordinary in a directory, and Graph's members collection returns
+	// only the direct ones — an admin group holding one group per department would
+	// resolve nobody, with no signal that anything went wrong.
+	if g.asked("/graph/groups/staff-group/members/") || g.asked("/graph/groups/admins/members/") {
+		t.Error("the direct members collection was read instead of transitiveMembers")
 	}
 }
 

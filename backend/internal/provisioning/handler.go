@@ -128,7 +128,16 @@ func parseSettingsRequest(r *http.Request) (SettingsInput, error) {
 // directory read is a handful of paged HTTP calls.
 func (h *Handler) postSync(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
-	result, err := h.sync.Sync(r.Context(), org.ID)
+	// The same bound the scheduled pass puts on one organisation. Without it this
+	// run is unbounded: cmd/api sets no WriteTimeout on purpose and expects
+	// per-request bounds instead, and the driver's HTTP timeout is per request
+	// rather than per sync, so a slow tenant would hold the request for as long as
+	// its pages keep arriving.
+	ctx, cancel := context.WithTimeout(r.Context(), DefaultSyncTimeout)
+	defer cancel()
+
+	var sourceErr *SourceError
+	result, err := h.sync.Sync(ctx, org.ID)
 	switch {
 	case errors.Is(err, ErrNotConfigured):
 		return &respond.APIError{Status: http.StatusConflict, Code: "not_configured", Message: "provisioning is not configured for this organization"}
@@ -140,11 +149,18 @@ func (h *Handler) postSync(w http.ResponseWriter, r *http.Request) error {
 		return &respond.APIError{Status: http.StatusBadGateway, Code: "empty_directory", Message: "the source returned no accounts; nothing was changed"}
 	case errors.Is(err, provisioner.ErrIncompleteConfig):
 		return &respond.APIError{Status: http.StatusConflict, Code: "incomplete_config", Message: "the source configuration is incomplete"}
-	case err != nil:
+	case errors.Is(err, context.DeadlineExceeded):
+		return &respond.APIError{Status: http.StatusGatewayTimeout, Code: "sync_timeout", Message: "the directory sync did not finish in time"}
+	case errors.As(err, &sourceErr):
 		// The source is somebody else's system, so a failure to reach it is a
 		// gateway error rather than ours. The reason is on the settings row
 		// (lastRunError), which is where the screen shows it.
 		return &respond.APIError{Status: http.StatusBadGateway, Code: "sync_failed", Message: "the directory sync failed; see the last run error"}
+	case err != nil:
+		// Anything left is our own failure — a database error in the reconciler, say.
+		// Answering that with a bad gateway too would send the admin to check a
+		// credential that is fine, so it goes out as the 500 it is.
+		return fmt.Errorf("running provisioning sync: %w", err)
 	}
 	respond.JSON(w, r, http.StatusOK, result)
 	return nil

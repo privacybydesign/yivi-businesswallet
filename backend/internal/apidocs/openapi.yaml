@@ -2820,7 +2820,8 @@ paths:
         provisioning is not configured, disabled, or names a source this
         deployment has no driver for; 502 when the source could not be read or
         answered with no accounts at all (which is refused rather than obeyed,
-        because it would deprovision the whole organisation).
+        because it would deprovision the whole organisation); 504 when the run
+        did not finish inside the sync timeout.
       responses:
         '2XX':
           description: Successful response.
@@ -2844,6 +2845,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '502':
           description: The source could not be read, or returned no accounts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: The sync did not finish inside the sync timeout.
           content:
             application/json:
               schema:

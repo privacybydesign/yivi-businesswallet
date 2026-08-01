@@ -16,8 +16,10 @@ const (
 	// generous for the first and considerate of the second.
 	DefaultSyncInterval = time.Hour
 	// DefaultSyncTimeout bounds one organisation's sync. It is enforced from the
-	// outside so a source that stops answering delays that organisation only, not
-	// every organisation behind it in the pass.
+	// outside, and the read of the source is waited on rather than called straight
+	// through (Service.fetchDirectory), so the bound holds for a driver that does
+	// not watch the context too. Without that, a source that stops answering would
+	// delay every organisation behind it in the pass rather than only its own.
 	DefaultSyncTimeout = 5 * time.Minute
 )
 

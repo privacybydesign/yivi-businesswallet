@@ -242,3 +242,47 @@ func TestSyncEndToEndThroughTheRealStores(t *testing.T) {
 		t.Errorf("carol was added by hand and must survive the sync: %v", err)
 	}
 }
+
+// TestSyncReplacesASourceAccountOnAMailboxItOwnsAgainstTheRealIndex drives the
+// one rule the in-memory doubles can only imitate: provisioned_members has a
+// unique index on (organization, source, lower(email)), and LinkMember upserts on
+// the primary key alone, so a second link on one address is an error that would
+// abort the run.
+func TestSyncReplacesASourceAccountOnAMailboxItOwnsAgainstTheRealIndex(t *testing.T) {
+	e := newEndToEnd(t, []graphUser{{
+		ID: "old-1", Mail: "ada@example.org", GivenName: "Ada", Surname: "Lovelace", AccountEnabled: true,
+	}}, nil)
+	ctx := context.Background()
+
+	if first := e.sync(t); first.MembersInvited != 1 {
+		t.Fatalf("first run = %+v, want the invitation", first)
+	}
+
+	// Ada declines, or an admin revokes it. The invitation goes and the ownership
+	// link stays behind, because the sync does not re-invite somebody removed here.
+	invitationID := *e.entry(t, "ada@example.org").InvitationID
+	if err := e.orgs.RevokeInvitation(ctx, e.orgID, invitationID); err != nil {
+		t.Fatalf("RevokeInvitation: %v", err)
+	}
+
+	// The tenant deletes the account and re-creates it on the same mailbox, which
+	// gives it a new directory object id.
+	e.graph.users[0].ID = "new-1"
+	second := e.sync(t)
+
+	if second.MembersInvited != 1 {
+		t.Fatalf("second run = %+v, want the replacement account provisioned", second)
+	}
+	if entry := e.entry(t, "ada@example.org"); entry.Status != organization.StatusInvited {
+		t.Errorf("entry = %+v, want an invitation for the replacement account", entry)
+	}
+	var externalID string
+	if err := e.pool.QueryRow(ctx,
+		"SELECT external_id FROM provisioned_members WHERE organization_id = $1", e.orgID,
+	).Scan(&externalID); err != nil {
+		t.Fatalf("read the ownership link: %v", err)
+	}
+	if externalID != "new-1" {
+		t.Errorf("link = %q, want the mailbox owned by the new account alone", externalID)
+	}
+}

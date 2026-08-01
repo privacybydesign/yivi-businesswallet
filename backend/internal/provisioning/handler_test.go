@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -106,13 +107,16 @@ func (s *fakeConfigStore) Save(_ context.Context, _ uuid.UUID, in SettingsInput)
 }
 
 type fakeSyncer struct {
-	result Result
-	err    error
-	calls  int
+	result      Result
+	err         error
+	calls       int
+	deadline    time.Time
+	hasDeadline bool
 }
 
-func (f *fakeSyncer) Sync(context.Context, uuid.UUID) (Result, error) {
+func (f *fakeSyncer) Sync(ctx context.Context, _ uuid.UUID) (Result, error) {
 	f.calls++
+	f.deadline, f.hasDeadline = ctx.Deadline()
 	return f.result, f.err
 }
 
@@ -198,6 +202,22 @@ func TestPostSyncReportsWhatTheRunDid(t *testing.T) {
 	}
 }
 
+func TestPostSyncBoundsTheRunLikeTheScheduledOne(t *testing.T) {
+	sync := &fakeSyncer{}
+
+	serve(t, &fakeConfigStore{}, sync, organization.RoleAdmin,
+		httptest.NewRequest(http.MethodPost, "/orgs/acme/provisioning/sync", nil))
+
+	// cmd/api sets no WriteTimeout on purpose and the driver's HTTP timeout is per
+	// request, so nothing else bounds a run-now against a slow or large tenant.
+	if !sync.hasDeadline {
+		t.Fatal("the manual sync runs with no deadline at all")
+	}
+	if left := time.Until(sync.deadline); left <= 0 || left > DefaultSyncTimeout {
+		t.Errorf("deadline in %s, want at most the %s the scheduled pass uses", left, DefaultSyncTimeout)
+	}
+}
+
 func TestPostSyncMapsFailures(t *testing.T) {
 	cases := map[string]struct {
 		err    error
@@ -209,7 +229,11 @@ func TestPostSyncMapsFailures(t *testing.T) {
 		"unknown source":  {ErrUnknownSource, http.StatusConflict, "unknown_source"},
 		"empty directory": {ErrEmptyDirectory, http.StatusBadGateway, "empty_directory"},
 		"incomplete":      {provisioner.ErrIncompleteConfig, http.StatusConflict, "incomplete_config"},
-		"source down":     {errors.New("status 503"), http.StatusBadGateway, "sync_failed"},
+		"source down":     {&SourceError{Err: errors.New("status 503")}, http.StatusBadGateway, "sync_failed"},
+		"timed out":       {context.DeadlineExceeded, http.StatusGatewayTimeout, "sync_timeout"},
+		// Our own failure is not a bad gateway: reporting it as one sends the admin
+		// to check a directory credential that is fine.
+		"our database": {errors.New("connection refused"), http.StatusInternalServerError, "internal_error"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -258,7 +282,7 @@ func TestSourceErrorMessageDoesNotEchoTheDriversText(t *testing.T) {
 	// The driver's own message is stored on the settings row for the admin to
 	// read; repeating it in the HTTP response would hand whatever a third party
 	// wrote back to the browser.
-	rec := serve(t, &fakeConfigStore{}, &fakeSyncer{err: errors.New("AADSTS7000215: secret hunter2")},
+	rec := serve(t, &fakeConfigStore{}, &fakeSyncer{err: &SourceError{Err: errors.New("AADSTS7000215: secret hunter2")}},
 		organization.RoleAdmin, httptest.NewRequest(http.MethodPost, "/orgs/acme/provisioning/sync", nil))
 
 	if strings.Contains(rec.Body.String(), "hunter2") {

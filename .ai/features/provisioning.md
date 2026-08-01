@@ -43,6 +43,15 @@ deployment. A tenant brings its own directory, so there is no boot-time `Ping` g
 an expired secret must not fail everybody else's deploy. The outcome of a run lands on the
 organisation's settings row (`lastRunStatus` / `lastRunError`) and in its audit log instead.
 
+`Fetch` is waited on, not called straight through (`Service.fetchDirectory`). A `context` deadline
+is a request the callee has to honour, and the callee here is an interface written for code we do
+not own; the shipped Entra driver does honour it, but a driver that blocks on a call ignoring the
+context would hold the goroutine, and with it the rest of the pass (organisations are synced one
+after another) and the ticker loop that started it. Running the call on its own goroutine and
+selecting against `ctx.Done()` costs one leaked goroutine per wedged driver and keeps
+`DefaultSyncTimeout` true. The same goroutine recovers a panic in a driver, which would otherwise
+take the API process down.
+
 ## 3. Decisions
 
 ### 3.1 Pull over Graph, not SCIM push
@@ -120,8 +129,25 @@ Demoting the organisation's **last** admin is refused by the membership store an
   the person, on every pass. Removing them in the source is what stops the report.
 - **A paging link that leaves the Graph endpoint is refused**, so a spoofed response cannot walk our
   bearer token to a host of its choosing.
+- **Departed accounts let go of their address before anybody is invited.** `provisioned_members`
+  allows one link per address per source, so a person deleted in the source and re-created on the
+  same mailbox needs the old link gone before the new account can take it. The stale links are
+  cleared first, and an address a still-listed account holds is reported as `skipped: conflict`
+  rather than invited — the invitation would exist with nothing owning it and the run would abort on
+  the link write.
+- **A department is only mirrored for somebody the run provisions.** Departments are never deleted
+  here, so one created for a disabled or unusable record would sit in the organisation's list, empty,
+  for good. A record skipped as `conflict` or `removed_locally` is not knowable until the membership
+  lookup and still mirrors its department.
 
 ### 3.6 Known limits
+
+- **Group membership is read transitively.** Both the scoping `groupId` and each of `adminGroupIds`
+  are read through Graph's `transitiveMembers` collection, not `members`, because `members` returns
+  direct members only and nesting is ordinary (an "All staff" group holding one group per
+  department). On the scoping group direct-only would at least fail loudly — no users trips
+  `ErrEmptyDirectory` — but on an admin group it would resolve nobody and quietly provision every
+  admin as a plain member. Same permission either way (`GroupMember.Read.All`).
 
 - **A department rename in the source reads as a new department.** Entra's `department` is a string
   attribute on the user with no stable identifier behind it, so there is nothing to detect a rename
@@ -191,4 +217,7 @@ The app registration needs the application permissions `User.Read.All` and `Grou
 admin-consented in the tenant.
 
 `POST /api/v1/orgs/{slug}/provisioning/sync` runs one now and answers with the counts and the skip
-list, which is how an admin checks a credential they just fixed.
+list, which is how an admin checks a credential they just fixed. It carries the same
+`DefaultSyncTimeout` the scheduled pass puts on one organisation, and answers 504 when it runs out.
+A failure of the source is a 502 and a failure of ours is a 500: telling an admin their directory is
+at fault when a query of ours failed sends them to check a credential that is fine.

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -14,6 +15,11 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/provisioner"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
+
+// recordRunTimeout bounds the write of a run's outcome. It is a single row on a
+// context of its own, so it needs no more than this; the point of the bound is
+// that a detached context cannot be cancelled by the sync that just ended.
+const recordRunTimeout = 5 * time.Second
 
 // settingsStore is the configuration and ownership side of the sync, implemented
 // by *Store.
@@ -93,11 +99,21 @@ func (s *Service) Sync(ctx context.Context, orgID uuid.UUID) (Result, error) {
 	}
 
 	result, runErr := s.run(ctx, orgID, source, cfg)
-	if err := s.settings.RecordRun(ctx, orgID, source, result, runErr); err != nil {
+	if err := s.recordRun(ctx, orgID, source, result, runErr); err != nil {
 		slog.ErrorContext(ctx, "provisioning: recording run outcome",
 			slog.String("organizationId", orgID.String()), slog.String("error", err.Error()))
 	}
 	return result, runErr
+}
+
+// recordRun writes the outcome on a context detached from the sync's own. A run
+// that ran out of time is the one an admin most needs to see, and on the sync's
+// context the deadline that stopped the run would stop the write that says so —
+// leaving the settings row showing the previous run's status for good.
+func (s *Service) recordRun(ctx context.Context, orgID uuid.UUID, source provisioner.SourceID, result Result, runErr error) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordRunTimeout)
+	defer cancel()
+	return s.settings.RecordRun(ctx, orgID, source, result, runErr)
 }
 
 func (s *Service) run(ctx context.Context, orgID uuid.UUID, source provisioner.SourceID, cfg provisioner.Config) (Result, error) {
@@ -106,9 +122,11 @@ func (s *Service) run(ctx context.Context, orgID uuid.UUID, source provisioner.S
 		return Result{}, fmt.Errorf("%w %q", ErrUnknownSource, source)
 	}
 
-	directory, err := driver.Fetch(ctx, cfg)
+	directory, err := fetchDirectory(ctx, driver, cfg)
 	if err != nil {
-		return Result{}, err
+		// Whatever went wrong here is the source's side of the seam, which is what
+		// separates it from a fault of ours for the caller and for lastRunError.
+		return Result{}, &SourceError{Err: err}
 	}
 	// An expired secret, a mistyped group id and a revoked permission can all come
 	// back as a successful, empty read. Obeying it would deprovision the whole
@@ -120,8 +138,48 @@ func (s *Service) run(ctx context.Context, orgID uuid.UUID, source provisioner.S
 	return s.reconcile(ctx, orgID, source, directory)
 }
 
+// fetchDirectory runs the driver's Fetch and stops waiting for it once ctx is
+// done.
+//
+// The deadline around a sync cannot be left to the driver. context.WithTimeout
+// only arms a timer; nothing in the runtime interrupts a running callee, and
+// Provisioner is an interface written for other sources to implement — one that
+// blocks on a call ignoring the context would hold this goroutine forever, and
+// with it the rest of the scheduler's pass (organisations are synced one after
+// another) and the ticker loop that started the pass. Waiting on a channel
+// instead costs one leaked goroutine per wedged driver, which is bounded by how
+// many of them wedge.
+func fetchDirectory(ctx context.Context, driver provisioner.Provisioner, cfg provisioner.Config) (provisioner.Directory, error) {
+	type fetched struct {
+		directory provisioner.Directory
+		err       error
+	}
+	// Buffered, so the goroutine can finish after we have stopped listening.
+	done := make(chan fetched, 1)
+	go func() {
+		// The recover has to be here rather than in the caller: a deferred recover on
+		// this side of the call no longer sees a panic raised on another stack, and a
+		// panicking goroutine with nobody to catch it takes the process down.
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fetched{err: fmt.Errorf("provisioning: source driver panicked: %v", r)}
+			}
+		}()
+		directory, err := driver.Fetch(ctx, cfg)
+		done <- fetched{directory: directory, err: err}
+	}()
+
+	select {
+	case f := <-done:
+		return f.directory, f.err
+	case <-ctx.Done():
+		return provisioner.Directory{}, ctx.Err()
+	}
+}
+
 func (s *Service) reconcile(ctx context.Context, orgID uuid.UUID, source provisioner.SourceID, directory provisioner.Directory) (Result, error) {
-	var result Result
+	// Empty rather than nil, so a clean run answers "skipped": [] instead of null.
+	result := Result{Skipped: []Skip{}}
 
 	departments, err := s.syncDepartments(ctx, orgID, source, directory, &result)
 	if err != nil {
@@ -133,19 +191,18 @@ func (s *Service) reconcile(ctx context.Context, orgID uuid.UUID, source provisi
 		return result, err
 	}
 
-	seen := map[string]bool{}
+	seen := make(map[string]bool, len(directory.People))
 	for _, person := range directory.People {
-		if person.ExternalID == "" {
-			continue
-		}
-		seen[person.ExternalID] = true
-		if err := s.syncPerson(ctx, orgID, source, person, departments, links, &result); err != nil {
-			return result, err
+		if person.ExternalID != "" {
+			seen[person.ExternalID] = true
 		}
 	}
 
-	// Everyone we own who was not in the snapshot has left the source. Sorted so a
-	// run over the same directory does the same thing in the same order.
+	// Everyone we own who was not in the snapshot has left the source. They are
+	// handled before anybody is invited, because a person can be replaced in the
+	// source by a new account on the same mailbox and only one link may hold an
+	// address: the departed account has to let go of it first. Sorted so a run over
+	// the same directory does the same thing in the same order.
 	gone := make([]string, 0, len(links))
 	for externalID := range links {
 		if !seen[externalID] {
@@ -154,7 +211,30 @@ func (s *Service) reconcile(ctx context.Context, orgID uuid.UUID, source provisi
 	}
 	sort.Strings(gone)
 	for _, externalID := range gone {
-		if err := s.deprovision(ctx, orgID, source, links[externalID], &result); err != nil {
+		unlinked, err := s.deprovision(ctx, orgID, source, links[externalID], &result)
+		if err != nil {
+			return result, err
+		}
+		if unlinked {
+			delete(links, externalID)
+		}
+	}
+
+	// Which source account holds each address we own. provisioned_members allows
+	// one link per address per source, so an invitation for an address another link
+	// still holds could not be recorded — and by the time the write failed the
+	// invitation would already exist, with nothing owning it. It is reported
+	// instead, and clears itself once the holding account is gone from the source.
+	claimed := make(map[string]string, len(links))
+	for externalID, link := range links {
+		claimed[strings.ToLower(link.Email)] = externalID
+	}
+
+	for _, person := range directory.People {
+		if person.ExternalID == "" {
+			continue
+		}
+		if err := s.syncPerson(ctx, orgID, source, person, departments, links, claimed, &result); err != nil {
 			return result, err
 		}
 	}
@@ -174,6 +254,17 @@ func (s *Service) syncDepartments(ctx context.Context, orgID uuid.UUID, source p
 	wanted := []string{}
 	seen := map[string]bool{}
 	for _, person := range directory.People {
+		// Only the people this run can act on. Departments are never deleted here, so
+		// mirroring the department of somebody the run is about to deprovision, or
+		// cannot invite at all, would leave an empty department in the organisation's
+		// list for good. A person skipped as conflict or removed_locally is not
+		// knowable until the membership lookup, and still mirrors theirs.
+		if !person.Active {
+			continue
+		}
+		if _, _, _, ok := invitable(person); !ok {
+			continue
+		}
 		name := strings.TrimSpace(person.Department)
 		if name == "" || seen[departmentKey(name)] {
 			continue
@@ -237,6 +328,7 @@ func (s *Service) syncPerson(
 	person provisioner.Person,
 	departments map[string]uuid.UUID,
 	links map[string]Link,
+	claimed map[string]string,
 	result *Result,
 ) error {
 	link, owned := links[person.ExternalID]
@@ -247,16 +339,12 @@ func (s *Service) syncPerson(
 		if !owned {
 			return nil
 		}
-		return s.deprovision(ctx, orgID, source, link, result)
+		_, err := s.deprovision(ctx, orgID, source, link, result)
+		return err
 	}
 
-	email, err := user.ParseEmail(person.Email)
-	givenNames := strings.TrimSpace(person.GivenNames)
-	lastName := strings.TrimSpace(person.LastName)
-	if err != nil || givenNames == "" || lastName == "" {
-		// Our invitation needs an address plus a given and family name: the person's
-		// wallet disclosure is matched against them on accept, so a record missing
-		// any of the three cannot become one.
+	email, givenNames, lastName, ok := invitable(person)
+	if !ok {
 		result.Skipped = append(result.Skipped, Skip{Email: person.Email, Reason: SkipIncomplete})
 		return nil
 	}
@@ -288,6 +376,14 @@ func (s *Service) syncPerson(
 			// every run and mail them each time, so the run reports it and leaves it
 			// alone. Removing them from the source is what stops it.
 			result.Skipped = append(result.Skipped, Skip{Email: link.Email, Reason: SkipRemovedLocally})
+			return nil
+		}
+		if holder, taken := claimed[string(email)]; taken && holder != person.ExternalID {
+			// Another source account still owns this address here, with nothing behind
+			// it any more — the usual way there is a person who declined their
+			// invitation and was later replaced in the source. Inviting them would
+			// create an invitation the link table cannot record.
+			result.Skipped = append(result.Skipped, Skip{Email: string(email), Reason: SkipConflict})
 			return nil
 		}
 		return s.invite(ctx, orgID, source, person.ExternalID, email, givenNames, lastName, role, jobTitle, departmentID, result)
@@ -380,16 +476,20 @@ func (s *Service) update(
 }
 
 // deprovision takes away what the sync gave a person: a pending invitation is
-// revoked, an accepted membership is removed. Either way the link goes, so the
-// person is no longer ours.
-func (s *Service) deprovision(ctx context.Context, orgID uuid.UUID, source provisioner.SourceID, link Link, result *Result) error {
+// revoked, an accepted membership is removed. It reports whether the ownership
+// link went with it — it stays when the removal was refused, so the person is
+// still ours and the next run tries again.
+func (s *Service) deprovision(ctx context.Context, orgID uuid.UUID, source provisioner.SourceID, link Link, result *Result) (bool, error) {
 	entry, err := s.members.MemberEntryByEmail(ctx, orgID, link.Email)
 	switch {
 	case errors.Is(err, organization.ErrNotMember):
 		// Already gone; drop the ownership record and say nothing.
-		return s.settings.UnlinkMember(ctx, orgID, source, link.ExternalID)
+		if err := s.settings.UnlinkMember(ctx, orgID, source, link.ExternalID); err != nil {
+			return false, err
+		}
+		return true, nil
 	case err != nil:
-		return err
+		return false, err
 	}
 
 	switch entry.Status {
@@ -400,22 +500,22 @@ func (s *Service) deprovision(ctx context.Context, orgID uuid.UUID, source provi
 			// removal that leaves the organisation without an administrator. The run
 			// reports it every pass until an admin resolves it.
 			result.Skipped = append(result.Skipped, Skip{Email: link.Email, Reason: SkipLastAdmin})
-			return nil
+			return false, nil
 		}
 	case organization.StatusInvited:
 		err = s.members.RevokeInvitation(ctx, orgID, *entry.InvitationID)
 	default:
-		return fmt.Errorf("provisioning: unexpected member status %q", entry.Status)
+		return false, fmt.Errorf("provisioning: unexpected member status %q", entry.Status)
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if err := s.settings.UnlinkMember(ctx, orgID, source, link.ExternalID); err != nil {
-		return err
+		return false, err
 	}
 	result.MembersRemoved++
-	return nil
+	return true, nil
 }
 
 // sendInvitation delivers the invitation e-mail best-effort, like the manual
@@ -437,6 +537,17 @@ func (s *Service) sendInvitation(ctx context.Context, orgID uuid.UUID, invitatio
 		slog.WarnContext(ctx, "provisioning: invitation e-mail not sent",
 			slog.String("email", invitation.Email), slog.String("error", err.Error()))
 	}
+}
+
+// invitable reports whether a source record can become one of our invitations,
+// and returns the fields it would carry. The invitation needs an address plus a
+// given and a family name, because the person's wallet disclosure is matched
+// against them on accept — a record missing any of the three cannot become one.
+func invitable(person provisioner.Person) (email user.Email, givenNames, lastName string, ok bool) {
+	email, err := user.ParseEmail(person.Email)
+	givenNames = strings.TrimSpace(person.GivenNames)
+	lastName = strings.TrimSpace(person.LastName)
+	return email, givenNames, lastName, err == nil && givenNames != "" && lastName != ""
 }
 
 // sameAttributes reports whether a member entry already says what the source
