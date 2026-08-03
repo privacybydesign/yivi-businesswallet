@@ -475,6 +475,7 @@ export const en = {
       orgOnboardingAttestations: "Onboarding attestations",
       orgNotificationSettings: "Notification settings",
       orgSlackSettings: "Slack settings",
+      orgProvisioningSettings: "Provisioning settings",
     },
     actions: {
       orgCreated: "Created organization",
@@ -483,6 +484,7 @@ export const en = {
       memberInvited: "Invited member",
       inviteResent: "Resent invitation",
       inviteRevoked: "Revoked invitation",
+      inviteUpdated: "Updated invitation",
       inviteAccepted: "Accepted invitation",
       acceptRejected: "Rejected accept attempt",
       inviteDeclined: "Declined invitation",
@@ -539,6 +541,9 @@ export const en = {
       onboardingSettingsUpdated: "Updated onboarding attestations",
       notificationSettingsUpdated: "Updated notification settings",
       slackSettingsUpdated: "Updated Slack settings",
+      provisioningSettingsUpdated: "Updated provisioning settings",
+      provisioningRunCompleted: "Synced users from the directory",
+      provisioningRunFailed: "Directory sync failed",
     },
   },
   memberInvite: {

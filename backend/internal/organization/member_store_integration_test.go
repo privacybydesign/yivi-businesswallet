@@ -423,3 +423,84 @@ func TestListMemberEntriesReportsAvatars(t *testing.T) {
 		}
 	}
 }
+
+func TestMemberEntryByEmail(t *testing.T) {
+	store, orgID := memberFixture(t)
+	ctx := context.Background()
+
+	// An accepted membership.
+	active, err := store.MemberEntryByEmail(ctx, orgID, "ALICE@example.test")
+	if err != nil {
+		t.Fatalf("MemberEntryByEmail alice: %v", err)
+	}
+	if active.Status != organization.StatusActive || active.UserID == nil || active.Role != organization.RoleAdmin {
+		t.Errorf("alice = %+v, want her active admin membership", active)
+	}
+
+	// A pending invitation is the other shape the same address can have.
+	invited, err := store.MemberEntryByEmail(ctx, orgID, "carol@example.test")
+	if err != nil {
+		t.Fatalf("MemberEntryByEmail carol: %v", err)
+	}
+	if invited.Status != organization.StatusInvited || invited.InvitationID == nil {
+		t.Errorf("carol = %+v, want her pending invitation", invited)
+	}
+
+	if _, err := store.MemberEntryByEmail(ctx, orgID, "nobody@example.test"); !errors.Is(err, organization.ErrNotMember) {
+		t.Errorf("unknown address = %v, want ErrNotMember", err)
+	}
+
+	// The lookup is org-scoped: another organisation's member is not ours.
+	pool, _ := testdb.Fresh(t)
+	other := organization.NewStore(pool, audit.NopRecorder{})
+	otherOrg := makeOrg(t, pool, "Beta", "beta")
+	if _, err := other.MemberEntryByEmail(ctx, otherOrg.ID, "alice@example.test"); !errors.Is(err, organization.ErrNotMember) {
+		t.Errorf("cross-org lookup = %v, want ErrNotMember", err)
+	}
+}
+
+func TestUpdateInvitationRewritesTheRoleAndDepartment(t *testing.T) {
+	store, orgID := memberFixture(t)
+	ctx := context.Background()
+
+	carol, err := store.MemberEntryByEmail(ctx, orgID, "carol@example.test")
+	if err != nil {
+		t.Fatalf("MemberEntryByEmail: %v", err)
+	}
+	sales, err := store.MemberEntryByEmail(ctx, orgID, "bob@example.test")
+	if err != nil {
+		t.Fatalf("MemberEntryByEmail bob: %v", err)
+	}
+
+	if err := store.UpdateInvitation(ctx, orgID, *carol.InvitationID,
+		organization.RoleAdmin, strptr("Lead"), sales.DepartmentID); err != nil {
+		t.Fatalf("UpdateInvitation: %v", err)
+	}
+
+	updated, err := store.MemberEntryByEmail(ctx, orgID, "carol@example.test")
+	if err != nil {
+		t.Fatalf("MemberEntryByEmail: %v", err)
+	}
+	if updated.Role != organization.RoleAdmin || updated.JobTitle == nil || *updated.JobTitle != "Lead" {
+		t.Errorf("invitation = %+v, want the new role and job title", updated)
+	}
+	if updated.DepartmentID == nil || *updated.DepartmentID != *sales.DepartmentID {
+		t.Errorf("departmentId = %v, want %v", updated.DepartmentID, sales.DepartmentID)
+	}
+	// The invitation is rewritten in place: the accept link already sent out has
+	// to keep working.
+	if *updated.InvitationID != *carol.InvitationID || updated.Email != carol.Email {
+		t.Error("the invitation was replaced instead of updated")
+	}
+
+	if err := store.UpdateInvitation(ctx, orgID, uuid.New(),
+		organization.RoleMember, nil, nil); !errors.Is(err, organization.ErrInvitationNotFound) {
+		t.Errorf("unknown invitation = %v, want ErrInvitationNotFound", err)
+	}
+
+	unknownDept := uuid.New()
+	if err := store.UpdateInvitation(ctx, orgID, *carol.InvitationID,
+		organization.RoleMember, nil, &unknownDept); !errors.Is(err, organization.ErrDepartmentNotFound) {
+		t.Errorf("unknown department = %v, want ErrDepartmentNotFound", err)
+	}
+}

@@ -260,6 +260,55 @@ func (s *Store) declineInvitation(ctx context.Context, where string, arg any) er
 	})
 }
 
+// UpdateInvitation rewrites the role, job title and department a pending
+// invitation carries, leaving its token and expiry alone so a link already sent
+// out keeps working.
+//
+// It exists for the directory sync (internal/provisioning): when someone changes
+// department in the source before they have accepted, the alternative is to
+// revoke the invitation and issue a new one, which invalidates the link the
+// person was mailed. The identity fields (e-mail and name) are deliberately not
+// updatable — they are what the wallet disclosure is matched against on accept,
+// so changing them under a live invitation would change who it admits.
+func (s *Store) UpdateInvitation(ctx context.Context, orgID, invitationID uuid.UUID, role string, jobTitle *string, departmentID *uuid.UUID) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const update = `
+			WITH old AS (
+				SELECT i.role, i.job_title, d.name AS department_name
+				FROM invitations i
+				LEFT JOIN departments d ON d.id = i.department_id
+				WHERE i.id = $1 AND i.organization_id = $2
+				FOR UPDATE OF i
+			)
+			UPDATE invitations i SET role = $3, job_title = $4, department_id = $5
+			FROM old WHERE i.id = $1 AND i.organization_id = $2
+			RETURNING i.email, old.role, old.job_title, old.department_name,
+			          (SELECT name FROM departments WHERE id = $5 AND organization_id = $2)`
+		var (
+			email, oldRole             string
+			oldJobTitle, oldDepartment *string
+			newDepartment              *string
+		)
+		err := q.QueryRow(ctx, update, invitationID, orgID, role, jobTitle, departmentID).
+			Scan(&email, &oldRole, &oldJobTitle, &oldDepartment, &newDepartment)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation && pgErr.ConstraintName == invitationDepartmentFK {
+			return ErrDepartmentNotFound
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvitationNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("organization: update invitation %s org %s: %w", invitationID, orgID, err)
+		}
+		return s.audit.Record(ctx, q, audit.MembershipInviteUpdated,
+			audit.Target{Type: audit.TargetMembership, ID: email, OrgID: &orgID},
+			audit.Updated(
+				map[string]any{"role": oldRole, "jobTitle": oldJobTitle, "department": oldDepartment},
+				map[string]any{"role": role, "jobTitle": jobTitle, "department": newDepartment}))
+	})
+}
+
 func (s *Store) RevokeInvitation(ctx context.Context, orgID, invitationID uuid.UUID) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		const del = `DELETE FROM invitations WHERE id = $1 AND organization_id = $2

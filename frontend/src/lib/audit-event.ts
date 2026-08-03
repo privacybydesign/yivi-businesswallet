@@ -19,6 +19,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "membership.invited": { icon: "email", tone: "amber" },
   "membership.invite_resent": { icon: "email", tone: "amber" },
   "membership.invite_revoked": { icon: "close", tone: "red" },
+  "membership.invite_updated": { icon: "edit", tone: "blue" },
   "membership.accepted": { icon: "valid", tone: "green" },
   "membership.accept_rejected": { icon: "warning", tone: "amber" },
   "membership.declined": { icon: "close", tone: "slate" },
@@ -51,6 +52,9 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "email.template_reset": { icon: "email", tone: "amber" },
   "notification.settings_updated": { icon: "settings", tone: "blue" },
   "slack.settings_updated": { icon: "settings", tone: "blue" },
+  "provisioning.settings_updated": { icon: "settings", tone: "blue" },
+  "provisioning.run_completed": { icon: "valid", tone: "green" },
+  "provisioning.run_failed": { icon: "warning", tone: "red" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -79,6 +83,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.inviteResent");
     case "membership.invite_revoked":
       return t("auditLog.actions.inviteRevoked");
+    case "membership.invite_updated":
+      return t("auditLog.actions.inviteUpdated");
     case "membership.accepted":
       return t("auditLog.actions.inviteAccepted");
     case "membership.accept_rejected":
@@ -191,6 +197,12 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.notificationSettingsUpdated");
     case "slack.settings_updated":
       return t("auditLog.actions.slackSettingsUpdated");
+    case "provisioning.settings_updated":
+      return t("auditLog.actions.provisioningSettingsUpdated");
+    case "provisioning.run_completed":
+      return t("auditLog.actions.provisioningRunCompleted");
+    case "provisioning.run_failed":
+      return t("auditLog.actions.provisioningRunFailed");
     default:
       return action;
   }
@@ -250,6 +262,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.orgNotificationSettings");
     case "org_slack_settings":
       return t("auditLog.targets.orgSlackSettings");
+    case "org_provisioning_settings":
+      return t("auditLog.targets.orgProvisioningSettings");
     default:
       return targetType;
   }

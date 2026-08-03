@@ -78,6 +78,11 @@ const (
 	// when the recipient's own preference is unknown. Must be a locale the mail
 	// catalogue ships (internal/email); cmd/api rejects anything else at boot.
 	envMailDefaultLocale = "MAIL_DEFAULT_LOCALE"
+	// PROVISIONING_ENCRYPTION_KEY (hex 32 bytes) encrypts the per-org directory
+	// client secret at rest. Its own key rather than the e-mail one: the two are
+	// rotated by different decisions, and one key per purpose keeps a rotation from
+	// taking out a capability nobody meant to touch.
+	envProvisioningEncryptionKey = "PROVISIONING_ENCRYPTION_KEY"
 	// STATIC_DIR points at the built frontend; when set the API also serves it as
 	// an SPA on "/". Unset in dev (Vite serves the frontend).
 	envStaticDir = "STATIC_DIR"
@@ -229,6 +234,10 @@ type Config struct {
 	// SlackEncryptionKey encrypts per-org Slack webhook URLs at rest. Empty means
 	// the deployment cannot store one.
 	SlackEncryptionKey string
+	// ProvisioningEncryptionKey encrypts the per-org directory client secret at
+	// rest. Empty means no organisation can store one, so directory provisioning
+	// stays unavailable.
+	ProvisioningEncryptionKey string
 	// MailDefaultLocale is the fallback language for outbound transactional mail.
 	MailDefaultLocale string
 
@@ -374,11 +383,12 @@ func Load() (Config, error) {
 		AttestationHolderWSCAInsecure: strings.EqualFold(
 			os.Getenv(envAttestationHolderWSCAInsecure), "true"),
 
-		AppBaseURL:         appBaseURL,
-		EmailEncryptionKey: os.Getenv(envEmailEncryptionKey),
-		SlackEncryptionKey: os.Getenv(envSlackEncryptionKey),
-		MailDefaultLocale:  envOrDefault(envMailDefaultLocale, defaultMailLocale),
-		StaticDir:          os.Getenv(envStaticDir),
+		AppBaseURL:                appBaseURL,
+		EmailEncryptionKey:        os.Getenv(envEmailEncryptionKey),
+		SlackEncryptionKey:        os.Getenv(envSlackEncryptionKey),
+		ProvisioningEncryptionKey: os.Getenv(envProvisioningEncryptionKey),
+		MailDefaultLocale:         envOrDefault(envMailDefaultLocale, defaultMailLocale),
+		StaticDir:                 os.Getenv(envStaticDir),
 
 		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
 		PostGuardSharedSecret:  os.Getenv(envPostGuardSharedSecret),
