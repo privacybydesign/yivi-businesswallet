@@ -1,4 +1,4 @@
-package emailchannel
+package notifications
 
 import (
 	"encoding/json"
@@ -8,19 +8,22 @@ import (
 	"unicode/utf8"
 )
 
-// How much of an event's audit metadata a notification repeats.
+// How much of an event's audit metadata a notification repeats. Every channel
+// renders the same lines, so the same event reads the same in a mail and in a
+// Slack message.
 //
-// The metadata is handed to the channels verbatim, and the notification catalog
-// (internal/notifications) is the gate that decides which actions may leave the
-// audit log at all — so what is left here is presentation, not another filter.
-// The rules below keep that presentation honest:
+// The metadata is handed to the channels verbatim, and the catalog above is the
+// gate that decides which actions may leave the audit log at all — so what is
+// left here is presentation, not another filter. The rules below keep that
+// presentation honest:
 //
 //   - one "field: value" per line, sorted by field, so two notifications of the
 //     same action read the same way;
 //   - an {before, after} update shows the new value, with the old one before an
 //     arrow when both are set. A field the update cleared is left out rather than
 //     printed as its old value, which would read as if it were still in force;
-//   - a value is one line and bounded in length, because it lands in a mail;
+//   - a value is one line and bounded in length, because it lands in a mail or a
+//     chat message;
 //   - a field name is the metadata's own key and is not translated, while the copy
 //     around it is: a Dutch notification reads "Rol gewijzigd bij Acme BV" above
 //     "role: member → admin". Translating the keys would mean a second catalogue of
@@ -39,12 +42,26 @@ const (
 	// changeArrow separates an updated field's old value from its new one. It is a
 	// symbol rather than a word because this line carries no copy to translate.
 	changeArrow = " → "
+	// auditLogPath is the app route a notification's link opens, under the org's
+	// slug. The full record of the event lives there, behind the same access control
+	// as every other org page.
+	auditLogPath = "/audit-log"
 )
 
-// summarize renders an event's audit metadata as the lines the notification mail
-// shows. It returns "" when there is nothing worth stating, in which case the
-// template's details paragraph drops out of the message.
-func summarize(metadata map[string]any) string {
+// AuditLogURL is the link to an organization's audit log on the deployment's
+// frontend, which every channel puts in its message. It lives beside Summarize
+// for the same reason: what a notification shows of an event is one rule shared
+// by the channels, not a copy per channel. appBaseURL is the deployment's
+// frontend base URL — config.Load has already checked it is an absolute http(s)
+// URL — with or without a trailing slash.
+func AuditLogURL(appBaseURL, slug string) string {
+	return strings.TrimRight(appBaseURL, "/") + "/" + slug + auditLogPath
+}
+
+// Summarize renders an event's audit metadata as the lines a notification shows.
+// It returns "" when there is nothing worth stating, in which case the channel
+// leaves the details out of the message entirely.
+func Summarize(metadata map[string]any) string {
 	before, after, updated := envelope(metadata)
 
 	names := make([]string, 0, len(before)+len(after))

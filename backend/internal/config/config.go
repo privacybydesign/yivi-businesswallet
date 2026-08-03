@@ -69,6 +69,11 @@ const (
 	envAppBaseURL = "APP_BASE_URL"
 	// EMAIL_ENCRYPTION_KEY (hex 32 bytes) encrypts per-org SMTP passwords at rest.
 	envEmailEncryptionKey = "EMAIL_ENCRYPTION_KEY"
+	// SLACK_ENCRYPTION_KEY (hex 32 bytes) encrypts per-org Slack incoming-webhook
+	// URLs at rest. A key of its own, like every other secret at rest here, so it
+	// can be rotated without touching stored SMTP passwords; without it an org
+	// cannot store a webhook URL at all (internal/slackchannel).
+	envSlackEncryptionKey = "SLACK_ENCRYPTION_KEY"
 	// MAIL_DEFAULT_LOCALE is the language outbound transactional mail falls back to
 	// when the recipient's own preference is unknown. Must be a locale the mail
 	// catalogue ships (internal/email); cmd/api rejects anything else at boot.
@@ -221,6 +226,9 @@ type Config struct {
 
 	AppBaseURL         string
 	EmailEncryptionKey string
+	// SlackEncryptionKey encrypts per-org Slack webhook URLs at rest. Empty means
+	// the deployment cannot store one.
+	SlackEncryptionKey string
 	// MailDefaultLocale is the fallback language for outbound transactional mail.
 	MailDefaultLocale string
 
@@ -368,6 +376,7 @@ func Load() (Config, error) {
 
 		AppBaseURL:         appBaseURL,
 		EmailEncryptionKey: os.Getenv(envEmailEncryptionKey),
+		SlackEncryptionKey: os.Getenv(envSlackEncryptionKey),
 		MailDefaultLocale:  envOrDefault(envMailDefaultLocale, defaultMailLocale),
 		StaticDir:          os.Getenv(envStaticDir),
 

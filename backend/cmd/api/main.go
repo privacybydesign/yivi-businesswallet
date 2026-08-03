@@ -37,6 +37,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/slackchannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
@@ -420,12 +421,25 @@ func run() error {
 	wscaWalletHandler := wscawallet.NewHandler(wscaActivator, requireUser, orgHandler.Authorize)
 
 	notificationsHandler := notifications.NewHandler(notificationStore, requireUser, orgHandler.Authorize)
+
+	// Per-org Slack incoming webhook, the notification layer's second channel. The
+	// webhook URL is encrypted at rest under its own deployment key; without that key
+	// an org cannot save one (slackchannel.ErrNoEncryptionKey).
+	slackCipher, err := crypto.NewCipher(cfg.SlackEncryptionKey)
+	if err != nil {
+		return err
+	}
+	slackStore := slackchannel.NewStore(pool, recorder, slackCipher)
+	slackChannel := slackchannel.New(slackStore, orgStore, cfg.AppBaseURL, mailLocale)
+	slackHandler := slackchannel.NewHandler(slackStore, slackChannel, requireUser, orgHandler.Authorize)
+
 	// Drain the notification outbox out of band, into the channels registered here.
-	// Slack and MS Teams are their own slices and are not wired up yet, so an org
-	// subscribed to one of those keeps the preference and is delivered nothing until
-	// it is (see notifications.Dispatcher).
+	// MS Teams is its own slice and is not wired up yet, so an org subscribed to it
+	// keeps the preference and is delivered nothing until it is (see
+	// notifications.Dispatcher).
 	dispatcher := notifications.NewDispatcher(notificationStore, notificationStore)
 	dispatcher.Register(emailchannel.New(emailService, orgStore, cfg.AppBaseURL))
+	dispatcher.Register(slackChannel)
 	dispatcher.Start(ctx, notifications.DefaultPollInterval)
 
 	handler := server.New(
@@ -442,6 +456,7 @@ func run() error {
 		attestationHandler,
 		wscaWalletHandler,
 		notificationsHandler,
+		slackHandler,
 	)
 
 	httpServer := &http.Server{

@@ -1,4 +1,4 @@
-package emailchannel
+package notifications
 
 import (
 	"strings"
@@ -67,8 +67,8 @@ func TestSummarizeRendersTheStateAField(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := summarize(tc.metadata); got != tc.want {
-				t.Errorf("summarize() =\n%q\nwant\n%q", got, tc.want)
+			if got := Summarize(tc.metadata); got != tc.want {
+				t.Errorf("Summarize() =\n%q\nwant\n%q", got, tc.want)
 			}
 		})
 	}
@@ -77,31 +77,31 @@ func TestSummarizeRendersTheStateAField(t *testing.T) {
 // Metadata comes back off the outbox as JSON, so a count is a float64 and a
 // nested value is a map — neither may render as a Go value dump.
 func TestSummarizeRendersJSONValues(t *testing.T) {
-	got := summarize(map[string]any{"after": map[string]any{
+	got := Summarize(map[string]any{"after": map[string]any{
 		"attachmentCount": float64(2),
 		"qualified":       true,
 		"attributes":      map[string]any{"level": "gold"},
 	}})
 	want := "attachmentCount: 2\nattributes: {\"level\":\"gold\"}\nqualified: true"
 	if got != want {
-		t.Errorf("summarize() =\n%q\nwant\n%q", got, want)
+		t.Errorf("Summarize() =\n%q\nwant\n%q", got, want)
 	}
 }
 
 // A free-text field lands in a mail, so it is one line and bounded.
 func TestSummarizeKeepsAValueToOneBoundedLine(t *testing.T) {
-	got := summarize(map[string]any{"after": map[string]any{
+	got := Summarize(map[string]any{"after": map[string]any{
 		"subject": "Line one\nline  two",
 	}})
 	if got != "subject: Line one line two" {
-		t.Errorf("summarize() = %q, want the value on one line", got)
+		t.Errorf("Summarize() = %q, want the value on one line", got)
 	}
 
-	got = summarize(map[string]any{"after": map[string]any{
+	got = Summarize(map[string]any{"after": map[string]any{
 		"subject": strings.Repeat("é", maxDetailValue+10),
 	}})
 	if !strings.HasSuffix(got, ellipsis) {
-		t.Errorf("summarize() = %q, want a clipped value", got)
+		t.Errorf("Summarize() = %q, want a clipped value", got)
 	}
 	// The rune count is the cap plus the ellipsis; a byte-wise cut would exceed it.
 	if runes := len([]rune(got)) - len("subject: "); runes != maxDetailValue+1 {
@@ -117,8 +117,8 @@ func TestSummarizeCapsTheNumberOfFields(t *testing.T) {
 	} {
 		fields[name] = "value"
 	}
-	lines := strings.Split(summarize(map[string]any{"after": fields}), "\n")
+	lines := strings.Split(Summarize(map[string]any{"after": fields}), "\n")
 	if len(lines) != maxDetailLines {
-		t.Errorf("summarize() rendered %d lines, want %d", len(lines), maxDetailLines)
+		t.Errorf("Summarize() rendered %d lines, want %d", len(lines), maxDetailLines)
 	}
 }

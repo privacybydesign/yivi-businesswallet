@@ -70,6 +70,9 @@ services:
       # Encrypts per-org SMTP passwords at rest (hex 32 bytes). Optional: without
       # it, orgs can only configure passwordless (e.g. relay) SMTP.
       EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY:-}
+      # Encrypts per-org Slack incoming-webhook URLs at rest (hex 32 bytes).
+      # Optional: without it, orgs cannot save a Slack webhook.
+      SLACK_ENCRYPTION_KEY: ${SLACK_ENCRYPTION_KEY:-}
       # Language outbound transactional mail falls back to (en or nl). Compose does
       # not forward a root .env variable unless it is declared here.
       MAIL_DEFAULT_LOCALE: ${MAIL_DEFAULT_LOCALE:-}

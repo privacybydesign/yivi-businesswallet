@@ -6,8 +6,10 @@
 //
 // It holds no message copy and no SMTP knowledge of its own. What it owns is the
 // mapping from a recorded event onto the mail's variables: who is told (the org's
-// admins), what the message says the event was (the catalogue's name for the
-// audit action) and how much of the event's metadata it repeats (details.go).
+// admins) and what the message says the event was (the catalogue's name for the
+// audit action). How much of the event's metadata a notification repeats is the
+// notification layer's own rule, shared with every other channel
+// (notifications.Summarize).
 package emailchannel
 
 import (
@@ -15,7 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -24,11 +25,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/notifications"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
-
-// auditLogPath is the app route the mail's call to action opens, under the org's
-// slug. The full record of the event lives there, behind the same access control
-// as every other org page.
-const auditLogPath = "/audit-log"
 
 // notificationMailer sends the rendered notification (implemented by
 // *email.Service).
@@ -63,7 +59,7 @@ type Channel struct {
 // the mail's audit-log link is built on; config.Load has already checked it is an
 // absolute http(s) URL, which is what the mail renderer requires of a link.
 func New(mail notificationMailer, orgs orgDirectory, appBaseURL string) *Channel {
-	return &Channel{mail: mail, orgs: orgs, appBaseURL: strings.TrimRight(appBaseURL, "/")}
+	return &Channel{mail: mail, orgs: orgs, appBaseURL: appBaseURL}
 }
 
 func (c *Channel) ID() notifications.ChannelID { return notifications.ChannelEmail }
@@ -94,9 +90,9 @@ func (c *Channel) Notify(ctx context.Context, e notifications.Event) error {
 
 	err = c.mail.SendEventNotification(ctx, e.OrgID, admins, org.Name, email.EventNotification{
 		Action:     e.Action,
-		Details:    summarize(e.Metadata),
+		Details:    notifications.Summarize(e.Metadata),
 		OccurredAt: e.OccurredAt,
-		AuditURL:   c.appBaseURL + "/" + org.Slug + auditLogPath,
+		AuditURL:   notifications.AuditLogURL(c.appBaseURL, org.Slug),
 	})
 	switch {
 	case errors.Is(err, email.ErrNotConfigured):

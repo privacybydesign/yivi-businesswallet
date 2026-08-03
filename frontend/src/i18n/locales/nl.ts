@@ -393,6 +393,8 @@ export const nl: Translation<typeof en> = {
     attestationOfferCancelled: "Aanbod geannuleerd",
     emailSettingsSaved: "E-mailinstellingen opgeslagen",
     emailTestSent: "Test-e-mail verstuurd",
+    slackSettingsSaved: "Slack-instellingen opgeslagen",
+    slackTestSent: "Testnotificatie verstuurd",
     mailTemplateSaved: "E-mailtekst opgeslagen",
     mailTemplateReset: "E-mailtekst teruggezet naar de standaard",
     issuerSettingsSaved: "Uitgever-instellingen opgeslagen",
@@ -485,6 +487,7 @@ export const nl: Translation<typeof en> = {
       orgThemeSettings: "Thema-instellingen",
       orgOnboardingAttestations: "Onboarding-attestaties",
       orgNotificationSettings: "Notificatie-instellingen",
+      orgSlackSettings: "Slack-instellingen",
     },
     actions: {
       orgCreated: "Organisatie aangemaakt",
@@ -549,6 +552,7 @@ export const nl: Translation<typeof en> = {
       themeSettingsUpdated: "Thema-instellingen bijgewerkt",
       onboardingSettingsUpdated: "Onboarding-attestaties bijgewerkt",
       notificationSettingsUpdated: "Notificatie-instellingen bijgewerkt",
+      slackSettingsUpdated: "Slack-instellingen bijgewerkt",
     },
   },
   memberInvite: {
@@ -639,6 +643,7 @@ export const nl: Translation<typeof en> = {
     tabBranding: "Branding",
     tabEmail: "E-mail",
     tabMailTemplates: "E-mailteksten",
+    tabSlack: "Slack",
     tabIssuer: "Uitgever",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
@@ -880,6 +885,32 @@ export const nl: Translation<typeof en> = {
     testNotConfigured:
       "Configureer en sla de SMTP-instellingen op voordat je een test verstuurt.",
     testError: "Test-e-mail versturen mislukt: {{message}}",
+  },
+  slackSettings: {
+    loadError: "Slack-instellingen laden mislukt: {{message}}",
+    heading: "Slack-webhook",
+    description:
+      "Gebeurtenissen waarop deze organisatie zich heeft geabonneerd worden via een incoming webhook in een Slack-kanaal geplaatst. Maak er een aan in Slack en plak de URL hier.",
+    webhookUrl: "Webhook-URL",
+    webhookPlaceholder: "https://hooks.slack.com/services/…",
+    webhookUnchanged: "Laat leeg om de huidige webhook-URL te behouden",
+    webhookStored:
+      "Er is een webhook-URL opgeslagen. Die wordt als geheim behandeld en na het opslaan niet meer getoond.",
+    enabled: "Notificaties naar deze webhook versturen",
+    enabledNeedsWebhook: "Voeg eerst een webhook-URL toe.",
+    remove: "Webhook verwijderen",
+    saveError: "Slack-instellingen opslaan mislukt: {{message}}",
+    noEncryptionKey:
+      "Deze omgeving heeft geen Slack-encryptiesleutel, dus een webhook-URL kan niet worden opgeslagen. Vraag de beheerder er een in te stellen.",
+    testHeading: "Een testnotificatie versturen",
+    testDescription:
+      "Verstuur een testbericht om te bevestigen dat het in het juiste kanaal aankomt.",
+    sendTest: "Testnotificatie versturen",
+    testNotConfigured:
+      "Sla eerst een webhook-URL op en zet versturen aan voordat je een test verstuurt.",
+    testRefused:
+      "Slack heeft de testnotificatie niet geaccepteerd: {{message}}",
+    testError: "Testnotificatie versturen mislukt: {{message}}",
   },
   departments: {
     heading: "Afdelingen",

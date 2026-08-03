@@ -88,6 +88,8 @@ const (
 	OnboardingSettingsUpdated = "onboarding.settings_updated"
 
 	NotificationSettingsUpdated = "notification.settings_updated"
+
+	SlackSettingsUpdated = "slack.settings_updated"
 )
 
 const (
@@ -124,6 +126,8 @@ const (
 	TargetOnboardingSettings = "org_onboarding_attestations"
 
 	TargetNotificationSettings = "org_notification_settings"
+
+	TargetSlackSettings = "org_slack_settings"
 )
 
 type Actor struct {
