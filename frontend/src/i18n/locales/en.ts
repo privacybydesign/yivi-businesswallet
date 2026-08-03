@@ -382,6 +382,8 @@ export const en = {
     slackSettingsSaved: "Slack settings saved",
     slackTestSent: "Test notification sent",
     notificationSettingsSaved: "Notification settings saved",
+    provisioningSettingsSaved: "Directory sync settings saved",
+    provisioningSyncCompleted: "Directory sync completed",
     mailTemplateSaved: "Mail template saved",
     mailTemplateReset: "Mail template reverted to the default",
     issuerSettingsSaved: "Issuer settings saved",
@@ -636,6 +638,7 @@ export const en = {
     tabSlack: "Slack",
     tabNotifications: "Notifications",
     tabIssuer: "Issuer",
+    tabProvisioning: "Directory sync",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
     adminOnly: "Only organization admins can manage settings.",
@@ -664,6 +667,81 @@ export const en = {
     configureSlack: "Configure Slack",
     loadError: "Could not load notification settings: {{message}}",
     saveError: "Could not save notification settings: {{message}}",
+  },
+  provisioningSettings: {
+    heading: "Microsoft Entra ID",
+    description:
+      "Sync your members and departments in from your Microsoft Entra directory. Provisioned people are invited: they still prove their identity with their wallet before their membership is active.",
+    source: "Source",
+    tenantId: "Directory (tenant) ID",
+    tenantIdPlaceholder: "e.g. 00000000-0000-0000-0000-000000000000",
+    clientId: "Application (client) ID",
+    clientIdPlaceholder: "e.g. 11111111-1111-1111-1111-111111111111",
+    clientSecret: "Client secret",
+    secretPlaceholder: "Client secret value",
+    secretUnchanged: "Leave blank to keep the stored secret",
+    groupId: "Group ID",
+    groupIdPlaceholder: "e.g. 22222222-2222-2222-2222-222222222222",
+    groupIdHint:
+      "Only members of this group are synced. Leave blank to sync the whole directory.",
+    adminGroupIds: "Admin group IDs",
+    adminGroupIdsPlaceholder: "One group ID per line",
+    adminGroupIdsHint:
+      "Members of these groups become organization admins. One group ID per line.",
+    enabled: "Enable directory sync",
+    enabledHint:
+      "When enabled, the directory is synced automatically on a schedule.",
+    credentialsRequired:
+      "Enter the tenant ID and application (client) ID before enabling sync.",
+    secretRequired: "Enter a client secret before enabling sync.",
+    saveError: "Could not save directory sync settings: {{message}}",
+    loadError: "Could not load directory sync settings: {{message}}",
+    syncHeading: "Sync now",
+    syncDescription:
+      "Run a sync immediately using the saved configuration. This may take a few minutes for a large directory.",
+    syncNow: "Sync now",
+    syncDisabled: "Save an enabled configuration before running a sync.",
+    lastRun: "Last run:",
+    lastRunError: "Last error: {{message}}",
+    runStatus: {
+      succeeded: "Succeeded",
+      failed: "Failed",
+    },
+    resultSummary:
+      "{{invited}} invited, {{updated}} updated, {{removed}} removed, {{departments}} departments created.",
+    skipCount_one: "{{count}} skipped ({{reason}})",
+    skipCount_other: "{{count}} skipped ({{reason}})",
+    skipReasons: {
+      incomplete: "missing name or e-mail",
+      conflict: "e-mail already in use",
+      last_admin: "would remove the last admin",
+      removed_locally: "removed here",
+    },
+    syncError: "The sync failed: {{message}}",
+    syncErrors: {
+      not_configured: "Directory sync is not configured for this organization.",
+      disabled: "Directory sync is disabled. Enable it and save first.",
+      unknown_source: "This deployment has no driver for the selected source.",
+      incomplete_config:
+        "The configuration is incomplete. Check the tenant ID, client ID and secret.",
+      empty_directory:
+        "The source returned no accounts, so nothing was changed. Check the credential, group ID and permissions.",
+      sync_timeout: "The sync did not finish in time. Try again.",
+      sync_failed:
+        "Could not reach the directory. Check the credential and permissions, then see the last error above.",
+    },
+    setup: {
+      heading: "Setting up the Entra app registration",
+      intro:
+        "Create an app registration in Microsoft Entra ID and grant it read access to your directory, then paste its details above.",
+      steps: [
+        "In the Microsoft Entra admin center, register a new application (single tenant).",
+        "Under API permissions, add the Microsoft Graph application permissions User.Read.All and GroupMember.Read.All.",
+        "Grant admin consent for those permissions.",
+        "Under Certificates & secrets, create a client secret and copy its value.",
+        "Copy the directory (tenant) ID and application (client) ID from the app's Overview, then paste all three above.",
+      ],
+    },
   },
   issuerSettings: {
     title: "Issuer instance",

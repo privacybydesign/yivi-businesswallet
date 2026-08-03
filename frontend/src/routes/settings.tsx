@@ -12,6 +12,7 @@ import { OrgProfileSettings } from "./org-profile-settings";
 import { PostguardApiKeyCard } from "./postguard-api-key";
 import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
 import { PostguardNotificationsCard } from "./postguard-notifications";
+import { ProvisioningSettingsPanel } from "./provisioning-settings";
 import { SlackSettingsPanel } from "./slack-settings";
 import { ThemeSettingsPanel } from "./theme-settings";
 import { WscaWalletPanel } from "./wsca-wallet-settings";
@@ -25,6 +26,7 @@ const TABS = [
   { key: "slack", labelKey: "settings.tabSlack" },
   { key: "notifications", labelKey: "settings.tabNotifications" },
   { key: "issuer", labelKey: "settings.tabIssuer" },
+  { key: "provisioning", labelKey: "settings.tabProvisioning" },
   { key: "postguard", labelKey: "settings.tabPostguard" },
   { key: "wallets", labelKey: "settings.tabWallets" },
 ] as const;
@@ -122,6 +124,8 @@ export default function Settings(): React.JSX.Element {
           <NotificationsSettingsPanel slug={slug} />
         ) : tab === "issuer" ? (
           <IssuerSettingsPanel slug={slug} />
+        ) : tab === "provisioning" ? (
+          <ProvisioningSettingsPanel slug={slug} />
         ) : tab === "postguard" ? (
           <div className="flex max-w-2xl flex-col gap-6">
             <PostguardEncryptionKeyCard slug={slug} isAdmin={isAdmin} />

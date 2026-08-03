@@ -1,9 +1,12 @@
 # Directory provisioning: users and departments from an identity source
 
-**Status:** implemented, backend only. Microsoft Entra ID is the one source; there is no settings
-screen yet, so an organisation is configured through `PUT /api/v1/orgs/{slug}/provisioning/settings`.
+**Status:** implemented. Microsoft Entra ID is the one source. An organisation is configured from the
+**Directory sync** tab on the Settings screen (org-admin only), which reads and writes
+`GET/PUT /api/v1/orgs/{slug}/provisioning/settings` and offers a run-now button
+(`POST .../provisioning/sync`).
 **Code:** `backend/internal/provisioner` (the seam + the Entra driver), `backend/internal/provisioning`
-(configuration, reconciler, scheduler, HTTP).
+(configuration, reconciler, scheduler, HTTP); frontend `frontend/src/api/provisioning.ts` (+ `.queries.ts`)
+and `frontend/src/routes/provisioning-settings.tsx` (the `ProvisioningSettingsPanel` tab).
 
 ---
 
@@ -202,7 +205,8 @@ Deployment: `PROVISIONING_ENCRYPTION_KEY` (hex 32 bytes) encrypts each organisat
 client secret at rest, exactly like `EMAIL_ENCRYPTION_KEY` does for SMTP passwords. Without it an
 organisation cannot store a secret, so provisioning stays unavailable.
 
-Per organisation (`PUT /api/v1/orgs/{slug}/provisioning/settings`, org-admin only):
+Per organisation, from the **Directory sync** tab on the Settings screen (org-admin only), which is
+backed by `PUT /api/v1/orgs/{slug}/provisioning/settings`:
 
 | Field | Meaning |
 |---|---|
