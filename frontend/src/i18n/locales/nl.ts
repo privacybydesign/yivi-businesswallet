@@ -396,6 +396,9 @@ export const nl: Translation<typeof en> = {
     slackSettingsSaved: "Slack-instellingen opgeslagen",
     slackTestSent: "Testnotificatie verstuurd",
     notificationSettingsSaved: "Notificatie-instellingen opgeslagen",
+    provisioningSettingsSaved:
+      "Instellingen voor directorysynchronisatie opgeslagen",
+    provisioningSyncCompleted: "Directorysynchronisatie voltooid",
     mailTemplateSaved: "E-mailtekst opgeslagen",
     mailTemplateReset: "E-mailtekst teruggezet naar de standaard",
     issuerSettingsSaved: "Uitgever-instellingen opgeslagen",
@@ -652,6 +655,7 @@ export const nl: Translation<typeof en> = {
     tabSlack: "Slack",
     tabNotifications: "Notificaties",
     tabIssuer: "Uitgever",
+    tabProvisioning: "Directorysynchronisatie",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
     adminOnly: "Alleen organisatiebeheerders kunnen instellingen beheren.",
@@ -680,6 +684,88 @@ export const nl: Translation<typeof en> = {
     configureSlack: "Slack configureren",
     loadError: "Kon notificatie-instellingen niet laden: {{message}}",
     saveError: "Kon notificatie-instellingen niet opslaan: {{message}}",
+  },
+  provisioningSettings: {
+    heading: "Microsoft Entra ID",
+    description:
+      "Synchroniseer uw leden en afdelingen vanuit uw Microsoft Entra-directory. Ingerichte personen worden uitgenodigd: zij tonen hun identiteit aan met hun wallet voordat hun lidmaatschap actief is.",
+    source: "Bron",
+    tenantId: "Directory- (tenant-)ID",
+    tenantIdPlaceholder: "bijv. 00000000-0000-0000-0000-000000000000",
+    clientId: "Toepassings- (client-)ID",
+    clientIdPlaceholder: "bijv. 11111111-1111-1111-1111-111111111111",
+    clientSecret: "Clientgeheim",
+    secretPlaceholder: "Waarde van het clientgeheim",
+    secretUnchanged: "Laat leeg om het opgeslagen geheim te behouden",
+    groupId: "Groeps-ID",
+    groupIdPlaceholder: "bijv. 22222222-2222-2222-2222-222222222222",
+    groupIdHint:
+      "Alleen leden van deze groep worden gesynchroniseerd. Laat leeg om de hele directory te synchroniseren.",
+    adminGroupIds: "Beheerdersgroep-ID's",
+    adminGroupIdsPlaceholder: "Eén groeps-ID per regel",
+    adminGroupIdsHint:
+      "Leden van deze groepen worden organisatiebeheerder. Eén groeps-ID per regel.",
+    enabled: "Directorysynchronisatie inschakelen",
+    enabledHint:
+      "Indien ingeschakeld wordt de directory automatisch volgens een schema gesynchroniseerd.",
+    credentialsRequired:
+      "Vul de tenant-ID en de toepassings- (client-)ID in voordat u synchronisatie inschakelt.",
+    secretRequired:
+      "Vul een clientgeheim in voordat u synchronisatie inschakelt.",
+    saveError:
+      "Kon de instellingen voor directorysynchronisatie niet opslaan: {{message}}",
+    loadError:
+      "Kon de instellingen voor directorysynchronisatie niet laden: {{message}}",
+    syncHeading: "Nu synchroniseren",
+    syncDescription:
+      "Voer direct een synchronisatie uit met de opgeslagen configuratie. Dit kan enkele minuten duren bij een grote directory.",
+    syncNow: "Nu synchroniseren",
+    syncDisabled:
+      "Sla eerst een ingeschakelde configuratie op voordat u synchroniseert.",
+    lastRun: "Laatste run:",
+    lastRunError: "Laatste fout: {{message}}",
+    runStatus: {
+      succeeded: "Geslaagd",
+      failed: "Mislukt",
+    },
+    resultSummary:
+      "{{invited}} uitgenodigd, {{updated}} bijgewerkt, {{removed}} verwijderd, {{departments}} afdelingen aangemaakt.",
+    skipCount_one: "{{count}} overgeslagen ({{reason}})",
+    skipCount_other: "{{count}} overgeslagen ({{reason}})",
+    skipReasons: {
+      incomplete: "naam of e-mail ontbreekt",
+      conflict: "e-mail al in gebruik",
+      last_admin: "zou de laatste beheerder verwijderen",
+      removed_locally: "hier verwijderd",
+    },
+    syncError: "De synchronisatie is mislukt: {{message}}",
+    syncErrors: {
+      not_configured:
+        "Directorysynchronisatie is niet geconfigureerd voor deze organisatie.",
+      disabled:
+        "Directorysynchronisatie is uitgeschakeld. Schakel het in en sla eerst op.",
+      unknown_source: "Deze omgeving heeft geen driver voor de gekozen bron.",
+      incomplete_config:
+        "De configuratie is onvolledig. Controleer de tenant-ID, client-ID en het geheim.",
+      empty_directory:
+        "De bron gaf geen accounts terug, dus er is niets gewijzigd. Controleer het geheim, de groeps-ID en de rechten.",
+      sync_timeout:
+        "De synchronisatie is niet op tijd voltooid. Probeer opnieuw.",
+      sync_failed:
+        "Kon de directory niet bereiken. Controleer het geheim en de rechten en bekijk de laatste fout hierboven.",
+    },
+    setup: {
+      heading: "De Entra-app-registratie instellen",
+      intro:
+        "Maak een app-registratie in Microsoft Entra ID, geef deze leesrechten op uw directory en plak de gegevens hierboven.",
+      steps: [
+        "Registreer in het Microsoft Entra-beheercentrum een nieuwe toepassing (één tenant).",
+        "Voeg onder API-machtigingen de Microsoft Graph-toepassingsmachtigingen User.Read.All en GroupMember.Read.All toe.",
+        "Verleen beheerderstoestemming voor die machtigingen.",
+        "Maak onder Certificaten en geheimen een clientgeheim aan en kopieer de waarde.",
+        "Kopieer de directory- (tenant-)ID en toepassings- (client-)ID van het overzicht van de app en plak alle drie hierboven.",
+      ],
+    },
   },
   issuerSettings: {
     title: "Uitgever-instantie",
