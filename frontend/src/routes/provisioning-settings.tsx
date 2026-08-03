@@ -10,7 +10,7 @@ import type {
   ProvisioningSettings,
   ProvisioningSyncResult,
 } from "../api/provisioning";
-import { ApiError } from "../api/http";
+import { errorCode } from "../lib/api-error";
 import { useWhenFormatter } from "../lib/format-when";
 import { Button, Card, Input } from "../ui";
 import * as React from "react";
@@ -58,19 +58,6 @@ function skipReasonLabel(reason: string, t: TFunction): string {
   return key ? t(key) : reason;
 }
 
-function errorCode(error: unknown): string | null {
-  if (
-    error instanceof ApiError &&
-    error.body &&
-    typeof error.body === "object" &&
-    "code" in error.body
-  ) {
-    const { code } = error.body;
-    return typeof code === "string" ? code : null;
-  }
-  return null;
-}
-
 // A sync fails with a small set of known codes; each names the thing to fix.
 // Anything else falls back to the raw message.
 function syncError(error: Error, t: TFunction): string {
@@ -98,8 +85,27 @@ function parseGroupIds(value: string): string[] {
     .filter((id) => id !== "");
 }
 
+// configFingerprint changes only when the saved configuration changes, so it is
+// what the form is remounted on. It deliberately excludes updatedAt and the
+// run-status fields: a sync run bumps updated_at too (RecordRun), and keying on
+// that would remount the form mid-edit — an admin who pastes a rotated secret
+// and clicks "Sync now" to test it would lose the paste, and the run would use
+// the old stored secret. The sibling e-mail/Slack panels can key on updatedAt
+// only because nothing but their save writes it.
+function configFingerprint(s: ProvisioningSettings): string {
+  return JSON.stringify([
+    s.source,
+    s.tenantId,
+    s.clientId,
+    s.hasClientSecret,
+    s.groupId,
+    s.adminGroupIds,
+    s.enabled,
+  ]);
+}
+
 // ProvisioningForm seeds its state from the stored settings, so it is remounted
-// (via a `key` on updatedAt) whenever a save refreshes the data.
+// (via a `key` on configFingerprint) whenever a save refreshes the data.
 function ProvisioningForm({
   slug,
   initial,
@@ -110,7 +116,10 @@ function ProvisioningForm({
   const { t } = useTranslation();
   const save = useUpdateProvisioningSettingsMutation(slug);
 
-  const sources = initial.sources.length > 0 ? initial.sources : ["entra"];
+  // sources is a required, backend-owned, non-empty list (provisioning.Sources),
+  // so it is rendered as-is — no hardcoded fallback that would pin a driver id
+  // here.
+  const sources = initial.sources;
   const [enabled, setEnabled] = useState(initial.enabled);
   const [source, setSource] = useState(initial.source || sources[0]);
   const [tenantId, setTenantId] = useState(initial.tenantId);
@@ -237,8 +246,11 @@ function ProvisioningForm({
             onChange={(event) => setGroupId(event.target.value)}
             placeholder={t("provisioningSettings.groupIdPlaceholder")}
             autoComplete="off"
+            aria-describedby="provisioning-group-hint"
           />
-          <span className={HINT}>{t("provisioningSettings.groupIdHint")}</span>
+          <span id="provisioning-group-hint" className={HINT}>
+            {t("provisioningSettings.groupIdHint")}
+          </span>
         </div>
 
         <div className="flex flex-col gap-1">
@@ -251,21 +263,26 @@ function ProvisioningForm({
             value={adminGroups}
             onChange={(event) => setAdminGroups(event.target.value)}
             placeholder={t("provisioningSettings.adminGroupIdsPlaceholder")}
+            aria-describedby="provisioning-admin-groups-hint"
           />
-          <span className={HINT}>
+          <span id="provisioning-admin-groups-hint" className={HINT}>
             {t("provisioningSettings.adminGroupIdsHint")}
           </span>
         </div>
 
         <label className="text-ink flex cursor-pointer items-center gap-2 text-[13.5px]">
           <input
+            id="provisioning-enabled"
             type="checkbox"
             checked={enabled}
             onChange={(event) => setEnabled(event.target.checked)}
+            aria-describedby="provisioning-enabled-hint"
           />
           {t("provisioningSettings.enabled")}
         </label>
-        <span className={HINT}>{t("provisioningSettings.enabledHint")}</span>
+        <span id="provisioning-enabled-hint" className={HINT}>
+          {t("provisioningSettings.enabledHint")}
+        </span>
 
         {localError && (
           <p role="alert" className="text-error text-[13px]">
@@ -457,7 +474,7 @@ export function ProvisioningSettingsPanel({
   return (
     <div className="flex flex-col gap-6">
       <ProvisioningForm
-        key={settings.data.updatedAt ?? "unset"}
+        key={configFingerprint(settings.data)}
         slug={slug}
         initial={settings.data}
       />
