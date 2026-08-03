@@ -10,16 +10,16 @@ import type {
   NotificationGroup,
   NotificationSettings,
 } from "../api/notifications";
-import {
-  NOTIFICATION_CHANNELS,
-  SUPPORTED_CHANNELS,
-} from "../api/notifications";
+import { SUPPORTED_CHANNELS } from "../api/notifications";
 import { useSlackSettingsQuery } from "../api/slack.queries";
+import {
+  subscriptionsDiffer,
+  toggleChannel,
+} from "../lib/notification-subscriptions";
+import type { Subscriptions } from "../lib/notification-subscriptions";
 import { auditActionLabel } from "../lib/audit-event";
-import { Button, Card, Icon } from "../ui";
+import { Button, Card, Icon, Table } from "../ui";
 import * as React from "react";
-
-type Subscriptions = Record<string, ChannelId[]>;
 
 const CHANNEL_LABEL_KEY = {
   email: "notifications.channels.email",
@@ -34,18 +34,6 @@ const GROUP_LABEL_KEY = {
   postguard: "notifications.groups.postguard",
   attestation: "notifications.groups.attestation",
 } as const satisfies Record<NotificationGroup, string>;
-
-// A stable, order-independent fingerprint of a subscription document, used to
-// tell whether the admin's edits differ from what is stored. Events and channels
-// are both sorted so the comparison ignores ordering the backend may re-canonicalize.
-function fingerprint(subs: Subscriptions): string {
-  const events = Object.keys(subs)
-    .filter((event) => subs[event].length > 0)
-    .sort();
-  return JSON.stringify(
-    events.map((event) => [event, [...subs[event]].sort()]),
-  );
-}
 
 export function NotificationsSettingsPanel({
   slug,
@@ -77,13 +65,13 @@ export function NotificationsSettingsPanel({
   // Slack can only deliver once an org has stored and enabled a webhook. The
   // column is still editable before that (a preference set now is honoured once
   // configured), but a notice makes the gap explicit — matching "via Slack (when
-  // configured)".
-  const slackReady = Boolean(slack.data?.enabled);
+  // configured)". Only trust a settled query: while it is loading or has failed
+  // (main.tsx sets retry:false, so a failure never recovers) we don't yet know,
+  // so we treat Slack as ready rather than show a false "not configured" notice.
+  const slackReady = !slack.isSuccess || slack.data.enabled;
 
   return (
     <NotificationsForm
-      // Remount after a save so local edits re-seed from the stored document.
-      key={settings.data.updatedAt ?? "unset"}
       slug={slug}
       settings={settings.data}
       slackReady={slackReady}
@@ -104,8 +92,14 @@ function NotificationsForm({
   const [, setSearchParams] = useSearchParams();
   const save = useUpdateNotificationSettingsMutation(slug);
 
-  const [draft, setDraft] = useState<Subscriptions>(settings.subscriptions);
-  const dirty = fingerprint(draft) !== fingerprint(settings.subscriptions);
+  // A nullable draft (null = "no local edits, show the stored document"), the
+  // same pattern as postguard-notifications.tsx. Cleared on a successful save so
+  // edits re-seed from the refetched document without a remount that could stomp
+  // an in-flight edit. The checkboxes are also disabled while a save is pending,
+  // which is when that stomp could otherwise happen.
+  const [draft, setDraft] = useState<Subscriptions | null>(null);
+  const active = draft ?? settings.subscriptions;
+  const dirty = subscriptionsDiffer(active, settings.subscriptions);
 
   // Only the channels with a working backend get a column; the API may also list
   // reserved ids (msteams). Order follows the server's channel list.
@@ -122,29 +116,19 @@ function NotificationsForm({
   }
 
   function isChecked(event: string, channel: ChannelId): boolean {
-    return (draft[event] ?? []).includes(channel);
+    return (active[event] ?? []).includes(channel);
   }
 
   function toggle(event: string, channel: ChannelId): void {
-    setDraft((prev) => {
-      const current = new Set(prev[event] ?? []);
-      if (current.has(channel)) current.delete(channel);
-      else current.add(channel);
-      const next = { ...prev };
-      if (current.size === 0) {
-        delete next[event];
-      } else {
-        // Store in the canonical channel order so the fingerprint is stable.
-        next[event] = NOTIFICATION_CHANNELS.filter((c) => current.has(c));
-      }
-      return next;
-    });
+    setDraft((prev) =>
+      toggleChannel(prev ?? settings.subscriptions, event, channel),
+    );
   }
 
   function submit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (!dirty || save.isPending) return;
-    save.mutate({ subscriptions: draft });
+    save.mutate({ subscriptions: active }, { onSuccess: () => setDraft(null) });
   }
 
   return (
@@ -182,63 +166,61 @@ function NotificationsForm({
           </div>
         )}
 
-        <div className="mt-5 overflow-x-auto">
-          <table className="w-full border-collapse text-[13.5px]">
-            <thead>
-              <tr className="border-line border-b">
-                <th className="text-ink-soft py-2 pr-3 text-left text-[12px] font-semibold">
-                  {t("notifications.eventColumn")}
-                </th>
-                {columns.map((channel) => (
-                  <th
-                    key={channel}
-                    className="text-ink-soft w-24 px-2 py-2 text-center text-[12px] font-semibold"
-                  >
-                    {t(CHANNEL_LABEL_KEY[channel])}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
+        <div className="mt-5">
+          <Table>
+            <Table.Head>
+              <Table.HeaderCell scope="col">
+                {t("notifications.eventColumn")}
+              </Table.HeaderCell>
+              {columns.map((channel) => (
+                <Table.HeaderCell
+                  key={channel}
+                  scope="col"
+                  className="w-24 text-center"
+                >
+                  {t(CHANNEL_LABEL_KEY[channel])}
+                </Table.HeaderCell>
+              ))}
+            </Table.Head>
+            <Table.Body>
               {groups.map(({ group, events }) => (
                 <React.Fragment key={group}>
-                  <tr>
+                  <Table.Row>
                     <th
+                      scope="colgroup"
                       colSpan={1 + columns.length}
                       className="text-ink pt-5 pb-1.5 text-left text-[12.5px] font-bold"
                     >
                       {t(GROUP_LABEL_KEY[group])}
                     </th>
-                  </tr>
+                  </Table.Row>
                   {events.map((event) => (
-                    <tr
-                      key={event}
-                      className="border-line/60 hover:bg-surface-2 border-b"
-                    >
-                      <td className="text-ink py-2 pr-3">
+                    <Table.Row key={event} className="hover:bg-surface-2">
+                      <Table.Cell scope="row" className="text-ink">
                         {auditActionLabel(event, t)}
-                      </td>
+                      </Table.Cell>
                       {columns.map((channel) => {
                         const label = `${auditActionLabel(event, t)} — ${t(
                           CHANNEL_LABEL_KEY[channel],
                         )}`;
                         return (
-                          <td key={channel} className="px-2 py-2 text-center">
+                          <Table.Cell key={channel} className="text-center">
                             <input
                               type="checkbox"
                               aria-label={label}
                               checked={isChecked(event, channel)}
+                              disabled={save.isPending}
                               onChange={() => toggle(event, channel)}
                             />
-                          </td>
+                          </Table.Cell>
                         );
                       })}
-                    </tr>
+                    </Table.Row>
                   ))}
                 </React.Fragment>
               ))}
-            </tbody>
-          </table>
+            </Table.Body>
+          </Table>
         </div>
 
         {save.isError && (
