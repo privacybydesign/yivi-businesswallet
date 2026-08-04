@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
@@ -76,14 +77,22 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// settingsRequest replaces an org's SMTP configuration. Password and
+// ClientSecret are pointers so a body that omits the key keeps the stored secret,
+// while sending it empty clears it. AuthMechanism may be omitted, and then means
+// mailer.AuthPlain — a client written before XOAUTH2 existed keeps working.
 type settingsRequest struct {
-	Host        string  `json:"host"`
-	Port        int     `json:"port"`
-	Username    string  `json:"username"`
-	Password    *string `json:"password"`
-	FromName    string  `json:"fromName"`
-	FromAddress string  `json:"fromAddress"`
-	Enabled     bool    `json:"enabled"`
+	Host          string               `json:"host"`
+	Port          int                  `json:"port"`
+	Username      string               `json:"username"`
+	Password      *string              `json:"password"`
+	AuthMechanism mailer.AuthMechanism `json:"authMechanism"`
+	TenantID      string               `json:"tenantId"`
+	ClientID      string               `json:"clientId"`
+	ClientSecret  *string              `json:"clientSecret"`
+	FromName      string               `json:"fromName"`
+	FromAddress   string               `json:"fromAddress"`
+	Enabled       bool                 `json:"enabled"`
 }
 
 func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
@@ -91,29 +100,80 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return badRequest("invalid_body", "invalid request body")
 	}
-	req.Host = strings.TrimSpace(req.Host)
-	req.FromAddress = strings.TrimSpace(req.FromAddress)
-	if req.Host == "" {
-		return badRequest("invalid_input", "host is required")
-	}
-	if req.Port < minPort || req.Port > maxPort {
-		return badRequest("invalid_input", "port must be between 1 and 65535")
-	}
-	if req.FromAddress == "" {
-		return badRequest("invalid_input", "fromAddress is required")
-	}
 
 	org := organization.OrgFromContext(r.Context())
-	settings, err := h.store.Upsert(r.Context(), org.ID, SettingsInput{
-		Host: req.Host, Port: req.Port, Username: strings.TrimSpace(req.Username),
-		Password: req.Password, FromName: strings.TrimSpace(req.FromName),
-		FromAddress: req.FromAddress, Enabled: req.Enabled,
-	})
+	stored, err := h.store.GetSettings(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("getting email settings: %w", err)
+	}
+	in, err := parseSettingsRequest(req, stored)
+	if err != nil {
+		return err
+	}
+
+	settings, err := h.store.Upsert(r.Context(), org.ID, in)
 	if err != nil {
 		return fmt.Errorf("updating email settings: %w", err)
 	}
 	respond.JSON(w, r, http.StatusOK, settings)
 	return nil
+}
+
+// parseSettingsRequest normalises and validates a settings body. stored is the
+// org's current settings, needed because "keep the stored secret" is a valid way
+// to satisfy the credential requirement of an enabled XOAUTH2 configuration.
+func parseSettingsRequest(req settingsRequest, stored Settings) (SettingsInput, error) {
+	in := SettingsInput{
+		Host:          strings.TrimSpace(req.Host),
+		Port:          req.Port,
+		Username:      strings.TrimSpace(req.Username),
+		Password:      req.Password,
+		AuthMechanism: req.AuthMechanism,
+		TenantID:      strings.TrimSpace(req.TenantID),
+		ClientID:      strings.TrimSpace(req.ClientID),
+		ClientSecret:  req.ClientSecret,
+		FromName:      strings.TrimSpace(req.FromName),
+		FromAddress:   strings.TrimSpace(req.FromAddress),
+		Enabled:       req.Enabled,
+	}
+	if in.AuthMechanism == "" {
+		in.AuthMechanism = mailer.AuthPlain
+	}
+	if !mailer.KnownMechanism(in.AuthMechanism) {
+		return SettingsInput{}, badRequest("invalid_input", "authMechanism must be one of the supported SMTP auth mechanisms")
+	}
+	if in.Host == "" {
+		return SettingsInput{}, badRequest("invalid_input", "host is required")
+	}
+	if in.Port < minPort || in.Port > maxPort {
+		return SettingsInput{}, badRequest("invalid_input", "port must be between 1 and 65535")
+	}
+	if in.FromAddress == "" {
+		return SettingsInput{}, badRequest("invalid_input", "fromAddress is required")
+	}
+	// Only an enabled XOAUTH2 configuration has to be complete: an org part-way
+	// through setting one up saves it switched off, the same latitude the
+	// directory-sync screen gives. Once it is on, an incomplete credential only
+	// fails at the first send, which is a mail nobody receives rather than a
+	// message here.
+	if in.AuthMechanism == mailer.AuthXOAuth2 && in.Enabled {
+		if in.TenantID == "" || in.ClientID == "" {
+			return SettingsInput{}, badRequest("invalid_input", "tenantId and clientId are required for xoauth2")
+		}
+		if !keepsSecret(in.ClientSecret, stored.HasClientSecret) {
+			return SettingsInput{}, badRequest("invalid_input", "clientSecret is required for xoauth2")
+		}
+	}
+	return in, nil
+}
+
+// keepsSecret reports whether the request leaves a usable secret in place: it
+// either sets a new one, or omits the field while one is already stored.
+func keepsSecret(input *string, hasStored bool) bool {
+	if input == nil {
+		return hasStored
+	}
+	return *input != ""
 }
 
 // testRequest asks for a specimen message. Kind and Locale are optional: without

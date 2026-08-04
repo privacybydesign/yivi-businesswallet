@@ -7,6 +7,13 @@ import {
   useUpdateEmailSettingsMutation,
 } from "../api/email.queries";
 import type { EmailSettings as EmailSettingsData } from "../api/email";
+import {
+  SMTP_AUTH_MECHANISMS,
+  SMTP_XOAUTH2,
+  emailSettingsBody,
+  isSmtpAuthMechanism,
+  smtpAuthMechanismOptions,
+} from "../api/email";
 import { ApiError } from "../api/http";
 import { Button, Card, Input } from "../ui";
 import * as React from "react";
@@ -15,8 +22,20 @@ const DECIMAL_RADIX = 10;
 const CONFLICT_STATUS = 409;
 const DEFAULT_SMTP_PORT = 587;
 const LABEL = "text-ink-soft text-[12px] font-semibold";
+const HINT = "text-ink-soft text-[12px]";
+const CONTROL =
+  "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
 // Plausible address check only; the backend is the authority.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// A mechanism this frontend has no copy for still renders, as its raw id, the
+// way the directory-sync screen renders an unknown source.
+function mechanismLabel(mechanism: string, t: TFunction): string {
+  if (!isSmtpAuthMechanism(mechanism)) {
+    return mechanism;
+  }
+  return t(`emailSettings.authMechanisms.${mechanism}`);
+}
 
 function errorCode(error: unknown): string | null {
   if (
@@ -58,25 +77,55 @@ function SmtpForm({
   const [port, setPort] = useState(String(initial.port || DEFAULT_SMTP_PORT));
   const [username, setUsername] = useState(initial.username);
   const [password, setPassword] = useState("");
+  const [authMechanism, setAuthMechanism] = useState(
+    initial.authMechanism || SMTP_AUTH_MECHANISMS[0],
+  );
+  const [tenantId, setTenantId] = useState(initial.tenantId);
+  const [clientId, setClientId] = useState(initial.clientId);
+  const [clientSecret, setClientSecret] = useState("");
   const [fromName, setFromName] = useState(initial.fromName);
   const [fromAddress, setFromAddress] = useState(initial.fromAddress);
   const [enabled, setEnabled] = useState(initial.enabled);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const usesOAuth = authMechanism === SMTP_XOAUTH2;
 
   function handleSave(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (save.isPending) {
       return;
     }
-    save.mutate({
-      host: host.trim(),
-      port: Number.parseInt(port, DECIMAL_RADIX) || DEFAULT_SMTP_PORT,
-      username: username.trim(),
-      // Blank keeps the stored password; a typed value replaces it.
-      password: password ? password : null,
-      fromName: fromName.trim(),
-      fromAddress: fromAddress.trim(),
-      enabled,
-    });
+    // The backend refuses the same combination. Catching it here keeps the
+    // reason beside the fields, and a half-filled configuration can still be
+    // saved switched off.
+    if (usesOAuth && enabled) {
+      if (!tenantId.trim() || !clientId.trim()) {
+        setLocalError(t("emailSettings.credentialsRequired"));
+        return;
+      }
+      if (!initial.hasClientSecret && clientSecret === "") {
+        setLocalError(t("emailSettings.clientSecretRequired"));
+        return;
+      }
+    }
+    setLocalError(null);
+    // emailSettingsBody decides which credentials the body carries and which it
+    // clears; the trimming and the three-way secret rule live with it.
+    save.mutate(
+      emailSettingsBody({
+        host,
+        port: Number.parseInt(port, DECIMAL_RADIX) || DEFAULT_SMTP_PORT,
+        username,
+        password,
+        authMechanism,
+        tenantId,
+        clientId,
+        clientSecret,
+        fromName,
+        fromAddress,
+        enabled,
+      }),
+    );
   }
 
   return (
@@ -117,6 +166,36 @@ function SmtpForm({
         </div>
 
         <div className="flex flex-col gap-1">
+          <label htmlFor="email-auth-mechanism" className={LABEL}>
+            {t("emailSettings.authMechanism")}
+          </label>
+          <select
+            id="email-auth-mechanism"
+            className={CONTROL}
+            value={authMechanism}
+            onChange={(event) => {
+              setAuthMechanism(event.target.value);
+              // The message names fields the other mechanism does not have.
+              setLocalError(null);
+            }}
+            aria-describedby={usesOAuth ? "email-mechanism-hint" : undefined}
+          >
+            {smtpAuthMechanismOptions(initial.authMechanism).map(
+              (mechanism) => (
+                <option key={mechanism} value={mechanism}>
+                  {mechanismLabel(mechanism, t)}
+                </option>
+              ),
+            )}
+          </select>
+          {usesOAuth && (
+            <span id="email-mechanism-hint" className={HINT}>
+              {t("emailSettings.xoauth2Hint")}
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1">
           <label htmlFor="email-username" className={LABEL}>
             {t("emailSettings.username")}
           </label>
@@ -125,26 +204,84 @@ function SmtpForm({
             value={username}
             onChange={(event) => setUsername(event.target.value)}
             autoComplete="off"
+            aria-describedby={usesOAuth ? "email-username-hint" : undefined}
           />
+          {usesOAuth && (
+            <span id="email-username-hint" className={HINT}>
+              {t("emailSettings.usernameOAuthHint")}
+            </span>
+          )}
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor="email-password" className={LABEL}>
-            {t("emailSettings.password")}
-          </label>
-          <Input
-            id="email-password"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete="new-password"
-            placeholder={
-              initial.hasPassword
-                ? t("emailSettings.passwordUnchanged")
-                : t("emailSettings.passwordPlaceholder")
-            }
-          />
-        </div>
+        {usesOAuth ? (
+          <>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="email-tenant-id" className={LABEL}>
+                {t("emailSettings.tenantId")}
+              </label>
+              <Input
+                id="email-tenant-id"
+                value={tenantId}
+                onChange={(event) => setTenantId(event.target.value)}
+                placeholder={t("emailSettings.tenantIdPlaceholder")}
+                autoComplete="off"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label htmlFor="email-client-id" className={LABEL}>
+                {t("emailSettings.clientId")}
+              </label>
+              <Input
+                id="email-client-id"
+                value={clientId}
+                onChange={(event) => setClientId(event.target.value)}
+                placeholder={t("emailSettings.clientIdPlaceholder")}
+                autoComplete="off"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label htmlFor="email-client-secret" className={LABEL}>
+                {t("emailSettings.clientSecret")}
+              </label>
+              <Input
+                id="email-client-secret"
+                type="password"
+                value={clientSecret}
+                onChange={(event) => setClientSecret(event.target.value)}
+                autoComplete="new-password"
+                placeholder={
+                  initial.hasClientSecret
+                    ? t("emailSettings.clientSecretUnchanged")
+                    : t("emailSettings.clientSecretPlaceholder")
+                }
+                aria-describedby="email-client-secret-hint"
+              />
+              <span id="email-client-secret-hint" className={HINT}>
+                {t("emailSettings.appRegistrationHint")}
+              </span>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <label htmlFor="email-password" className={LABEL}>
+              {t("emailSettings.password")}
+            </label>
+            <Input
+              id="email-password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="new-password"
+              placeholder={
+                initial.hasPassword
+                  ? t("emailSettings.passwordUnchanged")
+                  : t("emailSettings.passwordPlaceholder")
+              }
+            />
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1">
@@ -183,6 +320,11 @@ function SmtpForm({
           {t("emailSettings.enabled")}
         </label>
 
+        {localError && (
+          <p role="alert" className="text-error text-[13px]">
+            {localError}
+          </p>
+        )}
         {save.isError && (
           <p role="alert" className="text-error text-[13px]">
             {t("emailSettings.saveError", { message: save.error.message })}

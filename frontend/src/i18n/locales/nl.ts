@@ -984,9 +984,31 @@ export const nl: Translation<typeof en> = {
     hostPlaceholder: "bijv. smtp.example.com",
     port: "Poort",
     username: "Gebruikersnaam",
+    usernameOAuthHint:
+      "De mailbox waarvandaan wordt verstuurd. Laat leeg om het afzenderadres te gebruiken.",
     password: "Wachtwoord",
     passwordPlaceholder: "SMTP-wachtwoord",
     passwordUnchanged: "Laat leeg om het huidige wachtwoord te behouden",
+    authMechanism: "Authenticatie",
+    authMechanisms: {
+      plain: "Gebruikersnaam en wachtwoord",
+      xoauth2: "Microsoft 365 (OAuth2)",
+    },
+    xoauth2Hint:
+      "Microsoft 365 gebruikt smtp.office365.com op poort 587. Basisauthenticatie staat bij de meeste tenants uit, dus e-mail wordt verstuurd met een accesstoken in plaats van een wachtwoord.",
+    tenantId: "Directory- (tenant-)ID",
+    tenantIdPlaceholder: "bijv. 00000000-0000-0000-0000-000000000000",
+    clientId: "Toepassings- (client-)ID",
+    clientIdPlaceholder: "bijv. 11111111-1111-1111-1111-111111111111",
+    clientSecret: "Clientgeheim",
+    clientSecretPlaceholder: "Waarde van het clientgeheim",
+    clientSecretUnchanged: "Laat leeg om het opgeslagen geheim te behouden",
+    appRegistrationHint:
+      "Registreer een toepassing in Microsoft Entra ID, geef die de Office 365 Exchange Online-permissie SMTP.SendAsApp met beheerderstoestemming, en sta toe dat die verstuurt namens de mailbox hierboven.",
+    credentialsRequired:
+      "Vul de tenant-ID en de toepassings- (client-)ID in voordat je versturen inschakelt.",
+    clientSecretRequired:
+      "Vul een clientgeheim in voordat je versturen inschakelt.",
     fromName: "Afzendernaam",
     fromNamePlaceholder: "bijv. Acme B.V.",
     fromAddress: "Afzenderadres",

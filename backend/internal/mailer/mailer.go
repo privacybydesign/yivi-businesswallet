@@ -1,7 +1,13 @@
 // Package mailer is the SMTP transport seam: it sends a message given an explicit
 // SMTP configuration (resolved per-org by the caller). It is the mail analogue of
 // the other provider seams — no domain logic, just the wire protocol. Auth is
-// omitted when Username is empty (e.g. MailHog in dev).
+// omitted when the mechanism is AuthPlain and Username is empty (e.g. MailHog in
+// dev).
+//
+// Acquiring the bearer token an AuthXOAuth2 send authenticates with is not the
+// wire protocol and is not done here: the caller resolves it (internal/mailoauth)
+// and hands it over as Config.AccessToken. net/smtp takes no context, so a token
+// fetch inside Send could not be bounded by the caller's deadline anyway.
 package mailer
 
 import (
@@ -17,15 +23,51 @@ import (
 
 const dialTimeout = 15 * time.Second
 
+// AuthMechanism selects how a send authenticates to the SMTP server.
+type AuthMechanism string
+
+const (
+	// AuthPlain is SMTP AUTH PLAIN with a username and password. It is the
+	// default, and it is what an ordinary relay speaks.
+	AuthPlain AuthMechanism = "plain"
+	// AuthXOAuth2 is SASL XOAUTH2 with an OAuth2 bearer token. Microsoft 365
+	// (Exchange Online) requires it: Basic Authentication for SMTP AUTH is off on
+	// most tenants, so a password there is no longer a usable credential.
+	AuthXOAuth2 AuthMechanism = "xoauth2"
+)
+
+// KnownMechanism reports whether m is a mechanism this transport can speak. The
+// empty string is not one: callers normalise it to AuthPlain first.
+func KnownMechanism(m AuthMechanism) bool {
+	return m == AuthPlain || m == AuthXOAuth2
+}
+
 // Config is the SMTP connection + identity a single send uses.
 type Config struct {
-	Host     string
-	Port     int
-	Username string
-	Password string
+	Host string
+	Port int
+	// AuthMechanism is how the send authenticates; the empty string means
+	// AuthPlain, so a config written before XOAUTH2 existed keeps working.
+	AuthMechanism AuthMechanism
+	Username      string
+	Password      string
+	// AccessToken is the OAuth2 bearer token an AuthXOAuth2 send authenticates
+	// with. It is resolved per send by the caller (tokens are short-lived), never
+	// stored on the settings row.
+	AccessToken string
 	// FromName is the display name; FromAddress the envelope/from address.
 	FromName    string
 	FromAddress string
+}
+
+// authIdentity is the mailbox an XOAUTH2 exchange names. Microsoft 365 wants the
+// mailbox being sent as, which is the from address for an app-only registration;
+// Username stays the override for a tenant whose submitting mailbox differs.
+func (c Config) authIdentity() string {
+	if c.Username != "" {
+		return c.Username
+	}
+	return c.FromAddress
 }
 
 // Message is a single outbound e-mail (HTML + plain-text alternative), with any
@@ -51,6 +93,44 @@ type InlineImage struct {
 	Bytes       []byte
 }
 
+// validate rejects a config the transport cannot act on, before it opens a
+// connection. An XOAUTH2 send with no token would otherwise dial, greet and only
+// then fail — and it fails identically for a stale token, which is exactly the
+// distinction an admin reading the error needs.
+func (c Config) validate() error {
+	if c.AuthMechanism != "" && !KnownMechanism(c.AuthMechanism) {
+		return fmt.Errorf("mailer: unknown auth mechanism %q", c.AuthMechanism)
+	}
+	if c.AuthMechanism == AuthXOAuth2 {
+		if c.AccessToken == "" {
+			return fmt.Errorf("mailer: %s needs an access token", AuthXOAuth2)
+		}
+		if c.authIdentity() == "" {
+			return fmt.Errorf("mailer: %s needs a username or a from address to authenticate as", AuthXOAuth2)
+		}
+	}
+	return nil
+}
+
+// auth picks the smtp.Auth for this config, or nil when the send is unauthenticated
+// (an open relay). secured reports whether the connection is already encrypted.
+func (c Config) auth(secured bool) (smtp.Auth, error) {
+	if c.AuthMechanism == AuthXOAuth2 {
+		// Refused here as well as in Start: a server that does not offer STARTTLS
+		// should not get as far as an AUTH command carrying a bearer token, and the
+		// reason an admin reads should name the server's missing TLS rather than
+		// the auth exchange.
+		if !secured {
+			return nil, fmt.Errorf("mailer: %s requires STARTTLS but %s did not offer it", AuthXOAuth2, c.Host)
+		}
+		return XOAuth2Auth(c.authIdentity(), c.AccessToken), nil
+	}
+	if c.Username == "" {
+		return nil, nil
+	}
+	return smtp.PlainAuth("", c.Username, c.Password, c.Host), nil
+}
+
 // Sender sends a message over SMTP using the given config.
 type Sender interface {
 	Send(cfg Config, msg Message) error
@@ -63,8 +143,13 @@ func New() SMTPSender { return SMTPSender{} }
 
 // Send delivers the message. It uses STARTTLS when the server offers it and
 // authenticates with PLAIN when a username is set; a MailHog-style open relay
-// (no auth, no TLS) works with an empty username.
+// (no auth, no TLS) works with an empty username. With AuthXOAuth2 it
+// authenticates with the config's bearer token instead, and then STARTTLS is
+// required rather than opportunistic.
 func (SMTPSender) Send(cfg Config, msg Message) error {
+	if err := cfg.validate(); err != nil {
+		return err
+	}
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 
 	conn, err := net.DialTimeout("tcp", addr, dialTimeout)
@@ -79,14 +164,17 @@ func (SMTPSender) Send(cfg Config, msg Message) error {
 	}
 	defer func() { _ = client.Close() }()
 
+	secured := false
 	if ok, _ := client.Extension("STARTTLS"); ok {
 		if err := client.StartTLS(&tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12}); err != nil {
 			return fmt.Errorf("mailer: starttls: %w", err)
 		}
+		secured = true
 	}
 
-	if cfg.Username != "" {
-		auth := smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
+	if auth, err := cfg.auth(secured); err != nil {
+		return err
+	} else if auth != nil {
 		if err := client.Auth(auth); err != nil {
 			return fmt.Errorf("mailer: auth: %w", err)
 		}

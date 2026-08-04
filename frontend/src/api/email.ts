@@ -1,18 +1,54 @@
 import { z } from "zod";
 import { request } from "./http";
 
+// How a send authenticates (backend/internal/mailer). "plain" is a username and
+// password; "xoauth2" is an OAuth2 bearer token, which is what Microsoft 365
+// requires now that it has turned off Basic Authentication for SMTP AUTH.
+export const SMTP_AUTH_MECHANISMS = ["plain", "xoauth2"] as const;
+
+export type SmtpAuthMechanism = (typeof SMTP_AUTH_MECHANISMS)[number];
+
+// The mechanism that authenticates with a bearer token instead of a password, and
+// so the one the app-registration fields belong to.
+export const SMTP_XOAUTH2: SmtpAuthMechanism = "xoauth2";
+
+export function isSmtpAuthMechanism(value: string): value is SmtpAuthMechanism {
+  return (SMTP_AUTH_MECHANISMS as readonly string[]).includes(value);
+}
+
+// The mechanisms a settings form offers: the ones this frontend has copy for,
+// plus whatever the org already has stored when the backend has gained one this
+// list does not know yet. Dropping an unknown stored value would leave the
+// selector on a mechanism the org did not choose and rewrite its configuration
+// on the next save.
+export function smtpAuthMechanismOptions(stored: string): string[] {
+  if (stored === "" || isSmtpAuthMechanism(stored)) {
+    return [...SMTP_AUTH_MECHANISMS];
+  }
+  return [...SMTP_AUTH_MECHANISMS, stored];
+}
+
 // Per-organization SMTP configuration used to deliver credential offers and
-// notifications by e-mail. The password is write-only: it is never returned,
-// only whether one is stored (`hasPassword`).
+// notifications by e-mail. The password and the OAuth client secret are
+// write-only: they are never returned, only whether one is stored
+// (`hasPassword` / `hasClientSecret`).
+//
+// authMechanism is a plain string rather than a zod enum on purpose: a mechanism
+// the backend gains before this list learns it would otherwise fail the whole
+// settings document and take the screen down, not just that one option.
 export const emailSettingsSchema = z.object({
   configured: z.boolean(),
   host: z.string(),
   port: z.number(),
   username: z.string(),
+  authMechanism: z.string(),
+  tenantId: z.string(),
+  clientId: z.string(),
   fromName: z.string(),
   fromAddress: z.string(),
   enabled: z.boolean(),
   hasPassword: z.boolean(),
+  hasClientSecret: z.boolean(),
   updatedAt: z.string().optional(),
 });
 
@@ -24,9 +60,65 @@ export interface EmailSettingsInput {
   username: string;
   // null keeps the stored password, a non-empty string sets it, "" clears it.
   password: string | null;
+  authMechanism: string;
+  tenantId: string;
+  clientId: string;
+  // Same three-way rule as password.
+  clientSecret: string | null;
   fromName: string;
   fromAddress: string;
   enabled: boolean;
+}
+
+// The settings form's raw fields, before they become a request body. The two
+// secrets are plain strings here because the form only ever holds what was typed
+// into them: blank means the admin left the field alone.
+export interface EmailSettingsForm {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  authMechanism: string;
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
+  fromName: string;
+  fromAddress: string;
+  enabled: boolean;
+}
+
+// emailSettingsBody turns the form's fields into the body to save.
+//
+// The credentials belonging to the mechanism that is *not* selected are cleared
+// rather than left at rest: the form unmounts the input for one of the two, so
+// there would otherwise be no way to blank it and an org's unused client secret or
+// SMTP password would stay encrypted in its row indefinitely after it stopped
+// being used. Switching back means entering the secret again, which is the trade
+// this makes deliberately in favour of storing no credential the org is not using.
+//
+// Username is cleared in neither direction: plain authenticates with it, and
+// XOAUTH2 uses it to override the mailbox the token submits as.
+export function emailSettingsBody(form: EmailSettingsForm): EmailSettingsInput {
+  const usesOAuth = form.authMechanism === SMTP_XOAUTH2;
+  return {
+    host: form.host.trim(),
+    port: form.port,
+    username: form.username.trim(),
+    password: usesOAuth ? "" : keptOrSet(form.password),
+    authMechanism: form.authMechanism,
+    tenantId: usesOAuth ? form.tenantId.trim() : "",
+    clientId: usesOAuth ? form.clientId.trim() : "",
+    clientSecret: usesOAuth ? keptOrSet(form.clientSecret) : "",
+    fromName: form.fromName.trim(),
+    fromAddress: form.fromAddress.trim(),
+    enabled: form.enabled,
+  };
+}
+
+// A field the admin left blank keeps the stored secret (null); a typed value
+// replaces it. Clearing is the caller's decision, not a blank field's.
+function keptOrSet(secret: string): string | null {
+  return secret ? secret : null;
 }
 
 function base(slug: string): string {

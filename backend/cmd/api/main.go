@@ -26,6 +26,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailoauth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/notifications"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
@@ -68,6 +69,9 @@ const (
 	// A directory read is a handful of paged calls to somebody else's API; the
 	// per-organisation deadline in provisioning.Scheduler bounds the whole sync.
 	provisioningHTTPTimeout = 30 * time.Second
+
+	// One token request to the identity platform, on the path of a send.
+	mailOAuthHTTPTimeout = 15 * time.Second
 
 	serverAddr = ":8080"
 
@@ -312,7 +316,14 @@ func run() error {
 	// Mail reuses the org's app palette (themesettings), so a tenant configures its
 	// branding once and outbound mail follows.
 	themeSettingsStore := themesettings.NewStore(pool, recorder)
-	emailService := email.NewService(emailStore, mailer.New(), mailBranding{theme: themeSettingsStore}, mailLocale)
+	// An org on Microsoft 365 authenticates with an OAuth2 bearer token rather
+	// than a password (Microsoft has turned off Basic Authentication for SMTP
+	// AUTH), so the mail service needs a token source. It holds no deployment
+	// configuration of its own: the app registration is per-org, on the same
+	// settings row as the host and port.
+	emailService := email.NewService(emailStore, mailer.New(),
+		mailoauth.NewMicrosoft(&http.Client{Timeout: mailOAuthHTTPTimeout}),
+		mailBranding{theme: themeSettingsStore}, mailLocale)
 
 	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins)
 
