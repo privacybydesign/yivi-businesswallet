@@ -35,6 +35,8 @@ import {
   HELD_SOURCE_FILTERS,
   HELD_STATUS_FILTERS,
   HELD_STATUS_TONES,
+  heldExpiryAt,
+  heldExpiryIsPast,
   heldSections,
   heldSourceLabel,
   heldStatusLabel,
@@ -644,7 +646,10 @@ function HeldTab({
   }
 
   const filtered = query !== "" || status !== "" || source !== "";
-  const sections = heldSections(rows, { query, status, source }, new Date());
+  // One instant for the whole render, so a card's expiry tense cannot disagree with
+  // the section the same credential was sorted into.
+  const now = new Date();
+  const sections = heldSections(rows, { query, status, source }, now);
   const nothingMatches =
     sections.attention.length === 0 && sections.valid.length === 0;
 
@@ -657,6 +662,7 @@ function HeldTab({
       slug={slug}
       credential={credential}
       status={cardStatus}
+      now={now}
       isAdmin={isAdmin}
       formatWhen={formatWhen}
       formatDate={formatDate}
@@ -796,6 +802,7 @@ function HeldCard({
   slug,
   credential,
   status,
+  now,
   isAdmin,
   formatWhen,
   formatDate,
@@ -804,6 +811,7 @@ function HeldCard({
   slug: string;
   credential: HeldAttestation;
   status: HeldStatus;
+  now: Date;
   isAdmin: boolean;
   formatWhen: (iso: string) => string;
   formatDate: (iso: string) => string;
@@ -811,6 +819,11 @@ function HeldCard({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const name = credential.displayName || credentialDisplayName(credential.vct);
+  // The expiry line only renders for a date the view can phrase. A value that does
+  // not parse is dropped rather than echoed verbatim, which is how heldStatus reads
+  // it too: as a credential that does not expire.
+  const expiresAt =
+    heldExpiryAt(credential) === null ? undefined : credential.expiresAt;
 
   return (
     <Card className="focus-within:border-ink focus-within:ring-ink/10 hover:border-line-strong relative flex flex-col gap-3 p-4 transition-colors focus-within:ring-3">
@@ -847,14 +860,14 @@ function HeldCard({
           </span>{" "}
           {credential.issuer}
         </div>
-        {credential.expiresAt && (
+        {expiresAt && (
           <div className="text-ink-soft">
-            {status === "expired"
+            {heldExpiryIsPast(credential, now)
               ? t("attestations.held.expiredOn", {
-                  date: formatDate(credential.expiresAt),
+                  date: formatDate(expiresAt),
                 })
               : t("attestations.held.expires", {
-                  date: formatDate(credential.expiresAt),
+                  date: formatDate(expiresAt),
                 })}
           </div>
         )}

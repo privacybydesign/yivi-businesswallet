@@ -68,6 +68,16 @@ constants out of `backend/internal/email/catalog.go` and asserts each one is in
 is parsed through, so a kind the backend serves and the enum omits fails the whole
 list document and the settings screen stops loading — not just the new row.
 
+`src/lib/held-credential.test.ts` guards held-credential sources the same way: it
+parses the `HeldSource*` constants out of `backend/internal/attestation/held_store.go`
+and asserts they and `HELD_SOURCES` (`src/api/attestations.ts`) hold the same set,
+each named under `attestations.held.sources.*`. `HELD_SOURCE_FILTERS` is derived from
+`HELD_SOURCES` rather than written out again, so the filter dropdown cannot fall
+behind the enum. All three parity tests leave the Go type optional in the pattern
+(`KindFoo = "foo"` inside a `const` block still compiles and is still served), and
+assert membership in both directions — a list-length check alone passes on exactly
+the drift it exists to catch, both lists being short by the same one.
+
 **Backend** (`cd backend`), in order:
 ```bash
 gofmt -l .                      # must print nothing

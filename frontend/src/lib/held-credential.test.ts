@@ -1,7 +1,14 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { HeldAttestation } from "../api/attestations";
+import { HELD_SOURCES } from "../api/attestations";
+import { en } from "../i18n/locales/en";
 import {
   EXPIRING_SOON_DAYS,
+  HELD_SOURCE_FILTERS,
+  heldExpiryAt,
+  heldExpiryIsPast,
   heldMatchesQuery,
   heldNeedsAttention,
   heldSections,
@@ -81,6 +88,52 @@ describe("heldStatus", () => {
     expect(heldStatus({ expiresAt: "not-a-date", revoked: false }, NOW)).toBe(
       "valid",
     );
+  });
+});
+
+describe("heldExpiryAt", () => {
+  it("reads a parseable expiry as a timestamp", () => {
+    expect(
+      heldExpiryAt({ expiresAt: "2026-01-15T00:00:00Z", revoked: false }),
+    ).toBe(Date.parse("2026-01-15T00:00:00Z"));
+  });
+
+  it("has no timestamp for an absent or unparseable expiry", () => {
+    expect(heldExpiryAt({ revoked: false })).toBeNull();
+    expect(heldExpiryAt({ expiresAt: "", revoked: false })).toBeNull();
+    expect(
+      heldExpiryAt({ expiresAt: "not-a-date", revoked: false }),
+    ).toBeNull();
+  });
+});
+
+describe("heldExpiryIsPast", () => {
+  // The tense of the expiry copy is picked from this rather than from the badge.
+  // A revoked credential badges "revoked" whatever its exp claim says, so reading
+  // the tense off the badge printed a past date as "Expires 15 Jan 2026".
+  it("is true for a revoked credential whose expiry has already passed", () => {
+    expect(
+      heldExpiryIsPast({ expiresAt: daysFromNow(-200), revoked: true }, NOW),
+    ).toBe(true);
+  });
+
+  it("is false for a revoked credential that has not expired yet", () => {
+    expect(
+      heldExpiryIsPast({ expiresAt: daysFromNow(200), revoked: true }, NOW),
+    ).toBe(false);
+  });
+
+  it("treats an expiry exactly now as past, matching heldStatus", () => {
+    expect(
+      heldExpiryIsPast({ expiresAt: NOW.toISOString(), revoked: false }, NOW),
+    ).toBe(true);
+  });
+
+  it("is false when there is no date to phrase", () => {
+    expect(heldExpiryIsPast({ revoked: false }, NOW)).toBe(false);
+    expect(
+      heldExpiryIsPast({ expiresAt: "not-a-date", revoked: true }, NOW),
+    ).toBe(false);
   });
 });
 
@@ -206,5 +259,58 @@ describe("heldSections", () => {
     );
     expect(noMatch.attention).toEqual([]);
     expect(noMatch.valid).toEqual([]);
+  });
+});
+
+describe("HELD_SOURCE_FILTERS", () => {
+  it("offers every source the list responses can carry, plus no filter", () => {
+    expect(HELD_SOURCE_FILTERS[0]).toBe("");
+    expect([...HELD_SOURCE_FILTERS].slice(1)).toEqual([...HELD_SOURCES]);
+  });
+});
+
+// The backend is the source of truth for held-credential sources
+// (backend/internal/attestation/held_store.go). HELD_SOURCES is the zod enum every
+// held-list response is parsed through, so a source the backend serves and the enum
+// omits fails the whole list document and the Wallet tab stops loading — not just
+// the row carrying it. This test parses the Go constants and asserts the two lists
+// hold the same sources, and that each one is named in en.ts. nl.ts is typed
+// against en.ts, so the typecheck already fails on a missing Dutch twin.
+
+const heldStoreGoPath = fileURLToPath(
+  new URL(
+    "../../../backend/internal/attestation/held_store.go",
+    import.meta.url,
+  ),
+);
+const heldStoreSource = readFileSync(heldStoreGoPath, "utf8");
+
+// The type is optional in the pattern on purpose. Inside a `const` block a later
+// source may be written `HeldSourceFoo = "foo"` without repeating it — still an
+// untyped string constant, so it compiles and can be served. Requiring the type
+// here would skip it, and a length-only assertion would pass too, both lists
+// being short by the same one. Hence membership asserted in both directions.
+const backendSources = [
+  ...heldStoreSource.matchAll(/^\s*HeldSource\w+(?:\s+\w+)?\s*=\s*"([^"]+)"/gm),
+].map((m) => m[1]);
+
+const sourceLabels: Record<string, string> = en.attestations.held.sources;
+
+describe("held sources backend/frontend parity", () => {
+  it("extracts the sources from held_store.go", () => {
+    expect(backendSources).toContain("qerds");
+    expect(backendSources).toHaveLength(HELD_SOURCES.length);
+  });
+
+  it.each(backendSources)("accepts the source %s", (source) => {
+    expect(HELD_SOURCES).toContain(source);
+  });
+
+  it.each([...HELD_SOURCES])("is served the source %s", (source) => {
+    expect(backendSources).toContain(source);
+  });
+
+  it.each(backendSources)("names the source %s", (source) => {
+    expect(sourceLabels[source]).toBeTruthy();
   });
 });

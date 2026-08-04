@@ -1281,6 +1281,7 @@ export const en = {
         source: "Received via",
         received: "Received",
         expires: "Expires",
+        expired: "Expired",
       },
       sections: {
         attention: "Needs attention",

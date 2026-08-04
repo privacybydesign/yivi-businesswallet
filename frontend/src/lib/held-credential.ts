@@ -6,6 +6,7 @@
 // a presentation window, not a state the engine knows, so it is derived here.
 
 import type { TFunction } from "i18next";
+import { HELD_SOURCES } from "../api/attestations";
 import type { HeldAttestation, HeldSource } from "../api/attestations";
 import { credentialDisplayName } from "./credential-display";
 
@@ -31,12 +32,10 @@ export const HELD_STATUS_FILTERS = [
 
 export type HeldStatusFilter = (typeof HELD_STATUS_FILTERS)[number];
 
-export const HELD_SOURCE_FILTERS = [
-  "",
-  "qerds",
-  "openid4vci",
-  "bootstrap",
-] as const;
+// Derived from the source list the API module already declares, so a source added
+// to the backend only has to be added there: a second hand-written copy would make
+// a new source silently unfilterable rather than raise anything.
+export const HELD_SOURCE_FILTERS = ["", ...HELD_SOURCES] as const;
 
 export type HeldSourceFilter = (typeof HELD_SOURCE_FILTERS)[number];
 
@@ -47,6 +46,27 @@ export interface HeldValidity {
   revoked: boolean;
 }
 
+// heldExpiryAt reads a credential's expiry as a timestamp, or null when there is
+// none the view can use: absent, or a value that does not parse. Both mean "does
+// not expire" here, so the badge and the copy read one date the same way.
+export function heldExpiryAt(credential: HeldValidity): number | null {
+  if (!credential.expiresAt) {
+    return null;
+  }
+  const expiresAt = Date.parse(credential.expiresAt);
+  return Number.isNaN(expiresAt) ? null : expiresAt;
+}
+
+// heldExpiryIsPast reports whether the expiry has already passed, which is what the
+// expiry copy picks its tense from. It is deliberately not derived from the badge:
+// revoked outranks expiry, so a revoked credential whose exp claim is months past
+// still badges "revoked", and a tense read off that badge would call the date
+// upcoming. Null (no usable expiry) is not past — there is no date to phrase.
+export function heldExpiryIsPast(credential: HeldValidity, now: Date): boolean {
+  const expiresAt = heldExpiryAt(credential);
+  return expiresAt !== null && expiresAt <= now.getTime();
+}
+
 // heldStatus derives the badge for one held credential. Revoked outranks expiry:
 // a revoked credential is unusable whatever its exp claim says. An unparseable or
 // absent expiry means "does not expire", which is what a credential with no exp
@@ -55,11 +75,8 @@ export function heldStatus(credential: HeldValidity, now: Date): HeldStatus {
   if (credential.revoked) {
     return "revoked";
   }
-  if (!credential.expiresAt) {
-    return "valid";
-  }
-  const expiresAt = Date.parse(credential.expiresAt);
-  if (Number.isNaN(expiresAt)) {
+  const expiresAt = heldExpiryAt(credential);
+  if (expiresAt === null) {
     return "valid";
   }
   const remaining = expiresAt - now.getTime();

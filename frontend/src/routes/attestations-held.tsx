@@ -9,6 +9,8 @@ import { credentialDisplayName } from "../lib/credential-display";
 import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
 import {
   HELD_STATUS_TONES,
+  heldExpiryAt,
+  heldExpiryIsPast,
   heldSourceLabel,
   heldStatus,
   heldStatusLabel,
@@ -117,7 +119,12 @@ export default function AttestationHeldDetail(): React.JSX.Element {
     return shell(message(t("common.loading")));
   }
 
-  const status = heldStatus(credential, new Date());
+  const now = new Date();
+  const status = heldStatus(credential, now);
+  // Same rule the card follows: an expiry that does not parse is not a date, so it
+  // reads as "does not expire" rather than being echoed back as one.
+  const expiresAt =
+    heldExpiryAt(credential) === null ? undefined : credential.expiresAt;
 
   return (
     <>
@@ -184,10 +191,14 @@ export default function AttestationHeldDetail(): React.JSX.Element {
               value={formatWhen(credential.receivedAt)}
             />
             <DetailRow
-              label={t("attestations.held.fields.expires")}
+              label={
+                heldExpiryIsPast(credential, now)
+                  ? t("attestations.held.fields.expired")
+                  : t("attestations.held.fields.expires")
+              }
               value={
-                credential.expiresAt
-                  ? formatDate(credential.expiresAt)
+                expiresAt
+                  ? formatDate(expiresAt)
                   : t("attestations.held.detail.doesNotExpire")
               }
             />

@@ -1315,6 +1315,7 @@ export const nl: Translation<typeof en> = {
         source: "Ontvangen via",
         received: "Ontvangen",
         expires: "Verloopt",
+        expired: "Verlopen",
       },
       sections: {
         attention: "Vraagt aandacht",
