@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import type {
@@ -8,6 +8,7 @@ import type {
   HeldAttestation,
   IssuedAttestation,
 } from "../api/attestations";
+import { HELD_SOURCES } from "../api/attestations";
 import {
   useAttestationKeysQuery,
   useAttestationSchemasQuery,
@@ -16,7 +17,6 @@ import {
   useDeleteAttestationSchemaMutation,
   useDeleteAttestationTemplateMutation,
   useDeleteHeldAttestationMutation,
-  useHeldAttestationClaimsQuery,
   useHeldAttestationsQuery,
   useIssuedAttestationsQuery,
   useRevokeIssuedAttestationMutation,
@@ -24,8 +24,23 @@ import {
 import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { credentialDisplayName } from "../lib/credential-display";
-import { useWhenFormatter } from "../lib/format-when";
-import { Button, Card, ConfirmDialog, Modal, Table, Tag, TopBar } from "../ui";
+import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
+import type {
+  HeldCredentialWithStatus,
+  HeldSourceFilter,
+  HeldStatus,
+  HeldStatusFilter,
+} from "../lib/held-credential";
+import {
+  HELD_SOURCE_FILTERS,
+  HELD_STATUS_FILTERS,
+  HELD_STATUS_TONES,
+  heldSections,
+  heldSourceLabel,
+  heldStatusLabel,
+} from "../lib/held-credential";
+import { useDebouncedValue } from "../lib/use-debounced-value";
+import { Button, Card, ConfirmDialog, Input, Table, Tag, TopBar } from "../ui";
 import { AttestationIssueWizard } from "./attestations-issue";
 import { AttestationSchemaForm } from "./attestations-schema-form";
 import { AttestationTemplateForm } from "./attestations-template-form";
@@ -34,6 +49,7 @@ import { WscaActivationNotice } from "./wsca-activation-notice";
 const ISSUED_COLUMN_COUNT = 5;
 const CHIP_LIMIT = 3;
 const ADMIN_ROLE = "admin";
+const SEARCH_DEBOUNCE_MS = 300;
 
 type IssuedTone = "default" | "green" | "amber" | "red" | "blue";
 
@@ -84,10 +100,6 @@ export default function Attestations(): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = readTab(searchParams, tabs);
   const [modal, setModal] = useState<ActiveModal>(null);
-  // The held credential whose attributes are being viewed, if any.
-  const [selectedHeld, setSelectedHeld] = useState<HeldAttestation | null>(
-    null,
-  );
 
   const enabled = !org.isError;
   const issued = useIssuedAttestationsQuery(slug, enabled);
@@ -203,7 +215,6 @@ export default function Attestations(): React.JSX.Element {
                 error={held.error}
                 isAdmin={isAdmin}
                 formatWhen={formatWhen}
-                onSelect={setSelectedHeld}
               />
             )}
 
@@ -243,14 +254,6 @@ export default function Attestations(): React.JSX.Element {
           schemas={schemas.data ?? []}
           keys={keys.data ?? []}
           onClose={() => setModal(null)}
-        />
-      )}
-      {selectedHeld && (
-        <HeldDetailModal
-          slug={slug}
-          held={selectedHeld}
-          formatWhen={formatWhen}
-          onClose={() => setSelectedHeld(null)}
         />
       )}
     </>
@@ -530,8 +533,24 @@ function IssuedTab({
   );
 }
 
-const HELD_COLUMN_COUNT = 5;
+// Toolbar controls: the two filter dropdowns share the app's form-control styling.
+const FILTER_SELECT_CLASS =
+  "rounded-yivi border-line-strong bg-surface text-ink h-9 border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
 
+function readHeldStatusFilter(params: URLSearchParams): HeldStatusFilter {
+  const raw = params.get("status") as HeldStatusFilter | null;
+  return raw && HELD_STATUS_FILTERS.includes(raw) ? raw : "";
+}
+
+function readHeldSourceFilter(params: URLSearchParams): HeldSourceFilter {
+  const raw = params.get("source") as HeldSourceFilter | null;
+  return raw && HELD_SOURCE_FILTERS.includes(raw) ? raw : "";
+}
+
+// The credentials the organization holds, as cards grouped into what needs
+// attention (revoked, expired or expiring soon) and what is valid. A card opens
+// the credential's detail page; the search term and both filters live in the URL
+// alongside ?tab=held so the view survives a refresh and can be shared.
 function HeldTab({
   slug,
   rows,
@@ -539,7 +558,6 @@ function HeldTab({
   error,
   isAdmin,
   formatWhen,
-  onSelect,
 }: {
   slug: string;
   rows: HeldAttestation[];
@@ -547,14 +565,59 @@ function HeldTab({
   error: Error | null;
   isAdmin: boolean;
   formatWhen: (iso: string) => string;
-  onSelect: (row: HeldAttestation) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
+  const formatDate = useDateFormatter();
   const remove = useDeleteHeldAttestationMutation(slug);
   const [pendingDelete, setPendingDelete] = useState<HeldAttestation | null>(
     null,
   );
-  const columnCount = isAdmin ? HELD_COLUMN_COUNT : HELD_COLUMN_COUNT - 1;
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const query = searchParams.get("q")?.trim() ?? "";
+  const status = readHeldStatusFilter(searchParams);
+  const source = readHeldSourceFilter(searchParams);
+
+  const [searchInput, setSearchInput] = useState(
+    () => searchParams.get("q") ?? "",
+  );
+  const debouncedSearch = useDebouncedValue(
+    searchInput.trim(),
+    SEARCH_DEBOUNCE_MS,
+  );
+
+  // The debounced term is pushed to the URL (history-replaced so typing doesn't
+  // flood Back); the guard avoids rewriting the URL it just read.
+  React.useEffect(() => {
+    if (debouncedSearch === query) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (debouncedSearch) next.set("q", debouncedSearch);
+        else next.delete("q");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [debouncedSearch, query, setSearchParams]);
+
+  const setFilter = (key: "status" | "source", value: string): void => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set(key, value);
+      else next.delete(key);
+      return next;
+    });
+  };
+
+  const resetView = (): void => {
+    setSearchInput("");
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      for (const key of ["q", "status", "source"]) next.delete(key);
+      return next;
+    });
+  };
 
   if (error) {
     return (
@@ -563,106 +626,124 @@ function HeldTab({
       />
     );
   }
+  if (pending) {
+    return (
+      <Card className="p-6">
+        <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
+      </Card>
+    );
+  }
+  if (rows.length === 0) {
+    return (
+      <Card className="p-6">
+        <p className="text-ink-soft text-[14px]">
+          {t("attestations.held.empty")}
+        </p>
+      </Card>
+    );
+  }
+
+  const filtered = query !== "" || status !== "" || source !== "";
+  const sections = heldSections(rows, { query, status, source }, new Date());
+  const nothingMatches =
+    sections.attention.length === 0 && sections.valid.length === 0;
+
+  const renderCard = ({
+    credential,
+    status: cardStatus,
+  }: HeldCredentialWithStatus): React.JSX.Element => (
+    <HeldCard
+      key={credential.id}
+      slug={slug}
+      credential={credential}
+      status={cardStatus}
+      isAdmin={isAdmin}
+      formatWhen={formatWhen}
+      formatDate={formatDate}
+      onDelete={() => setPendingDelete(credential)}
+    />
+  );
 
   return (
-    <Card className="overflow-hidden">
-      <Table className="table-fixed">
-        <Table.Head>
-          <Table.HeaderCell className="w-[32%]">
-            {t("attestations.held.columns.credential")}
-          </Table.HeaderCell>
-          <Table.HeaderCell className="w-[24%]">
-            {t("attestations.held.columns.issuer")}
-          </Table.HeaderCell>
-          <Table.HeaderCell className="w-[16%]">
-            {t("attestations.held.columns.source")}
-          </Table.HeaderCell>
-          <Table.HeaderCell className="w-[16%]">
-            {t("attestations.held.columns.received")}
-          </Table.HeaderCell>
-          {isAdmin && (
-            <Table.HeaderCell className="w-[12%]" srOnly>
-              {t("attestations.held.columns.actions")}
-            </Table.HeaderCell>
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="w-full max-w-[320px]">
+          <Input
+            icon="search"
+            placeholder={t("attestations.held.search")}
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            aria-label={t("attestations.held.search")}
+          />
+        </div>
+        <select
+          className={FILTER_SELECT_CLASS}
+          value={status}
+          aria-label={t("attestations.held.filters.status")}
+          onChange={(event) => setFilter("status", event.target.value)}
+        >
+          <option value="">{t("attestations.held.filters.allStatuses")}</option>
+          <option value="attention">
+            {t("attestations.held.filters.attention")}
+          </option>
+          <option value="revoked">
+            {t("attestations.held.status.revoked")}
+          </option>
+          <option value="expired">
+            {t("attestations.held.status.expired")}
+          </option>
+          <option value="expiringSoon">
+            {t("attestations.held.status.expiringSoon")}
+          </option>
+          <option value="valid">{t("attestations.held.status.valid")}</option>
+        </select>
+        <select
+          className={FILTER_SELECT_CLASS}
+          value={source}
+          aria-label={t("attestations.held.filters.source")}
+          onChange={(event) => setFilter("source", event.target.value)}
+        >
+          <option value="">{t("attestations.held.filters.allSources")}</option>
+          {HELD_SOURCES.map((value) => (
+            <option key={value} value={value}>
+              {heldSourceLabel(value, t)}
+            </option>
+          ))}
+        </select>
+        {filtered && (
+          <Button variant="ghost" size="sm" onClick={resetView}>
+            {t("attestations.held.reset")}
+          </Button>
+        )}
+      </div>
+
+      {nothingMatches ? (
+        <Card className="p-6">
+          <p className="text-ink-soft text-[14px]">
+            {t("attestations.held.noMatch")}
+          </p>
+        </Card>
+      ) : (
+        <>
+          {sections.attention.length > 0 && (
+            <HeldSection
+              title={t("attestations.held.sections.attention")}
+              count={sections.attention.length}
+            >
+              {sections.attention.map(renderCard)}
+            </HeldSection>
           )}
-        </Table.Head>
-        <Table.Body>
-          {pending ? (
-            <Table.State colSpan={columnCount}>
-              {t("common.loading")}
-            </Table.State>
-          ) : rows.length === 0 ? (
-            <Table.State colSpan={columnCount}>
-              {t("attestations.held.empty")}
-            </Table.State>
-          ) : (
-            rows.map((row) => {
-              const name = row.displayName || credentialDisplayName(row.vct);
-              return (
-                <Table.Row
-                  key={row.id}
-                  onClick={() => onSelect(row)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      onSelect(row);
-                    }
-                  }}
-                  tabIndex={0}
-                  role="button"
-                  aria-label={t("attestations.held.viewDetail", { name })}
-                  className="hover:bg-surface-2 focus-visible:bg-surface-2 cursor-pointer outline-none"
-                >
-                  <Table.Cell className="min-w-0">
-                    <div className="flex min-w-0 items-center gap-3">
-                      {row.logoUri && (
-                        <img
-                          src={row.logoUri}
-                          alt={t("attestations.credentialImageAlt")}
-                          className="border-line bg-surface h-8 w-8 shrink-0 rounded-md border object-contain"
-                        />
-                      )}
-                      <div className="min-w-0">
-                        <div className="text-ink truncate font-semibold">
-                          {name}
-                        </div>
-                        <div className="text-ink-soft truncate font-mono text-[12px]">
-                          {row.vct}
-                        </div>
-                      </div>
-                    </div>
-                  </Table.Cell>
-                  <Table.Cell className="text-ink-soft truncate">
-                    {row.issuer}
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Tag tone="default">
-                      <span className="capitalize">{row.source}</span>
-                    </Tag>
-                  </Table.Cell>
-                  <Table.Cell className="text-ink-soft text-[12.5px]">
-                    {formatWhen(row.receivedAt)}
-                  </Table.Cell>
-                  {isAdmin && (
-                    <Table.Cell className="text-right">
-                      <Button
-                        variant="dangerGhost"
-                        size="sm"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setPendingDelete(row);
-                        }}
-                      >
-                        {t("attestations.held.delete")}
-                      </Button>
-                    </Table.Cell>
-                  )}
-                </Table.Row>
-              );
-            })
+          {sections.valid.length > 0 && (
+            <HeldSection
+              title={t("attestations.held.sections.valid")}
+              count={sections.valid.length}
+            >
+              {sections.valid.map(renderCard)}
+            </HeldSection>
           )}
-        </Table.Body>
-      </Table>
+        </>
+      )}
+
       {pendingDelete && (
         <ConfirmDialog
           title={t("attestations.held.delete")}
@@ -680,118 +761,127 @@ function HeldTab({
           onClose={() => setPendingDelete(null)}
         />
       )}
-    </Card>
+    </div>
   );
 }
 
-// HeldDetailModal shows a held credential's friendly name, provenance metadata and
-// its disclosed attributes (fetched on open from the holder engine). Attribute
-// values are rendered generically since the SD-JWT payload may carry any JSON type.
-function HeldDetailModal({
+// One horizontal section of held-credential cards, headed by its name and count.
+function HeldSection({
+  title,
+  count,
+  children,
+}: {
+  title: string;
+  count: number;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <h2 className="text-ink text-[14px] font-semibold">{title}</h2>
+        <span className="text-muted text-[12.5px]">{count}</span>
+      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+// One held credential as a card, matching the template cards: logo, name and mono
+// vct, its status pinned top-right, provenance below. The whole card is the link
+// to the credential's detail page — an overlay stretched over it — so the delete
+// action sits above that overlay to stay clickable in its own right.
+function HeldCard({
   slug,
-  held,
+  credential,
+  status,
+  isAdmin,
   formatWhen,
-  onClose,
+  formatDate,
+  onDelete,
 }: {
   slug: string;
-  held: HeldAttestation;
+  credential: HeldAttestation;
+  status: HeldStatus;
+  isAdmin: boolean;
   formatWhen: (iso: string) => string;
-  onClose: () => void;
+  formatDate: (iso: string) => string;
+  onDelete: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const claims = useHeldAttestationClaimsQuery(slug, held.id);
-  const name =
-    claims.data?.displayName ||
-    held.displayName ||
-    credentialDisplayName(held.vct);
-  const logoUri = claims.data?.logoUri || held.logoUri;
-  const attributes = claims.data?.attributes ?? [];
+  const name = credential.displayName || credentialDisplayName(credential.vct);
 
   return (
-    <Modal title={name} closeLabel={t("common.close")} onClose={onClose}>
-      <div className="flex flex-col gap-5">
-        {logoUri && (
-          <img
-            src={logoUri}
-            alt={t("attestations.credentialImageAlt")}
-            className="border-line bg-surface h-12 w-12 shrink-0 rounded-md border object-contain"
-          />
-        )}
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
-          <dt className="text-ink-soft">
-            {t("attestations.held.columns.issuer")}
-          </dt>
-          <dd className="text-ink">{claims.data?.issuerName || held.issuer}</dd>
-          <dt className="text-ink-soft">
-            {t("attestations.held.columns.source")}
-          </dt>
-          <dd className="text-ink capitalize">{held.source}</dd>
-          <dt className="text-ink-soft">
-            {t("attestations.held.columns.received")}
-          </dt>
-          <dd className="text-ink">{formatWhen(held.receivedAt)}</dd>
-          <dt className="text-ink-soft">
-            {t("attestations.held.detail.type")}
-          </dt>
-          <dd className="text-ink-soft font-mono text-[12px] break-all">
-            {held.vct}
-          </dd>
-        </dl>
-
-        <div>
-          <h3 className="text-ink mb-2 text-[13px] font-semibold">
-            {t("attestations.held.detail.attributes")}
-          </h3>
-          {claims.isError ? (
-            <p className="text-error text-[13px]">
-              {t("attestations.loadError", { message: claims.error.message })}
-            </p>
-          ) : claims.isPending ? (
-            <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
-          ) : attributes.length === 0 ? (
-            <p className="text-ink-soft text-[13px]">
-              {t("attestations.held.detail.noAttributes")}
-            </p>
-          ) : (
-            <dl className="border-line divide-line divide-y rounded-md border">
-              {attributes.map((attribute) => (
-                <div
-                  key={attribute.key}
-                  className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4 px-3 py-2"
-                >
-                  <dt className="text-ink-soft truncate text-[12.5px]">
-                    {attribute.label || attribute.key}
-                  </dt>
-                  <dd className="text-ink text-[13px] break-words">
-                    {formatClaimValue(attribute.value)}
-                  </dd>
-                </div>
-              ))}
-            </dl>
+    <Card className="focus-within:border-ink focus-within:ring-ink/10 hover:border-line-strong relative flex flex-col gap-3 p-4 transition-colors focus-within:ring-3">
+      <Link
+        to={`/${slug}/attestations/held/${credential.id}`}
+        aria-label={t("attestations.held.viewDetail", { name })}
+        className="rounded-yivi absolute inset-0 outline-none"
+      />
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-3">
+          {credential.logoUri && (
+            <img
+              src={credential.logoUri}
+              alt={t("attestations.credentialImageAlt")}
+              className="border-line bg-surface h-10 w-10 shrink-0 rounded-md border object-contain"
+            />
           )}
+          <div className="min-w-0">
+            <div className="text-ink truncate font-semibold">{name}</div>
+            <div className="text-ink-soft truncate font-mono text-[12px]">
+              {credential.vct}
+            </div>
+          </div>
         </div>
+        <Tag tone={HELD_STATUS_TONES[status]} dot>
+          {heldStatusLabel(status, t)}
+        </Tag>
       </div>
-    </Modal>
-  );
-}
 
-// formatClaimValue renders a disclosed SD-JWT claim value for display. Primitives
-// show as text; objects/arrays are JSON-stringified so nested claims stay legible.
-function formatClaimValue(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "—";
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  if (
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "bigint"
-  ) {
-    return String(value);
-  }
-  return JSON.stringify(value);
+      <div className="flex flex-col gap-0.5 text-[12.5px]">
+        <div className="text-ink-soft truncate">
+          <span className="text-muted">
+            {t("attestations.held.fields.issuer")}
+          </span>{" "}
+          {credential.issuer}
+        </div>
+        {credential.expiresAt && (
+          <div className="text-ink-soft">
+            {status === "expired"
+              ? t("attestations.held.expiredOn", {
+                  date: formatDate(credential.expiresAt),
+                })
+              : t("attestations.held.expires", {
+                  date: formatDate(credential.expiresAt),
+                })}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <Tag>{heldSourceLabel(credential.source, t)}</Tag>
+          <span className="text-ink-soft truncate text-[12.5px]">
+            {formatWhen(credential.receivedAt)}
+          </span>
+        </div>
+        {isAdmin && (
+          <Button
+            variant="dangerGhost"
+            size="sm"
+            // Above the link overlay, so removing a credential is not a click
+            // through to its detail page.
+            className="relative z-10"
+            onClick={onDelete}
+          >
+            {t("attestations.held.delete")}
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
 }
 
 function SchemasTab({

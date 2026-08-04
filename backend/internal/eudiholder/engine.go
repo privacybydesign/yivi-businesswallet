@@ -259,6 +259,47 @@ func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (ma
 	return displays, nil
 }
 
+// Validities resolves each held credential's expiry and last known revocation
+// state, keyed by the engine credential-instance id (the ref the held index points
+// at), so the held view can badge every credential without a per-row fetch. Both
+// facts are read from the org's own schema: the batch carries the credential's exp
+// claim, the instance its last observed status-list bit. Nothing is fetched over
+// the network, so a credential revoked after it was received keeps reading as not
+// revoked until a status refresh writes the new bit back (see HeldValidity).
+func (e *Engine) Validities(ctx context.Context, orgID uuid.UUID) (map[string]HeldValidity, error) {
+	eng, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	// One row per credential instance: its own id (the ref) and status bit, plus its
+	// batch's expiry — expiry is a property of the batch, revocation of the instance.
+	var rows []struct {
+		ID              datatypes.UUID
+		ExpiresAt       datatypes.NullTime
+		LastKnownStatus uint8
+	}
+	if err := eng.Db().WithContext(ctx).
+		Model(&models.IssuedCredentialInstance{}).
+		Select(`issued_credential_instances.id,
+			credential_batches.expires_at,
+			issued_credential_instances.last_known_status`).
+		Joins(`JOIN credential_batches
+			ON credential_batches.id = issued_credential_instances.credential_batch_id`).
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("eudiholder: validities org %s: %w", orgID, err)
+	}
+	validities := make(map[string]HeldValidity, len(rows))
+	for _, row := range rows {
+		validity := HeldValidity{Revoked: statusRevoked(row.LastKnownStatus)}
+		if row.ExpiresAt.Valid {
+			expiresAt := row.ExpiresAt.V
+			validity.ExpiresAt = &expiresAt
+		}
+		validities[row.ID.String()] = validity
+	}
+	return validities, nil
+}
+
 // claimsBatch loads the credential batch for a held credential, with its claim
 // metadata preloaded for labelling. It prefers the instance ref — the only
 // per-credential discriminator the held index carries — and falls back to the vct

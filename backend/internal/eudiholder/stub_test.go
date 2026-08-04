@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -102,6 +103,71 @@ func TestStubHolderRedeem(t *testing.T) {
 	// The redeemed credential is now held: deleting its ref is a no-op success.
 	if err := h.Delete(ctx, org, got.Ref); err != nil {
 		t.Fatalf("delete redeemed ref: %v", err)
+	}
+}
+
+// TestStubHolderValidities covers the held view's status source: the expiry the
+// credential was stored with, keyed by the ref the held index points at. The stub
+// checks no status list, so nothing ever reads as revoked.
+func TestStubHolderValidities(t *testing.T) {
+	t.Parallel()
+	h := eudiholder.NewStubHolder()
+	ctx := context.Background()
+	org := uuid.New()
+
+	expires := time.Date(2027, time.March, 1, 12, 0, 0, 0, time.UTC)
+	expiring, err := h.Store(ctx, org, eudiholder.Credential{
+		VCT:       "nl.kvk.registration",
+		ExpiresAt: &expires,
+	})
+	if err != nil {
+		t.Fatalf("store expiring: %v", err)
+	}
+	perpetual, err := h.Store(ctx, org, eudiholder.Credential{VCT: "eaa.perpetual"})
+	if err != nil {
+		t.Fatalf("store perpetual: %v", err)
+	}
+
+	validities, err := h.Validities(ctx, org)
+	if err != nil {
+		t.Fatalf("validities: %v", err)
+	}
+	if len(validities) != 2 {
+		t.Fatalf("validities has %d entries, want one per held credential", len(validities))
+	}
+	if got := validities[expiring].ExpiresAt; got == nil || !got.Equal(expires) {
+		t.Errorf("validities[expiring].ExpiresAt = %v, want %v", got, expires)
+	}
+	if got := validities[perpetual].ExpiresAt; got != nil {
+		t.Errorf("validities[perpetual].ExpiresAt = %v, want nil: it does not expire", got)
+	}
+	for ref, validity := range validities {
+		if validity.Revoked {
+			t.Errorf("validities[%s].Revoked = true, want false: the stub checks no status list", ref)
+		}
+	}
+
+	// A redeemed credential carries an expiry too, so the held view has one to show
+	// in local dev / CI.
+	redeemed, err := h.Redeem(ctx, org, "openid-credential-offer://?x=1")
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	validities, err = h.Validities(ctx, org)
+	if err != nil {
+		t.Fatalf("validities after redeem: %v", err)
+	}
+	if got := validities[redeemed.Ref].ExpiresAt; got == nil || !got.After(time.Now()) {
+		t.Errorf("validities[redeemed].ExpiresAt = %v, want an expiry in the future", got)
+	}
+
+	// An org that holds nothing yields an empty map, never nil.
+	empty, err := h.Validities(ctx, uuid.New())
+	if err != nil {
+		t.Fatalf("validities for unknown org: %v", err)
+	}
+	if empty == nil {
+		t.Error("validities for an org holding nothing = nil, want an empty map")
 	}
 }
 

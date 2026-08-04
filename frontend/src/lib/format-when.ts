@@ -9,6 +9,24 @@ function calendarDayDiff(now: Date, then: Date): number {
   return Math.round((a.getTime() - b.getTime()) / MS_PER_DAY);
 }
 
+// Formats a calendar date without a time — what a validity date is ("1 Jun 2026").
+// Unlike useWhenFormatter this carries no Today / Yesterday labels: those read as
+// past events, and a validity date is usually in the future.
+export function useDateFormatter(): (iso: string) => string {
+  const { i18n } = useTranslation();
+  return useMemo(() => {
+    const day = new Intl.DateTimeFormat(i18n.language, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+    return (iso: string): string => {
+      const date = new Date(iso);
+      return Number.isNaN(date.getTime()) ? iso : day.format(date);
+    };
+  }, [i18n.language]);
+}
+
 // Formats an event timestamp for "when it happened": 24-hour time, with Today /
 // Yesterday labels for the two most recent days and an absolute date before that.
 export function useWhenFormatter(): (iso: string) => string {

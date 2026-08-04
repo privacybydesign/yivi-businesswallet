@@ -1302,20 +1302,49 @@ export const nl: Translation<typeof en> = {
     },
     held: {
       empty: "Nog geen credentials ontvangen.",
+      noMatch: "Geen credentials komen overeen met je zoekopdracht.",
       delete: "Verwijderen",
       confirmDelete: "Credential “{{name}}” verwijderen?",
       viewDetail: "Details van {{name}} bekijken",
-      columns: {
-        credential: "Credential",
+      search: "Zoek op naam, type of uitgever…",
+      reset: "Herstellen",
+      expires: "Verloopt {{date}}",
+      expiredOn: "Verlopen {{date}}",
+      fields: {
         issuer: "Uitgegeven door",
         source: "Ontvangen via",
         received: "Ontvangen",
-        actions: "Acties",
+        expires: "Verloopt",
+      },
+      sections: {
+        attention: "Vraagt aandacht",
+        valid: "Geldig",
+      },
+      status: {
+        valid: "Geldig",
+        expiringSoon: "Verloopt binnenkort",
+        expired: "Verlopen",
+        revoked: "Ingetrokken",
+      },
+      filters: {
+        status: "Status",
+        allStatuses: "Alle statussen",
+        attention: "Vraagt aandacht",
+        source: "Ontvangen via",
+        allSources: "Alle bronnen",
+      },
+      sources: {
+        qerds: "QERDS",
+        openid4vci: "OpenID4VCI",
+        bootstrap: "Onboarding",
       },
       detail: {
+        title: "Credential",
+        notFound: "Deze credential zit niet in de wallet.",
         type: "Type credential",
         attributes: "Attributen",
         noAttributes: "Deze credential geeft geen attributen vrij.",
+        doesNotExpire: "Verloopt niet",
       },
     },
     schemas: {
