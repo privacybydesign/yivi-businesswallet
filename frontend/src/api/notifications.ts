@@ -2,18 +2,21 @@ import { z } from "zod";
 import { request } from "./http";
 
 // The delivery channels the backend knows about, in the order the settings
-// screen lists them. `msteams` is a reserved id with no channel implementation
-// yet, so the UI does not offer it (see SUPPORTED_CHANNELS below).
+// screen lists them.
 export const NOTIFICATION_CHANNELS = ["email", "slack", "msteams"] as const;
 export const channelIdSchema = z.enum(NOTIFICATION_CHANNELS);
 export type ChannelId = z.infer<typeof channelIdSchema>;
 
 // The channels the settings screen renders a column for: those with a working
-// backend channel today. Kept as a subset of NOTIFICATION_CHANNELS so an org's
-// saved subscription to a not-yet-offered channel is preserved untouched.
+// backend channel today. That is currently all of them, but it stays a separate
+// subset of NOTIFICATION_CHANNELS rather than collapsing into it — the ids exist
+// so an org's saved subscription survives a deployment that has not enabled a
+// channel (see notifications.ChannelID in the backend), and the next reserved id
+// needs a column withheld without its subscriptions being dropped.
 export const SUPPORTED_CHANNELS = [
   "email",
   "slack",
+  "msteams",
 ] as const satisfies readonly ChannelId[];
 
 // The families the subscribable events are grouped into, so the screen renders

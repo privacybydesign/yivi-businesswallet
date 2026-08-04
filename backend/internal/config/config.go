@@ -74,6 +74,12 @@ const (
 	// can be rotated without touching stored SMTP passwords; without it an org
 	// cannot store a webhook URL at all (internal/slackchannel).
 	envSlackEncryptionKey = "SLACK_ENCRYPTION_KEY"
+	// TEAMS_ENCRYPTION_KEY (hex 32 bytes) encrypts per-org Microsoft Teams webhook
+	// URLs at rest. Its own key rather than the Slack one, for the same reason every
+	// other secret at rest here has one: the two are rotated by different decisions,
+	// and rotating one must not take out the other channel. Without it an org cannot
+	// store a Teams webhook URL at all (internal/teamschannel).
+	envTeamsEncryptionKey = "TEAMS_ENCRYPTION_KEY"
 	// MAIL_DEFAULT_LOCALE is the language outbound transactional mail falls back to
 	// when the recipient's own preference is unknown. Must be a locale the mail
 	// catalogue ships (internal/email); cmd/api rejects anything else at boot.
@@ -234,6 +240,9 @@ type Config struct {
 	// SlackEncryptionKey encrypts per-org Slack webhook URLs at rest. Empty means
 	// the deployment cannot store one.
 	SlackEncryptionKey string
+	// TeamsEncryptionKey encrypts per-org Microsoft Teams webhook URLs at rest.
+	// Empty means the deployment cannot store one.
+	TeamsEncryptionKey string
 	// ProvisioningEncryptionKey encrypts the per-org directory client secret at
 	// rest. Empty means no organisation can store one, so directory provisioning
 	// stays unavailable.
@@ -386,6 +395,7 @@ func Load() (Config, error) {
 		AppBaseURL:                appBaseURL,
 		EmailEncryptionKey:        os.Getenv(envEmailEncryptionKey),
 		SlackEncryptionKey:        os.Getenv(envSlackEncryptionKey),
+		TeamsEncryptionKey:        os.Getenv(envTeamsEncryptionKey),
 		ProvisioningEncryptionKey: os.Getenv(envProvisioningEncryptionKey),
 		MailDefaultLocale:         envOrDefault(envMailDefaultLocale, defaultMailLocale),
 		StaticDir:                 os.Getenv(envStaticDir),

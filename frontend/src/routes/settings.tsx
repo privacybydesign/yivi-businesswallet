@@ -14,6 +14,7 @@ import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
 import { PostguardNotificationsCard } from "./postguard-notifications";
 import { ProvisioningSettingsPanel } from "./provisioning-settings";
 import { SlackSettingsPanel } from "./slack-settings";
+import { TeamsSettingsPanel } from "./teams-settings";
 import { ThemeSettingsPanel } from "./theme-settings";
 import { WscaWalletPanel } from "./wsca-wallet-settings";
 import * as React from "react";
@@ -24,6 +25,7 @@ const TABS = [
   { key: "email", labelKey: "settings.tabEmail" },
   { key: "mailTemplates", labelKey: "settings.tabMailTemplates" },
   { key: "slack", labelKey: "settings.tabSlack" },
+  { key: "msteams", labelKey: "settings.tabTeams" },
   { key: "notifications", labelKey: "settings.tabNotifications" },
   { key: "issuer", labelKey: "settings.tabIssuer" },
   { key: "provisioning", labelKey: "settings.tabProvisioning" },
@@ -120,6 +122,8 @@ export default function Settings(): React.JSX.Element {
           <EmailTemplatesPanel slug={slug} />
         ) : tab === "slack" ? (
           <SlackSettingsPanel slug={slug} />
+        ) : tab === "msteams" ? (
+          <TeamsSettingsPanel slug={slug} />
         ) : tab === "notifications" ? (
           <NotificationsSettingsPanel slug={slug} />
         ) : tab === "issuer" ? (

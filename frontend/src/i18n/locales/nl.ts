@@ -395,6 +395,8 @@ export const nl: Translation<typeof en> = {
     emailTestSent: "Test-e-mail verstuurd",
     slackSettingsSaved: "Slack-instellingen opgeslagen",
     slackTestSent: "Testnotificatie verstuurd",
+    teamsSettingsSaved: "Microsoft Teams-instellingen opgeslagen",
+    teamsTestSent: "Testnotificatie verstuurd",
     notificationSettingsSaved: "Notificatie-instellingen opgeslagen",
     provisioningSettingsSaved:
       "Instellingen voor directorysynchronisatie opgeslagen",
@@ -492,6 +494,7 @@ export const nl: Translation<typeof en> = {
       orgOnboardingAttestations: "Onboarding-attestaties",
       orgNotificationSettings: "Notificatie-instellingen",
       orgSlackSettings: "Slack-instellingen",
+      orgTeamsSettings: "Microsoft Teams-instellingen",
       orgProvisioningSettings: "Provisioning-instellingen",
     },
     actions: {
@@ -559,6 +562,7 @@ export const nl: Translation<typeof en> = {
       onboardingSettingsUpdated: "Onboarding-attestaties bijgewerkt",
       notificationSettingsUpdated: "Notificatie-instellingen bijgewerkt",
       slackSettingsUpdated: "Slack-instellingen bijgewerkt",
+      teamsSettingsUpdated: "Microsoft Teams-instellingen bijgewerkt",
       provisioningSettingsUpdated: "Provisioning-instellingen bijgewerkt",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
@@ -653,6 +657,7 @@ export const nl: Translation<typeof en> = {
     tabEmail: "E-mail",
     tabMailTemplates: "E-mailteksten",
     tabSlack: "Slack",
+    tabTeams: "Microsoft Teams",
     tabNotifications: "Notificaties",
     tabIssuer: "Uitgever",
     tabProvisioning: "Directorysynchronisatie",
@@ -682,6 +687,9 @@ export const nl: Translation<typeof en> = {
     slackNotConfigured:
       "Slack is nog niet geconfigureerd, dus Slack-notificaties worden pas bezorgd zodra je dit instelt.",
     configureSlack: "Slack configureren",
+    teamsNotConfigured:
+      "Microsoft Teams is nog niet geconfigureerd, dus Teams-notificaties worden pas bezorgd zodra je dit instelt.",
+    configureTeams: "Microsoft Teams configureren",
     loadError: "Kon notificatie-instellingen niet laden: {{message}}",
     saveError: "Kon notificatie-instellingen niet opslaan: {{message}}",
   },
@@ -1048,6 +1056,34 @@ export const nl: Translation<typeof en> = {
       "Sla eerst een webhook-URL op en zet versturen aan voordat je een test verstuurt.",
     testRefused:
       "Slack heeft de testnotificatie niet geaccepteerd: {{message}}",
+    testError: "Testnotificatie versturen mislukt: {{message}}",
+  },
+  teamsSettings: {
+    loadError: "Microsoft Teams-instellingen laden mislukt: {{message}}",
+    heading: "Microsoft Teams-webhook",
+    description:
+      "Gebeurtenissen waarop deze organisatie zich heeft geabonneerd worden via een webhook in een Teams-kanaal geplaatst. Maak er een aan in Teams en plak de URL hier.",
+    webhookUrl: "Webhook-URL",
+    webhookPlaceholder: "https://…webhook.office.com/webhookb2/…",
+    webhookHint:
+      "Beide soorten URL werken: een Workflows-webhook (logic.azure.com) en een oudere connector-webhook (webhook.office.com).",
+    webhookUnchanged: "Laat leeg om de huidige webhook-URL te behouden",
+    webhookStored:
+      "Er is een webhook-URL opgeslagen. Die wordt als geheim behandeld en na het opslaan niet meer getoond.",
+    enabled: "Notificaties naar deze webhook versturen",
+    enabledNeedsWebhook: "Voeg eerst een webhook-URL toe.",
+    remove: "Webhook verwijderen",
+    saveError: "Microsoft Teams-instellingen opslaan mislukt: {{message}}",
+    noEncryptionKey:
+      "Deze omgeving heeft geen Microsoft Teams-encryptiesleutel, dus een webhook-URL kan niet worden opgeslagen. Vraag de beheerder er een in te stellen.",
+    testHeading: "Een testnotificatie versturen",
+    testDescription:
+      "Verstuur een testbericht om te bevestigen dat het in het juiste kanaal aankomt.",
+    sendTest: "Testnotificatie versturen",
+    testNotConfigured:
+      "Sla eerst een webhook-URL op en zet versturen aan voordat je een test verstuurt.",
+    testRefused:
+      "Microsoft Teams heeft de testnotificatie niet geaccepteerd: {{message}}",
     testError: "Testnotificatie versturen mislukt: {{message}}",
   },
   departments: {

@@ -381,6 +381,8 @@ export const en = {
     emailTestSent: "Test e-mail sent",
     slackSettingsSaved: "Slack settings saved",
     slackTestSent: "Test notification sent",
+    teamsSettingsSaved: "Microsoft Teams settings saved",
+    teamsTestSent: "Test notification sent",
     notificationSettingsSaved: "Notification settings saved",
     provisioningSettingsSaved: "Directory sync settings saved",
     provisioningSyncCompleted: "Directory sync completed",
@@ -477,6 +479,7 @@ export const en = {
       orgOnboardingAttestations: "Onboarding attestations",
       orgNotificationSettings: "Notification settings",
       orgSlackSettings: "Slack settings",
+      orgTeamsSettings: "Microsoft Teams settings",
       orgProvisioningSettings: "Provisioning settings",
     },
     actions: {
@@ -543,6 +546,7 @@ export const en = {
       onboardingSettingsUpdated: "Updated onboarding attestations",
       notificationSettingsUpdated: "Updated notification settings",
       slackSettingsUpdated: "Updated Slack settings",
+      teamsSettingsUpdated: "Updated Microsoft Teams settings",
       provisioningSettingsUpdated: "Updated provisioning settings",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
@@ -636,6 +640,7 @@ export const en = {
     tabEmail: "E-mail",
     tabMailTemplates: "Mail templates",
     tabSlack: "Slack",
+    tabTeams: "Microsoft Teams",
     tabNotifications: "Notifications",
     tabIssuer: "Issuer",
     tabProvisioning: "Directory sync",
@@ -665,6 +670,9 @@ export const en = {
     slackNotConfigured:
       "Slack is not configured yet, so Slack notifications won't be delivered until you set it up.",
     configureSlack: "Configure Slack",
+    teamsNotConfigured:
+      "Microsoft Teams is not configured yet, so Teams notifications won't be delivered until you set it up.",
+    configureTeams: "Configure Microsoft Teams",
     loadError: "Could not load notification settings: {{message}}",
     saveError: "Could not save notification settings: {{message}}",
   },
@@ -1015,6 +1023,34 @@ export const en = {
     testNotConfigured:
       "Save a webhook URL and switch posting on before sending a test.",
     testRefused: "Slack did not accept the test notification: {{message}}",
+    testError: "Could not send the test notification: {{message}}",
+  },
+  teamsSettings: {
+    loadError: "Could not load the Microsoft Teams settings: {{message}}",
+    heading: "Microsoft Teams webhook",
+    description:
+      "Events this organization subscribed to are posted into a Teams channel through a webhook. Create one in Teams and paste its URL here.",
+    webhookUrl: "Webhook URL",
+    webhookPlaceholder: "https://…webhook.office.com/webhookb2/…",
+    webhookHint:
+      "Both kinds of URL work: a Workflows webhook (logic.azure.com) and an older connector webhook (webhook.office.com).",
+    webhookUnchanged: "Leave blank to keep the current webhook URL",
+    webhookStored:
+      "A webhook URL is stored. It is treated as a secret, so it is not shown again after saving.",
+    enabled: "Post notifications to this webhook",
+    enabledNeedsWebhook: "Add a webhook URL first.",
+    remove: "Remove webhook",
+    saveError: "Could not save the Microsoft Teams settings: {{message}}",
+    noEncryptionKey:
+      "This deployment has no Microsoft Teams encryption key, so a webhook URL cannot be stored. Ask the administrator to set one.",
+    testHeading: "Send a test notification",
+    testDescription:
+      "Post a test message to confirm it arrives in the right channel.",
+    sendTest: "Send test notification",
+    testNotConfigured:
+      "Save a webhook URL and switch posting on before sending a test.",
+    testRefused:
+      "Microsoft Teams did not accept the test notification: {{message}}",
     testError: "Could not send the test notification: {{message}}",
   },
   departments: {

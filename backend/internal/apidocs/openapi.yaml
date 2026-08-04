@@ -37,6 +37,8 @@ tags:
     description: Per-organisation notification subscriptions per audit event.
   - name: slack
     description: Per-organisation Slack incoming-webhook notification settings.
+  - name: msteams
+    description: Per-organisation Microsoft Teams webhook notification settings.
   - name: provisioning
     description: Per-organisation user and department provisioning from an identity directory.
 paths:
@@ -2489,6 +2491,109 @@ paths:
       responses:
         '204':
           description: The test notification was accepted by Slack.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/msteams/settings:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [msteams]
+      summary: Get the organisation Microsoft Teams settings
+      description: >-
+        Requires an administrator role in the organisation. The webhook URL is a
+        secret and is never returned: the response reports whether one is stored
+        (`hasWebhook`) and whether delivery is switched on.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [msteams]
+      summary: Update the organisation Microsoft Teams settings
+      description: >-
+        Requires an administrator role in the organisation. `webhookUrl` must be an
+        https URL at webhook.office.com (an Office 365 connector's incoming webhook)
+        or logic.azure.com (a Power Automate workflow trigger, which is what the
+        Teams "Workflows" app hands out); omitting it keeps the stored one, and
+        sending it empty clears it. Answers 409 `no_encryption_key` when the
+        deployment has no Microsoft Teams encryption key, because the URL cannot
+        then be stored at all.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                webhookUrl:
+                  type: string
+                  nullable: true
+                  description: >-
+                    Microsoft Teams webhook URL. Omit to keep the stored one, send
+                    an empty string to clear it. The query is kept verbatim: a
+                    workflow trigger's signature lives there.
+                enabled:
+                  type: boolean
+                  description: >-
+                    Whether subscribed events are posted to the webhook. It is
+                    stored as false when no webhook URL is stored, because there
+                    is nothing to post to.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/msteams/test:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [msteams]
+      summary: Post a test notification to the organisation Microsoft Teams webhook
+      description: >-
+        Requires an administrator role in the organisation. Answers 204 when the
+        webhook accepted the card, 409 `not_configured` when the organisation has no
+        stored webhook or has switched delivery off, and 502 `webhook_failed` with
+        the status this side read when the post was not accepted. No part of the
+        answer is repeated, not even the status line's reason phrase: the webhook URL
+        is a secret, neither endpoint kind documents a closed set of refusals to
+        allowlist, and an intermediary's error document can quote the URL back.
+      responses:
+        '204':
+          description: The test notification was accepted by the webhook.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

@@ -73,6 +73,9 @@ services:
       # Encrypts per-org Slack incoming-webhook URLs at rest (hex 32 bytes).
       # Optional: without it, orgs cannot save a Slack webhook.
       SLACK_ENCRYPTION_KEY: ${SLACK_ENCRYPTION_KEY:-}
+      # Encrypts per-org Microsoft Teams webhook URLs at rest (hex 32 bytes).
+      # Optional: without it, orgs cannot save a Teams webhook.
+      TEAMS_ENCRYPTION_KEY: ${TEAMS_ENCRYPTION_KEY:-}
       # Language outbound transactional mail falls back to (en or nl). Compose does
       # not forward a root .env variable unless it is declared here.
       MAIL_DEFAULT_LOCALE: ${MAIL_DEFAULT_LOCALE:-}
