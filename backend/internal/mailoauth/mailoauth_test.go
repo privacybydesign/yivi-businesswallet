@@ -459,6 +459,34 @@ func TestTokenRejectsAResponseWithoutAToken(t *testing.T) {
 	}
 }
 
+// A 200 whose body is not a token document is the fourth position the response
+// can carry the responder's bytes in, after the status line, the error document
+// and the transport error. encoding/json puts the first offending byte of the
+// document into its SyntaxError, so decoding a body that is the request quoted
+// back would put the client secret in an error two call sites log at ERROR.
+func TestTokenNeverRepeatsAnUndecodableBody(t *testing.T) {
+	const secret = "SUPERSECRET"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// A 200 carrying the request rather than a token document, which is what
+		// a captive portal or a TLS-terminating egress proxy answers with.
+		_, _ = fmt.Fprintf(w, "client_id=c&client_secret=%s&grant_type=client_credentials", secret)
+	}))
+	defer server.Close()
+	source := NewMicrosoft(server.Client()).WithEndpoint(server.URL)
+
+	_, err := source.Token(context.Background(), testCredentials())
+	if err == nil {
+		t.Fatal("a body that is not a token document was accepted")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("the error repeated the client secret: %v", err)
+	}
+	// The first byte of the body above is "c". A SyntaxError would name it.
+	if strings.Contains(err.Error(), "invalid character") {
+		t.Errorf("the error repeated a byte the responder chose: %v", err)
+	}
+}
+
 // The caller's deadline bounds the token request: it is on the path of a send,
 // and a hung identity platform must not hold the sending goroutine.
 func TestTokenHonoursTheContext(t *testing.T) {

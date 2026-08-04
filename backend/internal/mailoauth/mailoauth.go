@@ -247,7 +247,11 @@ func (m *Microsoft) fetch(ctx context.Context, creds Credentials) (string, time.
 		ExpiresIn   int64  `json:"expires_in"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", 0, fmt.Errorf("mailoauth: token: decode response: %w", err)
+		// Deliberately not wrapped: encoding/json puts the first offending byte of
+		// the document into its SyntaxError, and that byte is the responder's, on
+		// the one path whose request carried the client secret in its form body.
+		// That is the same reason statusDetail repeats only allowlisted bytes.
+		return "", 0, errors.New("mailoauth: token: response was not a token document")
 	}
 	if body.AccessToken == "" {
 		return "", 0, errors.New("mailoauth: token: response carried no access token")
