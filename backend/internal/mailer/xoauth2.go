@@ -7,8 +7,15 @@ import (
 	"strings"
 )
 
-// xoauth2Mechanism is the SASL mechanism name as it goes out in the AUTH command.
-const xoauth2Mechanism = "XOAUTH2"
+const (
+	// xoauth2Mechanism is the SASL mechanism name as it goes out in the AUTH command.
+	xoauth2Mechanism = "XOAUTH2"
+
+	// xoauth2Separator is the SASL field separator, CTRL-A. It goes between the two
+	// fields of the client response and twice more to terminate it, which is why a
+	// stray one in either field would forge a field rather than corrupt one.
+	xoauth2Separator = '\x01'
+)
 
 // xoauth2Auth is the SASL XOAUTH2 client (Google's mechanism, and the one
 // Microsoft 365 requires now that it has turned off Basic Authentication for
@@ -44,10 +51,11 @@ func (a *xoauth2Auth) Start(server *smtp.ServerInfo) (string, []byte, error) {
 	}
 	// The username and the token are ours, not a peer's, but a stray ^A would
 	// forge an extra field in the SASL response, so refuse rather than truncate.
-	if strings.ContainsRune(a.username, 0x01) || strings.ContainsRune(a.token, 0x01) {
+	if strings.ContainsRune(a.username, xoauth2Separator) || strings.ContainsRune(a.token, xoauth2Separator) {
 		return "", nil, errors.New("mailer: XOAUTH2 username and access token must not contain a separator byte")
 	}
-	return xoauth2Mechanism, fmt.Appendf(nil, "user=%s\x01auth=Bearer %s\x01\x01", a.username, a.token), nil
+	return xoauth2Mechanism, fmt.Appendf(nil, "user=%s%cauth=Bearer %s%c%c",
+		a.username, xoauth2Separator, a.token, xoauth2Separator, xoauth2Separator), nil
 }
 
 // Next answers the server's challenge. XOAUTH2 has no second client message: a

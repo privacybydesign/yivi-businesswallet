@@ -9,6 +9,8 @@ import {
 import type { EmailSettings as EmailSettingsData } from "../api/email";
 import {
   SMTP_AUTH_MECHANISMS,
+  SMTP_XOAUTH2,
+  emailSettingsBody,
   isSmtpAuthMechanism,
   smtpAuthMechanismOptions,
 } from "../api/email";
@@ -23,7 +25,6 @@ const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
 const CONTROL =
   "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
-const XOAUTH2 = "xoauth2";
 // Plausible address check only; the backend is the authority.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -87,20 +88,18 @@ function SmtpForm({
   const [enabled, setEnabled] = useState(initial.enabled);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const usesOAuth = authMechanism === XOAUTH2;
+  const usesOAuth = authMechanism === SMTP_XOAUTH2;
 
   function handleSave(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (save.isPending) {
       return;
     }
-    const trimmedTenant = tenantId.trim();
-    const trimmedClient = clientId.trim();
     // The backend refuses the same combination. Catching it here keeps the
     // reason beside the fields, and a half-filled configuration can still be
     // saved switched off.
     if (usesOAuth && enabled) {
-      if (!trimmedTenant || !trimmedClient) {
+      if (!tenantId.trim() || !clientId.trim()) {
         setLocalError(t("emailSettings.credentialsRequired"));
         return;
       }
@@ -110,21 +109,23 @@ function SmtpForm({
       }
     }
     setLocalError(null);
-    save.mutate({
-      host: host.trim(),
-      port: Number.parseInt(port, DECIMAL_RADIX) || DEFAULT_SMTP_PORT,
-      username: username.trim(),
-      // Blank keeps the stored password; a typed value replaces it.
-      password: password ? password : null,
-      authMechanism,
-      tenantId: trimmedTenant,
-      clientId: trimmedClient,
-      // Same rule as the password.
-      clientSecret: clientSecret ? clientSecret : null,
-      fromName: fromName.trim(),
-      fromAddress: fromAddress.trim(),
-      enabled,
-    });
+    // emailSettingsBody decides which credentials the body carries and which it
+    // clears; the trimming and the three-way secret rule live with it.
+    save.mutate(
+      emailSettingsBody({
+        host,
+        port: Number.parseInt(port, DECIMAL_RADIX) || DEFAULT_SMTP_PORT,
+        username,
+        password,
+        authMechanism,
+        tenantId,
+        clientId,
+        clientSecret,
+        fromName,
+        fromAddress,
+        enabled,
+      }),
+    );
   }
 
   return (

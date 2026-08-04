@@ -36,10 +36,6 @@ const (
 	AuthXOAuth2 AuthMechanism = "xoauth2"
 )
 
-// Mechanisms returns the auth mechanisms this transport can speak, in the order
-// a settings screen lists them.
-func Mechanisms() []AuthMechanism { return []AuthMechanism{AuthPlain, AuthXOAuth2} }
-
 // KnownMechanism reports whether m is a mechanism this transport can speak. The
 // empty string is not one: callers normalise it to AuthPlain first.
 func KnownMechanism(m AuthMechanism) bool {

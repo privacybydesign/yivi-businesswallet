@@ -1,13 +1,17 @@
 package mailoauth
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -199,8 +203,11 @@ func TestTokenReportsIncompleteCredentials(t *testing.T) {
 	}
 }
 
-// Microsoft's error document names what is wrong (an expired secret, a
-// permission nobody consented to), and that is what an admin has to read.
+// Microsoft's error document names what is wrong (a wrong or expired secret, a
+// permission nobody consented to), and that is what an admin has to read. What
+// carries it are the two closed shapes: the RFC 6749 error code, and the AADSTS
+// code an admin searches for. The free text after that code is the responder's
+// own bytes and goes with the rest of the description.
 func TestTokenCarriesTheEndpointsRefusal(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -213,9 +220,229 @@ func TestTokenCarriesTheEndpointsRefusal(t *testing.T) {
 	if err == nil {
 		t.Fatal("a refused credential produced a token")
 	}
-	if !strings.Contains(err.Error(), "AADSTS7000215") {
-		t.Errorf("err = %v, want it to carry the endpoint's reason", err)
+	for _, want := range []string{"401 Unauthorized", "invalid_client", "AADSTS7000215"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to carry %q", err, want)
+		}
 	}
+	if strings.Contains(err.Error(), "Invalid client secret provided") {
+		t.Errorf("err = %v, want the free-text description dropped", err)
+	}
+}
+
+// rawResponder answers with a byte-for-byte HTTP response. It takes a raw listener
+// rather than httptest to reach one position an httptest stub structurally cannot:
+// ResponseWriter.WriteHeader makes Go write its own canonical reason phrase, so a
+// stub can never put chosen bytes in the status line.
+func rawResponder(t *testing.T, response string) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			// Read the request in full, body included, so the client's write completes
+			// before the connection goes away under it.
+			if req, err := http.ReadRequest(bufio.NewReader(conn)); err == nil {
+				_, _ = io.Copy(io.Discard, req.Body)
+			}
+			_, _ = io.WriteString(conn, response)
+			_ = conn.Close()
+		}
+	}()
+	return "http://" + listener.Addr().String()
+}
+
+// refusal renders a 401 with a chosen reason phrase and body.
+func refusal(reasonPhrase, body string) string {
+	return fmt.Sprintf("HTTP/1.1 401 %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+		reasonPhrase, len(body), body)
+}
+
+// The client secret goes out in the request's form body, so a response that quotes
+// the request back carries it into the error — and that error is logged at ERROR by
+// respond/handler.go for the settings self-test and notifications/dispatcher.go for
+// a background notification. The responder is not necessarily the tenant:
+// WithEndpoint is a supported mode for a sovereign cloud, and a TLS-terminating
+// egress proxy or captive portal in front of login.microsoftonline.com is an
+// ordinary deployment condition. These are the positions such a responder controls.
+func TestTokenNeverRepeatsTheRequestFromAResponse(t *testing.T) {
+	const quoted = "client_id=c&client_secret=SUPERSECRET&grant_type=client_credentials"
+	creds := testCredentials()
+	creds.ClientSecret = "SUPERSECRET"
+
+	for name, response := range map[string]string{
+		"status line reason phrase":   refusal("Unauthorized for "+quoted, `{"error":"invalid_client"}`),
+		"the error code itself":       refusal("Unauthorized", `{"error":"`+quoted+`"}`),
+		"a free-text description":     refusal("Unauthorized", `{"error":"invalid_client","error_description":"`+quoted+`"}`),
+		"an intermediary's HTML page": refusal("Unauthorized", "<html><body>"+quoted+"</body></html>"),
+		"a description after a code":  refusal("Unauthorized", `{"error":"invalid_client","error_description":"AADSTS7000215: `+quoted+`"}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			source := NewMicrosoft(http.DefaultClient).WithEndpoint(rawResponder(t, response))
+
+			_, err := source.Token(context.Background(), creds)
+			if err == nil {
+				t.Fatal("a refused credential produced a token")
+			}
+			if strings.Contains(err.Error(), "SUPERSECRET") {
+				t.Errorf("err = %v, want no part of the client secret in it", err)
+			}
+			// The status this side read stays, so the reason is not empty.
+			if !strings.Contains(err.Error(), "401 Unauthorized") {
+				t.Errorf("err = %v, want this side's own status line", err)
+			}
+		})
+	}
+}
+
+// An error code outside RFC 6749's set is not one of the endpoint's refusals but
+// bytes the responder chose, so it is dropped rather than repeated. It costs the
+// reason's detail and leaks nothing, the same trade slackchannel's allowlist makes.
+func TestTokenDropsAnUnlistedErrorCode(t *testing.T) {
+	source := NewMicrosoft(http.DefaultClient).WithEndpoint(
+		rawResponder(t, refusal("Unauthorized", `{"error":"temporarily_unavailable"}`)))
+
+	_, err := source.Token(context.Background(), testCredentials())
+	if err == nil {
+		t.Fatal("a refused credential produced a token")
+	}
+	if strings.Contains(err.Error(), "temporarily_unavailable") {
+		t.Errorf("err = %v, want an unlisted code dropped", err)
+	}
+}
+
+// Concurrent sends for one org are the realistic cache miss, and the case the
+// cache's own justification is weakest in: notifications.Dispatcher runs each
+// Channel.Notify on its own goroutine, so several outbox rows for one org fan out
+// at once and each would otherwise spend a request against an endpoint that is
+// rate-limited per tenant.
+func TestTokenSharesOneExchangeAcrossConcurrentCallers(t *testing.T) {
+	const callers = 20
+	release := make(chan struct{})
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		<-release
+		_, _ = fmt.Fprint(w, `{"token_type":"Bearer","expires_in":3600,"access_token":"shared-token"}`)
+	}))
+	defer server.Close()
+	source := NewMicrosoft(server.Client()).WithEndpoint(server.URL)
+
+	tokens := make([]string, callers)
+	errs := make([]error, callers)
+	var started, finished sync.WaitGroup
+	started.Add(callers)
+	finished.Add(callers)
+	for i := range callers {
+		go func() {
+			defer finished.Done()
+			started.Done()
+			tokens[i], errs[i] = source.Token(context.Background(), testCredentials())
+		}()
+	}
+	// Every caller has entered Token, so the exchange they share is in flight.
+	// A straggler that arrives after it finishes reads the cache, which is the
+	// same one request.
+	started.Wait()
+	close(release)
+	finished.Wait()
+
+	if got := calls.Load(); got != 1 {
+		t.Errorf("token endpoint called %d times for %d concurrent callers, want 1", got, callers)
+	}
+	for i := range callers {
+		if errs[i] != nil {
+			t.Fatalf("caller %d: %v", i, errs[i])
+		}
+		if tokens[i] != "shared-token" {
+			t.Errorf("caller %d token = %q, want the shared token", i, tokens[i])
+		}
+	}
+	if left := inFlightSize(source); left != 0 {
+		t.Errorf("%d exchanges left in flight, want 0; a stranded one wedges every later caller", left)
+	}
+}
+
+// A failed exchange has to leave the in-flight map clean too: an entry nobody ever
+// closes would leave every later caller for that org waiting on it until its own
+// deadline passed.
+func TestTokenClearsTheInFlightEntryAfterAFailure(t *testing.T) {
+	source := NewMicrosoft(http.DefaultClient).WithEndpoint(
+		rawResponder(t, refusal("Unauthorized", `{"error":"invalid_client"}`)))
+
+	if _, err := source.Token(context.Background(), testCredentials()); err == nil {
+		t.Fatal("a refused credential produced a token")
+	}
+	if left := inFlightSize(source); left != 0 {
+		t.Errorf("%d exchanges left in flight after a failure, want 0", left)
+	}
+}
+
+// Rotating a secret changes the cache key, so the entry the old secret minted is
+// stranded — nothing looks it up again. Without eviction a long-lived process keeps
+// one per rotation per org for as long as it runs.
+func TestTokenEvictsLapsedCacheEntries(t *testing.T) {
+	const rotations = 5
+	ts := newTokenServer(t, 3600)
+	source := newTestSource(t, ts)
+	now := time.Now()
+	source.now = func() time.Time { return now }
+	ctx := context.Background()
+
+	for i := range rotations {
+		creds := testCredentials()
+		creds.ClientSecret = fmt.Sprintf("rotation-%d", i)
+		if _, err := source.Token(ctx, creds); err != nil {
+			t.Fatalf("Token (rotation %d): %v", i, err)
+		}
+		// Past the cached lifetime, so the entry this rotation leaves behind is dead
+		// by the time the next one is stored.
+		now = now.Add(time.Hour)
+	}
+
+	if got := cacheSize(source); got != 1 {
+		t.Errorf("cache holds %d entries after %d rotations, want 1", got, rotations)
+	}
+}
+
+// The entry for a credential still in use is overwritten in place, so refreshing a
+// token does not accumulate one entry per refresh either.
+func TestTokenRefreshOverwritesTheEntryInPlace(t *testing.T) {
+	ts := newTokenServer(t, 3600)
+	source := newTestSource(t, ts)
+	now := time.Now()
+	source.now = func() time.Time { return now }
+	ctx := context.Background()
+
+	for range 5 {
+		if _, err := source.Token(ctx, testCredentials()); err != nil {
+			t.Fatalf("Token: %v", err)
+		}
+		now = now.Add(time.Hour)
+	}
+
+	if got := cacheSize(source); got != 1 {
+		t.Errorf("cache holds %d entries after 5 refreshes, want 1", got)
+	}
+}
+
+func cacheSize(m *Microsoft) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.cache)
+}
+
+func inFlightSize(m *Microsoft) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.inFlight)
 }
 
 // A 200 with no token is not a token: obeying it would authenticate with an
