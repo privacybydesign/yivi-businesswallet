@@ -126,7 +126,8 @@ function NotificationsForm({
   const dirty = subscriptionsDiffer(active, settings.subscriptions);
 
   // Only the channels with a working backend get a column; the API may also list
-  // reserved ids (msteams). Order follows the server's channel list.
+  // a reserved id this build offers no column for. Order follows the server's
+  // channel list.
   const columns = settings.channels.filter((channel) =>
     (SUPPORTED_CHANNELS as readonly ChannelId[]).includes(channel),
   );
