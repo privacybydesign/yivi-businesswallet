@@ -400,9 +400,18 @@ func TestRevoke(t *testing.T) {
 	if _, err := e.service.Revoke(ctx, e.orgID, result.ID); !errors.Is(err, attestation.ErrNotOfferable) {
 		t.Fatalf("expected ErrNotOfferable revoking an unclaimed offer, got %v", err)
 	}
-	if _, err := e.store.MarkClaimed(ctx, e.orgID, result.ID); err != nil {
-		t.Fatalf("MarkClaimed: %v", err)
+
+	// Poll once so the (stub) issuer reports the credential issued: this captures
+	// the issuer's credential uuid on the ledger row, the handle revocation needs
+	// to flip the status-list bit.
+	claimed, err := e.service.Status(ctx, e.orgID, result.ID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
 	}
+	if claimed.Status != attestation.StatusClaimed || claimed.CredentialUUID == "" {
+		t.Fatalf("expected claimed with a captured credential uuid, got %+v", claimed)
+	}
+
 	revoked, err := e.service.Revoke(ctx, e.orgID, result.ID)
 	if err != nil {
 		t.Fatalf("Revoke: %v", err)
@@ -453,7 +462,7 @@ func TestCancelOffer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if _, err := e.store.MarkClaimed(ctx, e.orgID, claimable.ID); err != nil {
+	if _, err := e.store.MarkClaimed(ctx, e.orgID, claimable.ID, "cred-d"); err != nil {
 		t.Fatalf("MarkClaimed: %v", err)
 	}
 	if _, err := e.service.Cancel(ctx, e.orgID, claimable.ID); !errors.Is(err, attestation.ErrNotOfferable) {

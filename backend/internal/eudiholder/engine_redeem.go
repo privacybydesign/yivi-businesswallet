@@ -10,14 +10,25 @@ import (
 	"github.com/privacybydesign/irmago/common/clientmodels"
 	"github.com/privacybydesign/irmago/eudi"
 	"github.com/privacybydesign/irmago/eudi/credentials/sdjwtvc"
+	"github.com/privacybydesign/irmago/eudi/credentials/statuslist"
 	eudijwt "github.com/privacybydesign/irmago/eudi/jwt"
 	"github.com/privacybydesign/irmago/eudi/openid4vci"
+	"github.com/privacybydesign/irmago/eudi/sdjwt"
+	"github.com/privacybydesign/irmago/eudi/services"
+	"github.com/privacybydesign/irmago/eudi/storage/db"
 	"github.com/privacybydesign/irmago/eudi/utils"
 )
 
 // redirectURI is unused by the pre-authorized-code grant (no browser redirect),
 // but NewSession requires a value.
 const redirectURI = "ybw-holder://redirect"
+
+// defaultHolderLocale is the locale irmago's holder credential services resolve
+// display metadata in during receive. Receive is headless, and this engine
+// re-resolves display per request at read time (Claims/Displays take the
+// caller's language), so this only affects irmago's internal storage-time
+// resolution.
+const defaultHolderLocale = "en"
 
 // Redeem runs irmago's OpenID4VCI holder flow for offerURI against the sending
 // org's issuer, verifying and storing the received credential into this org's
@@ -43,7 +54,19 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		return Redeemed{}, fmt.Errorf("eudiholder: redeem load trust anchors org %s: %w", orgID, err)
 	}
 
-	verCtx, err := e.verificationContext(conf)
+	// statusChecker performs the IETF Token Status List check the newer irmago
+	// holder pipeline supports. It is shared between the receive-time verification
+	// context (which rejects a credential whose status-list bit is not valid) and
+	// the credential service's revocation view, exactly as irmago's own wallet
+	// wires it. Its cache is the org's own status_list_cache table (AutoMigrated
+	// with the rest of the holder schema). Credentials that carry no
+	// status.status_list reference are unaffected — the check is a no-op for them.
+	statusChecker := statuslist.NewChecker(statuslist.VerificationContext{
+		X509Context: &conf.Issuers,
+		Clock:       eudijwt.NewSystemClock(),
+	}, db.NewStatusListCacheStore(st.Db()))
+
+	verCtx, err := e.verificationContext(conf, statusChecker)
 	if err != nil {
 		return Redeemed{}, err
 	}
@@ -55,7 +78,28 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	if err != nil {
 		return Redeemed{}, err
 	}
-	client, err := openid4vci.NewClient(e.httpClient, conf, sdjwtvc.NewHolderVerificationProcessor(verCtx), binder)
+	// currentLocale is shared by the credential service and the client (matching
+	// irmago's wallet assembly); receive is headless, so the default locale stands.
+	currentLocale := clientmodels.NewCurrentLocale(defaultHolderLocale)
+	// credentialService is the holder-side store irmago's OpenID4VCI client now
+	// requires to verify and persist the received credential; its revocation
+	// service is built on the shared status checker.
+	credStore := db.NewCredentialStore(st.Db())
+	credentialService := services.NewCredentialService(
+		credStore,
+		db.NewHolderBindingKeyStore(st.Db()),
+		st.FileSystem(),
+		services.NewRevocationService(statusChecker, credStore),
+		currentLocale,
+	)
+	client, err := openid4vci.NewClient(
+		e.httpClient,
+		conf,
+		sdjwtvc.NewHolderVerificationProcessor(verCtx),
+		credentialService,
+		binder,
+		currentLocale,
+	)
 	if err != nil {
 		return Redeemed{}, fmt.Errorf("eudiholder: redeem client org %s: %w", orgID, err)
 	}
@@ -97,8 +141,10 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 
 // verificationContext builds the SD-JWT VC trust context: a configured
 // trusted-issuer CA chain when set (the holder analogue of EUDI_ISSUER_CHAIN),
-// otherwise irmago's built-in trust model loaded into conf.Issuers.
-func (e *Engine) verificationContext(conf *eudi.Configuration) (sdjwtvc.SdJwtVcVerificationContext, error) {
+// otherwise irmago's built-in trust model loaded into conf.Issuers. statusChecker
+// is set so a received credential that references a Token Status List is rejected
+// unless its bit reads valid (a no-op for credentials that carry no reference).
+func (e *Engine) verificationContext(conf *eudi.Configuration, statusChecker *statuslist.Checker) (sdjwtvc.SdJwtVcVerificationContext, error) {
 	if len(e.redeem.TrustChainPEM) > 0 {
 		opts, err := utils.CreateX509VerifyOptionsFromCertChain(e.redeem.TrustChainPEM)
 		if err != nil {
@@ -107,13 +153,15 @@ func (e *Engine) verificationContext(conf *eudi.Configuration) (sdjwtvc.SdJwtVcV
 		return sdjwtvc.SdJwtVcVerificationContext{
 			X509VerificationContext: &eudijwt.StaticVerificationContext{VerifyOpts: *opts},
 			Clock:                   eudijwt.NewSystemClock(),
-			JwtVerifier:             sdjwtvc.NewJwxJwtVerifier(),
+			JwtVerifier:             sdjwt.NewJwxJwtVerifier(),
+			StatusChecker:           statusChecker,
 		}, nil
 	}
 	return sdjwtvc.SdJwtVcVerificationContext{
 		X509VerificationContext: &conf.Issuers,
 		Clock:                   eudijwt.NewSystemClock(),
-		JwtVerifier:             sdjwtvc.NewJwxJwtVerifier(),
+		JwtVerifier:             sdjwt.NewJwxJwtVerifier(),
+		StatusChecker:           statusChecker,
 	}, nil
 }
 
