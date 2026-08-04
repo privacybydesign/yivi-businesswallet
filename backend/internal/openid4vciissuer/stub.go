@@ -39,10 +39,16 @@ func (StubIssuer) CreateOffer(_ context.Context, req OfferRequest) (Offer, error
 
 // Status reports the credential as issued immediately: the stub has no real
 // wallet on the other end, so a poll resolves the offer for the demo/tests. The
-// instance is ignored (the stub has no per-instance routing).
-func (StubIssuer) Status(_ context.Context, _, _ string) (string, error) {
-	return StatusIssued, nil
+// credential uuid is derived from the issuance id so the revoke path has a
+// stable handle to key on. The instance is ignored (the stub has no per-instance
+// routing).
+func (StubIssuer) Status(_ context.Context, _, issuanceID string) (IssuanceStatus, error) {
+	return IssuanceStatus{Status: StatusIssued, CredentialUUID: "stub-cred-" + issuanceID}, nil
 }
+
+// RevokeCredential is a no-op success: the stub keeps no status list, so there
+// is nothing to flip (the local ledger still records the revocation).
+func (StubIssuer) RevokeCredential(context.Context, string, string) error { return nil }
 
 func (StubIssuer) Ping(context.Context) error { return nil }
 
