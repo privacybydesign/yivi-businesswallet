@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/privacybydesign/irmago/common/clientmodels"
@@ -16,6 +18,7 @@ import (
 	"github.com/privacybydesign/irmago/eudi/sdjwt"
 	"github.com/privacybydesign/irmago/eudi/services"
 	"github.com/privacybydesign/irmago/eudi/storage/db"
+	"github.com/privacybydesign/irmago/eudi/storage/db/models"
 	"github.com/privacybydesign/irmago/eudi/utils"
 )
 
@@ -83,8 +86,10 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	currentLocale := clientmodels.NewCurrentLocale(defaultHolderLocale)
 	// credentialService is the holder-side store irmago's OpenID4VCI client now
 	// requires to verify and persist the received credential; its revocation
-	// service is built on the shared status checker.
-	credStore := db.NewCredentialStore(st.Db())
+	// service is built on the shared status checker. The store is wrapped so this
+	// redemption learns the instance id of the batch it actually persisted — see
+	// storeRecorder.
+	credStore := &storeRecorder{CredentialStore: db.NewCredentialStore(st.Db())}
 	credentialService := services.NewCredentialService(
 		credStore,
 		db.NewHolderBindingKeyStore(st.Db()),
@@ -119,21 +124,21 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 			return Redeemed{}, fmt.Errorf("eudiholder: redeem org %s: %w", orgID, res.err)
 		}
 		redeemed := res.redeemed
-		// irmago hands back the offered credential, whose instance id is not
-		// populated (session.buildOfferedCredentials leaves CredentialInstanceIds
-		// empty), so credentialInstanceRef yields "". Recover the stored instance id
-		// by the credential's dedup hash — a unique index (vct + sorted disclosed
-		// attributes) that identifies exactly the batch just stored, even when the
-		// org already holds another credential of the same vct — so the held index
-		// gets a precise ref for delete/claims.
+		// irmago hands back the *offered* credential (buildOfferedCredentials), which
+		// populates neither CredentialInstanceIds nor Hash — so credentialInstanceRef
+		// yields "" on every real redemption and the handed-back credential carries no
+		// way to name the row just written. Take the ref from the batch this
+		// redemption stored instead, so the held index gets a precise per-credential
+		// ref for claims/delete even when the org already holds another credential of
+		// the same vct.
 		if redeemed.Ref == "" {
-			batch, ok, err := e.batchByHash(ctx, orgID, res.hash)
-			if err != nil {
-				return Redeemed{}, err
-			}
-			if ok && len(batch.Instances) > 0 {
-				redeemed.Ref = batch.Instances[0].ID.String()
-			}
+			redeemed.Ref = credStore.refFor(redeemed.VCT)
+		}
+		if redeemed.Ref == "" {
+			// Without a ref the held row can only be resolved by vct, which is
+			// ambiguous once the org holds a second credential of the type.
+			slog.WarnContext(ctx, "eudiholder: redeemed credential stored without an instance ref",
+				slog.String("orgId", orgID.String()), slog.String("vct", redeemed.VCT))
 		}
 		return redeemed, nil
 	}
@@ -165,13 +170,72 @@ func (e *Engine) verificationContext(conf *eudi.Configuration, statusChecker *st
 	}, nil
 }
 
+// storeRecorder decorates irmago's holder credential store to capture the batches
+// a redemption persists. irmago reports a completed session through
+// Handler.Success with the credential built by session.buildOfferedCredentials,
+// which sets neither CredentialInstanceIds nor Hash — so the credential handed back
+// cannot identify the row that was just written, and vct alone cannot either once
+// the org holds two credentials of one type. Recording at the insert closes that
+// gap exactly: StoreBatch is where the ids are generated, and GORM writes them into
+// the struct it inserted.
+type storeRecorder struct {
+	db.CredentialStore
+
+	// mu guards batches: irmago stores one batch per credential configuration, and
+	// a caller may cancel while a store is in flight.
+	mu      sync.Mutex
+	batches []storedBatch
+}
+
+// storedBatch is one persisted credential batch: its credential type and the id of
+// its first instance, which is the ref the held index records (the receive flow
+// indexes one held row per received credential, matching Store's single-instance
+// batches).
+type storedBatch struct {
+	vct        string
+	instanceID string
+}
+
+func (r *storeRecorder) StoreBatch(batch *models.CredentialBatch) error {
+	if err := r.CredentialStore.StoreBatch(batch); err != nil {
+		return err
+	}
+	if len(batch.Instances) == 0 {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.batches = append(r.batches, storedBatch{
+		vct:        batch.VerifiableCredentialType,
+		instanceID: batch.Instances[0].ID.String(),
+	})
+	return nil
+}
+
+// refFor returns the instance id of the batch this redemption stored for vct.
+// It prefers an exact vct match and otherwise falls back to the first batch stored:
+// the credential Success reports is built from the first fetched configuration,
+// which storeCredentials persists first, so that is the same credential even when
+// the issued vct differs from the one the caller passed. Empty when the session
+// stored nothing.
+func (r *storeRecorder) refFor(vct string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, b := range r.batches {
+		if b.vct == vct {
+			return b.instanceID
+		}
+	}
+	if len(r.batches) > 0 {
+		return r.batches[0].instanceID
+	}
+	return ""
+}
+
 // redeemResult carries the outcome of the asynchronous, callback-driven session
-// back to Redeem over a buffered channel. hash is the received credential's dedup
-// hash, kept out of the public Redeemed type: it is not indexed in
-// held_attestations, only used to backfill a precise instance ref (see Redeem).
+// back to Redeem over a buffered channel.
 type redeemResult struct {
 	redeemed Redeemed
-	hash     string
 	err      error
 }
 
@@ -198,7 +262,6 @@ func (h *redeemHandler) Success(_ string, issued []*clientmodels.Credential) {
 			VCT:    c.CredentialId,
 			Issuer: c.Issuer.Id,
 		},
-		hash: c.Hash,
 	}
 }
 

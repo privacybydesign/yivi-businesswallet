@@ -145,6 +145,67 @@ func TestEngineStoreDeleteRoundTrip(t *testing.T) {
 	}
 }
 
+// TestEngineClaimsWithSeveralCredentialsOfOneVCT is the irmago-backed half of the
+// "held-credential detail shows the wrong credential" fix: with two credentials of
+// one vct, each ref must resolve to its own attributes, and a held row whose ref no
+// longer resolves must yield nothing rather than an arbitrary sibling's data.
+func TestEngineClaimsWithSeveralCredentialsOfOneVCT(t *testing.T) {
+	eng, _ := newTestEngine(t)
+	ctx := context.Background()
+	org := uuid.New()
+
+	const vct = "nl.kvk.registration"
+	alpha := sampleCredential(vct, "hash-alpha")
+	alpha.ProcessedPayload = []byte(`{"vct":"nl.kvk.registration","company_name":"Alpha B.V."}`)
+	beta := sampleCredential(vct, "hash-beta")
+	beta.ProcessedPayload = []byte(`{"vct":"nl.kvk.registration","company_name":"Beta B.V."}`)
+
+	refA, err := eng.Store(ctx, org, alpha)
+	if err != nil {
+		t.Fatalf("store alpha: %v", err)
+	}
+	refB, err := eng.Store(ctx, org, beta)
+	if err != nil {
+		t.Fatalf("store beta: %v", err)
+	}
+
+	for _, tc := range []struct{ ref, want string }{{refA, "Alpha B.V."}, {refB, "Beta B.V."}} {
+		claims, err := eng.Claims(ctx, org, tc.ref, vct, "en")
+		if err != nil {
+			t.Fatalf("claims %s: %v", tc.ref, err)
+		}
+		if got := attributeValue(claims.Attributes, "company_name"); got != tc.want {
+			t.Errorf("claims[company_name] for ref %s = %v, want %q", tc.ref, got, tc.want)
+		}
+	}
+
+	// No usable ref (empty, a non-uuid legacy/seed ref, or one that no longer
+	// resolves) and a vct that matches both: the fallback must decline.
+	for _, ref := range []string{"", "demo-kvk-registration", uuid.NewString()} {
+		claims, err := eng.Claims(ctx, org, ref, vct, "en")
+		if err != nil {
+			t.Fatalf("claims ref %q: %v", ref, err)
+		}
+		if len(claims.Attributes) != 0 {
+			t.Errorf("claims for ref %q = %v, want empty: the vct matches two credentials",
+				ref, claims.Attributes)
+		}
+	}
+
+	// One credential of the type left: the vct is a discriminator again, so the
+	// fallback recovers it (what a ref-less legacy row relies on).
+	if err := eng.Delete(ctx, org, refB); err != nil {
+		t.Fatalf("delete beta: %v", err)
+	}
+	claims, err := eng.Claims(ctx, org, "", vct, "en")
+	if err != nil {
+		t.Fatalf("claims by vct: %v", err)
+	}
+	if got := attributeValue(claims.Attributes, "company_name"); got != "Alpha B.V." {
+		t.Errorf("claims by vct[company_name] = %v, want the only remaining credential", got)
+	}
+}
+
 // TestEnginePerOrgSchemaIsolation proves each org's credentials live in their own
 // Postgres schema: a delete in one org never touches another's.
 func TestEnginePerOrgSchemaIsolation(t *testing.T) {

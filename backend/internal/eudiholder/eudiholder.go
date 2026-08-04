@@ -66,11 +66,11 @@ type Holder interface {
 	// SD-JWT payload (stripped of the registered protocol claims iss, vct, cnf, the
 	// SD digests) and its label from the credential's stored issuer metadata. It
 	// resolves the credential by ref (the engine instance id) when that resolves,
-	// else falls back to vct — irmago's redemption hands back a credential whose
-	// instance id is not populated, so a stored ref can be empty. An unresolvable
-	// ref+vct yields an empty slice, not an error: the held_attestations index owns
-	// existence (a caller resolves the row first), while the engine holds the
-	// claims. lang is the request's active language (a BCP-47 tag); the credential
+	// else falls back to vct — but only when the org holds exactly one credential of
+	// that type, since the vct cannot otherwise say which of them was asked for. An
+	// unresolvable ref+vct yields an empty slice, not an error: the held_attestations
+	// index owns existence (a caller resolves the row first), while the engine holds
+	// the claims. lang is the request's active language (a BCP-47 tag); the credential
 	// title, attribute labels and issuer name are resolved in it. Used by the
 	// held-credential detail view (Art 5(1)(a) "store, select").
 	Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (HeldCredential, error)
