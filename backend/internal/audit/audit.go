@@ -92,6 +92,8 @@ const (
 
 	SlackSettingsUpdated = "slack.settings_updated"
 
+	TeamsSettingsUpdated = "msteams.settings_updated"
+
 	ProvisioningSettingsUpdated = "provisioning.settings_updated"
 	ProvisioningRunCompleted    = "provisioning.run_completed"
 	ProvisioningRunFailed       = "provisioning.run_failed"
@@ -133,6 +135,8 @@ const (
 	TargetNotificationSettings = "org_notification_settings"
 
 	TargetSlackSettings = "org_slack_settings"
+
+	TargetTeamsSettings = "org_teams_settings"
 
 	TargetProvisioningSettings = "org_provisioning_settings"
 )

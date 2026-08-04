@@ -43,9 +43,10 @@ describe("toggleChannel", () => {
     expect(next).toEqual({});
   });
 
-  it("preserves an org's saved reserved-channel subscription through a rebuild", () => {
-    // msteams has no column but must survive a toggle of another channel, since
-    // the save is a full replacement of the document.
+  it("preserves the channels it is not toggling through a rebuild", () => {
+    // The save is a full replacement of the document, so a channel the admin did
+    // not touch has to come back out of the rebuild — including one this build
+    // renders no column for, whose subscription would otherwise be dropped.
     const next = toggleChannel({ "a.b": ["msteams"] }, "a.b", "email");
     expect(next["a.b"]).toEqual(["email", "msteams"]);
   });

@@ -12,6 +12,7 @@ import type {
 } from "../api/notifications";
 import { SUPPORTED_CHANNELS } from "../api/notifications";
 import { useSlackSettingsQuery } from "../api/slack.queries";
+import { useTeamsSettingsQuery } from "../api/teams.queries";
 import {
   subscriptionsDiffer,
   toggleChannel,
@@ -35,6 +36,26 @@ const GROUP_LABEL_KEY = {
   attestation: "notifications.groups.attestation",
 } as const satisfies Record<NotificationGroup, string>;
 
+// The channels that need a webhook of their own before they can deliver anything,
+// and the copy that says so. Each one's settings live on the Settings tab named
+// after the channel id, which is what the notice links to.
+const WEBHOOK_CHANNELS = [
+  {
+    id: "slack",
+    noticeKey: "notifications.slackNotConfigured",
+    configureKey: "notifications.configureSlack",
+  },
+  {
+    id: "msteams",
+    noticeKey: "notifications.teamsNotConfigured",
+    configureKey: "notifications.configureTeams",
+  },
+] as const satisfies readonly {
+  id: ChannelId;
+  noticeKey: string;
+  configureKey: string;
+}[];
+
 export function NotificationsSettingsPanel({
   slug,
 }: {
@@ -43,6 +64,7 @@ export function NotificationsSettingsPanel({
   const { t } = useTranslation();
   const settings = useNotificationSettingsQuery(slug);
   const slack = useSlackSettingsQuery(slug);
+  const teams = useTeamsSettingsQuery(slug);
 
   if (settings.isError) {
     return (
@@ -62,19 +84,21 @@ export function NotificationsSettingsPanel({
     );
   }
 
-  // Slack can only deliver once an org has stored and enabled a webhook. The
-  // column is still editable before that (a preference set now is honoured once
-  // configured), but a notice makes the gap explicit — matching "via Slack (when
-  // configured)". Only trust a settled query: while it is loading or has failed
-  // (main.tsx sets retry:false, so a failure never recovers) we don't yet know,
-  // so we treat Slack as ready rather than show a false "not configured" notice.
-  const slackReady = !slack.isSuccess || slack.data.enabled;
+  // A webhook channel can only deliver once an org has stored and enabled a
+  // webhook. The column is still editable before that (a preference set now is
+  // honoured once configured), but a notice makes the gap explicit. Only a settled
+  // query counts as knowing: while one is loading or has failed (main.tsx sets
+  // retry:false, so a failure never recovers) we treat the channel as ready rather
+  // than show a false "not configured" notice.
+  const unconfigured = new Set<ChannelId>();
+  if (slack.isSuccess && !slack.data.enabled) unconfigured.add("slack");
+  if (teams.isSuccess && !teams.data.enabled) unconfigured.add("msteams");
 
   return (
     <NotificationsForm
       slug={slug}
       settings={settings.data}
-      slackReady={slackReady}
+      unconfigured={unconfigured}
     />
   );
 }
@@ -82,11 +106,11 @@ export function NotificationsSettingsPanel({
 function NotificationsForm({
   slug,
   settings,
-  slackReady,
+  unconfigured,
 }: {
   slug: string;
   settings: NotificationSettings;
-  slackReady: boolean;
+  unconfigured: ReadonlySet<ChannelId>;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const [, setSearchParams] = useSearchParams();
@@ -141,11 +165,17 @@ function NotificationsForm({
           {t("notifications.description")}
         </p>
 
-        {!slackReady && columns.includes("slack") && (
-          <div className="bg-warning-bg text-warning-fg rounded-yivi mt-4 flex items-start gap-2.5 p-3 text-[12.5px]">
+        {WEBHOOK_CHANNELS.filter(
+          (channel) =>
+            unconfigured.has(channel.id) && columns.includes(channel.id),
+        ).map((channel) => (
+          <div
+            key={channel.id}
+            className="bg-warning-bg text-warning-fg rounded-yivi mt-4 flex items-start gap-2.5 p-3 text-[12.5px]"
+          >
             <Icon name="warning" size={16} className="mt-0.5 shrink-0" />
             <div>
-              <span>{t("notifications.slackNotConfigured")}</span>{" "}
+              <span>{t(channel.noticeKey)}</span>{" "}
               <button
                 type="button"
                 className="font-semibold underline"
@@ -153,18 +183,18 @@ function NotificationsForm({
                   setSearchParams(
                     (prev) => {
                       const params = new URLSearchParams(prev);
-                      params.set("tab", "slack");
+                      params.set("tab", channel.id);
                       return params;
                     },
                     { replace: true },
                   )
                 }
               >
-                {t("notifications.configureSlack")}
+                {t(channel.configureKey)}
               </button>
             </div>
           </div>
-        )}
+        ))}
 
         <div className="mt-5">
           <Table>

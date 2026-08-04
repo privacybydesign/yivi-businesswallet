@@ -40,6 +40,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/slackchannel"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/teamschannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
@@ -441,13 +442,24 @@ func run() error {
 	slackChannel := slackchannel.New(slackStore, orgStore, cfg.AppBaseURL, mailLocale)
 	slackHandler := slackchannel.NewHandler(slackStore, slackChannel, requireUser, orgHandler.Authorize)
 
+	// Per-org Microsoft Teams webhook, the notification layer's third channel. Same
+	// shape as Slack, on its own deployment key: without it an org cannot save one
+	// (teamschannel.ErrNoEncryptionKey).
+	teamsCipher, err := crypto.NewCipher(cfg.TeamsEncryptionKey)
+	if err != nil {
+		return err
+	}
+	teamsStore := teamschannel.NewStore(pool, recorder, teamsCipher)
+	teamsChannel := teamschannel.New(teamsStore, orgStore, cfg.AppBaseURL, mailLocale)
+	teamsHandler := teamschannel.NewHandler(teamsStore, teamsChannel, requireUser, orgHandler.Authorize)
+
 	// Drain the notification outbox out of band, into the channels registered here.
-	// MS Teams is its own slice and is not wired up yet, so an org subscribed to it
-	// keeps the preference and is delivered nothing until it is (see
-	// notifications.Dispatcher).
+	// A channel a deployment leaves out keeps the orgs' saved preference and delivers
+	// nothing until it is registered (see notifications.Dispatcher).
 	dispatcher := notifications.NewDispatcher(notificationStore, notificationStore)
 	dispatcher.Register(emailchannel.New(emailService, orgStore, cfg.AppBaseURL))
 	dispatcher.Register(slackChannel)
+	dispatcher.Register(teamsChannel)
 	dispatcher.Start(ctx, notifications.DefaultPollInterval)
 
 	// Directory provisioning. Unlike the verifier/QERDS/registry there is no boot
@@ -489,6 +501,7 @@ func run() error {
 		wscaWalletHandler,
 		notificationsHandler,
 		slackHandler,
+		teamsHandler,
 		provisioningHandler,
 	)
 
