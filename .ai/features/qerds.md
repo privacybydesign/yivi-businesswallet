@@ -127,6 +127,8 @@ edge.
 
 - **`qerds_addresses`** — `(id, org_id FK, address unique, is_default, provider_ref, provisioned_at,
   created_at)`. Art 6(1)(j) allows ≥1 address per owner; model as a set from day one.
+  **Ownership / namespace rule (see §4.1)** — provisioning is constrained to the org's own verified
+  namespace, so one org can never claim a local part that belongs to another.
 - **`qerds_messages`** — `(id, org_id FK, direction ['outbound'|'inbound'], sender_address,
   recipient_address, subject, provider_ref unique, status, submitted_at, delivered_at,
   qualified_timestamp_send, created_at, updated_at)`. `provider_ref` is the correlation key into
@@ -142,6 +144,29 @@ edge.
 - **`qerds_evidence`** — **append-only**. `(id, message_id FK, evidence_type, provider_ref,
   qualified_timestamp, raw_evidence bytea, verified_at, created_at)`. Never updated, only inserted.
   Backs the Art 5(1)(n) "access, store and verify" dashboard.
+
+### 4.1 Address ownership / namespace rule
+
+A QERDS digital address is a legally significant (eIDAS / QERDS) routing identity, so provisioning
+must not let one org claim a local part that belongs to another. The check lives in the handler
+(`namespacedLocalPart`, `handler.go`), which has the resolved org from context:
+
+- An org's **verified claim** is its `slug` — KVK-validated at bootstrap (`wallet.OpenWallet` →
+  `registry.Consult`) and unique per deployment (`organizations.slug`).
+- The org owns the local part **equal to its slug** plus any **subdivision beneath it**: `acme`,
+  `acme.sales`, `acme.sales.eu`. The auto-provisioned bootstrap address (`slug@domain`) is the bare
+  slug, so it fits the same rule.
+- The client-supplied `localPart` is lower-cased and must be either the slug itself or
+  `<slug>.<label>` where each dot-separated label matches the slug grammar (`[a-z0-9]` segments
+  joined by single hyphens). An empty value defaults to the bare slug. Anything else is rejected
+  with `400 address_outside_namespace`.
+- Because a slug can never contain the `.` separator, a local part inside one org's namespace can
+  never collide with another org's slug or namespace — closing the cross-org squatting hole. Global
+  `address` uniqueness in the store (`ErrAddressTaken`) remains the second-line guard against a
+  same-namespace race.
+
+Verifying control of a fully free-form local part (out-of-band proof) is deliberately out of scope
+for now; the slug namespace is the identity the deployment already validates.
 
 ### Delivery state machine (`status.go`)
 
@@ -193,6 +218,12 @@ chain, allow export/validate), a compose flow with directory-backed recipient lo
 attachment picker (multipart upload, client-side size/count limits mirroring the handler), an
 attachment list on the detail view with credentialed download, and address management in org
 settings.
+
+Because inbound delivery is automatic on the backend (poll worker / webhook push), the inbox does
+not depend on the manual "Check inbox" action to surface a new message: the messages query
+re-fetches on an interval (paused while the tab is hidden), and inbound messages that arrived since
+this browser last opened them show an unread count on the Inbox tab plus a marker on the row.
+Unread state is per-browser (localStorage) — an arrival signal, not an org-wide read receipt.
 
 ---
 
@@ -258,19 +289,37 @@ QERDS_PROVIDER_URL=http://domibus:8080/domibus/services/backend
 
 The `qerdsprovider.DomibusProvider` driver speaks the WS-plugin SOAP (submitMessage /
 listPendingMessages / retrieveMessage) and boot-probes the endpoint's WSDL. Its ebMS3 addressing
-(`QERDS_DOMIBUS_*`) defaults to the Domibus **sample PMode** parties (`domibus-blue` → `domibus-red`,
-service `bdx:noprocess`, action `TC1Leg1`). A different Domibus deployment needs those vars aligned
-to its PMode.
+(`QERDS_DOMIBUS_*`) defaults to the parties in `backend/internal/qerdsprovider/testdata/pmode.xml`
+(`domibus-blue` → `domibus-red`, service `bdx:noprocess`, action `TC1Leg1`). A different Domibus
+deployment needs those vars aligned to its PMode.
 
-**Live verification (manual, against this bench):** `Ping` succeeds against the real WS-plugin WSDL,
-and `submitMessage` is **structurally accepted** by Domibus 4.0 — the envelope unmarshals fully
-(this shook out a real bug: the WS-plugin `payload`/`value` elements are `elementFormDefault`
-unqualified and must reset to the empty namespace inside `submitRequest`, now covered by a
-regression test). A fully-*accepted* submission additionally requires a **PMode uploaded to the
-Domibus instance** (a fresh Domibus answers `EBMS:0010 PMode could not be found`); that is a
-Domibus-admin step (upload the sample PMode via the `:8090` console), not driver work. CI exercises
-only the envelope construction + response parsing (unit tests); the **stub remains the verified
-default** provider.
+**The bench is self-provisioning.** A fresh Domibus has no PMode and answers `EBMS:0010 PMode could
+not be found`, so the `domibus-provision` Compose service waits for the WS plugin to be healthy and
+uploads `testdata/pmode.xml` via the admin REST API (idempotent — re-runs on every `up`). It also
+persists a **message filter** routing inbound to the WS plugin (`backendWebservice`): the image
+ships three backend plugins (WS + JMS + FS) and, with no persisted filter, a *received* message
+matches no backend and is dropped to `notification.unknown` — `listPendingMessages` then stays empty
+and the recipient's poll never sees it. The live integration test provisions the same two things
+itself (CI's Domibus starts unprovisioned). The
+bundled `blue_gw`/`red_gw` sample certs **expired 2025-12-01**, which breaks the AS4 self-send two
+ways. First, Domibus's own send-side cert validation; the `domibus` service turns that off via
+`JAVA_OPTS` `-D` overrides (the image's entrypoint appends to `JAVA_OPTS`, so it survives a
+recreate). Second — and not covered by any Domibus flag — the receive side's WSS4J
+`SignatureTrustValidator` rejects a message *signed* by an expired cert (`CertificateExpiredException`
+→ `EBMS:0005`/`EBMS:0004`), so submission was accepted and logged but the send never reached `SENT`.
+The fix: `docker/development/domibus/gateway_{keystore,truststore}.jks` hold freshly-generated
+`blue_gw`/`red_gw` certs (same aliases/password as the image, so `domibus.properties` is unchanged),
+mounted over the image's expired ones. With those, the loopback completes end to end — sending side
+`ACKNOWLEDGED`, receiving side `RECEIVED`. This proves AS4 transport plumbing, **not** qualified
+compliance — the certs are self-signed and real qualified delivery keeps cert validation on.
+
+The `payload`/`value` `elementFormDefault`-unqualified reset (WS-plugin `submitRequest`) that the
+offline marshalling tests pin was a real bug shaken out here. Coverage: `domibus_test.go` unit-tests
+envelope construction + response parsing offline (runs in the default `go test`), and
+`domibus_integration_test.go` (`//go:build integration`, gated on `QERDS_TEST_DOMIBUS_URL`) runs the
+real round-trip — upload PMode, `Ping`, `Send`, assert Domibus accepts and returns a provider ref.
+CI's `backend-integration-test` job now runs a Domibus + MySQL service pair so that test executes on
+every push; the **stub remains the config default** provider for dev/CI unit runs.
 
 ### What this branch implements
 

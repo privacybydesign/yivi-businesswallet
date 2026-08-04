@@ -67,7 +67,7 @@ func (s *fakeStore) GetTemplateDetail(context.Context, uuid.UUID, uuid.UUID) (Te
 	return TemplateDetail{}, nil
 }
 
-func (s *fakeStore) CreateOffered(context.Context, uuid.UUID, IssueInput, TemplateDetail, uuid.UUID, *time.Time, string, string) (Issued, error) {
+func (s *fakeStore) CreateOffered(context.Context, uuid.UUID, IssueInput, TemplateDetail, *uuid.UUID, *time.Time, string, string) (Issued, error) {
 	return Issued{}, nil
 }
 
@@ -76,6 +76,10 @@ func (s *fakeStore) SetOffer(context.Context, uuid.UUID, uuid.UUID, string, stri
 }
 func (s *fakeStore) MarkFailed(context.Context, uuid.UUID, uuid.UUID) error { return nil }
 func (s *fakeStore) MarkClaimed(context.Context, uuid.UUID, uuid.UUID, string) (Issued, error) {
+	return Issued{}, nil
+}
+
+func (s *fakeStore) Cancel(context.Context, uuid.UUID, uuid.UUID) (Issued, error) {
 	return Issued{}, nil
 }
 func (s *fakeStore) GetClaim(context.Context, string) (claimRow, error) { return claimRow{}, nil }
@@ -144,23 +148,5 @@ func TestRevokeDegradesWhenNoStatusListBit(t *testing.T) {
 	}
 	if !store.revoked {
 		t.Fatalf("local ledger should still be flipped when the issuer has no status-list bit")
-	}
-}
-
-// TestRevokeOfferedSkipsIssuer asserts an offered row (nothing published yet, no
-// credential uuid) is revoked locally without an issuer call.
-func TestRevokeOfferedSkipsIssuer(t *testing.T) {
-	store := &fakeStore{row: Issued{Status: StatusOffered}}
-	iss := &fakeIssuer{}
-	svc := newRevokeService(store, iss)
-
-	if _, err := svc.Revoke(context.Background(), uuid.New(), uuid.New()); err != nil {
-		t.Fatalf("Revoke: %v", err)
-	}
-	if len(iss.revoked) != 0 {
-		t.Fatalf("issuer should not be called for an offered row: %+v", iss.revoked)
-	}
-	if !store.revoked {
-		t.Fatalf("offered row should still be revoked locally")
 	}
 }

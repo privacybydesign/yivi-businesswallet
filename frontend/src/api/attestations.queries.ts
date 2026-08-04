@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
+  cancelIssuedAttestation,
   createAttestationKey,
   createAttestationSchema,
   createAttestationTemplate,
@@ -14,14 +15,18 @@ import {
   getAttestationSchemas,
   getAttestationTemplates,
   getHeldAttestations,
+  getHeldAttestationClaims,
   getIssuedAttestation,
   getIssuedAttestations,
+  getOnboardingAttestations,
   issueAttestation,
+  setOnboardingAttestations,
   revokeAttestationKey,
   revokeIssuedAttestation,
   suspendAttestationKey,
   updateAttestationSchema,
   updateAttestationTemplate,
+  uploadAttestationSchemaLogo,
 } from "./attestations";
 import type {
   AttestationClaim,
@@ -31,13 +36,16 @@ import type {
   AttestationSchema,
   AttestationSchemaInput,
   AttestationSchemaUpdate,
+  SchemaLogoChange,
   AttestationTemplate,
   AttestationTemplateInput,
   AttestationTemplateUpdate,
   HeldAttestation,
+  HeldAttestationClaims,
   IssuedAttestation,
   IssueAttestationInput,
   IssueResult,
+  OnboardingAttestation,
 } from "./attestations";
 import { toast } from "../lib/toast";
 
@@ -73,6 +81,12 @@ export function attestationKeysQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "attestations", "keys"];
 }
 
+export function onboardingAttestationsQueryKey(
+  slug: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "onboarding"];
+}
+
 export function issuedAttestationsQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "attestations", "issued"];
 }
@@ -88,8 +102,27 @@ export function attestationClaimQueryKey(token: string): readonly string[] {
   return ["attestations", "claim", token];
 }
 
-export function heldAttestationsQueryKey(slug: string): readonly string[] {
-  return ["organizations", "detail", slug, "attestations", "held"];
+export function heldAttestationsQueryKey(
+  slug: string,
+  lang: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "held", lang];
+}
+
+export function heldAttestationClaimsQueryKey(
+  slug: string,
+  heldId: string,
+  lang: string,
+): readonly string[] {
+  return [
+    "organizations",
+    "detail",
+    slug,
+    "attestations",
+    "held",
+    heldId,
+    lang,
+  ];
 }
 
 // Public claim polling: re-fetches while the attestation is still offered so the
@@ -143,6 +176,37 @@ export function useAttestationTemplatesQuery(
     queryKey: attestationTemplatesQueryKey(slug),
     queryFn: ({ signal }) => getAttestationTemplates(slug, signal),
     enabled: enabled && slug !== "",
+  });
+}
+
+export function useOnboardingAttestationsQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<OnboardingAttestation[], Error> {
+  return useQuery({
+    queryKey: onboardingAttestationsQueryKey(slug),
+    queryFn: ({ signal }) => getOnboardingAttestations(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+export function useSetOnboardingAttestationsMutation(
+  slug: string,
+): UseMutationResult<
+  OnboardingAttestation[],
+  Error,
+  { templateIds: string[] }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ templateIds }) =>
+      setOnboardingAttestations(slug, templateIds),
+    meta: { suppressErrorToast: true },
+    onSuccess: (set) => {
+      toast.success(t("toasts.onboardingAttestationsUpdated"));
+      queryClient.setQueryData(onboardingAttestationsQueryKey(slug), set);
+    },
   });
 }
 
@@ -224,6 +288,32 @@ export function useUpdateAttestationSchemaMutation(
       });
       void queryClient.invalidateQueries({
         queryKey: attestationTemplatesQueryKey(slug),
+      });
+    },
+  });
+}
+
+// Uploads or clears a schema's credential image. The parent schema mutation
+// already toasts on save, so this one is silent — it only refreshes the schemas
+// query and the schema's issuer config so the preview reflects the new image.
+export function useUploadAttestationSchemaLogoMutation(
+  slug: string,
+): UseMutationResult<
+  AttestationSchema,
+  Error,
+  { schemaId: string; change: Exclude<SchemaLogoChange, "keep"> }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ schemaId, change }) =>
+      uploadAttestationSchemaLogo(slug, schemaId, change),
+    meta: { suppressErrorToast: true },
+    onSuccess: (_data, { schemaId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: attestationSchemasQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: attestationSchemaIssuerConfigQueryKey(slug, schemaId),
       });
     },
   });
@@ -394,14 +484,53 @@ export function useRevokeIssuedAttestationMutation(
   });
 }
 
+export function useCancelIssuedAttestationMutation(
+  slug: string,
+): UseMutationResult<IssuedAttestation, Error, { issuedId: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ issuedId }) => cancelIssuedAttestation(slug, issuedId),
+    meta: { suppressErrorToast: true },
+    onSuccess: (_data, { issuedId }) => {
+      toast.success(t("toasts.attestationOfferCancelled"));
+      void queryClient.invalidateQueries({
+        queryKey: issuedAttestationsQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: issuedAttestationQueryKey(slug, issuedId),
+      });
+    },
+  });
+}
+
 export function useHeldAttestationsQuery(
   slug: string,
   enabled = true,
 ): UseQueryResult<HeldAttestation[], Error> {
+  const { i18n } = useTranslation();
+  const lang = i18n.language;
   return useQuery({
-    queryKey: heldAttestationsQueryKey(slug),
-    queryFn: ({ signal }) => getHeldAttestations(slug, signal),
+    queryKey: heldAttestationsQueryKey(slug, lang),
+    queryFn: ({ signal }) => getHeldAttestations(slug, lang, signal),
     enabled: enabled && slug !== "",
+  });
+}
+
+// Fetches a held credential's disclosed attributes on demand — the Wallet tab
+// enables it when the user opens a credential's detail view.
+export function useHeldAttestationClaimsQuery(
+  slug: string,
+  heldId: string,
+  enabled = true,
+): UseQueryResult<HeldAttestationClaims, Error> {
+  const { i18n } = useTranslation();
+  const lang = i18n.language;
+  return useQuery({
+    queryKey: heldAttestationClaimsQueryKey(slug, heldId, lang),
+    queryFn: ({ signal }) =>
+      getHeldAttestationClaims(slug, heldId, lang, signal),
+    enabled: enabled && slug !== "" && heldId !== "",
   });
 }
 
@@ -414,8 +543,10 @@ export function useDeleteHeldAttestationMutation(
     mutationFn: ({ heldId }) => deleteHeldAttestation(slug, heldId),
     onSuccess: () => {
       toast.success(t("toasts.attestationHeldDeleted"));
+      // Prefix match (no language) invalidates the held list across every cached
+      // language, not just the active one.
       void queryClient.invalidateQueries({
-        queryKey: heldAttestationsQueryKey(slug),
+        queryKey: ["organizations", "detail", slug, "attestations", "held"],
       });
     },
   });

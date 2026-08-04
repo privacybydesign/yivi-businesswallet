@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { request } from "./http";
+import { absoluteApiUrl, request } from "./http";
 
 // The value types an attribute may declare, mirroring the backend's
 // SupportedAttributeTypes allow-list. The schema editor offers these as a
@@ -57,8 +57,105 @@ export type AttestationSubjectType = z.infer<
   typeof attestationSubjectTypeSchema
 >;
 
+// Subject-field tokens a template attribute can be bound to, so the issue wizard
+// pre-fills that attribute from the recipient's known data. Kept in sync with the
+// backend's SubjectSourceTokens vocabulary (internal/attestation/attestation.go).
+// SUBJECT_SOURCE_FIELDS lists the tokens per subject type, in the order the
+// template editor offers them; the editor maps each token to an i18n label.
+export const SUBJECT_SOURCE_FIELDS: Record<AttestationSubjectType, string[]> = {
+  natural_person: [
+    "member.givenNames",
+    "member.lastName",
+    "member.fullName",
+    "member.preferredName",
+    "member.email",
+    "member.phone",
+    "member.role",
+    "member.jobTitle",
+    "member.department",
+  ],
+  organization: ["org.name", "org.kvkNumber", "org.euid", "org.digitalAddress"],
+};
+
+// The recipient data a source binding reads from. Fields are optional/nullable —
+// a missing field resolves to an empty string (the wizard leaves the input blank).
+export interface MemberSubject {
+  givenNames?: string | null;
+  lastName?: string | null;
+  preferredName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  role?: string | null;
+  jobTitle?: string | null;
+  departmentName?: string | null;
+}
+
+export interface OrgSubject {
+  name?: string | null; // address-book display name
+  legalName?: string | null;
+  kvkNumber?: string | null;
+  euid?: string | null;
+  address?: string | null; // QERDS digital address
+}
+
+export type SubjectSourceValue =
+  | { kind: "natural_person"; member: MemberSubject }
+  | { kind: "organization"; org: OrgSubject };
+
+// resolveSubjectSource returns the value a source token resolves to for the given
+// recipient, or "" when the token is unknown for the subject or the field is empty.
+export function resolveSubjectSource(
+  token: string,
+  subject: SubjectSourceValue,
+): string {
+  const value = (v: string | null | undefined): string => v ?? "";
+  if (subject.kind === "natural_person") {
+    const m = subject.member;
+    switch (token) {
+      case "member.givenNames":
+        return value(m.givenNames);
+      case "member.lastName":
+        return value(m.lastName);
+      case "member.fullName":
+        return [m.givenNames, m.lastName]
+          .map((p) => (p ?? "").trim())
+          .filter(Boolean)
+          .join(" ");
+      case "member.preferredName":
+        return value(m.preferredName);
+      case "member.email":
+        return value(m.email);
+      case "member.phone":
+        return value(m.phone);
+      case "member.role":
+        return value(m.role);
+      case "member.jobTitle":
+        return value(m.jobTitle);
+      case "member.department":
+        return value(m.departmentName);
+      default:
+        return "";
+    }
+  }
+  const o = subject.org;
+  switch (token) {
+    case "org.name":
+      return value(o.legalName) || value(o.name);
+    case "org.kvkNumber":
+      return value(o.kvkNumber);
+    case "org.euid":
+      return value(o.euid);
+    case "org.digitalAddress":
+      return value(o.address);
+    default:
+      return "";
+  }
+}
+
 // A credential schema: the shape of an attestation (its VCT + attributes),
-// independent of any issuance defaults.
+// independent of any issuance defaults. logoUri is the API path serving the
+// uploaded credential image for the admin builder preview ("" when none); the
+// generated issuer config bundle embeds the image as a data: URI for wallets.
 export const attestationSchemaSchema = z.object({
   id: z.string(),
   organizationId: z.string(),
@@ -70,6 +167,7 @@ export const attestationSchemaSchema = z.object({
   subjectType: attestationSubjectTypeSchema,
   qualified: z.boolean(),
   status: z.string(),
+  logoUri: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -77,6 +175,18 @@ export const attestationSchemaSchema = z.object({
 export type AttestationSchema = z.infer<typeof attestationSchemaSchema>;
 
 const attestationSchemaListSchema = z.array(attestationSchemaSchema);
+
+// The credential-image change to apply after saving a schema: a File uploads a
+// new image, "remove" clears the current one, and "keep" leaves it untouched.
+export type SchemaLogoChange = File | "keep" | "remove";
+
+// The backend returns the image as a path on the API; make it absolute so an
+// <img> loads it from the API origin even when the SPA is served elsewhere.
+function withAbsoluteLogo(schema: AttestationSchema): AttestationSchema {
+  return schema.logoUri
+    ? { ...schema, logoUri: absoluteApiUrl(schema.logoUri) }
+    : schema;
+}
 
 // A template pairs a schema with issuance defaults (validity, key material,
 // prefilled attributes) and is enriched server-side with the schema's fields.
@@ -86,6 +196,7 @@ export const attestationTemplateSchema = z.object({
   schemaId: z.string(),
   name: z.string(),
   defaultAttributes: z.record(z.string(), z.string()).optional(),
+  attributeSources: z.record(z.string(), z.string()).optional(),
   validitySeconds: z.number().optional(),
   keyMaterialId: z.string().optional(),
   status: z.string(),
@@ -102,6 +213,21 @@ export const attestationTemplateSchema = z.object({
 export type AttestationTemplate = z.infer<typeof attestationTemplateSchema>;
 
 const attestationTemplateListSchema = z.array(attestationTemplateSchema);
+
+// An onboarding attestation is one template in the org's auto-issue set: the
+// credentials issued to a new member when they accept an invitation.
+export const onboardingAttestationSchema = z.object({
+  templateId: z.string(),
+  name: z.string(),
+  vct: z.string(),
+  displayName: z.string(),
+  subjectType: attestationSubjectTypeSchema,
+  position: z.number(),
+});
+
+export type OnboardingAttestation = z.infer<typeof onboardingAttestationSchema>;
+
+const onboardingAttestationListSchema = z.array(onboardingAttestationSchema);
 
 // Signing key material used to issue attestations: either wallet-managed or a
 // qualified certificate held by a provider.
@@ -132,10 +258,14 @@ export const issuedAttestationSchema = z.object({
   attributes: z.record(z.string(), z.string()),
   qualified: z.boolean(),
   status: z.string(),
+  // The delivery channel the offer was routed over: "email", "qerds", or "none"
+  // (shown as a QR directly, no message sent).
+  delivery: z.string(),
   issuedByUserId: z.string().optional(),
   claimedAt: z.string().optional(),
   expiresAt: z.string().optional(),
   revokedAt: z.string().optional(),
+  cancelledAt: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -145,7 +275,10 @@ export type IssuedAttestation = z.infer<typeof issuedAttestationSchema>;
 const issuedAttestationListSchema = z.array(issuedAttestationSchema);
 
 // A credential the organization HOLDS (the "Received" facet). The claims live in
-// the holder engine; this is the thin org-scoped index over it.
+// the holder engine; this is the thin org-scoped index over it. displayName and
+// logoUri are the credential's own type-metadata title and logo, resolved by the
+// backend for the request's language ("" when the credential carried no such
+// metadata — the UI then falls back to the VCT-derived name and shows no logo).
 export const heldAttestationSchema = z.object({
   id: z.string(),
   organizationId: z.string(),
@@ -156,11 +289,40 @@ export const heldAttestationSchema = z.object({
   sourceMessageId: z.string().optional(),
   receivedAt: z.string(),
   createdAt: z.string(),
+  displayName: z.string().default(""),
+  logoUri: z.string().default(""),
 });
 
 export type HeldAttestation = z.infer<typeof heldAttestationSchema>;
 
 const heldAttestationListSchema = z.array(heldAttestationSchema);
+
+// One disclosed attribute of a held credential: its payload key, the issuer
+// metadata display label (empty when the credential carries no label — the UI
+// falls back to the key), and the value (any JSON type, rendered generically).
+export const heldAttributeSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  value: z.unknown(),
+});
+
+export type HeldAttribute = z.infer<typeof heldAttributeSchema>;
+
+// The detail view of a held credential: its index metadata plus the disclosed
+// attributes read from the holder engine, display-ordered and labelled server-side.
+export const heldAttestationClaimsSchema = z.object({
+  id: z.string(),
+  vct: z.string(),
+  issuer: z.string(),
+  issuerName: z.string(),
+  displayName: z.string().default(""),
+  logoUri: z.string().default(""),
+  source: z.string(),
+  receivedAt: z.string(),
+  attributes: z.array(heldAttributeSchema),
+});
+
+export type HeldAttestationClaims = z.infer<typeof heldAttestationClaimsSchema>;
 
 // The response to a POST issue: the ledger entry plus the wallet offer link
 // (and an optional transaction code the recipient must enter).
@@ -208,6 +370,7 @@ export interface AttestationTemplateInput {
   schemaId: string;
   name: string;
   defaultAttributes?: Record<string, string>;
+  attributeSources?: Record<string, string>;
   validitySeconds?: number;
   keyMaterialId?: string;
 }
@@ -215,6 +378,7 @@ export interface AttestationTemplateInput {
 export interface AttestationTemplateUpdate {
   name: string;
   defaultAttributes?: Record<string, string>;
+  attributeSources?: Record<string, string>;
   validitySeconds?: number;
   keyMaterialId?: string;
   status: string;
@@ -230,16 +394,38 @@ export interface IssueAttestationInput {
   templateId: string;
   recipient: { kind: string; userId?: string; ref: string };
   attributes: Record<string, string>;
+  // "email" (send a claim link) or "qr" (show the QR directly, no e-mail) for a
+  // natural person; omitted for organizations (always delivered over QERDS).
+  deliveryMethod?: "email" | "qr";
 }
 
+// lang is the active app language (from i18next); the backend resolves the
+// held credentials' titles and logos in it, so switching language re-fetches
+// localized metadata.
 export function getHeldAttestations(
   slug: string,
+  lang: string,
   signal?: AbortSignal,
 ): Promise<HeldAttestation[]> {
-  return request(`${base(slug)}/held`, {
+  return request(`${base(slug)}/held?lang=${encodeURIComponent(lang)}`, {
     schema: heldAttestationListSchema,
     signal,
   });
+}
+
+export function getHeldAttestationClaims(
+  slug: string,
+  heldId: string,
+  lang: string,
+  signal?: AbortSignal,
+): Promise<HeldAttestationClaims> {
+  return request(
+    `${base(slug)}/held/${encodeURIComponent(heldId)}/claims?lang=${encodeURIComponent(lang)}`,
+    {
+      schema: heldAttestationClaimsSchema,
+      signal,
+    },
+  );
 }
 
 export function deleteHeldAttestation(
@@ -258,52 +444,89 @@ function base(slug: string): string {
   return `/api/v1/orgs/${encodeURIComponent(slug)}/attestations`;
 }
 
-export function getAttestationSchemas(
+export async function getAttestationSchemas(
   slug: string,
   signal?: AbortSignal,
 ): Promise<AttestationSchema[]> {
-  return request(`${base(slug)}/schemas`, {
+  const schemas = await request(`${base(slug)}/schemas`, {
     schema: attestationSchemaListSchema,
     signal,
   });
+  return schemas.map(withAbsoluteLogo);
 }
 
-export function getAttestationSchema(
+export async function getAttestationSchema(
   slug: string,
   schemaId: string,
   signal?: AbortSignal,
 ): Promise<AttestationSchema> {
-  return request(`${base(slug)}/schemas/${encodeURIComponent(schemaId)}`, {
-    schema: attestationSchemaSchema,
-    signal,
-  });
+  const schema = await request(
+    `${base(slug)}/schemas/${encodeURIComponent(schemaId)}`,
+    {
+      schema: attestationSchemaSchema,
+      signal,
+    },
+  );
+  return withAbsoluteLogo(schema);
 }
 
-export function createAttestationSchema(
+export async function createAttestationSchema(
   slug: string,
   input: AttestationSchemaInput,
   signal?: AbortSignal,
 ): Promise<AttestationSchema> {
-  return request(`${base(slug)}/schemas`, {
+  const schema = await request(`${base(slug)}/schemas`, {
     schema: attestationSchemaSchema,
     method: "POST",
     body: input,
     signal,
   });
+  return withAbsoluteLogo(schema);
 }
 
-export function updateAttestationSchema(
+export async function updateAttestationSchema(
   slug: string,
   schemaId: string,
   input: AttestationSchemaUpdate,
   signal?: AbortSignal,
 ): Promise<AttestationSchema> {
-  return request(`${base(slug)}/schemas/${encodeURIComponent(schemaId)}`, {
-    schema: attestationSchemaSchema,
-    method: "PATCH",
-    body: input,
-    signal,
-  });
+  const schema = await request(
+    `${base(slug)}/schemas/${encodeURIComponent(schemaId)}`,
+    {
+      schema: attestationSchemaSchema,
+      method: "PATCH",
+      body: input,
+      signal,
+    },
+  );
+  return withAbsoluteLogo(schema);
+}
+
+// Uploads, replaces or clears a schema's credential image via the multipart logo
+// sub-resource. A File replaces the image; "remove" clears it; "keep" is a no-op
+// the caller should skip.
+export async function uploadAttestationSchemaLogo(
+  slug: string,
+  schemaId: string,
+  change: Exclude<SchemaLogoChange, "keep">,
+  signal?: AbortSignal,
+): Promise<AttestationSchema> {
+  const form = new FormData();
+  if (change instanceof File) {
+    form.append("logo", change);
+  } else {
+    form.append("removeLogo", "true");
+  }
+  const schema = await request(
+    `${base(slug)}/schemas/${encodeURIComponent(schemaId)}/logo`,
+    {
+      schema: attestationSchemaSchema,
+      method: "PUT",
+      body: form,
+      signal,
+    },
+  );
+  return withAbsoluteLogo(schema);
 }
 
 // The Veramo issuer GitOps config generated from a schema: the metadata fragment
@@ -408,6 +631,29 @@ export function deleteAttestationTemplate(
   });
 }
 
+export function getOnboardingAttestations(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<OnboardingAttestation[]> {
+  return request(`${base(slug)}/onboarding`, {
+    schema: onboardingAttestationListSchema,
+    signal,
+  });
+}
+
+export function setOnboardingAttestations(
+  slug: string,
+  templateIds: string[],
+  signal?: AbortSignal,
+): Promise<OnboardingAttestation[]> {
+  return request(`${base(slug)}/onboarding`, {
+    schema: onboardingAttestationListSchema,
+    method: "PUT",
+    body: { templateIds },
+    signal,
+  });
+}
+
 export function getAttestationKeys(
   slug: string,
   signal?: AbortSignal,
@@ -495,6 +741,18 @@ export function revokeIssuedAttestation(
   signal?: AbortSignal,
 ): Promise<IssuedAttestation> {
   return request(`${base(slug)}/${encodeURIComponent(issuedId)}/revoke`, {
+    schema: issuedAttestationSchema,
+    method: "POST",
+    signal,
+  });
+}
+
+export function cancelIssuedAttestation(
+  slug: string,
+  issuedId: string,
+  signal?: AbortSignal,
+): Promise<IssuedAttestation> {
+  return request(`${base(slug)}/${encodeURIComponent(issuedId)}/cancel`, {
     schema: issuedAttestationSchema,
     method: "POST",
     signal,

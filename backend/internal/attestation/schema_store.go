@@ -14,7 +14,8 @@ import (
 )
 
 const schemaColumns = `id, organization_id, vct, display_name, credential_config_id,
-	subject_type, attributes, display, qualified, status, created_at, updated_at`
+	subject_type, attributes, display, qualified, status, created_at, updated_at,
+	(logo_bytes IS NOT NULL) AS has_logo`
 
 func scanSchema(row rowScanner) (Schema, error) {
 	var (
@@ -25,6 +26,7 @@ func scanSchema(row rowScanner) (Schema, error) {
 	if err := row.Scan(
 		&s.ID, &s.OrganizationID, &s.VCT, &s.DisplayName, &s.CredentialConfigID,
 		&s.SubjectType, &attrsRaw, &displayRaw, &s.Qualified, &s.Status, &s.CreatedAt, &s.UpdatedAt,
+		&s.HasLogo,
 	); err != nil {
 		return Schema{}, err
 	}
@@ -167,6 +169,55 @@ func (s *Store) DeleteSchema(ctx context.Context, orgID, id uuid.UUID) error {
 			audit.Target{Type: audit.TargetAttestationSchema, ID: id.String(), OrgID: &orgID},
 			audit.Deleted(map[string]any{"vct": vct}))
 	})
+}
+
+// GetSchemaLogo returns an org-scoped schema's stored image, or ErrNoSchemaLogo
+// when none is set (and ErrSchemaNotFound when the schema does not exist).
+func (s *Store) GetSchemaLogo(ctx context.Context, orgID, id uuid.UUID) (Logo, error) {
+	const query = `SELECT logo_bytes, logo_content_type
+		FROM attestation_schemas WHERE organization_id = $1 AND id = $2`
+	var logo Logo
+	err := s.db.QueryRow(ctx, query, orgID, id).Scan(&logo.Bytes, &logo.ContentType)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Logo{}, ErrSchemaNotFound
+	}
+	if err != nil {
+		return Logo{}, fmt.Errorf("attestation: get schema logo %s: %w", id, err)
+	}
+	if len(logo.Bytes) == 0 {
+		return Logo{}, ErrNoSchemaLogo
+	}
+	return logo, nil
+}
+
+// SetSchemaLogo applies an image change to an org-scoped schema and audits, in
+// one transaction. A non-empty Logo stores the image; an empty one clears it.
+// Returns ErrSchemaNotFound when the schema does not exist.
+func (s *Store) SetSchemaLogo(ctx context.Context, orgID, id uuid.UUID, logo LogoUpdate) (Schema, error) {
+	var out Schema
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		// An empty Logo (nil bytes) clears the stored image.
+		var bytes []byte
+		if len(logo.Logo.Bytes) > 0 {
+			bytes = logo.Logo.Bytes
+		}
+		const update = `UPDATE attestation_schemas
+			SET logo_bytes = $3, logo_content_type = $4, updated_at = now()
+			WHERE organization_id = $1 AND id = $2
+			RETURNING ` + schemaColumns
+		var err error
+		out, err = scanSchema(q.QueryRow(ctx, update, orgID, id, bytes, logo.Logo.ContentType))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrSchemaNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("attestation: set schema logo %s: %w", id, err)
+		}
+		return s.audit.Record(ctx, q, audit.AttestationSchemaUpdated,
+			audit.Target{Type: audit.TargetAttestationSchema, ID: out.ID.String(), OrgID: &orgID},
+			audit.Updated(nil, map[string]any{"hasLogo": len(bytes) > 0}))
+	})
+	return out, err
 }
 
 func isUniqueViolation(err error) bool {

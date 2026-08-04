@@ -5,8 +5,10 @@ import type {
   AttestationAttribute,
   AttestationKey,
   AttestationSchema,
+  AttestationSubjectType,
   AttestationTemplate,
 } from "../api/attestations";
+import { SUBJECT_SOURCE_FIELDS } from "../api/attestations";
 import {
   useCreateAttestationTemplateMutation,
   useUpdateAttestationTemplateMutation,
@@ -14,19 +16,76 @@ import {
 import { Button, Modal } from "../ui";
 import { control } from "../lib/attestation-form";
 import { Field } from "./attestations-fields";
+import type { TFunction } from "i18next";
 
 const DEFAULT_STATUS = "active";
 const DECIMAL_RADIX = 10;
 
+// sourceLabel maps a subject-source token to its i18n label. A literal-key switch
+// (not a dynamic key) keeps the typed-i18n guarantee, mirroring lib/audit-event.ts.
+function sourceLabel(t: TFunction, token: string): string {
+  switch (token) {
+    case "member.givenNames":
+      return t("attestations.sources.givenNames");
+    case "member.lastName":
+      return t("attestations.sources.lastName");
+    case "member.fullName":
+      return t("attestations.sources.fullName");
+    case "member.preferredName":
+      return t("attestations.sources.preferredName");
+    case "member.email":
+      return t("attestations.sources.email");
+    case "member.phone":
+      return t("attestations.sources.phone");
+    case "member.role":
+      return t("attestations.sources.role");
+    case "member.jobTitle":
+      return t("attestations.sources.jobTitle");
+    case "member.department":
+      return t("attestations.sources.department");
+    case "org.name":
+      return t("attestations.sources.orgName");
+    case "org.kvkNumber":
+      return t("attestations.sources.orgKvkNumber");
+    case "org.euid":
+      return t("attestations.sources.orgEuid");
+    case "org.digitalAddress":
+      return t("attestations.sources.orgDigitalAddress");
+    default:
+      return token;
+  }
+}
+
 function buildDefaults(
+  attributes: AttestationAttribute[],
+  values: Record<string, string>,
+  sources: Record<string, string>,
+): Record<string, string> | undefined {
+  const result: Record<string, string> = {};
+  for (const attribute of attributes) {
+    // A source-bound attribute is pre-filled from the subject, not a static value.
+    if ((sources[attribute.key] ?? "") !== "") {
+      continue;
+    }
+    const value = values[attribute.key]?.trim() ?? "";
+    if (value !== "") {
+      result[attribute.key] = value;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+// buildSources keeps only bindings for attributes still declared by the schema,
+// dropping any stale entry left over from a different schema/subject type.
+function buildSources(
   attributes: AttestationAttribute[],
   values: Record<string, string>,
 ): Record<string, string> | undefined {
   const result: Record<string, string> = {};
   for (const attribute of attributes) {
-    const value = values[attribute.key]?.trim() ?? "";
-    if (value !== "") {
-      result[attribute.key] = value;
+    const token = values[attribute.key] ?? "";
+    if (token !== "") {
+      result[attribute.key] = token;
     }
   }
   return Object.keys(result).length > 0 ? result : undefined;
@@ -67,6 +126,9 @@ export function AttestationTemplateForm({
   const [defaults, setDefaults] = useState<Record<string, string>>(
     template?.defaultAttributes ?? {},
   );
+  const [sources, setSources] = useState<Record<string, string>>(
+    template?.attributeSources ?? {},
+  );
   const [attempted, setAttempted] = useState(false);
 
   const pending = create.isPending || update.isPending;
@@ -81,6 +143,15 @@ export function AttestationTemplateForm({
     }
     return schemas.find((s) => s.id === schemaId)?.attributes ?? [];
   }, [isEdit, template, schemas, schemaId]);
+
+  // The subject type drives which subject fields an attribute can be copied from.
+  const subjectType = useMemo<AttestationSubjectType | undefined>(() => {
+    if (isEdit && template) {
+      return template.subjectType;
+    }
+    return schemas.find((s) => s.id === schemaId)?.subjectType;
+  }, [isEdit, template, schemas, schemaId]);
+  const sourceOptions = subjectType ? SUBJECT_SOURCE_FIELDS[subjectType] : [];
 
   const trimmedName = name.trim();
   const nameError = attempted && trimmedName === "";
@@ -99,7 +170,8 @@ export function AttestationTemplateForm({
       validity.trim() === ""
         ? undefined
         : Number.parseInt(validity, DECIMAL_RADIX);
-    const defaultAttributes = buildDefaults(attributes, defaults);
+    const attributeSources = buildSources(attributes, sources);
+    const defaultAttributes = buildDefaults(attributes, defaults, sources);
     const keyId = keyMaterialId === "" ? undefined : keyMaterialId;
 
     if (isEdit && template) {
@@ -109,6 +181,7 @@ export function AttestationTemplateForm({
           input: {
             name: trimmedName,
             defaultAttributes,
+            attributeSources,
             validitySeconds: parsedValidity,
             keyMaterialId: keyId,
             status: status.trim() || DEFAULT_STATUS,
@@ -122,6 +195,7 @@ export function AttestationTemplateForm({
           schemaId,
           name: trimmedName,
           defaultAttributes,
+          attributeSources,
           validitySeconds: parsedValidity,
           keyMaterialId: keyId,
         },
@@ -268,26 +342,62 @@ export function AttestationTemplateForm({
             <span className="text-ink-soft text-[12px] font-semibold">
               {t("attestations.templateForm.defaultAttributes")}
             </span>
-            <div className="flex flex-col gap-2">
-              {attributes.map((attribute) => (
-                <Field
-                  key={attribute.key}
-                  id={`template-default-${attribute.key}`}
-                  label={attribute.label || attribute.key}
-                >
-                  <input
+            <div className="flex flex-col gap-3">
+              {attributes.map((attribute) => {
+                const boundToken = sources[attribute.key] ?? "";
+                const isBound = boundToken !== "";
+                return (
+                  <Field
+                    key={attribute.key}
                     id={`template-default-${attribute.key}`}
-                    className={`${control(false)} h-9`}
-                    value={defaults[attribute.key] ?? ""}
-                    onChange={(event) =>
-                      setDefaults((current) => ({
-                        ...current,
-                        [attribute.key]: event.target.value,
-                      }))
-                    }
-                  />
-                </Field>
-              ))}
+                    label={attribute.label || attribute.key}
+                  >
+                    <div className="flex flex-col gap-1">
+                      {sourceOptions.length > 0 && (
+                        <select
+                          aria-label={t("attestations.templateForm.copyFrom", {
+                            attribute: attribute.label || attribute.key,
+                          })}
+                          className={`${control(false)} h-9`}
+                          value={boundToken}
+                          onChange={(event) =>
+                            setSources((current) => ({
+                              ...current,
+                              [attribute.key]: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">
+                            {t("attestations.templateForm.noSource")}
+                          </option>
+                          {sourceOptions.map((token) => (
+                            <option key={token} value={token}>
+                              {sourceLabel(t, token)}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      <input
+                        id={`template-default-${attribute.key}`}
+                        className={`${control(false)} h-9`}
+                        value={defaults[attribute.key] ?? ""}
+                        disabled={isBound}
+                        placeholder={
+                          isBound
+                            ? t("attestations.templateForm.sourcePrefill")
+                            : undefined
+                        }
+                        onChange={(event) =>
+                          setDefaults((current) => ({
+                            ...current,
+                            [attribute.key]: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </Field>
+                );
+              })}
             </div>
           </div>
         )}

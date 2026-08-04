@@ -167,3 +167,86 @@ func TestStoreMembershipsReflectInsertedRows(t *testing.T) {
 		t.Errorf("ListMembers = %+v, want one member %s/%s", members, userID, userEmail)
 	}
 }
+
+func TestStoreListResolvesThemeLogoURI(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NopRecorder{})
+	ctx := context.Background()
+
+	withLogo := makeOrg(t, pool, "Has Logo", "has-logo")
+	noLogo := makeOrg(t, pool, "No Logo", "no-logo")
+
+	// A theme row with logo bytes -> the list must resolve a versioned logo path.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO org_theme_settings (organization_id, logo_bytes, logo_content_type)
+		 VALUES ($1, $2, $3)`,
+		withLogo.ID, []byte{0x89, 0x50, 0x4e, 0x47}, "image/png",
+	); err != nil {
+		t.Fatalf("insert theme logo: %v", err)
+	}
+	// A theme row without logo bytes must not produce a logo path.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO org_theme_settings (organization_id, primary_color) VALUES ($1, $2)`,
+		noLogo.ID, "#1d4e89",
+	); err != nil {
+		t.Fatalf("insert theme colours: %v", err)
+	}
+
+	orgs, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	byID := map[uuid.UUID]organization.Organization{}
+	for _, o := range orgs {
+		byID[o.ID] = o
+	}
+
+	got := byID[withLogo.ID].LogoURI
+	wantPrefix := "/api/v1/orgs/has-logo/theme/logo?v="
+	if len(got) <= len(wantPrefix) || got[:len(wantPrefix)] != wantPrefix {
+		t.Errorf("List LogoURI = %q, want prefix %q with a version", got, wantPrefix)
+	}
+	if uri := byID[noLogo.ID].LogoURI; uri != "" {
+		t.Errorf("List LogoURI for org without a logo = %q, want empty", uri)
+	}
+}
+
+func TestStoreListForUserResolvesThemeLogoURI(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NopRecorder{})
+	ctx := context.Background()
+
+	org := makeOrg(t, pool, "Acme", "acme")
+	var userID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO users (email, given_names, last_name) VALUES ($1, $2, $3) RETURNING id",
+		"alice@example.test", "Test", "User",
+	).Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO memberships (user_id, organization_id, role) VALUES ($1, $2, $3)",
+		userID, org.ID, organization.RoleAdmin,
+	); err != nil {
+		t.Fatalf("insert membership: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO org_theme_settings (organization_id, logo_bytes, logo_content_type)
+		 VALUES ($1, $2, $3)`,
+		org.ID, []byte{0x89, 0x50, 0x4e, 0x47}, "image/png",
+	); err != nil {
+		t.Fatalf("insert theme logo: %v", err)
+	}
+
+	orgs, err := store.ListForUser(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListForUser: %v", err)
+	}
+	if len(orgs) != 1 {
+		t.Fatalf("ListForUser returned %d orgs, want 1", len(orgs))
+	}
+	wantPrefix := "/api/v1/orgs/acme/theme/logo?v="
+	if got := orgs[0].LogoURI; len(got) <= len(wantPrefix) || got[:len(wantPrefix)] != wantPrefix {
+		t.Errorf("ListForUser LogoURI = %q, want prefix %q with a version", got, wantPrefix)
+	}
+}

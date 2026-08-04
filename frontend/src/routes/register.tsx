@@ -8,6 +8,7 @@ import { REGISTER_SESSION_URL, registerWallet } from "../api/wallet";
 import type { WalletEnrollment } from "../api/wallet";
 import { meQueryKey } from "../api/auth.queries";
 import { representationLabel } from "../lib/representation";
+import { usePreAuthOrgTheme } from "../lib/pre-auth-theme";
 import {
   Button,
   Card,
@@ -55,6 +56,7 @@ function errorMessage(error: unknown, t: TFunction): string {
 
 export default function Register(): React.JSX.Element {
   const { t } = useTranslation();
+  usePreAuthOrgTheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<Phase>("form");

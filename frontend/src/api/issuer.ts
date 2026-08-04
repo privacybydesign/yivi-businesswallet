@@ -1,10 +1,12 @@
 import { z } from "zod";
-import { request } from "./http";
+import { absoluteApiUrl, request } from "./http";
 
 // Per-organization Veramo issuer instance settings. The org's attestations issue
 // from this instance (the {instance} path segment at the hosted issuer); the
 // display name / logo become the issuer's wallet-facing branding. No secret here
-// — the hosted issuer's admin token is deployment-global.
+// — the hosted issuer's admin token is deployment-global. logoUri is the API path
+// serving the uploaded logo for the admin preview ("" when none); the generated
+// bundle embeds the logo as a self-contained data: URI for wallets.
 export const issuerSettingsSchema = z.object({
   configured: z.boolean(),
   instanceName: z.string(),
@@ -16,11 +18,16 @@ export const issuerSettingsSchema = z.object({
 
 export type IssuerSettings = z.infer<typeof issuerSettingsSchema>;
 
+// The logo change to apply when saving: a File uploads a new logo, "remove"
+// clears the current one, and "keep" leaves it untouched (so the other fields
+// can be changed on their own).
+export type LogoChange = File | "keep" | "remove";
+
 export interface IssuerSettingsInput {
   instanceName: string;
   displayName: string;
-  logoUri: string;
   enabled: boolean;
+  logo: LogoChange;
 }
 
 // The generated GitOps bundle for an org's issuer instance: the issuer
@@ -42,27 +49,46 @@ function base(slug: string): string {
   return `/api/v1/orgs/${encodeURIComponent(slug)}`;
 }
 
-export function getIssuerSettings(
+// The backend returns the logo as a path on the API; make it absolute so an
+// <img> loads it from the API origin even when the SPA is served elsewhere.
+function withAbsoluteLogo(settings: IssuerSettings): IssuerSettings {
+  return settings.logoUri
+    ? { ...settings, logoUri: absoluteApiUrl(settings.logoUri) }
+    : settings;
+}
+
+export async function getIssuerSettings(
   slug: string,
   signal?: AbortSignal,
 ): Promise<IssuerSettings> {
-  return request(`${base(slug)}/issuer/settings`, {
+  const settings = await request(`${base(slug)}/issuer/settings`, {
     schema: issuerSettingsSchema,
     signal,
   });
+  return withAbsoluteLogo(settings);
 }
 
-export function updateIssuerSettings(
+export async function updateIssuerSettings(
   slug: string,
   input: IssuerSettingsInput,
   signal?: AbortSignal,
 ): Promise<IssuerSettings> {
-  return request(`${base(slug)}/issuer/settings`, {
+  const form = new FormData();
+  form.append("instanceName", input.instanceName);
+  form.append("displayName", input.displayName);
+  form.append("enabled", String(input.enabled));
+  if (input.logo instanceof File) {
+    form.append("logo", input.logo);
+  } else if (input.logo === "remove") {
+    form.append("removeLogo", "true");
+  }
+  const settings = await request(`${base(slug)}/issuer/settings`, {
     schema: issuerSettingsSchema,
     method: "PUT",
-    body: input,
+    body: form,
     signal,
   });
+  return withAbsoluteLogo(settings);
 }
 
 export function getIssuerBundle(

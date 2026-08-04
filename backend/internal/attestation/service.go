@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 )
 
@@ -39,12 +40,13 @@ type issuerInstanceResolver interface {
 // through the store directly from the handler.
 type issuedStore interface {
 	GetTemplateDetail(ctx context.Context, orgID, id uuid.UUID) (TemplateDetail, error)
-	CreateOffered(ctx context.Context, orgID uuid.UUID, in IssueInput, detail TemplateDetail, issuedBy uuid.UUID, expiresAt *time.Time, claimToken, delivery string) (Issued, error)
+	CreateOffered(ctx context.Context, orgID uuid.UUID, in IssueInput, detail TemplateDetail, issuedBy *uuid.UUID, expiresAt *time.Time, claimToken, delivery string) (Issued, error)
 	SetOffer(ctx context.Context, orgID, id uuid.UUID, issuanceID, offerURI, txCode string) error
 	MarkFailed(ctx context.Context, orgID, id uuid.UUID) error
 	MarkClaimed(ctx context.Context, orgID, id uuid.UUID, credentialUUID string) (Issued, error)
 	GetIssued(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
+	Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	GetClaim(ctx context.Context, token string) (claimRow, error)
 }
 
@@ -52,15 +54,20 @@ type issuedStore interface {
 // engine-backed delete flow (read the ref, then soft-delete the audited index
 // row). Backed by the attestation store.
 type heldMutator interface {
+	ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error)
 	GetHeld(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error)
 	SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
 }
 
-// credentialRemover removes a credential from the organization's holder engine.
-// Backed by internal/eudiholder; accept the interface so the service stays
-// decoupled from the concrete engine (stub or irmago).
-type credentialRemover interface {
+// holderEngine is the organization's holder-wallet engine seam the service
+// coordinates: removing a credential (the delete flow) and reading a held
+// credential's disclosed attributes (the detail view). Backed by
+// internal/eudiholder; accept the interface so the service stays decoupled from
+// the concrete engine (stub or irmago).
+type holderEngine interface {
 	Delete(ctx context.Context, orgID uuid.UUID, ref string) error
+	Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (eudiholder.HeldCredential, error)
+	Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]eudiholder.HeldDisplay, error)
 }
 
 // emailNotifier delivers a person-facing "your credential is ready" e-mail.
@@ -85,12 +92,12 @@ type Service struct {
 	email      emailNotifier
 	qerds      qerdsNotifier
 	held       heldMutator
-	holder     credentialRemover
+	holder     holderEngine
 	appBaseURL string
 	now        func() time.Time
 }
 
-func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, holder credentialRemover, appBaseURL string) *Service {
+func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, holder holderEngine, appBaseURL string) *Service {
 	return &Service{
 		store:      store,
 		issuer:     iss,
@@ -122,7 +129,10 @@ func (s *Service) instanceFor(ctx context.Context, orgID uuid.UUID) string {
 // channel the schema's subject type dictates: e-mail for a natural person, QERDS
 // for an organization. Delivery failures are non-fatal — the offer still exists
 // and the issuing UI shows its QR — but they are logged.
-func (s *Service) Issue(ctx context.Context, orgID, issuedBy uuid.UUID, orgName string, in IssueInput) (IssueResult, error) {
+// issuedBy is the admin who issued the attestation, or nil for a
+// system-initiated issuance (the onboarding auto-issue path, which has no admin
+// actor); the ledger's issued_by_user_id is nullable to record that.
+func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUID, orgName string, in IssueInput) (IssueResult, error) {
 	detail, err := s.store.GetTemplateDetail(ctx, orgID, in.TemplateID)
 	if err != nil {
 		return IssueResult{}, err
@@ -148,7 +158,7 @@ func (s *Service) Issue(ctx context.Context, orgID, issuedBy uuid.UUID, orgName 
 	if err != nil {
 		return IssueResult{}, err
 	}
-	delivery := deliveryFor(detail.SubjectType)
+	delivery := resolveDelivery(detail.SubjectType, in.DeliveryMethod)
 
 	issued, err := s.store.CreateOffered(ctx, orgID, in, detail, issuedBy, expiresAt, claimToken, delivery)
 	if err != nil {
@@ -180,27 +190,31 @@ func (s *Service) Issue(ctx context.Context, orgID, issuedBy uuid.UUID, orgName 
 	}
 	issued.IssuanceID = offer.IssuanceID
 
-	s.deliver(ctx, orgID, orgName, detail.Name, offer, in.Recipient, claimToken)
+	s.deliver(ctx, orgID, orgName, detail.Name, offer, in.Recipient, claimToken, delivery)
 
 	return IssueResult{Issued: issued, OfferURI: offer.OfferURI, TxCode: offer.TxCode}, nil
 }
 
-// deliver routes the offer to the recipient. Errors are logged, never fatal.
-func (s *Service) deliver(ctx context.Context, orgID uuid.UUID, orgName, credentialName string, offer openid4vciissuer.Offer, recipient Recipient, claimToken string) {
-	claimURL := s.appBaseURL + "/claim/" + claimToken
-	switch recipient.Kind {
-	case RecipientOrganization:
+// deliver routes the offer over the resolved delivery channel. Errors are logged,
+// never fatal. DeliveryNone (the "show QR directly" choice) sends nothing — the
+// issuing UI shows the QR.
+func (s *Service) deliver(ctx context.Context, orgID uuid.UUID, orgName, credentialName string, offer openid4vciissuer.Offer, recipient Recipient, claimToken, delivery string) {
+	switch delivery {
+	case DeliveryQerds:
 		// Organizations receive the real OpenID4VCI offer (their wallet redeems it
 		// automatically over the secure channel), not a human claim link.
 		if err := s.qerds.SendCredentialOffer(ctx, orgID, recipient.Ref, orgName, credentialName, offer.OfferURI); err != nil {
 			slog.ErrorContext(ctx, "attestation: qerds offer delivery failed",
 				slog.String("recipient", recipient.Ref), slog.String("error", err.Error()))
 		}
-	default: // member / external → natural person → e-mail
+	case DeliveryEmail:
+		claimURL := s.appBaseURL + "/claim/" + claimToken
 		if err := s.email.SendCredentialOffer(ctx, orgID, recipient.Ref, orgName, credentialName, claimURL, offer.TxCode); err != nil {
 			slog.ErrorContext(ctx, "attestation: email offer delivery failed",
 				slog.String("recipient", recipient.Ref), slog.String("error", err.Error()))
 		}
+	case DeliveryNone:
+		// "Show QR directly" — nothing to send; the issuing UI renders the QR.
 	}
 }
 
@@ -246,16 +260,15 @@ func (s *Service) ClaimStatus(ctx context.Context, token string) (ClaimView, err
 	}, nil
 }
 
-// Revoke revokes an issued attestation (Art 6(2)). It flips the credential's bit
+// Revoke revokes an already-claimed attestation (Art 6(2)). Offers that were
+// never claimed are withdrawn via Cancel instead. It flips the credential's bit
 // on the issuer's Token Status List first, then the local ledger — so a local
 // "revoked" flag is never set without the published status list also marking it
-// revoked (the two must not drift). Only a claimed credential has a published
-// uuid to revoke; an offered/failed row has nothing published, so the local flip
-// stands alone. If the issuer reports no status-list bit for the credential (a
-// deployment issuing without a Token Status List), the revoke degrades to a
-// local-only flip — there is nothing published that could drift. Any other
-// issuer failure leaves the local state untouched and surfaces the error (the
-// same fail-safe, external-first ordering as DeleteHeld).
+// revoked (the two must not drift). If the issuer reports no status-list bit for
+// the credential (a deployment issuing without a Token Status List), the revoke
+// degrades to a local-only flip — there is nothing published that could drift.
+// Any other issuer failure leaves the local state untouched and surfaces the
+// error (the same fail-safe, external-first ordering as DeleteHeld).
 func (s *Service) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
 	issued, err := s.store.GetIssued(ctx, orgID, id)
 	if err != nil {
@@ -286,9 +299,16 @@ func (s *Service) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, erro
 }
 
 // isRevocable reports whether an attestation in this status can still be revoked
-// (mirrors the store's transition guard).
+// (mirrors the store's transition guard: only a claimed credential is revocable;
+// an unclaimed offer is withdrawn via Cancel).
 func isRevocable(status string) bool {
-	return status == StatusOffered || status == StatusClaimed
+	return status == StatusClaimed
+}
+
+// Cancel withdraws an unclaimed offer. Nothing was ever held, so this is a
+// cancellation, not a revocation, and never publishes to the Token Status List.
+func (s *Service) Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
+	return s.store.Cancel(ctx, orgID, id)
 }
 
 // DeleteHeld removes a held credential the organization no longer wants to keep
@@ -306,6 +326,94 @@ func (s *Service) DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error {
 		return fmt.Errorf("attestation: delete held %s from engine: %w", id, err)
 	}
 	return s.held.SoftDeleteHeld(ctx, orgID, id)
+}
+
+// HeldClaimsView is a held credential's index metadata plus its disclosed
+// attributes, assembled for the detail view. The index row carries the
+// routing/identity fields (vct, issuer identifier, source, receivedAt); the
+// attributes and the issuer's human display name are read from the holder engine,
+// where the credential material and its metadata live (§6.5). Issuer is the issuer
+// identifier (a URL); IssuerName is its display name, falling back to the
+// identifier when the credential carried no issuer display metadata. DisplayName /
+// LogoURI are the credential's own type-metadata title and logo resolved for the
+// request's language (both empty when the credential carried no credential-level
+// display metadata, so the frontend falls back to the VCT-derived name and shows
+// no logo).
+type HeldClaimsView struct {
+	ID          uuid.UUID                  `json:"id"`
+	VCT         string                     `json:"vct"`
+	Issuer      string                     `json:"issuer"`
+	IssuerName  string                     `json:"issuerName"`
+	DisplayName string                     `json:"displayName"`
+	LogoURI     string                     `json:"logoUri"`
+	Source      string                     `json:"source"`
+	ReceivedAt  time.Time                  `json:"receivedAt"`
+	Attributes  []eudiholder.HeldAttribute `json:"attributes"`
+}
+
+// HeldListView is one held-credential index row enriched with the credential's
+// localized type-metadata title and logo (resolved from the holder engine for the
+// request's language), so the held-list table can show a friendly, localized name
+// and a logo without a per-row claims fetch. DisplayName / LogoURI are empty when
+// the credential carried no credential-level display metadata (the frontend then
+// falls back to the VCT-derived name and shows no logo).
+type HeldListView struct {
+	HeldAttestation
+	DisplayName string `json:"displayName"`
+	LogoURI     string `json:"logoUri"`
+}
+
+// HeldClaims returns a held credential's disclosed attributes for the detail view,
+// after confirming the organization holds it (the index row is the source of truth
+// for existence). lang is the request's active language (a BCP-47 tag); the
+// credential title, attribute labels and issuer name are resolved in it. Returns
+// ErrHeldNotFound when the row is absent or already deleted.
+func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang string) (HeldClaimsView, error) {
+	held, err := s.held.GetHeld(ctx, orgID, id)
+	if err != nil {
+		return HeldClaimsView{}, err
+	}
+	cred, err := s.holder.Claims(ctx, orgID, held.CredentialRef, held.VCT, lang)
+	if err != nil {
+		return HeldClaimsView{}, fmt.Errorf("attestation: held claims %s from engine: %w", id, err)
+	}
+	issuerName := cred.IssuerName
+	if issuerName == "" {
+		issuerName = held.Issuer
+	}
+	return HeldClaimsView{
+		ID:          held.ID,
+		VCT:         held.VCT,
+		Issuer:      held.Issuer,
+		IssuerName:  issuerName,
+		DisplayName: cred.DisplayName,
+		LogoURI:     cred.LogoURI,
+		Source:      held.Source,
+		ReceivedAt:  held.ReceivedAt,
+		Attributes:  cred.Attributes,
+	}, nil
+}
+
+// ListHeld returns an organization's active held credentials enriched with each
+// credential's localized type-metadata title and logo (resolved from the holder
+// engine for lang, the request's active language), so the held-list table shows a
+// friendly, localized name and logo without a per-row claims fetch. A row keeps
+// empty DisplayName / LogoURI when its credential carried no display metadata.
+func (s *Service) ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([]HeldListView, error) {
+	held, err := s.held.ListHeld(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	displays, err := s.holder.Displays(ctx, orgID, lang)
+	if err != nil {
+		return nil, fmt.Errorf("attestation: held displays org %s from engine: %w", orgID, err)
+	}
+	views := make([]HeldListView, len(held))
+	for i, h := range held {
+		d := displays[h.VCT]
+		views[i] = HeldListView{HeldAttestation: h, DisplayName: d.DisplayName, LogoURI: d.LogoURI}
+	}
+	return views, nil
 }
 
 // reconcile reports whether the issuer says the credential has been issued, and
@@ -339,9 +447,15 @@ func checkRecipientKind(subjectType, kind string) error {
 	return nil
 }
 
-func deliveryFor(subjectType string) string {
+// resolveDelivery picks the delivery channel: organizations always go over QERDS;
+// a natural person is e-mailed a claim link unless the caller chose the QR method
+// (DeliveryNone — shown directly in the UI, no e-mail sent).
+func resolveDelivery(subjectType, method string) string {
 	if subjectType == SubjectOrganization {
 		return DeliveryQerds
+	}
+	if method == DeliveryMethodQR {
+		return DeliveryNone
 	}
 	return DeliveryEmail
 }

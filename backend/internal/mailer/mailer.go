@@ -6,6 +6,7 @@ package mailer
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/smtp"
@@ -27,12 +28,27 @@ type Config struct {
 	FromAddress string
 }
 
-// Message is a single outbound e-mail (HTML + plain-text alternative).
+// Message is a single outbound e-mail (HTML + plain-text alternative), with any
+// inline images the HTML references by cid:.
 type Message struct {
 	To       string
 	Subject  string
 	HTMLBody string
 	TextBody string
+	// Inline holds images embedded as related parts, each referenced from HTMLBody
+	// by cid:<ContentID> (e.g. an org's logo). Empty for a plain message, in which
+	// case the wire form stays a bare multipart/alternative.
+	Inline []InlineImage
+}
+
+// InlineImage is an image carried inside the message as a related MIME part and
+// referenced from the HTML by cid:<ContentID>, so it renders in clients that block
+// remote images (Gmail, Outlook) and offline. The bytes are sent as-is; the
+// transport base64-encodes them.
+type InlineImage struct {
+	ContentID   string
+	ContentType string
+	Bytes       []byte
 }
 
 // Sender sends a message over SMTP using the given config.
@@ -102,28 +118,89 @@ func (SMTPSender) Send(cfg Config, msg Message) error {
 // already CR/LF-validated by net/smtp; the hand-built MIME headers below are not.
 var headerReplacer = strings.NewReplacer("\r", "", "\n", "")
 
-// buildMIME renders a multipart/alternative message (text + HTML).
+// Distinct boundaries for the two nesting levels: the alternative (text + HTML)
+// and, when the message has inline images, the related wrapper around it.
+const (
+	altBoundary = "ybw-alt-9f1c2a"
+	relBoundary = "ybw-rel-7d2b4e"
+)
+
+// buildMIME renders the message on the wire. With no inline images it is a bare
+// multipart/alternative (text + HTML), unchanged from before; with inline images
+// the alternative is wrapped in a multipart/related so the HTML's cid: references
+// resolve to the attached parts.
 func buildMIME(cfg Config, msg Message) string {
 	from := cfg.FromAddress
 	if cfg.FromName != "" {
 		from = fmt.Sprintf("%s <%s>", cfg.FromName, cfg.FromAddress)
 	}
-	const boundary = "ybw-boundary-9f1c2a"
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", headerReplacer.Replace(from))
 	fmt.Fprintf(&b, "To: %s\r\n", headerReplacer.Replace(msg.To))
 	fmt.Fprintf(&b, "Subject: %s\r\n", headerReplacer.Replace(msg.Subject))
 	b.WriteString("MIME-Version: 1.0\r\n")
-	fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=%s\r\n\r\n", boundary)
 
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	if len(msg.Inline) == 0 {
+		writeAlternative(&b, msg)
+		return b.String()
+	}
+
+	fmt.Fprintf(&b, "Content-Type: multipart/related; boundary=%s\r\n\r\n", relBoundary)
+	fmt.Fprintf(&b, "--%s\r\n", relBoundary)
+	writeAlternative(&b, msg)
+	for _, img := range msg.Inline {
+		writeInlineImage(&b, img)
+	}
+	fmt.Fprintf(&b, "--%s--\r\n", relBoundary)
+	return b.String()
+}
+
+// writeAlternative writes the multipart/alternative entity: its own Content-Type
+// header, the text/plain part, then the text/html part. Written both at the top
+// level (a plain message) and as the first part of the related wrapper, so the two
+// paths cannot render the body differently.
+func writeAlternative(b *strings.Builder, msg Message) {
+	fmt.Fprintf(b, "Content-Type: multipart/alternative; boundary=%s\r\n\r\n", altBoundary)
+
+	fmt.Fprintf(b, "--%s\r\n", altBoundary)
 	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
-	fmt.Fprintf(&b, "%s\r\n\r\n", msg.TextBody)
+	fmt.Fprintf(b, "%s\r\n\r\n", msg.TextBody)
 
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	fmt.Fprintf(b, "--%s\r\n", altBoundary)
 	b.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
-	fmt.Fprintf(&b, "%s\r\n\r\n", msg.HTMLBody)
+	fmt.Fprintf(b, "%s\r\n\r\n", msg.HTMLBody)
 
-	fmt.Fprintf(&b, "--%s--\r\n", boundary)
+	fmt.Fprintf(b, "--%s--\r\n", altBoundary)
+}
+
+// writeInlineImage writes one base64 image part of the related wrapper, keyed by a
+// Content-ID the HTML references as cid:<ContentID>. The angle brackets are the
+// RFC 2045 form; the cid: URL in the HTML omits them.
+func writeInlineImage(b *strings.Builder, img InlineImage) {
+	contentType := img.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	fmt.Fprintf(b, "--%s\r\n", relBoundary)
+	fmt.Fprintf(b, "Content-Type: %s\r\n", headerReplacer.Replace(contentType))
+	b.WriteString("Content-Transfer-Encoding: base64\r\n")
+	fmt.Fprintf(b, "Content-ID: <%s>\r\n", headerReplacer.Replace(img.ContentID))
+	b.WriteString("Content-Disposition: inline\r\n\r\n")
+	b.WriteString(wrapBase64(img.Bytes))
+	b.WriteString("\r\n")
+}
+
+// wrapBase64 encodes the bytes and folds them to 76-character lines, the RFC 2045
+// limit some SMTP servers enforce on a single line.
+func wrapBase64(data []byte) string {
+	const lineLength = 76
+	encoded := base64.StdEncoding.EncodeToString(data)
+	var b strings.Builder
+	for len(encoded) > lineLength {
+		b.WriteString(encoded[:lineLength])
+		b.WriteString("\r\n")
+		encoded = encoded[lineLength:]
+	}
+	b.WriteString(encoded)
 	return b.String()
 }

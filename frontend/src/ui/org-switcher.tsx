@@ -81,7 +81,12 @@ export function OrgSwitcher({
         className="bg-surface-3 hover:bg-line flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60"
       >
         {activeOrg ? (
-          <Avatar name={activeOrg.name} tone="rose" />
+          <Avatar
+            name={activeOrg.name}
+            src={activeOrg.logoUri}
+            alt={activeOrg.name}
+            tone="rose"
+          />
         ) : (
           <span className="bg-line text-ink-soft flex h-7 w-7 shrink-0 items-center justify-center rounded-full">
             <Icon name="personal" size={GLYPH_SIZE} />
@@ -128,7 +133,13 @@ export function OrgSwitcher({
                         isActive ? "bg-surface-3" : "",
                       ].join(" ")}
                     >
-                      <Avatar name={org.name} tone="rose" />
+                      <Avatar
+                        name={org.name}
+                        src={org.logoUri}
+                        // decorative: the org name is shown as visible text beside it
+                        alt=""
+                        tone="rose"
+                      />
                       <span className="min-w-0 flex-1">
                         <span className="text-ink block truncate text-[13px] font-semibold">
                           {org.name}

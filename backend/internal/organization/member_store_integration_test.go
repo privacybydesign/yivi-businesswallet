@@ -3,8 +3,10 @@
 package organization_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -12,6 +14,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 func strptr(s string) *string { return &s }
@@ -257,4 +260,247 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// The notification channels mail an org's admins, so this query has to hold to
+// exactly that: admins of this organization, not its plain members, not someone
+// who is only invited, and nobody from another organization.
+func TestListAdminEmails(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NopRecorder{})
+	ctx := context.Background()
+
+	org := makeOrg(t, pool, "Acme", "acme")
+	other := makeOrg(t, pool, "Globex", "globex")
+
+	newUser := func(email string) uuid.UUID {
+		var id uuid.UUID
+		if err := pool.QueryRow(ctx,
+			"INSERT INTO users (email, given_names, last_name) VALUES ($1, $2, $3) RETURNING id",
+			email, "Test", "User",
+		).Scan(&id); err != nil {
+			t.Fatalf("create user %s: %v", email, err)
+		}
+		return id
+	}
+
+	memberships := []struct {
+		email string
+		orgID uuid.UUID
+		role  string
+	}{
+		{"zoe@example.test", org.ID, organization.RoleAdmin},
+		{"alice@example.test", org.ID, organization.RoleAdmin},
+		{"bob@example.test", org.ID, organization.RoleMember},
+		{"dana@example.test", other.ID, organization.RoleAdmin},
+	}
+	for _, m := range memberships {
+		if _, err := store.AddMembership(ctx, m.orgID, newUser(m.email), m.role, nil, nil); err != nil {
+			t.Fatalf("AddMembership %s: %v", m.email, err)
+		}
+	}
+	if _, err := store.CreateInvitation(ctx, organization.Invitation{
+		OrganizationID: org.ID,
+		Email:          "carol@example.test",
+		Role:           organization.RoleAdmin,
+		GivenNames:     "Carol",
+		LastName:       "Clark",
+	}); err != nil {
+		t.Fatalf("CreateInvitation carol: %v", err)
+	}
+
+	got, err := store.ListAdminEmails(ctx, org.ID)
+	if err != nil {
+		t.Fatalf("ListAdminEmails: %v", err)
+	}
+	want := []string{"alice@example.test", "zoe@example.test"}
+	if !slices.Equal(got, want) {
+		t.Errorf("ListAdminEmails = %v, want %v", got, want)
+	}
+
+	empty, err := store.ListAdminEmails(ctx, uuid.New())
+	if err != nil {
+		t.Fatalf("ListAdminEmails for an unknown org: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("ListAdminEmails for an unknown org = %v, want none", empty)
+	}
+}
+
+// TestGetMemberAvatarIsScopedToTheOrganization is the access boundary: an avatar
+// is personal data, so it must only be readable through an org the person is a
+// member of — a second org's admin gets the same answer as "no photo set".
+func TestGetMemberAvatarIsScopedToTheOrganization(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NopRecorder{})
+	users := user.NewStore(pool)
+	ctx := context.Background()
+
+	acme := makeOrg(t, pool, "Acme", "acme")
+	other := makeOrg(t, pool, "Other", "other")
+
+	var userID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO users (email, given_names, last_name) VALUES ($1, $2, $3) RETURNING id",
+		"alice@example.test", "Alice", "Anderson",
+	).Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := store.AddMembership(ctx, acme.ID, userID, organization.RoleMember, nil, nil); err != nil {
+		t.Fatalf("AddMembership: %v", err)
+	}
+
+	if _, err := store.GetMemberAvatar(ctx, acme.ID, userID); !errors.Is(err, user.ErrNoAvatar) {
+		t.Errorf("GetMemberAvatar before upload = %v, want user.ErrNoAvatar", err)
+	}
+
+	avatar := user.Avatar{Bytes: []byte{0xFF, 0xD8, 0xFF, 0xE0}, ContentType: user.AvatarContentType}
+	if _, err := users.SetAvatar(ctx, userID, avatar); err != nil {
+		t.Fatalf("SetAvatar: %v", err)
+	}
+
+	got, err := store.GetMemberAvatar(ctx, acme.ID, userID)
+	if err != nil {
+		t.Fatalf("GetMemberAvatar: %v", err)
+	}
+	if !bytes.Equal(got.Bytes, avatar.Bytes) || got.ContentType != avatar.ContentType {
+		t.Errorf("GetMemberAvatar = %+v, want %+v", got, avatar)
+	}
+
+	if _, err := store.GetMemberAvatar(ctx, other.ID, userID); !errors.Is(err, user.ErrNoAvatar) {
+		t.Errorf("GetMemberAvatar from a foreign org = %v, want user.ErrNoAvatar", err)
+	}
+}
+
+// TestListMemberEntriesReportsAvatars keeps the list query's has_avatar column
+// honest: an active member's photo shows, an invited entry has no user row and so
+// never claims one.
+func TestListMemberEntriesReportsAvatars(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NopRecorder{})
+	users := user.NewStore(pool)
+	ctx := context.Background()
+
+	org := makeOrg(t, pool, "Acme", "acme")
+
+	var userID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO users (email, given_names, last_name) VALUES ($1, $2, $3) RETURNING id",
+		"alice@example.test", "Alice", "Anderson",
+	).Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := store.AddMembership(ctx, org.ID, userID, organization.RoleMember, nil, nil); err != nil {
+		t.Fatalf("AddMembership: %v", err)
+	}
+	if _, err := store.CreateInvitation(ctx, organization.Invitation{
+		OrganizationID: org.ID,
+		Email:          "dave@example.test",
+		GivenNames:     "Dave",
+		LastName:       "Dijk",
+		Role:           organization.RoleMember,
+	}); err != nil {
+		t.Fatalf("CreateInvitation: %v", err)
+	}
+	if _, err := users.SetAvatar(ctx, userID, user.Avatar{Bytes: []byte{1, 2, 3}, ContentType: user.AvatarContentType}); err != nil {
+		t.Fatalf("SetAvatar: %v", err)
+	}
+
+	entries, _, err := store.ListMemberEntries(ctx, org.ID, organization.MemberListParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListMemberEntries: %v", err)
+	}
+	for _, e := range entries {
+		switch e.Status {
+		case organization.StatusActive:
+			if !e.HasAvatar || e.AvatarUpdatedAt == nil {
+				t.Errorf("active entry %s: hasAvatar = %v, updatedAt = %v; want true and a timestamp", e.Email, e.HasAvatar, e.AvatarUpdatedAt)
+			}
+		case organization.StatusInvited:
+			if e.HasAvatar {
+				t.Errorf("invited entry %s claims an avatar", e.Email)
+			}
+		}
+	}
+}
+
+func TestMemberEntryByEmail(t *testing.T) {
+	store, orgID := memberFixture(t)
+	ctx := context.Background()
+
+	// An accepted membership.
+	active, err := store.MemberEntryByEmail(ctx, orgID, "ALICE@example.test")
+	if err != nil {
+		t.Fatalf("MemberEntryByEmail alice: %v", err)
+	}
+	if active.Status != organization.StatusActive || active.UserID == nil || active.Role != organization.RoleAdmin {
+		t.Errorf("alice = %+v, want her active admin membership", active)
+	}
+
+	// A pending invitation is the other shape the same address can have.
+	invited, err := store.MemberEntryByEmail(ctx, orgID, "carol@example.test")
+	if err != nil {
+		t.Fatalf("MemberEntryByEmail carol: %v", err)
+	}
+	if invited.Status != organization.StatusInvited || invited.InvitationID == nil {
+		t.Errorf("carol = %+v, want her pending invitation", invited)
+	}
+
+	if _, err := store.MemberEntryByEmail(ctx, orgID, "nobody@example.test"); !errors.Is(err, organization.ErrNotMember) {
+		t.Errorf("unknown address = %v, want ErrNotMember", err)
+	}
+
+	// The lookup is org-scoped: another organisation's member is not ours.
+	pool, _ := testdb.Fresh(t)
+	other := organization.NewStore(pool, audit.NopRecorder{})
+	otherOrg := makeOrg(t, pool, "Beta", "beta")
+	if _, err := other.MemberEntryByEmail(ctx, otherOrg.ID, "alice@example.test"); !errors.Is(err, organization.ErrNotMember) {
+		t.Errorf("cross-org lookup = %v, want ErrNotMember", err)
+	}
+}
+
+func TestUpdateInvitationRewritesTheRoleAndDepartment(t *testing.T) {
+	store, orgID := memberFixture(t)
+	ctx := context.Background()
+
+	carol, err := store.MemberEntryByEmail(ctx, orgID, "carol@example.test")
+	if err != nil {
+		t.Fatalf("MemberEntryByEmail: %v", err)
+	}
+	sales, err := store.MemberEntryByEmail(ctx, orgID, "bob@example.test")
+	if err != nil {
+		t.Fatalf("MemberEntryByEmail bob: %v", err)
+	}
+
+	if err := store.UpdateInvitation(ctx, orgID, *carol.InvitationID,
+		organization.RoleAdmin, strptr("Lead"), sales.DepartmentID); err != nil {
+		t.Fatalf("UpdateInvitation: %v", err)
+	}
+
+	updated, err := store.MemberEntryByEmail(ctx, orgID, "carol@example.test")
+	if err != nil {
+		t.Fatalf("MemberEntryByEmail: %v", err)
+	}
+	if updated.Role != organization.RoleAdmin || updated.JobTitle == nil || *updated.JobTitle != "Lead" {
+		t.Errorf("invitation = %+v, want the new role and job title", updated)
+	}
+	if updated.DepartmentID == nil || *updated.DepartmentID != *sales.DepartmentID {
+		t.Errorf("departmentId = %v, want %v", updated.DepartmentID, sales.DepartmentID)
+	}
+	// The invitation is rewritten in place: the accept link already sent out has
+	// to keep working.
+	if *updated.InvitationID != *carol.InvitationID || updated.Email != carol.Email {
+		t.Error("the invitation was replaced instead of updated")
+	}
+
+	if err := store.UpdateInvitation(ctx, orgID, uuid.New(),
+		organization.RoleMember, nil, nil); !errors.Is(err, organization.ErrInvitationNotFound) {
+		t.Errorf("unknown invitation = %v, want ErrInvitationNotFound", err)
+	}
+
+	unknownDept := uuid.New()
+	if err := store.UpdateInvitation(ctx, orgID, *carol.InvitationID,
+		organization.RoleMember, nil, &unknownDept); !errors.Is(err, organization.ErrDepartmentNotFound) {
+		t.Errorf("unknown department = %v, want ErrDepartmentNotFound", err)
+	}
 }

@@ -9,8 +9,10 @@ import {
   sendPostguardFile,
   setPostguardApiKey,
   setPostguardEncryptionKey,
+  setPostguardNotifications,
 } from "./postguard";
 import type {
+  PostguardNotificationDelivery,
   PostguardSentFile,
   PostguardSettings,
   SendPostguardFileInput,
@@ -108,6 +110,27 @@ export function useDeletePostguardApiKeyMutation(
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.postguardKeyRemoved"));
+      void queryClient.invalidateQueries({
+        queryKey: postguardSettingsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useSetPostguardNotificationsMutation(
+  slug: string,
+): UseMutationResult<
+  PostguardSettings,
+  Error,
+  { notifications: PostguardNotificationDelivery }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (input) => setPostguardNotifications(slug, input),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.postguardNotificationsSaved"));
       void queryClient.invalidateQueries({
         queryKey: postguardSettingsQueryKey(slug),
       });

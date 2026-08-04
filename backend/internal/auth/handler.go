@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,17 +12,27 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
+// avatarStore is the slice of the user store the /me/avatar routes need: the
+// signed-in user's own portrait photo, read and written on their own behalf.
+type avatarStore interface {
+	GetAvatar(ctx context.Context, id uuid.UUID) (user.Avatar, error)
+	SetAvatar(ctx context.Context, id uuid.UUID, a user.Avatar) (user.User, error)
+	ClearAvatar(ctx context.Context, id uuid.UUID) (user.User, error)
+}
+
 type Handler struct {
 	svc      *Service
 	sessions sessionLookuper
+	users    avatarStore
 	cookie   CookieConfig
 	admins   PlatformAdmins
 }
 
-func NewHandler(svc *Service, sessions sessionLookuper, cookie CookieConfig, admins PlatformAdmins) *Handler {
+func NewHandler(svc *Service, sessions sessionLookuper, users avatarStore, cookie CookieConfig, admins PlatformAdmins) *Handler {
 	return &Handler{
 		svc:      svc,
 		sessions: sessions,
+		users:    users,
 		cookie:   cookie,
 		admins:   admins,
 	}
@@ -35,6 +46,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	authed := RequireUser(h.sessions)
 	mux.Handle("GET /me", authed(respond.HandlerFunc(h.me)))
+	mux.Handle("GET /me/avatar", authed(respond.HandlerFunc(h.serveMyAvatar)))
+	mux.Handle("PUT /me/avatar", authed(respond.HandlerFunc(h.putMyAvatar)))
+	mux.Handle("DELETE /me/avatar", authed(respond.HandlerFunc(h.deleteMyAvatar)))
 }
 
 func (h *Handler) startSession(w http.ResponseWriter, r *http.Request) error {
@@ -104,6 +118,7 @@ func (h *Handler) meResponse(u user.User) meResponse {
 		PreferredName:   u.PreferredName,
 		GivenNames:      u.GivenNames,
 		LastName:        u.LastName,
+		AvatarURI:       user.AvatarURL(MeAvatarPath, u.HasAvatar, u.AvatarUpdatedAt),
 		IsPlatformAdmin: h.admins.Has(u.Email),
 	}
 }
@@ -133,10 +148,13 @@ type statusResponse struct {
 }
 
 type meResponse struct {
-	ID              uuid.UUID `json:"id"`
-	Email           string    `json:"email"`
-	PreferredName   *string   `json:"preferredName"`
-	GivenNames      string    `json:"givenNames"`
-	LastName        string    `json:"lastName"`
-	IsPlatformAdmin bool      `json:"isPlatformAdmin"`
+	ID            uuid.UUID `json:"id"`
+	Email         string    `json:"email"`
+	PreferredName *string   `json:"preferredName"`
+	GivenNames    string    `json:"givenNames"`
+	LastName      string    `json:"lastName"`
+	// AvatarURI is the API path serving the user's own portrait photo, "" when they
+	// have not set one (the frontend then shows their initials).
+	AvatarURI       string `json:"avatarUri"`
+	IsPlatformAdmin bool   `json:"isPlatformAdmin"`
 }

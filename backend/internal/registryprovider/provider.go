@@ -6,7 +6,26 @@
 // KVK/BRIS driver later. See .ai/features/wallet-bootstrap.md.
 package registryprovider
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+// ErrUnknownKVK means the consulted KVK number is not in the register at all —
+// distinct from a known company whose requester simply is not a representative.
+// The register did not validate the request; no wallet may be opened.
+var ErrUnknownKVK = errors.New("registryprovider: kvk number not found in the register")
+
+// ConsultRequest is what the requestor sends KVK: the KVK number of the company
+// and the requester's identification data (from their disclosed PID) that KVK
+// matches against the authorised representatives in its register. DateOfBirth is
+// "2006-01-02" and may be empty when the caller has no verified birth date.
+type ConsultRequest struct {
+	KVKNumber   string
+	GivenNames  string
+	FamilyName  string
+	DateOfBirth string
+}
 
 // AttestationContentType is the QERDS content type a real KVK attestation would
 // carry when delivered over QERDS (the faithful, async transport). The stub

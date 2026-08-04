@@ -160,6 +160,40 @@ func (s *Store) loadDEKCipher(ctx context.Context, q database.Querier, orgID uui
 	return newCipherFromKey(dek)
 }
 
+// --- Notification delivery ---------------------------------------------
+
+// NotificationDelivery returns the org's recipient-notification delivery method,
+// defaulting to NotifyPostGuard when the org has no row yet.
+func (s *Store) NotificationDelivery(ctx context.Context, orgID uuid.UUID) (NotificationDelivery, error) {
+	const query = `SELECT notification_delivery FROM postguard_org_settings WHERE organization_id = $1`
+	var method string
+	err := s.db.QueryRow(ctx, query, orgID).Scan(&method)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return NotifyPostGuard, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("postguard: get notification delivery org %s: %w", orgID, err)
+	}
+	return NotificationDelivery(method), nil
+}
+
+// SetNotificationDelivery upserts the org's recipient-notification delivery
+// method and audits the change.
+func (s *Store) SetNotificationDelivery(ctx context.Context, orgID uuid.UUID, method NotificationDelivery) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const upsert = `INSERT INTO postguard_org_settings (organization_id, notification_delivery)
+			VALUES ($1, $2)
+			ON CONFLICT (organization_id)
+			DO UPDATE SET notification_delivery = EXCLUDED.notification_delivery, updated_at = now()`
+		if _, err := q.Exec(ctx, upsert, orgID, string(method)); err != nil {
+			return fmt.Errorf("postguard: upsert notification delivery org %s: %w", orgID, err)
+		}
+		return s.audit.Record(ctx, q, audit.PostGuardNotificationSet,
+			audit.Target{Type: audit.TargetPostGuardSettings, ID: orgID.String(), OrgID: &orgID},
+			audit.Updated(nil, map[string]any{"notificationDelivery": string(method)}))
+	})
+}
+
 // --- API key ------------------------------------------------------------
 
 // APIKeyInfo returns the non-secret view of an org's stored key.
@@ -245,7 +279,11 @@ func (s *Store) DecryptedAPIKey(ctx context.Context, orgID uuid.UUID) (string, e
 // --- Sent files ---------------------------------------------------------
 
 // RecordSentFile persists a sent-file record and audits the transfer.
-func (s *Store) RecordSentFile(ctx context.Context, orgID uuid.UUID, senderUserID uuid.UUID, f SentFile) (SentFile, error) {
+// notificationLinkBase is the PostGuard website base the recipient download link
+// was built on, empty when PostGuard's own service notified the recipients. It is
+// audited so a deployment pointed at the wrong environment is diagnosable from the
+// org's audit log instead of from a recipient's complaint.
+func (s *Store) RecordSentFile(ctx context.Context, orgID uuid.UUID, senderUserID uuid.UUID, f SentFile, notificationLinkBase string) (SentFile, error) {
 	var expiresAfter *string
 	if f.ExpiresAfter != "" {
 		expiresAfter = &f.ExpiresAfter
@@ -259,14 +297,18 @@ func (s *Store) RecordSentFile(ctx context.Context, orgID uuid.UUID, senderUserI
 			Scan(&f.ID, &f.Status, &f.CreatedAt); err != nil {
 			return fmt.Errorf("postguard: record sent file org %s: %w", orgID, err)
 		}
+		detail := map[string]any{
+			"fileName":     f.FileName,
+			"sizeBytes":    f.SizeBytes,
+			"recipients":   f.Recipients,
+			"cryptifyUuid": f.CryptifyUUID,
+		}
+		if notificationLinkBase != "" {
+			detail["notificationLinkBase"] = notificationLinkBase
+		}
 		return s.audit.Record(ctx, q, audit.PostGuardFileSent,
 			audit.Target{Type: audit.TargetPostGuardFile, ID: f.ID.String(), OrgID: &orgID},
-			audit.Created(map[string]any{
-				"fileName":     f.FileName,
-				"sizeBytes":    f.SizeBytes,
-				"recipients":   len(f.Recipients),
-				"cryptifyUuid": f.CryptifyUUID,
-			}))
+			audit.Created(detail))
 	})
 	return f, err
 }

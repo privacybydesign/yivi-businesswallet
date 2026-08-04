@@ -29,16 +29,26 @@ func TestContactsRoundTrip(t *testing.T) {
 	}
 	store := qerds.NewStore(pool, audit.NopRecorder{})
 
-	created, err := store.CreateContact(ctx, org.ID, "Municipality", "muni@qerds.localhost")
+	kvk := "12345678"
+	created, err := store.CreateContact(ctx, org.ID, qerds.Contact{
+		Name: "Municipality", Address: "muni@qerds.localhost", KVKNumber: &kvk,
+	})
 	if err != nil {
 		t.Fatalf("CreateContact: %v", err)
 	}
 	if created.Name != "Municipality" || created.Address != "muni@qerds.localhost" {
 		t.Fatalf("unexpected contact: %+v", created)
 	}
+	// Optional org fields round-trip.
+	if created.KVKNumber == nil || *created.KVKNumber != kvk {
+		t.Fatalf("kvkNumber = %v, want %q", created.KVKNumber, kvk)
+	}
+	if created.LegalName != nil || created.EUID != nil {
+		t.Fatalf("unset org fields should be nil, got legalName=%v euid=%v", created.LegalName, created.EUID)
+	}
 
 	// Same address within the org is rejected.
-	if _, err := store.CreateContact(ctx, org.ID, "Dup", "muni@qerds.localhost"); !errors.Is(err, qerds.ErrContactAddressTaken) {
+	if _, err := store.CreateContact(ctx, org.ID, qerds.Contact{Name: "Dup", Address: "muni@qerds.localhost"}); !errors.Is(err, qerds.ErrContactAddressTaken) {
 		t.Fatalf("duplicate address err = %v, want ErrContactAddressTaken", err)
 	}
 

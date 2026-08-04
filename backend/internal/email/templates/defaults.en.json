@@ -1,0 +1,109 @@
+{
+  "shell": {
+    "footer": "Sent by {{orgName}} with the Yivi Business Wallet.",
+    "linkFallback": "Or open this link:"
+  },
+  "samples": {
+    "credentialName": "Employee badge",
+    "claimUrl": "https://wallet.example.org/claim/sample",
+    "txCode": "123456",
+    "acceptUrl": "https://wallet.example.org/invite/sample",
+    "message": "Here is the file we discussed.",
+    "downloadUrl": "https://postguard.example/download?uuid=sample",
+    "eventName": "Invited member",
+    "eventDetails": "email: sam@example.org\nrole: member",
+    "eventTime": "2026-01-14 09:32 UTC",
+    "auditUrl": "https://wallet.example.org/acme/audit-log"
+  },
+  "events": {
+    "membership.invited": "Invited member",
+    "membership.invite_resent": "Resent invitation",
+    "membership.invite_revoked": "Revoked invitation",
+    "membership.accepted": "Accepted invitation",
+    "membership.declined": "Declined invitation",
+    "membership.revoked": "Revoked membership",
+    "membership.role_changed": "Changed role",
+    "membership.expired": "Invitation expired",
+
+    "wallet.bootstrapped": "Bootstrapped wallet",
+    "wallet.suspended": "Suspended wallet",
+    "wallet.revoked": "Revoked wallet",
+    "wallet.representation_claimed": "Claimed representation",
+    "wallet.representation_revoked": "Revoked representation",
+
+    "qerds.message_sent": "Sent secure message",
+    "qerds.message_received": "Received secure message",
+    "qerds.address_provisioned": "Provisioned digital address",
+    "qerds.address_default_changed": "Changed default address",
+    "qerds.contact_added": "Added contact",
+    "qerds.contact_deleted": "Deleted contact",
+
+    "postguard.file_sent": "Sent encrypted file",
+    "postguard.key_set": "Set PostGuard API key",
+    "postguard.key_removed": "Removed PostGuard API key",
+    "postguard.encryption_key_set": "Set PostGuard encryption key",
+    "postguard.encryption_key_removed": "Removed PostGuard encryption key",
+
+    "attestation.issued": "Issued attestation",
+    "attestation.claimed": "Claimed attestation",
+    "attestation.revoked": "Revoked attestation",
+    "attestation.offer_cancelled": "Cancelled attestation offer",
+    "attestation.key_added": "Added attestation key",
+    "attestation.key_suspended": "Suspended attestation key",
+    "attestation.key_revoked": "Revoked attestation key"
+  },
+  "templates": {
+    "credential_offer": {
+      "subject": "{{orgName}} has issued you a credential: {{credentialName}}",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} has issued you a credential" },
+        { "type": "paragraph", "text": "{{credentialName}} is ready to be added to your wallet." },
+        { "type": "button", "label": "Add it to your wallet", "url": "{{claimUrl}}" },
+        { "type": "paragraph", "text": "Your wallet will ask for this code: {{txCode}}" },
+        { "type": "footer" }
+      ]
+    },
+    "invitation": {
+      "subject": "You have been invited to join {{orgName}}",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "You have been invited to join {{orgName}}" },
+        { "type": "paragraph", "text": "{{orgName}} invited you to become a member on the Business Wallet." },
+        { "type": "button", "label": "Accept the invitation", "url": "{{acceptUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "postguard_file": {
+      "subject": "{{orgName}} has sent you an encrypted file",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} has sent you an encrypted file with PostGuard" },
+        { "type": "paragraph", "text": "{{message}}" },
+        { "type": "button", "label": "Open the file", "url": "{{downloadUrl}}" },
+        { "type": "paragraph", "text": "You open the file by proving ownership of this e-mail address." },
+        { "type": "footer" }
+      ]
+    },
+    "event_notification": {
+      "subject": "{{eventName}} at {{orgName}}",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{eventName}} at {{orgName}}" },
+        { "type": "paragraph", "text": "Recorded on {{eventTime}}." },
+        { "type": "paragraph", "text": "{{eventDetails}}" },
+        { "type": "button", "label": "Open the audit log", "url": "{{auditUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "smtp_test": {
+      "subject": "Test e-mail from your Business Wallet",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Your SMTP settings work" },
+        { "type": "paragraph", "text": "This is a test message sent from {{orgName}}. It uses the same layout and branding as the mail your recipients get." },
+        { "type": "footer" }
+      ]
+    }
+  }
+}

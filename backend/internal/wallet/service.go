@@ -29,9 +29,11 @@ type walletStore interface {
 	ClaimRepresentation(ctx context.Context, orgID, repID, userID uuid.UUID) error
 }
 
-// registry is the KVK authentic-source seam (see internal/registryprovider).
+// registry is the KVK authentic-source seam (see internal/registryprovider). It
+// receives the KVK number plus the requester's identification data and decides
+// whether the requester is a listed representative.
 type registry interface {
-	Consult(ctx context.Context, kvkNumber string) (registryprovider.RegistrationAttestation, error)
+	Consult(ctx context.Context, req registryprovider.ConsultRequest) (registryprovider.RegistrationAttestation, error)
 }
 
 // identityDiscloser resolves an OpenID4VP identity disclosure (public register
@@ -105,7 +107,15 @@ func (s *Service) Register(ctx context.Context, disclosureToken, kvkNumber, slug
 	if err != nil {
 		return RegistrationOutcome{}, err
 	}
-	result, err := s.OpenWallet(ctx, u.ID, kvkNumber, slug)
+	// The disclosed PID (verified name + date of birth) is what KVK matches
+	// against its register — the person is identified by their wallet, not by
+	// the account we just found or created.
+	requester := Requester{
+		GivenNames:  disclosed.Name.GivenNames,
+		FamilyName:  disclosed.Name.LastName,
+		DateOfBirth: disclosed.DateOfBirth,
+	}
+	result, err := s.OpenWallet(ctx, u.ID, requester, kvkNumber, slug)
 	if err != nil {
 		return RegistrationOutcome{}, err
 	}
@@ -133,16 +143,26 @@ func (s *Service) findOrCreateUser(ctx context.Context, disclosed auth.Disclosed
 }
 
 // OpenWallet registers a business wallet for the KVK number under the chosen slug:
-// it validates the slug, consults KVK and — if the requester is a listed
-// representative — creates the organization (with the register's legal name), makes
-// them the first owner, and deposits the attestation in the org's QERDS inbox.
-func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, kvkNumber, slug string) (RegistrationResult, error) {
+// it validates the slug, consults KVK with the requester's identification data
+// and — if KVK validates the requester as a listed representative — creates the
+// organization (with the register's legal name), makes them the first owner, and
+// deposits the attestation in the org's QERDS inbox. An unknown KVK number or a
+// requester KVK does not list is bounced as not validated; no org is created.
+func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, requester Requester, kvkNumber, slug string) (RegistrationResult, error) {
 	slug = strings.ToLower(strings.TrimSpace(slug))
 	if err := organization.ValidateSlug(slug); err != nil {
 		return RegistrationResult{}, err
 	}
 
-	att, err := s.registry.Consult(ctx, kvkNumber)
+	att, err := s.registry.Consult(ctx, registryprovider.ConsultRequest{
+		KVKNumber:   kvkNumber,
+		GivenNames:  requester.GivenNames,
+		FamilyName:  requester.FamilyName,
+		DateOfBirth: requester.DateOfBirth,
+	})
+	if errors.Is(err, registryprovider.ErrUnknownKVK) {
+		return RegistrationResult{}, ErrUnknownKVK
+	}
 	if err != nil {
 		return RegistrationResult{}, fmt.Errorf("wallet: consult registry: %w", err)
 	}

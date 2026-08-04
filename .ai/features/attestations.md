@@ -56,12 +56,23 @@ recipient step and the delivery route. On issue, the created offer is persisted
   the generated GitOps fragment. If the issuer's `BEARER_TOKEN` is ever enabled,
   the same `BuildIssuerConfig` mapping can drive a runtime `PUT/POST /api/credentials`
   push instead.
+- **A schema can carry a per-credential image.** Besides the issuer-level logo, a
+  schema stores an optional credential image (`attestation_schemas.logo_bytes`/
+  `logo_content_type`, mirroring the issuer-logo pipeline): uploaded/cleared via
+  `PUT .../attestations/schemas/{id}/logo` (multipart, admin) and previewed at
+  `GET .../attestations/schemas/{id}/logo`. `BuildIssuerConfig`/`BuildIssuerBundle`
+  embed it as a `data:` URI in the per-credential `display[].logo`, so a wallet can
+  render a distinct image per credential type on the credential card.
 - **Issuer instance is per-organization.** Each org has its own Veramo issuer
   instance (the `{instance}` path segment): a new `org_issuer_settings` slice
   (`internal/issuersettings`, org settings → **Issuer** tab) stores the instance
   name (default = org slug) + display-name/logo branding — **no secret**, since the
   hosted issuer's admin token is deployment-global (every instance renders the same
-  `VERAMO_ISSUER_ADMIN_TOKEN`). `openid4vciissuer.OfferRequest.Instance` /
+  `VERAMO_ISSUER_ADMIN_TOKEN`). The logo is an **uploaded image** stored as bytes
+  (`logo_bytes`/`logo_content_type`, mirroring the theme-branding upload): the admin
+  preview is served at `GET .../issuer/settings/logo`, while the generated metadata
+  embeds it as a self-contained `data:` URI (the hosted issuer serves that metadata
+  to wallets and cannot reach a business-wallet endpoint). `openid4vciissuer.OfferRequest.Instance` /
   `Status(instance, …)` route offers to the org's instance (empty ⇒ the configured
   default); `attestation.Service` resolves it per-org via the `issuerInstanceResolver`
   seam. `GET .../attestations/issuer-bundle` (and the Issuer tab) generate the full
@@ -217,7 +228,7 @@ Slice layout (house convention):
 ```
 internal/attestation/
   handler.go        HTTP: parse, authz-in-context, status mapping, respond.*
-  service.go        orchestration: issue flow, offer lifecycle, receive/hold, revoke
+  service.go        orchestration: issue flow, offer lifecycle, receive/hold, cancel, revoke
   schema_store.go   pgx CRUD for credential-type schemas
   template_store.go pgx CRUD for issuance templates
   issued_store.go   pgx CRUD for the issued-attestation ledger
@@ -318,7 +329,8 @@ validity, branding, and the key-material choice. The card's "N issued" is a coun
 | `org_id` | uuid FK→organizations | `ON DELETE CASCADE` |
 | `schema_id` | uuid FK→attestation_schemas | the type this template issues |
 | `name` | text | e.g. "Board signing authority" |
-| `default_attributes` | jsonb NULL | pre-filled values for the wizard |
+| `default_attributes` | jsonb NULL | static pre-filled values for the wizard |
+| `attribute_sources` | jsonb NOT NULL `{}` | per-attribute **subject-field bindings** (attribute key → a source token like `member.email` / `org.kvkNumber`); at issue time the wizard copies that field from the selected recipient into the attribute (editable pre-fill). Validated against the schema's `subject_type` + attribute list (`attestation.ValidateAttributeSources`); mutually exclusive with `default_attributes` per attribute. Vocabulary: `attestation.SubjectSourceTokens`, mirrored frontend `SUBJECT_SOURCE_FIELDS`/`resolveSubjectSource`. Org-recipient data is copied from the enriched **`qerds_contacts`** row (now carries `legal_name`/`kvk_number`/`euid`). |
 | `validity_period` | interval NULL | issued-credential lifetime (→ `expires_at`) |
 | `key_material_id` | uuid FK→attestation_keys NULL | which key/cert seals it (§7); null ⇒ org default |
 | `linked_schema_ids` | uuid[] NULL | chained attestations (Art 5(1)(g)) — types this one links to |
@@ -341,12 +353,12 @@ One row per issuance attempt; the transaction log the regulation requires
 | `recipient_ref` | text | email / digital address / name shown in the UI |
 | `attributes` | jsonb | the exact attribute values issued (source of the "attributes" step) |
 | `qualified` | boolean | snapshot of whether a qualified seal was used |
-| `status` | text CHECK | `offered` \| `claimed` \| `expired` \| `revoked` \| `failed` |
+| `status` | text CHECK | `offered` \| `claimed` \| `expired` \| `revoked` \| `cancelled` \| `failed` |
 | `issuance_id` | text | opaque id into `openid4vciissuer` (correlation key) |
 | `linked_attestation_id` | uuid FK→issued_attestations NULL | chained/linked (Art 5(1)(g)) |
 | `qualified_timestamp` | timestamptz NULL | when a QTST anchors the seal (if qualified) |
 | `issued_by_user_id` | uuid FK→users NULL | the admin/member who issued it |
-| `claimed_at` / `expires_at` / `revoked_at` | timestamptz NULL | lifecycle stamps |
+| `claimed_at` / `expires_at` / `revoked_at` / `cancelled_at` | timestamptz NULL | lifecycle stamps |
 | `created_at` / `updated_at` | timestamptz | |
 
 ### 6.4 `attestation_keys` — key material (sidebar "Key material")
@@ -433,6 +445,28 @@ irmago-owned credential, it does not duplicate the claims:
 > **without** the cgo `sqlcipher` package (the `CGO_ENABLED=0` Alpine build + `go test
 > -race` both forbid it).
 
+### 6.6 `org_onboarding_attestations` — the onboarding auto-issue set
+
+The per-org set of templates automatically issued to a new member when they
+accept an invitation (onboarding). It replaces the earlier hardcoded member-invite
+UI stub (two literal tags + a disabled "Add more"). Presence of a row means
+"auto-issue this template on onboarding"; `position` orders the set as the admin
+arranged it.
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `organization_id` | uuid FK→organizations | `ON DELETE CASCADE` |
+| `template_id` | uuid FK→attestation_templates | `ON DELETE CASCADE`; one of the org's own templates |
+| `position` | int | admin-defined order within the set |
+| `created_at` | timestamptz | |
+
+`UNIQUE (organization_id, template_id)`. Only **natural-person** templates may be
+added (onboarding issues to the accepting member, a natural person); an
+organization-subject template is rejected (`attestation.ErrOnboardingSubject`).
+The set is edited from the member-invite screen (admin) and is per-org, so a
+change applies to every future onboarding, not just the current invitation.
+
 ---
 
 ## 7. Qualified vs non-qualified, and chained attestations
@@ -465,7 +499,8 @@ issued_attestations:
   offered ──(wallet claims)────▶ claimed       (OpenID4VCI handshake done, VC delivered)
   offered ──(TTL elapses)──────▶ expired
   offered ──(issuer error)─────▶ failed        (retryable — offer can be re-created)
-  claimed ──(owner/holder)─────▶ revoked        (Art 6(2) — validity revoked)
+  offered ──(admin cancels)────▶ cancelled     (offer withdrawn — nothing was held, no Token Status List)
+  claimed ──(admin revokes)────▶ revoked        (Art 6(2) — validity revoked, published to Token Status List)
 
 attestation_keys:  active ──▶ suspended | revoked   (compromise, QTSP drop-off)
 held_attestations: received ──▶ deleted (soft)      (owner delete, Art 5(1)(a))
@@ -506,26 +541,32 @@ delivered over **QERDS** to their digital address (reusing the `qerds` send path
 by email. The service polls `Result`; on claim → `claimed` + `claimed_at` + audit; on
 TTL → `expired`.
 
-### 9.4 Revoke an issued attestation (admin, Art 6(2))
-`POST .../attestations/{id}/revoke` → propagate revocation to the issuer's Token
-Status List, then `status → revoked`, `revoked_at`, audit. **Implemented** against
-the hosted Veramo issuer's status-list API:
-- **At issuance** the offer sets `credentialMetadata.enableStatusLists: true`, so
-  the issuer reserves a Token Status List bit and embeds the `status.status_list`
-  reference in the credential (a no-op unless the issuer instance has a
-  `statusLists` block configured in `openid4vc-poc-ops` + a deployed
-  `statuslist-agent`).
-- **On claim** the poll captures the issuer's credential `uuid` (`check-offer`'s
-  `uuid`) onto `issued_attestations.credential_uuid` — the handle revocation keys
-  on.
-- **On revoke** `Service.Revoke` calls the issuer's
-  `POST /{instance}/api/revoke-credential` (`state: revoke`) with that uuid, then
-  flips the local ledger. Issuer-first ordering keeps the local `revoked` flag and
-  the published status list from drifting: a failed issuer call aborts before the
-  local flip (same fail-safe ordering as `DeleteHeld`). An offered row (nothing
-  published yet) or a legacy claimed row with no captured uuid flips locally only.
-
-Revocation propagation to external validators beyond the status list is v2.
+### 9.4 Withdraw: cancel an offer vs revoke a claimed credential (admin)
+Two distinct terminal withdrawals, because they are different events:
+- **Cancel an unclaimed offer** — `POST .../attestations/{id}/cancel` → `status → cancelled`,
+  `cancelled_at`, audit `attestation.offer_cancelled`. Only rows in `offered` are
+  cancellable. Nothing was ever held, so this is not a revocation and never touches
+  the Token Status List (returns 409 `not_cancellable` otherwise).
+- **Revoke a claimed credential** (Art 6(2)) — `POST .../attestations/{id}/revoke` →
+  propagate revocation to the issuer's Token Status List, then `status → revoked`,
+  `revoked_at`, audit `attestation.revoked`. Only rows in `claimed` are revocable
+  (returns 409 `not_revocable` otherwise). **Implemented** against the hosted Veramo
+  issuer's status-list API (IETF Token Status List, `draft-ietf-oauth-status-list`):
+  - **At issuance** the offer sets `credentialMetadata.enableStatusLists: true`, so
+    the issuer reserves a Token Status List bit and embeds the `status.status_list`
+    reference in the credential (a no-op unless the issuer instance has a
+    `statusLists` block configured in `openid4vc-poc-ops` + a deployed
+    `statuslist-agent`).
+  - **On claim** the poll captures the issuer's credential `uuid` (`check-offer`'s
+    `uuid`) onto `issued_attestations.credential_uuid` — the handle revocation keys
+    on.
+  - **On revoke** `Service.Revoke` calls the issuer's
+    `POST /{instance}/api/revoke-credential` (`state: revoke`) with that uuid, then
+    flips the local ledger. Issuer-first ordering keeps the local `revoked` flag and
+    the published status list from drifting: a failed issuer call aborts before the
+    local flip (same fail-safe ordering as `DeleteHeld`). A deployment issuing
+    without a status list, or a legacy claimed row with no captured uuid, flips
+    locally only. Propagation to external validators beyond the status list is v2.
 
 ### 9.5 Receive / hold (holder side, Art 5(1)(a))
 Inbound EAAs land in the org's **irmago EUDI holder engine** (§6.5) with a
@@ -541,6 +582,42 @@ secure channel (not a claim link) and redeeming it via the holder's OpenID4VCI
 flow — is designed in [`oid4vci-over-qerds.md`](./oid4vci-over-qerds.md) (pre-auth
 vs. authorization-code grants for business wallets).
 
+### 9.6 Auto-issue on onboarding (member accept)
+
+An org admin configures the onboarding auto-issue set (§6.6) from the member-invite
+screen. When a member **accepts** an invitation and their identity is disclosed
+(`organization/accept.go` → `acceptResolved`, the point that already proves email
+ownership and mints the session), the backend issues each configured template to
+that member:
+
+- The organization service holds an optional `OnboardingIssuer` seam, wired in at
+  boot after the attestation service is constructed (setter, mirroring the inbound
+  QERDS consumer, because the org service is built first). The concrete
+  implementation is `attestation.OnboardingIssuer`.
+- For each configured template it resolves the attribute values from the member's
+  onboarding context — the template's `attribute_sources` bindings mapped onto the
+  member's known fields (`member.givenNames`, `member.email`, `member.role`,
+  `member.jobTitle`, `member.department`, …), overriding the static
+  `default_attributes` — then reuses the normal `Service.Issue` path (offer +
+  e-mail claim link, audited). Auto-issued rows have a **null `issued_by_user_id`**
+  (system-initiated, no admin actor).
+- Issuance is **best-effort and non-fatal**: it runs after the accept has
+  committed, and any failure (one template, or the whole set) is logged, never
+  surfaced to the accepting member — consistent with the existing offer-delivery
+  model.
+- Both join paths issue the set, since both are the same event (a member joins
+  the org). The happy accept fires it from `acceptResolved`; the
+  **identity-review approval** path (an admin approves a name mismatch, admitting
+  the member from `Store.ResolveIdentityReview`) fires it from
+  `Service.ResolveIdentityReview` after the approval transaction commits, building
+  the member from the held invitation and the approved (disclosed) identity. A
+  member joining an org gets the same onboarding attestations regardless of which
+  path admitted them.
+
+Fields with no value known at accept time (`member.preferredName`, and all `org.*`
+tokens, which never apply to a member) resolve to `""`; a binding that resolves
+empty falls back to the template's static default or is simply omitted.
+
 ---
 
 ## 10. HTTP API
@@ -551,15 +628,20 @@ All org-scoped (`auth.RequireUser` → `organization.Handler.Authorize`, org via
 
 **Schemas** (admin): `GET|POST .../attestations/schemas`, `GET|PATCH|DELETE .../attestations/schemas/{id}`
 **Templates** (admin): `GET|POST .../attestations/templates`, `GET|PATCH|DELETE .../attestations/templates/{id}`
-**Issued ledger** (member read; admin issue/revoke):
+**Onboarding set** (admin): `GET .../attestations/onboarding` (the auto-issue set, §6.6), `PUT .../attestations/onboarding` (replace with `{templateIds: [...]}`, in order)
+**Issued ledger** (member read; admin issue/cancel/revoke):
 - `GET  .../attestations` — the Issued tab (filter by template/status/recipient)
 - `POST .../attestations` — issue (§9.3) → `202 {id, status, offerUri}`
 - `GET  .../attestations/{id}` — poll one issuance `{status, claimedAt?, offerUri?}`
-- `POST .../attestations/{id}/revoke` — admin
+- `POST .../attestations/{id}/cancel` — admin, cancel an unclaimed offer (§9.4)
+- `POST .../attestations/{id}/revoke` — admin, revoke a claimed credential (§9.4)
 **Key material** (admin): `GET|POST .../attestations/keys`, `POST .../attestations/keys/{id}/suspend|revoke`
 **Held** (member read; admin delete): `GET .../attestations/held`, `DELETE .../attestations/held/{id}`
 **Export** (Art 5(1)(l)): `GET .../attestations/export` — structured, machine-readable
-(issued + held), admin.
+(issued + held), admin. The bundle contract (manifest schema, format profile,
+container, versioning) is [`export.md`](./export.md); the unified org-scoped endpoint
+is `GET /api/v1/orgs/{slug}/export`, and whether this per-slice route survives
+alongside it is an open decision there (§8).
 
 The recipient wallet's OpenID4VCI callbacks hit the **hosted issuer**, not our routes.
 
@@ -587,7 +669,7 @@ invalidation cascades. The screen is the mockup:
 
 - **Audit** (`internal/audit`): new actions `SchemaCreated/Updated`,
   `TemplateCreated/Updated/Archived`, `AttestationIssued`, `AttestationClaimed`,
-  `AttestationRevoked`, `KeyMaterialAdded/Suspended/Revoked`, `HeldAttestationDeleted`;
+  `AttestationRevoked`, `AttestationOfferCancelled`, `KeyMaterialAdded/Suspended/Revoked`, `HeldAttestationDeleted`;
   new targets `TargetAttestationSchema`, `TargetAttestationTemplate`,
   `TargetIssuedAttestation`, `TargetAttestationKey`, `TargetHeldAttestation`. Standard
   `{before, after}` envelope; store readable values, never ids. Every mutation in-tx.
@@ -595,7 +677,12 @@ invalidation cascades. The screen is the mockup:
   issued; the schema is the allow-list. The verify side (`auth-openid4vp.md`) already
   enforces selective disclosure on presentation.
 - **Export** (Art 5(1)(l)): a structured machine-readable dump of issued + held EAAs
-  and their ledger/evidence, for portability and service termination.
+  and their ledger/evidence, for portability and service termination. The bundle it
+  goes into is specified in [`export.md`](./export.md): a ZIP with a top-level
+  `manifest.json`, the `attestations` section carrying `issued.json` + `held.json` +
+  the referenced schemas/templates/key references, and held credential material as
+  native SD-JWT VC files. That doc also fixes what never leaves: `claim_token`,
+  `offer_uri`, `tx_code`, `IssuanceID` and any key material (export.md §7).
 
 ---
 

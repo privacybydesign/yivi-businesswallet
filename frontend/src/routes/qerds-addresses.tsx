@@ -14,6 +14,7 @@ import { Button, Card, Input, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const CONFLICT_STATUS = 409;
+const BAD_REQUEST_STATUS = 400;
 
 function errorCode(error: ApiError): string | null {
   const body = error.body;
@@ -31,6 +32,13 @@ function addressError(error: Error, t: TFunction): string {
     errorCode(error) === "address_taken"
   ) {
     return t("qerds.addresses.taken");
+  }
+  if (
+    error instanceof ApiError &&
+    error.status === BAD_REQUEST_STATUS &&
+    errorCode(error) === "address_outside_namespace"
+  ) {
+    return t("qerds.addresses.outsideNamespace");
   }
   return t("qerds.addresses.error", { message: error.message });
 }
@@ -84,8 +92,12 @@ export default function QerdsAddresses(): React.JSX.Element {
                 <Input
                   value={localPart}
                   onChange={(event) => setLocalPart(event.target.value)}
-                  placeholder={t("qerds.addresses.localPartPlaceholder")}
-                  aria-label={t("qerds.addresses.localPartPlaceholder")}
+                  placeholder={t("qerds.addresses.localPartPlaceholder", {
+                    slug,
+                  })}
+                  aria-label={t("qerds.addresses.localPartPlaceholder", {
+                    slug,
+                  })}
                 />
               </div>
               <Button type="submit" icon="add" disabled={create.isPending}>

@@ -1,16 +1,25 @@
 import { z } from "zod";
-import { request } from "./http";
+import { absoluteApiUrl, request } from "./http";
 
+// avatarUri is the API path serving the user's own portrait photo, "" when they
+// have not uploaded one (their initials are shown instead).
 export const meSchema = z.object({
   id: z.string(),
   email: z.string(),
   preferredName: z.string().nullable(),
   givenNames: z.string(),
   lastName: z.string(),
+  avatarUri: z.string(),
   isPlatformAdmin: z.boolean(),
 });
 
 export type Me = z.infer<typeof meSchema>;
+
+// The backend returns the avatar as a path on the API; make it absolute so an
+// <img> loads it from the API origin even when the SPA is served elsewhere.
+function withAbsoluteAvatar(me: Me): Me {
+  return me.avatarUri ? { ...me, avatarUri: absoluteApiUrl(me.avatarUri) } : me;
+}
 
 export const pendingInvitationSchema = z.object({
   id: z.string(),
@@ -66,22 +75,62 @@ export function getSessionStatus(
   }).then((r) => r.status);
 }
 
-export function claimAuthSession(
+export async function claimAuthSession(
   token: string,
   signal?: AbortSignal,
 ): Promise<ClaimResult> {
-  return request(`/api/v1/auth/session/${encodeURIComponent(token)}/claim`, {
-    schema: claimResultSchema,
-    method: "POST",
-    signal,
-  });
+  const result = await request(
+    `/api/v1/auth/session/${encodeURIComponent(token)}/claim`,
+    {
+      schema: claimResultSchema,
+      method: "POST",
+      signal,
+    },
+  );
+  // The caller seeds the `me` cache with this, so the avatar path has to be made
+  // absolute here too.
+  return "pendingInvitations" in result ? result : withAbsoluteAvatar(result);
 }
 
-export function getMe(signal?: AbortSignal): Promise<Me> {
-  return request("/api/v1/me", {
-    schema: meSchema,
-    signal,
-  });
+export async function getMe(signal?: AbortSignal): Promise<Me> {
+  return withAbsoluteAvatar(
+    await request("/api/v1/me", {
+      schema: meSchema,
+      signal,
+    }),
+  );
+}
+
+// The multipart field the backend reads the photo from.
+const AVATAR_FORM_FIELD = "avatar";
+
+// updateMyAvatar uploads a new portrait photo. The backend re-encodes it to a
+// fixed square JPEG, so the returned avatarUri carries a fresh version and the
+// browser refetches instead of reusing the previous photo.
+export async function updateMyAvatar(
+  file: File,
+  signal?: AbortSignal,
+): Promise<Me> {
+  const form = new FormData();
+  form.append(AVATAR_FORM_FIELD, file);
+  return withAbsoluteAvatar(
+    await request("/api/v1/me/avatar", {
+      schema: meSchema,
+      method: "PUT",
+      body: form,
+      signal,
+    }),
+  );
+}
+
+export async function removeMyAvatar(signal?: AbortSignal): Promise<Me> {
+  return withAbsoluteAvatar(
+    await request("/api/v1/me/avatar", {
+      schema: meSchema,
+      method: "DELETE",
+      signal,
+    }),
+  );
 }
 
 export function logout(signal?: AbortSignal): Promise<void> {

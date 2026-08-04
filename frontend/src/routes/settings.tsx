@@ -1,15 +1,19 @@
-import { useState } from "react";
-import { useParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { Card, TopBar } from "../ui";
 import { DepartmentSettings } from "./department-settings";
 import { EmailSettingsPanel } from "./email-settings";
+import { EmailTemplatesPanel } from "./email-templates";
 import { IssuerSettingsPanel } from "./issuer-settings";
+import { NotificationsSettingsPanel } from "./notifications-settings";
 import { OrgProfileSettings } from "./org-profile-settings";
 import { PostguardApiKeyCard } from "./postguard-api-key";
 import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
+import { PostguardNotificationsCard } from "./postguard-notifications";
+import { ProvisioningSettingsPanel } from "./provisioning-settings";
+import { SlackSettingsPanel } from "./slack-settings";
 import { ThemeSettingsPanel } from "./theme-settings";
 import { WscaWalletPanel } from "./wsca-wallet-settings";
 import * as React from "react";
@@ -18,10 +22,26 @@ const TABS = [
   { key: "org", labelKey: "settings.tabOrg" },
   { key: "branding", labelKey: "settings.tabBranding" },
   { key: "email", labelKey: "settings.tabEmail" },
+  { key: "mailTemplates", labelKey: "settings.tabMailTemplates" },
+  { key: "slack", labelKey: "settings.tabSlack" },
+  { key: "notifications", labelKey: "settings.tabNotifications" },
   { key: "issuer", labelKey: "settings.tabIssuer" },
+  { key: "provisioning", labelKey: "settings.tabProvisioning" },
   { key: "postguard", labelKey: "settings.tabPostguard" },
   { key: "wallets", labelKey: "settings.tabWallets" },
 ] as const;
+
+type TabKey = (typeof TABS)[number]["key"];
+
+const DEFAULT_TAB: TabKey = TABS[0].key;
+
+// The active tab is addressable via ?tab=<key> so links can deep-link to a
+// specific panel (e.g. ?tab=wallets for WSCA activation); an unknown or missing
+// value falls back to the first tab.
+function readTab(params: URLSearchParams): TabKey {
+  const value = params.get("tab");
+  return TABS.find((item) => item.key === value)?.key ?? DEFAULT_TAB;
+}
 
 export default function Settings(): React.JSX.Element {
   const { t } = useTranslation();
@@ -30,7 +50,20 @@ export default function Settings(): React.JSX.Element {
   const slug = orgSlug!;
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
-  const [tab, setTab] = useState("org");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = readTab(searchParams);
+
+  const setTab = (value: TabKey): void => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === DEFAULT_TAB) next.delete("tab");
+        else next.set("tab", value);
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   return (
     <>
@@ -83,12 +116,21 @@ export default function Settings(): React.JSX.Element {
           <ThemeSettingsPanel slug={slug} />
         ) : tab === "email" ? (
           <EmailSettingsPanel slug={slug} />
+        ) : tab === "mailTemplates" ? (
+          <EmailTemplatesPanel slug={slug} />
+        ) : tab === "slack" ? (
+          <SlackSettingsPanel slug={slug} />
+        ) : tab === "notifications" ? (
+          <NotificationsSettingsPanel slug={slug} />
         ) : tab === "issuer" ? (
           <IssuerSettingsPanel slug={slug} />
+        ) : tab === "provisioning" ? (
+          <ProvisioningSettingsPanel slug={slug} />
         ) : tab === "postguard" ? (
           <div className="flex max-w-2xl flex-col gap-6">
             <PostguardEncryptionKeyCard slug={slug} isAdmin={isAdmin} />
             <PostguardApiKeyCard slug={slug} isAdmin={isAdmin} />
+            <PostguardNotificationsCard slug={slug} isAdmin={isAdmin} />
           </div>
         ) : (
           <WscaWalletPanel slug={slug} />

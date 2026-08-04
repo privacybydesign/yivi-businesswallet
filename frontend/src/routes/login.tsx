@@ -13,12 +13,14 @@ import {
 import { inviteError } from "../lib/invite-error";
 import type { InviteErrorContent } from "../lib/invite-error";
 import { claimErrorKind } from "../lib/login-error";
+import { usePreAuthOrgTheme } from "../lib/pre-auth-theme";
 import {
   Avatar,
   Button,
   Card,
   Icon,
   IdentityDisclosure,
+  LanguageSwitcher,
   Logo,
   Outcome,
 } from "../ui";
@@ -75,6 +77,7 @@ type LoginPhase =
 
 export default function Login(): React.JSX.Element {
   const { t } = useTranslation();
+  usePreAuthOrgTheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<LoginPhase>("running");
@@ -136,7 +139,10 @@ export default function Login(): React.JSX.Element {
   const showMessage = phase === "idle" && message !== "";
 
   return (
-    <div className="mesh-wave flex min-h-screen flex-col justify-center">
+    <div className="mesh-wave relative flex min-h-screen flex-col justify-center">
+      <div className="absolute top-4 right-4 sm:top-6 sm:right-6">
+        <LanguageSwitcher />
+      </div>
       <div className="mx-auto grid w-full max-w-6xl items-center gap-10 px-6 py-12 lg:grid-cols-2 lg:gap-16">
         <section className="order-2 flex flex-col lg:order-1">
           <h1 className="font-display text-ink text-[32px] leading-[1.15] font-bold sm:text-[38px]">

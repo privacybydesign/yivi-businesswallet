@@ -22,6 +22,8 @@ type schemaStore interface {
 	CreateSchema(ctx context.Context, orgID uuid.UUID, in Schema) (Schema, error)
 	UpdateSchema(ctx context.Context, orgID, id uuid.UUID, in Schema) (Schema, error)
 	DeleteSchema(ctx context.Context, orgID, id uuid.UUID) error
+	GetSchemaLogo(ctx context.Context, orgID, id uuid.UUID) (Logo, error)
+	SetSchemaLogo(ctx context.Context, orgID, id uuid.UUID, logo LogoUpdate) (Schema, error)
 }
 
 type templateStore interface {
@@ -42,12 +44,22 @@ type issuedReader interface {
 	ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error)
 }
 
+// onboardingStore reads and replaces an org's onboarding auto-issue set (the
+// templates issued to a new member on accept). Implemented by the attestation Store.
+type onboardingStore interface {
+	ListOnboardingAttestations(ctx context.Context, orgID uuid.UUID) ([]OnboardingAttestation, error)
+	SetOnboardingAttestations(ctx context.Context, orgID uuid.UUID, templateIDs []uuid.UUID) ([]OnboardingAttestation, error)
+}
+
 type issuanceService interface {
-	Issue(ctx context.Context, orgID, issuedBy uuid.UUID, orgName string, in IssueInput) (IssueResult, error)
+	Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUID, orgName string, in IssueInput) (IssueResult, error)
 	Status(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
+	Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ClaimStatus(ctx context.Context, token string) (ClaimView, error)
 	DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
+	ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([]HeldListView, error)
+	HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang string) (HeldClaimsView, error)
 }
 
 // issuerSettingsReader resolves an org's issuer instance name (defaulted to the
@@ -61,21 +73,17 @@ type issuerSettingsReader interface {
 // tabs + key material). Org routes compose the injected requireUser + authorize
 // middleware; write/manage routes additionally require org admin.
 //
-// heldStore is the read surface over the org's held-credential index; deletion
-// runs through the service (it also removes the credential from the holder
-// engine, §6.5), so only the list read lives here.
-type heldStore interface {
-	ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error)
-}
-
+// The held-credential list read runs through the service (it enriches each row
+// with the credential's localized display metadata from the holder engine, §6.5),
+// as does deletion (it also removes the credential from the engine).
 type Handler struct {
 	schemas        schemaStore
 	templates      templateStore
 	keys           keyStore
 	issued         issuedReader
-	held           heldStore
 	service        issuanceService
 	issuerSettings issuerSettingsReader
+	onboarding     onboardingStore
 	issuerURL      string
 	requireUser    func(http.Handler) http.Handler
 	authorize      func(http.Handler) http.Handler
@@ -86,15 +94,15 @@ type Handler struct {
 // be empty (the generated config's issuer field is then left for the operator).
 // issuerSettings resolves an org's issuer instance + branding for the per-org
 // bundle generator (see issuerBundle).
-func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, held heldStore, service issuanceService, issuerSettings issuerSettingsReader, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, service issuanceService, issuerSettings issuerSettingsReader, onboarding onboardingStore, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		schemas:        schemas,
 		templates:      templates,
 		keys:           keys,
 		issued:         issued,
-		held:           held,
 		service:        service,
 		issuerSettings: issuerSettings,
+		onboarding:     onboarding,
 		issuerURL:      issuerURL,
 		requireUser:    requireUser,
 		authorize:      authorize,
@@ -114,6 +122,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/attestations/schemas", admin(respond.HandlerFunc(h.createSchema)))
 	mux.Handle("GET /orgs/{slug}/attestations/schemas/{id}", admin(respond.HandlerFunc(h.getSchema)))
 	mux.Handle("GET /orgs/{slug}/attestations/schemas/{id}/issuer-config", admin(respond.HandlerFunc(h.schemaIssuerConfig)))
+	mux.Handle("GET /orgs/{slug}/attestations/schemas/{id}/logo", admin(respond.HandlerFunc(h.serveSchemaLogo)))
+	mux.Handle("PUT /orgs/{slug}/attestations/schemas/{id}/logo", admin(respond.HandlerFunc(h.putSchemaLogo)))
 	mux.Handle("PATCH /orgs/{slug}/attestations/schemas/{id}", admin(respond.HandlerFunc(h.updateSchema)))
 	mux.Handle("DELETE /orgs/{slug}/attestations/schemas/{id}", admin(respond.HandlerFunc(h.deleteSchema)))
 
@@ -127,20 +137,26 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PATCH /orgs/{slug}/attestations/templates/{id}", admin(respond.HandlerFunc(h.updateTemplate)))
 	mux.Handle("DELETE /orgs/{slug}/attestations/templates/{id}", admin(respond.HandlerFunc(h.deleteTemplate)))
 
+	// Onboarding auto-issue set (admin): the templates issued to a new member on accept.
+	mux.Handle("GET /orgs/{slug}/attestations/onboarding", admin(respond.HandlerFunc(h.listOnboarding)))
+	mux.Handle("PUT /orgs/{slug}/attestations/onboarding", admin(respond.HandlerFunc(h.putOnboarding)))
+
 	// Key material (admin).
 	mux.Handle("GET /orgs/{slug}/attestations/keys", admin(respond.HandlerFunc(h.listKeys)))
 	mux.Handle("POST /orgs/{slug}/attestations/keys", admin(respond.HandlerFunc(h.createKey)))
 	mux.Handle("POST /orgs/{slug}/attestations/keys/{id}/suspend", admin(respond.HandlerFunc(h.suspendKey)))
 	mux.Handle("POST /orgs/{slug}/attestations/keys/{id}/revoke", admin(respond.HandlerFunc(h.revokeKey)))
 
-	// Issuance ledger (member read; admin issue/revoke).
+	// Issuance ledger (member read; admin issue/cancel/revoke).
 	mux.Handle("GET /orgs/{slug}/attestations", member(respond.HandlerFunc(h.listIssued)))
 	mux.Handle("POST /orgs/{slug}/attestations", admin(respond.HandlerFunc(h.issue)))
 	mux.Handle("GET /orgs/{slug}/attestations/{id}", member(respond.HandlerFunc(h.getIssued)))
+	mux.Handle("POST /orgs/{slug}/attestations/{id}/cancel", admin(respond.HandlerFunc(h.cancel)))
 	mux.Handle("POST /orgs/{slug}/attestations/{id}/revoke", admin(respond.HandlerFunc(h.revoke)))
 
 	// Held credentials (member read; admin delete). Art 5(1)(a) "store, select".
 	mux.Handle("GET /orgs/{slug}/attestations/held", member(respond.HandlerFunc(h.listHeld)))
+	mux.Handle("GET /orgs/{slug}/attestations/held/{id}/claims", member(respond.HandlerFunc(h.heldClaims)))
 	mux.Handle("DELETE /orgs/{slug}/attestations/held/{id}", admin(respond.HandlerFunc(h.deleteHeld)))
 
 	// Public, unauthenticated claim view (keyed on an opaque claim token, never the
@@ -166,13 +182,47 @@ func (h *Handler) claim(w http.ResponseWriter, r *http.Request) error {
 
 // --- Held credentials ---
 
+// defaultLanguage is the language held-credential display metadata is resolved in
+// when the request names none — matching the frontend's default and the "en"
+// preference the engine already fell back to before localization.
+const defaultLanguage = "en"
+
+// requestLanguage reads the active app language from the `lang` query parameter
+// (a BCP-47 tag such as "en" or "nl", sent by the frontend from i18next), so the
+// held-credential title, labels and issuer name follow the user's language. It
+// falls back to defaultLanguage when the parameter is absent or blank; the engine
+// resolves an unknown tag to its English/first entry, so no allow-list is needed.
+func requestLanguage(r *http.Request) string {
+	if lang := strings.TrimSpace(r.URL.Query().Get("lang")); lang != "" {
+		return lang
+	}
+	return defaultLanguage
+}
+
 func (h *Handler) listHeld(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
-	held, err := h.held.ListHeld(r.Context(), org.ID)
+	held, err := h.service.ListHeld(r.Context(), org.ID, requestLanguage(r))
 	if err != nil {
 		return fmt.Errorf("listing held attestations: %w", err)
 	}
 	respond.JSON(w, r, http.StatusOK, held)
+	return nil
+}
+
+func (h *Handler) heldClaims(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid held attestation id")
+	}
+	org := organization.OrgFromContext(r.Context())
+	view, err := h.service.HeldClaims(r.Context(), org.ID, id, requestLanguage(r))
+	switch {
+	case errors.Is(err, ErrHeldNotFound):
+		return notFound("held_not_found", "held attestation not found")
+	case err != nil:
+		return fmt.Errorf("reading held attestation claims: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, view)
 	return nil
 }
 
@@ -211,6 +261,9 @@ func (h *Handler) listSchemas(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("listing attestation schemas: %w", err)
 	}
+	for i := range schemas {
+		schemas[i].LogoURI = schemaLogoURL(org.Slug, schemas[i])
+	}
 	respond.JSON(w, r, http.StatusOK, schemas)
 	return nil
 }
@@ -228,6 +281,7 @@ func (h *Handler) getSchema(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("getting attestation schema: %w", err)
 	}
+	sc.LogoURI = schemaLogoURL(org.Slug, sc)
 	respond.JSON(w, r, http.StatusOK, sc)
 	return nil
 }
@@ -251,8 +305,28 @@ func (h *Handler) schemaIssuerConfig(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return fmt.Errorf("getting attestation schema: %w", err)
 	}
-	respond.JSON(w, r, http.StatusOK, BuildIssuerConfig(sc, h.issuerURL))
+	logoURI, err := h.schemaLogoDataURI(r.Context(), org.ID, sc)
+	if err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, BuildIssuerConfig(sc, h.issuerURL, logoURI))
 	return nil
+}
+
+// schemaLogoDataURI resolves a schema's stored image as a data: URI for embedding
+// in the generated issuer config, or "" when the schema has no image.
+func (h *Handler) schemaLogoDataURI(ctx context.Context, orgID uuid.UUID, sc Schema) (string, error) {
+	if !sc.HasLogo {
+		return "", nil
+	}
+	logo, err := h.schemas.GetSchemaLogo(ctx, orgID, sc.ID)
+	if errors.Is(err, ErrNoSchemaLogo) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("getting attestation schema logo: %w", err)
+	}
+	return logoDataURI(logo), nil
 }
 
 // issuerBundle returns the full Veramo issuer GitOps bundle for the org: the
@@ -270,7 +344,17 @@ func (h *Handler) issuerBundle(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("listing attestation schemas: %w", err)
 	}
-	respond.JSON(w, r, http.StatusOK, BuildIssuerBundle(instance, displayName, logoURI, schemas))
+	schemaLogos := make(map[uuid.UUID]string)
+	for _, sc := range schemas {
+		dataURI, err := h.schemaLogoDataURI(r.Context(), org.ID, sc)
+		if err != nil {
+			return err
+		}
+		if dataURI != "" {
+			schemaLogos[sc.ID] = dataURI
+		}
+	}
+	respond.JSON(w, r, http.StatusOK, BuildIssuerBundle(instance, displayName, logoURI, schemas, schemaLogos))
 	return nil
 }
 
@@ -290,6 +374,7 @@ func (h *Handler) createSchema(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("creating attestation schema: %w", err)
 	}
+	sc.LogoURI = schemaLogoURL(org.Slug, sc)
 	respond.JSON(w, r, http.StatusCreated, sc)
 	return nil
 }
@@ -314,6 +399,7 @@ func (h *Handler) updateSchema(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("updating attestation schema: %w", err)
 	}
+	sc.LogoURI = schemaLogoURL(org.Slug, sc)
 	respond.JSON(w, r, http.StatusOK, sc)
 	return nil
 }
@@ -451,6 +537,7 @@ type templateRequest struct {
 	SchemaID          string            `json:"schemaId"`
 	Name              string            `json:"name"`
 	DefaultAttributes map[string]string `json:"defaultAttributes"`
+	AttributeSources  map[string]string `json:"attributeSources"`
 	ValiditySeconds   *int              `json:"validitySeconds"`
 	KeyMaterialID     *string           `json:"keyMaterialId"`
 	Status            string            `json:"status"`
@@ -463,6 +550,51 @@ func (h *Handler) listTemplates(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("listing attestation templates: %w", err)
 	}
 	respond.JSON(w, r, http.StatusOK, templates)
+	return nil
+}
+
+type onboardingRequest struct {
+	TemplateIDs []string `json:"templateIds"`
+}
+
+// listOnboarding returns the org's onboarding auto-issue set.
+func (h *Handler) listOnboarding(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	set, err := h.onboarding.ListOnboardingAttestations(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("listing onboarding attestations: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, set)
+	return nil
+}
+
+// putOnboarding replaces the org's onboarding auto-issue set with the given
+// templates, in order. Each must be one of the org's own natural-person templates.
+func (h *Handler) putOnboarding(w http.ResponseWriter, r *http.Request) error {
+	var req onboardingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return badRequest("invalid_body", "invalid request body")
+	}
+	templateIDs := make([]uuid.UUID, len(req.TemplateIDs))
+	for i, raw := range req.TemplateIDs {
+		id, err := uuid.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			return badRequest("invalid_input", "invalid templateId")
+		}
+		templateIDs[i] = id
+	}
+
+	org := organization.OrgFromContext(r.Context())
+	set, err := h.onboarding.SetOnboardingAttestations(r.Context(), org.ID, templateIDs)
+	switch {
+	case errors.Is(err, ErrTemplateNotFound):
+		return notFound("template_not_found", "template not found")
+	case errors.Is(err, ErrOnboardingSubject):
+		return badRequest("onboarding_subject_mismatch", "onboarding auto-issue is only supported for natural-person templates")
+	case err != nil:
+		return fmt.Errorf("updating onboarding attestations: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, set)
 	return nil
 }
 
@@ -498,9 +630,22 @@ func (h *Handler) createTemplate(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := organization.OrgFromContext(r.Context())
+	if len(req.AttributeSources) > 0 {
+		sc, err := h.schemas.GetSchema(r.Context(), org.ID, schemaID)
+		if errors.Is(err, ErrSchemaNotFound) {
+			return badRequest("invalid_input", "schema not found")
+		}
+		if err != nil {
+			return fmt.Errorf("resolving schema for template attribute sources: %w", err)
+		}
+		if err := ValidateAttributeSources(sc.SubjectType, sc.Attributes, req.AttributeSources); err != nil {
+			return badRequest("invalid_input", err.Error())
+		}
+	}
 	t, err := h.templates.CreateTemplate(r.Context(), org.ID, Template{
 		SchemaID: schemaID, Name: req.Name, DefaultAttributes: req.DefaultAttributes,
-		ValiditySeconds: req.ValiditySeconds, KeyMaterialID: keyID,
+		AttributeSources: req.AttributeSources,
+		ValiditySeconds:  req.ValiditySeconds, KeyMaterialID: keyID,
 	})
 	if errors.Is(err, ErrSchemaNotFound) {
 		return badRequest("invalid_input", "schema not found")
@@ -527,9 +672,22 @@ func (h *Handler) updateTemplate(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := organization.OrgFromContext(r.Context())
+	if len(req.AttributeSources) > 0 {
+		existing, err := h.templates.GetTemplate(r.Context(), org.ID, id)
+		if errors.Is(err, ErrTemplateNotFound) {
+			return notFound("template_not_found", "template not found")
+		}
+		if err != nil {
+			return fmt.Errorf("resolving template for attribute sources: %w", err)
+		}
+		if err := ValidateAttributeSources(existing.SubjectType, existing.Attributes, req.AttributeSources); err != nil {
+			return badRequest("invalid_input", err.Error())
+		}
+	}
 	t, err := h.templates.UpdateTemplate(r.Context(), org.ID, id, Template{
 		Name: req.Name, DefaultAttributes: req.DefaultAttributes,
-		ValiditySeconds: req.ValiditySeconds, KeyMaterialID: keyID, Status: req.Status,
+		AttributeSources: req.AttributeSources,
+		ValiditySeconds:  req.ValiditySeconds, KeyMaterialID: keyID, Status: req.Status,
 	})
 	if errors.Is(err, ErrTemplateNotFound) {
 		return notFound("template_not_found", "template not found")
@@ -646,9 +804,10 @@ type recipientRequest struct {
 }
 
 type issueRequest struct {
-	TemplateID string            `json:"templateId"`
-	Recipient  recipientRequest  `json:"recipient"`
-	Attributes map[string]string `json:"attributes"`
+	TemplateID     string            `json:"templateId"`
+	Recipient      recipientRequest  `json:"recipient"`
+	Attributes     map[string]string `json:"attributes"`
+	DeliveryMethod string            `json:"deliveryMethod"`
 }
 
 func (h *Handler) listIssued(w http.ResponseWriter, r *http.Request) error {
@@ -701,13 +860,18 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) error {
 	if req.Attributes == nil {
 		req.Attributes = map[string]string{}
 	}
+	deliveryMethod := strings.TrimSpace(req.DeliveryMethod)
+	if deliveryMethod != "" && deliveryMethod != DeliveryMethodEmail && deliveryMethod != DeliveryMethodQR {
+		return badRequest("invalid_input", "invalid deliveryMethod")
+	}
 
 	org := organization.OrgFromContext(r.Context())
 	actor := auth.UserFromContext(r.Context())
-	result, err := h.service.Issue(r.Context(), org.ID, actor.ID, org.Name, IssueInput{
-		TemplateID: templateID,
-		Recipient:  Recipient{Kind: req.Recipient.Kind, UserID: userID, Ref: ref},
-		Attributes: req.Attributes,
+	result, err := h.service.Issue(r.Context(), org.ID, &actor.ID, org.Name, IssueInput{
+		TemplateID:     templateID,
+		Recipient:      Recipient{Kind: req.Recipient.Kind, UserID: userID, Ref: ref},
+		Attributes:     req.Attributes,
+		DeliveryMethod: deliveryMethod,
 	})
 	switch {
 	case errors.Is(err, ErrTemplateNotFound):
@@ -736,9 +900,28 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) error {
 	case errors.Is(err, ErrIssuedNotFound):
 		return notFound("attestation_not_found", "attestation not found")
 	case errors.Is(err, ErrNotOfferable):
-		return &respond.APIError{Status: http.StatusConflict, Code: "not_revocable", Message: "attestation is not in a revocable state"}
+		return &respond.APIError{Status: http.StatusConflict, Code: "not_revocable", Message: "only a claimed credential can be revoked"}
 	case err != nil:
 		return fmt.Errorf("revoking attestation: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, issued)
+	return nil
+}
+
+func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseID(r, "id", "attestation")
+	if err != nil {
+		return err
+	}
+	org := organization.OrgFromContext(r.Context())
+	issued, err := h.service.Cancel(r.Context(), org.ID, id)
+	switch {
+	case errors.Is(err, ErrIssuedNotFound):
+		return notFound("attestation_not_found", "attestation not found")
+	case errors.Is(err, ErrNotOfferable):
+		return &respond.APIError{Status: http.StatusConflict, Code: "not_cancellable", Message: "only an unclaimed offer can be cancelled"}
+	case err != nil:
+		return fmt.Errorf("cancelling attestation offer: %w", err)
 	}
 	respond.JSON(w, r, http.StatusOK, issued)
 	return nil

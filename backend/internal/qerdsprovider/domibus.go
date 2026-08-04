@@ -50,6 +50,7 @@ const (
 
 	propOriginalSender = "originalSender"
 	propFinalRecipient = "finalRecipient"
+	propSubject        = "subject"
 	payloadCID         = "cid:message"
 	payloadMimeType    = "text/plain"
 	attachmentCIDBase  = "cid:attachment-"
@@ -221,6 +222,18 @@ func (p *DomibusProvider) buildSubmitEnvelope(msg OutboundMessage) submitEnvelop
 		})
 	}
 
+	// originalSender + finalRecipient are required by the PMode property set;
+	// subject is optional (carries the message title) and only sent when present.
+	// Every property here must be declared in the PMode's property set or Domibus
+	// rejects the submission ("Property profiling ... does not include a property").
+	msgProps := []property{
+		{Name: propOriginalSender, Value: string(msg.Sender)},
+		{Name: propFinalRecipient, Value: string(msg.Recipient)},
+	}
+	if msg.Subject != "" {
+		msgProps = append(msgProps, property{Name: propSubject, Value: msg.Subject})
+	}
+
 	return submitEnvelope{
 		XMLName: xml.Name{Space: soapNS, Local: "Envelope"},
 		Header: submitHeader{
@@ -236,11 +249,8 @@ func (p *DomibusProvider) buildSubmitEnvelope(msg OutboundMessage) submitEnvelop
 						Action:         p.cfg.Action,
 						ConversationID: "1",
 					},
-					MessageProperties: []property{
-						{Name: propOriginalSender, Value: string(msg.Sender)},
-						{Name: propFinalRecipient, Value: string(msg.Recipient)},
-					},
-					PayloadInfo: payloadInfo{PartInfo: parts},
+					MessageProperties: msgProps,
+					PayloadInfo:       payloadInfo{PartInfo: parts},
 				},
 			},
 		},
@@ -376,7 +386,7 @@ func newRetrieveEnvelope(messageID string) retrieveEnvelope {
 		Body: retrieveBody{
 			Request: retrieveRequest{
 				XMLName:   xml.Name{Space: backendNS, Local: "retrieveMessageRequest"},
-				MessageID: messageID,
+				MessageID: xmlValue{XMLName: xml.Name{Local: "messageID"}, Value: messageID},
 			},
 		},
 	}
@@ -392,8 +402,13 @@ type retrieveBody struct {
 }
 
 type retrieveRequest struct {
-	XMLName   xml.Name
-	MessageID string `xml:"messageID"`
+	XMLName xml.Name
+	// Unqualified (empty namespace), like the submitRequest payload and the
+	// listPending finalRecipient: the backend schema is
+	// elementFormDefault="unqualified", so the messageID child must reset the
+	// backendNS it would otherwise inherit from retrieveMessageRequest — else
+	// Domibus rejects it ("unexpected element ... Expected elements are <{}messageID>").
+	MessageID xmlValue
 }
 
 // --- SOAP response types (local-name matched, namespace-agnostic) ---
@@ -431,7 +446,7 @@ func (r retrieveResponse) toInbound(messageID string, fallbackRecipient Address)
 			if prop.Value != "" {
 				recipient = Address(prop.Value)
 			}
-		case "subject":
+		case propSubject:
 			subject = prop.Value
 		}
 	}

@@ -17,7 +17,7 @@ import (
 
 // walletService is the surface the handler depends on.
 type walletService interface {
-	OpenWallet(ctx context.Context, requestorUserID uuid.UUID, kvkNumber, slug string) (RegistrationResult, error)
+	OpenWallet(ctx context.Context, requestorUserID uuid.UUID, requester Requester, kvkNumber, slug string) (RegistrationResult, error)
 	StartRegisterSession(ctx context.Context) (auth.Session, error)
 	Register(ctx context.Context, disclosureToken, kvkNumber, slug string) (RegistrationOutcome, error)
 	Representations(ctx context.Context, orgID uuid.UUID) ([]Representation, error)
@@ -145,7 +145,10 @@ func (h *Handler) open(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	u := auth.UserFromContext(r.Context())
-	res, err := h.service.OpenWallet(r.Context(), u.ID, req.KVKNumber, req.Slug)
+	// The logged-in path has no fresh disclosure, so KVK matches on the stored
+	// name alone (no verified date of birth). See wallet.Requester.
+	requester := Requester{GivenNames: u.GivenNames, FamilyName: u.LastName}
+	res, err := h.service.OpenWallet(r.Context(), u.ID, requester, req.KVKNumber, req.Slug)
 	if e := mapError(err); e != nil {
 		return e
 	}
@@ -210,6 +213,8 @@ func mapError(err error) error {
 		return nil
 	case errors.Is(err, ErrNotRepresentative):
 		return &respond.APIError{Status: http.StatusForbidden, Code: "not_a_representative", Message: "you are not registered as a representative of this company"}
+	case errors.Is(err, ErrUnknownKVK):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "unknown_kvk", Message: "this KVK number is not in the register"}
 	case errors.Is(err, ErrAlreadyRegistered):
 		return &respond.APIError{Status: http.StatusConflict, Code: "already_registered", Message: "this company already has a business wallet"}
 	case errors.Is(err, ErrSlugTaken):

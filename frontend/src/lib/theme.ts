@@ -1,17 +1,47 @@
 import type { OrgTheme } from "../api/theme";
 
 // Runtime theming. The app's colours resolve through the --yb-* custom
-// properties on :root (see index.css); overriding those on the documentElement
-// re-colours every Tailwind utility that maps to them. Clearing an override
-// falls back to the :root default, so an unset field keeps the default look.
+// properties on :root (see index.css); overriding those re-colours every
+// Tailwind utility that maps to them. Clearing an override falls back to the
+// :root default, so an unset field keeps the default look.
+//
+// Two mechanisms, chosen by whether a token is mode-safe:
+//   * Brand fills (primary, accent) are self-contained coloured fills with their
+//     own readable foreground, so a single value is correct in both light and
+//     dark mode. They are applied INLINE on the documentElement (resolveThemeTokens
+//     → applyOrgTheme), where they win over both the light and dark :root defaults.
+//   * Neutral/semantic roles (surface, border, text, link, status) are
+//     mode-specific — a tenant's light surface must not be forced into dark mode —
+//     so each derives a light value AND a dark value, shipped as a single
+//     <style id="ybw-org-theme"> block whose dark half lives under a
+//     `prefers-color-scheme: dark` media query (an inline custom property can't
+//     carry a media query). The block uses a doubled `:root:root` selector so it
+//     wins over index.css by SPECIFICITY, not source order — which lets the inline
+//     pre-paint script (index.html) inject it before Vite's CSS without a
+//     source-order race, so a full reload never flashes the default palette (the
+//     FOUC this all guards against).
 
-// The design tokens an org theme re-colours. Primary drives buttons and the
-// active-nav accent; accent (brand) drives avatars and small accents.
+// --- Mode-safe brand fills (applied inline on the documentElement) ---
 const PRIMARY = "--yb-primary";
 const PRIMARY_HOVER = "--yb-primary-hover";
 const PRIMARY_FG = "--yb-primary-fg";
 const ACCENT = "--yb-brand";
 const ACCENT_600 = "--yb-brand-600";
+
+// Navigation chrome (sidebar + top bar) and the body font are also mode-safe: a
+// chrome colour is a self-contained fill with its own readable foreground that
+// works in both modes, and a font family is mode-agnostic — so all are applied
+// inline alongside the brand fills.
+const SIDEBAR = "--yb-sidebar";
+const SIDEBAR_FG = "--yb-sidebar-fg";
+const SIDEBAR_FG_SOFT = "--yb-sidebar-fg-soft";
+const SIDEBAR_ACTIVE = "--yb-sidebar-active";
+const SIDEBAR_LINE = "--yb-sidebar-line";
+const TOPBAR = "--yb-topbar";
+const TOPBAR_FG = "--yb-topbar-fg";
+const TOPBAR_FG_SOFT = "--yb-topbar-fg-soft";
+const TOPBAR_LINE = "--yb-topbar-line";
+const FONT_SANS = "--yb-font-sans";
 
 const THEMED_PROPERTIES = [
   PRIMARY,
@@ -19,10 +49,56 @@ const THEMED_PROPERTIES = [
   PRIMARY_FG,
   ACCENT,
   ACCENT_600,
+  SIDEBAR,
+  SIDEBAR_FG,
+  SIDEBAR_FG_SOFT,
+  SIDEBAR_ACTIVE,
+  SIDEBAR_LINE,
+  TOPBAR,
+  TOPBAR_FG,
+  TOPBAR_FG_SOFT,
+  TOPBAR_LINE,
+  FONT_SANS,
 ] as const;
 
+// How a chrome seed derives its companions: the soft foreground fades the
+// readable foreground toward the background; the active/hover fill and the
+// border nudge the background toward the foreground so they stay visible on the
+// chrome in both light and dark.
+const CHROME_FG_SOFT_MIX = 0.32;
+const CHROME_ACTIVE_MIX = 0.12;
+const CHROME_LINE_MIX = 0.18;
+
+// isSafeFontFamily gates a stored font-family string before it is set as a CSS
+// custom property (defense-in-depth alongside the backend's own validation):
+// only letters, digits, spaces, commas, quotes and hyphens, and a sane length,
+// so no value can carry CSS-injection punctuation (;{}()/*).
+const FONT_FAMILY_PATTERN = /^[A-Za-z0-9 ,'"-]{1,120}$/;
+function isSafeFontFamily(value: string): boolean {
+  return FONT_FAMILY_PATTERN.test(value);
+}
+
+// --- Mode-aware roles (shipped via the <style> block) ---
+const LINK = "--yb-link";
+const INK = "--yb-ink";
+const SURFACE = "--yb-surface";
+const SURFACE_2 = "--yb-surface-2";
+const SURFACE_3 = "--yb-surface-3";
+const LINE = "--yb-line";
+const LINE_STRONG = "--yb-line-strong";
+const SUCCESS = "--yb-success";
+const SUCCESS_BG = "--yb-success-bg";
+const WARNING = "--yb-warning";
+const WARNING_FG = "--yb-warning-fg";
+const WARNING_BG = "--yb-warning-bg";
+const ERROR = "--yb-error";
+const ERROR_BG = "--yb-error-bg";
+
+// The <style> element carrying the mode-aware overrides.
+const ORG_THEME_STYLE_ID = "ybw-org-theme";
+
 // Foreground candidates for text sitting on a themed colour: near-white or the
-// app's warm-dark ink. applyTheme picks whichever reads better.
+// app's warm-dark ink. readableForeground picks whichever reads better.
 const LIGHT_FG = "#ffffff";
 const DARK_FG = "#211f1f";
 
@@ -34,10 +110,57 @@ const ACCENT_DARKEN = 0.16;
 // which is "normal" text, so this is the bar a primary colour must clear.
 export const AA_CONTRAST = 4.5;
 
+// Step size and iteration cap when nudging a colour toward the contrast floor.
+const ADJUST_STEP = 0.06;
+const ADJUST_MAX_STEPS = 24;
+
 // The default token values (from index.css :root), shown as the placeholder /
-// picker fallback when a field is unset.
+// picker fallback when a field is unset. Keyed by the theme colour field so the
+// settings UI can look each up.
 export const DEFAULT_PRIMARY = "#484747";
 export const DEFAULT_ACCENT = "#ba3354";
+export const COLOR_FIELD_DEFAULTS = {
+  primaryColor: DEFAULT_PRIMARY,
+  accentColor: DEFAULT_ACCENT,
+  textColor: "#484747",
+  surfaceColor: "#faf8f6",
+  borderColor: "#eae5e2",
+  linkColor: "#1d4e89",
+  successColor: "#00973a",
+  warningColor: "#eba73b",
+  errorColor: "#bd1919",
+  sidebarColor: "#faf8f6",
+  topbarColor: "#faf8f6",
+} as const;
+
+// --- Default neutral anchors, mirrored from index.css ---
+// The mode-aware derivations gate contrast against, and tint from, these
+// baseline values so the derived palette stays coherent with the design system.
+const LIGHT = {
+  surface: "#ffffff",
+  surface2: "#faf8f6",
+  surface3: "#f5f2ef",
+  line: "#eae5e2",
+  lineStrong: "#d7d2cd",
+  highlight: "#eaf3f9",
+} as const;
+const DARK = {
+  surface: "#1d1b1a",
+  surface2: "#141312",
+  surface3: "#252322",
+  line: "#2b2928",
+  lineStrong: "#3a3736",
+  highlight: "#1c3648",
+} as const;
+
+// How strongly a seed tints each neutral. Surfaces are backgrounds behind body
+// text, so their tint is kept subtle to preserve the text contrast the default
+// neutrals were designed for; borders are decorative (no text), so they take a
+// stronger tint. Status backgrounds are pale/dark chips.
+const SURFACE_TINT = 0.08;
+const BORDER_TINT = 0.28;
+const STATUS_BG_TINT_LIGHT = 0.14;
+const STATUS_BG_TINT_DARK = 0.16;
 
 interface Rgb {
   r: number;
@@ -98,6 +221,20 @@ export function readableForeground(background: string): string {
   return dark > light ? DARK_FG : LIGHT_FG;
 }
 
+// readableForegroundAA is like readableForeground but GUARANTEES the WCAG-AA
+// floor: for a mid-tone background neither near-white nor the warm-dark ink may
+// reach 4.5:1, so the dark candidate is pushed toward pure black until it clears
+// AA, then whichever candidate has the most contrast wins. Since pure black or
+// pure white clears ~4.5:1 against any background, the result is always AA — used
+// for the navigation chrome, whose backgrounds aren't gated at save time (unlike
+// the primary button, which is).
+export function readableForegroundAA(background: string): string {
+  const dark = adjustToContrast(DARK_FG, background, "darken");
+  const lightRatio = contrastRatio(LIGHT_FG, background) ?? 0;
+  const darkRatio = contrastRatio(dark, background) ?? 0;
+  return darkRatio >= lightRatio ? dark : LIGHT_FG;
+}
+
 function darken(hex: string, amount: number): string {
   const rgb = parseHex(hex);
   if (!rgb) {
@@ -105,6 +242,34 @@ function darken(hex: string, amount: number): string {
   }
   const scale = 1 - amount;
   return toHex({ r: rgb.r * scale, g: rgb.g * scale, b: rgb.b * scale });
+}
+
+// lighten mixes a colour towards white by the given fraction (0–1).
+function lighten(hex: string, amount: number): string {
+  const rgb = parseHex(hex);
+  if (!rgb) {
+    return hex;
+  }
+  return toHex({
+    r: rgb.r + (255 - rgb.r) * amount,
+    g: rgb.g + (255 - rgb.g) * amount,
+    b: rgb.b + (255 - rgb.b) * amount,
+  });
+}
+
+// mix blends `base` toward `tint` by fraction t (0 = base, 1 = tint). Both must
+// be valid hex; a malformed tint leaves the base unchanged.
+function mix(base: string, tint: string, t: number): string {
+  const a = parseHex(base);
+  const b = parseHex(tint);
+  if (!a || !b) {
+    return base;
+  }
+  return toHex({
+    r: a.r + (b.r - a.r) * t,
+    g: a.g + (b.g - a.g) * t,
+    b: a.b + (b.b - a.b) * t,
+  });
 }
 
 // primaryContrastFloor is the lowest contrast the applied foreground reaches
@@ -123,13 +288,15 @@ export function primaryContrastFloor(background: string): number | null {
   return Math.min(resting, hover);
 }
 
-// resolveThemeTokens turns a saved theme into the map of design-token overrides
-// to apply on the documentElement: the brand seed colours plus the hover/shade
-// and readable-foreground variants derived from them. A missing or malformed
-// seed is simply left out (so it falls back to the :root default), so the
-// returned map only ever holds valid overrides. This is the single source of
-// truth for both the runtime apply and the pre-paint cache (see index.html),
-// so the cached palette and the applied palette can never drift apart.
+// resolveThemeTokens turns a saved theme into the map of INLINE design-token
+// overrides (the mode-safe brand fills) to apply on the documentElement: the
+// primary/accent seeds plus the hover/shade and readable-foreground variants
+// derived from them. A missing or malformed seed is simply left out (so it falls
+// back to the :root default), so the returned map only ever holds valid
+// overrides. This is the single source of truth for both the runtime apply and
+// the pre-paint cache (see index.html), so the cached palette and the applied
+// palette can never drift apart. The mode-aware roles are handled separately by
+// resolveThemeCss.
 export function resolveThemeTokens(
   theme: OrgTheme | null | undefined,
 ): Record<string, string> {
@@ -148,7 +315,330 @@ export function resolveThemeTokens(
     tokens[ACCENT_600] = darken(accent, ACCENT_DARKEN);
   }
 
+  // Navigation chrome: each seed is a brand fill with a readable foreground, a
+  // faded soft foreground, and a nudged active/border shade so nav elements
+  // stay legible on the coloured chrome (in both modes).
+  const sidebar = theme?.sidebarColor ?? "";
+  if (parseHex(sidebar)) {
+    const fg = readableForegroundAA(sidebar);
+    tokens[SIDEBAR] = sidebar;
+    tokens[SIDEBAR_FG] = fg;
+    tokens[SIDEBAR_FG_SOFT] = mix(fg, sidebar, CHROME_FG_SOFT_MIX);
+    tokens[SIDEBAR_ACTIVE] = mix(sidebar, fg, CHROME_ACTIVE_MIX);
+    tokens[SIDEBAR_LINE] = mix(sidebar, fg, CHROME_LINE_MIX);
+  }
+
+  const topbar = theme?.topbarColor ?? "";
+  if (parseHex(topbar)) {
+    const fg = readableForegroundAA(topbar);
+    tokens[TOPBAR] = topbar;
+    tokens[TOPBAR_FG] = fg;
+    tokens[TOPBAR_FG_SOFT] = mix(fg, topbar, CHROME_FG_SOFT_MIX);
+    tokens[TOPBAR_LINE] = mix(topbar, fg, CHROME_LINE_MIX);
+  }
+
+  const font = theme?.fontFamily ?? "";
+  if (isSafeFontFamily(font)) {
+    tokens[FONT_SANS] = font;
+  }
+
   return tokens;
+}
+
+// extremeBackground returns the background from the list with the highest or
+// lowest relative luminance — the worst case to gate a colour's contrast on.
+function extremeBackground(
+  backgrounds: readonly string[],
+  pick: "lightest" | "darkest",
+): string {
+  let chosen = backgrounds[0];
+  let chosenLuminance = pick === "lightest" ? -1 : 2;
+  for (const bg of backgrounds) {
+    const rgb = parseHex(bg);
+    if (!rgb) {
+      continue;
+    }
+    const luminance = relativeLuminance(rgb);
+    if (
+      (pick === "lightest" && luminance > chosenLuminance) ||
+      (pick === "darkest" && luminance < chosenLuminance)
+    ) {
+      chosen = bg;
+      chosenLuminance = luminance;
+    }
+  }
+  return chosen;
+}
+
+// adjustToContrast nudges a colour towards black (darken) or white (lighten) in
+// small steps until it clears the AA floor against the given background, or the
+// step cap is hit (by which point it is near-black / near-white and clears AA
+// against any surface tier).
+function adjustToContrast(
+  color: string,
+  background: string,
+  direction: "darken" | "lighten",
+): string {
+  let current = color;
+  for (let i = 0; i < ADJUST_MAX_STEPS; i++) {
+    if ((contrastRatio(current, background) ?? 0) >= AA_CONTRAST) {
+      break;
+    }
+    current =
+      direction === "darken"
+        ? darken(current, ADJUST_STEP)
+        : lighten(current, ADJUST_STEP);
+  }
+  return current;
+}
+
+// The light and dark link colours derived from a theme's link/accent seed.
+export interface LinkTheme {
+  light: string;
+  dark: string;
+}
+
+// The surface tiers a `text-link` element renders on, per mode: the seed-tinted
+// surfaces plus the fixed highlight/info chip. The derived link must clear AA
+// against every one, so we gate on the worst case (the darkest light bg / the
+// lightest dark bg — clearing AA there clears it on all the others in that mode).
+function linkBackgrounds(theme: OrgTheme | null | undefined): {
+  light: string[];
+  dark: string[];
+} {
+  const surfaces = surfaceTiers(theme);
+  return {
+    light: [...Object.values(surfaces.light), LIGHT.highlight],
+    dark: [...Object.values(surfaces.dark), DARK.highlight],
+  };
+}
+
+// resolveLinkTheme derives the mode-aware link colour from the link seed
+// (falling back to the accent seed, so a brand accent still tints links even
+// when no explicit link colour is set): darkened until it clears AA on the
+// darkest light-mode background, and lightened until it clears AA on the
+// lightest dark-mode background. Returns null when there is no valid seed (the
+// default Yivi link then stands).
+export function resolveLinkTheme(
+  theme: OrgTheme | null | undefined,
+): LinkTheme | null {
+  const seed =
+    theme?.linkColor && parseHex(theme.linkColor)
+      ? theme.linkColor
+      : (theme?.accentColor ?? "");
+  if (!parseHex(seed)) {
+    return null;
+  }
+  const backgrounds = linkBackgrounds(theme);
+  return {
+    light: adjustToContrast(
+      seed,
+      extremeBackground(backgrounds.light, "darkest"),
+      "darken",
+    ),
+    dark: adjustToContrast(
+      seed,
+      extremeBackground(backgrounds.dark, "lightest"),
+      "lighten",
+    ),
+  };
+}
+
+// surfaceTiers derives the light and dark surface tiers from the surface seed
+// (each default neutral tinted subtly toward it), or the default neutrals when
+// no seed is set. The subtle tint keeps the surfaces close to the AA-verified
+// defaults so body text stays readable on them.
+function surfaceTiers(theme: OrgTheme | null | undefined): {
+  light: { surface: string; surface2: string; surface3: string };
+  dark: { surface: string; surface2: string; surface3: string };
+} {
+  const seed = theme?.surfaceColor ?? "";
+  if (!parseHex(seed)) {
+    return {
+      light: {
+        surface: LIGHT.surface,
+        surface2: LIGHT.surface2,
+        surface3: LIGHT.surface3,
+      },
+      dark: {
+        surface: DARK.surface,
+        surface2: DARK.surface2,
+        surface3: DARK.surface3,
+      },
+    };
+  }
+  return {
+    light: {
+      surface: mix(LIGHT.surface, seed, SURFACE_TINT),
+      surface2: mix(LIGHT.surface2, seed, SURFACE_TINT),
+      surface3: mix(LIGHT.surface3, seed, SURFACE_TINT),
+    },
+    dark: {
+      surface: mix(DARK.surface, seed, SURFACE_TINT),
+      surface2: mix(DARK.surface2, seed, SURFACE_TINT),
+      surface3: mix(DARK.surface3, seed, SURFACE_TINT),
+    },
+  };
+}
+
+// A single mode-aware token: its value in light mode and in dark mode.
+interface ModeValue {
+  light: string;
+  dark: string;
+}
+
+// statusPair derives a status role from its seed: a chip background (the seed
+// mixed toward the mode's base, pale in light / dark in dark mode) and a solid
+// foreground/icon colour. The solid is nudged past the WCAG-AA floor against the
+// WORST-CASE background it actually lands on in that mode — not just its own
+// chip. `text-error` / `text-success` / `text-warning` render the solid bare on
+// the surface tiers (--yb-surface etc.) all over the app, and a surface seed
+// tints those tiers; in dark mode a tinted surface is lighter than the chip, so
+// light-on-light there would fall below AA if we only gated on the chip. So the
+// candidates are the chip PLUS every (possibly tinted) surface tier, and we gate
+// on the darkest of them in light mode / the lightest in dark mode. Both modes
+// stay AA-safe by construction on every background the solid can sit on.
+function statusPair(
+  seed: string,
+  surfaces: ReturnType<typeof surfaceTiers>,
+): { solid: ModeValue; bg: ModeValue } {
+  const lightBg = mix(LIGHT.surface, seed, STATUS_BG_TINT_LIGHT);
+  const darkBg = mix(DARK.surface2, seed, STATUS_BG_TINT_DARK);
+  const lightWorst = extremeBackground(
+    [...Object.values(surfaces.light), lightBg],
+    "darkest",
+  );
+  const darkWorst = extremeBackground(
+    [...Object.values(surfaces.dark), darkBg],
+    "lightest",
+  );
+  return {
+    solid: {
+      light: adjustToContrast(seed, lightWorst, "darken"),
+      dark: adjustToContrast(seed, darkWorst, "lighten"),
+    },
+    bg: { light: lightBg, dark: darkBg },
+  };
+}
+
+// resolveThemeCss derives the map of mode-aware token overrides (surface,
+// border, text, link, status) from a saved theme, as { token: {light, dark} }.
+// Only roles whose seed is set (or, for the link, whose seed or accent is set)
+// appear. This is the single source of truth for both the runtime <style> block
+// (applyOrgTheme) and the pre-paint cache (index.html), so they cannot drift.
+export function resolveThemeCss(
+  theme: OrgTheme | null | undefined,
+): Record<string, ModeValue> {
+  const out: Record<string, ModeValue> = {};
+
+  // Surfaces (subtle brand tint of the neutral tiers).
+  if (parseHex(theme?.surfaceColor ?? "")) {
+    const s = surfaceTiers(theme);
+    out[SURFACE] = { light: s.light.surface, dark: s.dark.surface };
+    out[SURFACE_2] = { light: s.light.surface2, dark: s.dark.surface2 };
+    out[SURFACE_3] = { light: s.light.surface3, dark: s.dark.surface3 };
+  }
+
+  // Borders (decorative — no text — so a stronger tint is fine).
+  const border = theme?.borderColor ?? "";
+  if (parseHex(border)) {
+    out[LINE] = {
+      light: mix(LIGHT.line, border, BORDER_TINT),
+      dark: mix(DARK.line, border, BORDER_TINT),
+    };
+    out[LINE_STRONG] = {
+      light: mix(LIGHT.lineStrong, border, BORDER_TINT),
+      dark: mix(DARK.lineStrong, border, BORDER_TINT),
+    };
+  }
+
+  // Body text/ink: gated to AA against the (possibly tinted) worst-case surface
+  // in each mode — the darkest light surface for dark ink, the lightest dark
+  // surface for light ink.
+  const text = theme?.textColor ?? "";
+  if (parseHex(text)) {
+    const surfaces = surfaceTiers(theme);
+    out[INK] = {
+      light: adjustToContrast(
+        text,
+        extremeBackground(Object.values(surfaces.light), "darkest"),
+        "darken",
+      ),
+      dark: adjustToContrast(
+        text,
+        extremeBackground(Object.values(surfaces.dark), "lightest"),
+        "lighten",
+      ),
+    };
+  }
+
+  // Link (seed = link colour, else accent).
+  const link = resolveLinkTheme(theme);
+  if (link) {
+    out[LINK] = { light: link.light, dark: link.dark };
+  }
+
+  // Semantic status roles. The solid is gated against the surface tiers it
+  // renders on (see statusPair), so it needs the theme's (possibly tinted)
+  // surfaces.
+  const statusSurfaces = surfaceTiers(theme);
+  const success = theme?.successColor ?? "";
+  if (parseHex(success)) {
+    const p = statusPair(success, statusSurfaces);
+    out[SUCCESS] = p.solid;
+    out[SUCCESS_BG] = p.bg;
+  }
+  const warning = theme?.warningColor ?? "";
+  if (parseHex(warning)) {
+    const p = statusPair(warning, statusSurfaces);
+    out[WARNING] = p.solid;
+    out[WARNING_FG] = p.solid;
+    out[WARNING_BG] = p.bg;
+  }
+  const error = theme?.errorColor ?? "";
+  if (parseHex(error)) {
+    const p = statusPair(error, statusSurfaces);
+    out[ERROR] = p.solid;
+    out[ERROR_BG] = p.bg;
+  }
+
+  return out;
+}
+
+// buildThemeCss serialises the mode-aware token map into a stylesheet. The
+// doubled `:root:root` selector wins over index.css by specificity (not source
+// order), so the pre-paint injection in index.html has no ordering race against
+// Vite's CSS. Returns "" when there is nothing to override.
+export function buildThemeCss(theme: OrgTheme | null | undefined): string {
+  const tokens = resolveThemeCss(theme);
+  const names = Object.keys(tokens);
+  if (names.length === 0) {
+    return "";
+  }
+  const light = names.map((n) => `${n}:${tokens[n].light}`).join(";");
+  const dark = names.map((n) => `${n}:${tokens[n].dark}`).join(";");
+  return (
+    `:root:root{${light}}` +
+    `@media (prefers-color-scheme: dark){:root:root{${dark}}}`
+  );
+}
+
+// setThemeStyle installs (or clears) the mode-aware <style> block.
+function setThemeStyle(css: string): void {
+  const existing = document.getElementById(ORG_THEME_STYLE_ID);
+  if (!css) {
+    existing?.remove();
+    return;
+  }
+  const style =
+    existing instanceof HTMLStyleElement
+      ? existing
+      : document.createElement("style");
+  style.id = ORG_THEME_STYLE_ID;
+  style.textContent = css;
+  if (!style.isConnected) {
+    document.head.appendChild(style);
+  }
 }
 
 // shouldApplyOrgTheme reports whether the runtime theme effect should push
@@ -164,8 +654,10 @@ export function shouldApplyOrgTheme(
   return theme !== undefined;
 }
 
-// applyOrgTheme maps a saved theme onto the design tokens on the documentElement.
-// Missing/invalid fields are cleared so they fall back to the default look.
+// applyOrgTheme maps a saved theme onto the design tokens: the mode-safe brand
+// fills inline on the documentElement, the mode-aware roles as the <style>
+// block. Missing/invalid fields are cleared so they fall back to the default
+// look.
 export function applyOrgTheme(theme: OrgTheme | null | undefined): void {
   const root = document.documentElement.style;
   const tokens = resolveThemeTokens(theme);
@@ -177,6 +669,7 @@ export function applyOrgTheme(theme: OrgTheme | null | undefined): void {
       root.setProperty(property, value);
     }
   }
+  setThemeStyle(buildThemeCss(theme));
 }
 
 // clearOrgTheme restores every token to its default (used when leaving an org).
@@ -185,6 +678,7 @@ export function clearOrgTheme(): void {
   for (const property of THEMED_PROPERTIES) {
     root.removeProperty(property);
   }
+  setThemeStyle("");
 }
 
 // Cached theme, keyed by org slug, so a full page reload can paint the tenant's
@@ -197,9 +691,16 @@ function themeCacheKey(slug: string): string {
   return THEME_CACHE_PREFIX + slug;
 }
 
-// cacheOrgTheme stores the resolved token overrides for an org so the next full
-// load can apply them before first paint. An empty map (the org uses the
-// default look) is written too, so clearing a theme also clears the stale cache.
+// The cached shape: the inline brand-fill overrides and the mode-aware CSS
+// string. Kept in step with the reader in index.html.
+interface CachedTheme {
+  inline: Record<string, string>;
+  css: string;
+}
+
+// cacheOrgTheme stores the resolved overrides for an org so the next full load
+// can apply them before first paint. An empty payload (the org uses the default
+// look) is written too, so clearing a theme also clears the stale cache.
 export function cacheOrgTheme(
   slug: string,
   theme: OrgTheme | null | undefined,
@@ -208,11 +709,40 @@ export function cacheOrgTheme(
     return;
   }
   try {
-    const tokens = resolveThemeTokens(theme);
-    window.localStorage.setItem(themeCacheKey(slug), JSON.stringify(tokens));
+    const payload: CachedTheme = {
+      inline: resolveThemeTokens(theme),
+      css: buildThemeCss(theme),
+    };
+    window.localStorage.setItem(themeCacheKey(slug), JSON.stringify(payload));
   } catch {
     // Storage can be unavailable (private mode, quota). The runtime apply still
     // themes the app; only the pre-paint optimisation is lost, so this is
     // non-fatal.
+  }
+}
+
+// applyCachedOrgTheme applies an org's cached palette without a network fetch,
+// for the pre-auth screens (login/register) where a `?org=<slug>` hints the
+// tenant but the theme endpoint is member-gated. It re-uses the cache written on
+// a prior authenticated visit; a first-time visitor simply keeps the default
+// Yivi look (graceful fallback). Returns whether a cached theme was applied.
+export function applyCachedOrgTheme(slug: string): boolean {
+  if (!slug) {
+    return false;
+  }
+  try {
+    const raw = window.localStorage.getItem(themeCacheKey(slug));
+    if (!raw) {
+      return false;
+    }
+    const payload = JSON.parse(raw) as Partial<CachedTheme>;
+    const root = document.documentElement.style;
+    for (const [property, value] of Object.entries(payload.inline ?? {})) {
+      root.setProperty(property, value);
+    }
+    setThemeStyle(payload.css ?? "");
+    return true;
+  } catch {
+    return false;
   }
 }

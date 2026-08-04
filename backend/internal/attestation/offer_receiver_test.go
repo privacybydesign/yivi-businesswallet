@@ -30,7 +30,9 @@ type fakeHeldStore struct {
 }
 
 func (f *fakeHeldStore) HeldForMessage(_ context.Context, _, _ uuid.UUID) (bool, error) {
-	return f.exists, nil
+	// Mirror the real store: a message is "held" once a credential has been
+	// recorded against it, so a re-delivery after a successful redeem is skipped.
+	return f.exists || len(f.recorded) > 0, nil
 }
 
 func (f *fakeHeldStore) RecordHeld(_ context.Context, _ uuid.UUID, in attestation.HeldInput) (attestation.HeldAttestation, error) {
@@ -98,6 +100,63 @@ func TestOfferReceiverIdempotentWhenAlreadyHeld(t *testing.T) {
 	}
 	if redeemer.calls != 0 || len(store.recorded) != 0 {
 		t.Errorf("already-held offer must be skipped (redeems=%d, records=%d)", redeemer.calls, len(store.recorded))
+	}
+}
+
+// stagedRedeemer fails its first Redeem (mirroring an offer that arrives while
+// the org's WSCA wallet is not yet activated) and succeeds on every call after,
+// as it would once the wallet is activated.
+type stagedRedeemer struct {
+	calls  int
+	result eudiholder.Redeemed
+}
+
+func (s *stagedRedeemer) Redeem(_ context.Context, _ uuid.UUID, offerURI string) (eudiholder.Redeemed, error) {
+	s.calls++
+	if s.calls == 1 {
+		return eudiholder.Redeemed{}, errors.New("wsca: wallet not activated")
+	}
+	s.result.Ref = offerURI
+	return s.result, nil
+}
+
+// An offer that arrives before the wallet is activated must not be lost: the
+// first delivery fails and records nothing (so a re-delivery retries), a later
+// delivery after activation redeems and records exactly one credential, and any
+// further re-delivery is skipped by the idempotency guard.
+func TestOfferReceiverRedeemableAfterActivation(t *testing.T) {
+	redeemer := &stagedRedeemer{result: eudiholder.Redeemed{VCT: "nl.kvk.registration", Issuer: "https://issuer.test"}}
+	store := &fakeHeldStore{}
+	rec := attestation.NewOfferReceiver(redeemer, store)
+
+	orgID, msgID := uuid.New(), uuid.New()
+	body := offerBody(t)
+
+	// Delivery 1: wallet not activated — redeem fails, nothing recorded.
+	if err := rec.OnInboundMessage(context.Background(), orgID, msgID, "subject", body); err == nil {
+		t.Fatal("expected an error while the wallet is not activated")
+	}
+	if len(store.recorded) != 0 {
+		t.Fatalf("offer must not be recorded before activation, got %d", len(store.recorded))
+	}
+
+	// Delivery 2: wallet now activated — redeem succeeds and records the credential.
+	if err := rec.OnInboundMessage(context.Background(), orgID, msgID, "subject", body); err != nil {
+		t.Fatalf("OnInboundMessage after activation: %v", err)
+	}
+	if len(store.recorded) != 1 {
+		t.Fatalf("expected 1 held record after activation, got %d", len(store.recorded))
+	}
+
+	// Delivery 3: idempotency guard skips the already-held offer.
+	if err := rec.OnInboundMessage(context.Background(), orgID, msgID, "subject", body); err != nil {
+		t.Fatalf("OnInboundMessage on re-delivery: %v", err)
+	}
+	if len(store.recorded) != 1 {
+		t.Fatalf("re-delivery must not record again, got %d", len(store.recorded))
+	}
+	if redeemer.calls != 2 {
+		t.Fatalf("expected 2 redeem attempts (fail, then succeed), got %d", redeemer.calls)
 	}
 }
 

@@ -1,0 +1,61 @@
+# Domibus AS4 access point (+ its MySQL) for the QERDS live integration test in
+# CI. This is deliberately a compose stack launched from a workflow *step*, not a
+# GitHub Actions `services:` block, for one reason: service containers start
+# during "Initialize containers" — BEFORE actions/checkout runs — so they cannot
+# mount the regenerated keystores below (the repo isn't on disk yet). The stock
+# fiware/domibus-tomcat image ships blue_gw/red_gw sample certs that expired
+# 2025-12-01; WSS4J rejects a message *signed* by an expired cert on receipt, so
+# the AS4 self-send never reaches SENT and the inbound round-trip times out.
+# Mounting the non-expired bench keystores is what makes the loopback deliver.
+#
+# The dev bench (compose.override.yaml, `domibus` profile) is the source of truth
+# for this config; keep the two in sync. The integration test itself uploads the
+# PMode + message filter (provisionDomibus), so no provisioner service is needed.
+services:
+  mysql:
+    image: fiware/domibus-mysql:latest
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: domibus
+      MYSQL_USER: edelivery
+      MYSQL_PASSWORD: edelivery
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p123456 --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+
+  domibus:
+    image: fiware/domibus-tomcat:latest
+    environment:
+      # The image requires exactly "MySQL" or "Oracle" (case-sensitive).
+      DB_TYPE: MySQL
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: domibus
+      DB_USER: edelivery
+      DB_PASS: edelivery
+      # Belt-and-suspenders cert-validation disables; harmless alongside the
+      # non-expired keystores below (WSS4J's expiry check ignores these flags).
+      JAVA_OPTS: >-
+        -Ddomibus.receiver.certificate.validation.onsending=false
+        -Ddomibus.sender.certificate.validation.onsending=false
+        -Ddomibus.sender.certificate.validation.onreceiving=false
+    ports:
+      - "8090:8080"
+    # Overlay the non-expired blue_gw/red_gw keystores over the image's baked-in
+    # (expired) sample ones. Same aliases/password (test123) as the image, so
+    # domibus.properties needs no change. See docker/development/domibus/README.md.
+    volumes:
+      - ../development/domibus/gateway_keystore.jks:/data/tomcat/conf/domibus/keystores/gateway_keystore.jks:ro
+      - ../development/domibus/gateway_truststore.jks:/data/tomcat/conf/domibus/keystores/gateway_truststore.jks:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/domibus/services/backend?wsdl"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 240s
+    depends_on:
+      mysql:
+        condition: service_healthy

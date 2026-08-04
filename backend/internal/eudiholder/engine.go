@@ -5,6 +5,8 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -194,6 +196,286 @@ func (e *Engine) Delete(ctx context.Context, orgID uuid.UUID, ref string) error 
 		return fmt.Errorf("eudiholder: delete credential %s org %s: %w", ref, orgID, err)
 	}
 	return nil
+}
+
+// Claims builds a held credential's disclosed attributes into a display-ordered,
+// labelled list: values from its verified SD-JWT payload (ProcessedSdJwtPayload),
+// labels from its stored issuer claim metadata. It resolves the batch by the
+// instance ref when that parses and matches, else falls back to the vct: irmago's
+// redemption returns the credential with an unpopulated instance id
+// (session.buildOfferedCredentials leaves CredentialInstanceIds empty), so a
+// stored ref can be empty. A ref+vct that resolves to no batch yields an empty
+// slice (the held index owns existence).
+func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (HeldCredential, error) {
+	batch, ok, err := e.claimsBatch(ctx, orgID, ref, vct)
+	if err != nil {
+		return HeldCredential{}, err
+	}
+	if !ok {
+		return HeldCredential{Attributes: []HeldAttribute{}}, nil
+	}
+	labels, order := claimLabels(batch.CredentialMetadata, lang)
+	attributes, err := assembleAttributes(batch.ProcessedSdJwtPayload, labels, order)
+	if err != nil {
+		return HeldCredential{}, err
+	}
+	name, logoURI := credentialDisplay(batch.CredentialMetadata, lang)
+	return HeldCredential{
+		IssuerName:  issuerDisplayName(batch.IssuerDisplay, lang),
+		DisplayName: name,
+		LogoURI:     logoURI,
+		Attributes:  attributes,
+	}, nil
+}
+
+// Displays resolves, for every credential an organization holds, its localized
+// type-metadata title and logo keyed by verifiable-credential type — the held-list
+// view's source for per-row titles and logos, so the table does not need a per-row
+// claims fetch. Credentials of the same vct share one display (it is a property of
+// the type), so the map is keyed by vct. An org that holds nothing yields an empty
+// (non-nil) map.
+func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]HeldDisplay, error) {
+	eng, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	var batches []models.CredentialBatch
+	if err := eng.Db().WithContext(ctx).
+		Preload("CredentialMetadata.Display").
+		Find(&batches).Error; err != nil {
+		return nil, fmt.Errorf("eudiholder: displays org %s: %w", orgID, err)
+	}
+	displays := make(map[string]HeldDisplay, len(batches))
+	for i := range batches {
+		vct := batches[i].VerifiableCredentialType
+		if vct == "" {
+			continue
+		}
+		if _, seen := displays[vct]; seen {
+			continue
+		}
+		name, logoURI := credentialDisplay(batches[i].CredentialMetadata, lang)
+		displays[vct] = HeldDisplay{DisplayName: name, LogoURI: logoURI}
+	}
+	return displays, nil
+}
+
+// claimsBatch loads the credential batch for a held credential, with its claim
+// metadata preloaded for labelling. It prefers the instance ref, then falls back
+// to the vct (the stored ref can be empty — see Claims). Returns (_, false, nil)
+// when neither resolves.
+func (e *Engine) claimsBatch(ctx context.Context, orgID uuid.UUID, ref, vct string) (models.CredentialBatch, bool, error) {
+	if id, perr := uuid.Parse(ref); perr == nil {
+		eng, err := e.engineFor(ctx, orgID)
+		if err != nil {
+			return models.CredentialBatch{}, false, err
+		}
+		base := eng.Db()
+		batchID := base.WithContext(ctx).
+			Model(&models.IssuedCredentialInstance{}).
+			Select("credential_batch_id").
+			Where("id = ?", id)
+		var batch models.CredentialBatch
+		err = base.WithContext(ctx).
+			Preload("CredentialMetadata.Display").
+			Preload("CredentialMetadata.Claims.Display").
+			Where("id = (?)", batchID).First(&batch).Error
+		if err == nil {
+			return batch, true, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return models.CredentialBatch{}, false, fmt.Errorf("eudiholder: claims %s org %s: %w", ref, orgID, err)
+		}
+	}
+	return e.batchByVCT(ctx, orgID, vct)
+}
+
+// batchByHash loads an org's stored credential batch (with its instances) by the
+// credential's dedup hash, which irmago persists under a unique index (vct + sorted
+// disclosed attributes). Unlike batchByVCT this identifies exactly one batch even
+// when the org holds several credentials of the same vct, so the receive flow uses
+// it to backfill a precise instance ref when irmago hands back an unpopulated one
+// (see Redeem). Returns (batch, false, nil) when hash is empty or no batch matches.
+func (e *Engine) batchByHash(ctx context.Context, orgID uuid.UUID, hash string) (models.CredentialBatch, bool, error) {
+	if hash == "" {
+		return models.CredentialBatch{}, false, nil
+	}
+	eng, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return models.CredentialBatch{}, false, err
+	}
+	var batch models.CredentialBatch
+	err = eng.Db().WithContext(ctx).
+		Preload("Instances").
+		Where("hash = ?", hash).First(&batch).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return models.CredentialBatch{}, false, nil
+	}
+	if err != nil {
+		return models.CredentialBatch{}, false, fmt.Errorf("eudiholder: batch by hash org %s: %w", orgID, err)
+	}
+	return batch, true, nil
+}
+
+// batchByVCT loads an org's stored credential batch (with its instances and claim
+// metadata) for a verifiable-credential type, recovering the batch when the
+// instance ref is unavailable (see Claims). It returns (batch, false, nil) when
+// vct is empty or no batch matches. If an org holds several credentials of the
+// same vct it returns an arbitrary one — the stored index carries no other
+// discriminator once the ref is empty, an accepted limitation until irmago returns
+// a populated instance id.
+func (e *Engine) batchByVCT(ctx context.Context, orgID uuid.UUID, vct string) (models.CredentialBatch, bool, error) {
+	if vct == "" {
+		return models.CredentialBatch{}, false, nil
+	}
+	eng, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return models.CredentialBatch{}, false, err
+	}
+	var batch models.CredentialBatch
+	err = eng.Db().WithContext(ctx).
+		Preload("Instances").
+		Preload("CredentialMetadata.Display").
+		Preload("CredentialMetadata.Claims.Display").
+		Where("verifiable_credential_type = ?", vct).First(&batch).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return models.CredentialBatch{}, false, nil
+	}
+	if err != nil {
+		return models.CredentialBatch{}, false, fmt.Errorf("eudiholder: batch by vct %q org %s: %w", vct, orgID, err)
+	}
+	return batch, true, nil
+}
+
+// claimLabels extracts, from a credential's stored issuer metadata, a map of
+// top-level payload key → display label and the metadata's claim order. It handles
+// single-segment claim paths (the flat top-level attributes the detail view shows);
+// nested-path claims are skipped (their values render as JSON under the parent).
+// Returns empty results when meta is nil (the credential carried no metadata).
+// Labels are resolved in the requested language (see pickLocaleName).
+func claimLabels(meta *models.CredentialMetadata, lang string) (map[string]string, []string) {
+	labels := map[string]string{}
+	order := []string{}
+	if meta == nil {
+		return labels, order
+	}
+	for _, claim := range meta.Claims {
+		var path []any
+		if err := json.Unmarshal(claim.Path, &path); err != nil || len(path) != 1 {
+			continue
+		}
+		key, ok := path[0].(string)
+		if !ok || key == "" {
+			continue
+		}
+		if _, seen := labels[key]; seen {
+			continue
+		}
+		order = append(order, key)
+		names := make([]localeName, len(claim.Display))
+		for i, d := range claim.Display {
+			names[i] = localeName{name: d.Name, locale: d.Locale}
+		}
+		labels[key] = pickLocaleName(names, lang)
+	}
+	return labels, order
+}
+
+// issuerDisplayName resolves a credential's issuer metadata display name in the
+// requested language, empty when the credential carried no issuer display (the
+// caller falls back to the issuer identifier).
+func issuerDisplayName(displays []models.IssuerMetadataDisplay, lang string) string {
+	names := make([]localeName, len(displays))
+	for i, d := range displays {
+		names[i] = localeName{name: d.Name, locale: d.Locale}
+	}
+	return pickLocaleName(names, lang)
+}
+
+// credentialDisplay resolves a credential's type-metadata title and logo URI for
+// the requested language from its CredentialMetadata.Display rows. Name and logo
+// are picked independently (the logo is taken from the same display entry as the
+// chosen name, falling back to the first entry that carries a logo), so a name-only
+// localized entry still yields a logo when another entry provides one. Both are
+// empty when meta is nil or carries no display rows (the caller then falls back to
+// the VCT-derived name and shows no logo).
+func credentialDisplay(meta *models.CredentialMetadata, lang string) (name, logoURI string) {
+	if meta == nil {
+		return "", ""
+	}
+	names := make([]localeName, len(meta.Display))
+	for i, d := range meta.Display {
+		names[i] = localeName{name: d.Name, locale: d.Locale}
+	}
+	name = pickLocaleName(names, lang)
+	chosen := pickLocaleIndex(names, lang)
+	if chosen >= 0 && meta.Display[chosen].LogoURI != "" {
+		return name, meta.Display[chosen].LogoURI
+	}
+	for _, d := range meta.Display {
+		if d.LogoURI != "" {
+			return name, d.LogoURI
+		}
+	}
+	return name, ""
+}
+
+// localeName is a display name paired with its (optional) locale, the common shape
+// of irmago's per-locale display models (claim / issuer / credential).
+type localeName struct {
+	name   string
+	locale datatypes.NullString
+}
+
+// pickLocaleName chooses a display name for the requested language. Returns ""
+// when there are no entries. See pickLocaleIndex for the selection order.
+func pickLocaleName(names []localeName, lang string) string {
+	i := pickLocaleIndex(names, lang)
+	if i < 0 {
+		return ""
+	}
+	return names[i].name
+}
+
+// pickLocaleIndex chooses the index of the display entry to render for the
+// requested language, preferring (in order): an entry whose locale matches the
+// requested language's base tag (so "nl" matches "nl" and "nl-NL"), then an English
+// locale, then a locale-less entry, else the first entry. Returns -1 when there are
+// no entries. lang is a BCP-47 tag or base tag ("en", "nl", "nl-NL"); an empty lang
+// falls straight through to the English/locale-less/first order (preserving the
+// pre-localization behaviour).
+func pickLocaleIndex(names []localeName, lang string) int {
+	base := strings.ToLower(lang)
+	if i := strings.IndexByte(base, '-'); i >= 0 {
+		base = base[:i]
+	}
+	english, unlocalized, first := -1, -1, -1
+	for i, n := range names {
+		if first < 0 {
+			first = i
+		}
+		if !n.locale.Valid || n.locale.V == "" {
+			if unlocalized < 0 {
+				unlocalized = i
+			}
+			continue
+		}
+		loc := strings.ToLower(n.locale.V)
+		if base != "" && (loc == base || strings.HasPrefix(loc, base+"-")) {
+			return i
+		}
+		if english < 0 && strings.HasPrefix(loc, "en") {
+			english = i
+		}
+	}
+	switch {
+	case english >= 0:
+		return english
+	case unlocalized >= 0:
+		return unlocalized
+	default:
+		return first
+	}
 }
 
 // Close releases every per-org engine.

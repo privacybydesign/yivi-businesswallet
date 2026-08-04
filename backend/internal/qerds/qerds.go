@@ -20,6 +20,8 @@ var (
 	ErrAddressTaken       = errors.New("qerds: digital address already taken")
 	ErrSenderNotOwned     = errors.New("qerds: sender address not owned by organization")
 
+	ErrAddressOutsideNamespace = errors.New("qerds: address is outside the organization namespace")
+
 	ErrContactNotFound     = errors.New("qerds: contact not found")
 	ErrContactAddressTaken = errors.New("qerds: contact address already saved")
 )
@@ -31,8 +33,13 @@ type Contact struct {
 	OrganizationID uuid.UUID `json:"organizationId"`
 	Name           string    `json:"name"`
 	Address        string    `json:"address"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	// Optional structured organisation data, so an attestation issued to this
+	// recipient can copy the org's real details into the credential.
+	LegalName *string   `json:"legalName,omitempty"`
+	KVKNumber *string   `json:"kvkNumber,omitempty"`
+	EUID      *string   `json:"euid,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Message is a QERDS communication owned by an organization.

@@ -24,19 +24,35 @@ type settingsStore interface {
 	Upsert(ctx context.Context, orgID uuid.UUID, in SettingsInput) (Settings, error)
 }
 
-type tester interface {
-	SendTest(ctx context.Context, orgID uuid.UUID, to string) error
+// templateStore is the tenant-editing surface of the mail catalogue (implemented
+// by *Store). Kinds and locales themselves are code, so there is no create.
+type templateStore interface {
+	ListTemplates(ctx context.Context, orgID uuid.UUID) ([]TemplateOverride, error)
+	GetTemplate(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale) (TemplateOverride, bool, error)
+	SaveTemplate(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, tpl Template) (TemplateOverride, error)
+	DeleteTemplate(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale) (bool, error)
 }
 
-// Handler serves org-scoped SMTP settings (admin only).
+type mailService interface {
+	SendSpecimen(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, to, orgName string) error
+	Preview(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, tpl *Template, orgName string) (Body, error)
+}
+
+// orgMailStore is everything the handler persists through, implemented by *Store.
+type orgMailStore interface {
+	settingsStore
+	templateStore
+}
+
+// Handler serves org-scoped SMTP settings and mail templates (admin only).
 type Handler struct {
-	store       settingsStore
-	service     tester
+	store       orgMailStore
+	service     mailService
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
 }
 
-func NewHandler(store settingsStore, service tester, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+func NewHandler(store orgMailStore, service mailService, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{store: store, service: service, requireUser: requireUser, authorize: authorize}
 }
 
@@ -47,6 +63,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/email/settings", admin(respond.HandlerFunc(h.getSettings)))
 	mux.Handle("PUT /orgs/{slug}/email/settings", admin(respond.HandlerFunc(h.putSettings)))
 	mux.Handle("POST /orgs/{slug}/email/test", admin(respond.HandlerFunc(h.sendTest)))
+	h.registerTemplateRoutes(mux, admin)
 }
 
 func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) error {
@@ -99,8 +116,14 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// testRequest asks for a specimen message. Kind and Locale are optional: without
+// them the SMTP self-test goes out in the deployment's default language, which is
+// what the "does my SMTP work" button has always sent. With them an admin gets a
+// real specimen of one cause, in one language, rendered from their own template.
 type testRequest struct {
-	To string `json:"to"`
+	To     string `json:"to"`
+	Kind   string `json:"kind,omitempty"`
+	Locale string `json:"locale,omitempty"`
 }
 
 func (h *Handler) sendTest(w http.ResponseWriter, r *http.Request) error {
@@ -112,9 +135,26 @@ func (h *Handler) sendTest(w http.ResponseWriter, r *http.Request) error {
 	if req.To == "" {
 		return badRequest("invalid_input", "to is required")
 	}
+	kind := KindSMTPTest
+	if req.Kind != "" {
+		parsed, ok := parseKind(req.Kind)
+		if !ok {
+			return badRequest("invalid_input", "kind must be one of the mail template kinds")
+		}
+		kind = parsed
+	}
+	// An empty locale leaves the choice to the service's deployment default.
+	var locale Locale
+	if req.Locale != "" {
+		parsed, ok := ParseLocale(req.Locale)
+		if !ok {
+			return badRequest("invalid_input", "locale must be one of the supported mail locales")
+		}
+		locale = parsed
+	}
 
 	org := organization.OrgFromContext(r.Context())
-	if err := h.service.SendTest(r.Context(), org.ID, req.To); errors.Is(err, ErrNotConfigured) {
+	if err := h.service.SendSpecimen(r.Context(), org.ID, kind, locale, req.To, org.Name); errors.Is(err, ErrNotConfigured) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "not_configured", Message: "SMTP is not configured or is disabled"}
 	} else if err != nil {
 		return fmt.Errorf("sending test email: %w", err)
@@ -123,6 +163,10 @@ func (h *Handler) sendTest(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+func apiError(status int, code, msg string) error {
+	return &respond.APIError{Status: status, Code: code, Message: msg}
+}
+
 func badRequest(code, msg string) error {
-	return &respond.APIError{Status: http.StatusBadRequest, Code: code, Message: msg}
+	return apiError(http.StatusBadRequest, code, msg)
 }

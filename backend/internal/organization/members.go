@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -81,6 +82,9 @@ func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("listing members: %w", err)
 	}
 
+	for i := range entries {
+		entries[i].AvatarURI = entryAvatarURI(org.Slug, entries[i])
+	}
 	respond.JSON(w, r, http.StatusOK, memberListPage{Entries: entries, Total: total})
 	return nil
 }
@@ -100,8 +104,47 @@ func (h *Handler) member(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("getting member: %w", err)
 	}
 
+	member.AvatarURI = user.AvatarURL(MemberAvatarPath(org.Slug, member.UserID), member.HasAvatar, member.AvatarUpdatedAt)
 	respond.JSON(w, r, http.StatusOK, member)
 	return nil
+}
+
+// memberAvatar streams a member's portrait photo. Reachable to the same org
+// admins who can already see the member list and the audit log; the store's
+// membership join keeps it to people who are actually in this organisation.
+func (h *Handler) memberAvatar(w http.ResponseWriter, r *http.Request) error {
+	userID, err := uuid.Parse(r.PathValue("userId"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid user id")
+	}
+
+	org := OrgFromContext(r.Context())
+	avatar, err := h.store.GetMemberAvatar(r.Context(), org.ID, userID)
+	if errors.Is(err, user.ErrNoAvatar) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "no avatar set"}
+	}
+	if err != nil {
+		return fmt.Errorf("getting member avatar: %w", err)
+	}
+
+	user.WriteAvatar(w, r, avatar)
+	return nil
+}
+
+// MemberAvatarPath is the API path serving a member's portrait photo within an
+// organisation. Member responses and the audit log both point at it, so the
+// pattern is written once.
+func MemberAvatarPath(slug string, userID uuid.UUID) string {
+	return fmt.Sprintf("/api/v1/orgs/%s/members/%s/avatar", url.PathEscape(slug), userID)
+}
+
+// entryAvatarURI is MemberAvatarPath for an active member entry. An invited entry
+// has no user row yet, so it has no avatar to point at.
+func entryAvatarURI(slug string, e MemberEntry) string {
+	if e.UserID == nil {
+		return ""
+	}
+	return user.AvatarURL(MemberAvatarPath(slug, *e.UserID), e.HasAvatar, e.AvatarUpdatedAt)
 }
 
 type inviteRequest struct {

@@ -101,7 +101,10 @@ func (s *Store) RecordSent(ctx context.Context, messageID uuid.UUID, receipt qer
 
 // CreateInbound persists a message received from the provider, deduping on the
 // provider ref (webhooks and polls retry). It reports whether a new row was
-// created; evidence and the audit event are written only on first receipt.
+// created; evidence and the audit event are written only on first receipt. On a
+// dedupe hit it returns the *existing* row (not a zero value) so the caller can
+// re-run the idempotent inbound consumer on a re-delivery — e.g. to retry a
+// credential-offer redeem that failed on an earlier delivery.
 func (s *Store) CreateInbound(ctx context.Context, orgID uuid.UUID, in qerdsprovider.InboundMessage) (Message, bool, error) {
 	var (
 		m       Message
@@ -117,7 +120,14 @@ func (s *Store) CreateInbound(ctx context.Context, orgID uuid.UUID, in qerdsprov
 		m, err = scanMessage(q.QueryRow(ctx, insert, orgID, DirectionInbound,
 			string(in.Sender), string(in.Recipient), in.Subject, in.Body, in.ProviderRef, StatusReceived))
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Already received — idempotent no-op.
+			// Already received — load the existing row so the caller still gets a
+			// populated message to hand the (idempotent) consumer on re-delivery.
+			const sel = `SELECT ` + messageColumns + ` FROM qerds_messages
+				WHERE organization_id = $1 AND direction = $2 AND provider_ref = $3`
+			m, err = scanMessage(q.QueryRow(ctx, sel, orgID, DirectionInbound, in.ProviderRef))
+			if err != nil {
+				return fmt.Errorf("qerds: load existing inbound org %s: %w", orgID, err)
+			}
 			return nil
 		}
 		if err != nil {

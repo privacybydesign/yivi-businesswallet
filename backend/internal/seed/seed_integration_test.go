@@ -8,19 +8,25 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/seed"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
 
-// TestEnsureYiviOrganizationSeedsAndIsIdempotent covers the staging org seed:
-// the Yivi organisation is present after one run, re-running does not duplicate
-// it (nor its QERDS address or representative), and it pulls in none of the demo
-// members or audit activity the full dev seed creates.
+// localAddressDomain mirrors the QERDS default address domain used in local dev
+// (config.defaultQerdsDefaultAddressDomain).
+const localAddressDomain = "qerds.localhost"
+
+// TestEnsureYiviOrganizationSeedsAndIsIdempotent covers the staging org seed: the
+// Yivi organisation is present after one run with its team as admins, its three
+// attestation schemas and its issuer settings; re-running does not duplicate any
+// of it; and it pulls in none of the faker members or audit activity the full dev
+// seed creates.
 func TestEnsureYiviOrganizationSeedsAndIsIdempotent(t *testing.T) {
 	pool, dsn := testdb.Fresh(t)
 	ctx := context.Background()
 
-	first, err := seed.EnsureYiviOrganization(ctx, dsn)
+	first, err := seed.EnsureYiviOrganization(ctx, dsn, localAddressDomain)
 	if err != nil {
 		t.Fatalf("first EnsureYiviOrganization: %v", err)
 	}
@@ -32,7 +38,7 @@ func TestEnsureYiviOrganizationSeedsAndIsIdempotent(t *testing.T) {
 	}
 
 	// Re-run: the staging deploy runs the seed every time, so this must be safe.
-	second, err := seed.EnsureYiviOrganization(ctx, dsn)
+	second, err := seed.EnsureYiviOrganization(ctx, dsn, localAddressDomain)
 	if err != nil {
 		t.Fatalf("second EnsureYiviOrganization: %v", err)
 	}
@@ -45,9 +51,90 @@ func TestEnsureYiviOrganizationSeedsAndIsIdempotent(t *testing.T) {
 	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM qerds_addresses WHERE organization_id = $1", first.ID)
 	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM wallet_representations WHERE organization_id = $1", first.ID)
 
-	// The org seed must not drag in the full dev demo data.
-	assertCount(t, ctx, pool, 0, "SELECT count(*) FROM memberships")
-	assertCount(t, ctx, pool, 0, "SELECT count(*) FROM audit_events")
+	// The four Yivi team members are admins of the org, with real names (not the
+	// generic platform-admin placeholder) — and not duplicated on re-run.
+	assertCount(t, ctx, pool, 4, "SELECT count(*) FROM memberships WHERE organization_id = $1 AND role = 'admin'", first.ID)
+	assertCount(t, ctx, pool, 1,
+		"SELECT count(*) FROM users u JOIN memberships m ON m.user_id = u.id WHERE m.organization_id = $1 AND u.email = 'd.mulder@yivi.app' AND u.given_names = 'Dibran' AND u.last_name = 'Mulder'",
+		first.ID)
+
+	// Yivi's attestation catalogue: the three schemas plus one issuer settings row.
+	assertCount(t, ctx, pool, 3, "SELECT count(*) FROM attestation_schemas WHERE organization_id = $1", first.ID)
+	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM org_issuer_settings WHERE organization_id = $1", first.ID)
+
+	// The org seed must not drag in the full dev demo data: only the four real
+	// team members exist (no faker members), and the only audit history is the
+	// attestation catalogue provisioning (schema/template creation) — none of the
+	// invitation/membership churn the full dev seed fabricates.
+	assertCount(t, ctx, pool, 4, "SELECT count(*) FROM memberships")
+	assertCount(t, ctx, pool, 0, "SELECT count(*) FROM users WHERE email LIKE '%@example.test'")
+	assertCount(t, ctx, pool, 0,
+		"SELECT count(*) FROM audit_events WHERE action NOT IN ('attestation.schema_created', 'attestation.template_created')")
+}
+
+// TestEnsureKVKRegisterOrganizationSeedsAndIsIdempotent covers the staging seed of
+// the KVK register participant (the authentic source): the org is present with its
+// nl.kvk.registration schema and issuer settings after one run, re-running does not
+// duplicate any of it, and it has no representative of its own.
+func TestEnsureKVKRegisterOrganizationSeedsAndIsIdempotent(t *testing.T) {
+	pool, dsn := testdb.Fresh(t)
+	ctx := context.Background()
+
+	first, err := seed.EnsureKVKRegisterOrganization(ctx, dsn, localAddressDomain)
+	if err != nil {
+		t.Fatalf("first EnsureKVKRegisterOrganization: %v", err)
+	}
+	if first.Slug != registryprovider.RegisterSlug {
+		t.Fatalf("slug = %q, want %q", first.Slug, registryprovider.RegisterSlug)
+	}
+	if first.KVKNumber != registryprovider.RegisterKVKNumber {
+		t.Fatalf("kvk number = %q, want %q", first.KVKNumber, registryprovider.RegisterKVKNumber)
+	}
+
+	second, err := seed.EnsureKVKRegisterOrganization(ctx, dsn, localAddressDomain)
+	if err != nil {
+		t.Fatalf("second EnsureKVKRegisterOrganization: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("re-run created a new org: %s != %s", second.ID, first.ID)
+	}
+
+	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM organizations")
+	// The register is the authentic source, not a consultable company: no representative.
+	assertCount(t, ctx, pool, 0, "SELECT count(*) FROM wallet_representations WHERE organization_id = $1", first.ID)
+	// Its nl.kvk.registration schema and issuer settings, not duplicated on re-run.
+	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM attestation_schemas WHERE organization_id = $1", first.ID)
+	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM org_issuer_settings WHERE organization_id = $1", first.ID)
+}
+
+// TestEnsureYiviOrganizationUsesConfiguredDomain is the regression for issue #104:
+// the seeded Yivi org's QERDS address must be built from the configured address
+// domain, not the hardcoded qerds.localhost. With a staging-style domain the
+// digital address and the default qerds_addresses row must both use it.
+func TestEnsureYiviOrganizationUsesConfiguredDomain(t *testing.T) {
+	pool, dsn := testdb.Fresh(t)
+	ctx := context.Background()
+
+	const domain = "qerds.staging.yivi.app"
+	const want = "yivi@" + domain
+
+	org, err := seed.EnsureYiviOrganization(ctx, dsn, domain)
+	if err != nil {
+		t.Fatalf("EnsureYiviOrganization: %v", err)
+	}
+	if org.DigitalAddress != want {
+		t.Fatalf("digital address = %q, want %q", org.DigitalAddress, want)
+	}
+
+	var addr string
+	if err := pool.QueryRow(ctx,
+		"SELECT address FROM qerds_addresses WHERE organization_id = $1 AND is_default = true",
+		org.ID).Scan(&addr); err != nil {
+		t.Fatalf("query default qerds address: %v", err)
+	}
+	if addr != want {
+		t.Fatalf("default qerds address = %q, want %q", addr, want)
+	}
 }
 
 func assertCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, want int, query string, args ...any) {

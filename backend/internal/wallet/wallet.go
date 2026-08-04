@@ -22,11 +22,24 @@ var (
 	ErrSlugTaken = errors.New("wallet: slug already taken")
 	// ErrNotRepresentative means KVK does not list the requester as a representative.
 	ErrNotRepresentative = errors.New("wallet: requester is not a listed representative")
+	// ErrUnknownKVK means the KVK number is not in the register at all.
+	ErrUnknownKVK = errors.New("wallet: kvk number not found in the register")
 
 	ErrRepresentationNotFound = errors.New("wallet: representation not found")
 	// ErrNotImplemented marks scaffold seams not yet wired. Handlers map it to 501.
 	ErrNotImplemented = errors.New("wallet: not implemented")
 )
+
+// Requester is the natural person opening a wallet, identified by their disclosed
+// PID (verified name + date of birth). KVK matches it against the company's
+// authorised representatives. DateOfBirth is "2006-01-02" and may be empty when
+// the caller has no verified birth date (the logged-in "register another company"
+// path carries only the stored name), in which case KVK matches on name alone.
+type Requester struct {
+	GivenNames  string
+	FamilyName  string
+	DateOfBirth string
+}
 
 // Representation is one authorised representative from the KVK attestation — the
 // legal mandate list (Art 5(1)(j), Art 6(2)). It is claimed when a person proves

@@ -1,4 +1,4 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import type { HTMLAttributes, ReactNode, ThHTMLAttributes } from "react";
 import { Icon } from "./icon";
 
 const TH_CLASS =
@@ -38,9 +38,9 @@ function Head({ children }: { children: ReactNode }): React.JSX.Element {
   );
 }
 
-interface HeaderCellProps {
-  children?: ReactNode;
-  className?: string;
+// Extra `th` attributes (scope, colSpan, …) are forwarded, so a header cell can
+// carry the association attributes SC 1.3.1 asks for or span a group heading.
+interface HeaderCellProps extends ThHTMLAttributes<HTMLTableCellElement> {
   srOnly?: boolean;
   // When onSort is set the header becomes a sort toggle. sortDir is the active
   // direction when this is the sorted column, or null when sortable but inactive.
@@ -54,12 +54,13 @@ function HeaderCell({
   srOnly,
   sortDir,
   onSort,
+  ...rest
 }: HeaderCellProps): React.JSX.Element {
   const classes = [TH_CLASS, className ?? ""].join(" ");
 
   if (!onSort) {
     return (
-      <th className={classes}>
+      <th className={classes} {...rest}>
         {srOnly ? <span className="sr-only">{children}</span> : children}
       </th>
     );
@@ -72,6 +73,7 @@ function HeaderCell({
       aria-sort={
         active ? (sortDir === "asc" ? "ascending" : "descending") : "none"
       }
+      {...rest}
     >
       <button
         type="button"
@@ -105,13 +107,28 @@ function Row({
   );
 }
 
+interface CellProps extends HTMLAttributes<HTMLTableCellElement> {
+  // Rendering a body cell as a row header: pass scope="row" so the cell becomes
+  // a <th scope="row"> that a screen reader associates with the rest of the row.
+  scope?: "row";
+}
+
 function Cell({
   children,
   className,
+  scope,
   ...rest
-}: HTMLAttributes<HTMLTableCellElement>): React.JSX.Element {
+}: CellProps): React.JSX.Element {
+  const classes = [TD_CLASS, className ?? ""].join(" ");
+  if (scope) {
+    return (
+      <th scope={scope} className={classes} {...rest}>
+        {children}
+      </th>
+    );
+  }
   return (
-    <td className={[TD_CLASS, className ?? ""].join(" ")} {...rest}>
+    <td className={classes} {...rest}>
       {children}
     </td>
   );

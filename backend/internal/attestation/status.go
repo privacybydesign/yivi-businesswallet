@@ -1,12 +1,15 @@
 package attestation
 
-// Issuance lifecycle: offered -> claimed, with expired / revoked / failed.
+// Issuance lifecycle: offered -> claimed, with expired / failed. Two distinct
+// terminal withdrawals: an unclaimed offer is cancelled, an already-claimed
+// credential is revoked (the latter is the Token Status List-backed path).
 const (
-	StatusOffered = "offered"
-	StatusClaimed = "claimed"
-	StatusExpired = "expired"
-	StatusRevoked = "revoked"
-	StatusFailed  = "failed"
+	StatusOffered   = "offered"
+	StatusClaimed   = "claimed"
+	StatusExpired   = "expired"
+	StatusRevoked   = "revoked"
+	StatusCancelled = "cancelled"
+	StatusFailed    = "failed"
 )
 
 // Schema lifecycle.

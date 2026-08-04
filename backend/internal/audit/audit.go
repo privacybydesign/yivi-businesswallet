@@ -19,6 +19,7 @@ const (
 	MembershipInvited        = "membership.invited"
 	MembershipInviteResent   = "membership.invite_resent"
 	MembershipInviteRevoked  = "membership.invite_revoked"
+	MembershipInviteUpdated  = "membership.invite_updated"
 	MembershipAccepted       = "membership.accepted"
 	MembershipAcceptRejected = "membership.accept_rejected"
 	MembershipDeclined       = "membership.declined"
@@ -48,6 +49,7 @@ const (
 	PostGuardEncryptionKeySet     = "postguard.encryption_key_set"
 	PostGuardEncryptionKeyRemoved = "postguard.encryption_key_removed"
 	PostGuardFileSent             = "postguard.file_sent"
+	PostGuardNotificationSet      = "postguard.notification_delivery_set"
 
 	WalletOpened          = "wallet.opened"
 	WalletBootstrapped    = "wallet.bootstrapped"
@@ -55,6 +57,11 @@ const (
 	WalletRevoked         = "wallet.revoked"
 	RepresentationClaimed = "wallet.representation_claimed"
 	RepresentationRevoked = "wallet.representation_revoked"
+
+	// KVK-side decisions, recorded against the KVK register's own audit log when
+	// it consults its authentic source for a registration request.
+	KVKRegistrationValidated    = "kvk.registration_validated"
+	KVKRegistrationNotValidated = "kvk.registration_not_validated"
 
 	AttestationSchemaCreated   = "attestation.schema_created"
 	AttestationSchemaUpdated   = "attestation.schema_updated"
@@ -65,16 +72,29 @@ const (
 	AttestationIssued          = "attestation.issued"
 	AttestationClaimed         = "attestation.claimed"
 	AttestationRevoked         = "attestation.revoked"
+	AttestationOfferCancelled  = "attestation.offer_cancelled"
 	AttestationKeyAdded        = "attestation.key_added"
 	AttestationKeySuspended    = "attestation.key_suspended"
 	AttestationKeyRevoked      = "attestation.key_revoked"
 	AttestationHeldDeleted     = "attestation.held_deleted"
 
 	EmailSettingsUpdated = "email.settings_updated"
+	EmailTemplateUpdated = "email.template_updated"
+	EmailTemplateReset   = "email.template_reset"
 
 	IssuerSettingsUpdated = "issuer.settings_updated"
 
 	ThemeSettingsUpdated = "theme.settings_updated"
+
+	OnboardingSettingsUpdated = "onboarding.settings_updated"
+
+	NotificationSettingsUpdated = "notification.settings_updated"
+
+	SlackSettingsUpdated = "slack.settings_updated"
+
+	ProvisioningSettingsUpdated = "provisioning.settings_updated"
+	ProvisioningRunCompleted    = "provisioning.run_completed"
+	ProvisioningRunFailed       = "provisioning.run_failed"
 )
 
 const (
@@ -86,12 +106,14 @@ const (
 	TargetQerdsAddress = "qerds_address"
 	TargetQerdsContact = "qerds_contact"
 
-	TargetWalletInstance = "wallet_instance"
-	TargetRepresentation = "wallet_representation"
+	TargetWalletInstance  = "wallet_instance"
+	TargetRepresentation  = "wallet_representation"
+	TargetKVKRegistration = "kvk_registration"
 
 	TargetPostGuardKey           = "postguard_key"
 	TargetPostGuardEncryptionKey = "postguard_encryption_key"
 	TargetPostGuardFile          = "postguard_file"
+	TargetPostGuardSettings      = "postguard_settings"
 
 	TargetAttestationSchema   = "attestation_schema"
 	TargetAttestationTemplate = "attestation_template"
@@ -100,10 +122,19 @@ const (
 	TargetHeldAttestation     = "held_attestation"
 
 	TargetEmailSettings = "org_email_settings"
+	TargetEmailTemplate = "org_email_template"
 
 	TargetIssuerSettings = "org_issuer_settings"
 
 	TargetThemeSettings = "org_theme_settings"
+
+	TargetOnboardingSettings = "org_onboarding_attestations"
+
+	TargetNotificationSettings = "org_notification_settings"
+
+	TargetSlackSettings = "org_slack_settings"
+
+	TargetProvisioningSettings = "org_provisioning_settings"
 )
 
 type Actor struct {
@@ -116,7 +147,10 @@ func ContextWithActor(ctx context.Context, a Actor) context.Context {
 	return context.WithValue(ctx, ctxKey{}, a)
 }
 
-func actorFromContext(ctx context.Context) (Actor, bool) {
+// ActorFromContext returns the actor behind the current request, if one was
+// stashed by ContextWithActor. A decorating Recorder needs it to attribute what
+// it records; the plain write path uses it to fill actor_user_id.
+func ActorFromContext(ctx context.Context) (Actor, bool) {
 	a, ok := ctx.Value(ctxKey{}).(Actor)
 	return a, ok
 }
@@ -160,7 +194,7 @@ func (DBRecorder) Record(ctx context.Context, q database.Querier, action string,
 	}
 
 	var actorID *uuid.UUID
-	if a, ok := actorFromContext(ctx); ok {
+	if a, ok := ActorFromContext(ctx); ok {
 		actorID = &a.UserID
 	}
 

@@ -211,3 +211,20 @@ func TestDomibusListPendingFiltersByRecipient(t *testing.T) {
 		t.Errorf("empty recipient must omit the filter\n%s", string(whole))
 	}
 }
+
+func TestDomibusRetrieveEnvelopeMessageIDUnqualified(t *testing.T) {
+	raw, err := xml.Marshal(newRetrieveEnvelope("id-123@domibus.eu"))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	doc := string(raw)
+	if !strings.Contains(doc, "id-123@domibus.eu") {
+		t.Errorf("retrieve envelope missing the message id\n%s", doc)
+	}
+	// retrieveMessageRequest sits in backendNS; its messageID child must reset to
+	// the empty namespace (elementFormDefault="unqualified"). Sending it qualified
+	// makes Domibus answer "unexpected element ... Expected elements are <{}messageID>".
+	if !strings.Contains(doc, `<messageID xmlns="">`) {
+		t.Errorf("messageID must be unqualified (<messageID xmlns=\"\">)\n%s", doc)
+	}
+}

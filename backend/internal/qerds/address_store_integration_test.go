@@ -84,3 +84,22 @@ func TestSetDefaultAddress(t *testing.T) {
 		t.Fatalf("cross-org err = %v, want ErrAddressNotFound", err)
 	}
 }
+
+// TestProvisionAddressCrossOrgCollision is the store-level defence for
+// namespace ownership: the global uniqueness constraint stops a second org from
+// provisioning an address another org already holds, surfaced as ErrAddressTaken.
+func TestProvisionAddressCrossOrgCollision(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+	acme := seedOrg(t, ctx, pool, "acme")
+	other := seedOrg(t, ctx, pool, "other")
+
+	store := qerds.NewStore(pool, audit.NopRecorder{})
+
+	if _, err := store.ProvisionAddress(ctx, acme, "acme@qerds.localhost", true, ""); err != nil {
+		t.Fatalf("provision for acme: %v", err)
+	}
+	if _, err := store.ProvisionAddress(ctx, other, "acme@qerds.localhost", true, ""); !errors.Is(err, qerds.ErrAddressTaken) {
+		t.Fatalf("cross-org collision err = %v, want ErrAddressTaken", err)
+	}
+}

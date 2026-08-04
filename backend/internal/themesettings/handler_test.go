@@ -19,6 +19,16 @@ func TestValidateColorsAcceptsEmptyAndWellFormedValues(t *testing.T) {
 		{PrimaryColor: "#1d4e89"}, // primary only
 		{PrimaryColor: "#000000", AccentColor: "#FFFFFF"}, // mixed case hex
 		{PrimaryColor: "#ba3354", AccentColor: "#9a2744"},
+		{ // full palette set
+			PrimaryColor: "#1d4e89", AccentColor: "#ba3354", TextColor: "#111827",
+			SurfaceColor: "#ffffff", BorderColor: "#e5e7eb", LinkColor: "#2563eb",
+			SuccessColor: "#16a34a", WarningColor: "#d97706", ErrorColor: "#dc2626",
+		},
+		{TextColor: "#abcdef", SuccessColor: "#012345"}, // a couple of the new fields only
+		{ // navigation chrome colours and a valid font-family list
+			SidebarColor: "#0f172a", TopbarColor: "#1e293b",
+			FontFamily: `"Open Sans", system-ui, sans-serif`,
+		},
 	}
 	for _, in := range inputs {
 		if err := validateColors(in); err != nil {
@@ -29,10 +39,15 @@ func TestValidateColorsAcceptsEmptyAndWellFormedValues(t *testing.T) {
 
 func TestValidateColorsRejectsMalformedValues(t *testing.T) {
 	cases := map[string]SettingsInput{
-		"3-digit hex":  {PrimaryColor: "#fff"},
-		"missing hash": {PrimaryColor: "1d4e89"},
-		"non-hex char": {PrimaryColor: "#gggggg"},
-		"bad accent":   {AccentColor: "red"},
+		"3-digit hex":    {PrimaryColor: "#fff"},
+		"missing hash":   {PrimaryColor: "1d4e89"},
+		"non-hex char":   {PrimaryColor: "#gggggg"},
+		"bad accent":     {AccentColor: "red"},
+		"bad success":    {SuccessColor: "#12345"},
+		"bad text":       {TextColor: "green"},
+		"bad sidebar":    {SidebarColor: "navy"},
+		"font injection": {FontFamily: `"a; } body{}`},
+		"font too long":  {FontFamily: strings.Repeat("a", 121)},
 	}
 	for name, in := range cases {
 		t.Run(name, func(t *testing.T) {

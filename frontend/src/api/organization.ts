@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { request } from "./http";
+import { absoluteApiUrl, request } from "./http";
 
 export const departmentSchema = z.object({
   id: z.string(),
@@ -22,11 +22,32 @@ export const organizationSchema = z.object({
   digitalAddress: z.string(),
   status: z.string(),
   bootstrappedAt: z.string(),
+  // Only the list endpoints carry the org's theme logo path (absent when the org
+  // has no logo, or on single-org endpoints), so the org switcher can show it.
+  logoUri: z.string().optional(),
 });
 
 export type Organization = z.infer<typeof organizationSchema>;
 
 const organizationListSchema = z.array(organizationSchema);
+
+// The backend returns each org's logo as a path on the API; make it absolute so
+// an <img> loads it from the API origin even when the SPA is served elsewhere
+// (mirrors withAbsoluteLogo in theme.ts).
+export function withAbsoluteLogos(orgs: Organization[]): Organization[] {
+  return orgs.map((org) =>
+    org.logoUri ? { ...org, logoUri: absoluteApiUrl(org.logoUri) } : org,
+  );
+}
+
+// The avatar path needs the same treatment as a logo: the backend returns an API
+// path, and an <img> has to load it from the API origin. Applied to every shape
+// that carries one (members, member list entries, audit-log actors).
+function withAbsoluteAvatar<T extends { avatarUri: string }>(subject: T): T {
+  return subject.avatarUri
+    ? { ...subject, avatarUri: absoluteApiUrl(subject.avatarUri) }
+    : subject;
+}
 
 export const organizationDetailSchema = organizationSchema.extend({
   role: z.string(),
@@ -46,6 +67,7 @@ export const memberSchema = z.object({
   departmentName: z.string().nullable(),
   phone: z.string().nullable(),
   verified: z.boolean(),
+  avatarUri: z.string(),
 });
 
 export type Member = z.infer<typeof memberSchema>;
@@ -67,6 +89,7 @@ export const memberListEntrySchema = z.object({
   invitedBy: z.string().nullable(),
   phone: z.string().nullable(),
   verified: z.boolean(),
+  avatarUri: z.string(),
 });
 
 export type MemberListEntry = z.infer<typeof memberListEntrySchema>;
@@ -96,22 +119,24 @@ export interface MemberListParams {
   offset?: number;
 }
 
-export function getOrganizations(
+export async function getOrganizations(
   signal?: AbortSignal,
 ): Promise<Organization[]> {
-  return request("/api/v1/organizations", {
+  const orgs = await request("/api/v1/organizations", {
     schema: organizationListSchema,
     signal,
   });
+  return withAbsoluteLogos(orgs);
 }
 
-export function getMyOrganizations(
+export async function getMyOrganizations(
   signal?: AbortSignal,
 ): Promise<Organization[]> {
-  return request("/api/v1/me/organizations", {
+  const orgs = await request("/api/v1/me/organizations", {
     schema: organizationListSchema,
     signal,
   });
+  return withAbsoluteLogos(orgs);
 }
 
 // deleteOrganization removes an organization by id (platform-admin only). All
@@ -150,7 +175,7 @@ export function updateOrganization(
   });
 }
 
-export function getOrganizationMembers(
+export async function getOrganizationMembers(
   slug: string,
   params: MemberListParams = {},
   signal?: AbortSignal,
@@ -163,26 +188,29 @@ export function getOrganizationMembers(
   if (params.limit !== undefined) search.set("limit", String(params.limit));
   if (params.offset !== undefined) search.set("offset", String(params.offset));
   const query = search.toString();
-  return request(
+  const page = await request(
     `/api/v1/orgs/${encodeURIComponent(slug)}/members${query ? `?${query}` : ""}`,
     {
       schema: memberListPageSchema,
       signal,
     },
   );
+  return { ...page, entries: page.entries.map(withAbsoluteAvatar) };
 }
 
-export function getOrganizationMember(
+export async function getOrganizationMember(
   slug: string,
   userId: string,
   signal?: AbortSignal,
 ): Promise<Member> {
-  return request(
-    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`,
-    {
-      schema: memberSchema,
-      signal,
-    },
+  return withAbsoluteAvatar(
+    await request(
+      `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`,
+      {
+        schema: memberSchema,
+        signal,
+      },
+    ),
   );
 }
 
@@ -324,6 +352,7 @@ export const auditActorSchema = z.object({
   preferredName: z.string().nullable(),
   givenNames: z.string(),
   lastName: z.string(),
+  avatarUri: z.string(),
 });
 
 export type AuditActor = z.infer<typeof auditActorSchema>;
@@ -347,7 +376,20 @@ export const auditEventsPageSchema = z.object({
 
 export type AuditEventsPage = z.infer<typeof auditEventsPageSchema>;
 
-export function getOrganizationAuditEvents(
+// An actor's avatar path is org-scoped, like a member's, so it needs the same
+// absolutising before it reaches an <img>.
+function withAbsoluteActorAvatars(page: AuditEventsPage): AuditEventsPage {
+  return {
+    ...page,
+    events: page.events.map((event) =>
+      event.actor
+        ? { ...event, actor: withAbsoluteAvatar(event.actor) }
+        : event,
+    ),
+  };
+}
+
+export async function getOrganizationAuditEvents(
   slug: string,
   cursor?: string,
   signal?: AbortSignal,
@@ -357,16 +399,18 @@ export function getOrganizationAuditEvents(
     params.set("cursor", cursor);
   }
   const query = params.toString();
-  return request(
-    `/api/v1/orgs/${encodeURIComponent(slug)}/audit-events${query ? `?${query}` : ""}`,
-    {
-      schema: auditEventsPageSchema,
-      signal,
-    },
+  return withAbsoluteActorAvatars(
+    await request(
+      `/api/v1/orgs/${encodeURIComponent(slug)}/audit-events${query ? `?${query}` : ""}`,
+      {
+        schema: auditEventsPageSchema,
+        signal,
+      },
+    ),
   );
 }
 
-export function getMemberAuditEvents(
+export async function getMemberAuditEvents(
   slug: string,
   userId: string,
   cursor?: string,
@@ -377,11 +421,13 @@ export function getMemberAuditEvents(
     params.set("cursor", cursor);
   }
   const query = params.toString();
-  return request(
-    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}/audit-events${query ? `?${query}` : ""}`,
-    {
-      schema: auditEventsPageSchema,
-      signal,
-    },
+  return withAbsoluteActorAvatars(
+    await request(
+      `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}/audit-events${query ? `?${query}` : ""}`,
+      {
+        schema: auditEventsPageSchema,
+        signal,
+      },
+    ),
   );
 }

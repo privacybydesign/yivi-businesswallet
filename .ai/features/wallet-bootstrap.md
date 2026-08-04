@@ -2,24 +2,31 @@
 
 **Status:** Implemented end-to-end (demo). A logged-in user enrolls at `/enroll`
 by entering a KVK number; the backend **synchronously consults the registry**
-(`registryprovider.Consult`, mocked) and, if the caller is a listed
+(`registryprovider.Consult`) and, if KVK validates the caller as a listed
 representative, atomically creates the org + address + owner membership +
 representations and activates the wallet (`ActivateFromAttestation`,
 integration-tested). Frontend enrollment screen + org-switcher entry.
 
-Mock: `WALLET_REGISTRY_PROVIDER=stub` returns **Yivi B.V. (KVK 94861412)** with
-Dibran Mulder as a **gevolmachtigde / beperkt** (beperkt volmacht); any other
-number returns a generic company so the flow always demoes.
+Registry: `WALLET_REGISTRY_PROVIDER=stub` is a **seeded, audited authentic
+source** (`registryprovider.SeededRegistry`), not a blanket mock. It matches the
+requester's identification data (name + date of birth) against a seeded dataset
+of known registrations (the "fake API", `DemoRegistrations`), records every
+match/no-match decision on the seeded KVK register org's audit log, and bounces
+anything it cannot validate — an unknown KVK number (`ErrUnknownKVK`) or a
+requester the register does not list (`not_a_representative`). The demo KVK
+numbers (`900000xx`) are shared with `internal/seed`, so a seeded user resolves
+to a real representative entry.
 
 Divergences from the async design below (deliberate, for this iteration):
 - **Consult is synchronous**, not a two-legged QERDS request+attestation. The
   faithful async path (outbound over QERDS, inbound webhook →
   `HandleAttestation`) remains the target; `HandleAttestation` is reused by the
   sync path.
-- **No PID disclosure at enrollment** — the mock keys on the KVK number, and
-  login is email-only, so the requester's verified identity is not sent to KVK
-  yet. A real integration would present the PID (see `auth-openid4vp.md`
-  `ScopeIdentity`).
+- **PID matched by name + date of birth, not a shared strong identifier** — the
+  public `/register` flow sends the disclosed PID (name + date of birth) and KVK
+  matches it against the register (§8). The logged-in `/enroll` path has no fresh
+  disclosure, so it matches on the stored name alone. Upgrading to a shared
+  pseudonymous person reference is tracked in §12.
 - The requester is granted **admin** regardless of representation kind (they
   bootstrap the wallet). Role-by-kind (bestuurder→admin, gevolmachtigde→scoped)
   is a refinement.

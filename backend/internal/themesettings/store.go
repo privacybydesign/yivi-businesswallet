@@ -29,11 +29,17 @@ func NewStore(db database.DB, recorder audit.Recorder) *Store {
 // logo bytes are not read here — only whether a logo is stored (HasLogo); the
 // handler turns that into the served LogoURI.
 func (s *Store) GetSettings(ctx context.Context, orgID uuid.UUID) (Settings, error) {
-	const query = `SELECT primary_color, accent_color, logo_bytes IS NOT NULL, updated_at
+	const query = `SELECT primary_color, accent_color, text_color, surface_color,
+			border_color, link_color, success_color, warning_color, error_color,
+			sidebar_color, topbar_color, font_family,
+			logo_bytes IS NOT NULL, updated_at
 		FROM org_theme_settings WHERE organization_id = $1`
 	var out Settings
 	err := s.db.QueryRow(ctx, query, orgID).Scan(
-		&out.PrimaryColor, &out.AccentColor, &out.HasLogo, &out.UpdatedAt,
+		&out.PrimaryColor, &out.AccentColor, &out.TextColor, &out.SurfaceColor,
+		&out.BorderColor, &out.LinkColor, &out.SuccessColor, &out.WarningColor, &out.ErrorColor,
+		&out.SidebarColor, &out.TopbarColor, &out.FontFamily,
+		&out.HasLogo, &out.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Settings{Configured: false}, nil
@@ -74,26 +80,57 @@ func (s *Store) Save(ctx context.Context, orgID uuid.UUID, in SettingsInput, log
 				bytes = logo.Logo.Bytes
 			}
 			const upsert = `INSERT INTO org_theme_settings
-				(organization_id, primary_color, accent_color, logo_bytes, logo_content_type)
-				VALUES ($1, $2, $3, $4, $5)
+				(organization_id, primary_color, accent_color, text_color, surface_color,
+					border_color, link_color, success_color, warning_color, error_color,
+					sidebar_color, topbar_color, font_family,
+					logo_bytes, logo_content_type)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 				ON CONFLICT (organization_id) DO UPDATE SET
 					primary_color = EXCLUDED.primary_color,
 					accent_color = EXCLUDED.accent_color,
+					text_color = EXCLUDED.text_color,
+					surface_color = EXCLUDED.surface_color,
+					border_color = EXCLUDED.border_color,
+					link_color = EXCLUDED.link_color,
+					success_color = EXCLUDED.success_color,
+					warning_color = EXCLUDED.warning_color,
+					error_color = EXCLUDED.error_color,
+					sidebar_color = EXCLUDED.sidebar_color,
+					topbar_color = EXCLUDED.topbar_color,
+					font_family = EXCLUDED.font_family,
 					logo_bytes = EXCLUDED.logo_bytes,
 					logo_content_type = EXCLUDED.logo_content_type,
 					updated_at = now()`
-			if _, err := q.Exec(ctx, upsert, orgID, in.PrimaryColor, in.AccentColor, bytes, logo.Logo.ContentType); err != nil {
+			if _, err := q.Exec(ctx, upsert, orgID, in.PrimaryColor, in.AccentColor,
+				in.TextColor, in.SurfaceColor, in.BorderColor, in.LinkColor,
+				in.SuccessColor, in.WarningColor, in.ErrorColor,
+				in.SidebarColor, in.TopbarColor, in.FontFamily, bytes, logo.Logo.ContentType); err != nil {
 				return fmt.Errorf("themesettings: save settings org %s: %w", orgID, err)
 			}
 		} else {
 			const upsert = `INSERT INTO org_theme_settings
-				(organization_id, primary_color, accent_color)
-				VALUES ($1, $2, $3)
+				(organization_id, primary_color, accent_color, text_color, surface_color,
+					border_color, link_color, success_color, warning_color, error_color,
+					sidebar_color, topbar_color, font_family)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 				ON CONFLICT (organization_id) DO UPDATE SET
 					primary_color = EXCLUDED.primary_color,
 					accent_color = EXCLUDED.accent_color,
+					text_color = EXCLUDED.text_color,
+					surface_color = EXCLUDED.surface_color,
+					border_color = EXCLUDED.border_color,
+					link_color = EXCLUDED.link_color,
+					success_color = EXCLUDED.success_color,
+					warning_color = EXCLUDED.warning_color,
+					error_color = EXCLUDED.error_color,
+					sidebar_color = EXCLUDED.sidebar_color,
+					topbar_color = EXCLUDED.topbar_color,
+					font_family = EXCLUDED.font_family,
 					updated_at = now()`
-			if _, err := q.Exec(ctx, upsert, orgID, in.PrimaryColor, in.AccentColor); err != nil {
+			if _, err := q.Exec(ctx, upsert, orgID, in.PrimaryColor, in.AccentColor,
+				in.TextColor, in.SurfaceColor, in.BorderColor, in.LinkColor,
+				in.SuccessColor, in.WarningColor, in.ErrorColor,
+				in.SidebarColor, in.TopbarColor, in.FontFamily); err != nil {
 				return fmt.Errorf("themesettings: save settings org %s: %w", orgID, err)
 			}
 		}
@@ -101,6 +138,16 @@ func (s *Store) Save(ctx context.Context, orgID uuid.UUID, in SettingsInput, log
 		after := map[string]any{
 			"primaryColor": in.PrimaryColor,
 			"accentColor":  in.AccentColor,
+			"textColor":    in.TextColor,
+			"surfaceColor": in.SurfaceColor,
+			"borderColor":  in.BorderColor,
+			"linkColor":    in.LinkColor,
+			"successColor": in.SuccessColor,
+			"warningColor": in.WarningColor,
+			"errorColor":   in.ErrorColor,
+			"sidebarColor": in.SidebarColor,
+			"topbarColor":  in.TopbarColor,
+			"fontFamily":   in.FontFamily,
 		}
 		if logo.Replace {
 			after["hasLogo"] = len(logo.Logo.Bytes) > 0

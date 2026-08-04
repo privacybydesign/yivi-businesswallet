@@ -21,20 +21,25 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/emailchannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/notifications"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/postguard"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/provisioner"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/provisioning"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/slackchannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
@@ -59,6 +64,10 @@ const (
 
 	// PostGuard uploads can be large; allow a generous client timeout.
 	postguardHTTPTimeout = 60 * time.Second
+
+	// A directory read is a handful of paged calls to somebody else's API; the
+	// per-organisation deadline in provisioning.Scheduler bounds the whole sync.
+	provisioningHTTPTimeout = 30 * time.Second
 
 	serverAddr = ":8080"
 
@@ -85,13 +94,13 @@ type qerdsProvider interface {
 // plus the request operation the wallet service uses. Chosen by config.
 type registryProvider interface {
 	Ping(context.Context) error
-	Consult(context.Context, string) (registryprovider.RegistrationAttestation, error)
+	Consult(context.Context, registryprovider.ConsultRequest) (registryprovider.RegistrationAttestation, error)
 }
 
-func newRegistryProvider(cfg config.Config) (registryProvider, error) {
+func newRegistryProvider(cfg config.Config, db database.DB, recorder audit.Recorder) (registryProvider, error) {
 	switch cfg.WalletRegistryProvider {
 	case config.ProviderStub:
-		return registryprovider.NewStubRegistry(), nil
+		return registryprovider.NewSeededRegistry(db, recorder), nil
 	default:
 		return nil, fmt.Errorf("wallet registry provider %q is not implemented", cfg.WalletRegistryProvider)
 	}
@@ -255,6 +264,20 @@ func run() error {
 		return err
 	}
 
+	// Every store records audit events through this recorder: it writes the event
+	// like a plain audit.DBRecorder and, for an event an org can subscribe to,
+	// queues it for notification in the same transaction. A store handed a bare
+	// audit.NewDBRecorder() instead is invisible to notifications, so only three get
+	// one: the seeder (seeding pages nobody), the notification store itself, which
+	// cannot be handed a recorder that needs it, and the organization store the
+	// provisioning sync writes through (a bulk directory import would otherwise page
+	// every admin once per person — see below).
+	// The consequence of that second exception is that a notification.* action
+	// would never notify — which is fine as long as none is in the catalog, and a
+	// reason to think twice before putting one there.
+	notificationStore := notifications.NewStore(pool, audit.NewDBRecorder())
+	recorder := notifications.NewRecorder(audit.NewDBRecorder(), notificationStore)
+
 	userStore := user.NewStore(pool)
 	sessionStore := session.NewStore(pool, cfg.SessionTTL)
 	cookieCfg := auth.CookieConfig{
@@ -262,10 +285,10 @@ func run() error {
 		MaxAge: int(cfg.SessionTTL.Seconds()),
 	}
 	platformAdmins := auth.NewPlatformAdmins(cfg.PlatformAdminEmails)
-	orgStore := organization.NewStore(pool, audit.NewDBRecorder())
+	orgStore := organization.NewStore(pool, recorder)
 	presentationStore := presentation.NewStore(pool, cfg.PresentationTTL)
 	authService := auth.NewService(verifier, presentationStore, userStore, sessionStore, orgStore)
-	authHandler := auth.NewHandler(authService, sessionStore, cookieCfg, platformAdmins)
+	authHandler := auth.NewHandler(authService, sessionStore, userStore, cookieCfg, platformAdmins)
 
 	startPruner(ctx, "sessions", cfg.SessionPruneEvery, sessionStore.DeleteExpired)
 	startPruner(ctx, "presentation_sessions", cfg.SessionPruneEvery, presentationStore.DeleteExpired)
@@ -281,8 +304,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	emailStore := email.NewStore(pool, audit.NewDBRecorder(), emailCipher)
-	emailService := email.NewService(emailStore, mailer.New())
+	emailStore := email.NewStore(pool, recorder, emailCipher)
+	mailLocale, ok := email.ParseLocale(cfg.MailDefaultLocale)
+	if !ok {
+		return fmt.Errorf("MAIL_DEFAULT_LOCALE: unsupported locale %q (supported: %v)", cfg.MailDefaultLocale, email.Locales())
+	}
+	// Mail reuses the org's app palette (themesettings), so a tenant configures its
+	// branding once and outbound mail follows.
+	themeSettingsStore := themesettings.NewStore(pool, recorder)
+	emailService := email.NewService(emailStore, mailer.New(), mailBranding{theme: themeSettingsStore}, mailLocale)
 
 	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins)
 
@@ -297,11 +327,11 @@ func run() error {
 	if err := qerdsProv.Ping(qerdsProbeCtx); err != nil {
 		return fmt.Errorf("qerds provider ping: %w", err)
 	}
-	qerdsStore := qerds.NewStore(pool, audit.NewDBRecorder())
+	qerdsStore := qerds.NewStore(pool, recorder)
 	qerdsService := qerds.NewService(qerdsStore, qerdsStore, qerdsProv)
 	qerdsHandler := qerds.NewHandler(qerdsService, qerdsStore, qerdsStore, qerdsStore, requireUser, orgHandler.Authorize, cfg.QerdsWebhookSecret, cfg.QerdsDefaultAddressDomain)
 
-	registry, err := newRegistryProvider(cfg)
+	registry, err := newRegistryProvider(cfg, pool, recorder)
 	if err != nil {
 		return err
 	}
@@ -312,7 +342,7 @@ func run() error {
 	if err := registry.Ping(registryProbeCtx); err != nil {
 		return fmt.Errorf("wallet registry ping: %w", err)
 	}
-	walletStore := wallet.NewStore(pool, audit.NewDBRecorder())
+	walletStore := wallet.NewStore(pool, recorder)
 	walletService := wallet.NewService(walletStore, registry, authService, userStore, qerdsStore, cfg.QerdsDefaultAddressDomain)
 	walletHandler := wallet.NewHandler(walletService, sessionIssuer, requireUser, orgHandler.Authorize)
 
@@ -323,10 +353,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	postguardStore := postguard.NewStore(pool, audit.NewDBRecorder(), postguardCipher)
+	postguardStore := postguard.NewStore(pool, recorder, postguardCipher)
 	postguardClient := postguard.NewClient(cfg.PostGuardSidecarURL, cfg.PostGuardSharedSecret, &http.Client{Timeout: postguardHTTPTimeout})
-	postguardService := postguard.NewService(postguardStore, postguardClient)
+	postguardService := postguard.NewService(postguardStore, postguardClient, postguardNotifier{email: emailService}, cfg.PostGuardWebsiteURL)
 	postguardHandler := postguard.NewHandler(postguardService, requireUser, orgHandler.Authorize)
+	slog.Info("postguard environment",
+		slog.String("websiteUrl", cfg.PostGuardWebsiteURL),
+		slog.String("pkgUrl", cfg.PostGuardPkgURL),
+		slog.String("cryptifyUrl", cfg.PostGuardCryptifyURL))
 
 	attIssuer, err := newAttestationIssuer(cfg)
 	if err != nil {
@@ -341,7 +375,7 @@ func run() error {
 	}
 	emailHandler := email.NewHandler(emailStore, emailService, requireUser, orgHandler.Authorize)
 
-	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())
+	issuerSettingsStore := issuersettings.NewStore(pool, recorder)
 	issuerSettingsHandler := issuersettings.NewHandler(issuerSettingsStore, requireUser, orgHandler.Authorize)
 
 	wscaCipher, err := crypto.NewCipher(cfg.AttestationHolderWSCAKEK)
@@ -350,7 +384,6 @@ func run() error {
 	}
 	wscaStore := wsca.NewStore(pool, wscaCipher)
 
-	themeSettingsStore := themesettings.NewStore(pool, audit.NewDBRecorder())
 	themeSettingsHandler := themesettings.NewHandler(themeSettingsStore, requireUser, orgHandler.Authorize)
 
 	attHolder, err := newAttestationHolder(cfg, wscaStore)
@@ -370,14 +403,18 @@ func run() error {
 		}
 	}()
 
-	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
+	attestationStore := attestation.NewStore(pool, recorder)
 	// An inbound QERDS message carrying an OpenID4VCI credential offer is redeemed
 	// into the org's holder engine and indexed (source=qerds).
 	qerdsService.SetInboundConsumer(attestation.NewOfferReceiver(attHolder, attestationStore))
 	attestationService := attestation.NewService(
 		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, attestationStore, attHolder, cfg.AppBaseURL,
 	)
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
+	// Auto-issue an org's configured onboarding attestations when a member accepts
+	// an invitation. Wired via a setter (like the inbound QERDS consumer) because
+	// the org service is constructed before the attestation service.
+	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
+	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
 
 	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
 	// sealed-secret store + keystore layout with the holder redeem path so a wallet
@@ -392,6 +429,52 @@ func run() error {
 	)
 	wscaWalletHandler := wscawallet.NewHandler(wscaActivator, requireUser, orgHandler.Authorize)
 
+	notificationsHandler := notifications.NewHandler(notificationStore, requireUser, orgHandler.Authorize)
+
+	// Per-org Slack incoming webhook, the notification layer's second channel. The
+	// webhook URL is encrypted at rest under its own deployment key; without that key
+	// an org cannot save one (slackchannel.ErrNoEncryptionKey).
+	slackCipher, err := crypto.NewCipher(cfg.SlackEncryptionKey)
+	if err != nil {
+		return err
+	}
+	slackStore := slackchannel.NewStore(pool, recorder, slackCipher)
+	slackChannel := slackchannel.New(slackStore, orgStore, cfg.AppBaseURL, mailLocale)
+	slackHandler := slackchannel.NewHandler(slackStore, slackChannel, requireUser, orgHandler.Authorize)
+
+	// Drain the notification outbox out of band, into the channels registered here.
+	// MS Teams is its own slice and is not wired up yet, so an org subscribed to it
+	// keeps the preference and is delivered nothing until it is (see
+	// notifications.Dispatcher).
+	dispatcher := notifications.NewDispatcher(notificationStore, notificationStore)
+	dispatcher.Register(emailchannel.New(emailService, orgStore, cfg.AppBaseURL))
+	dispatcher.Register(slackChannel)
+	dispatcher.Start(ctx, notifications.DefaultPollInterval)
+
+	// Directory provisioning. Unlike the verifier/QERDS/registry there is no boot
+	// gate: the source is configured per organisation, not per deployment, so
+	// there is nothing to probe at startup and a tenant with an expired secret
+	// must not fail everyone else's deploy. A run's outcome lands on the org's
+	// settings row and in its audit log instead.
+	provisioningCipher, err := crypto.NewCipher(cfg.ProvisioningEncryptionKey)
+	if err != nil {
+		return err
+	}
+	provisioningStore := provisioning.NewStore(pool, recorder, provisioningCipher)
+	// The sync writes memberships through its own organization store, built on the
+	// plain audit recorder rather than the notifications one. Its changes are
+	// audited exactly like a hand-made invite or off-boarding; they just do not page
+	// anybody. membership.invited, membership.revoked and membership.role_changed
+	// are all in the notifications catalogue, so a first run against a directory of
+	// five hundred people would mail every admin five hundred times for one act of
+	// configuration — and every leaver sweep after that in bursts. Same exception,
+	// and the same reason, as internal/seed. Pass `recorder` here to reverse it.
+	provisioningOrgStore := organization.NewStore(pool, audit.NewDBRecorder())
+	provisioningService := provisioning.NewService(provisioningStore, provisioningOrgStore, provisioningOrgStore, emailService, cfg.AppBaseURL)
+	provisioningService.Register(provisioner.NewEntra(&http.Client{Timeout: provisioningHTTPTimeout}))
+	provisioningHandler := provisioning.NewHandler(provisioningStore, provisioningService, requireUser, orgHandler.Authorize)
+	provisioning.NewScheduler(provisioningStore, provisioningService).Start(ctx, provisioning.DefaultSyncInterval)
+
 	handler := server.New(
 		pool,
 		cfg.StaticDir,
@@ -405,6 +488,9 @@ func run() error {
 		themeSettingsHandler,
 		attestationHandler,
 		wscaWalletHandler,
+		notificationsHandler,
+		slackHandler,
+		provisioningHandler,
 	)
 
 	httpServer := &http.Server{
@@ -436,4 +522,57 @@ func run() error {
 
 	slog.Info("server stopped")
 	return nil
+}
+
+// mailBranding adapts the theme-settings store to the mail service's branding
+// seam. Outbound mail is branded from the same org_theme_settings row as the app
+// shell, so there is exactly one place a tenant configures its look; the mail
+// service keeps its own Seeds type so internal/email does not depend on the
+// theming slice.
+type mailBranding struct {
+	theme *themesettings.Store
+}
+
+func (b mailBranding) MailBrandSeeds(ctx context.Context, orgID uuid.UUID) (email.Seeds, error) {
+	settings, err := b.theme.GetSettings(ctx, orgID)
+	if err != nil {
+		return email.Seeds{}, err
+	}
+	return email.Seeds{
+		PrimaryColor: settings.PrimaryColor,
+		TextColor:    settings.TextColor,
+		SurfaceColor: settings.SurfaceColor,
+		BorderColor:  settings.BorderColor,
+		LinkColor:    settings.LinkColor,
+		FontFamily:   settings.FontFamily,
+	}, nil
+}
+
+// MailLogo resolves the org's uploaded theme logo for embedding in mail. No logo
+// set is not an error: it returns an empty Logo and the logo block renders the org
+// name as a wordmark instead.
+func (b mailBranding) MailLogo(ctx context.Context, orgID uuid.UUID) (email.Logo, error) {
+	logo, err := b.theme.GetLogo(ctx, orgID)
+	if errors.Is(err, themesettings.ErrNoLogo) {
+		return email.Logo{}, nil
+	}
+	if err != nil {
+		return email.Logo{}, err
+	}
+	return email.Logo{Bytes: logo.Bytes, ContentType: logo.ContentType}, nil
+}
+
+// postguardNotifier adapts the e-mail service to the PostGuard "own SMTP"
+// notification seam, mapping the e-mail package's not-configured sentinel onto
+// PostGuard's so the handler reports a clear "configure your SMTP" error.
+type postguardNotifier struct {
+	email *email.Service
+}
+
+func (n postguardNotifier) SendPostguardNotification(ctx context.Context, orgID uuid.UUID, recipients []string, orgName, message, downloadURL string) error {
+	err := n.email.SendPostguardNotification(ctx, orgID, recipients, orgName, message, downloadURL)
+	if errors.Is(err, email.ErrNotConfigured) {
+		return postguard.ErrSMTPNotConfigured
+	}
+	return err
 }

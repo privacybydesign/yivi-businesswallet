@@ -4,18 +4,20 @@ go 1.26.4
 
 require (
 	github.com/brianvoe/gofakeit/v7 v7.15.0
-	github.com/getkin/kin-openapi v0.139.0
+	github.com/getkin/kin-openapi v0.144.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/pressly/goose/v3 v3.27.1
+	golang.org/x/image v0.42.0
 	golang.org/x/text v0.38.0
 )
 
 require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
-	github.com/go-openapi/jsonpointer v0.21.0 // indirect
+	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
+	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
@@ -31,8 +33,8 @@ require (
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/mr-tron/base58 v1.1.3 // indirect
-	github.com/oasdiff/yaml v0.1.0 // indirect
-	github.com/oasdiff/yaml3 v0.0.13 // indirect
+	github.com/oasdiff/yaml v0.1.1 // indirect
+	github.com/oasdiff/yaml3 v0.0.14 // indirect
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
 	github.com/privacybydesign/gabi v0.0.0-20221212095008-68a086907750 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
@@ -296,7 +298,7 @@ require (
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/tools v0.46.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260420184626-e10c466a9529 // indirect
-	google.golang.org/grpc v1.80.0 // indirect
+	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/datatypes v1.2.7

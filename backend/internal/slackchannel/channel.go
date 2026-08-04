@@ -1,0 +1,276 @@
+package slackchannel
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/notifications"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+)
+
+const (
+	// postTimeout bounds one webhook POST end to end. It sits under the dispatcher's
+	// notify timeout on purpose: the dispatcher abandons a channel that has not
+	// returned by then and leaks the goroutine until it does, so this channel owns a
+	// deadline of its own rather than relying on being walked away from.
+	postTimeout = 10 * time.Second
+	// maxReasonBytes bounds how much of the answer is read back. Slack answers a
+	// rejected post with a short token ("no_service", "invalid_payload"), so this is
+	// the read's own bound against a proxy answering with an HTML error page instead —
+	// what such a page says is not repeated either way (see refusalReason).
+	maxReasonBytes = 200
+	// redactedWebhook stands in for the URL in a reason that quoted it back.
+	redactedWebhook = "[webhook url]"
+	// unknownRefusal replaces an answer that is not one of Slack's own refusals: it
+	// did not come from the endpoint this code talks to, so its bytes are not repeated
+	// (see refusalReason). It still says what the admin can act on — something between
+	// this deployment and Slack answered instead.
+	unknownRefusal  = "the answer was not one of Slack's refusals"
+	contentTypeJSON = "application/json"
+)
+
+// slackRefusals is every refusal Slack's incoming-webhook endpoint answers with,
+// as documented, and the only answers repeated into a reason. The endpoint's
+// refusals are a short, closed set of lowercase snake_case tokens; anything else
+// is an intermediary's own error document, whose bytes may quote the request URL
+// — and the URL is the credential. Allowlisting the answer is what keeps those
+// bytes out of a log line and the admin's screen, whatever shape they escape the
+// path in; redact is then a second pass over a string that cannot hold it.
+// A refusal Slack adds later reads as unknown until it is listed here, which
+// costs the reason's detail and leaks nothing.
+var slackRefusals = map[string]struct{}{
+	"action_prohibited":                       {},
+	"channel_is_archived":                     {},
+	"channel_not_found":                       {},
+	"invalid_blocks":                          {},
+	"invalid_blocks_format":                   {},
+	"invalid_payload":                         {},
+	"invalid_token":                           {},
+	"missing_text_or_fallback_or_attachments": {},
+	"no_service":                              {},
+	"no_service_id":                           {},
+	"no_team":                                 {},
+	"no_text":                                 {},
+	"posting_to_general_channel_denied":       {},
+	"rate_limited":                            {},
+	"team_disabled":                           {},
+	"too_many_attachments":                    {},
+	"user_not_found":                          {},
+}
+
+// webhookStore resolves the URL to post to (implemented by *Store).
+type webhookStore interface {
+	webhookFor(ctx context.Context, orgID uuid.UUID) (string, error)
+}
+
+// orgDirectory resolves what to call the organization and where its audit log is
+// (implemented by *organization.Store).
+type orgDirectory interface {
+	GetByID(ctx context.Context, id uuid.UUID) (organization.Organization, error)
+}
+
+// Channel delivers notifications to an organization's Slack incoming webhook.
+// Register it on the dispatcher at startup; a deployment that leaves it out keeps
+// orgs' saved Slack preferences and simply does not deliver them (see
+// notifications.Dispatcher).
+type Channel struct {
+	store      webhookStore
+	orgs       orgDirectory
+	appBaseURL string
+	locale     email.Locale
+	client     *http.Client
+	// unconfigured remembers the orgs already warned about a missing webhook, so a
+	// misconfiguration costs one log line per org instead of one per event: a dispatch
+	// pass claims up to notifications.DefaultClaimBatch events, and the same org's
+	// whole batch would repeat the line every tick, per replica. A channel sees no
+	// pass boundary, so the memo lives as long as the process.
+	unconfigured sync.Map
+}
+
+// New builds the channel. appBaseURL is the deployment's frontend base URL the
+// posted audit-log link is built on (config.Load has already checked it is an
+// absolute http(s) URL); locale is the deployment's notification language, the
+// same one the mail channel renders in.
+func New(store webhookStore, orgs orgDirectory, appBaseURL string, locale email.Locale) *Channel {
+	return &Channel{
+		store:      store,
+		orgs:       orgs,
+		appBaseURL: appBaseURL,
+		locale:     locale,
+		client: &http.Client{
+			Timeout: postTimeout,
+			// Slack answers a webhook post itself. A redirect could only take the request
+			// — and the organization's event metadata in its body — to a host other than
+			// the one NormalizeWebhookURL pinned, so the 3xx is handed back as the
+			// response and reported as a refusal.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
+	}
+}
+
+func (c *Channel) ID() notifications.ChannelID { return notifications.ChannelSlack }
+
+// Notify posts one event to the organization's webhook. An org that subscribed to
+// Slack without configuring (or after disabling) a webhook is a misconfiguration
+// to warn about once, not an error to log per event.
+func (c *Channel) Notify(ctx context.Context, e notifications.Event) error {
+	webhook, err := c.store.webhookFor(ctx, e.OrgID)
+	switch {
+	case errors.Is(err, ErrNotConfigured):
+		c.warnUnconfigured(ctx, e.OrgID)
+		return nil
+	case err != nil:
+		return err
+	}
+
+	org, err := c.orgs.GetByID(ctx, e.OrgID)
+	if err != nil {
+		return fmt.Errorf("slackchannel: organization %s: %w", e.OrgID, err)
+	}
+	msg, err := eventMessage(e, org.Name, notifications.AuditLogURL(c.appBaseURL, org.Slug), c.locale)
+	if err != nil {
+		return err
+	}
+	return c.post(ctx, webhook, msg)
+}
+
+// SendTest posts a specimen message so an admin can confirm the webhook works
+// before relying on it. ErrNotConfigured (nothing to post to) and *DeliveryError
+// (Slack refused it) are both answers the admin can act on, so they are returned
+// for the handler to show rather than logged here.
+func (c *Channel) SendTest(ctx context.Context, orgID uuid.UUID, orgName string) error {
+	webhook, err := c.store.webhookFor(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	return c.post(ctx, webhook, testMessage(orgName))
+}
+
+// post sends one message to the webhook. Every failure comes back as a
+// *DeliveryError whose Reason names what went wrong without the URL: net/http
+// reports a failed request as `Post "<url>": ...`, and that URL is the workspace's
+// secret, while this reason reaches both a log line and the admin's screen.
+func (c *Channel) post(ctx context.Context, webhook string, m message) error {
+	body, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("slackchannel: encode message: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhook, bytes.NewReader(body))
+	if err != nil {
+		return &DeliveryError{Reason: "the stored webhook url is not a usable request target"}
+	}
+	req.Header.Set("Content-Type", contentTypeJSON)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return &DeliveryError{Reason: redact(transportReason(err), webhook)}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Read the answer either way: an accepted post answers "ok", and draining the
+	// body is what lets the connection be reused.
+	answer, _ := io.ReadAll(io.LimitReader(resp.Body, maxReasonBytes))
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return &DeliveryError{Reason: redact(refusalReason(resp.Status, answer), webhook)}
+	}
+	return nil
+}
+
+// refusalReason says why the post was rejected, repeating the answer only when it
+// is one of Slack's own refusals (slackRefusals). Anything else is replaced whole:
+// it is an intermediary's document, and copying it into the reason is what carried
+// the webhook URL — in whatever shape that intermediary wrote it — into a log line
+// and the admin's screen. The status line is this side's own reading of the
+// response and is kept either way.
+func refusalReason(status string, answer []byte) string {
+	if _, known := slackRefusals[strings.TrimSpace(string(answer))]; known {
+		return oneLine(status + ": " + string(answer))
+	}
+	return oneLine(status) + ": " + unknownRefusal
+}
+
+// warnUnconfigured reports an org subscribed to Slack without a usable webhook,
+// once per org (see Channel.unconfigured). The line names no event: what the admin
+// has to fix is the same whichever event ran into it.
+func (c *Channel) warnUnconfigured(ctx context.Context, orgID uuid.UUID) {
+	if _, warned := c.unconfigured.LoadOrStore(orgID, struct{}{}); warned {
+		return
+	}
+	slog.WarnContext(ctx, "notifications: slack is subscribed but no webhook is configured",
+		slog.String("organizationId", orgID.String()))
+}
+
+// transportReason states why a post never got an answer, without the URL net/http
+// wraps its errors in: a *url.Error carries the request URL verbatim.
+func transportReason(err error) string {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) && urlErr.Err != nil {
+		return oneLine(urlErr.Err.Error())
+	}
+	return oneLine(err.Error())
+}
+
+// redact keeps the webhook out of a reason about to be logged or shown. It is the
+// second line rather than the first: a refused post no longer repeats an answer
+// that is not Slack's own (refusalReason), so the bytes reaching here are this
+// side's own — a status line, or the transport failure net/http names the URL in.
+// It stays because that transport half really does carry the URL, and because a
+// reason built here later should not have to be safe on its own.
+func redact(reason, webhook string) string {
+	for _, secret := range secretForms(webhook) {
+		reason = strings.ReplaceAll(reason, secret, redactedWebhook)
+	}
+	return reason
+}
+
+// secretForms lists the shapes the webhook has been seen quoted back in, which is
+// not the same as all of them ("&#47;" and "%252F" are as writable as the rest) —
+// the reason refusalReason allowlists the answer instead of trusting this list.
+// Matching the stored URL verbatim is not enough: the path is the secret half —
+// whoever holds it can post as the integration — and something that names the
+// request it refused writes that path in a shape of its own. Percent-encoding the
+// separators is the common one ("path=%2Fservices%2F…"), in either case; a JSON
+// error document writes them "\/"; none is a substring of the decoded path.
+func secretForms(webhook string) []string {
+	forms := []string{webhook}
+	parsed, err := url.Parse(webhook)
+	if err != nil {
+		return forms
+	}
+	// The decoded and the escaped path are kept apart by url.Parse and an answer may
+	// quote either; for a Slack webhook they are usually the same string, and a
+	// duplicate form only costs a second pass that matches nothing.
+	for _, path := range []string{parsed.Path, parsed.EscapedPath()} {
+		trimmed := strings.Trim(path, "/")
+		if trimmed == "" {
+			continue
+		}
+		forms = append(forms, trimmed,
+			strings.ReplaceAll(trimmed, "/", "%2F"),
+			strings.ReplaceAll(trimmed, "/", "%2f"),
+			strings.ReplaceAll(trimmed, "/", `\/`))
+	}
+	// Longest first, so a form contained in a longer one does not blank out the part
+	// that would have matched the longer one and leave the rest of it standing.
+	sort.SliceStable(forms, func(i, j int) bool { return len(forms[i]) > len(forms[j]) })
+	return forms
+}
+
+// oneLine collapses whitespace, so a refusal stays one line of a log or an error.
+func oneLine(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}

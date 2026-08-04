@@ -103,6 +103,16 @@ async function handleSend(req: IncomingMessage, res: ServerResponse): Promise<vo
     return;
   }
 
+  // Log the upstream endpoints this send actually targets. The sealed package is
+  // uploaded to `cryptify` and the sender is verified against `pkg`; making the
+  // environment visible per-request is the only way to catch a sidecar pointed at
+  // a different PostGuard environment than the backend expects (e.g. upload to
+  // staging while the mailed download link resolves against production).
+  console.log(
+    `postguard-sidecar: encrypt-and-upload pkg=${config.pkgUrl} cryptify=${config.cryptifyUrl} ` +
+      `recipients=${recipients.length} files=${form.files.length} notify=${form.fields.notify !== "false"}`,
+  );
+
   const result = await client.encryptAndSend({
     apiKey,
     recipients,
@@ -111,6 +121,10 @@ async function handleSend(req: IncomingMessage, res: ServerResponse): Promise<vo
     message: form.fields.message,
     language: form.fields.language,
   });
+
+  console.log(
+    `postguard-sidecar: upload complete cryptify=${config.cryptifyUrl} uuid=${result.uuid}`,
+  );
 
   sendJSON(res, 200, { uuid: result.uuid });
 }

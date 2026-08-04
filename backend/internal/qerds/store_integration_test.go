@@ -72,7 +72,7 @@ func TestSelfSendReachesInbox(t *testing.T) {
 	}
 
 	// First intake must store the inbound copy despite sharing the outbound ref.
-	_, created, err := store.CreateInbound(ctx, org.ID, inbound)
+	first, created, err := store.CreateInbound(ctx, org.ID, inbound)
 	if err != nil {
 		t.Fatalf("CreateInbound: %v", err)
 	}
@@ -80,13 +80,20 @@ func TestSelfSendReachesInbox(t *testing.T) {
 		t.Fatal("inbound not stored — self-send collided on provider_ref")
 	}
 
-	// Repeated intake (poll/webhook retry) must dedupe.
-	_, createdAgain, err := store.CreateInbound(ctx, org.ID, inbound)
+	// Repeated intake (poll/webhook retry) must dedupe, but still return the
+	// existing row so the inbound consumer can re-run idempotently on re-delivery.
+	again, createdAgain, err := store.CreateInbound(ctx, org.ID, inbound)
 	if err != nil {
 		t.Fatalf("CreateInbound (again): %v", err)
 	}
 	if createdAgain {
 		t.Fatal("duplicate inbound stored — dedupe on (direction, provider_ref) broken")
+	}
+	if again.ID != first.ID {
+		t.Fatalf("dedupe hit returned id %s, want the existing row %s", again.ID, first.ID)
+	}
+	if again.Body != inbound.Body {
+		t.Fatalf("dedupe hit returned empty body %q, want %q — consumer would re-run with no offer", again.Body, inbound.Body)
 	}
 
 	messages, err := store.List(ctx, org.ID)

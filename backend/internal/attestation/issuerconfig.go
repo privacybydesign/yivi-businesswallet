@@ -1,6 +1,12 @@
 package attestation
 
-import "strings"
+import (
+	"encoding/base64"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+)
 
 // This file generates the Veramo issuer provisioning for a schema. In the target
 // deployment the hosted issuer's runtime config API is disabled (no global admin
@@ -39,10 +45,13 @@ const (
 
 // localeDisplay is one language's rendering of a name, in the {name, locale}
 // shape OpenID4VCI credential/claim `display` arrays use (note: our stored
-// schema uses {lang, name|label}; this is the issuer-side spelling).
+// schema uses {lang, name|label}; this is the issuer-side spelling). Logo carries
+// the optional per-credential image OpenID4VCI credential display supports, so a
+// wallet can show a distinct image per credential type on the credential card.
 type localeDisplay struct {
-	Name   string `json:"name"`
-	Locale string `json:"locale"`
+	Name   string      `json:"name"`
+	Locale string      `json:"locale"`
+	Logo   *issuerLogo `json:"logo,omitempty"`
 }
 
 // claimConfig is one attribute in a credential configuration: its disclosure
@@ -111,7 +120,10 @@ type IssuerConfig struct {
 // + per-claim labels, per language) to the Veramo issuer GitOps config. issuerURL
 // is the issuer instance base URL written into the VCT document's `issuer` field
 // (empty is fine — the operator fills it in for the target environment).
-func BuildIssuerConfig(s Schema, issuerURL string) IssuerConfig {
+// logoDataURI is the schema's credential image as a data: URI (empty when none):
+// it is embedded into the per-credential display so a wallet renders it on the
+// credential card.
+func BuildIssuerConfig(s Schema, issuerURL, logoDataURI string) IssuerConfig {
 	claims := make([]claimConfig, 0, len(s.Attributes))
 	vctClaims := make([]vctClaim, 0, len(s.Attributes))
 	for _, a := range s.Attributes {
@@ -123,7 +135,7 @@ func BuildIssuerConfig(s Schema, issuerURL string) IssuerConfig {
 		vctClaims = append(vctClaims, vctClaim{Path: []string{a.Key}, SD: vctSelectiveDisclosure})
 	}
 
-	credDisplay := nameDisplays(s.Display)
+	credDisplay := credentialDisplays(s, logoDataURI)
 	cfg := credentialConfiguration{
 		Format:                               credentialFormatSDJWT,
 		Scope:                                s.CredentialConfigID,
@@ -223,7 +235,9 @@ type IssuerBundle struct {
 
 // BuildIssuerBundle assembles the per-org issuer GitOps bundle from the org's
 // instance name + branding and its schemas' localized display metadata.
-func BuildIssuerBundle(instance, displayName, logoURI string, schemas []Schema) IssuerBundle {
+// schemaLogos maps a schema id to its credential image as a data: URI (absent
+// when the schema has no image); each is embedded into that credential's display.
+func BuildIssuerBundle(instance, displayName, logoURI string, schemas []Schema, schemaLogos map[uuid.UUID]string) IssuerBundle {
 	issuerBase := opsBaseURLPlaceholder + "/" + instance
 	didAlias := instance + "-did"
 
@@ -233,7 +247,7 @@ func BuildIssuerBundle(instance, displayName, logoURI string, schemas []Schema) 
 		if s.CredentialConfigID == "" {
 			continue
 		}
-		ic := BuildIssuerConfig(s, issuerBase)
+		ic := BuildIssuerConfig(s, issuerBase, schemaLogos[s.ID])
 		for k, v := range ic.Metadata {
 			configs[k] = v
 		}
@@ -278,6 +292,32 @@ func BuildIssuerBundle(instance, displayName, logoURI string, schemas []Schema) 
 		},
 		VCTs: vcts,
 	}
+}
+
+// credentialDisplays builds a credential's per-language display array, attaching
+// the credential image (as a data: URI) to every language entry so a wallet shows
+// it on the credential card. When the schema declares no display names but has an
+// image, a single default-language entry carries the display name + image so the
+// image is not dropped.
+func credentialDisplays(s Schema, logoDataURI string) []localeDisplay {
+	displays := nameDisplays(s.Display)
+	if logoDataURI == "" {
+		return displays
+	}
+	logo := &issuerLogo{URI: logoDataURI, AltText: s.DisplayName + " logo"}
+	if len(displays) == 0 {
+		return []localeDisplay{{Name: s.DisplayName, Locale: defaultVctLanguage, Logo: logo}}
+	}
+	for i := range displays {
+		displays[i].Logo = logo
+	}
+	return displays
+}
+
+// logoDataURI encodes a stored credential image as an RFC 2397 data: URI so the
+// generated issuer metadata carries the image inline.
+func logoDataURI(logo Logo) string {
+	return fmt.Sprintf("data:%s;base64,%s", logo.ContentType, base64.StdEncoding.EncodeToString(logo.Bytes))
 }
 
 // nameDisplays / labelDisplays convert the stored {lang, name|label} entries to

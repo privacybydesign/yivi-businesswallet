@@ -19,6 +19,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "membership.invited": { icon: "email", tone: "amber" },
   "membership.invite_resent": { icon: "email", tone: "amber" },
   "membership.invite_revoked": { icon: "close", tone: "red" },
+  "membership.invite_updated": { icon: "edit", tone: "blue" },
   "membership.accepted": { icon: "valid", tone: "green" },
   "membership.accept_rejected": { icon: "warning", tone: "amber" },
   "membership.declined": { icon: "close", tone: "slate" },
@@ -42,10 +43,18 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "attestation.issued": { icon: "valid", tone: "violet" },
   "attestation.claimed": { icon: "valid", tone: "green" },
   "attestation.revoked": { icon: "close", tone: "red" },
+  "attestation.offer_cancelled": { icon: "close", tone: "amber" },
   "attestation.key_added": { icon: "add", tone: "green" },
   "attestation.key_suspended": { icon: "warning", tone: "amber" },
   "attestation.key_revoked": { icon: "close", tone: "red" },
   "email.settings_updated": { icon: "settings", tone: "blue" },
+  "email.template_updated": { icon: "email", tone: "blue" },
+  "email.template_reset": { icon: "email", tone: "amber" },
+  "notification.settings_updated": { icon: "settings", tone: "blue" },
+  "slack.settings_updated": { icon: "settings", tone: "blue" },
+  "provisioning.settings_updated": { icon: "settings", tone: "blue" },
+  "provisioning.run_completed": { icon: "valid", tone: "green" },
+  "provisioning.run_failed": { icon: "warning", tone: "red" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -74,6 +83,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.inviteResent");
     case "membership.invite_revoked":
       return t("auditLog.actions.inviteRevoked");
+    case "membership.invite_updated":
+      return t("auditLog.actions.inviteUpdated");
     case "membership.accepted":
       return t("auditLog.actions.inviteAccepted");
     case "membership.accept_rejected":
@@ -124,6 +135,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.postguardEncryptionKeyRemoved");
     case "postguard.file_sent":
       return t("auditLog.actions.postguardFileSent");
+    case "postguard.notification_delivery_set":
+      return t("auditLog.actions.postguardNotificationDeliverySet");
     case "wallet.opened":
       return t("auditLog.actions.walletOpened");
     case "wallet.bootstrapped":
@@ -136,6 +149,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.representationClaimed");
     case "wallet.representation_revoked":
       return t("auditLog.actions.representationRevoked");
+    case "kvk.registration_validated":
+      return t("auditLog.actions.kvkRegistrationValidated");
+    case "kvk.registration_not_validated":
+      return t("auditLog.actions.kvkRegistrationNotValidated");
     case "attestation.schema_created":
       return t("auditLog.actions.attestationSchemaCreated");
     case "attestation.schema_updated":
@@ -154,6 +171,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.attestationClaimed");
     case "attestation.revoked":
       return t("auditLog.actions.attestationRevoked");
+    case "attestation.offer_cancelled":
+      return t("auditLog.actions.attestationOfferCancelled");
     case "attestation.key_added":
       return t("auditLog.actions.attestationKeyAdded");
     case "attestation.key_suspended":
@@ -164,10 +183,26 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.attestationHeldDeleted");
     case "email.settings_updated":
       return t("auditLog.actions.emailSettingsUpdated");
+    case "email.template_updated":
+      return t("auditLog.actions.emailTemplateUpdated");
+    case "email.template_reset":
+      return t("auditLog.actions.emailTemplateReset");
     case "issuer.settings_updated":
       return t("auditLog.actions.issuerSettingsUpdated");
     case "theme.settings_updated":
       return t("auditLog.actions.themeSettingsUpdated");
+    case "onboarding.settings_updated":
+      return t("auditLog.actions.onboardingSettingsUpdated");
+    case "notification.settings_updated":
+      return t("auditLog.actions.notificationSettingsUpdated");
+    case "slack.settings_updated":
+      return t("auditLog.actions.slackSettingsUpdated");
+    case "provisioning.settings_updated":
+      return t("auditLog.actions.provisioningSettingsUpdated");
+    case "provisioning.run_completed":
+      return t("auditLog.actions.provisioningRunCompleted");
+    case "provisioning.run_failed":
+      return t("auditLog.actions.provisioningRunFailed");
     default:
       return action;
   }
@@ -193,12 +228,16 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.walletInstance");
     case "wallet_representation":
       return t("auditLog.targets.walletRepresentation");
+    case "kvk_registration":
+      return t("auditLog.targets.kvkRegistration");
     case "postguard_key":
       return t("auditLog.targets.postguardKey");
     case "postguard_encryption_key":
       return t("auditLog.targets.postguardEncryptionKey");
     case "postguard_file":
       return t("auditLog.targets.postguardFile");
+    case "postguard_settings":
+      return t("auditLog.targets.postguardSettings");
     case "attestation_schema":
       return t("auditLog.targets.attestationSchema");
     case "attestation_template":
@@ -211,10 +250,20 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.heldAttestation");
     case "org_email_settings":
       return t("auditLog.targets.orgEmailSettings");
+    case "org_email_template":
+      return t("auditLog.targets.orgEmailTemplate");
     case "org_issuer_settings":
       return t("auditLog.targets.orgIssuerSettings");
     case "org_theme_settings":
       return t("auditLog.targets.orgThemeSettings");
+    case "org_onboarding_attestations":
+      return t("auditLog.targets.orgOnboardingAttestations");
+    case "org_notification_settings":
+      return t("auditLog.targets.orgNotificationSettings");
+    case "org_slack_settings":
+      return t("auditLog.targets.orgSlackSettings");
+    case "org_provisioning_settings":
+      return t("auditLog.targets.orgProvisioningSettings");
     default:
       return targetType;
   }
@@ -260,6 +309,14 @@ export function auditSubject(
 
   const snapshot = after ?? before;
   if (!snapshot) return null;
-  const id = snapshot.name ?? snapshot.email ?? snapshot.role;
+  // `recipients` identifies a sent encrypted file (who it was sent to): the
+  // send handler rejects an empty list, so it is always a non-empty array.
+  if (Array.isArray(snapshot.recipients) && snapshot.recipients.length > 0) {
+    return snapshot.recipients.filter((r) => typeof r === "string").join(", ");
+  }
+  // `recipient` identifies an issued attestation (who it was issued to); the
+  // issue handler rejects an empty ref, so it is always present on that event.
+  const id =
+    snapshot.name ?? snapshot.email ?? snapshot.recipient ?? snapshot.role;
   return typeof id === "string" ? id : null;
 }

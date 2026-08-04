@@ -3,8 +3,12 @@
 package attestation_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -125,7 +129,7 @@ func TestIssuePersonEmailsAndClaims(t *testing.T) {
 	ctx := context.Background()
 	templateID := personTemplate(t, ctx, e.store, e.orgID)
 
-	result, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "anna@example.com"},
 		Attributes: map[string]string{"email": "anna@example.com", "department": "Platform"},
@@ -157,13 +161,40 @@ func TestIssuePersonEmailsAndClaims(t *testing.T) {
 	}
 }
 
+// TestIssuePersonQrMethodSkipsEmail: the "show QR directly" method creates the
+// offer but sends nothing — delivery is recorded as none and no e-mail goes out.
+func TestIssuePersonQrMethodSkipsEmail(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	templateID := personTemplate(t, ctx, e.store, e.orgID)
+
+	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
+		TemplateID:     templateID,
+		Recipient:      attestation.Recipient{Kind: attestation.RecipientMember, Ref: "anna@example.com"},
+		Attributes:     map[string]string{"email": "anna@example.com"},
+		DeliveryMethod: attestation.DeliveryMethodQR,
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if result.OfferURI == "" {
+		t.Fatalf("expected an offerUri to render as a QR, got %+v", result)
+	}
+	if result.Delivery != attestation.DeliveryNone {
+		t.Fatalf("delivery = %q, want %q", result.Delivery, attestation.DeliveryNone)
+	}
+	if len(e.email.to) != 0 || len(e.qerds.to) != 0 {
+		t.Fatalf("expected no delivery, got email=%v qerds=%v", e.email.to, e.qerds.to)
+	}
+}
+
 // TestIssueOrganizationDeliversOverQerds: an org-subject issue routes to QERDS.
 func TestIssueOrganizationDeliversOverQerds(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 	templateID := orgTemplate(t, ctx, e.store, e.orgID)
 
-	_, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientOrganization, Ref: "supplier@qerds.example"},
 		Attributes: map[string]string{"name": "Supplier B.V."},
@@ -185,7 +216,7 @@ func TestRecipientKindMustMatchSubjectType(t *testing.T) {
 	ctx := context.Background()
 	templateID := orgTemplate(t, ctx, e.store, e.orgID)
 
-	_, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "a@b.com"},
 		Attributes: map[string]string{"name": "X"},
@@ -195,13 +226,144 @@ func TestRecipientKindMustMatchSubjectType(t *testing.T) {
 	}
 }
 
+// TestTemplateAttributeSourcesRoundTrip persists a template's subject-source
+// bindings and reads them back enriched, and confirms an empty map round-trips.
+func TestTemplateAttributeSourcesRoundTrip(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+
+	schema, err := e.store.CreateSchema(ctx, e.orgID, attestation.Schema{
+		VCT:                "nl.caesar.badge",
+		DisplayName:        "Badge",
+		CredentialConfigID: "EmailCredentialSdJwt",
+		SubjectType:        attestation.SubjectNaturalPerson,
+		Attributes: []attestation.AttributeDef{
+			{Key: "email", Label: "E-mail", Type: "string", Required: true},
+			{Key: "department", Label: "Department", Type: "string"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSchema: %v", err)
+	}
+
+	sources := map[string]string{
+		"email":      attestation.SourceMemberEmail,
+		"department": attestation.SourceMemberDepartment,
+	}
+	created, err := e.store.CreateTemplate(ctx, e.orgID, attestation.Template{
+		SchemaID: schema.ID, Name: "Badge", AttributeSources: sources,
+	})
+	if err != nil {
+		t.Fatalf("CreateTemplate: %v", err)
+	}
+	if got := created.AttributeSources; len(got) != 2 || got["email"] != attestation.SourceMemberEmail || got["department"] != attestation.SourceMemberDepartment {
+		t.Fatalf("AttributeSources round-trip = %v, want %v", got, sources)
+	}
+
+	// Clearing the bindings on update round-trips to an empty map.
+	updated, err := e.store.UpdateTemplate(ctx, e.orgID, created.ID, attestation.Template{
+		Name: "Badge", AttributeSources: nil,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if len(updated.AttributeSources) != 0 {
+		t.Fatalf("AttributeSources after clear = %v, want empty", updated.AttributeSources)
+	}
+}
+
+// TestSchemaLogoRoundTrip stores, replaces and clears a schema's credential image
+// and checks it is embedded into the generated issuer config as a data: URI.
+func TestSchemaLogoRoundTrip(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+
+	// A 1x1 PNG so http.DetectContentType recognises image/png.
+	png := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+		0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
+	}
+
+	schema, err := e.store.CreateSchema(ctx, e.orgID, attestation.Schema{
+		VCT:                "nl.caesar.card",
+		DisplayName:        "Card",
+		CredentialConfigID: "nl.caesar.card",
+		SubjectType:        attestation.SubjectNaturalPerson,
+		Attributes:         []attestation.AttributeDef{{Key: "email", Label: "E-mail", Type: "string", Required: true}},
+		Display:            []attestation.LocalizedName{{Lang: "en", Name: "Card"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateSchema: %v", err)
+	}
+	if schema.HasLogo {
+		t.Fatalf("new schema should have no image")
+	}
+	if _, err := e.store.GetSchemaLogo(ctx, e.orgID, schema.ID); !errors.Is(err, attestation.ErrNoSchemaLogo) {
+		t.Fatalf("GetSchemaLogo on empty = %v, want ErrNoSchemaLogo", err)
+	}
+
+	// Store an image; it round-trips and flags HasLogo.
+	updated, err := e.store.SetSchemaLogo(ctx, e.orgID, schema.ID, attestation.LogoUpdate{
+		Replace: true, Logo: attestation.Logo{Bytes: png, ContentType: "image/png"},
+	})
+	if err != nil {
+		t.Fatalf("SetSchemaLogo: %v", err)
+	}
+	if !updated.HasLogo {
+		t.Fatalf("schema should have an image after upload")
+	}
+	logo, err := e.store.GetSchemaLogo(ctx, e.orgID, schema.ID)
+	if err != nil {
+		t.Fatalf("GetSchemaLogo: %v", err)
+	}
+	if !bytes.Equal(logo.Bytes, png) || logo.ContentType != "image/png" {
+		t.Fatalf("logo round-trip mismatch: type=%q len=%d", logo.ContentType, len(logo.Bytes))
+	}
+
+	// The image reaches the generated issuer config as a data: URI.
+	stored, err := e.store.GetSchema(ctx, e.orgID, schema.ID)
+	if err != nil {
+		t.Fatalf("GetSchema: %v", err)
+	}
+	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(logo.Bytes)
+	cfg := attestation.BuildIssuerConfig(stored, "", dataURI)
+	raw, err := json.Marshal(cfg.Metadata)
+	if err != nil {
+		t.Fatalf("marshal issuer config: %v", err)
+	}
+	if !strings.Contains(string(raw), dataURI) {
+		t.Fatalf("issuer config credential display missing embedded image: %s", raw)
+	}
+
+	// Clearing the image resets HasLogo and returns ErrNoSchemaLogo.
+	cleared, err := e.store.SetSchemaLogo(ctx, e.orgID, schema.ID, attestation.LogoUpdate{Replace: true})
+	if err != nil {
+		t.Fatalf("SetSchemaLogo clear: %v", err)
+	}
+	if cleared.HasLogo {
+		t.Fatalf("schema should have no image after clear")
+	}
+	if _, err := e.store.GetSchemaLogo(ctx, e.orgID, schema.ID); !errors.Is(err, attestation.ErrNoSchemaLogo) {
+		t.Fatalf("GetSchemaLogo after clear = %v, want ErrNoSchemaLogo", err)
+	}
+
+	// A missing schema is distinguished from a missing image.
+	if _, err := e.store.GetSchemaLogo(ctx, e.orgID, uuid.New()); !errors.Is(err, attestation.ErrSchemaNotFound) {
+		t.Fatalf("GetSchemaLogo unknown schema = %v, want ErrSchemaNotFound", err)
+	}
+	if _, err := e.store.SetSchemaLogo(ctx, e.orgID, uuid.New(), attestation.LogoUpdate{Replace: true}); !errors.Is(err, attestation.ErrSchemaNotFound) {
+		t.Fatalf("SetSchemaLogo unknown schema = %v, want ErrSchemaNotFound", err)
+	}
+}
+
 // TestDataMinimisationRejectsUndeclaredAttribute enforces the schema allow-list.
 func TestDataMinimisationRejectsUndeclaredAttribute(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 	templateID := personTemplate(t, ctx, e.store, e.orgID)
 
-	_, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "x@example.com"},
 		Attributes: map[string]string{"email": "x@example.com", "salary": "secret"},
@@ -218,19 +380,25 @@ func TestDataMinimisationRejectsUndeclaredAttribute(t *testing.T) {
 	}
 }
 
-// TestRevoke flips an issued attestation to revoked.
+// TestRevoke reserves revocation for already-claimed credentials: an unclaimed
+// offer cannot be revoked (that is Cancel's job), and a claimed one flips to
+// revoked exactly once.
 func TestRevoke(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 	templateID := personTemplate(t, ctx, e.store, e.orgID)
 
-	result, err := e.service.Issue(ctx, e.orgID, e.actorID, "Caesar", attestation.IssueInput{
+	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "z@example.com"},
 		Attributes: map[string]string{"email": "z@example.com"},
 	})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
+	}
+	// An offer that was never claimed is not revocable.
+	if _, err := e.service.Revoke(ctx, e.orgID, result.ID); !errors.Is(err, attestation.ErrNotOfferable) {
+		t.Fatalf("expected ErrNotOfferable revoking an unclaimed offer, got %v", err)
 	}
 
 	// Poll once so the (stub) issuer reports the credential issued: this captures
@@ -253,5 +421,51 @@ func TestRevoke(t *testing.T) {
 	}
 	if _, err := e.service.Revoke(ctx, e.orgID, result.ID); !errors.Is(err, attestation.ErrNotOfferable) {
 		t.Fatalf("expected ErrNotOfferable on re-revoke, got %v", err)
+	}
+}
+
+// TestCancelOffer withdraws an unclaimed offer as a cancellation (not a
+// revocation) and refuses to cancel an already-claimed credential.
+func TestCancelOffer(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	templateID := personTemplate(t, ctx, e.store, e.orgID)
+
+	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
+		TemplateID: templateID,
+		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "c@example.com"},
+		Attributes: map[string]string{"email": "c@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	cancelled, err := e.service.Cancel(ctx, e.orgID, result.ID)
+	if err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if cancelled.Status != attestation.StatusCancelled || cancelled.CancelledAt == nil {
+		t.Fatalf("expected cancelled, got %+v", cancelled)
+	}
+	if cancelled.RevokedAt != nil {
+		t.Fatalf("cancelling an offer must not set revoked_at, got %+v", cancelled)
+	}
+	if _, err := e.service.Cancel(ctx, e.orgID, result.ID); !errors.Is(err, attestation.ErrNotOfferable) {
+		t.Fatalf("expected ErrNotOfferable on re-cancel, got %v", err)
+	}
+
+	// A claimed credential is revoked, never cancelled.
+	claimable, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
+		TemplateID: templateID,
+		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "d@example.com"},
+		Attributes: map[string]string{"email": "d@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if _, err := e.store.MarkClaimed(ctx, e.orgID, claimable.ID, "cred-d"); err != nil {
+		t.Fatalf("MarkClaimed: %v", err)
+	}
+	if _, err := e.service.Cancel(ctx, e.orgID, claimable.ID); !errors.Is(err, attestation.ErrNotOfferable) {
+		t.Fatalf("expected ErrNotOfferable cancelling a claimed credential, got %v", err)
 	}
 }

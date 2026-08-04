@@ -165,8 +165,12 @@ func (s *Service) Poll(ctx context.Context, orgID uuid.UUID) (int, error) {
 			}
 			if created {
 				count++
-				s.notifyConsumer(ctx, orgID, msg)
 			}
+			// Notify on every intake, not only newly-stored rows: the consumer is
+			// idempotent and a re-delivered offer whose earlier redeem failed must
+			// be retried. CreateInbound returns the existing row on a dedupe hit,
+			// so msg is populated either way.
+			s.notifyConsumer(ctx, orgID, msg)
 		}
 	}
 	return count, nil
@@ -179,12 +183,12 @@ func (s *Service) ReceiveInbound(ctx context.Context, in qerdsprovider.InboundMe
 	if err != nil {
 		return err
 	}
-	msg, created, err := s.messages.CreateInbound(ctx, orgID, in)
+	msg, _, err := s.messages.CreateInbound(ctx, orgID, in)
 	if err != nil {
 		return err
 	}
-	if created {
-		s.notifyConsumer(ctx, orgID, msg)
-	}
+	// Notify on every delivery (not only the first): the consumer is idempotent
+	// and a re-delivered offer whose earlier redeem failed must be retried.
+	s.notifyConsumer(ctx, orgID, msg)
 	return nil
 }

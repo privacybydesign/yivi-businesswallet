@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import type { IssuerSettings } from "../api/issuer";
+import type { IssuerSettings, LogoChange } from "../api/issuer";
 import {
   useIssuerBundleQuery,
   useIssuerSettingsQuery,
@@ -17,6 +17,17 @@ const CONTROL =
 
 // Matches the backend instanceNamePattern (a lowercase URL-path slug).
 const INSTANCE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+// Keep the accepted types and size cap in step with the backend detectLogoType
+// allowlist and MaxLogoBytes.
+const ACCEPTED_LOGO_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+];
+const MAX_LOGO_BYTES = 512 * 1024;
 
 export function IssuerSettingsPanel({
   slug,
@@ -67,24 +78,71 @@ function IssuerForm({
 
   const [instanceName, setInstanceName] = useState(settings.instanceName);
   const [displayName, setDisplayName] = useState(settings.displayName);
-  const [logoUri, setLogoUri] = useState(settings.logoUri);
   const [enabled, setEnabled] = useState(settings.enabled);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [newLogoUrl, setNewLogoUrl] = useState<string | null>(null);
+  const [removeLogo, setRemoveLogo] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
   const [attempted, setAttempted] = useState(false);
+
+  // The object URL for a freshly picked file is created in the change handler
+  // (not render), so this effect only revokes the previous one when it changes
+  // or the form unmounts.
+  useEffect(() => {
+    if (!newLogoUrl) {
+      return;
+    }
+    return () => URL.revokeObjectURL(newLogoUrl);
+  }, [newLogoUrl]);
 
   const trimmedInstance = instanceName.trim();
   const instanceError =
     attempted && !INSTANCE_NAME_PATTERN.test(trimmedInstance);
+
+  const hasStoredLogo = settings.logoUri !== "";
+  const showStoredLogo = hasStoredLogo && !removeLogo && logoFile === null;
+  const logoPreviewSrc = logoFile
+    ? newLogoUrl
+    : showStoredLogo
+      ? settings.logoUri
+      : null;
+
+  function handleLogoSelect(file: File | null): void {
+    if (!file) {
+      return;
+    }
+    if (!ACCEPTED_LOGO_TYPES.includes(file.type)) {
+      setLogoError(t("issuerSettings.logoTypeInvalid"));
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setLogoError(t("issuerSettings.logoTooLarge"));
+      return;
+    }
+    setLogoError(null);
+    setRemoveLogo(false);
+    setLogoFile(file);
+    setNewLogoUrl(URL.createObjectURL(file));
+  }
+
+  function handleLogoRemove(): void {
+    setLogoError(null);
+    setLogoFile(null);
+    setNewLogoUrl(null);
+    setRemoveLogo(true);
+  }
 
   function handleSave(): void {
     setAttempted(true);
     if (!INSTANCE_NAME_PATTERN.test(trimmedInstance) || save.isPending) {
       return;
     }
+    const logo: LogoChange = logoFile ?? (removeLogo ? "remove" : "keep");
     save.mutate({
       instanceName: trimmedInstance,
       displayName: displayName.trim(),
-      logoUri: logoUri.trim(),
       enabled,
+      logo,
     });
   }
 
@@ -109,14 +167,42 @@ function IssuerForm({
           onChange={(event) => setDisplayName(event.target.value)}
           aria-label={t("issuerSettings.displayName")}
         />
-        <span className={EYEBROW}>{t("issuerSettings.logoUri")}</span>
-        <input
-          className={CONTROL}
-          value={logoUri}
-          onChange={(event) => setLogoUri(event.target.value)}
-          placeholder={t("issuerSettings.logoUriPlaceholder")}
-          aria-label={t("issuerSettings.logoUri")}
-        />
+        <span className={EYEBROW}>{t("issuerSettings.logo")}</span>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <label className="rounded-yivi border-line-strong bg-surface text-ink hover:bg-surface-3 focus-within:border-ink focus-within:ring-ink/10 inline-flex h-9 cursor-pointer items-center border px-3 text-[13px] font-medium transition-colors focus-within:ring-3">
+              <input
+                type="file"
+                accept={ACCEPTED_LOGO_TYPES.join(",")}
+                className="sr-only"
+                onChange={(event) =>
+                  handleLogoSelect(event.target.files?.[0] ?? null)
+                }
+              />
+              {t("issuerSettings.logoChoose")}
+            </label>
+            {(logoFile !== null || showStoredLogo) && (
+              <Button variant="ghost" size="sm" onClick={handleLogoRemove}>
+                {t("issuerSettings.logoRemove")}
+              </Button>
+            )}
+            {logoPreviewSrc && (
+              <img
+                src={logoPreviewSrc}
+                alt={t("issuerSettings.logoPreviewAlt")}
+                className="max-h-9 max-w-[120px]"
+              />
+            )}
+          </div>
+          {logoFile && (
+            <span className="text-ink-soft truncate text-[12px]">
+              {logoFile.name}
+            </span>
+          )}
+          <span className="text-muted text-[11px]">
+            {t("issuerSettings.logoHint")}
+          </span>
+        </div>
         <span className={EYEBROW}>{t("issuerSettings.enabled")}</span>
         <label className="text-ink flex cursor-pointer items-center gap-2 text-[13.5px]">
           <input
@@ -130,6 +216,11 @@ function IssuerForm({
       {instanceError && (
         <p role="alert" className="text-error mt-2 text-[12px]">
           {t("issuerSettings.instanceNameInvalid")}
+        </p>
+      )}
+      {logoError && (
+        <p role="alert" className="text-error mt-2 text-[12px]">
+          {logoError}
         </p>
       )}
       <div className="mt-5">

@@ -22,7 +22,9 @@ func run() error {
 	adminsOnly := flag.Bool("admins", false,
 		"provision only the configured PLATFORM_ADMIN_EMAILS accounts (no demo data); safe for staging/production")
 	orgOnly := flag.Bool("org", false,
-		"provision only the Yivi organisation (no demo members or activity); safe for staging/production")
+		"provision the anchor organisations — Yivi (with its team as admins + attestation catalogue) and the KVK register (authentic source); no demo members or activity, safe for staging/production")
+	partnersOnly := flag.Bool("partners", false,
+		"provision the staging pilot partner organisations (Anoigo, Gemeente Nijmegen, Ver.iD, PinkRoccade, Stichting Nuts, Secumail) with their teams as admins; no demo data, idempotent — staging only, not for production")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -37,7 +39,7 @@ func run() error {
 	// Both partial seeds create no demo data, so they can be combined and are
 	// safe to run on every deploy. Only when neither flag is set does the full
 	// dev demo seed run.
-	if *adminsOnly || *orgOnly {
+	if *adminsOnly || *orgOnly || *partnersOnly {
 		if *adminsOnly {
 			slog.Info("provisioning platform-admin accounts", slog.Int("count", len(cfg.PlatformAdminEmails)))
 			if err := seed.EnsurePlatformAdmins(ctx, cfg.DatabaseDSN, cfg.PlatformAdminEmails); err != nil {
@@ -47,16 +49,29 @@ func run() error {
 		}
 		if *orgOnly {
 			slog.Info("provisioning Yivi organisation")
-			if _, err := seed.EnsureYiviOrganization(ctx, cfg.DatabaseDSN); err != nil {
+			if _, err := seed.EnsureYiviOrganization(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
 				return err
 			}
 			slog.Info("Yivi organisation provisioning complete")
+
+			slog.Info("provisioning KVK register organisation")
+			if _, err := seed.EnsureKVKRegisterOrganization(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
+				return err
+			}
+			slog.Info("KVK register organisation provisioning complete")
+		}
+		if *partnersOnly {
+			slog.Info("provisioning staging partner organisations")
+			if err := seed.EnsurePartnerOrganizations(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
+				return err
+			}
+			slog.Info("partner organisation provisioning complete")
 		}
 		return nil
 	}
 
 	slog.Info("running database seed")
-	if err := seed.Run(ctx, cfg.DatabaseDSN); err != nil {
+	if err := seed.Run(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
 		return err
 	}
 	slog.Info("database seed complete")

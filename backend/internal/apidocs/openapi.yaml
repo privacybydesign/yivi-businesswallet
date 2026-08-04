@@ -26,13 +26,19 @@ tags:
   - name: postguard
     description: PostGuard attribute-based encryption settings and files.
   - name: email
-    description: Per-organisation email settings.
+    description: Per-organisation email settings and transactional mail templates.
   - name: issuer-settings
     description: Per-organisation issuer settings.
   - name: wsca
     description: Per-organisation WSCA holder-wallet activation and rotation.
   - name: theme
     description: Per-organisation colour scheme and logo.
+  - name: notifications
+    description: Per-organisation notification subscriptions per audit event.
+  - name: slack
+    description: Per-organisation Slack incoming-webhook notification settings.
+  - name: provisioning
+    description: Per-organisation user and department provisioning from an identity directory.
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -408,6 +414,74 @@ paths:
                 description: Response payload; shape depends on the endpoint.
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/v1/me/avatar:
+    get:
+      tags: [auth]
+      summary: Serve the authenticated user's own avatar
+      description: >-
+        Streams the stored portrait photo. Requires an authenticated session.
+        Returns 404 when no photo is set.
+      responses:
+        '2XX':
+          description: The avatar image bytes.
+          content:
+            image/jpeg: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [auth]
+      summary: Upload or replace the authenticated user's avatar
+      description: >-
+        Accepts a PNG, JPEG, GIF or WebP photo in the "avatar" file field, up to
+        8 MiB. The image is re-encoded to a 256x256 JPEG before it is stored, so
+        camera metadata (EXIF, including GPS) is dropped; the EXIF orientation is
+        applied to the pixels first. Returns the updated user.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+                  description: The photo to store as the avatar.
+              required: [avatar]
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: The uploaded photo is larger than the accepted maximum.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [auth]
+      summary: Remove the authenticated user's avatar
+      description: >-
+        Clears the stored photo, so the user falls back to their initials.
+        Returns the updated user.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/v1/me/invitations:
     get:
       tags: [organizations]
@@ -671,6 +745,37 @@ paths:
       tags: [attestation]
       summary: Delete a held attestation
       description: Requires an administrator role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/held/{id}/claims:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    get:
+      tags: [attestation]
+      summary: Get the disclosed attributes of a held attestation
+      description: Requires membership of the organisation.
       responses:
         '2XX':
           description: Successful response.
@@ -996,6 +1101,136 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/schemas/{id}/logo:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    get:
+      tags: [attestation]
+      summary: Get an attestation schema credential image
+      description: >-
+        Serves the uploaded credential image bytes for the admin builder preview.
+        Requires an administrator role in the organisation. Returns 404 when no
+        image is set.
+      responses:
+        '2XX':
+          description: The credential image bytes.
+          content:
+            image/png: {}
+            image/jpeg: {}
+            image/gif: {}
+            image/webp: {}
+            image/svg+xml: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [attestation]
+      summary: Update an attestation schema credential image
+      description: >-
+        Requires an administrator role in the organisation. Sent as
+        multipart/form-data: an image file in the "logo" field replaces the
+        credential image, and removeLogo=true clears it.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                logo:
+                  type: string
+                  format: binary
+                  description: Credential image (PNG, JPEG, GIF, WebP or SVG) that replaces the current one.
+                removeLogo:
+                  type: string
+                  description: Set to "true" to clear the stored image.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: The uploaded image is too large.
+  /api/v1/orgs/{slug}/attestations/onboarding:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [attestation]
+      summary: List the onboarding auto-issue set
+      description: >-
+        The attestation templates automatically issued to a new member when they
+        accept an invitation. Requires an administrator role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [attestation]
+      summary: Replace the onboarding auto-issue set
+      description: >-
+        Replaces the set of templates auto-issued on onboarding, in the given
+        order. Each must be one of the organisation's own natural-person
+        templates. Requires an administrator role in the organisation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/attestations/templates:
     parameters:
       - name: slug
@@ -1152,6 +1387,50 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/{id}/cancel:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [attestation]
+      summary: Cancel an unclaimed attestation offer
+      description: >-
+        Withdraws an offer that was never claimed (status `offered`), setting it
+        to `cancelled`. Nothing was held, so this is not a revocation and never
+        touches the Token Status List. Requires an administrator role. Returns
+        409 when the attestation is not an unclaimed offer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/attestations/{id}/revoke:
     parameters:
       - name: slug
@@ -1168,8 +1447,13 @@ paths:
         description: Resource identifier.
     post:
       tags: [attestation]
-      summary: Revoke an issued attestation
-      description: Requires an administrator role in the organisation.
+      summary: Revoke a claimed attestation
+      description: >-
+        Revokes an already-claimed credential (status `claimed`), setting it to
+        `revoked`. This is the path backed by the issuer's IETF Token Status
+        List. Unclaimed offers are withdrawn via cancel instead. Requires an
+        administrator role. Returns 409 when the attestation is not a claimed
+        credential.
       requestBody:
         required: true
         content:
@@ -1410,6 +1694,173 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/email/templates:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [email]
+      summary: List the transactional mail templates
+      description: >-
+        Returns every mail kind with its allowed placeholder variables and, per
+        locale, whether the organisation has customised that template or is using
+        the shipped default. Requires an administrator role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/email/templates/{kind}/{locale}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [credential_offer, event_notification, invitation, postguard_file, smtp_test]
+        description: Mail cause. The set is fixed by the backend catalogue.
+      - name: locale
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [en, nl]
+        description: Mail language.
+    get:
+      tags: [email]
+      summary: Get one mail template
+      description: >-
+        Returns the template in force, the shipped default it may be reverted to,
+        and the placeholder variables this kind allows. Requires an administrator
+        role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [email]
+      summary: Save one mail template
+      description: >-
+        Stores the organisation's own copy for this kind and locale. The body is
+        a subject plus an ordered layout of typed blocks (logo, heading,
+        paragraph, button, divider, footer), never HTML; every `{{placeholder}}`
+        must be a variable this kind declares, and a button URL must be a single
+        URL variable or an absolute http(s) URL. Requires an administrator role
+        in the organisation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [email]
+      summary: Revert one mail template to the shipped default
+      description: >-
+        Drops the organisation's own copy so the shipped default is used again.
+        404 when this template was not customised. Requires an administrator role
+        in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/email/templates/{kind}/preview:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [credential_offer, event_notification, invitation, postguard_file, smtp_test]
+        description: Mail cause. The set is fixed by the backend catalogue.
+    post:
+      tags: [email]
+      summary: Render a mail template without sending it
+      description: >-
+        Renders the supplied draft (or the template in force when none is given)
+        with the kind's sample variables and the organisation's branding, and
+        returns the subject and both MIME parts. Requires an administrator role in
+        the organisation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/invitations/{id}:
     parameters:
       - name: slug
@@ -1509,14 +1960,35 @@ paths:
     put:
       tags: [issuer-settings]
       summary: Update the organisation issuer settings
-      description: Requires an administrator role in the organisation.
+      description: >-
+        Requires an administrator role in the organisation. Sent as
+        multipart/form-data: string fields instanceName, displayName and enabled
+        ("true"/"false"), an optional logo image file that replaces the logo, and
+        removeLogo=true to clear it. Omitting both leaves the existing logo
+        untouched.
       requestBody:
         required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
               type: object
-              description: JSON request payload; see the endpoint description.
+              properties:
+                instanceName:
+                  type: string
+                  description: Lowercase slug the org's offers route to.
+                displayName:
+                  type: string
+                  description: Issuer display name shown in wallets.
+                enabled:
+                  type: string
+                  description: Set to "true" to route this org's offers to its own instance.
+                logo:
+                  type: string
+                  format: binary
+                  description: Logo image (PNG, JPEG, GIF, WebP or SVG) that replaces the current logo.
+                removeLogo:
+                  type: string
+                  description: Set to "true" to clear the stored logo.
       responses:
         '2XX':
           description: Successful response.
@@ -1526,6 +1998,37 @@ paths:
                 description: Response payload; shape depends on the endpoint.
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: The uploaded logo is too large.
+  /api/v1/orgs/{slug}/issuer/settings/logo:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [issuer-settings]
+      summary: Get the organisation issuer logo
+      description: >-
+        Serves the uploaded issuer logo image bytes for the admin preview.
+        Requires membership of the organisation. Returns 404 when no logo is set.
+      responses:
+        '2XX':
+          description: The logo image bytes.
+          content:
+            image/png: {}
+            image/jpeg: {}
+            image/gif: {}
+            image/webp: {}
+            image/svg+xml: {}
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1786,6 +2289,212 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/members/{userId}/avatar:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: User identifier.
+    get:
+      tags: [organizations]
+      summary: Serve a member's avatar
+      description: >-
+        Streams the member's portrait photo. Requires an administrator role in
+        the organisation, and the user must be a member of it. Returns 404 when
+        no photo is set.
+      responses:
+        '2XX':
+          description: The avatar image bytes.
+          content:
+            image/jpeg: {}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/notifications/settings:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [notifications]
+      summary: Get the organisation notification subscriptions
+      description: >-
+        Requires an administrator role in the organisation. Returns the saved
+        subscriptions together with the catalogue they are chosen from: the
+        subscribable audit events (grouped as the settings screen shows them)
+        and the known channel identifiers.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [notifications]
+      summary: Replace the organisation notification subscriptions
+      description: >-
+        Requires an administrator role in the organisation. Replaces the whole
+        subscription document: an audit event the request leaves out is
+        unsubscribed. An unknown event or channel is rejected with 400, as is a
+        body that omits `subscriptions` — send it empty to unsubscribe from
+        everything.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subscriptions]
+              additionalProperties: false
+              properties:
+                subscriptions:
+                  type: object
+                  description: >-
+                    Audit action to the channels notified for it, e.g.
+                    {"membership.invited": ["email", "slack"]}. An event mapped
+                    to an empty list notifies nobody and is not stored.
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+                      enum: [email, slack, msteams]
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/slack/settings:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [slack]
+      summary: Get the organisation Slack settings
+      description: >-
+        Requires an administrator role in the organisation. The webhook URL is a
+        secret and is never returned: the response reports whether one is stored
+        (`hasWebhook`) and whether delivery is switched on.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [slack]
+      summary: Update the organisation Slack settings
+      description: >-
+        Requires an administrator role in the organisation. `webhookUrl` must be
+        an https URL at hooks.slack.com; omitting it keeps the stored one, and
+        sending it empty clears it. Answers 409 `no_encryption_key` when the
+        deployment has no Slack encryption key, because the URL cannot then be
+        stored at all.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                webhookUrl:
+                  type: string
+                  nullable: true
+                  description: >-
+                    Slack incoming-webhook URL. Omit to keep the stored one, send
+                    an empty string to clear it.
+                enabled:
+                  type: boolean
+                  description: >-
+                    Whether subscribed events are posted to the webhook. It is
+                    stored as false when no webhook URL is stored, because there
+                    is nothing to post to.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/slack/test:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [slack]
+      summary: Post a test notification to the organisation Slack webhook
+      description: >-
+        Requires an administrator role in the organisation. Answers 204 when
+        Slack accepted the message, 409 `not_configured` when the organisation has
+        no stored webhook or has switched delivery off, and 502 `webhook_failed`
+        with Slack's own refusal when the post was not accepted. An answer from
+        anything other than Slack is reported as such without repeating it: the
+        webhook URL is a secret, and an intermediary's error document can quote it.
+      responses:
+        '204':
+          description: The test notification was accepted by Slack.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/postguard/api-key:
     parameters:
       - name: slug
@@ -1831,6 +2540,43 @@ paths:
             application/json:
               schema:
                 description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/postguard/notifications:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    put:
+      tags: [postguard]
+      summary: Set the recipient-notification delivery method
+      description: >-
+        Choose whether recipient notifications are delivered by PostGuard's
+        hosted mailing service ("postguard") or by the organisation's own SMTP
+        server ("smtp"). Requires an administrator role in the organisation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1964,6 +2710,151 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/provisioning/settings:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [provisioning]
+      summary: Get the organisation directory provisioning configuration
+      description: >-
+        Requires an administrator role in the organisation. Returns the saved
+        configuration together with the source identifiers this deployment can
+        configure, and the outcome of the last sync. The stored client secret is
+        never returned; `hasClientSecret` reports whether one is set.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [provisioning]
+      summary: Replace the organisation directory provisioning configuration
+      description: >-
+        Requires an administrator role in the organisation. Replaces the whole
+        configuration. Omitting `clientSecret` keeps the stored secret; sending
+        it empty clears it. A body that omits `adminGroupIds` is rejected with
+        400 — send it empty to map nobody to the administrator role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source, adminGroupIds]
+              additionalProperties: false
+              properties:
+                enabled:
+                  type: boolean
+                  description: Whether the scheduled sync runs for this organisation.
+                source:
+                  type: string
+                  enum: [entra]
+                  description: Directory source identifier.
+                tenantId:
+                  type: string
+                  description: >-
+                    Directory tenant. For Entra, the tenant GUID or domain.
+                clientId:
+                  type: string
+                  description: App registration the sync authenticates as.
+                clientSecret:
+                  type: string
+                  nullable: true
+                  description: >-
+                    Write-only. Omit to keep the stored secret, send empty to
+                    clear it.
+                groupId:
+                  type: string
+                  description: >-
+                    Group whose members are in scope. Empty means the whole
+                    directory.
+                adminGroupIds:
+                  type: array
+                  description: >-
+                    Groups whose members are provisioned as organisation
+                    administrators. Everyone else becomes a member.
+                  items:
+                    type: string
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/provisioning/sync:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [provisioning]
+      summary: Run a directory sync now
+      description: >-
+        Requires an administrator role in the organisation. Reads the source and
+        reconciles it synchronously, answering with what the run did. 409 when
+        provisioning is not configured, disabled, or names a source this
+        deployment has no driver for; 502 when the source could not be read or
+        answered with no accounts at all (which is refused rather than obeyed,
+        because it would deprovision the whole organisation); 504 when the run
+        did not finish inside the sync timeout.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            Provisioning is not configured, disabled, or names a source this
+            deployment has no driver for.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: The source could not be read, or returned no accounts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: The sync did not finish inside the sync timeout.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/qerds/addresses:
     parameters:
       - name: slug
@@ -2320,9 +3211,12 @@ paths:
       summary: Update the organisation theme
       description: >-
         Requires an administrator role in the organisation. Sent as
-        multipart/form-data: string fields primaryColor and accentColor, an
-        optional logo image file that replaces the logo, and removeLogo=true to
-        clear it. Omitting both leaves the existing logo untouched.
+        multipart/form-data: the palette colour string fields (primaryColor,
+        accentColor, textColor, surfaceColor, borderColor, linkColor,
+        successColor, warningColor, errorColor), the navigation chrome colours
+        (sidebarColor, topbarColor), a body font (fontFamily), an optional logo
+        image file that replaces the logo, and removeLogo=true to clear it.
+        Omitting both leaves the existing logo untouched.
       requestBody:
         required: true
         content:
@@ -2336,6 +3230,36 @@ paths:
                 accentColor:
                   type: string
                   description: Accent colour as a 6-digit hex string; empty clears it.
+                textColor:
+                  type: string
+                  description: Text colour as a 6-digit hex string; empty clears it.
+                surfaceColor:
+                  type: string
+                  description: Surface colour as a 6-digit hex string; empty clears it.
+                borderColor:
+                  type: string
+                  description: Border colour as a 6-digit hex string; empty clears it.
+                linkColor:
+                  type: string
+                  description: Link colour as a 6-digit hex string; empty clears it.
+                successColor:
+                  type: string
+                  description: Success colour as a 6-digit hex string; empty clears it.
+                warningColor:
+                  type: string
+                  description: Warning colour as a 6-digit hex string; empty clears it.
+                errorColor:
+                  type: string
+                  description: Error colour as a 6-digit hex string; empty clears it.
+                sidebarColor:
+                  type: string
+                  description: Sidebar colour as a 6-digit hex string; empty clears it.
+                topbarColor:
+                  type: string
+                  description: Top bar colour as a 6-digit hex string; empty clears it.
+                fontFamily:
+                  type: string
+                  description: CSS font-family list (e.g. "Open Sans", sans-serif); empty uses the default.
                 logo:
                   type: string
                   format: binary

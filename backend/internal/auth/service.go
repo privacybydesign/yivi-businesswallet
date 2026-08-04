@@ -52,6 +52,10 @@ type Session struct {
 type DisclosedIdentity struct {
 	Email user.Email
 	Name  identity.Name
+	// DateOfBirth is the disclosed birth date ("2006-01-02"), part of the PID used
+	// to match the person against KVK's register. Best-effort: empty when the
+	// presentation carried no birth-date claim.
+	DateOfBirth string
 	// Phone is the disclosed mobile number (identity scope). Best-effort: empty
 	// when the presentation carried no phone claim.
 	Phone string
