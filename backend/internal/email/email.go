@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
 )
 
 // ErrNotConfigured means the organization has no usable (present + enabled) SMTP
@@ -30,30 +32,46 @@ func (e *InvalidTemplateError) Error() string {
 func (e *InvalidTemplateError) Unwrap() error { return e.Reason }
 
 // Settings is the non-secret view of an org's SMTP configuration (never the
-// password). Configured is false when no row exists yet.
+// password, never the OAuth client secret). Configured is false when no row
+// exists yet.
 type Settings struct {
-	Configured  bool   `json:"configured"`
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	Username    string `json:"username"`
+	Configured bool   `json:"configured"`
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Username   string `json:"username"`
+	// AuthMechanism is how a send authenticates: mailer.AuthPlain (username and
+	// password) or mailer.AuthXOAuth2 (an OAuth2 bearer token, which is what
+	// Microsoft 365 requires).
+	AuthMechanism mailer.AuthMechanism `json:"authMechanism"`
+	// TenantID and ClientID identify the app registration an XOAuth2 org mints
+	// its token from. Empty for a password org.
+	TenantID    string `json:"tenantId"`
+	ClientID    string `json:"clientId"`
 	FromName    string `json:"fromName"`
 	FromAddress string `json:"fromAddress"`
 	Enabled     bool   `json:"enabled"`
 	// HasPassword reports whether a password is stored, so the UI can show
 	// "unchanged" without ever receiving the secret.
-	HasPassword bool       `json:"hasPassword"`
-	UpdatedAt   *time.Time `json:"updatedAt,omitempty"`
+	HasPassword bool `json:"hasPassword"`
+	// HasClientSecret is the same for the app registration's client secret.
+	HasClientSecret bool       `json:"hasClientSecret"`
+	UpdatedAt       *time.Time `json:"updatedAt,omitempty"`
 }
 
-// SettingsInput is an upsert of an org's SMTP configuration. Password is optional
-// on update: when nil the stored password is kept; when a non-nil empty string it
-// is cleared (no-auth relay).
+// SettingsInput is an upsert of an org's SMTP configuration. Password and
+// ClientSecret are optional on update: when nil the stored value is kept; when a
+// non-nil empty string it is cleared (a no-auth relay, or an org switching away
+// from XOAUTH2).
 type SettingsInput struct {
-	Host        string
-	Port        int
-	Username    string
-	Password    *string
-	FromName    string
-	FromAddress string
-	Enabled     bool
+	Host          string
+	Port          int
+	Username      string
+	Password      *string
+	AuthMechanism mailer.AuthMechanism
+	TenantID      string
+	ClientID      string
+	ClientSecret  *string
+	FromName      string
+	FromAddress   string
+	Enabled       bool
 }

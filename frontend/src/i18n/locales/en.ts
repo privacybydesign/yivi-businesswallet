@@ -953,9 +953,30 @@ export const en = {
     hostPlaceholder: "e.g. smtp.example.com",
     port: "Port",
     username: "Username",
+    usernameOAuthHint:
+      "The mailbox to send as. Leave blank to use the from address.",
     password: "Password",
     passwordPlaceholder: "SMTP password",
     passwordUnchanged: "Leave blank to keep the current password",
+    authMechanism: "Authentication",
+    authMechanisms: {
+      plain: "Username and password",
+      xoauth2: "Microsoft 365 (OAuth2)",
+    },
+    xoauth2Hint:
+      "Microsoft 365 uses smtp.office365.com on port 587. Basic authentication is switched off for most tenants, so mail is sent with an access token instead of a password.",
+    tenantId: "Directory (tenant) ID",
+    tenantIdPlaceholder: "e.g. 00000000-0000-0000-0000-000000000000",
+    clientId: "Application (client) ID",
+    clientIdPlaceholder: "e.g. 11111111-1111-1111-1111-111111111111",
+    clientSecret: "Client secret",
+    clientSecretPlaceholder: "Client secret value",
+    clientSecretUnchanged: "Leave blank to keep the stored secret",
+    appRegistrationHint:
+      "Register an application in Microsoft Entra ID, grant it the Office 365 Exchange Online permission SMTP.SendAsApp with admin consent, and allow it to send as the mailbox above.",
+    credentialsRequired:
+      "Enter the tenant ID and application (client) ID before enabling sending.",
+    clientSecretRequired: "Enter a client secret before enabling sending.",
     fromName: "From name",
     fromNamePlaceholder: "e.g. Acme B.V.",
     fromAddress: "From address",

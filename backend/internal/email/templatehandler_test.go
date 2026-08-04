@@ -26,6 +26,9 @@ type stubStore struct {
 	saved     []TemplateOverride
 	deleted   []string
 	saveErr   error
+	// upserted is the last settings input that reached the store, so a test can
+	// assert on what validation normalised it to.
+	upserted *SettingsInput
 }
 
 func newStubStore() *stubStore {
@@ -36,7 +39,8 @@ func (s *stubStore) GetSettings(context.Context, uuid.UUID) (Settings, error) {
 	return s.settings, nil
 }
 
-func (s *stubStore) Upsert(context.Context, uuid.UUID, SettingsInput) (Settings, error) {
+func (s *stubStore) Upsert(_ context.Context, _ uuid.UUID, in SettingsInput) (Settings, error) {
+	s.upserted = &in
 	return s.settings, nil
 }
 

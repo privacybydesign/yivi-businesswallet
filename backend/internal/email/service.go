@@ -10,11 +10,29 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailoauth"
 )
+
+// sendConfig is everything one send needs: the SMTP wire config, plus the app
+// registration an XOAUTH2 org mints its bearer token from. The two are kept
+// apart because the token is resolved per send and never stored — internal/mailer
+// only ever sees the token, never the credentials behind it.
+type sendConfig struct {
+	Mailer mailer.Config
+	OAuth  mailoauth.Credentials
+}
 
 // config is the settings surface the service needs (implemented by *Store).
 type config interface {
-	configFor(ctx context.Context, orgID uuid.UUID) (mailer.Config, bool, error)
+	configFor(ctx context.Context, orgID uuid.UUID) (sendConfig, bool, error)
+}
+
+// tokenSource mints the OAuth2 bearer token an XOAUTH2 send authenticates with
+// (implemented by *mailoauth.Microsoft). It is resolved here rather than in
+// internal/mailer because net/smtp takes no context: a token fetch inside Send
+// could not be bounded by the caller's deadline.
+type tokenSource interface {
+	Token(ctx context.Context, creds mailoauth.Credentials) (string, error)
 }
 
 // brandSource resolves an organization's presentational branding seeds (its theme
@@ -42,6 +60,7 @@ type templateSource interface {
 type Service struct {
 	settings  config
 	sender    mailer.Sender
+	tokens    tokenSource
 	brand     brandSource
 	templates templateSource
 	// defaultLocale is the deployment's fallback mail language, used when the
@@ -50,10 +69,13 @@ type Service struct {
 }
 
 // NewService builds the mail service. brand may be nil, in which case every
-// message renders in the default Yivi palette. The settings store doubles as the
-// template source, so a tenant's edited copy is what a send renders.
-func NewService(settings *Store, sender mailer.Sender, brand brandSource, defaultLocale Locale) *Service {
-	return &Service{settings: settings, sender: sender, brand: brand, templates: settings, defaultLocale: defaultLocale}
+// message renders in the default Yivi palette. tokens may be nil, in which case
+// an org configured for XOAUTH2 cannot send — a deployment that leaves it out has
+// no OAuth path at all, and failing the send says so rather than falling back to
+// a password the tenant does not have. The settings store doubles as the template
+// source, so a tenant's edited copy is what a send renders.
+func NewService(settings *Store, sender mailer.Sender, tokens tokenSource, brand brandSource, defaultLocale Locale) *Service {
+	return &Service{settings: settings, sender: sender, tokens: tokens, brand: brand, templates: settings, defaultLocale: defaultLocale}
 }
 
 // SendCredentialOffer notifies a natural-person recipient that a credential is
@@ -237,12 +259,16 @@ func (s *Service) sendToEach(ctx context.Context, orgID uuid.UUID, kind Kind, lo
 // carries no To: the caller sets it per recipient, so the body is rendered once
 // however many addresses it goes to.
 func (s *Service) compose(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, vars map[string]string) (mailer.Config, mailer.Message, error) {
-	cfg, ok, err := s.settings.configFor(ctx, orgID)
+	resolved, ok, err := s.settings.configFor(ctx, orgID)
 	if err != nil {
 		return mailer.Config{}, mailer.Message{}, err
 	}
 	if !ok {
 		return mailer.Config{}, mailer.Message{}, ErrNotConfigured
+	}
+	cfg, err := s.authenticate(ctx, resolved)
+	if err != nil {
+		return mailer.Config{}, mailer.Message{}, err
 	}
 
 	tpl, err := s.templateFor(ctx, orgID, kind, locale)
@@ -269,6 +295,26 @@ func (s *Service) compose(ctx context.Context, orgID uuid.UUID, kind Kind, local
 		HTMLBody: body.HTMLBody,
 		Inline:   inline,
 	}, nil
+}
+
+// authenticate completes the wire config with the credential the send presents.
+// For a password org that is already done; for an XOAUTH2 org it mints the
+// bearer token, which is short-lived and so belongs to the send rather than to
+// the settings row.
+func (s *Service) authenticate(ctx context.Context, resolved sendConfig) (mailer.Config, error) {
+	cfg := resolved.Mailer
+	if cfg.AuthMechanism != mailer.AuthXOAuth2 {
+		return cfg, nil
+	}
+	if s.tokens == nil {
+		return mailer.Config{}, fmt.Errorf("email: %s is configured but this deployment has no token source", mailer.AuthXOAuth2)
+	}
+	token, err := s.tokens.Token(ctx, resolved.OAuth)
+	if err != nil {
+		return mailer.Config{}, fmt.Errorf("email: acquiring the smtp access token: %w", err)
+	}
+	cfg.AccessToken = token
+	return cfg, nil
 }
 
 // templateFor resolves the template to render: the org's own edit when it has

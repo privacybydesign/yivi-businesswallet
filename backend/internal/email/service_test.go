@@ -10,27 +10,49 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailoauth"
 )
 
 type stubSettings struct {
-	cfg mailer.Config
+	cfg sendConfig
 	ok  bool
 	err error
 }
 
-func (s stubSettings) configFor(context.Context, uuid.UUID) (mailer.Config, bool, error) {
+func (s stubSettings) configFor(context.Context, uuid.UUID) (sendConfig, bool, error) {
 	return s.cfg, s.ok, s.err
+}
+
+// stubTokens stands in for the OAuth token source an XOAUTH2 org sends through.
+type stubTokens struct {
+	token string
+	err   error
+	// creds records what the service asked a token for.
+	creds mailoauth.Credentials
+	calls int
+}
+
+func (s *stubTokens) Token(_ context.Context, creds mailoauth.Credentials) (string, error) {
+	s.creds = creds
+	s.calls++
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.token, nil
 }
 
 type recordingSender struct {
 	sent []mailer.Message
-	err  error
+	// configs records the wire config each message went out with, so a test can
+	// assert on the credential a send presented.
+	configs []mailer.Config
+	err     error
 	// reject fails the send to one address, the way a relay rejects a mailbox that no
 	// longer exists while the rest of the list is deliverable.
 	reject map[string]error
 }
 
-func (r *recordingSender) Send(_ mailer.Config, msg mailer.Message) error {
+func (r *recordingSender) Send(cfg mailer.Config, msg mailer.Message) error {
 	if r.err != nil {
 		return r.err
 	}
@@ -38,6 +60,7 @@ func (r *recordingSender) Send(_ mailer.Config, msg mailer.Message) error {
 		return err
 	}
 	r.sent = append(r.sent, msg)
+	r.configs = append(r.configs, cfg)
 	return nil
 }
 
@@ -66,7 +89,7 @@ func (s stubBrand) MailLogo(context.Context, uuid.UUID) (Logo, error) {
 
 func newTestService(sender mailer.Sender, brand brandSource, locale Locale) *Service {
 	return &Service{
-		settings:      stubSettings{cfg: mailer.Config{Host: "mail.example.org", Port: 25}, ok: true},
+		settings:      stubSettings{cfg: sendConfig{Mailer: mailer.Config{Host: "mail.example.org", Port: 25}}, ok: true},
 		sender:        sender,
 		brand:         brand,
 		defaultLocale: locale,

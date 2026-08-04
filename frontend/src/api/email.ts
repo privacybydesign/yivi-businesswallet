@@ -1,18 +1,50 @@
 import { z } from "zod";
 import { request } from "./http";
 
+// How a send authenticates (backend/internal/mailer). "plain" is a username and
+// password; "xoauth2" is an OAuth2 bearer token, which is what Microsoft 365
+// requires now that it has turned off Basic Authentication for SMTP AUTH.
+export const SMTP_AUTH_MECHANISMS = ["plain", "xoauth2"] as const;
+
+export type SmtpAuthMechanism = (typeof SMTP_AUTH_MECHANISMS)[number];
+
+export function isSmtpAuthMechanism(value: string): value is SmtpAuthMechanism {
+  return (SMTP_AUTH_MECHANISMS as readonly string[]).includes(value);
+}
+
+// The mechanisms a settings form offers: the ones this frontend has copy for,
+// plus whatever the org already has stored when the backend has gained one this
+// list does not know yet. Dropping an unknown stored value would leave the
+// selector on a mechanism the org did not choose and rewrite its configuration
+// on the next save.
+export function smtpAuthMechanismOptions(stored: string): string[] {
+  if (stored === "" || isSmtpAuthMechanism(stored)) {
+    return [...SMTP_AUTH_MECHANISMS];
+  }
+  return [...SMTP_AUTH_MECHANISMS, stored];
+}
+
 // Per-organization SMTP configuration used to deliver credential offers and
-// notifications by e-mail. The password is write-only: it is never returned,
-// only whether one is stored (`hasPassword`).
+// notifications by e-mail. The password and the OAuth client secret are
+// write-only: they are never returned, only whether one is stored
+// (`hasPassword` / `hasClientSecret`).
+//
+// authMechanism is a plain string rather than a zod enum on purpose: a mechanism
+// the backend gains before this list learns it would otherwise fail the whole
+// settings document and take the screen down, not just that one option.
 export const emailSettingsSchema = z.object({
   configured: z.boolean(),
   host: z.string(),
   port: z.number(),
   username: z.string(),
+  authMechanism: z.string(),
+  tenantId: z.string(),
+  clientId: z.string(),
   fromName: z.string(),
   fromAddress: z.string(),
   enabled: z.boolean(),
   hasPassword: z.boolean(),
+  hasClientSecret: z.boolean(),
   updatedAt: z.string().optional(),
 });
 
@@ -24,6 +56,11 @@ export interface EmailSettingsInput {
   username: string;
   // null keeps the stored password, a non-empty string sets it, "" clears it.
   password: string | null;
+  authMechanism: string;
+  tenantId: string;
+  clientId: string;
+  // Same three-way rule as password.
+  clientSecret: string | null;
   fromName: string;
   fromAddress: string;
   enabled: boolean;
