@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -201,11 +202,9 @@ func (e *Engine) Delete(ctx context.Context, orgID uuid.UUID, ref string) error 
 // Claims builds a held credential's disclosed attributes into a display-ordered,
 // labelled list: values from its verified SD-JWT payload (ProcessedSdJwtPayload),
 // labels from its stored issuer claim metadata. It resolves the batch by the
-// instance ref when that parses and matches, else falls back to the vct: irmago's
-// redemption returns the credential with an unpopulated instance id
-// (session.buildOfferedCredentials leaves CredentialInstanceIds empty), so a
-// stored ref can be empty. A ref+vct that resolves to no batch yields an empty
-// slice (the held index owns existence).
+// instance ref when that parses and matches, else falls back to the vct — but only
+// when the vct identifies exactly one held credential (see claimsBatch). A ref+vct
+// that resolves to no batch yields an empty slice (the held index owns existence).
 func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (HeldCredential, error) {
 	batch, ok, err := e.claimsBatch(ctx, orgID, ref, vct)
 	if err != nil {
@@ -261,9 +260,14 @@ func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (ma
 }
 
 // claimsBatch loads the credential batch for a held credential, with its claim
-// metadata preloaded for labelling. It prefers the instance ref, then falls back
-// to the vct (the stored ref can be empty — see Claims). Returns (_, false, nil)
-// when neither resolves.
+// metadata preloaded for labelling. It prefers the instance ref — the only
+// per-credential discriminator the held index carries — and falls back to the vct
+// only when that names exactly one of the org's credentials, so a row whose ref is
+// missing can still recover its claims without ever borrowing another
+// credential's. Returns (_, false, nil) when neither resolves, which the caller
+// renders as "no attributes": an org that holds several credentials of one vct and
+// a row with no usable ref cannot be told apart, and showing an arbitrary sibling's
+// attributes under this credential's name would be worse than showing none.
 func (e *Engine) claimsBatch(ctx context.Context, orgID uuid.UUID, ref, vct string) (models.CredentialBatch, bool, error) {
 	if id, perr := uuid.Parse(ref); perr == nil {
 		eng, err := e.engineFor(ctx, orgID)
@@ -287,44 +291,17 @@ func (e *Engine) claimsBatch(ctx context.Context, orgID uuid.UUID, ref, vct stri
 			return models.CredentialBatch{}, false, fmt.Errorf("eudiholder: claims %s org %s: %w", ref, orgID, err)
 		}
 	}
-	return e.batchByVCT(ctx, orgID, vct)
+	return e.batchByUniqueVCT(ctx, orgID, vct)
 }
 
-// batchByHash loads an org's stored credential batch (with its instances) by the
-// credential's dedup hash, which irmago persists under a unique index (vct + sorted
-// disclosed attributes). Unlike batchByVCT this identifies exactly one batch even
-// when the org holds several credentials of the same vct, so the receive flow uses
-// it to backfill a precise instance ref when irmago hands back an unpopulated one
-// (see Redeem). Returns (batch, false, nil) when hash is empty or no batch matches.
-func (e *Engine) batchByHash(ctx context.Context, orgID uuid.UUID, hash string) (models.CredentialBatch, bool, error) {
-	if hash == "" {
-		return models.CredentialBatch{}, false, nil
-	}
-	eng, err := e.engineFor(ctx, orgID)
-	if err != nil {
-		return models.CredentialBatch{}, false, err
-	}
-	var batch models.CredentialBatch
-	err = eng.Db().WithContext(ctx).
-		Preload("Instances").
-		Where("hash = ?", hash).First(&batch).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return models.CredentialBatch{}, false, nil
-	}
-	if err != nil {
-		return models.CredentialBatch{}, false, fmt.Errorf("eudiholder: batch by hash org %s: %w", orgID, err)
-	}
-	return batch, true, nil
-}
-
-// batchByVCT loads an org's stored credential batch (with its instances and claim
-// metadata) for a verifiable-credential type, recovering the batch when the
-// instance ref is unavailable (see Claims). It returns (batch, false, nil) when
-// vct is empty or no batch matches. If an org holds several credentials of the
-// same vct it returns an arbitrary one — the stored index carries no other
-// discriminator once the ref is empty, an accepted limitation until irmago returns
-// a populated instance id.
-func (e *Engine) batchByVCT(ctx context.Context, orgID uuid.UUID, vct string) (models.CredentialBatch, bool, error) {
+// batchByUniqueVCT loads an org's stored credential batch (with its claim metadata)
+// for a verifiable-credential type, but only when the type names exactly one of the
+// org's credentials — then the vct is a discriminator and it recovers the batch for
+// a held row whose instance ref is missing (see claimsBatch). When the org holds
+// two or more credentials of that vct the type says nothing about which row was
+// asked for, so it reports no match rather than an arbitrary sibling. Also
+// (batch, false, nil) when vct is empty or nothing matches.
+func (e *Engine) batchByUniqueVCT(ctx context.Context, orgID uuid.UUID, vct string) (models.CredentialBatch, bool, error) {
 	if vct == "" {
 		return models.CredentialBatch{}, false, nil
 	}
@@ -332,19 +309,28 @@ func (e *Engine) batchByVCT(ctx context.Context, orgID uuid.UUID, vct string) (m
 	if err != nil {
 		return models.CredentialBatch{}, false, err
 	}
-	var batch models.CredentialBatch
+	// Limit(2) is enough to tell "exactly one" from "several" without loading every
+	// credential of the type.
+	var batches []models.CredentialBatch
 	err = eng.Db().WithContext(ctx).
-		Preload("Instances").
 		Preload("CredentialMetadata.Display").
 		Preload("CredentialMetadata.Claims.Display").
-		Where("verifiable_credential_type = ?", vct).First(&batch).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return models.CredentialBatch{}, false, nil
-	}
+		Where("verifiable_credential_type = ?", vct).Limit(2).Find(&batches).Error
 	if err != nil {
 		return models.CredentialBatch{}, false, fmt.Errorf("eudiholder: batch by vct %q org %s: %w", vct, orgID, err)
 	}
-	return batch, true, nil
+	if len(batches) != 1 {
+		if len(batches) > 1 {
+			// The held row lost its ref (received before the ref was captured at store
+			// time), so its claims cannot be recovered. Logged because the detail view
+			// renders it as an empty attribute list, which otherwise looks like a
+			// credential that discloses nothing.
+			slog.WarnContext(ctx, "eudiholder: held credential ref missing and vct is ambiguous",
+				slog.String("orgId", orgID.String()), slog.String("vct", vct))
+		}
+		return models.CredentialBatch{}, false, nil
+	}
+	return batches[0], true, nil
 }
 
 // claimLabels extracts, from a credential's stored issuer metadata, a map of

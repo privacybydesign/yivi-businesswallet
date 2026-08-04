@@ -105,6 +105,70 @@ func TestStubHolderRedeem(t *testing.T) {
 	}
 }
 
+// TestStubHolderClaimsWithSeveralCredentialsOfOneVCT is the read half of the
+// "held-credential detail shows the wrong credential" fix. Two credentials of one
+// vct must each resolve to their own attributes by ref, and a row whose ref no
+// longer resolves must yield nothing rather than an arbitrary sibling's data.
+func TestStubHolderClaimsWithSeveralCredentialsOfOneVCT(t *testing.T) {
+	t.Parallel()
+	h := eudiholder.NewStubHolder()
+	ctx := context.Background()
+	org := uuid.New()
+
+	const vct = "nl.kvk.registration"
+	refA, err := h.Store(ctx, org, eudiholder.Credential{
+		VCT:              vct,
+		ProcessedPayload: []byte(`{"vct":"nl.kvk.registration","company_name":"Alpha B.V."}`),
+	})
+	if err != nil {
+		t.Fatalf("store A: %v", err)
+	}
+	refB, err := h.Store(ctx, org, eudiholder.Credential{
+		VCT:              vct,
+		ProcessedPayload: []byte(`{"vct":"nl.kvk.registration","company_name":"Beta B.V."}`),
+	})
+	if err != nil {
+		t.Fatalf("store B: %v", err)
+	}
+
+	// Each ref resolves to its own credential, not the first one stored.
+	for _, tc := range []struct{ ref, want string }{{refA, "Alpha B.V."}, {refB, "Beta B.V."}} {
+		claims, err := h.Claims(ctx, org, tc.ref, vct, "en")
+		if err != nil {
+			t.Fatalf("claims %s: %v", tc.ref, err)
+		}
+		if got := attributeValue(claims.Attributes, "company_name"); got != tc.want {
+			t.Errorf("claims[company_name] for ref %s = %v, want %q", tc.ref, got, tc.want)
+		}
+	}
+
+	// With no usable ref the vct names both credentials, so it cannot say which row
+	// was asked for: the fallback must decline rather than return either one.
+	for _, ref := range []string{"", "no-longer-stored"} {
+		claims, err := h.Claims(ctx, org, ref, vct, "en")
+		if err != nil {
+			t.Fatalf("claims ref %q: %v", ref, err)
+		}
+		if len(claims.Attributes) != 0 {
+			t.Errorf("claims for ref %q = %v, want empty: the vct matches two credentials",
+				ref, claims.Attributes)
+		}
+	}
+
+	// Once only one credential of the type is left, the vct is a discriminator again
+	// and the fallback recovers it (the case a ref-less legacy row relies on).
+	if err := h.Delete(ctx, org, refB); err != nil {
+		t.Fatalf("delete B: %v", err)
+	}
+	claims, err := h.Claims(ctx, org, "", vct, "en")
+	if err != nil {
+		t.Fatalf("claims by vct: %v", err)
+	}
+	if got := attributeValue(claims.Attributes, "company_name"); got != "Alpha B.V." {
+		t.Errorf("claims by vct[company_name] = %v, want the only remaining credential", got)
+	}
+}
+
 // attributeValue returns the value of the attribute with the given key, or nil.
 func attributeValue(attrs []eudiholder.HeldAttribute, key string) any {
 	for _, a := range attrs {

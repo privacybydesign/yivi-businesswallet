@@ -265,6 +265,14 @@ part, not an attachment, so no inbound-attachment plumbing was needed.
   (`engine_redeem.go`, pre-auth grant, auto-consent, auth-code declined),
   writing straight into the org's per-org storage. `StubHolder.Redeem`
   synthesises a held credential so the receive loop runs offline (default).
+- **`Redeemed.Ref` is captured at the store, not read off the session result.**
+  irmago reports success with the *offered* credential
+  (`session.buildOfferedCredentials`), which carries neither an instance id nor a
+  hash — so `engine_redeem.go` wraps irmago's credential store in a
+  `storeRecorder` and takes the ref from the batch that was actually inserted.
+  That ref is the only per-credential discriminator `held_attestations` carries:
+  without it a row can only be resolved by `vct`, which stops identifying
+  anything as soon as the org holds a second credential of the type (issue #170).
 
 **Holder trust posture** (`eudiholder.RedeemConfig`, config `ATTESTATION_HOLDER_*`):
 a configured trusted-issuer CA chain (`ATTESTATION_HOLDER_TRUST_CHAIN`, the

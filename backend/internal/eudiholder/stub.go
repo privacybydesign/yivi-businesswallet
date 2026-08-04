@@ -75,10 +75,11 @@ func (h *StubHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI strin
 }
 
 // Claims decodes the stored credential's processed payload into its disclosed
-// attributes, resolving by ref then falling back to vct (mirroring the engine's
-// recovery of an empty ref). An unknown org/ref/vct yields an empty map (matches
-// the engine contract, so the held-detail flow behaves the same under stub and
-// irmago).
+// attributes, resolving by ref then falling back to vct — but only when the vct
+// names exactly one held credential, mirroring the engine (see
+// Engine.batchByUniqueVCT). An unknown org/ref/vct, or a vct the org holds several
+// credentials of, yields an empty map (matches the engine contract, so the
+// held-detail flow behaves the same under stub and irmago).
 // The stub records no credential-level display metadata, so lang is accepted for
 // interface parity but ignored (DisplayName / LogoURI stay empty and the caller
 // falls back to the VCT-derived name and shows no logo).
@@ -87,12 +88,14 @@ func (h *StubHolder) Claims(_ context.Context, orgID uuid.UUID, ref, vct, _ stri
 	defer h.mu.Unlock()
 	found, ok := h.creds[orgID][ref]
 	if !ok && vct != "" {
+		matches := 0
 		for _, cred := range h.creds[orgID] {
 			if cred.VCT == vct {
-				found, ok = cred, true
-				break
+				matches++
+				found = cred
 			}
 		}
+		ok = matches == 1
 	}
 	if !ok {
 		return HeldCredential{Attributes: []HeldAttribute{}}, nil
