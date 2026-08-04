@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -22,7 +23,10 @@ const claimTokenBytes = 24
 // injected at boot.
 type issuer interface {
 	CreateOffer(ctx context.Context, req openid4vciissuer.OfferRequest) (openid4vciissuer.Offer, error)
-	Status(ctx context.Context, instance, issuanceID string) (string, error)
+	Status(ctx context.Context, instance, issuanceID string) (openid4vciissuer.IssuanceStatus, error)
+	// RevokeCredential flips the credential's bit on the issuer's Token Status
+	// List, so a verifier observes the revocation.
+	RevokeCredential(ctx context.Context, instance, credentialUUID string) error
 }
 
 // issuerInstanceResolver resolves an organization's Veramo issuer instance name
@@ -39,7 +43,7 @@ type issuedStore interface {
 	CreateOffered(ctx context.Context, orgID uuid.UUID, in IssueInput, detail TemplateDetail, issuedBy *uuid.UUID, expiresAt *time.Time, claimToken, delivery string) (Issued, error)
 	SetOffer(ctx context.Context, orgID, id uuid.UUID, issuanceID, offerURI, txCode string) error
 	MarkFailed(ctx context.Context, orgID, id uuid.UUID) error
-	MarkClaimed(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
+	MarkClaimed(ctx context.Context, orgID, id uuid.UUID, credentialUUID string) (Issued, error)
 	GetIssued(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
@@ -225,8 +229,8 @@ func (s *Service) Status(ctx context.Context, orgID, id uuid.UUID) (Issued, erro
 	if issued.Status != StatusOffered || issued.IssuanceID == "" {
 		return issued, nil
 	}
-	if s.reconcile(ctx, s.instanceFor(ctx, orgID), issued.IssuanceID) {
-		return s.store.MarkClaimed(ctx, orgID, id)
+	if credentialUUID, ok := s.reconcile(ctx, s.instanceFor(ctx, orgID), issued.IssuanceID); ok {
+		return s.store.MarkClaimed(ctx, orgID, id, credentialUUID)
 	}
 	return issued, nil
 }
@@ -239,11 +243,13 @@ func (s *Service) ClaimStatus(ctx context.Context, token string) (ClaimView, err
 		return ClaimView{}, err
 	}
 	status := c.status
-	if status == StatusOffered && c.issuanceID != "" && s.reconcile(ctx, s.instanceFor(ctx, c.orgID), c.issuanceID) {
-		if _, err := s.store.MarkClaimed(ctx, c.orgID, c.id); err != nil {
-			return ClaimView{}, err
+	if status == StatusOffered && c.issuanceID != "" {
+		if credentialUUID, ok := s.reconcile(ctx, s.instanceFor(ctx, c.orgID), c.issuanceID); ok {
+			if _, err := s.store.MarkClaimed(ctx, c.orgID, c.id, credentialUUID); err != nil {
+				return ClaimView{}, err
+			}
+			status = StatusClaimed
 		}
-		status = StatusClaimed
 	}
 	return ClaimView{
 		Status:           status,
@@ -255,9 +261,48 @@ func (s *Service) ClaimStatus(ctx context.Context, token string) (ClaimView, err
 }
 
 // Revoke revokes an already-claimed attestation (Art 6(2)). Offers that were
-// never claimed are withdrawn via Cancel instead.
+// never claimed are withdrawn via Cancel instead. It flips the credential's bit
+// on the issuer's Token Status List first, then the local ledger — so a local
+// "revoked" flag is never set without the published status list also marking it
+// revoked (the two must not drift). If the issuer reports no status-list bit for
+// the credential (a deployment issuing without a Token Status List), the revoke
+// degrades to a local-only flip — there is nothing published that could drift.
+// Any other issuer failure leaves the local state untouched and surfaces the
+// error (the same fail-safe, external-first ordering as DeleteHeld).
 func (s *Service) Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error) {
+	issued, err := s.store.GetIssued(ctx, orgID, id)
+	if err != nil {
+		return Issued{}, err
+	}
+	switch {
+	case issued.CredentialUUID != "" && isRevocable(issued.Status):
+		switch err := s.issuer.RevokeCredential(ctx, s.instanceFor(ctx, orgID), issued.CredentialUUID); {
+		case errors.Is(err, openid4vciissuer.ErrNoStatusListBit):
+			// The deployment issues without a Token Status List (enableStatusLists
+			// off / no statusLists block), so the issuer reserved no bit to flip.
+			// Degrade to a local-only revocation: the local ledger records it, and
+			// there is nothing published that could drift. Matches StubIssuer,
+			// whose RevokeCredential is a graceful no-op success.
+			slog.WarnContext(ctx, "attestation: issuer has no status-list bit for the credential; revoking locally only",
+				slog.String("id", id.String()))
+		case err != nil:
+			return Issued{}, fmt.Errorf("attestation: revoke on issuer status list: %w", err)
+		}
+	case issued.CredentialUUID == "" && issued.Status == StatusClaimed:
+		// A claimed credential with no captured uuid predates status-list backing
+		// (issued before this column existed): the local ledger can still record
+		// the revocation, but the status list cannot be updated.
+		slog.WarnContext(ctx, "attestation: revoking claimed attestation with no issuer credential uuid; status list not updated",
+			slog.String("id", id.String()))
+	}
 	return s.store.Revoke(ctx, orgID, id)
+}
+
+// isRevocable reports whether an attestation in this status can still be revoked
+// (mirrors the store's transition guard: only a claimed credential is revocable;
+// an unclaimed offer is withdrawn via Cancel).
+func isRevocable(status string) bool {
+	return status == StatusClaimed
 }
 
 // Cancel withdraws an unclaimed offer. Nothing was ever held, so this is a
@@ -371,16 +416,20 @@ func (s *Service) ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([
 	return views, nil
 }
 
-// reconcile reports whether the issuer says the credential has been issued. A
-// transient issuer error is treated as "not yet" (never fails the poll).
-func (s *Service) reconcile(ctx context.Context, instance, issuanceID string) bool {
-	status, err := s.issuer.Status(ctx, instance, issuanceID)
+// reconcile reports whether the issuer says the credential has been issued, and
+// if so the issuer's credential uuid (to store for later revocation). A transient
+// issuer error is treated as "not yet" (never fails the poll).
+func (s *Service) reconcile(ctx context.Context, instance, issuanceID string) (string, bool) {
+	st, err := s.issuer.Status(ctx, instance, issuanceID)
 	if err != nil {
 		slog.WarnContext(ctx, "attestation: issuer status check failed",
 			slog.String("error", err.Error()))
-		return false
+		return "", false
 	}
-	return status == openid4vciissuer.StatusIssued
+	if st.Status != openid4vciissuer.StatusIssued {
+		return "", false
+	}
+	return st.CredentialUUID, true
 }
 
 // checkRecipientKind enforces that the recipient matches the schema subject type.
