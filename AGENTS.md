@@ -73,10 +73,14 @@ parses the `HeldSource*` constants out of `backend/internal/attestation/held_sto
 and asserts they and `HELD_SOURCES` (`src/api/attestations.ts`) hold the same set,
 each named under `attestations.held.sources.*`. `HELD_SOURCE_FILTERS` is derived from
 `HELD_SOURCES` rather than written out again, so the filter dropdown cannot fall
-behind the enum. All three parity tests leave the Go type optional in the pattern
-(`KindFoo = "foo"` inside a `const` block still compiles and is still served), and
-assert membership in both directions — a list-length check alone passes on exactly
-the drift it exists to catch, both lists being short by the same one.
+behind the enum. This guard and `mail-template.test.ts` leave the Go type optional in
+the pattern (`KindFoo = "foo"` inside a `const` block still compiles and is still
+served); `audit-event.test.ts`'s pattern allows no type at all, so a typed action
+constant would be skipped there — safe only because `audit.go` writes its constants
+untyped. This guard asserts membership in both directions, because a list-length check
+alone passes on exactly the drift it exists to catch, both lists being short by the
+same one; `mail-template.test.ts` closes that gap with a length assertion instead, and
+`audit-event.test.ts` only checks that each backend constant resolves to a translation.
 
 **Backend** (`cd backend`), in order:
 ```bash
