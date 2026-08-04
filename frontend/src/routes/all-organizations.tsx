@@ -103,7 +103,12 @@ export default function AllOrganizations(): React.JSX.Element {
                           to={`/${org.slug}`}
                           className="flex items-center gap-2.5"
                         >
-                          <Avatar name={org.name} tone="rose" />
+                          <Avatar
+                            name={org.name}
+                            src={org.logoUri}
+                            alt={org.name}
+                            tone="rose"
+                          />
                           <span className="text-ink font-semibold">
                             {org.name}
                           </span>
