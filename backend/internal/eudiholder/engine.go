@@ -234,11 +234,17 @@ func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang str
 }
 
 // Displays resolves, for every credential an organization holds, its localized
-// type-metadata title and logo keyed by verifiable-credential type — the held-list
-// view's source for per-row titles and logos, so the table does not need a per-row
-// claims fetch. Credentials of the same vct share one display (it is a property of
-// the type), so the map is keyed by vct. An org that holds nothing yields an empty
-// (non-nil) map.
+// type-metadata title, logo and issuer name keyed by verifiable-credential type —
+// the held-list view's source for per-row titles, logos and issuers, so the table
+// does not need a per-row claims fetch. Credentials of the same vct share one display
+// (it is a property of the type), so the map is keyed by vct. An org that holds
+// nothing yields an empty (non-nil) map.
+//
+// Metadata is merged across every batch of a type rather than taken from the first
+// one seen: an issuer enriches its metadata over time, so of two batches of the same
+// vct one may carry a logo (or issuer name) the other lacks. First-non-empty-wins
+// means a type reliably shows whatever any of its batches carries — matching the
+// detail view, which resolves the one batch and so always finds its logo.
 func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]HeldDisplay, error) {
 	eng, err := e.engineFor(ctx, orgID)
 	if err != nil {
@@ -257,18 +263,21 @@ func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (ma
 		if vct == "" {
 			continue
 		}
-		if _, seen := displays[vct]; seen {
-			continue
-		}
 		name, logoURI := credentialDisplay(batches[i].CredentialMetadata, lang)
 		if logoURI == "" {
 			logoURI = issuerLogoURI(batches[i].IssuerDisplay, lang)
 		}
-		displays[vct] = HeldDisplay{
-			DisplayName: name,
-			LogoURI:     logoURI,
-			IssuerName:  issuerDisplayName(batches[i].IssuerDisplay, lang),
+		d := displays[vct]
+		if d.DisplayName == "" {
+			d.DisplayName = name
 		}
+		if d.LogoURI == "" {
+			d.LogoURI = logoURI
+		}
+		if d.IssuerName == "" {
+			d.IssuerName = issuerDisplayName(batches[i].IssuerDisplay, lang)
+		}
+		displays[vct] = d
 	}
 	return displays, nil
 }
