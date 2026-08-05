@@ -28,6 +28,7 @@ function held(overrides: Partial<HeldAttestation> = {}): HeldAttestation {
     credentialRef: "ref-1",
     vct: "nl.kvk.registration",
     issuer: "https://issuer.test",
+    issuerName: "",
     source: "bootstrap",
     receivedAt: "2026-01-01T00:00:00Z",
     createdAt: "2026-01-01T00:00:00Z",

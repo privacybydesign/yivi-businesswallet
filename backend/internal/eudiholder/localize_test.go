@@ -143,3 +143,69 @@ func TestCredentialDisplay(t *testing.T) {
 		}
 	})
 }
+
+func TestIssuerDisplayName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no entries yields empty", func(t *testing.T) {
+		t.Parallel()
+		if got := issuerDisplayName(nil, "nl"); got != "" {
+			t.Errorf("issuerDisplayName(nil) = %q, want empty", got)
+		}
+	})
+
+	t.Run("resolves the localized issuer name", func(t *testing.T) {
+		t.Parallel()
+		displays := []models.IssuerMetadataDisplay{
+			{Name: "Yivi B.V.", Locale: loc("en")},
+			{Name: "Yivi B.V.", Locale: loc("nl")},
+		}
+		if got := issuerDisplayName(displays, "nl"); got != "Yivi B.V." {
+			t.Errorf("issuerDisplayName = %q, want the Dutch entry", got)
+		}
+	})
+}
+
+func TestIssuerLogoURI(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no entries yields empty", func(t *testing.T) {
+		t.Parallel()
+		if got := issuerLogoURI(nil, "nl"); got != "" {
+			t.Errorf("issuerLogoURI(nil) = %q, want empty", got)
+		}
+	})
+
+	t.Run("resolves the chosen language's logo", func(t *testing.T) {
+		t.Parallel()
+		displays := []models.IssuerMetadataDisplay{
+			{Name: "Yivi B.V.", Locale: loc("en"), LogoURI: loc("data:image/svg+xml;base64,EN")},
+			{Name: "Yivi B.V.", Locale: loc("nl"), LogoURI: loc("data:image/svg+xml;base64,NL")},
+		}
+		if got := issuerLogoURI(displays, "nl"); got != "data:image/svg+xml;base64,NL" {
+			t.Errorf("issuerLogoURI = %q, want the Dutch entry's logo", got)
+		}
+	})
+
+	t.Run("takes a logo from another entry when the chosen one has none", func(t *testing.T) {
+		t.Parallel()
+		displays := []models.IssuerMetadataDisplay{
+			{Name: "Yivi B.V.", Locale: loc("en"), LogoURI: loc("data:image/svg+xml;base64,EN")},
+			{Name: "Yivi B.V.", Locale: loc("nl")},
+		}
+		if got := issuerLogoURI(displays, "nl"); got != "data:image/svg+xml;base64,EN" {
+			t.Errorf("issuerLogoURI = %q, want the fallback entry's logo", got)
+		}
+	})
+
+	t.Run("no logos yields empty", func(t *testing.T) {
+		t.Parallel()
+		displays := []models.IssuerMetadataDisplay{
+			{Name: "Yivi B.V.", Locale: loc("en")},
+			{Name: "Yivi B.V.", Locale: loc("nl")},
+		}
+		if got := issuerLogoURI(displays, "nl"); got != "" {
+			t.Errorf("issuerLogoURI = %q, want empty when no entry carries a logo", got)
+		}
+	})
+}

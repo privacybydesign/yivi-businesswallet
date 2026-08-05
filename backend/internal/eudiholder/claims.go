@@ -31,13 +31,17 @@ type HeldCredential struct {
 }
 
 // HeldDisplay is a held credential's localized presentation metadata (its
-// type-metadata title and logo) without its disclosed attributes — the lightweight
-// shape the held-list view needs so each row's title and logo do not require the
-// per-row claims fetch. Both fields are empty when the credential carried no
-// credential-level display metadata.
+// type-metadata title, logo and issuer name) without its disclosed attributes — the
+// lightweight shape the held-list view needs so each row's title, logo and issuer do
+// not require the per-row claims fetch. DisplayName / LogoURI are empty when the
+// credential carried no credential-level display metadata (LogoURI falls back to the
+// issuer logo when the type ships none); IssuerName is empty when the credential
+// carried no issuer display metadata, so the caller falls back to the issuer
+// identifier.
 type HeldDisplay struct {
 	DisplayName string
 	LogoURI     string
+	IssuerName  string
 }
 
 // reservedClaims are the registered JWT / SD-JWT VC claims that carry protocol

@@ -358,19 +358,23 @@ type HeldClaimsView struct {
 }
 
 // HeldListView is one held-credential index row enriched with the credential's
-// localized type-metadata title and logo (resolved from the holder engine for the
-// request's language), so the held-list table can show a friendly, localized name
-// and a logo without a per-row claims fetch. DisplayName / LogoURI are empty when
-// the credential carried no credential-level display metadata (the frontend then
-// falls back to the VCT-derived name and shows no logo). ExpiresAt / Revoked carry
-// the credential's validity as the holder engine has it stored, so the view can
-// badge each credential; an absent ExpiresAt means the credential does not expire
-// (or the engine does not know this ref). See eudiholder.HeldValidity for what
-// Revoked does and does not observe.
+// localized type-metadata title, logo and issuer name (resolved from the holder
+// engine for the request's language), so the held-list table can show a friendly,
+// localized name, a logo and a translated issuer without a per-row claims fetch.
+// DisplayName / LogoURI are empty when the credential carried no credential-level
+// display metadata (the frontend then falls back to the VCT-derived name and shows
+// no logo). IssuerName is the issuer's display name, falling back to the raw issuer
+// identifier (Issuer, a URL) when the credential carried no issuer display metadata —
+// the same rule the detail view follows. ExpiresAt / Revoked carry the credential's
+// validity as the holder engine has it stored, so the view can badge each
+// credential; an absent ExpiresAt means the credential does not expire (or the
+// engine does not know this ref). See eudiholder.HeldValidity for what Revoked does
+// and does not observe.
 type HeldListView struct {
 	HeldAttestation
 	DisplayName string     `json:"displayName"`
 	LogoURI     string     `json:"logoUri"`
+	IssuerName  string     `json:"issuerName"`
 	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
 	Revoked     bool       `json:"revoked"`
 }
@@ -440,10 +444,15 @@ func (s *Service) ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([
 	for i, h := range held {
 		d := displays[h.VCT]
 		v := validities[h.CredentialRef]
+		issuerName := d.IssuerName
+		if issuerName == "" {
+			issuerName = h.Issuer
+		}
 		views[i] = HeldListView{
 			HeldAttestation: h,
 			DisplayName:     d.DisplayName,
 			LogoURI:         d.LogoURI,
+			IssuerName:      issuerName,
 			ExpiresAt:       v.ExpiresAt,
 			Revoked:         v.Revoked,
 		}

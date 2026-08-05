@@ -858,7 +858,7 @@ function HeldCard({
           <span className="text-muted">
             {t("attestations.held.fields.issuer")}
           </span>{" "}
-          {credential.issuer}
+          {credential.issuerName || credential.issuer}
         </div>
         {expiresAt && (
           <div className="text-ink-soft">

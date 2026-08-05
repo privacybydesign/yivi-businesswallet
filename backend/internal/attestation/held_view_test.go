@@ -121,6 +121,50 @@ func TestListHeldCarriesEachCredentialsValidity(t *testing.T) {
 	}
 }
 
+func TestListHeldCarriesIssuerName(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	org := uuid.New()
+
+	// One vct the engine resolves an issuer name for, one it does not.
+	named := attestation.HeldAttestation{
+		ID:     uuid.New(),
+		VCT:    "https://veramo-issuer.test/vct/nl-yivi-supplier",
+		Issuer: "https://veramo-issuer.test/yivi",
+	}
+	unnamed := attestation.HeldAttestation{
+		ID:     uuid.New(),
+		VCT:    "nl.kvk.registration",
+		Issuer: "KVK",
+	}
+
+	store := &heldViewStore{rows: []attestation.HeldAttestation{named, unnamed}}
+	holder := &heldViewHolder{
+		displays: map[string]eudiholder.HeldDisplay{
+			named.VCT: {DisplayName: "Approved supplier", IssuerName: "Yivi B.V."},
+			// unnamed.VCT: no display entry -> empty IssuerName.
+		},
+	}
+	service := attestation.NewService(nil, nil, nil, nil, nil, store, holder, "http://app.test")
+
+	views, err := service.ListHeld(ctx, org, "en")
+	if err != nil {
+		t.Fatalf("list held: %v", err)
+	}
+	byID := map[uuid.UUID]attestation.HeldListView{}
+	for _, view := range views {
+		byID[view.ID] = view
+	}
+	if got := byID[named.ID].IssuerName; got != "Yivi B.V." {
+		t.Errorf("named row IssuerName = %q, want the engine's localized issuer name", got)
+	}
+	// No issuer display metadata: the list falls back to the raw issuer identifier,
+	// the same rule the detail view follows.
+	if got := byID[unnamed.ID].IssuerName; got != unnamed.Issuer {
+		t.Errorf("unnamed row IssuerName = %q, want the issuer identifier %q", got, unnamed.Issuer)
+	}
+}
+
 func TestHeldClaimsCarriesValidity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

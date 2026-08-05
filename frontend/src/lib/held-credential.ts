@@ -135,11 +135,13 @@ export function heldSourceLabel(source: string, t: TFunction): string {
   }
 }
 
-// heldSearchText is what the search box matches on: the name shown on the card,
-// the credential type and the issuer — the three things a card puts on screen.
+// heldSearchText is what the search box matches on: the name shown on the card, the
+// credential type and the issuer — the things a card puts on screen. Both the
+// translated issuer name and the raw identifier are included so a search matches
+// whichever the card is showing (issuerName falls back to issuer server-side).
 function heldSearchText(credential: HeldAttestation): string {
   const name = credential.displayName || credentialDisplayName(credential.vct);
-  return `${name}\n${credential.vct}\n${credential.issuer}`.toLowerCase();
+  return `${name}\n${credential.vct}\n${credential.issuerName}\n${credential.issuer}`.toLowerCase();
 }
 
 // heldMatchesQuery reports whether a credential matches a search term. Terms are

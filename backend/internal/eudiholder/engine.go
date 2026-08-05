@@ -219,6 +219,12 @@ func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang str
 		return HeldCredential{}, err
 	}
 	name, logoURI := credentialDisplay(batch.CredentialMetadata, lang)
+	// A credential type need not ship its own logo (the Yivi issuer serves a name
+	// but no per-credential logo on most types), so fall back to the issuer's logo
+	// for the card rather than showing none.
+	if logoURI == "" {
+		logoURI = issuerLogoURI(batch.IssuerDisplay, lang)
+	}
 	return HeldCredential{
 		IssuerName:  issuerDisplayName(batch.IssuerDisplay, lang),
 		DisplayName: name,
@@ -241,6 +247,7 @@ func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (ma
 	var batches []models.CredentialBatch
 	if err := eng.Db().WithContext(ctx).
 		Preload("CredentialMetadata.Display").
+		Preload("IssuerDisplay").
 		Find(&batches).Error; err != nil {
 		return nil, fmt.Errorf("eudiholder: displays org %s: %w", orgID, err)
 	}
@@ -254,7 +261,14 @@ func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (ma
 			continue
 		}
 		name, logoURI := credentialDisplay(batches[i].CredentialMetadata, lang)
-		displays[vct] = HeldDisplay{DisplayName: name, LogoURI: logoURI}
+		if logoURI == "" {
+			logoURI = issuerLogoURI(batches[i].IssuerDisplay, lang)
+		}
+		displays[vct] = HeldDisplay{
+			DisplayName: name,
+			LogoURI:     logoURI,
+			IssuerName:  issuerDisplayName(batches[i].IssuerDisplay, lang),
+		}
 	}
 	return displays, nil
 }
@@ -324,6 +338,7 @@ func (e *Engine) claimsBatch(ctx context.Context, orgID uuid.UUID, ref, vct stri
 		err = base.WithContext(ctx).
 			Preload("CredentialMetadata.Display").
 			Preload("CredentialMetadata.Claims.Display").
+			Preload("IssuerDisplay").
 			Where("id = (?)", batchID).First(&batch).Error
 		if err == nil {
 			return batch, true, nil
@@ -356,6 +371,7 @@ func (e *Engine) batchByUniqueVCT(ctx context.Context, orgID uuid.UUID, vct stri
 	err = eng.Db().WithContext(ctx).
 		Preload("CredentialMetadata.Display").
 		Preload("CredentialMetadata.Claims.Display").
+		Preload("IssuerDisplay").
 		Where("verifiable_credential_type = ?", vct).Limit(2).Find(&batches).Error
 	if err != nil {
 		return models.CredentialBatch{}, false, fmt.Errorf("eudiholder: batch by vct %q org %s: %w", vct, orgID, err)
@@ -417,6 +433,29 @@ func issuerDisplayName(displays []models.IssuerMetadataDisplay, lang string) str
 		names[i] = localeName{name: d.Name, locale: d.Locale}
 	}
 	return pickLocaleName(names, lang)
+}
+
+// issuerLogoURI resolves a credential's issuer logo for the requested language from
+// its stored issuer display metadata, empty when no issuer display entry carries a
+// logo. The logo is taken from the same entry as the chosen language (falling back
+// to the first entry that carries one, mirroring credentialDisplay), so a name-only
+// localized entry still yields a logo when another entry provides one. It is the
+// credential-card logo fallback when the credential type ships no logo of its own.
+func issuerLogoURI(displays []models.IssuerMetadataDisplay, lang string) string {
+	names := make([]localeName, len(displays))
+	for i, d := range displays {
+		names[i] = localeName{name: d.Name, locale: d.Locale}
+	}
+	if chosen := pickLocaleIndex(names, lang); chosen >= 0 &&
+		displays[chosen].LogoURI.Valid && displays[chosen].LogoURI.V != "" {
+		return displays[chosen].LogoURI.V
+	}
+	for _, d := range displays {
+		if d.LogoURI.Valid && d.LogoURI.V != "" {
+			return d.LogoURI.V
+		}
+	}
+	return ""
 }
 
 // credentialDisplay resolves a credential's type-metadata title and logo URI for

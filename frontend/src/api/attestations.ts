@@ -284,6 +284,9 @@ export type HeldSource = (typeof HELD_SOURCES)[number];
 // logoUri are the credential's own type-metadata title and logo, resolved by the
 // backend for the request's language ("" when the credential carried no such
 // metadata — the UI then falls back to the VCT-derived name and shows no logo).
+// issuerName is the issuer's localized display name, already falling back to the
+// raw issuer identifier (issuer, a URL) server-side when the credential carried no
+// issuer display metadata.
 // expiresAt and revoked carry the validity the holder engine has stored: absent
 // expiresAt means the credential does not expire, revoked means its last observed
 // Token Status List bit read something other than valid.
@@ -293,6 +296,7 @@ export const heldAttestationSchema = z.object({
   credentialRef: z.string(),
   vct: z.string(),
   issuer: z.string(),
+  issuerName: z.string().default(""),
   source: z.enum(HELD_SOURCES),
   sourceMessageId: z.string().optional(),
   receivedAt: z.string(),
