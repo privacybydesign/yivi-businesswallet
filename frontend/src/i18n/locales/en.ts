@@ -1037,7 +1037,7 @@ export const en = {
     webhookUrl: "Webhook URL",
     webhookPlaceholder: "https://…webhook.office.com/webhookb2/…",
     webhookHint:
-      "Both kinds of URL work: a Workflows webhook (logic.azure.com) and an older connector webhook (webhook.office.com).",
+      "Both kinds of URL work: a Workflows webhook (logic.azure.com or powerplatform.com) and an older connector webhook (webhook.office.com).",
     webhookUnchanged: "Leave blank to keep the current webhook URL",
     webhookStored:
       "A webhook URL is stored. It is treated as a secret, so it is not shown again after saving.",

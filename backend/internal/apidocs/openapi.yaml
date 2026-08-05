@@ -2531,8 +2531,9 @@ paths:
       description: >-
         Requires an administrator role in the organisation. `webhookUrl` must be an
         https URL at webhook.office.com (an Office 365 connector's incoming webhook)
-        or logic.azure.com (a Power Automate workflow trigger, which is what the
-        Teams "Workflows" app hands out); omitting it keeps the stored one, and
+        or logic.azure.com / powerplatform.com (a Power Automate workflow trigger,
+        which is what the Teams "Workflows" app hands out); omitting it keeps the
+        stored one, and
         sending it empty clears it. Answers 409 `no_encryption_key` when the
         deployment has no Microsoft Teams encryption key, because the URL cannot
         then be stored at all.

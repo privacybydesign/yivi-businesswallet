@@ -6,11 +6,12 @@ import (
 	"testing"
 )
 
-// The two kinds of URL the Teams settings accept, in the shapes Microsoft actually
+// The three kinds of URL the Teams settings accept, in the shapes Microsoft actually
 // hands out: a connector's incoming webhook on the tenant's own subdomain, and a
-// Power Automate trigger with its signature in the query and https' own port
-// written out in full.
-func TestNormalizeWebhookURLAcceptsBothKindsOfTeamsWebhook(t *testing.T) {
+// Power Automate trigger — on either the *.logic.azure.com host or the newer
+// per-environment powerplatform.com host — with its signature in the query and https'
+// own port written out in full.
+func TestNormalizeWebhookURLAcceptsEveryKindOfTeamsWebhook(t *testing.T) {
 	cases := map[string]struct {
 		raw  string
 		want string
@@ -22,6 +23,10 @@ func TestNormalizeWebhookURLAcceptsBothKindsOfTeamsWebhook(t *testing.T) {
 		"a power automate workflow": {
 			raw:  "https://prod-27.westeurope.logic.azure.com:443/workflows/9f8e/triggers/manual/paths/invoke?api-version=2016-06-01&sig=s3cr3t",
 			want: "https://prod-27.westeurope.logic.azure.com/workflows/9f8e/triggers/manual/paths/invoke?api-version=2016-06-01&sig=s3cr3t",
+		},
+		"a power automate workflow on powerplatform.com": {
+			raw:  "https://defaultc53567a14f5a4d88a3a4c20d15cca8.83.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/05/workflows/9d0a63d27e5b4c2eaa94ef26b07e2ed6/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=7T2muJx_DVlXgxZwVCyfVOyuITl3CdQKN_PnXhFLLhY",
+			want: "https://defaultc53567a14f5a4d88a3a4c20d15cca8.83.environment.api.powerplatform.com/powerautomate/automations/direct/cu/05/workflows/9d0a63d27e5b4c2eaa94ef26b07e2ed6/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=7T2muJx_DVlXgxZwVCyfVOyuITl3CdQKN_PnXhFLLhY",
 		},
 	}
 	for name, tc := range cases {
@@ -95,6 +100,8 @@ func TestNormalizeWebhookURLRejectsAnythingButATeamsHost(t *testing.T) {
 		"a lookalike host":      "https://webhook-office.com/webhookb2/abc/IncomingWebhook/0/d",
 		"the bare suffix":       "https://webhook.office.com/webhookb2/abc/IncomingWebhook/0/d",
 		"the bare azure suffix": "https://logic.azure.com/workflows/9f8e/triggers/manual/paths/invoke",
+		"the bare pp suffix":    "https://powerplatform.com/powerautomate/automations/direct/cu/05/workflows/abc/triggers/manual/paths/invoke",
+		"a pp suffix as label":  "https://env.environment.api.powerplatform.com.example.org/powerautomate/automations/direct/cu/05/workflows/abc",
 		"another azure service": "https://contoso.blob.core.windows.net/container/blob",
 		"internal address":      "https://169.254.169.254/latest/meta-data/",
 		"loopback":              "https://127.0.0.1/webhookb2/abc/IncomingWebhook/0/d",

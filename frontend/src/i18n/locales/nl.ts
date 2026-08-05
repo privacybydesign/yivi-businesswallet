@@ -1070,7 +1070,7 @@ export const nl: Translation<typeof en> = {
     webhookUrl: "Webhook-URL",
     webhookPlaceholder: "https://…webhook.office.com/webhookb2/…",
     webhookHint:
-      "Beide soorten URL werken: een Workflows-webhook (logic.azure.com) en een oudere connector-webhook (webhook.office.com).",
+      "Beide soorten URL werken: een Workflows-webhook (logic.azure.com of powerplatform.com) en een oudere connector-webhook (webhook.office.com).",
     webhookUnchanged: "Laat leeg om de huidige webhook-URL te behouden",
     webhookStored:
       "Er is een webhook-URL opgeslagen. Die wordt als geheim behandeld en na het opslaan niet meer getoond.",
