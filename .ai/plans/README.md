@@ -7,6 +7,12 @@ A plan lives only as long as its branch; nothing here is a source of truth.
 Durable knowledge is extracted on merge (see Harvest) into `.ai/conventions/`
 or `.ai/features/`, which are committed.
 
+**Exception: a design-only plan is force-committed.** When a branch produces a decision
+rather than code (a design or grilling ticket), its plan *is* the deliverable, so it goes in
+the PR with `git add -f` despite the gitignore and carries `Status: proposed` until the
+implementing branch lands. `membership-lifecycle.md`, `rbac-model.md` and
+`signing-provider-seam.md` are the ones that exist. Everything above still applies to them.
+
 ## Plans
 - One plan per branch: `.ai/plans/<branch-name>.md`. Never share a plan file across worktrees.
 - A plan states: the goal, the files and interfaces touched, what is out of scope,
