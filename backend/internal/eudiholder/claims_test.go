@@ -25,7 +25,7 @@ func TestDecodeClaims(t *testing.T) {
 		},
 		{
 			name:    "strips registered claims, keeps attributes",
-			payload: `{"iss":"https://issuer","vct":"nl.kvk.registration","iat":1700000000,"cnf":{"jwk":{}},"_sd":["x"],"_sd_alg":"sha-256","company_name":"Demo B.V.","kvk_number":"12345678"}`,
+			payload: `{"iss":"https://issuer","vct":"nl.kvk.registration","iat":1700000000,"cnf":{"jwk":{}},"_sd":["x"],"_sd_alg":"sha-256","fed":{"entity":"x"},"company_name":"Demo B.V.","kvk_number":"12345678"}`,
 			want: map[string]any{
 				"company_name": "Demo B.V.",
 				"kvk_number":   "12345678",

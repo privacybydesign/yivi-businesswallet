@@ -60,6 +60,9 @@ var reservedClaims = map[string]struct{}{
 	"status":  {},
 	"_sd":     {},
 	"_sd_alg": {},
+	// fed carries OpenID4Federation protocol metadata, not a disclosed
+	// attribute, so it is stripped from the display like the JWT envelope.
+	"fed": {},
 }
 
 // decodeClaims unmarshals a verified SD-JWT payload (as stored in the holder
