@@ -8,11 +8,12 @@
 // the Teams admin who created it decided there and then which channel it may post
 // to, so this side cannot widen the audience.
 //
-// Two kinds of URL are accepted, because Microsoft is midway through replacing the
-// first with the second: an Office 365 connector's incoming webhook (at the
-// tenant's own <tenant>.webhook.office.com) and a Power Automate workflow trigger
-// (at *.logic.azure.com), which is what the Teams "Workflows" app hands out. Both
-// take the same payload — see message.go.
+// Three kinds of URL are accepted, because Microsoft is midway through replacing the
+// first with the others: an Office 365 connector's incoming webhook (at the tenant's
+// own <tenant>.webhook.office.com) and a Power Automate workflow trigger, which is
+// what the Teams "Workflows" app hands out — issued either at *.logic.azure.com or,
+// newer, at *.environment.api.powerplatform.com. All three take the same payload —
+// see message.go.
 //
 // The webhook URL is the tenant's secret: whoever holds it can post as the
 // integration. So it is encrypted at rest under the deployment Teams key, it is
@@ -76,6 +77,10 @@ const (
 //     are what many orgs still have.
 //   - .logic.azure.com — a Power Automate workflow trigger, which is what the Teams
 //     "Workflows" app hands out and what Microsoft's migration guidance points at.
+//   - .powerplatform.com — the same Power Automate workflow trigger, on the newer
+//     per-environment Power Platform API host (e.g.
+//     <env>.environment.api.powerplatform.com) that Microsoft has begun issuing these
+//     URLs on in place of *.logic.azure.com.
 //
 // Pinning these says the request goes to Microsoft, not that it goes to the org's
 // own tenant: anyone can create a workflow, exactly as anyone can create a Slack
@@ -86,6 +91,7 @@ const (
 var webhookHostSuffixes = []string{
 	".webhook.office.com",
 	".logic.azure.com",
+	".powerplatform.com",
 }
 
 // WebhookHostsDescription names the accepted hosts for the copy that has to tell
