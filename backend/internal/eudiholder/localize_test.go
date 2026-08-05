@@ -143,3 +143,25 @@ func TestCredentialDisplay(t *testing.T) {
 		}
 	})
 }
+
+func TestIssuerDisplayName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no entries yields empty", func(t *testing.T) {
+		t.Parallel()
+		if got := issuerDisplayName(nil, "nl"); got != "" {
+			t.Errorf("issuerDisplayName(nil) = %q, want empty", got)
+		}
+	})
+
+	t.Run("resolves the localized issuer name", func(t *testing.T) {
+		t.Parallel()
+		displays := []models.IssuerMetadataDisplay{
+			{Name: "Yivi B.V.", Locale: loc("en")},
+			{Name: "Yivi B.V.", Locale: loc("nl")},
+		}
+		if got := issuerDisplayName(displays, "nl"); got != "Yivi B.V." {
+			t.Errorf("issuerDisplayName = %q, want the Dutch entry", got)
+		}
+	})
+}

@@ -33,6 +33,7 @@ import QerdsMessage from "./routes/qerds-message";
 import Postguard from "./routes/postguard";
 import PostguardSend from "./routes/postguard-send";
 import Attestations from "./routes/attestations";
+import AttestationHeldDetail from "./routes/attestations-held";
 import Claim from "./routes/claim";
 import Settings from "./routes/settings";
 import AdminDashboard from "./routes/admin-dashboard";
@@ -85,6 +86,11 @@ const qerdsMessageCrumb: RouteHandle = {
 };
 const attestationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("attestations.title"),
+};
+// The credential's own name is only known once its claims load, and the page's
+// title already carries it, so the crumb stays a static label.
+const heldCredentialCrumb: RouteHandle = {
+  crumb: ({ t }) => t("attestations.held.detail.title"),
 };
 const postguardCrumb: RouteHandle = { crumb: ({ t }) => t("postguard.title") };
 const postguardSendCrumb: RouteHandle = {
@@ -193,8 +199,15 @@ export const router = createBrowserRouter([
                   },
                   {
                     path: "attestations",
-                    Component: Attestations,
                     handle: attestationsCrumb,
+                    children: [
+                      { index: true, Component: Attestations },
+                      {
+                        path: "held/:heldId",
+                        Component: AttestationHeldDetail,
+                        handle: heldCredentialCrumb,
+                      },
+                    ],
                   },
                   {
                     path: "postguard",

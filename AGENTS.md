@@ -46,12 +46,14 @@ npm run format      # prettier --check (use format:write to fix)
 npm run lint        # eslint . --cache
 npm run typecheck   # tsc --build
 npm run build       # vite build
-npm test            # vitest run (DOM-free unit tests; not yet a CI job)
+npm test            # vitest run (DOM-free unit tests)
 ```
 
 Frontend unit tests use Vitest (node env, no jsdom) and live beside their source as
-`*.test.ts`; they cover extracted pure logic, not rendered components. CI does not
-run them yet (`.github/workflows/ci.yml` only lints/typechecks/builds the frontend).
+`*.test.ts`; they cover extracted pure logic, not rendered components. CI runs them
+in the `frontend-test` job. The `include` glob is `src/**/*.test.ts`, so a `.tsx`
+test is silently skipped, and Vitest transpiles without type-checking — a type error
+in a test only surfaces in `npm run typecheck`, never in `npm test`.
 
 `src/lib/audit-event.test.ts` parses the action/target constants out of
 `backend/internal/audit/audit.go` and asserts each resolves to a real i18n
@@ -65,6 +67,20 @@ constants out of `backend/internal/email/catalog.go` and asserts each one is in
 `kindDescriptions.*` copy. That enum is the zod enum every mail-templates response
 is parsed through, so a kind the backend serves and the enum omits fails the whole
 list document and the settings screen stops loading — not just the new row.
+
+`src/lib/held-credential.test.ts` guards held-credential sources the same way: it
+parses the `HeldSource*` constants out of `backend/internal/attestation/held_store.go`
+and asserts they and `HELD_SOURCES` (`src/api/attestations.ts`) hold the same set,
+each named under `attestations.held.sources.*`. `HELD_SOURCE_FILTERS` is derived from
+`HELD_SOURCES` rather than written out again, so the filter dropdown cannot fall
+behind the enum. This guard and `mail-template.test.ts` leave the Go type optional in
+the pattern (`KindFoo = "foo"` inside a `const` block still compiles and is still
+served); `audit-event.test.ts`'s pattern allows no type at all, so a typed action
+constant would be skipped there — safe only because `audit.go` writes its constants
+untyped. This guard asserts membership in both directions, because a list-length check
+alone passes on exactly the drift it exists to catch, both lists being short by the
+same one; `mail-template.test.ts` closes that gap with a length assertion instead, and
+`audit-event.test.ts` only checks that each backend constant resolves to a translation.
 
 **Backend** (`cd backend`), in order:
 ```bash

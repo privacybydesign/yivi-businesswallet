@@ -274,23 +274,37 @@ export type IssuedAttestation = z.infer<typeof issuedAttestationSchema>;
 
 const issuedAttestationListSchema = z.array(issuedAttestationSchema);
 
+// How a held credential arrived (backend/internal/attestation/held_store.go).
+export const HELD_SOURCES = ["qerds", "openid4vci", "bootstrap"] as const;
+
+export type HeldSource = (typeof HELD_SOURCES)[number];
+
 // A credential the organization HOLDS (the "Received" facet). The claims live in
 // the holder engine; this is the thin org-scoped index over it. displayName and
 // logoUri are the credential's own type-metadata title and logo, resolved by the
 // backend for the request's language ("" when the credential carried no such
 // metadata — the UI then falls back to the VCT-derived name and shows no logo).
+// issuerName is the issuer's localized display name, already falling back to the
+// raw issuer identifier (issuer, a URL) server-side when the credential carried no
+// issuer display metadata.
+// expiresAt and revoked carry the validity the holder engine has stored: absent
+// expiresAt means the credential does not expire, revoked means its last observed
+// Token Status List bit read something other than valid.
 export const heldAttestationSchema = z.object({
   id: z.string(),
   organizationId: z.string(),
   credentialRef: z.string(),
   vct: z.string(),
   issuer: z.string(),
-  source: z.enum(["qerds", "openid4vci", "bootstrap"]),
+  issuerName: z.string().default(""),
+  source: z.enum(HELD_SOURCES),
   sourceMessageId: z.string().optional(),
   receivedAt: z.string(),
   createdAt: z.string(),
   displayName: z.string().default(""),
   logoUri: z.string().default(""),
+  expiresAt: z.string().optional(),
+  revoked: z.boolean().default(false),
 });
 
 export type HeldAttestation = z.infer<typeof heldAttestationSchema>;
@@ -308,8 +322,9 @@ export const heldAttributeSchema = z.object({
 
 export type HeldAttribute = z.infer<typeof heldAttributeSchema>;
 
-// The detail view of a held credential: its index metadata plus the disclosed
-// attributes read from the holder engine, display-ordered and labelled server-side.
+// The detail view of a held credential: its index metadata, validity (see
+// heldAttestationSchema) plus the disclosed attributes read from the holder engine,
+// display-ordered and labelled server-side.
 export const heldAttestationClaimsSchema = z.object({
   id: z.string(),
   vct: z.string(),
@@ -319,6 +334,8 @@ export const heldAttestationClaimsSchema = z.object({
   logoUri: z.string().default(""),
   source: z.string(),
   receivedAt: z.string(),
+  expiresAt: z.string().optional(),
+  revoked: z.boolean().default(false),
   attributes: z.array(heldAttributeSchema),
 });
 

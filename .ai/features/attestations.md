@@ -445,6 +445,17 @@ irmago-owned credential, it does not duplicate the claims:
 > **without** the cgo `sqlcipher` package (the `CGO_ENABLED=0` Alpine build + `go test
 > -race` both forbid it).
 
+**Held-credential status (Valid / Expiring soon / Expired / Revoked).** The index table
+carries no validity columns: both facts live in the engine, so `Holder.Validities`
+reads them per credential-instance ref — the batch's `expires_at` (the `exp` claim) and
+the instance's `last_known_status` (the Token Status List bit, non-VALID/non-UNKNOWN =
+revoked, irmago's own policy). Nothing is fetched over the network on a list read, and
+"expiring soon" is a frontend window over the expiry, not an engine state. Open follow-up:
+irmago seeds the bit at receive and its `RevocationService.RefreshStatuses` sweep
+maintains it, but **we run no sweep yet** — so a credential revoked after it was received
+keeps reading as valid until one is scheduled (a periodic per-org refresh, like the
+provisioning scheduler).
+
 ### 6.6 `org_onboarding_attestations` — the onboarding auto-issue set
 
 The per-org set of templates automatically issued to a new member when they

@@ -1268,20 +1268,50 @@ export const en = {
     },
     held: {
       empty: "No credentials received yet.",
+      noMatch: "No credentials match your search.",
       delete: "Remove",
       confirmDelete: "Remove credential “{{name}}”?",
       viewDetail: "View {{name}} details",
-      columns: {
-        credential: "Credential",
+      search: "Search by name, type or issuer…",
+      reset: "Reset",
+      expires: "Expires {{date}}",
+      expiredOn: "Expired {{date}}",
+      fields: {
         issuer: "Issued by",
         source: "Received via",
         received: "Received",
-        actions: "Actions",
+        expires: "Expires",
+        expired: "Expired",
+      },
+      sections: {
+        attention: "Needs attention",
+        valid: "Valid",
+      },
+      status: {
+        valid: "Valid",
+        expiringSoon: "Expiring soon",
+        expired: "Expired",
+        revoked: "Revoked",
+      },
+      filters: {
+        status: "Status",
+        allStatuses: "All statuses",
+        attention: "Needs attention",
+        source: "Received via",
+        allSources: "All sources",
+      },
+      sources: {
+        qerds: "QERDS",
+        openid4vci: "OpenID4VCI",
+        bootstrap: "Onboarding",
       },
       detail: {
+        title: "Credential",
+        notFound: "This credential is not in the wallet.",
         type: "Credential type",
         attributes: "Attributes",
         noAttributes: "This credential discloses no attributes.",
+        doesNotExpire: "Does not expire",
       },
     },
     schemas: {

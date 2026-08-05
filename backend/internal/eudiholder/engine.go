@@ -219,6 +219,16 @@ func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang str
 		return HeldCredential{}, err
 	}
 	name, logoURI := credentialDisplay(batch.CredentialMetadata, lang)
+	// The logo is the credential type's own image, not the issuer's. An issuer may
+	// have added it to newer batches only, so when this credential's own batch
+	// carries none, resolve it across the org's other batches of the same type rather
+	// than falling back to the issuer logo.
+	if logoURI == "" {
+		logoURI, err = e.credentialLogoForVCT(ctx, orgID, batch.VerifiableCredentialType, lang)
+		if err != nil {
+			return HeldCredential{}, err
+		}
+	}
 	return HeldCredential{
 		IssuerName:  issuerDisplayName(batch.IssuerDisplay, lang),
 		DisplayName: name,
@@ -228,11 +238,18 @@ func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang str
 }
 
 // Displays resolves, for every credential an organization holds, its localized
-// type-metadata title and logo keyed by verifiable-credential type — the held-list
-// view's source for per-row titles and logos, so the table does not need a per-row
-// claims fetch. Credentials of the same vct share one display (it is a property of
-// the type), so the map is keyed by vct. An org that holds nothing yields an empty
-// (non-nil) map.
+// type-metadata title, logo and issuer name keyed by verifiable-credential type —
+// the held-list view's source for per-row titles, logos and issuers, so the table
+// does not need a per-row claims fetch. Credentials of the same vct share one display
+// (it is a property of the type), so the map is keyed by vct. The logo is the
+// credential type's own image, never the issuer's. An org that holds nothing yields
+// an empty (non-nil) map.
+//
+// Metadata is merged across every batch of a type rather than taken from the first
+// one seen: an issuer enriches its metadata over time, so of two batches of the same
+// vct one may carry a logo (or issuer name) the other lacks. First-non-empty-wins
+// means a type reliably shows whatever any of its batches carries — matching the
+// detail view, which resolves the type's logo the same way.
 func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]HeldDisplay, error) {
 	eng, err := e.engineFor(ctx, orgID)
 	if err != nil {
@@ -241,6 +258,7 @@ func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (ma
 	var batches []models.CredentialBatch
 	if err := eng.Db().WithContext(ctx).
 		Preload("CredentialMetadata.Display").
+		Preload("IssuerDisplay").
 		Find(&batches).Error; err != nil {
 		return nil, fmt.Errorf("eudiholder: displays org %s: %w", orgID, err)
 	}
@@ -250,13 +268,61 @@ func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (ma
 		if vct == "" {
 			continue
 		}
-		if _, seen := displays[vct]; seen {
-			continue
-		}
 		name, logoURI := credentialDisplay(batches[i].CredentialMetadata, lang)
-		displays[vct] = HeldDisplay{DisplayName: name, LogoURI: logoURI}
+		d := displays[vct]
+		if d.DisplayName == "" {
+			d.DisplayName = name
+		}
+		if d.LogoURI == "" {
+			d.LogoURI = logoURI
+		}
+		if d.IssuerName == "" {
+			d.IssuerName = issuerDisplayName(batches[i].IssuerDisplay, lang)
+		}
+		displays[vct] = d
 	}
 	return displays, nil
+}
+
+// Validities resolves each held credential's expiry and last known revocation
+// state, keyed by the engine credential-instance id (the ref the held index points
+// at), so the held view can badge every credential without a per-row fetch. Both
+// facts are read from the org's own schema: the batch carries the credential's exp
+// claim, the instance its last observed status-list bit. Nothing is fetched over
+// the network, so a credential revoked after it was received keeps reading as not
+// revoked until a status refresh writes the new bit back (see HeldValidity).
+func (e *Engine) Validities(ctx context.Context, orgID uuid.UUID) (map[string]HeldValidity, error) {
+	eng, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	// One row per credential instance: its own id (the ref) and status bit, plus its
+	// batch's expiry — expiry is a property of the batch, revocation of the instance.
+	var rows []struct {
+		ID              datatypes.UUID
+		ExpiresAt       datatypes.NullTime
+		LastKnownStatus uint8
+	}
+	if err := eng.Db().WithContext(ctx).
+		Model(&models.IssuedCredentialInstance{}).
+		Select(`issued_credential_instances.id,
+			credential_batches.expires_at,
+			issued_credential_instances.last_known_status`).
+		Joins(`JOIN credential_batches
+			ON credential_batches.id = issued_credential_instances.credential_batch_id`).
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("eudiholder: validities org %s: %w", orgID, err)
+	}
+	validities := make(map[string]HeldValidity, len(rows))
+	for _, row := range rows {
+		validity := HeldValidity{Revoked: statusRevoked(row.LastKnownStatus)}
+		if row.ExpiresAt.Valid {
+			expiresAt := row.ExpiresAt.V
+			validity.ExpiresAt = &expiresAt
+		}
+		validities[row.ID.String()] = validity
+	}
+	return validities, nil
 }
 
 // claimsBatch loads the credential batch for a held credential, with its claim
@@ -283,6 +349,7 @@ func (e *Engine) claimsBatch(ctx context.Context, orgID uuid.UUID, ref, vct stri
 		err = base.WithContext(ctx).
 			Preload("CredentialMetadata.Display").
 			Preload("CredentialMetadata.Claims.Display").
+			Preload("IssuerDisplay").
 			Where("id = (?)", batchID).First(&batch).Error
 		if err == nil {
 			return batch, true, nil
@@ -315,6 +382,7 @@ func (e *Engine) batchByUniqueVCT(ctx context.Context, orgID uuid.UUID, vct stri
 	err = eng.Db().WithContext(ctx).
 		Preload("CredentialMetadata.Display").
 		Preload("CredentialMetadata.Claims.Display").
+		Preload("IssuerDisplay").
 		Where("verifiable_credential_type = ?", vct).Limit(2).Find(&batches).Error
 	if err != nil {
 		return models.CredentialBatch{}, false, fmt.Errorf("eudiholder: batch by vct %q org %s: %w", vct, orgID, err)
@@ -376,6 +444,34 @@ func issuerDisplayName(displays []models.IssuerMetadataDisplay, lang string) str
 		names[i] = localeName{name: d.Name, locale: d.Locale}
 	}
 	return pickLocaleName(names, lang)
+}
+
+// credentialLogoForVCT resolves the credential type's own logo for a vct across
+// every batch of that type the org holds, empty when none carries one. The logo is
+// a property of the type, but an issuer may have added it to newer batches only, so
+// a credential whose own batch predates the logo still shows it. This is the
+// detail-view fallback when the resolved batch carries no logo of its own; the
+// list view merges the same way inside Displays.
+func (e *Engine) credentialLogoForVCT(ctx context.Context, orgID uuid.UUID, vct, lang string) (string, error) {
+	if vct == "" {
+		return "", nil
+	}
+	eng, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return "", err
+	}
+	var batches []models.CredentialBatch
+	if err := eng.Db().WithContext(ctx).
+		Preload("CredentialMetadata.Display").
+		Where("verifiable_credential_type = ?", vct).Find(&batches).Error; err != nil {
+		return "", fmt.Errorf("eudiholder: credential logo for vct %q org %s: %w", vct, orgID, err)
+	}
+	for i := range batches {
+		if _, logoURI := credentialDisplay(batches[i].CredentialMetadata, lang); logoURI != "" {
+			return logoURI, nil
+		}
+	}
+	return "", nil
 }
 
 // credentialDisplay resolves a credential's type-metadata title and logo URI for

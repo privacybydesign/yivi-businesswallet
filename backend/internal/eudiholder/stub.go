@@ -24,6 +24,12 @@ const stubReceivedVCT = "eaa.received.stub"
 // carries a couple of demo attributes plus the registered claims Claims strips.
 const stubReceivedPayload = `{"vct":"eaa.received.stub","iss":"stub-issuer","company_name":"Demo Supplier B.V.","kvk_number":"12345678","approval_status":"approved"}`
 
+// stubReceivedLifetime is how long the stub's synthesised credential stays valid —
+// one year, the same default the reference issuer mints with — so a credential
+// received in local dev / CI carries an exp claim like a real one does and the held
+// view has an expiry to show.
+const stubReceivedLifetime = 365 * 24 * time.Hour
+
 // StubHolder is an in-process, in-memory holder engine for local dev / CI
 // (ATTESTATION_HOLDER=stub, the default). It keeps credentials in a map keyed by
 // org so the store/index/delete loop runs offline without irmago or Postgres. It
@@ -59,13 +65,16 @@ func (h *StubHolder) Store(_ context.Context, orgID uuid.UUID, cred Credential) 
 // (dev/CI default). offerURI is used only as a stable dedup hash. It mirrors the
 // engine contract: on return the credential is "held" and the ref can be indexed.
 func (h *StubHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (Redeemed, error) {
+	issuedAt := time.Now()
+	expiresAt := issuedAt.Add(stubReceivedLifetime)
 	cred := Credential{
 		VCT:              stubReceivedVCT,
 		IssuerURL:        offerURI,
 		CredentialIssuer: offerURI,
 		Hash:             offerURI,
 		ProcessedPayload: []byte(stubReceivedPayload),
-		IssuedAt:         time.Now(),
+		IssuedAt:         issuedAt,
+		ExpiresAt:        &expiresAt,
 	}
 	ref, err := h.Store(ctx, orgID, cred)
 	if err != nil {
@@ -122,6 +131,19 @@ func (h *StubHolder) Displays(_ context.Context, orgID uuid.UUID, _ string) (map
 		}
 	}
 	return displays, nil
+}
+
+// Validities returns each stored credential's expiry keyed by its ref. The stub
+// runs no Token Status List check, so no credential is ever reported revoked (the
+// engine reports the last bit it stored; the stub stores none).
+func (h *StubHolder) Validities(_ context.Context, orgID uuid.UUID) (map[string]HeldValidity, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	validities := make(map[string]HeldValidity, len(h.creds[orgID]))
+	for ref, cred := range h.creds[orgID] {
+		validities[ref] = HeldValidity{ExpiresAt: cred.ExpiresAt}
+	}
+	return validities, nil
 }
 
 // Delete removes the credential; an absent ref is a no-op (matches the engine

@@ -82,6 +82,15 @@ type Holder interface {
 	// org that holds nothing yields an empty (non-nil) map.
 	Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]HeldDisplay, error)
 
+	// Validities resolves, for every credential the organization holds, its expiry
+	// and last known revocation state keyed by the engine credential-instance id —
+	// the same ref held_attestations.credential_ref carries. It backs the held view's
+	// per-credential status without a per-row fetch. Both facts come from what the
+	// engine already stored, so no status list is fetched here (see HeldValidity). A
+	// ref the engine does not know is absent from the map; an org that holds nothing
+	// yields an empty (non-nil) map.
+	Validities(ctx context.Context, orgID uuid.UUID) (map[string]HeldValidity, error)
+
 	// Close releases all per-organization engines.
 	Close() error
 }

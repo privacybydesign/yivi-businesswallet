@@ -68,6 +68,7 @@ type holderEngine interface {
 	Delete(ctx context.Context, orgID uuid.UUID, ref string) error
 	Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (eudiholder.HeldCredential, error)
 	Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]eudiholder.HeldDisplay, error)
+	Validities(ctx context.Context, orgID uuid.UUID) (map[string]eudiholder.HeldValidity, error)
 }
 
 // emailNotifier delivers a person-facing "your credential is ready" e-mail.
@@ -339,6 +340,9 @@ func (s *Service) DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error {
 // request's language (both empty when the credential carried no credential-level
 // display metadata, so the frontend falls back to the VCT-derived name and shows
 // no logo).
+// ExpiresAt / Revoked carry the credential's validity as the holder engine has it
+// stored (absent expiry means the credential does not expire); see
+// eudiholder.HeldValidity for what Revoked does and does not observe.
 type HeldClaimsView struct {
 	ID          uuid.UUID                  `json:"id"`
 	VCT         string                     `json:"vct"`
@@ -348,19 +352,31 @@ type HeldClaimsView struct {
 	LogoURI     string                     `json:"logoUri"`
 	Source      string                     `json:"source"`
 	ReceivedAt  time.Time                  `json:"receivedAt"`
+	ExpiresAt   *time.Time                 `json:"expiresAt,omitempty"`
+	Revoked     bool                       `json:"revoked"`
 	Attributes  []eudiholder.HeldAttribute `json:"attributes"`
 }
 
 // HeldListView is one held-credential index row enriched with the credential's
-// localized type-metadata title and logo (resolved from the holder engine for the
-// request's language), so the held-list table can show a friendly, localized name
-// and a logo without a per-row claims fetch. DisplayName / LogoURI are empty when
-// the credential carried no credential-level display metadata (the frontend then
-// falls back to the VCT-derived name and shows no logo).
+// localized type-metadata title, logo and issuer name (resolved from the holder
+// engine for the request's language), so the held-list table can show a friendly,
+// localized name, a logo and a translated issuer without a per-row claims fetch.
+// DisplayName / LogoURI are empty when the credential carried no credential-level
+// display metadata (the frontend then falls back to the VCT-derived name and shows
+// no logo). IssuerName is the issuer's display name, falling back to the raw issuer
+// identifier (Issuer, a URL) when the credential carried no issuer display metadata —
+// the same rule the detail view follows. ExpiresAt / Revoked carry the credential's
+// validity as the holder engine has it stored, so the view can badge each
+// credential; an absent ExpiresAt means the credential does not expire (or the
+// engine does not know this ref). See eudiholder.HeldValidity for what Revoked does
+// and does not observe.
 type HeldListView struct {
 	HeldAttestation
-	DisplayName string `json:"displayName"`
-	LogoURI     string `json:"logoUri"`
+	DisplayName string     `json:"displayName"`
+	LogoURI     string     `json:"logoUri"`
+	IssuerName  string     `json:"issuerName"`
+	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+	Revoked     bool       `json:"revoked"`
 }
 
 // HeldClaims returns a held credential's disclosed attributes for the detail view,
@@ -381,6 +397,14 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang stri
 	if issuerName == "" {
 		issuerName = held.Issuer
 	}
+	// The detail view badges the credential like the list does, so it needs the same
+	// validity. The engine answers per org rather than per credential; an org holds
+	// few credentials, so the whole map is cheaper than a second engine seam.
+	validities, err := s.holder.Validities(ctx, orgID)
+	if err != nil {
+		return HeldClaimsView{}, fmt.Errorf("attestation: held validity %s from engine: %w", id, err)
+	}
+	validity := validities[held.CredentialRef]
 	return HeldClaimsView{
 		ID:          held.ID,
 		VCT:         held.VCT,
@@ -390,15 +414,19 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang stri
 		LogoURI:     cred.LogoURI,
 		Source:      held.Source,
 		ReceivedAt:  held.ReceivedAt,
+		ExpiresAt:   validity.ExpiresAt,
+		Revoked:     validity.Revoked,
 		Attributes:  cred.Attributes,
 	}, nil
 }
 
 // ListHeld returns an organization's active held credentials enriched with each
 // credential's localized type-metadata title and logo (resolved from the holder
-// engine for lang, the request's active language), so the held-list table shows a
-// friendly, localized name and logo without a per-row claims fetch. A row keeps
-// empty DisplayName / LogoURI when its credential carried no display metadata.
+// engine for lang, the request's active language) and its stored validity, so the
+// held view shows a friendly, localized name, a logo and a status badge without a
+// per-row claims fetch. A row keeps empty DisplayName / LogoURI when its credential
+// carried no display metadata, and no expiry when the credential does not expire or
+// the engine does not know its ref (a row received before refs were captured).
 func (s *Service) ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([]HeldListView, error) {
 	held, err := s.held.ListHeld(ctx, orgID)
 	if err != nil {
@@ -408,10 +436,26 @@ func (s *Service) ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([
 	if err != nil {
 		return nil, fmt.Errorf("attestation: held displays org %s from engine: %w", orgID, err)
 	}
+	validities, err := s.holder.Validities(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("attestation: held validities org %s from engine: %w", orgID, err)
+	}
 	views := make([]HeldListView, len(held))
 	for i, h := range held {
 		d := displays[h.VCT]
-		views[i] = HeldListView{HeldAttestation: h, DisplayName: d.DisplayName, LogoURI: d.LogoURI}
+		v := validities[h.CredentialRef]
+		issuerName := d.IssuerName
+		if issuerName == "" {
+			issuerName = h.Issuer
+		}
+		views[i] = HeldListView{
+			HeldAttestation: h,
+			DisplayName:     d.DisplayName,
+			LogoURI:         d.LogoURI,
+			IssuerName:      issuerName,
+			ExpiresAt:       v.ExpiresAt,
+			Revoked:         v.Revoked,
+		}
 	}
 	return views, nil
 }

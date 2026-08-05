@@ -206,6 +206,91 @@ func TestEngineClaimsWithSeveralCredentialsOfOneVCT(t *testing.T) {
 	}
 }
 
+// TestEngineValidities covers the held view's status source against the real
+// engine: each credential's expiry and last known status-list bit, keyed by the
+// instance ref the held index points at. The bit is written the way irmago's status
+// refresh writes it, since nothing in this process fetches a status list.
+func TestEngineValidities(t *testing.T) {
+	eng, pool := newTestEngine(t)
+	ctx := context.Background()
+	org := uuid.New()
+
+	expires := time.Unix(1_900_000_000, 0).UTC()
+	expiring := sampleCredential("nl.kvk.registration", "hash-expiring")
+	expiring.ExpiresAt = &expires
+	expiringRef, err := eng.Store(ctx, org, expiring)
+	if err != nil {
+		t.Fatalf("store expiring: %v", err)
+	}
+	perpetualRef, err := eng.Store(ctx, org, sampleCredential("eaa.perpetual", "hash-perpetual"))
+	if err != nil {
+		t.Fatalf("store perpetual: %v", err)
+	}
+
+	validities, err := eng.Validities(ctx, org)
+	if err != nil {
+		t.Fatalf("validities: %v", err)
+	}
+	if len(validities) != 2 {
+		t.Fatalf("validities has %d entries, want one per held credential", len(validities))
+	}
+	if got := validities[expiringRef].ExpiresAt; got == nil || !got.Equal(expires) {
+		t.Errorf("validities[expiring].ExpiresAt = %v, want %v", got, expires)
+	}
+	if got := validities[perpetualRef].ExpiresAt; got != nil {
+		t.Errorf("validities[perpetual].ExpiresAt = %v, want nil: it does not expire", got)
+	}
+	for ref, validity := range validities {
+		if validity.Revoked {
+			t.Errorf("validities[%s].Revoked = true, want false: no status bit was written yet", ref)
+		}
+	}
+
+	// statuslist.StatusInvalid (2) is what a status refresh writes back for a revoked
+	// credential; StatusValid (1) and the never-checked default (0) are not revoked.
+	setInstanceStatus(t, pool, org, perpetualRef, 2)
+	setInstanceStatus(t, pool, org, expiringRef, 1)
+	validities, err = eng.Validities(ctx, org)
+	if err != nil {
+		t.Fatalf("validities after status writeback: %v", err)
+	}
+	if !validities[perpetualRef].Revoked {
+		t.Error("validities[perpetual].Revoked = false, want true: its status bit reads invalid")
+	}
+	if validities[expiringRef].Revoked {
+		t.Error("validities[expiring].Revoked = true, want false: its status bit reads valid")
+	}
+
+	// A deleted credential drops out of the map, so its held row gets no validity.
+	if err := eng.Delete(ctx, org, perpetualRef); err != nil {
+		t.Fatalf("delete perpetual: %v", err)
+	}
+	validities, err = eng.Validities(ctx, org)
+	if err != nil {
+		t.Fatalf("validities after delete: %v", err)
+	}
+	if _, ok := validities[perpetualRef]; ok {
+		t.Error("validities still carries a deleted credential")
+	}
+}
+
+// setInstanceStatus writes a credential instance's last known status-list bit in an
+// org's isolated schema, standing in for irmago's status-refresh writeback.
+func setInstanceStatus(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID, ref string, status uint8) {
+	t.Helper()
+	schema := "holder_" + hex.EncodeToString(orgID[:])
+	//nolint:gosec // schema is a fixed identifier derived from the org id, not user input.
+	query := fmt.Sprintf(
+		`UPDATE %q.issued_credential_instances SET last_known_status = $1 WHERE id = $2`, schema)
+	tag, err := pool.Exec(context.Background(), query, status, ref)
+	if err != nil {
+		t.Fatalf("set status for %s: %v", ref, err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("set status for %s affected %d rows, want 1", ref, tag.RowsAffected())
+	}
+}
+
 // TestEnginePerOrgSchemaIsolation proves each org's credentials live in their own
 // Postgres schema: a delete in one org never touches another's.
 func TestEnginePerOrgSchemaIsolation(t *testing.T) {
