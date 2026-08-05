@@ -45,7 +45,7 @@ Three layering rules that matter more here than they did for QERDS:
 
 - **`signingprovider` imports no other `internal/` package.** It is leaf-level, like `qerdsprovider`. It does not know about orgs, users, or the RBAC model.
 - **`signing` does not import `qerds`, and `qerds` does not import `signing`.** Sign-then-deliver is wired at the top in `main.go` through a consumer interface on the `signing` side, exactly how `attestation` hooks into inbound QERDS today via `qerds.Service.SetInboundConsumer`. That keeps the map's sign-and-deliver fog out of both slices' import graphs.
-- **The `Provider` interface below is documentation.** Per "accept interfaces, return structs", `signingprovider` exports value types and concrete constructors only; the compiled interfaces are the narrow consumer-defined ones in `internal/signing` (`provider`) and `cmd/api/main.go` (`signingProvider`, which adds `Ping`). `qerdsprovider` does the same and declares no interface of its own.
+- **The `Provider` interface below is documentation.** Per "accept interfaces, return structs", `signingprovider` exports value types and concrete constructors only; the compiled interfaces are the narrow consumer-defined ones in `internal/signing` (`provider`) and `cmd/api/main.go` (`signingProvider`, which adds `Ping`). `qerdsprovider` does the same and declares no *provider* interface of its own, its one exported interface being `RequestAuthenticator`, the body-level auth seam this package copies.
 
 ## The seam contract
 
@@ -75,6 +75,24 @@ const (
 	CredentialSeal      CredentialKind = "seal"      // QESeal — the organisation seals
 )
 
+// SCALLevel is the sole-control assurance level of a credential (EN 419241-1).
+type SCALLevel string
+
+const (
+	SCAL1 SCALLevel = "1" // key usable without a fresh per-signature authorization
+	SCAL2 SCALLevel = "2" // each signature needs a fresh authorization binding the hashes
+)
+
+// AuthMode is how a credential's authorization leg is driven. It is the branch
+// point for BeginAuthorization / FinishAuthorization, read off the credential.
+type AuthMode string
+
+const (
+	AuthExplicit   AuthMode = "explicit"   // we collect an OTP/PIN and submit it ourselves
+	AuthOAuth2Code AuthMode = "oauth2code" // the signer authenticates at the QTSP, returns a code
+	AuthImplicit   AuthMode = "implicit"   // machine-held, granted without an interactive leg
+)
+
 // SubjectRef identifies whose credentials to list.
 type SubjectRef struct {
 	Kind      CredentialKind
@@ -86,15 +104,15 @@ type Credential struct {
 	ID          string
 	Kind        CredentialKind
 	Label       string
-	SCAL        SCALLevel   // "1" or "2" (EN 419241-1)
-	AuthMode    AuthMode    // explicit | oauth2code | implicit
-	MultiSign   int         // how many hashes one authorization covers
-	Qualified   bool        // the QTSP asserts this credential is qualified
-	Certificate [][]byte    // signing cert + chain, DER
+	SCAL        SCALLevel // "1" or "2" (EN 419241-1)
+	AuthMode    AuthMode  // explicit | oauth2code | implicit
+	MultiSign   int       // how many hashes one authorization covers
+	Qualified   bool      // the QTSP asserts this credential is qualified
+	Certificate [][]byte  // signing cert + chain, DER
 	ValidFrom   time.Time
 	ValidUntil  time.Time
-	HashAlgos   []string    // OIDs the credential accepts
-	SignAlgos   []string    // OIDs the credential can produce
+	HashAlgos   []string // OIDs the credential accepts
+	SignAlgos   []string // OIDs the credential can produce
 }
 ```
 
@@ -118,6 +136,7 @@ The last row is the reason this shape was chosen over a second `Sealer` interfac
 ```go
 // DocumentDigest is one data-to-be-signed representation (DTBS/R).
 type DocumentDigest struct {
+	ID            string // caller-minted, opaque and unique within one request — the correlation key
 	Name          string // human label; reaches the QTSP's consent screen only
 	Hash          []byte // raw digest bytes — the driver does the base64/hex
 	HashAlgorithm string // OID, e.g. 2.16.840.1.101.3.4.2.1 for SHA-256
@@ -158,11 +177,22 @@ type Authorization struct {
 
 // AuthorizationCallback resumes an authorization begun earlier.
 type AuthorizationCallback struct {
-	ProviderRef string
-	Code        string // oauth2code: the authorization code
-	State       string // oauth2code: echoed back for verification
-	Factor      string // explicit: the OTP/PIN the signer supplied
+	ProviderRef  string
+	CredentialID string           // re-supplied from our persisted row, so Finish needs no driver-side state
+	Digests      []DocumentDigest // the digests bound at Begin; CSC explicit sends them with the OTP
+	Code         string           // oauth2code: the authorization code
+	State        string           // oauth2code: echoed back for verification
+	Factor       string           // explicit: the OTP/PIN the signer supplied
 }
+
+// Authorization.Status values. This is the branch point of the whole design, so
+// the closed set is declared, not left in a comment (cf. qerdsprovider).
+const (
+	AuthStatusPending  = "pending"  // an interactive leg is still outstanding
+	AuthStatusGranted  = "granted"  // Activation is set; ready to Sign
+	AuthStatusRejected = "rejected" // the signer declined or a factor failed terminally
+	AuthStatusExpired  = "expired"  // the window closed before the signer acted
+)
 ```
 
 One `AuthorizationCallback` covers all three CSC auth modes because each mode needs a different subset of it, and a caller that already read `Credential.AuthMode` knows which:
@@ -175,9 +205,9 @@ One `AuthorizationCallback` covers all three CSC auth modes because each mode ne
 
 So `FinishAuthorization` doubles as the poll for `implicit`, rather than a third method that exists only for one mode. A `pending` result on a `Finish` call is normal and not an error.
 
-Why not one `Authorize` returning a union: the two legs run in **different HTTP requests of ours**. `Begin` runs in the request that starts the ceremony; `Finish` runs in the OAuth2 callback or the OTP-submit request, which have no shared memory with the first. Two methods make that boundary explicit, and it is where the persistence rule below bites.
+Why not one `Authorize` returning a union: the two legs run in **different HTTP requests of ours**, and on a horizontally-scaled deployment those two requests can land on different replicas or straddle a restart. `Begin` runs in the request that starts the ceremony; `Finish` runs in the OAuth2 callback or the OTP-submit request, which have no shared memory with the first — an in-process map would be empty on the second pod. That is why `AuthorizationCallback` carries `CredentialID` and `Digests`, not just `ProviderRef`: the domain layer reloads them from the persisted `signing_requests` row and re-supplies them, so the driver's `Finish` holds no state between the two requests. Two methods make that boundary explicit, and it is where the persistence rule below bites.
 
-**`ProviderRef` identifies the authorization, not the signature.** CSC's `signatures/signHash` is synchronous, so unlike QERDS delivery there is usually no long-lived remote handle for the *signature* — the receipt's ref is whatever the driver can correlate back, minted by the driver if the protocol gives it nothing. There is deliberately no `Status(ctx, providerRef)` polling method for signatures in v1; add one when a driver needs it (an async proprietary autosigner is the likely first). What the ref is *never* derived from is our own request id, which does not exist on the provider's side — the same correlate-by-provider-ref rule `qerds_messages.provider_ref` already follows.
+**`ProviderRef` identifies the authorization, not the signature.** CSC's `signatures/signHash` is synchronous, so unlike QERDS delivery there is usually no long-lived remote handle for the *signature* — the ref that matters is the one minted at `BeginAuthorization` and made unique on `signing_requests.provider_ref`. `SignRequest` therefore carries that `ProviderRef` in, and `SignReceipt.ProviderRef` echoes it back out, so the receipt joins the row already persisted rather than arriving as a fresh unrelated value the driver has no way to recover (the SAD is the QTSP's opaque blob, not a lookup key). There is deliberately no `Status(ctx, providerRef)` polling method for signatures in v1; add one when a driver needs it (an async proprietary autosigner is the likely first). What the ref is *never* derived from is our own request id, which does not exist on the provider's side — the same correlate-by-provider-ref rule `qerds_messages.provider_ref` already follows.
 
 ### Activation data is request-scoped and never persisted
 
@@ -189,16 +219,16 @@ type Activation struct {
 	sad string
 }
 
-func NewActivation(sad string) Activation      { return Activation{sad: sad} }
-func (a Activation) SAD() string               { return a.sad }
-func (a Activation) Granted() bool             { return a.sad != "" }
-func (a Activation) String() string            { return "[REDACTED]" }
-func (a Activation) LogValue() slog.Value      { return slog.StringValue("[REDACTED]") }
+func NewActivation(sad string) Activation { return Activation{sad: sad} }
+func (a Activation) SAD() string          { return a.sad }
+func (a Activation) Granted() bool        { return a.sad != "" }
+func (a Activation) String() string       { return "[REDACTED]" }
+func (a Activation) LogValue() slog.Value { return slog.StringValue("[REDACTED]") }
 ```
 
-The field is unexported, so `encoding/json` marshals `{}` and no store can round-trip it by accident. `String` covers `%v`, `%s`, `%+v` and `%q`; `LogValue` covers `slog.Any`, which is what the backend convention says to use. Measured on Go 1.26.4, both directly and nested one struct deep. **`%#v` is not covered** and cannot be — fmt's Go-syntax verb reads unexported fields directly and no method intercepts it. That residual is small (nothing in the backend formats with `%#v`) but it is real, so it is written down rather than claimed away.
+The field is unexported, so `encoding/json` marshals `{}` and no store can round-trip it by accident. `String` covers `%v`, `%s`, `%+v` and `%q`; `LogValue` covers `slog.Any`, which is what the backend convention says to use. Measured on Go 1.26.4, both directly and nested one struct deep. **`%#v` is not covered** and cannot be — fmt's Go-syntax verb reads unexported fields directly and no method intercepts it. That residual is small (nothing in the backend formats with `%#v`) but it is real, so it is written down rather than claimed away. The easier leak is the exported `SAD()` accessor itself: `slog.Any("sad", auth.Activation.SAD())` or `fmt.Errorf("%s", a.SAD())` prints the secret with no unusual verb, and unlike `%#v` it will not look wrong in review. The accessor has to exist — the driver needs the SAD on the wire — so the invariant is a usage rule, not a type guarantee: **`SAD()` is for the driver's outbound wire call only**, never a log field and never an error string.
 
-The invariant that goes with the type: **`Activation` never reaches a store or a log line.** Between `Begin` and `Finish` we persist only the `ProviderRef` and the digests (hashes are not secret). `Finish` and `Sign` run in the same request, so the SAD lives in one call stack and dies with it. If a flow ever needs the SAD to outlive a request, that is a design change to argue for, not a field to add to a store.
+The invariant that goes with the type: **`Activation` never reaches a store or a log line.** Between `Begin` and `Finish` we persist only the `ProviderRef`, the `credential_id` and the digests (none of which is secret) — exactly what `AuthorizationCallback` re-supplies so `Finish` is stateless. `Finish` and `Sign` run in the same request, so the SAD lives in one call stack and dies with it. If a flow ever needs the SAD to outlive a request, that is a design change to argue for, not a field to add to a store.
 
 `FailureCode` is a closed set for the same reason. A driver **maps** onto it and never repeats the responder's own words, because a passthrough string reaches both a log line and an API error body:
 
@@ -213,11 +243,14 @@ const (
 )
 ```
 
+`FailureCode` closing the mapped code is only half the surface: every method also returns `error`, and a driver's `error` must not carry the responder's own bytes either — a sentinel or a code-derived message, never a passthrough, since that error reaches the same log line and API body. A CSC driver has all four positions this repo has already leaked a secret or a URL through, and each is closed by name: the **response body** (an error document the responder wrote); the **status line** — Go keeps the responder's reason phrase verbatim in `resp.Status`, so build from `resp.StatusCode` + `http.StatusText`, never `resp.Status`; the **transport error** (`*url.Error` embeds the full request URL, so wrap it as a sentinel, don't format it into the message); and the **`encoding/json` decode error on a 200**, which carries the responder's first offending byte and sits on the success path where a fix reviewed against the other three never looks. This is the rule `slackchannel` (#159) and `mailoauth` (#168) each paid for; it is written here rather than as a fact about one package because any seam talking to somebody else's endpoint inherits it.
+
 ### SignReceipt and the evidence record
 
 ```go
 // SignRequest asks the QSCD to sign the authorized digests.
 type SignRequest struct {
+	ProviderRef   string // the authorization from Begin/Finish, so the receipt can echo it
 	CredentialID  string
 	Digests       []DocumentDigest // must be the digests bound at Begin
 	Activation    Activation
@@ -234,7 +267,7 @@ type SignReceipt struct {
 
 // Signature is one raw signature value plus the material needed to embed it.
 type Signature struct {
-	DigestName  string   // matches DocumentDigest.Name
+	DigestID    string   // matches DocumentDigest.ID — the correlation key, unique per request
 	Value       []byte   // raw signature bytes
 	Algorithm   string   // signature algorithm OID
 	Certificate [][]byte // signing cert + chain as used, DER
@@ -247,11 +280,26 @@ type Evidence struct {
 	QualifiedTimestamp time.Time
 	Raw                []byte
 }
+
+// SignReceipt.Status values.
+const (
+	SignStatusSigned = "signed"
+	SignStatusFailed = "failed"
+)
+
+// Evidence.Type values. These land verbatim in signing_evidence.evidence_type,
+// so the closed set is declared like qerdsprovider's Evidence* constants.
+const (
+	EvidenceAuthorization  = "authorization"   // the SAD grant: which hashes, which credential, when
+	EvidenceSignature      = "signature"       // the signature-creation event at the QSCD
+	EvidenceTimestamp      = "timestamp"       // the qualified RFC 3161 timestamp token
+	EvidenceRevocationInfo = "revocation-info" // OCSP/CRL captured at signing time
+)
 ```
 
 `SignReceipt` is deliberately the `qerdsprovider.SendReceipt` shape (`ProviderRef` + `Status` + `Evidence`) with `Signatures` added, and `Evidence` is field-for-field the `qerdsprovider.Evidence` shape. That is not cosmetic: it lets `signing_evidence` be the same append-only table design as `qerds_evidence`, and it means the Art 5(1)(n) verify-and-export UI has one evidence vocabulary to render, not two.
 
-`Signatures` correlates to the request by `DigestName`, not by slice position. Position is what a driver silently gets wrong when a provider reorders or drops one, and the caller then embeds the wrong signature in the wrong document with no error anywhere. The caller must reject a receipt whose `DigestName` set is not exactly the requested set.
+`Signatures` correlates to the request by `DigestID` — a caller-minted, opaque, per-request-unique key — not by slice position and not by `Name`. Position is what a driver silently gets wrong when a provider reorders or drops one; `Name` is a human filename that is neither unique (a `MultiSign` authorization can hold two files both called `contract.pdf`) nor stable (sanitisation collapses `a/b.pdf` and `a_b.pdf` to one string), so correlating on it embeds the wrong signature in the wrong document while passing every set-equality check. `DigestID` is unique by construction, so the caller must reject a receipt whose `DigestID` set is not exactly the requested set. `Name` stays display-only.
 
 Evidence types, and why each one has to be able to come back through the seam:
 
@@ -263,6 +311,22 @@ Evidence types, and why each one has to be able to come back through the seam:
 | `revocation-info` | OCSP/CRL captured at signing time | PAdES **B-LT** cannot be built without it (#173) |
 
 #173 concluded B-LT/B-LTA needs a DSS service boundary, but it needs the *material* first, and signing time is the only moment revocation data is guaranteed fresh for the certificate actually used. A seam that returned only the signature value would make climbing from B to B-T to B-LT an interface change every step. `Timestamp` is a separate method for the same reason: #172 found Digidentity reuses a CSC endpoint for timestamping even on its non-CSC seal path, so a provider can offer timestamping independently of how it signs.
+
+```go
+// TimestampRequest asks for a qualified RFC 3161 timestamp over one hash.
+type TimestampRequest struct {
+	Hash          []byte // the digest to timestamp — raw bytes, driver encodes
+	HashAlgorithm string // OID of the digest algorithm
+}
+
+// Timestamp is a qualified RFC 3161 timestamp token, the material PAdES B-T needs.
+type Timestamp struct {
+	Token       []byte    // the DER-encoded TimeStampToken (RFC 3161)
+	GeneratedAt time.Time // the genTime the TSA asserts, for the evidence record
+}
+```
+
+The token is the same bytes a `timestamp` evidence record carries; `Timestamp` is offered separately so a caller can timestamp a hash the seam did not sign (an archival re-timestamp toward B-LTA, #173), which is why it takes a bare hash rather than a `SignReceipt`.
 
 ### Capabilities, config swap and Ping
 
