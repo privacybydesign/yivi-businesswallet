@@ -219,11 +219,15 @@ func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang str
 		return HeldCredential{}, err
 	}
 	name, logoURI := credentialDisplay(batch.CredentialMetadata, lang)
-	// A credential type need not ship its own logo (the Yivi issuer serves a name
-	// but no per-credential logo on most types), so fall back to the issuer's logo
-	// for the card rather than showing none.
+	// The logo is the credential type's own image, not the issuer's. An issuer may
+	// have added it to newer batches only, so when this credential's own batch
+	// carries none, resolve it across the org's other batches of the same type rather
+	// than falling back to the issuer logo.
 	if logoURI == "" {
-		logoURI = issuerLogoURI(batch.IssuerDisplay, lang)
+		logoURI, err = e.credentialLogoForVCT(ctx, orgID, batch.VerifiableCredentialType, lang)
+		if err != nil {
+			return HeldCredential{}, err
+		}
 	}
 	return HeldCredential{
 		IssuerName:  issuerDisplayName(batch.IssuerDisplay, lang),
@@ -237,14 +241,15 @@ func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang str
 // type-metadata title, logo and issuer name keyed by verifiable-credential type —
 // the held-list view's source for per-row titles, logos and issuers, so the table
 // does not need a per-row claims fetch. Credentials of the same vct share one display
-// (it is a property of the type), so the map is keyed by vct. An org that holds
-// nothing yields an empty (non-nil) map.
+// (it is a property of the type), so the map is keyed by vct. The logo is the
+// credential type's own image, never the issuer's. An org that holds nothing yields
+// an empty (non-nil) map.
 //
 // Metadata is merged across every batch of a type rather than taken from the first
 // one seen: an issuer enriches its metadata over time, so of two batches of the same
 // vct one may carry a logo (or issuer name) the other lacks. First-non-empty-wins
 // means a type reliably shows whatever any of its batches carries — matching the
-// detail view, which resolves the one batch and so always finds its logo.
+// detail view, which resolves the type's logo the same way.
 func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]HeldDisplay, error) {
 	eng, err := e.engineFor(ctx, orgID)
 	if err != nil {
@@ -264,9 +269,6 @@ func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (ma
 			continue
 		}
 		name, logoURI := credentialDisplay(batches[i].CredentialMetadata, lang)
-		if logoURI == "" {
-			logoURI = issuerLogoURI(batches[i].IssuerDisplay, lang)
-		}
 		d := displays[vct]
 		if d.DisplayName == "" {
 			d.DisplayName = name
@@ -444,27 +446,32 @@ func issuerDisplayName(displays []models.IssuerMetadataDisplay, lang string) str
 	return pickLocaleName(names, lang)
 }
 
-// issuerLogoURI resolves a credential's issuer logo for the requested language from
-// its stored issuer display metadata, empty when no issuer display entry carries a
-// logo. The logo is taken from the same entry as the chosen language (falling back
-// to the first entry that carries one, mirroring credentialDisplay), so a name-only
-// localized entry still yields a logo when another entry provides one. It is the
-// credential-card logo fallback when the credential type ships no logo of its own.
-func issuerLogoURI(displays []models.IssuerMetadataDisplay, lang string) string {
-	names := make([]localeName, len(displays))
-	for i, d := range displays {
-		names[i] = localeName{name: d.Name, locale: d.Locale}
+// credentialLogoForVCT resolves the credential type's own logo for a vct across
+// every batch of that type the org holds, empty when none carries one. The logo is
+// a property of the type, but an issuer may have added it to newer batches only, so
+// a credential whose own batch predates the logo still shows it. This is the
+// detail-view fallback when the resolved batch carries no logo of its own; the
+// list view merges the same way inside Displays.
+func (e *Engine) credentialLogoForVCT(ctx context.Context, orgID uuid.UUID, vct, lang string) (string, error) {
+	if vct == "" {
+		return "", nil
 	}
-	if chosen := pickLocaleIndex(names, lang); chosen >= 0 &&
-		displays[chosen].LogoURI.Valid && displays[chosen].LogoURI.V != "" {
-		return displays[chosen].LogoURI.V
+	eng, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return "", err
 	}
-	for _, d := range displays {
-		if d.LogoURI.Valid && d.LogoURI.V != "" {
-			return d.LogoURI.V
+	var batches []models.CredentialBatch
+	if err := eng.Db().WithContext(ctx).
+		Preload("CredentialMetadata.Display").
+		Where("verifiable_credential_type = ?", vct).Find(&batches).Error; err != nil {
+		return "", fmt.Errorf("eudiholder: credential logo for vct %q org %s: %w", vct, orgID, err)
+	}
+	for i := range batches {
+		if _, logoURI := credentialDisplay(batches[i].CredentialMetadata, lang); logoURI != "" {
+			return logoURI, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // credentialDisplay resolves a credential's type-metadata title and logo URI for
