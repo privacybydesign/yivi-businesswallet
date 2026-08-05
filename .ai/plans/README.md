@@ -10,8 +10,9 @@ or `.ai/features/`, which are committed.
 **Exception: a design-only plan is force-committed.** When a branch produces a decision
 rather than code (a design or grilling ticket), its plan *is* the deliverable, so it goes in
 the PR with `git add -f` despite the gitignore and carries `Status: proposed` until the
-implementing branch lands. `membership-lifecycle.md`, `rbac-model.md`, `signing-provider-seam.md` and
-`sole-control-authorization.md` are the ones that exist. Everything above still applies to them.
+implementing branch lands. `membership-lifecycle.md`, `rbac-model.md`, `signing-provider-seam.md`,
+`sole-control-authorization.md` and `inbound-validation-model.md` are the ones that exist.
+Everything above still applies to them.
 
 ## Plans
 - One plan per branch: `.ai/plans/<branch-name>.md`. Never share a plan file across worktrees.
