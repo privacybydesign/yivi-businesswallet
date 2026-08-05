@@ -91,6 +91,13 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
 
 	org := organization.OrgFromContext(r.Context())
 	settings, err := h.store.Save(r.Context(), org.ID, in)
+	if errors.Is(err, ErrNoEncryptionKey) {
+		return &respond.APIError{
+			Status:  http.StatusConflict,
+			Code:    "no_encryption_key",
+			Message: "this deployment has no directory encryption key configured, so a client secret cannot be stored; set PROVISIONING_ENCRYPTION_KEY on the server",
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("updating provisioning settings: %w", err)
 	}

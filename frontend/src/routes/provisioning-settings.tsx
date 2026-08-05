@@ -76,6 +76,18 @@ function syncError(error: Error, t: TFunction): string {
   }
 }
 
+// A save fails with a small set of known codes; each names the thing to fix.
+// Anything else falls back to the raw message.
+function saveError(error: Error, t: TFunction): string {
+  const code = errorCode(error);
+  switch (code) {
+    case "no_encryption_key":
+      return t(`provisioningSettings.saveErrors.${code}`);
+    default:
+      return t("provisioningSettings.saveError", { message: error.message });
+  }
+}
+
 // One admin-group id per line, both on the way in and the way out; the backend
 // trims and de-duplicates, so this only has to be forgiving about whitespace.
 function parseGroupIds(value: string): string[] {
@@ -291,9 +303,7 @@ function ProvisioningForm({
         )}
         {save.isError && (
           <p role="alert" className="text-error text-[13px]">
-            {t("provisioningSettings.saveError", {
-              message: save.error.message,
-            })}
+            {saveError(save.error, t)}
           </p>
         )}
 

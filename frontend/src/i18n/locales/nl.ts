@@ -722,6 +722,10 @@ export const nl: Translation<typeof en> = {
       "Vul een clientgeheim in voordat u synchronisatie inschakelt.",
     saveError:
       "Kon de instellingen voor directorysynchronisatie niet opslaan: {{message}}",
+    saveErrors: {
+      no_encryption_key:
+        "Deze omgeving kan geen clientgeheim opslaan omdat er geen encryptiesleutel voor directory is ingesteld. Vraag de serverbeheerder om PROVISIONING_ENCRYPTION_KEY in te stellen.",
+    },
     loadError:
       "Kon de instellingen voor directorysynchronisatie niet laden: {{message}}",
     syncHeading: "Nu synchroniseren",

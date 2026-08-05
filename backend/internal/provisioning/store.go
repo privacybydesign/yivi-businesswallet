@@ -84,7 +84,7 @@ func (s *Store) Save(ctx context.Context, orgID uuid.UUID, in SettingsInput) (Se
 		setSecret = true
 		if *in.ClientSecret != "" {
 			if s.cipher == nil {
-				return Settings{}, errors.New("provisioning: no encryption key configured; cannot store a client secret")
+				return Settings{}, ErrNoEncryptionKey
 			}
 			ct, err := s.cipher.Encrypt([]byte(*in.ClientSecret))
 			if err != nil {

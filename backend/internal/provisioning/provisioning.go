@@ -57,6 +57,11 @@ var (
 	// a permission that was revoked all look exactly like "everybody left", and
 	// obeying it would deprovision the whole organisation in one pass.
 	ErrEmptyDirectory = errors.New("provisioning: source returned no accounts")
+	// ErrNoEncryptionKey is returned when saving a client secret but the deployment
+	// has no PROVISIONING_ENCRYPTION_KEY configured, so the secret cannot be
+	// encrypted at rest. It is surfaced to the admin as a configuration problem
+	// rather than an internal error.
+	ErrNoEncryptionKey = errors.New("provisioning: no encryption key configured; cannot store a client secret")
 )
 
 // SourceError wraps a failure that belongs to the directory source: it could not

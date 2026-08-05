@@ -703,6 +703,10 @@ export const en = {
       "Enter the tenant ID and application (client) ID before enabling sync.",
     secretRequired: "Enter a client secret before enabling sync.",
     saveError: "Could not save directory sync settings: {{message}}",
+    saveErrors: {
+      no_encryption_key:
+        "This deployment cannot store a client secret because no directory encryption key is configured. Ask the server administrator to set PROVISIONING_ENCRYPTION_KEY.",
+    },
     loadError: "Could not load directory sync settings: {{message}}",
     syncHeading: "Sync now",
     syncDescription:
