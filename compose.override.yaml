@@ -240,6 +240,99 @@ services:
           -d '[{"entityId":0,"index":0,"routingCriterias":[],"backendName":"backendWebservice","persisted":true},{"entityId":0,"index":1,"routingCriterias":[],"backendName":"backendFSPlugin","persisted":true},{"entityId":0,"index":2,"routingCriterias":[],"backendName":"Jms","persisted":true}]'
         echo "message filter configured"
 
+  # Qualified-signing demo (QES over CSC API v2). Opt-in — heavy, and only for
+  # demonstrating how remote QTSP signing works:
+  #   docker compose --profile signer up --build
+  # Hosts the EUDI wallet-driven QTSP reference implementation (built from source
+  # at a pinned commit, patched for SoftHSM + an EJBCA-free self-sign path) with
+  # SoftHSM2 as the QSCD stand-in. A one-shot provisioner seeds a signing
+  # credential, after which POST http://localhost:8085/csc/v2/signatures/signHash
+  # returns a real ECDSA signature — see docker/development/qtsp-signer/run-demo.sh.
+  # NOTE: proves QES-over-CSC plumbing on a software HSM, NOT qualified compliance,
+  # and runs the resource server in `noauth` mode — the OID4VP wallet ceremony
+  # (authorization_server + SCAL2 QR) is a later phase. See issue #194 and
+  # .ai/features/qtsp-signing-demo.md.
+  signer-mysql:
+    image: mysql:8
+    profiles: ["signer"]
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: qtsp
+      MYSQL_USER: qtsp
+      MYSQL_PASSWORD: qtsp
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uqtsp -pqtsp --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  qtsp-signer:
+    build:
+      context: ./docker/development/qtsp-signer
+    image: yivi-qtsp-signer:demo
+    profiles: ["signer"]
+    depends_on:
+      signer-mysql:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+    environment:
+      # noauth: no OID4VP; authz claims come from X-Stub-* headers. DEMO ONLY.
+      SPRING_PROFILES_ACTIVE: noauth
+      # --- Datasource (the app builds jdbc:mysql://<DB_URL>/<DB_NAME>) ---
+      SPRING_DATASOURCE_USERNAME: qtsp
+      SPRING_DATASOURCE_PASSWORD: qtsp
+      SPRING_DATASOURCE_DB_URL: signer-mysql:3306
+      SPRING_DATASOURCE_DB_NAME: qtsp
+      # --- DB field encryption + symmetric key (demo values, not secrets) ---
+      DB_ENCRYPTION_PASSPHRASE: demo-passphrase
+      DB_ENCRYPTION_SALT: MTIzNDU2Nzg5MDEyMzQ1Ng==            # base64("1234567890123456")
+      SYMMETRIC_SECRET_KEY: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=  # base64(32 bytes)
+      # --- JWT settings (unused under noauth, must still resolve) ---
+      AUTHORIZATION_SERVER_JWT_SET_URI: http://localhost:9999
+      AUTHORIZATION_SERVER_ISSUER_URI: http://localhost:9999
+      # --- EJBCA disabled: self-sign instead of enrolling against a CA ---
+      EJBCA_ENABLED: "false"
+      EJBCA_HOST: disabled.invalid
+      EJBCA_CLIENT_P12_FILEPATH: /dev/null
+      EJBCA_CLIENT_P12_PASSWORD: x
+      EJBCA_MANAGEMENT_CA: /dev/null
+      EJBCA_CERTIFICATE_PROFILE_NAME: x
+      EJBCA_END_ENTITY_PROFILE_NAME: x
+      EJBCA_USERNAME: x
+      EJBCA_PASSWORD: x
+      # --- SoftHSM / token (consumed by docker-entrypoint.sh) ---
+      PKCS11_TOKEN_LABEL: qtsp-token
+      PKCS11_PIN: "1234"
+      PKCS11_SO_PIN: "1234"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8085/spike/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+
+  # One-shot: once the signer is healthy, seed a signing credential (SoftHSM
+  # key-gen + wrap + self-signed cert, no EJBCA) so signHash is drivable at once.
+  # Idempotent enough to re-run on every `up` (it just mints another credential).
+  qtsp-signer-provision:
+    image: curlimages/curl:latest
+    profiles: ["signer"]
+    restart: "no"
+    depends_on:
+      qtsp-signer:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "seeding a demo signing credential..."
+        curl -fsS -X POST "http://qtsp-signer:8085/spike/seed-credential?sub=demo-user"
+        echo
+        echo "seeded. Verify end-to-end with: ./docker/development/qtsp-signer/run-demo.sh"
+
 volumes:
   backend-go-build:
   backend-go-mod:

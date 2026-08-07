@@ -1,0 +1,257 @@
+diff --git a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/CredentialsService.java b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/CredentialsService.java
+index cf6c7cb..649f274 100644
+--- a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/CredentialsService.java
++++ b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/CredentialsService.java
+@@ -56,7 +56,8 @@ public class CredentialsService {
+             @Autowired CredentialsRepository credentialsRepository) {
+         this.credentialsRepository = credentialsRepository;
+         this.keysService = new KeysService(hsmService);
+-        this.certificatesService = new CertificatesService(hsmService, ejbcaService);
++        // [SPIKE] Propagate EJBCA-enabled flag so CertificatesService self-signs when EJBCA is off.
++        this.certificatesService = new CertificatesService(hsmService, ejbcaService, ejbcaService.isEnabled());
+     }
+ 
+     /**
+diff --git a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/CertificatesService.java b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/CertificatesService.java
+index 259d07c..8eb77b2 100644
+--- a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/CertificatesService.java
++++ b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/CertificatesService.java
+@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
+ 
+ import javax.security.auth.x500.X500Principal;
+ import java.io.*;
++import java.math.BigInteger;
+ import java.security.*;
+ import java.security.cert.CertificateFactory;
+ import java.security.cert.X509Certificate;
+@@ -47,11 +48,18 @@ import java.util.*;
+ public class CertificatesService {
+     private final HsmService hsmService;
+     private final EjbcaService ejbcaService;
++    // [SPIKE] When false, generateCertificates self-signs instead of calling EJBCA.
++    private final boolean ejbcaEnabled;
+     private static final Logger logger = LoggerFactory.getLogger(CertificatesService.class);
+ 
+     public CertificatesService(HsmService hsmService, EjbcaService ejbcaService){
++        this(hsmService, ejbcaService, true);
++    }
++
++    public CertificatesService(HsmService hsmService, EjbcaService ejbcaService, boolean ejbcaEnabled){
+         this.hsmService = hsmService;
+         this.ejbcaService = ejbcaService;
++        this.ejbcaEnabled = ejbcaEnabled;
+     }
+ 
+     public String base64EncodeCertificate(X509Certificate certificate) throws Exception{
+@@ -75,6 +83,17 @@ public class CertificatesService {
+ 
+     private List<X509Certificate> generateCertificates(PublicKey publicKey, String givenName, String surname, String subjectCN, String countryCode, byte[] privateKeyValues, String keyAlgorithm) throws Exception{
+ 
++        // [SPIKE] EJBCA-free mode: self-sign the end-entity certificate on the HSM key
++        // instead of enrolling against a CA. signHash never reads the certificate, so a
++        // self-signed cert is enough to exercise the full create -> sign path. Demo only.
++        if(!this.ejbcaEnabled){
++            logger.warn("[SPIKE] EJBCA disabled — issuing a SELF-SIGNED certificate (demo only, NOT qualified).");
++            X509Certificate selfSigned = selfSignCertificate(publicKey, givenName, surname, subjectCN, countryCode, privateKeyValues, keyAlgorithm);
++            List<X509Certificate> out = new ArrayList<>();
++            out.add(selfSigned); // index 0 = leaf, no chain
++            return out;
++        }
++
+         byte[] csrInfo = generateCertificateRequestInfo(publicKey, removeSemicolon(givenName), removeSemicolon(surname), removeSemicolon(subjectCN), countryCode);
+         logger.info("Retrieved Certificate Signing Request Information.");
+ 
+@@ -93,6 +112,57 @@ public class CertificatesService {
+     }
+ 
+ 
++    // [SPIKE] Build a self-signed X.509 v3 certificate over the HSM-held key, signing the
++    // TBSCertificate with the same HSM ECDSA-SHA256 path the CSR uses. Mirrors
++    // generateCertificateRequest but assembles a Certificate instead of a PKCS#10 request.
++    private X509Certificate selfSignCertificate(PublicKey publicKey, String givenName, String surname, String subjectCN, String countryCode, byte[] privateKeyValues, String keyAlgorithm) throws Exception {
++        Security.addProvider(new BouncyCastleProvider());
++        if(!keyAlgorithm.equals("ECDSA")){
++            throw new Exception("[SPIKE] self-sign mode currently supports ECDSA (P-256) only.");
++        }
++
++        final X500Name subjectDN = new X500NameBuilder(BCStyle.INSTANCE)
++              .addRDN(BCStyle.CN, removeSemicolon(subjectCN))
++              .addRDN(BCStyle.SURNAME, removeSemicolon(surname))
++              .addRDN(BCStyle.GIVENNAME, removeSemicolon(givenName))
++              .addRDN(BCStyle.C, countryCode)
++              .build();
++
++        SubjectPublicKeyInfo spki = SubjectPublicKeyInfo.getInstance(publicKey.getEncoded());
++        AlgorithmIdentifier sigAlg = new AlgorithmIdentifier(X9ObjectIdentifiers.ecdsa_with_SHA256);
++
++        long now = System.currentTimeMillis();
++        V3TBSCertificateGenerator tbsGen = new V3TBSCertificateGenerator();
++        tbsGen.setSerialNumber(new ASN1Integer(BigInteger.valueOf(now)));
++        tbsGen.setIssuer(subjectDN);
++        tbsGen.setSubject(subjectDN);
++        tbsGen.setStartDate(new Time(new Date(now - 3600_000L)));
++        tbsGen.setEndDate(new Time(new Date(now + 365L * 24L * 3600L * 1000L)));
++        tbsGen.setSignature(sigAlg);
++        tbsGen.setSubjectPublicKeyInfo(spki);
++        TBSCertificate tbs = tbsGen.generateTBSCertificate();
++
++        byte[] tbsBytes = tbs.getEncoded(ASN1Encoding.DER);
++        // [SPIKE] SoftHSM does not support CKM_ECDSA_SHA256 (combined hash+sign), only raw
++        // CKM_ECDSA. So hash the TBS here and sign the digest with the raw-ECDSA path — the
++        // result is still a valid ecdsa-with-SHA256 certificate signature.
++        byte[] tbsDigest = MessageDigest.getInstance("SHA-256").digest(tbsBytes);
++        byte[] signature = hsmService.signDTBSWithECDSAAndGivenAlgorithm(privateKeyValues, tbsDigest, "ECDSA");
++
++        ASN1EncodableVector v = new ASN1EncodableVector();
++        v.add(tbs);
++        v.add(sigAlg);
++        v.add(new DERBitString(signature));
++        org.bouncycastle.asn1.x509.Certificate certAsn1 =
++              org.bouncycastle.asn1.x509.Certificate.getInstance(new DERSequence(v));
++
++        CertificateFactory cf = CertificateFactory.getInstance("X.509");
++        X509Certificate cert = (X509Certificate) cf.generateCertificate(
++              new ByteArrayInputStream(certAsn1.getEncoded(ASN1Encoding.DER)));
++        logger.info("[SPIKE] Self-signed certificate created. Subject: {}", subjectDN);
++        return cert;
++    }
++
+     private byte[] generateCertificateRequestInfo(PublicKey publicKey, String givenName, String surname, String commonName, String countryName) throws Exception {
+         Security.addProvider(new BouncyCastleProvider());
+         SubjectPublicKeyInfo pki = SubjectPublicKeyInfo.getInstance(publicKey.getEncoded());
+diff --git a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/ejbca/EjbcaProperties.java b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/ejbca/EjbcaProperties.java
+index b444206..a957298 100644
+--- a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/ejbca/EjbcaProperties.java
++++ b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/ejbca/EjbcaProperties.java
+@@ -45,8 +45,21 @@ public class EjbcaProperties {
+ 
+     private boolean includeChain;
+ 
++    // [SPIKE] When false, credential creation self-signs the certificate instead
++    // of enrolling against EJBCA (see CertificatesService). Defaults to true so
++    // upstream behaviour is unchanged unless ejbca.enabled=false is set.
++    private boolean enabled = true;
++
+     private List<CountryConfig> countries;
+ 
++    public boolean isEnabled() {
++        return enabled;
++    }
++
++    public void setEnabled(boolean enabled) {
++        this.enabled = enabled;
++    }
++
+     public void setCountries(List<CountryConfig> countries) {
+         this.countries = countries;
+     }
+diff --git a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/ejbca/EjbcaService.java b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/ejbca/EjbcaService.java
+index 85cc609..eea8adf 100644
+--- a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/ejbca/EjbcaService.java
++++ b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/certificates/ejbca/EjbcaService.java
+@@ -48,6 +48,12 @@ public class EjbcaService {
+         return this.ejbcaProperties.getCertificateAuthorityName(countryCode);
+     }
+ 
++    // [SPIKE] Exposes whether EJBCA enrollment is enabled, so CredentialsService can
++    // wire CertificatesService into self-sign mode when it is not.
++    public boolean isEnabled(){
++        return this.ejbcaProperties.isEnabled();
++    }
++
+     // [0] : certificate
+     // [1..] : certificate Chain
+     public List<X509Certificate> certificateRequest(String certificateRequest, String countryCode) throws Exception {
+diff --git a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/keys/hsm/HsmService.java b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/keys/hsm/HsmService.java
+index dd9c4a6..d5f2f27 100644
+--- a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/keys/hsm/HsmService.java
++++ b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/model/keys/hsm/HsmService.java
+@@ -50,6 +50,13 @@ public class HsmService {
+     private final HsmInformation hsmInfo;
+     private static final int IVLENGTH = 12;
+     private static final String SECRET_KEY_LABEL = "secret_key_wrapper";
++    // [SPIKE] Upstream wraps/unwraps the private key with CKM_AES_CBC and no parameter.
++    // SoftHSM rejects that with GENERAL_ERROR: its AES-CBC advertises only the wrap flag
++    // (not unwrap) and cannot CBC-wrap an asymmetric private key whose encoded length is
++    // not block-aligned. SoftHSM (and Utimaco) both support CKM_AES_KEY_WRAP_PAD (RFC 5649):
++    // wrap+unwrap, arbitrary length, default AIV so no IV parameter is needed. This is the
++    // portable key-wrapping mechanism and what a production HSM path should use too.
++    private static final long CKM_AES_KEY_WRAP_PAD = 0x210aL;
+ 
+     public HsmService(
+           @Autowired SecretKeyRepository secretKeyRepositoryLoaded,
+@@ -220,7 +227,7 @@ public class HsmService {
+         LongRef privKey = new LongRef();
+         CE.GenerateKeyPair(session, new CKM(CKM.RSA_PKCS_KEY_PAIR_GEN), pubTemplate, privTemplate, pubKey, privKey);
+         byte[][] keyPair = new byte[3][];
+-        keyPair[0] = CE.WrapKey(session, new CKM(CKM.AES_CBC), secretKeyObj, privKey.value());
++        keyPair[0] = CE.WrapKey(session, new CKM(CKM_AES_KEY_WRAP_PAD), secretKeyObj, privKey.value()); // [SPIKE] SoftHSM-portable key wrap
+         keyPair[1] = CE.GetAttributeValue(session, pubKey.value(), CKA.MODULUS).getValue();
+         keyPair[2] = CE.GetAttributeValue(session, pubKey.value(), CKA.PUBLIC_EXPONENT).getValue();
+ 
+@@ -264,7 +271,7 @@ public class HsmService {
+         LongRef privKey = new LongRef();
+         CE.GenerateKeyPair(session, new CKM(CKM.ECDSA_KEY_PAIR_GEN), pubTempl, privTempl, pubKey, privKey);
+         byte[][] keyPair = new byte[3][];
+-        keyPair[0] = CE.WrapKey(session, new CKM(CKM.AES_CBC), secretKeyObj, privKey.value());
++        keyPair[0] = CE.WrapKey(session, new CKM(CKM_AES_KEY_WRAP_PAD), secretKeyObj, privKey.value()); // [SPIKE] SoftHSM-portable key wrap
+         keyPair[1] = CE.GetAttributeValue(session, pubKey.value(), CKA.EC_POINT).getValue();
+         keyPair[2] = CE.GetAttributeValue(session, pubKey.value(), CKA.EC_PARAMS).getValue();
+ 
+@@ -284,7 +291,7 @@ public class HsmService {
+               new CKA(CKA.EXTRACTABLE, true),
+               new CKA(CKA.SIGN, true),
+         };
+-        return CE.UnwrapKey(session, new CKM(CKM.AES_CBC), secretKey, wrappedKey, templateUnwrap);
++        return CE.UnwrapKey(session, new CKM(CKM_AES_KEY_WRAP_PAD), secretKey, wrappedKey, templateUnwrap); // [SPIKE] SoftHSM-portable key wrap
+     }
+ 
+     private long unwrapP256Key(long session, long secretKey, byte[] wrappedKey){
+@@ -298,7 +305,7 @@ public class HsmService {
+               new CKA(CKA.EXTRACTABLE, true),
+               new CKA(CKA.SIGN, true),
+         };
+-        return CE.UnwrapKey(session, new CKM(CKM.AES_CBC), secretKey, wrappedKey, templateUnwrap);
++        return CE.UnwrapKey(session, new CKM(CKM_AES_KEY_WRAP_PAD), secretKey, wrappedKey, templateUnwrap); // [SPIKE] SoftHSM-portable key wrap
+     }
+ 
+     /**
+diff --git a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/web/config/NoAuthStubFilter.java b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/web/config/NoAuthStubFilter.java
+index 6246ff1..c265807 100644
+--- a/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/web/config/NoAuthStubFilter.java
++++ b/resource_server/src/main/java/eu/europa/ec/eudi/signer/r3/resource_server/web/config/NoAuthStubFilter.java
+@@ -52,15 +52,17 @@ public class NoAuthStubFilter extends OncePerRequestFilter {
+         if (SecurityContextHolder.getContext().getAuthentication() == null) {
+             Map<String, Object> headers = Map.of("alg", "none");
+             Map<String, Object> claims = new HashMap<>();
+-            claims.put("sub", STUB_SUB);
++            claims.put("sub", headerOrDefault(request, "X-Stub-Sub", STUB_SUB));
+             claims.put(JWTCustomClaimNames.GIVEN_NAME, "Dev");
+             claims.put(JWTCustomClaimNames.SURNAME, "User");
+             claims.put(JWTCustomClaimNames.ISSUING_COUNTRY, "UT");
+-            // Stub signing claims — populate with real values if testing signHash
+-            claims.put(JWTCustomClaimNames.CREDENTIAL_ID, "stub-credential-id");
+-            claims.put(JWTCustomClaimNames.NUM_SIGNATURES, "1");
+-            claims.put(JWTCustomClaimNames.HASH_ALGORITHM_OID, "2.16.840.1.101.3.4.2.1");
+-            claims.put(JWTCustomClaimNames.HASHES, "");
++            // [SPIKE] Signing (authorization) claims are sourced from request headers so a
++            // caller can bind them to the signHash body (SCAL2 binding) without a real
++            // authorize step. Falls back to placeholders when the headers are absent.
++            claims.put(JWTCustomClaimNames.CREDENTIAL_ID, headerOrDefault(request, "X-Stub-Credential-Id", "stub-credential-id"));
++            claims.put(JWTCustomClaimNames.NUM_SIGNATURES, headerOrDefault(request, "X-Stub-Num-Signatures", "1"));
++            claims.put(JWTCustomClaimNames.HASH_ALGORITHM_OID, headerOrDefault(request, "X-Stub-Hash-Alg", "2.16.840.1.101.3.4.2.1"));
++            claims.put(JWTCustomClaimNames.HASHES, headerOrDefault(request, "X-Stub-Hashes", ""));
+ 
+             Jwt stubJwt = new Jwt("stub-token", Instant.now(), Instant.now().plusSeconds(3600),
+                     headers, claims);
+@@ -74,4 +76,10 @@ public class NoAuthStubFilter extends OncePerRequestFilter {
+ 
+         filterChain.doFilter(request, response);
+     }
++
++    // [SPIKE] Returns the request header value if present and non-blank, else the default.
++    private static String headerOrDefault(HttpServletRequest request, String header, String def) {
++        String value = request.getHeader(header);
++        return (value == null || value.isBlank()) ? def : value;
++    }
+ }
