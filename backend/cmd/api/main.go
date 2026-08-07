@@ -19,6 +19,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/config"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/csc"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/emailchannel"
@@ -498,6 +499,17 @@ func run() error {
 	provisioningHandler := provisioning.NewHandler(provisioningStore, provisioningService, requireUser, orgHandler.Authorize)
 	provisioning.NewScheduler(provisioningStore, provisioningService).Start(ctx, provisioning.DefaultSyncInterval)
 
+	// Per-org CSC signing-provider settings (a remote QTSP driven over the CSC API
+	// v2). Settings + a connection test only for now; the signing ceremony is a
+	// separate seam. Its own deployment key encrypts the client secret at rest;
+	// without it an org cannot save one (csc.ErrNoEncryptionKey).
+	cscCipher, err := crypto.NewCipher(cfg.CSCEncryptionKey)
+	if err != nil {
+		return err
+	}
+	cscStore := csc.NewStore(pool, recorder, cscCipher)
+	cscHandler := csc.NewHandler(cscStore, csc.NewClient(), requireUser, orgHandler.Authorize)
+
 	handler := server.New(
 		pool,
 		cfg.StaticDir,
@@ -515,6 +527,7 @@ func run() error {
 		slackHandler,
 		teamsHandler,
 		provisioningHandler,
+		cscHandler,
 	)
 
 	httpServer := &http.Server{

@@ -97,6 +97,8 @@ const (
 	ProvisioningSettingsUpdated = "provisioning.settings_updated"
 	ProvisioningRunCompleted    = "provisioning.run_completed"
 	ProvisioningRunFailed       = "provisioning.run_failed"
+
+	CSCSettingsUpdated = "csc.settings_updated"
 )
 
 const (
@@ -139,6 +141,8 @@ const (
 	TargetTeamsSettings = "org_teams_settings"
 
 	TargetProvisioningSettings = "org_provisioning_settings"
+
+	TargetCSCSettings = "org_csc_settings"
 )
 
 type Actor struct {

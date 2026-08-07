@@ -56,6 +56,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "provisioning.settings_updated": { icon: "settings", tone: "blue" },
   "provisioning.run_completed": { icon: "valid", tone: "green" },
   "provisioning.run_failed": { icon: "warning", tone: "red" },
+  "csc.settings_updated": { icon: "settings", tone: "blue" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -206,6 +207,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.provisioningRunCompleted");
     case "provisioning.run_failed":
       return t("auditLog.actions.provisioningRunFailed");
+    case "csc.settings_updated":
+      return t("auditLog.actions.cscSettingsUpdated");
     default:
       return action;
   }
@@ -269,6 +272,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.orgTeamsSettings");
     case "org_provisioning_settings":
       return t("auditLog.targets.orgProvisioningSettings");
+    case "org_csc_settings":
+      return t("auditLog.targets.orgCscSettings");
     default:
       return targetType;
   }

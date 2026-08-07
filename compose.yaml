@@ -82,6 +82,9 @@ services:
       # Encrypts the per-org directory client secret at rest (hex 32 bytes).
       # Without it an org cannot store one, so directory provisioning stays off.
       PROVISIONING_ENCRYPTION_KEY: ${PROVISIONING_ENCRYPTION_KEY:-}
+      # Encrypts the per-org CSC signing-provider client secret at rest (hex 32
+      # bytes). Without it an org cannot store one (internal/csc).
+      CSC_ENCRYPTION_KEY: ${CSC_ENCRYPTION_KEY:-}
       # Attestation issuer (OpenID4VCI). Defaults to the in-process stub; set to
       # `veramo` with a URL/instance/token to issue real credentials.
       ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}

@@ -8,6 +8,7 @@ import { EmailSettingsPanel } from "./email-settings";
 import { EmailTemplatesPanel } from "./email-templates";
 import { IssuerSettingsPanel } from "./issuer-settings";
 import { NotificationsSettingsPanel } from "./notifications-settings";
+import { CscSettingsPanel } from "./csc-settings";
 import { OrgProfileSettings } from "./org-profile-settings";
 import { PostguardApiKeyCard } from "./postguard-api-key";
 import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
@@ -29,6 +30,7 @@ const TABS = [
   { key: "notifications", labelKey: "settings.tabNotifications" },
   { key: "issuer", labelKey: "settings.tabIssuer" },
   { key: "provisioning", labelKey: "settings.tabProvisioning" },
+  { key: "signing", labelKey: "settings.tabSigning" },
   { key: "postguard", labelKey: "settings.tabPostguard" },
   { key: "wallets", labelKey: "settings.tabWallets" },
 ] as const;
@@ -130,6 +132,8 @@ export default function Settings(): React.JSX.Element {
           <IssuerSettingsPanel slug={slug} />
         ) : tab === "provisioning" ? (
           <ProvisioningSettingsPanel slug={slug} />
+        ) : tab === "signing" ? (
+          <CscSettingsPanel slug={slug} />
         ) : tab === "postguard" ? (
           <div className="flex max-w-2xl flex-col gap-6">
             <PostguardEncryptionKeyCard slug={slug} isAdmin={isAdmin} />
