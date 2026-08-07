@@ -36,6 +36,7 @@ import Attestations from "./routes/attestations";
 import AttestationHeldDetail from "./routes/attestations-held";
 import Claim from "./routes/claim";
 import Settings from "./routes/settings";
+import Signing from "./routes/signing";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
 import NotFound from "./routes/not-found";
@@ -97,6 +98,7 @@ const postguardSendCrumb: RouteHandle = {
   crumb: ({ t }) => t("postguard.send.title"),
 };
 const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
+const signingCrumb: RouteHandle = { crumb: ({ t }) => t("signing.title") };
 const invitationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("myInvitations.title"),
 };
@@ -220,6 +222,11 @@ export const router = createBrowserRouter([
                         handle: postguardSendCrumb,
                       },
                     ],
+                  },
+                  {
+                    path: "signing",
+                    Component: Signing,
+                    handle: signingCrumb,
                   },
                   {
                     path: "audit-log",

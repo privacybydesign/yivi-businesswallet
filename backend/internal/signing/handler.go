@@ -25,6 +25,7 @@ type signingService interface {
 	GetRequest(ctx context.Context, orgID, userID, id uuid.UUID) (Request, error)
 	GetSignedDocument(ctx context.Context, orgID, userID, id uuid.UUID) ([]byte, string, error)
 	GetCredential(ctx context.Context, orgID, userID uuid.UUID) (LinkedCredential, error)
+	Available(ctx context.Context, orgID uuid.UUID) (bool, error)
 }
 
 // Handler serves the signing ceremony. The per-org routes are member-gated and
@@ -44,6 +45,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	member := func(next http.Handler) http.Handler {
 		return h.requireUser(h.authorize(next))
 	}
+	mux.Handle("GET /orgs/{slug}/signing/availability", member(respond.HandlerFunc(h.getAvailability)))
 	mux.Handle("GET /orgs/{slug}/signing/credential", member(respond.HandlerFunc(h.getCredential)))
 	mux.Handle("POST /orgs/{slug}/signing/credential/link", member(respond.HandlerFunc(h.linkCredential)))
 	mux.Handle("POST /orgs/{slug}/signing/requests", member(respond.HandlerFunc(h.createRequest)))
@@ -53,6 +55,19 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// Central OAuth redirect target (matches the QTSP client registration). It is
 	// correlated by state, so it needs no session; it 302s the browser onward.
 	mux.HandleFunc("GET /signing/callback", h.callback)
+}
+
+// getAvailability reports whether a signing provider is configured for the org.
+// Member-safe (no secret), so members — who cannot read the admin-only CSC
+// settings — can still have the signing feature gated for them in the UI.
+func (h *Handler) getAvailability(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	available, err := h.svc.Available(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("checking signing availability: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, map[string]bool{"available": available})
+	return nil
 }
 
 func (h *Handler) getCredential(w http.ResponseWriter, r *http.Request) error {

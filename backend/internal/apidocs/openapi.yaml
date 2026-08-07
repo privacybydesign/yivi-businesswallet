@@ -2745,6 +2745,33 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/signing/availability:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [signing]
+      summary: Whether a signing provider is configured for the org
+      description: >-
+        Requires organisation membership. Member-safe signal (no secret) reporting
+        whether the org has a CSC signing provider configured and enabled; used to
+        gate the signing feature in the UI for members (who cannot read the
+        admin-only CSC settings).
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/signing/credential/link:
     parameters:
       - name: slug

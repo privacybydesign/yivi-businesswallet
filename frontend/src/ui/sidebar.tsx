@@ -4,6 +4,7 @@ import type { IconName } from "./icon";
 import type { Me } from "../api/auth";
 import type { Organization } from "../api/organization";
 import { useOrganizationQuery } from "../api/organization.queries";
+import { useSigningAvailabilityQuery } from "../api/signing.queries";
 import { personInitials, fullName } from "../lib/name";
 import { Icon } from "./icon";
 import { Avatar } from "./avatar";
@@ -17,6 +18,7 @@ type NavLabelKey =
   | "nav.qerds"
   | "nav.attestations"
   | "nav.postguard"
+  | "nav.signing"
   | "nav.auditLog"
   | "nav.settings"
   | "nav.adminDashboard"
@@ -30,8 +32,10 @@ interface NavItem {
   end?: boolean;
 }
 
-function orgNavItems(slug: string): NavItem[] {
-  return [
+// showSigning gates the "Sign documents" item on the org having a CSC signing
+// provider configured (see the sidebar body); it is a plugin, absent otherwise.
+function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
+  const items: NavItem[] = [
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
     { to: `/${slug}/qerds`, labelKey: "nav.qerds", icon: "email" },
@@ -41,9 +45,19 @@ function orgNavItems(slug: string): NavItem[] {
       icon: "valid",
     },
     { to: `/${slug}/postguard`, labelKey: "nav.postguard", icon: "lock" },
+  ];
+  if (showSigning) {
+    items.push({
+      to: `/${slug}/signing`,
+      labelKey: "nav.signing",
+      icon: "edit",
+    });
+  }
+  items.push(
     { to: `/${slug}/audit-log`, labelKey: "nav.auditLog", icon: "time" },
     { to: `/${slug}/settings`, labelKey: "nav.settings", icon: "settings" },
-  ];
+  );
+  return items;
 }
 
 const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -96,8 +110,17 @@ export function Sidebar({
   const activeSlug = matches.find(
     (match) => (match.params as { orgSlug?: string }).orgSlug !== undefined,
   )?.params.orgSlug;
+  // The "Sign documents" plugin appears only when a CSC signing provider is
+  // configured for the org. The availability endpoint is member-safe (no secret),
+  // so the item surfaces for every member who can use the feature — not just
+  // admins. A query error simply leaves the item hidden.
+  const signing = useSigningAvailabilityQuery(
+    activeSlug ?? "",
+    activeSlug !== undefined,
+  );
+  const showSigning = Boolean(signing.data?.available);
   const navItems = activeSlug
-    ? orgNavItems(activeSlug)
+    ? orgNavItems(activeSlug, showSigning)
     : me.isPlatformAdmin
       ? ADMIN_NAV_ITEMS
       : [];

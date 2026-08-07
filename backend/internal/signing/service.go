@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -257,6 +258,13 @@ func (s *Service) GetCredential(ctx context.Context, orgID, userID uuid.UUID) (L
 
 type connection struct{ baseURL, clientID, clientSecret string }
 
+// Available reports whether the org has a signing provider configured and
+// enabled. It is member-safe, so the signing feature can be gated for members who
+// cannot read the admin-only provider settings.
+func (s *Service) Available(ctx context.Context, orgID uuid.UUID) (bool, error) {
+	return s.settings.Available(ctx, orgID)
+}
+
 func (s *Service) connection(ctx context.Context, orgID uuid.UUID) (connection, error) {
 	baseURL, clientID, clientSecret, err := s.settings.ResolveConnection(ctx, orgID)
 	if err != nil {
@@ -305,7 +313,9 @@ func (s *Service) expire(state string) {
 }
 
 func (s *Service) resultURL(c *ceremony, query string) string {
-	u := fmt.Sprintf("%s/orgs/%s/signing", s.appBaseURL, url.PathEscape(c.slug))
+	// The frontend serves org pages at /{slug}/... (no /orgs prefix — that is the
+	// API path, not the SPA route), so the post-ceremony redirect targets that.
+	u := fmt.Sprintf("%s/%s/signing", s.appBaseURL, url.PathEscape(c.slug))
 	if query != "" {
 		u += "?" + query
 	}
@@ -325,12 +335,5 @@ func newAuthArtifacts() (signingprovider.PKCE, string, error) {
 }
 
 func joinAlgo(a []string) string {
-	if len(a) == 0 {
-		return ""
-	}
-	out := a[0]
-	for _, x := range a[1:] {
-		out += "," + x
-	}
-	return out
+	return strings.Join(a, ",")
 }

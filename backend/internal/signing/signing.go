@@ -74,15 +74,19 @@ type provider interface {
 // inside that store and only handed here for the in-flight token exchange.
 type connectionResolver interface {
 	ResolveConnection(ctx context.Context, orgID uuid.UUID) (baseURL, clientID, clientSecret string, err error)
+	// Available reports whether the org has a signing provider configured and
+	// enabled. It is member-safe (no secret), so the signing feature can be gated
+	// for members who cannot read the admin-only provider settings.
+	Available(ctx context.Context, orgID uuid.UUID) (bool, error)
 }
 
 // LinkedCredential is a user's cached signing credential (fetched once, so the
 // signing ceremony is a single authorize — the cert must be known before the
 // document hash is computed, because the CMS SignedAttributes hash the cert).
 type LinkedCredential struct {
-	CredentialID string
-	KeyAlgo      string
-	UpdatedAt    time.Time
+	CredentialID string    `json:"credentialId"`
+	KeyAlgo      string    `json:"keyAlgo"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 // Request is the non-document view of a signing request.

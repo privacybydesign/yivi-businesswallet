@@ -184,6 +184,18 @@ func (s *Store) ResolveConnection(ctx context.Context, orgID uuid.UUID) (baseURL
 	return baseURL, clientID, clientSecret, nil
 }
 
+// Available reports whether the org has a CSC signing provider configured and
+// enabled. It reads only the non-secret settings view, so it is safe to expose to
+// members (it is the gate for showing the signing feature to non-admins, who
+// cannot read the full settings).
+func (s *Store) Available(ctx context.Context, orgID uuid.UUID) (bool, error) {
+	settings, err := s.GetSettings(ctx, orgID)
+	if err != nil {
+		return false, err
+	}
+	return settings.Configured && settings.Enabled, nil
+}
+
 // BaseURLFor resolves the base URL a connection test should probe. It returns
 // ErrNotConfigured when the org has no row or no base URL stored — neither is a
 // failure, both are "nothing to test".
