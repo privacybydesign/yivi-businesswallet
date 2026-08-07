@@ -41,6 +41,8 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/signing"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/signingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/slackchannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/teamschannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
@@ -510,6 +512,14 @@ func run() error {
 	cscStore := csc.NewStore(pool, recorder, cscCipher)
 	cscHandler := csc.NewHandler(cscStore, csc.NewClient(), requireUser, orgHandler.Authorize)
 
+	// Qualified document signing (Phase B): the business wallet as the RP-centric
+	// SCA driving the per-org CSC provider (base URL + OAuth client from cscStore).
+	// Settings + connection test shipped separately; this is the signing ceremony.
+	signingStore := signing.NewStore(pool, recorder)
+	signingHandler := signing.NewHandler(
+		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signing.DefaultRedirectURI, cfg.AppBaseURL),
+		requireUser, orgHandler.Authorize)
+
 	handler := server.New(
 		pool,
 		cfg.StaticDir,
@@ -528,6 +538,7 @@ func run() error {
 		teamsHandler,
 		provisioningHandler,
 		cscHandler,
+		signingHandler,
 	)
 
 	httpServer := &http.Server{

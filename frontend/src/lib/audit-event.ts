@@ -57,6 +57,10 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "provisioning.run_completed": { icon: "valid", tone: "green" },
   "provisioning.run_failed": { icon: "warning", tone: "red" },
   "csc.settings_updated": { icon: "settings", tone: "blue" },
+  "signing.credential_linked": { icon: "settings", tone: "blue" },
+  "signing.requested": { icon: "settings", tone: "blue" },
+  "signing.completed": { icon: "valid", tone: "green" },
+  "signing.failed": { icon: "warning", tone: "red" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -209,6 +213,14 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.provisioningRunFailed");
     case "csc.settings_updated":
       return t("auditLog.actions.cscSettingsUpdated");
+    case "signing.credential_linked":
+      return t("auditLog.actions.signingCredentialLinked");
+    case "signing.requested":
+      return t("auditLog.actions.signingRequested");
+    case "signing.completed":
+      return t("auditLog.actions.signingCompleted");
+    case "signing.failed":
+      return t("auditLog.actions.signingFailed");
     default:
       return action;
   }
@@ -274,6 +286,10 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.orgProvisioningSettings");
     case "org_csc_settings":
       return t("auditLog.targets.orgCscSettings");
+    case "signing_credentials":
+      return t("auditLog.targets.signingCredentials");
+    case "signing_requests":
+      return t("auditLog.targets.signingRequests");
     default:
       return targetType;
   }

@@ -43,6 +43,8 @@ tags:
     description: Per-organisation user and department provisioning from an identity directory.
   - name: csc
     description: Per-organisation CSC API v2 signing-provider (remote QTSP) connection settings.
+  - name: signing
+    description: Qualified document signing — the RP-centric signing ceremony against a CSC provider.
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -2716,6 +2718,202 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/signing/credential:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [signing]
+      summary: Get the caller's linked signing credential
+      description: >-
+        Requires organisation membership. Returns the acting user's cached signing
+        credential (id + key algorithm) or 404 `no_credential` if none is linked yet.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/signing/credential/link:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [signing]
+      summary: Start linking a signing credential
+      description: >-
+        Requires organisation membership. Begins the OAuth2/OID4VP authorization to
+        link the acting user's signing credential and returns an `authorizeUrl` the
+        browser must open to complete the wallet ceremony. Answers 409
+        `not_configured` when no CSC provider is configured.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The organisation has no CSC signing provider configured.
+  /api/v1/orgs/{slug}/signing/requests:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [signing]
+      summary: Start signing a document
+      description: >-
+        Requires organisation membership and a linked signing credential. Accepts a
+        PDF in the `document` multipart field, prepares it, binds its hash into the
+        authorization, records a request, and returns `{requestId, authorizeUrl}`;
+        the browser opens `authorizeUrl` to complete the wallet ceremony, after which
+        the signed PAdES is assembled.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                document:
+                  type: string
+                  format: binary
+                  description: The PDF to sign.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: No CSC provider configured, or no signing credential linked.
+  /api/v1/orgs/{slug}/signing/requests/{id}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Signing request id.
+    get:
+      tags: [signing]
+      summary: Get a signing request's status
+      description: >-
+        Requires organisation membership; returns the acting user's own request
+        (status, filename, credential, error if any).
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/signing/requests/{id}/document:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Signing request id.
+    get:
+      tags: [signing]
+      summary: Download the signed document
+      description: >-
+        Requires organisation membership. Returns the signed PAdES PDF
+        (`application/pdf`) for a completed request, 409 `not_completed` while it is
+        still in progress, or 404 if the request does not exist.
+      responses:
+        '2XX':
+          description: The signed PDF.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The signed document is not ready yet.
+  /api/v1/signing/callback:
+    get:
+      tags: [signing]
+      summary: OAuth2 signing-ceremony redirect callback
+      description: >-
+        The QTSP-registered redirect target the browser returns to after the wallet
+        ceremony. Correlated by an unguessable `state` (so it needs no session); it
+        completes the link or sign flow and 302-redirects the browser back to the
+        app. Not called directly by clients.
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+          description: OAuth2 authorization code.
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque state correlating the callback to the in-flight ceremony.
+      responses:
+        '302':
+          description: Redirect back to the application.
   /api/v1/orgs/{slug}/postguard/api-key:
     parameters:
       - name: slug
