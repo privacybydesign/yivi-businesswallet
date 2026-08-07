@@ -86,6 +86,9 @@ services:
       # Ignore any host go.work bind-mounted via ./backend (see backend service).
       GOWORK: "off"
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-yivi_business_wallet}?sslmode=disable
+      # The dev seed provisions these accounts so the operator's own admin email
+      # can log in (must match the backend service's value above).
+      PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-admin@yivi.app}
     depends_on:
       migrate:
         condition: service_completed_successfully

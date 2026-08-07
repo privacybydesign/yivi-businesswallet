@@ -189,7 +189,7 @@ var demoMemberships = []demoMembership{
 	{email: "user@yivi.app", slug: "firsty", role: "member", jobTitle: "Account Manager", department: "Sales"},
 }
 
-func Run(ctx context.Context, dsn, addressDomain string) error {
+func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) error {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return fmt.Errorf("seed: connect: %w", err)
@@ -199,6 +199,15 @@ func Run(ctx context.Context, dsn, addressDomain string) error {
 	faker := gofakeit.New(fakerSeed)
 	users := user.NewStore(pool)
 	orgs := organization.NewStore(pool, audit.NewDBRecorder())
+
+	// Provision the configured PLATFORM_ADMIN_EMAILS accounts as part of the dev
+	// seed too: PLATFORM_ADMIN_EMAILS only elevates an already-existing user, so
+	// without this a fresh `docker compose up` leaves the operator's own admin
+	// email with no user row and unable to log in (the demo `admin@yivi.app` is
+	// a separate, hardcoded account). Idempotent find-or-create per email.
+	if err := ensurePlatformAdmins(ctx, users, adminEmails); err != nil {
+		return err
+	}
 
 	// The KVK register participant must exist so its consult decisions have an
 	// audit log to be recorded against (registryprovider.SeededRegistry).
@@ -360,7 +369,13 @@ func EnsurePlatformAdmins(ctx context.Context, dsn string, emails []string) erro
 	}
 	defer pool.Close()
 
-	users := user.NewStore(pool)
+	return ensurePlatformAdmins(ctx, user.NewStore(pool), emails)
+}
+
+// ensurePlatformAdmins is the shared body behind both EnsurePlatformAdmins (its
+// own pool, run standalone with -admins) and Run (the dev seed, reusing its
+// pool). It creates a bare users row per email so the account can log in.
+func ensurePlatformAdmins(ctx context.Context, users *user.Store, emails []string) error {
 	for _, email := range emails {
 		u, err := ensureUser(ctx, users, email, platformAdminGivenNames, platformAdminLastName, "")
 		if err != nil {

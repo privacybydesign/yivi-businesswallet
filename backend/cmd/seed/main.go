@@ -71,7 +71,7 @@ func run() error {
 	}
 
 	slog.Info("running database seed")
-	if err := seed.Run(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
+	if err := seed.Run(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain, cfg.PlatformAdminEmails); err != nil {
 		return err
 	}
 	slog.Info("database seed complete")
