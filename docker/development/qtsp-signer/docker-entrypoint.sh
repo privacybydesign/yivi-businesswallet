@@ -1,9 +1,24 @@
 #!/bin/sh
-# [SPIKE] Entrypoint for the EJBCA-free / SoftHSM resource-server spike image.
-# Initializes a SoftHSM token on first boot, resolves its CK_SLOT_ID, exports the
-# jacknji11 env the app's HsmService reads (JACKNJI11_*), then starts the server.
+# Entrypoint for the QTSP demo image. One image carries both the CSC resource
+# server and the OAuth2/OID4VP authorization server; QTSP_SERVER selects which to
+# run (resource | authz, default resource).
+#
+#  - authz    -> the authorization server (port 8084). No HSM; just start the jar.
+#  - resource -> the CSC resource server (port 8085). Initializes a SoftHSM token
+#                on first boot, resolves its CK_SLOT_ID, and exports the jacknji11
+#                env the app's HsmService reads (JACKNJI11_*), then starts the jar.
 set -eu
 
+QTSP_SERVER="${QTSP_SERVER:-resource}"
+
+if [ "$QTSP_SERVER" = "authz" ]; then
+  echo "entrypoint: starting authorization_server (profiles=${SPRING_PROFILES_ACTIVE:-default})"
+  exec java -jar /authorization_server.jar "$@"
+fi
+
+# ---------------------------------------------------------------------------
+# resource server: SoftHSM (the QSCD stand-in)
+# ---------------------------------------------------------------------------
 : "${PKCS11_TOKEN_LABEL:=qtsp-token}"
 : "${PKCS11_PIN:=1234}"
 : "${PKCS11_SO_PIN:=1234}"

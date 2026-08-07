@@ -42,19 +42,26 @@ COPY src/SpikeSeedController.java \
 RUN mvn -B -e -DskipTests clean install
 
 # --------------------------------------------------------------------------
-# Runtime stage: JRE + SoftHSM2 (the software QSCD) + the resource server.
+# Runtime stage: JRE + SoftHSM2 (the software QSCD) + BOTH servers.
+# One image carries both jars; docker-entrypoint.sh runs the one named by
+# QTSP_SERVER (resource | authz). The resource server (CSC API, port 8085) needs
+# SoftHSM; the authorization server (OAuth2 + OID4VP, port 8084) does not.
 # --------------------------------------------------------------------------
 FROM eclipse-temurin:17
 WORKDIR /opt/app
 # softhsm2 -> the PKCS#11 module jacknji11 loads (the "HSM"/QSCD stand-in)
 # opensc   -> pkcs11-tool for debugging the token
-# curl     -> container HEALTHCHECK against /spike/health
+# curl     -> container HEALTHCHECK
 RUN apt-get update \
  && apt-get install -y --no-install-recommends softhsm2 opensc curl \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /src/resource_server/target/*.jar /resource_server.jar
+COPY --from=builder /src/authorization_server/target/*.jar /authorization_server.jar
+# The authorization server reads its trusted PID-issuer anchors from
+# ./certificate_of_issuers (relative to WORKDIR), so ship the ones from upstream.
+COPY --from=builder /src/certificate_of_issuers ./certificate_of_issuers
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
  && chmod +x /usr/local/bin/docker-entrypoint.sh
-EXPOSE 8085
+EXPOSE 8084 8085
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
