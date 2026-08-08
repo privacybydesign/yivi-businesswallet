@@ -397,6 +397,7 @@ export const nl: Translation<typeof en> = {
     slackTestSent: "Testnotificatie verstuurd",
     teamsSettingsSaved: "Microsoft Teams-instellingen opgeslagen",
     teamsTestSent: "Testnotificatie verstuurd",
+    cscSettingsSaved: "Instellingen ondertekenprovider opgeslagen",
     notificationSettingsSaved: "Notificatie-instellingen opgeslagen",
     provisioningSettingsSaved:
       "Instellingen voor directorysynchronisatie opgeslagen",
@@ -496,6 +497,7 @@ export const nl: Translation<typeof en> = {
       orgSlackSettings: "Slack-instellingen",
       orgTeamsSettings: "Microsoft Teams-instellingen",
       orgProvisioningSettings: "Provisioning-instellingen",
+      orgCscSettings: "Instellingen ondertekenprovider",
     },
     actions: {
       orgCreated: "Organisatie aangemaakt",
@@ -564,6 +566,7 @@ export const nl: Translation<typeof en> = {
       slackSettingsUpdated: "Slack-instellingen bijgewerkt",
       teamsSettingsUpdated: "Microsoft Teams-instellingen bijgewerkt",
       provisioningSettingsUpdated: "Provisioning-instellingen bijgewerkt",
+      cscSettingsUpdated: "Instellingen ondertekenprovider bijgewerkt",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
     },
@@ -661,6 +664,7 @@ export const nl: Translation<typeof en> = {
     tabNotifications: "Notificaties",
     tabIssuer: "Uitgever",
     tabProvisioning: "Directorysynchronisatie",
+    tabSigning: "Ondertekenen",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
     adminOnly: "Alleen organisatiebeheerders kunnen instellingen beheren.",
@@ -1089,6 +1093,47 @@ export const nl: Translation<typeof en> = {
     testRefused:
       "Microsoft Teams heeft de testnotificatie niet geaccepteerd: {{message}}",
     testError: "Testnotificatie versturen mislukt: {{message}}",
+  },
+  cscSettings: {
+    loadError:
+      "Kon de instellingen van de ondertekenprovider niet laden: {{message}}",
+    heading: "CSC-ondertekenprovider",
+    description:
+      "Verbind met een externe QTSP via de Cloud Signature Consortium (CSC) API v2 om gekwalificeerde handtekeningen te maken. Dit stelt de verbinding in; het ondertekenen zelf wordt apart toegevoegd.",
+    providerKind: "Provider",
+    kinds: {
+      sample: "Voorbeeld-QTSP (zelf gehost)",
+      custom: "Eigen CSC-endpoint",
+    },
+    sampleHint:
+      "De voorbeeldprovider is de meegeleverde referentie-QTSP. Start hem met `docker compose --profile signer up`; hij draait op http://localhost:8085.",
+    baseUrl: "CSC-basis-URL",
+    baseUrlPlaceholder: "https://qtsp.example.org",
+    clientId: "OAuth-client-ID",
+    clientIdPlaceholder: "Client-ID geregistreerd bij de QTSP",
+    clientIdHint:
+      "De OAuth-client waarmee de wallet ondertekenen autoriseert. Niet nodig voor de verbindingstest.",
+    clientSecret: "OAuth-clientgeheim",
+    secretPlaceholder: "Waarde van het clientgeheim",
+    secretUnchanged: "Laat leeg om het opgeslagen geheim te behouden",
+    secretStored:
+      "Er is een clientgeheim opgeslagen. Het wordt als geheim behandeld en na opslaan niet meer getoond.",
+    secretHint:
+      "Versleuteld opgeslagen. Nodig voor het ondertekenen, niet voor de verbindingstest.",
+    enabled: "Deze ondertekenprovider inschakelen",
+    enabledNeedsUrl: "Voer eerst een CSC-basis-URL in.",
+    noEncryptionKey:
+      "Deze omgeving heeft geen CSC-versleutelingssleutel, dus een clientgeheim kan niet worden opgeslagen. Vraag de beheerder om CSC_ENCRYPTION_KEY in te stellen.",
+    saveError:
+      "Kon de instellingen van de ondertekenprovider niet opslaan: {{message}}",
+    testHeading: "Verbinding testen",
+    testDescription:
+      "Roept /csc/v2/info van de provider aan om te bevestigen dat het endpoint bereikbaar is en CSC v2 spreekt.",
+    testConnection: "Verbinding testen",
+    testNotConfigured: "Sla eerst een CSC-basis-URL op voordat je test.",
+    testOk: "Verbonden met {{name}} (CSC {{specs}}).",
+    testFailed: "Het CSC-endpoint accepteerde de verbinding niet: {{message}}",
+    testError: "Kon de verbinding niet testen: {{message}}",
   },
   departments: {
     heading: "Afdelingen",

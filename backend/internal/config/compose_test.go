@@ -116,3 +116,19 @@ func TestComposePassesProvisioningEncryptionKeyToBackend(t *testing.T) {
 		t.Errorf("backend %s = %q, want %q", envProvisioningEncryptionKey, value, want)
 	}
 }
+
+// TestComposePassesCSCEncryptionKeyToBackend holds the CSC signing-provider key to
+// the same passthrough rule. Without the declaration the key set in .env never
+// reaches the container, so every attempt to save a CSC client secret is refused
+// as if the deployment had no key at all.
+func TestComposePassesCSCEncryptionKeyToBackend(t *testing.T) {
+	backendEnvironment := backendComposeEnvironment(t)
+
+	value, ok := backendEnvironment[envCSCEncryptionKey]
+	if !ok {
+		t.Fatalf("backend service does not pass %s through; setting it in .env would do nothing", envCSCEncryptionKey)
+	}
+	if want := "${" + envCSCEncryptionKey + ":-}"; value != want {
+		t.Errorf("backend %s = %q, want %q", envCSCEncryptionKey, value, want)
+	}
+}

@@ -41,6 +41,8 @@ tags:
     description: Per-organisation Microsoft Teams webhook notification settings.
   - name: provisioning
     description: Per-organisation user and department provisioning from an identity directory.
+  - name: csc
+    description: Per-organisation CSC API v2 signing-provider (remote QTSP) connection settings.
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -2595,6 +2597,119 @@ paths:
       responses:
         '204':
           description: The test notification was accepted by the webhook.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/csc/settings:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [csc]
+      summary: Get the organisation CSC signing-provider settings
+      description: >-
+        Requires an administrator role in the organisation. The client secret is a
+        secret and is never returned: the response reports whether one is stored
+        (`hasClientSecret`), plus the selectable provider kinds and their default
+        base URLs (`providerKinds`).
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [csc]
+      summary: Update the organisation CSC signing-provider settings
+      description: >-
+        Requires an administrator role in the organisation. `providerKind` is one of
+        the kinds this deployment offers (`sample` self-hosted reference QTSP, or
+        `custom`); `baseUrl` must be an http(s) URL with a host. `clientSecret` omits
+        keeps the stored one and an empty string clears it. Answers 409
+        `no_encryption_key` when the deployment has no CSC encryption key, because the
+        secret cannot then be stored at all.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                enabled:
+                  type: boolean
+                  description: >-
+                    Whether the signing provider is active. Stored as false when no
+                    base URL is set, because there is nothing to reach.
+                providerKind:
+                  type: string
+                  description: Provider kind (e.g. `sample` or `custom`).
+                baseUrl:
+                  type: string
+                  description: CSC API v2 base URL of the provider.
+                clientId:
+                  type: string
+                  description: OAuth client id registered at the QTSP (not a secret).
+                clientSecret:
+                  type: string
+                  nullable: true
+                  description: >-
+                    OAuth client secret. Omit to keep the stored one, send an empty
+                    string to clear it. Encrypted at rest; never returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/csc/test:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [csc]
+      summary: Test the connection to the organisation CSC signing provider
+      description: >-
+        Requires an administrator role in the organisation. Calls the stored
+        endpoint's unauthenticated `/csc/v2/info` and answers 200 with the provider's
+        own name and CSC spec version, 409 `not_configured` when no base URL is
+        stored, and 502 `test_failed` when the endpoint is unreachable or does not
+        answer usably. The reason carries no bytes the far side wrote and never the
+        URL: a status code is what an admin acts on.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

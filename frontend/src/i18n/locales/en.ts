@@ -383,6 +383,7 @@ export const en = {
     slackTestSent: "Test notification sent",
     teamsSettingsSaved: "Microsoft Teams settings saved",
     teamsTestSent: "Test notification sent",
+    cscSettingsSaved: "Signing provider settings saved",
     notificationSettingsSaved: "Notification settings saved",
     provisioningSettingsSaved: "Directory sync settings saved",
     provisioningSyncCompleted: "Directory sync completed",
@@ -481,6 +482,7 @@ export const en = {
       orgSlackSettings: "Slack settings",
       orgTeamsSettings: "Microsoft Teams settings",
       orgProvisioningSettings: "Provisioning settings",
+      orgCscSettings: "Signing provider settings",
     },
     actions: {
       orgCreated: "Created organization",
@@ -548,6 +550,7 @@ export const en = {
       slackSettingsUpdated: "Updated Slack settings",
       teamsSettingsUpdated: "Updated Microsoft Teams settings",
       provisioningSettingsUpdated: "Updated provisioning settings",
+      cscSettingsUpdated: "Updated signing provider settings",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
     },
@@ -644,6 +647,7 @@ export const en = {
     tabNotifications: "Notifications",
     tabIssuer: "Issuer",
     tabProvisioning: "Directory sync",
+    tabSigning: "Signing",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
     adminOnly: "Only organization admins can manage settings.",
@@ -1056,6 +1060,45 @@ export const en = {
     testRefused:
       "Microsoft Teams did not accept the test notification: {{message}}",
     testError: "Could not send the test notification: {{message}}",
+  },
+  cscSettings: {
+    loadError: "Could not load the signing provider settings: {{message}}",
+    heading: "CSC signing provider",
+    description:
+      "Connect to a remote QTSP over the Cloud Signature Consortium (CSC) API v2 to create qualified signatures. This sets up the connection; the signing flow itself is added separately.",
+    providerKind: "Provider",
+    kinds: {
+      sample: "Sample QTSP (self-hosted)",
+      custom: "Custom CSC endpoint",
+    },
+    sampleHint:
+      "The sample provider is the bundled reference QTSP. Run it with `docker compose --profile signer up`; it listens on http://localhost:8085.",
+    baseUrl: "CSC base URL",
+    baseUrlPlaceholder: "https://qtsp.example.org",
+    clientId: "OAuth client ID",
+    clientIdPlaceholder: "Client ID registered at the QTSP",
+    clientIdHint:
+      "The OAuth client the wallet uses to authorize signing. Not needed for the connection test.",
+    clientSecret: "OAuth client secret",
+    secretPlaceholder: "Client secret value",
+    secretUnchanged: "Leave blank to keep the stored secret",
+    secretStored:
+      "A client secret is stored. It is treated as a secret, so it is not shown again after saving.",
+    secretHint:
+      "Stored encrypted at rest. Needed for the signing flow, not the connection test.",
+    enabled: "Enable this signing provider",
+    enabledNeedsUrl: "Enter a CSC base URL first.",
+    noEncryptionKey:
+      "This deployment has no CSC encryption key, so a client secret cannot be stored. Ask the administrator to set CSC_ENCRYPTION_KEY.",
+    saveError: "Could not save the signing provider settings: {{message}}",
+    testHeading: "Test the connection",
+    testDescription:
+      "Call the provider's /csc/v2/info to confirm the endpoint is reachable and speaks CSC v2.",
+    testConnection: "Test connection",
+    testNotConfigured: "Save a CSC base URL before testing the connection.",
+    testOk: "Connected to {{name}} (CSC {{specs}}).",
+    testFailed: "The CSC endpoint did not accept the connection: {{message}}",
+    testError: "Could not test the connection: {{message}}",
   },
   departments: {
     heading: "Departments",
