@@ -51,6 +51,12 @@ services:
       QERDS_AUTH_TOKEN: ${QERDS_AUTH_TOKEN:-}
       QERDS_DOMIBUS_FROM_PARTY: ${QERDS_DOMIBUS_FROM_PARTY:-}
       QERDS_DOMIBUS_TO_PARTY: ${QERDS_DOMIBUS_TO_PARTY:-}
+      # Signing ceremony (--profile signer): the QTSP authorization server is
+      # reachable at localhost:8084 from the browser (the authorize URL) but at
+      # qtsp-authz:8084 from this backend container (the server-side token exchange).
+      # This overrides only the backend's token-exchange host; empty in production
+      # where the QTSP is one URL for both. See internal/signing.
+      SIGNING_OAUTH_ISSUER_INTERNAL: ${SIGNING_OAUTH_ISSUER_INTERNAL:-http://qtsp-authz:8084}
     depends_on:
       seed:
         condition: service_completed_successfully
@@ -244,14 +250,16 @@ services:
   # demonstrating how remote QTSP signing works:
   #   docker compose --profile signer up --build
   # Hosts the EUDI wallet-driven QTSP reference implementation (built from source
-  # at a pinned commit, patched for SoftHSM + an EJBCA-free self-sign path) with
-  # SoftHSM2 as the QSCD stand-in. A one-shot provisioner seeds a signing
-  # credential, after which POST http://localhost:8085/csc/v2/signatures/signHash
-  # returns a real ECDSA signature — see docker/development/qtsp-signer/run-demo.sh.
-  # NOTE: proves QES-over-CSC plumbing on a software HSM, NOT qualified compliance,
-  # and runs the resource server in `noauth` mode — the OID4VP wallet ceremony
-  # (authorization_server + SCAL2 QR) is a later phase. See issue #194 and
-  # .ai/features/qtsp-signing-demo.md.
+  # at a pinned commit, patched for SoftHSM + an EJBCA-free self-sign path): the CSC
+  # resource server (8085, SoftHSM2 as the QSCD stand-in) AND the OAuth2/OID4VP
+  # authorization server (8084), so the full RP-centric signing ceremony works.
+  # The ceremony's wallet step drives OID4VP at the PUBLIC EUDI verifier
+  # (verifier-backend.eudiw.dev) and needs an EUDI reference wallet holding a dev
+  # PID (mso_mdoc) — NOT our Yivi/SD-JWT login wallet. See the README.
+  # NOTE: proves QES-over-CSC plumbing on a software HSM, NOT qualified compliance.
+  # Quick no-wallet path: set SPRING_PROFILES_ACTIVE=noauth on qtsp-signer to drive
+  # signHash directly (run-demo.sh) without the authorization server. See issue #194
+  # and .ai/features/qtsp-signing-demo.md.
   signer-mysql:
     image: mysql:8
     profiles: ["signer"]
@@ -260,6 +268,11 @@ services:
       MYSQL_DATABASE: qtsp
       MYSQL_USER: qtsp
       MYSQL_PASSWORD: qtsp
+    volumes:
+      # Spring Authorization Server tables (JdbcRegisteredClientRepository /
+      # JdbcOAuth2AuthorizationService) must exist before the authz server starts;
+      # JPA ddl-auto does not create them. Loaded on first init of a fresh volume.
+      - ./docker/development/qtsp-signer/schema:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uqtsp -pqtsp --silent"]
       interval: 5s
@@ -275,11 +288,17 @@ services:
     depends_on:
       signer-mysql:
         condition: service_healthy
+      # The RS validates the AS's JWTs; wait for the AS to be serving its JWKS.
+      qtsp-authz:
+        condition: service_healthy
     ports:
       - "8085:8085"
     environment:
-      # noauth: no OID4VP; authz claims come from X-Stub-* headers. DEMO ONLY.
-      SPRING_PROFILES_ACTIVE: noauth
+      # Default: REAL auth — the RS validates the authorization server's JWTs, so
+      # signHash requires the full OID4VP + OAuth ceremony (see qtsp-authz).
+      # Quick no-wallet path: uncomment the next line to drive signHash directly
+      # via X-Stub-* headers + /spike/seed-credential (run-demo.sh), no AS needed.
+      # SPRING_PROFILES_ACTIVE: noauth
       # --- Datasource (the app builds jdbc:mysql://<DB_URL>/<DB_NAME>) ---
       SPRING_DATASOURCE_USERNAME: qtsp
       SPRING_DATASOURCE_PASSWORD: qtsp
@@ -289,9 +308,12 @@ services:
       DB_ENCRYPTION_PASSPHRASE: demo-passphrase
       DB_ENCRYPTION_SALT: MTIzNDU2Nzg5MDEyMzQ1Ng==            # base64("1234567890123456")
       SYMMETRIC_SECRET_KEY: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=  # base64(32 bytes)
-      # --- JWT settings (unused under noauth, must still resolve) ---
-      AUTHORIZATION_SERVER_JWT_SET_URI: http://localhost:9999
-      AUTHORIZATION_SERVER_ISSUER_URI: http://localhost:9999
+      # --- Trust the authorization server's JWTs ---
+      # ISSUER_URI must string-match the `iss` the AS stamps (its
+      # SERVICE_URL_OAUTH2_ISSUER); JWT_SET_URI must be container-reachable for the
+      # JWKS fetch (the app appends /oauth2/jwks). Hence localhost vs service name.
+      AUTHORIZATION_SERVER_ISSUER_URI: http://localhost:8084
+      AUTHORIZATION_SERVER_JWT_SET_URI: http://qtsp-authz:8084
       # --- EJBCA disabled: self-sign instead of enrolling against a CA ---
       EJBCA_ENABLED: "false"
       EJBCA_HOST: disabled.invalid
@@ -307,15 +329,68 @@ services:
       PKCS11_PIN: "1234"
       PKCS11_SO_PIN: "1234"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8085/spike/health"]
+      # /csc/v2/info is unauthenticated in both modes (real auth and noauth), so it
+      # is a stable readiness probe; /spike/health only exists under the noauth profile.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' -d '{\"lang\":\"en-US\"}' http://localhost:8085/csc/v2/info"]
       interval: 10s
       timeout: 5s
       retries: 30
       start_period: 90s
 
-  # One-shot: once the signer is healthy, seed a signing credential (SoftHSM
-  # key-gen + wrap + self-signed cert, no EJBCA) so signHash is drivable at once.
-  # Idempotent enough to re-run on every `up` (it just mints another credential).
+  # The OAuth2 + OID4VP authorization server (same image, QTSP_SERVER=authz). It
+  # runs the wallet ceremony: on /oauth2/authorize it starts an OID4VP presentation
+  # at the PUBLIC EUDI verifier and renders a QR the EUDI wallet scans, then issues
+  # the credential-scoped access token (the SCAL2 SAD) the RS's signHash validates.
+  qtsp-authz:
+    build:
+      context: ./docker/development/qtsp-signer
+    image: yivi-qtsp-signer:demo
+    profiles: ["signer"]
+    depends_on:
+      signer-mysql:
+        condition: service_healthy
+    ports:
+      - "8084:8084"
+    # Load the OAuth2 client registrations (our SCA client) at startup.
+    # The reference app reads the property names VERIFIER-DOMAIN / WALLET-SCHEME
+    # verbatim (hyphens). Docker Compose CANNOT pass hyphenated *env var* names
+    # (invalid POSIX names — they are silently dropped), so they are supplied as
+    # Spring command-line property overrides here instead.
+    command:
+      - "--spring.config.additional-location=file:/opt/app/config/clients/application-secret.yml"
+      - "--VERIFIER-DOMAIN=verifier-backend.eudiw.dev"
+      - "--WALLET-SCHEME=eudi-openid4vp://"
+    volumes:
+      - ./docker/development/qtsp-signer/config/application-secret.yml:/opt/app/config/clients/application-secret.yml:ro
+    environment:
+      QTSP_SERVER: authz
+      # --- Shared datasource (same MySQL + db as the resource server) ---
+      SPRING_DATASOURCE_USERNAME: qtsp
+      SPRING_DATASOURCE_PASSWORD: qtsp
+      SPRING_DATASOURCE_DB_URL: signer-mysql:3306
+      SPRING_DATASOURCE_DB_NAME: qtsp
+      # Must equal the resource server's value: the AS encrypts the identity claims
+      # (givenName/surname/issuingCountry) the RS later decrypts.
+      SYMMETRIC_SECRET_KEY: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=  # base64(32 bytes)
+      # The OAuth2 issuer the AS stamps into tokens. MUST equal the RS's
+      # AUTHORIZATION_SERVER_ISSUER_URI, and be reachable by the browser/wallet.
+      SERVICE_URL_OAUTH2_ISSUER: http://localhost:8084
+      SERVICE_URL: http://localhost:8084
+      # OID4VP verifier (VERIFIER-DOMAIN) + wallet scheme (WALLET-SCHEME) are passed
+      # as Spring command-line args above, NOT here — their hyphenated names are not
+      # valid env var names and Docker would drop them. Public EUDI verifier:
+      # requesting an mso_mdoc PID needs an EUDI reference wallet with a dev PID.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8084/oauth2/jwks"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+  # One-shot (noauth quick path only): seed a signing credential so signHash is
+  # drivable without the ceremony. Under the default REAL-auth config the noauth
+  # /spike endpoint is absent, so this degrades to a no-op with a hint instead of
+  # failing the `up`. Enable SPRING_PROFILES_ACTIVE=noauth on qtsp-signer to use it.
   qtsp-signer-provision:
     image: curlimages/curl:latest
     profiles: ["signer"]
@@ -327,11 +402,14 @@ services:
       - /bin/sh
       - -c
       - |
-        set -e
-        echo "seeding a demo signing credential..."
-        curl -fsS -X POST "http://qtsp-signer:8085/spike/seed-credential?sub=demo-user"
-        echo
-        echo "seeded. Verify end-to-end with: ./docker/development/qtsp-signer/run-demo.sh"
+        if curl -fsS -X POST "http://qtsp-signer:8085/spike/seed-credential?sub=demo-user" 2>/dev/null; then
+          echo
+          echo "seeded a demo credential. Drive signHash with run-demo.sh (noauth)."
+        else
+          echo "resource server is in REAL-auth mode (no /spike endpoint) — skipping seed."
+          echo "Use the signing ceremony (authorize -> token -> signHash), or set"
+          echo "SPRING_PROFILES_ACTIVE=noauth on qtsp-signer for the quick path."
+        fi
 
 volumes:
   backend-go-build:

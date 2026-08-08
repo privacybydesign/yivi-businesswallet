@@ -99,6 +99,11 @@ const (
 	ProvisioningRunFailed       = "provisioning.run_failed"
 
 	CSCSettingsUpdated = "csc.settings_updated"
+
+	SigningCredentialLinked = "signing.credential_linked"
+	SigningRequested        = "signing.requested"
+	SigningCompleted        = "signing.completed"
+	SigningFailed           = "signing.failed"
 )
 
 const (
@@ -143,6 +148,9 @@ const (
 	TargetProvisioningSettings = "org_provisioning_settings"
 
 	TargetCSCSettings = "org_csc_settings"
+
+	TargetSigningCredential = "signing_credentials"
+	TargetSigningRequest    = "signing_requests"
 )
 
 type Actor struct {

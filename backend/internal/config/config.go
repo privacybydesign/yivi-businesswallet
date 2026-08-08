@@ -95,6 +95,12 @@ const (
 	// taking out a capability nobody meant to touch. Without it an org cannot store
 	// a CSC client secret (internal/csc).
 	envCSCEncryptionKey = "CSC_ENCRYPTION_KEY"
+	// SIGNING_OAUTH_ISSUER_INTERNAL overrides the OAuth issuer base the backend uses
+	// for its own server-side token exchange during the signing ceremony, when that
+	// host differs from the browser-facing issuer. It exists for local Docker (the
+	// authorization server is localhost:8084 to the browser but qtsp-authz:8084 to
+	// the backend container). Empty in production, where the two are the same URL.
+	envSigningOAuthIssuerInternal = "SIGNING_OAUTH_ISSUER_INTERNAL"
 	// STATIC_DIR points at the built frontend; when set the API also serves it as
 	// an SPA on "/". Unset in dev (Vite serves the frontend).
 	envStaticDir = "STATIC_DIR"
@@ -256,6 +262,9 @@ type Config struct {
 	// CSCEncryptionKey encrypts the per-org CSC signing-provider client secret at
 	// rest. Empty means no organisation can store one.
 	CSCEncryptionKey string
+	// SigningOAuthIssuerInternal overrides the OAuth issuer base for the backend's
+	// server-side token exchange during signing (local Docker only; empty in prod).
+	SigningOAuthIssuerInternal string
 	// MailDefaultLocale is the fallback language for outbound transactional mail.
 	MailDefaultLocale string
 
@@ -401,14 +410,15 @@ func Load() (Config, error) {
 		AttestationHolderWSCAInsecure: strings.EqualFold(
 			os.Getenv(envAttestationHolderWSCAInsecure), "true"),
 
-		AppBaseURL:                appBaseURL,
-		EmailEncryptionKey:        os.Getenv(envEmailEncryptionKey),
-		SlackEncryptionKey:        os.Getenv(envSlackEncryptionKey),
-		TeamsEncryptionKey:        os.Getenv(envTeamsEncryptionKey),
-		ProvisioningEncryptionKey: os.Getenv(envProvisioningEncryptionKey),
-		CSCEncryptionKey:          os.Getenv(envCSCEncryptionKey),
-		MailDefaultLocale:         envOrDefault(envMailDefaultLocale, defaultMailLocale),
-		StaticDir:                 os.Getenv(envStaticDir),
+		AppBaseURL:                 appBaseURL,
+		EmailEncryptionKey:         os.Getenv(envEmailEncryptionKey),
+		SlackEncryptionKey:         os.Getenv(envSlackEncryptionKey),
+		TeamsEncryptionKey:         os.Getenv(envTeamsEncryptionKey),
+		ProvisioningEncryptionKey:  os.Getenv(envProvisioningEncryptionKey),
+		CSCEncryptionKey:           os.Getenv(envCSCEncryptionKey),
+		SigningOAuthIssuerInternal: os.Getenv(envSigningOAuthIssuerInternal),
+		MailDefaultLocale:          envOrDefault(envMailDefaultLocale, defaultMailLocale),
+		StaticDir:                  os.Getenv(envStaticDir),
 
 		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
 		PostGuardSharedSecret:  os.Getenv(envPostGuardSharedSecret),

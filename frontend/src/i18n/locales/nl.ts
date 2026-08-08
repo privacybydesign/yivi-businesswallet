@@ -44,6 +44,7 @@ export const nl: Translation<typeof en> = {
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
     postguard: "PostGuard-bestanden",
+    signing: "Documenten ondertekenen",
     auditLog: "Auditlogboek",
     adminDashboard: "Overzicht",
     allOrganizations: "Organisaties",
@@ -498,6 +499,8 @@ export const nl: Translation<typeof en> = {
       orgTeamsSettings: "Microsoft Teams-instellingen",
       orgProvisioningSettings: "Provisioning-instellingen",
       orgCscSettings: "Instellingen ondertekenprovider",
+      signingCredentials: "Ondertekencredential",
+      signingRequests: "Ondertekenverzoek",
     },
     actions: {
       orgCreated: "Organisatie aangemaakt",
@@ -567,6 +570,10 @@ export const nl: Translation<typeof en> = {
       teamsSettingsUpdated: "Microsoft Teams-instellingen bijgewerkt",
       provisioningSettingsUpdated: "Provisioning-instellingen bijgewerkt",
       cscSettingsUpdated: "Instellingen ondertekenprovider bijgewerkt",
+      signingCredentialLinked: "Ondertekencredential gekoppeld",
+      signingRequested: "Documenthandtekening aangevraagd",
+      signingCompleted: "Documenthandtekening voltooid",
+      signingFailed: "Documenthandtekening mislukt",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
     },
@@ -651,6 +658,44 @@ export const nl: Translation<typeof en> = {
     noDepartment: "Geen afdeling",
     lastAdmin:
       "Dit is de enige beheerder van de organisatie. Maak eerst een ander lid beheerder.",
+  },
+  signing: {
+    title: "Documenten ondertekenen",
+    subtitle:
+      "Gekwalificeerde elektronische handtekeningen via je CSC-ondertekenprovider",
+    credentialTitle: "Ondertekencertificaat",
+    credentialDescription:
+      "Je gekwalificeerde ondertekencertificaat wordt eenmalig opgehaald en voor elke handtekening hergebruikt. Bij het koppelen opent je wallet om het te autoriseren.",
+    credentialIdLabel: "Certificaat-ID",
+    keyAlgoLabel: "Sleutelalgoritme",
+    notLinked: "Er is nog geen ondertekencertificaat gekoppeld.",
+    linkButton: "Ondertekencertificaat koppelen",
+    relinkButton: "Certificaat opnieuw koppelen",
+    linkedToast: "Ondertekencertificaat gekoppeld.",
+    linkFailedToast:
+      "Het koppelen van het ondertekencertificaat is niet voltooid.",
+    credentialLoadError: "Kon je ondertekencertificaat niet laden.",
+    walletHint:
+      "Je wordt doorgestuurd naar de ondertekenprovider om te autoriseren met je wallet en daarna teruggebracht.",
+    signTitle: "Een document ondertekenen",
+    signDescription:
+      "Upload een PDF. De hash wordt met je wallet geautoriseerd, door de provider ondertekend en de ondertekende PDF wordt aan je teruggegeven.",
+    signNeedsCredential: "Koppel eerst een ondertekencertificaat.",
+    signButton: "Document ondertekenen",
+    requestTitle: "Ondertekenverzoek",
+    requestPending: "Wachten tot je de handtekening in je wallet autoriseert…",
+    requestCompleted: "{{filename}} is ondertekend.",
+    requestFailed: "Ondertekenen mislukt: {{reason}}",
+    requestFailedGeneric: "het verzoek is niet voltooid",
+    requestLoadError: "Kon het ondertekenverzoek niet laden.",
+    downloadButton: "Ondertekende PDF downloaden",
+    downloadedToast: "Ondertekend document gedownload.",
+    downloadError: "Kon het ondertekende document niet downloaden.",
+    notConfigured:
+      "Configureer eerst een CSC-ondertekenprovider in de instellingen.",
+    noCredentialError:
+      "Koppel een ondertekencertificaat voordat je ondertekent.",
+    startError: "Kon het ondertekenen niet starten: {{message}}",
   },
   settings: {
     title: "Instellingen",

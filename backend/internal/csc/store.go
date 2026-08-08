@@ -154,6 +154,48 @@ func readAuditable(ctx context.Context, q database.Querier, orgID uuid.UUID) (au
 	return current, nil
 }
 
+// ResolveConnection returns an org's CSC base URL, OAuth client id, and the
+// DECRYPTED client secret, for the signing ceremony (internal/signing) to drive
+// the authorization + token exchange. The secret is decrypted here and never
+// leaves as ciphertext; an org with no row returns empty strings (the caller
+// treats that as "not configured"). A stored secret with no deployment key is a
+// misconfiguration surfaced as an error, not a silent empty secret.
+func (s *Store) ResolveConnection(ctx context.Context, orgID uuid.UUID) (baseURL, clientID, clientSecret string, err error) {
+	const query = `SELECT base_url, client_id, client_secret_ciphertext
+		FROM org_csc_settings WHERE organization_id = $1`
+	var ciphertext []byte
+	err = s.db.QueryRow(ctx, query, orgID).Scan(&baseURL, &clientID, &ciphertext)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", "", nil
+	}
+	if err != nil {
+		return "", "", "", fmt.Errorf("csc: resolve connection org %s: %w", orgID, err)
+	}
+	if len(ciphertext) > 0 {
+		if s.cipher == nil {
+			return "", "", "", ErrNoEncryptionKey
+		}
+		plain, derr := s.cipher.Decrypt(ciphertext)
+		if derr != nil {
+			return "", "", "", fmt.Errorf("csc: decrypt client secret org %s: %w", orgID, derr)
+		}
+		clientSecret = string(plain)
+	}
+	return baseURL, clientID, clientSecret, nil
+}
+
+// Available reports whether the org has a CSC signing provider configured and
+// enabled. It reads only the non-secret settings view, so it is safe to expose to
+// members (it is the gate for showing the signing feature to non-admins, who
+// cannot read the full settings).
+func (s *Store) Available(ctx context.Context, orgID uuid.UUID) (bool, error) {
+	settings, err := s.GetSettings(ctx, orgID)
+	if err != nil {
+		return false, err
+	}
+	return settings.Configured && settings.Enabled, nil
+}
+
 // BaseURLFor resolves the base URL a connection test should probe. It returns
 // ErrNotConfigured when the org has no row or no base URL stored — neither is a
 // failure, both are "nothing to test".
