@@ -117,132 +117,134 @@ export default function Signing(): React.JSX.Element {
     <>
       <TopBar title={t("signing.title")} subtitle={t("signing.subtitle")} />
 
-      <div className="flex max-w-2xl flex-col gap-6">
-        {/* Signing credential */}
-        <Card className="p-7">
-          <h2 className="text-ink text-[15px] font-semibold">
-            {t("signing.credentialTitle")}
-          </h2>
-          <p className="text-ink-soft mt-1 text-[13px]">
-            {t("signing.credentialDescription")}
-          </p>
-
-          {credential.isPending ? (
-            <p className="text-ink-soft mt-4 text-[13px]">
-              {t("common.loading")}
-            </p>
-          ) : credential.isError ? (
-            <p className="text-error mt-4 text-[13px]">
-              {t("signing.credentialLoadError")}
-            </p>
-          ) : credential.data != null ? (
-            <dl className="mt-4 flex flex-col gap-2">
-              <div>
-                <dt className={LABEL}>{t("signing.credentialIdLabel")}</dt>
-                <dd className="text-ink font-mono text-[12px] break-all">
-                  {credential.data.credentialId}
-                </dd>
-              </div>
-              <div>
-                <dt className={LABEL}>{t("signing.keyAlgoLabel")}</dt>
-                <dd className="text-ink text-[13px]">
-                  {credential.data.keyAlgo}
-                </dd>
-              </div>
-            </dl>
-          ) : (
-            <p className="text-ink-soft mt-4 text-[13px]">
-              {t("signing.notLinked")}
-            </p>
-          )}
-
-          <div className="mt-5">
-            <Button type="button" onClick={onLink} loading={link.isPending}>
-              {isLinked ? t("signing.relinkButton") : t("signing.linkButton")}
-            </Button>
-          </div>
-          <p className="text-ink-soft mt-3 text-[12px]">
-            {t("signing.walletHint")}
-          </p>
-        </Card>
-
-        {/* Sign a document */}
-        <Card className="p-7">
-          <h2 className="text-ink text-[15px] font-semibold">
-            {t("signing.signTitle")}
-          </h2>
-          <p className="text-ink-soft mt-1 text-[13px]">
-            {t("signing.signDescription")}
-          </p>
-
-          {!isLinked && (
-            <p className="text-ink-soft mt-4 text-[13px]">
-              {t("signing.signNeedsCredential")}
-            </p>
-          )}
-
-          <div className="mt-4 flex flex-col gap-3">
-            <input
-              type="file"
-              accept="application/pdf"
-              disabled={!isLinked}
-              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-              className="text-ink file:bg-surface-2 text-[13px] file:mr-3 file:rounded-md file:border-0 file:px-3 file:py-1.5 file:text-[13px] file:font-medium disabled:opacity-50"
-            />
-            <div>
-              <Button
-                type="button"
-                onClick={onSign}
-                loading={create.isPending}
-                disabled={!isLinked || !file}
-              >
-                {t("signing.signButton")}
-              </Button>
-            </div>
-          </div>
-        </Card>
-
-        {/* Active signing request */}
-        {requestId && (
+      <div className="p-8">
+        <div className="flex max-w-2xl flex-col gap-6">
+          {/* Signing credential */}
           <Card className="p-7">
             <h2 className="text-ink text-[15px] font-semibold">
-              {t("signing.requestTitle")}
+              {t("signing.credentialTitle")}
             </h2>
-            {request.isPending ? (
-              <p className="text-ink-soft mt-3 text-[13px]">
+            <p className="text-ink-soft mt-1 text-[13px]">
+              {t("signing.credentialDescription")}
+            </p>
+
+            {credential.isPending ? (
+              <p className="text-ink-soft mt-4 text-[13px]">
                 {t("common.loading")}
               </p>
-            ) : request.isError ? (
-              <p className="text-error mt-3 text-[13px]">
-                {t("signing.requestLoadError")}
+            ) : credential.isError ? (
+              <p className="text-error mt-4 text-[13px]">
+                {t("signing.credentialLoadError")}
               </p>
-            ) : request.data.status === SIGNING_STATUS.completed ? (
-              <div className="mt-3 flex flex-col gap-3">
-                <p className="text-ink text-[13px]">
-                  {t("signing.requestCompleted", {
-                    filename: request.data.filename,
-                  })}
-                </p>
+            ) : credential.data != null ? (
+              <dl className="mt-4 flex flex-col gap-2">
                 <div>
-                  <Button type="button" onClick={onDownload}>
-                    {t("signing.downloadButton")}
-                  </Button>
+                  <dt className={LABEL}>{t("signing.credentialIdLabel")}</dt>
+                  <dd className="text-ink font-mono text-[12px] break-all">
+                    {credential.data.credentialId}
+                  </dd>
                 </div>
-              </div>
-            ) : request.data.status === SIGNING_STATUS.failed ? (
-              <p className="text-error mt-3 text-[13px]">
-                {t("signing.requestFailed", {
-                  reason:
-                    request.data.error || t("signing.requestFailedGeneric"),
-                })}
-              </p>
+                <div>
+                  <dt className={LABEL}>{t("signing.keyAlgoLabel")}</dt>
+                  <dd className="text-ink text-[13px]">
+                    {credential.data.keyAlgo}
+                  </dd>
+                </div>
+              </dl>
             ) : (
-              <p className="text-ink-soft mt-3 text-[13px]">
-                {t("signing.requestPending")}
+              <p className="text-ink-soft mt-4 text-[13px]">
+                {t("signing.notLinked")}
               </p>
             )}
+
+            <div className="mt-5">
+              <Button type="button" onClick={onLink} loading={link.isPending}>
+                {isLinked ? t("signing.relinkButton") : t("signing.linkButton")}
+              </Button>
+            </div>
+            <p className="text-ink-soft mt-3 text-[12px]">
+              {t("signing.walletHint")}
+            </p>
           </Card>
-        )}
+
+          {/* Sign a document */}
+          <Card className="p-7">
+            <h2 className="text-ink text-[15px] font-semibold">
+              {t("signing.signTitle")}
+            </h2>
+            <p className="text-ink-soft mt-1 text-[13px]">
+              {t("signing.signDescription")}
+            </p>
+
+            {!isLinked && (
+              <p className="text-ink-soft mt-4 text-[13px]">
+                {t("signing.signNeedsCredential")}
+              </p>
+            )}
+
+            <div className="mt-4 flex flex-col gap-3">
+              <input
+                type="file"
+                accept="application/pdf"
+                disabled={!isLinked}
+                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                className="text-ink file:bg-surface-2 text-[13px] file:mr-3 file:rounded-md file:border-0 file:px-3 file:py-1.5 file:text-[13px] file:font-medium disabled:opacity-50"
+              />
+              <div>
+                <Button
+                  type="button"
+                  onClick={onSign}
+                  loading={create.isPending}
+                  disabled={!isLinked || !file}
+                >
+                  {t("signing.signButton")}
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          {/* Active signing request */}
+          {requestId && (
+            <Card className="p-7">
+              <h2 className="text-ink text-[15px] font-semibold">
+                {t("signing.requestTitle")}
+              </h2>
+              {request.isPending ? (
+                <p className="text-ink-soft mt-3 text-[13px]">
+                  {t("common.loading")}
+                </p>
+              ) : request.isError ? (
+                <p className="text-error mt-3 text-[13px]">
+                  {t("signing.requestLoadError")}
+                </p>
+              ) : request.data.status === SIGNING_STATUS.completed ? (
+                <div className="mt-3 flex flex-col gap-3">
+                  <p className="text-ink text-[13px]">
+                    {t("signing.requestCompleted", {
+                      filename: request.data.filename,
+                    })}
+                  </p>
+                  <div>
+                    <Button type="button" onClick={onDownload}>
+                      {t("signing.downloadButton")}
+                    </Button>
+                  </div>
+                </div>
+              ) : request.data.status === SIGNING_STATUS.failed ? (
+                <p className="text-error mt-3 text-[13px]">
+                  {t("signing.requestFailed", {
+                    reason:
+                      request.data.error || t("signing.requestFailedGeneric"),
+                  })}
+                </p>
+              ) : (
+                <p className="text-ink-soft mt-3 text-[13px]">
+                  {t("signing.requestPending")}
+                </p>
+              )}
+            </Card>
+          )}
+        </div>
       </div>
     </>
   );
