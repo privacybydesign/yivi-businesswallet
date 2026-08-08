@@ -176,6 +176,13 @@ func NormalizeBaseURL(raw string) (string, error) {
 	}
 	parsed.Host = strings.ToLower(parsed.Host)
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	// Clear the fragment AND the query: Client.Info builds its endpoint by string
+	// concatenation (base + "/csc/v2/info"), so a stored query would fold the probe
+	// path into it (base "http://h?tenant=x" -> query "tenant=x/csc/v2/info", path
+	// "/"), reaching the server root and passing the test without ever hitting /info.
+	// A trailing "?" (ForceQuery) does the same, so drop that too.
 	parsed.Fragment = ""
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
 	return parsed.String(), nil
 }
