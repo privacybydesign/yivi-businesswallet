@@ -78,5 +78,60 @@ B-LT/B-LTA (validation data, archival timestamp) need a separate DSS augmentatio
   configurable.
 - Sign algorithm is ECDSA-P256 / SHA-256 only (the reference QTSP's supported set).
 
+## Running it locally (verified end to end against a real EUDI wallet)
+
+1. `docker compose --profile signer up --build` — brings up the app plus the QTSP resource
+   server (`:8085`) and authorization server (`:8084`). First run only: if `qtsp-authz` fails
+   with "table doesn't exist", `docker compose --profile signer down -v` once and up again (the
+   Spring OAuth schema loads only on a fresh `signer-mysql` volume).
+2. `.env` needs `CSC_ENCRYPTION_KEY` (`openssl rand -hex 32`) or the org can't save the client
+   secret.
+3. In **Settings → Signing**, use the sample preset and set:
+   - **base URL `http://qtsp-signer:8085`** (NOT `localhost:8085` — the backend calls it
+     server-side from its container),
+   - client id `yivi-business-wallet`, client secret `yivi-business-wallet-demo-secret`, enable.
+4. Install the **EUDI reference wallet**, get a dev **PID**. Add the EUDI verifier's RP trust
+   anchor to the wallet if prompted (`certificate_of_issuers/PIDIssuerCA02-EU.cacert.pem` from
+   the reference repo). **Yivi does not work here** — it rejects that CA's mdoc EKU and lacks an
+   mdoc PID.
+5. **Sign documents** page → link the credential (one scan) → upload a PDF → scan → download the
+   signed PDF.
+
+### Local-Docker gotchas baked into the compose (each was a real failure while bringing this up)
+
+- **CSC base URL** must be the container name `qtsp-signer:8085`, not `localhost` (backend calls
+  it server-side).
+- **`VERIFIER-DOMAIN` / `WALLET-SCHEME`** are passed to `qtsp-authz` as **Spring command-line
+  args**, not `environment:` — Docker Compose silently drops env var names containing hyphens.
+- **OAuth issuer host split**: the browser reaches the AS at `localhost:8084` (the authorize
+  URL) but the backend reaches it at `qtsp-authz:8084` (the server-side token exchange), so
+  `SIGNING_OAUTH_ISSUER_INTERNAL` overrides only the backend's token-exchange host. Empty in
+  production, where the QTSP is one URL for both.
+- **`client_id` in the token body**: the reference token endpoint requires `client_id` as a form
+  field even with `client_secret_basic`; `signingprovider.ExchangeToken` sends it in both.
+- **Authorize `hashes` are base64url**, `signHash` hashes are standard base64 (the token claim
+  the AS re-encodes to). Same digest, two encodings — mixing them 500s the AS.
+
+## Verifying a signed PDF
+
+The produced PDF is a detached CMS/PAdES signature (`/Type /Sig`, `/ByteRange`,
+`/SubFilter /adbe.pkcs7.detached`). To check one:
+
+- **`pdfsig file.pdf`** (poppler): shows the signer (the PID identity), signing time, SHA-256,
+  and "Signature is Valid".
+- **Adobe Acrobat** Signatures panel — valid signature, but "signer's identity is unknown".
+- **`digitorus/pdfsign/verify`** — the programmatic check `pades_test.go` uses.
+
+**Expected: "certificate issuer is unknown" / "not trusted".** The demo QTSP self-signs the cert
+(the EJBCA-free path), so it is not a qualified cert in the EU Trusted Lists / Adobe AATL — this
+is the "plumbing, not qualified compliance" line made concrete. A real production QTSP issues a
+cert that chains to an EU trust list, and the same signature would validate as trusted/qualified.
+
+### Follow-ups
+- The signature subfilter is `adbe.pkcs7.detached` (a widely-accepted CMS detached signature).
+  For strict PAdES-baseline badging, switch pdfsign to the `ETSI.CAdES.detached` subfilter.
+- `DefaultRedirectURI` and the local-Docker host overrides above are dev conveniences; a real
+  deployment points at one publicly-reachable QTSP URL and needs none of them.
+
 See also `.ai/features/qtsp-signing-demo.md` (the hosted QTSP + `--profile signer`, incl. the
 authorization_server) and `internal/csc` (per-org provider settings).
