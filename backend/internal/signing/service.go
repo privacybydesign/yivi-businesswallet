@@ -156,14 +156,17 @@ func (s *Service) StartSign(ctx context.Context, orgID, userID uuid.UUID, slug, 
 		return Start{}, err
 	}
 	authURL := s.provider.AuthorizeURL(info.OAuth2, signingprovider.AuthorizeParams{
-		ClientID:         conn.clientID,
-		RedirectURI:      s.redirectURI,
-		State:            state,
-		CodeChallenge:    pkce.Challenge,
-		Scope:            signingprovider.ScopeCredential,
-		CredentialID:     cred.ID,
-		NumSignatures:    1,
-		Hashes:           []string{digestB64},
+		ClientID:      conn.clientID,
+		RedirectURI:   s.redirectURI,
+		State:         state,
+		CodeChallenge: pkce.Challenge,
+		Scope:         signingprovider.ScopeCredential,
+		CredentialID:  cred.ID,
+		NumSignatures: 1,
+		// The authorize `hashes` param is base64url (the QTSP decodes it with
+		// getUrlDecoder); the token claim it becomes — and therefore the signHash
+		// request below — is standard base64 (digestB64). Same digest, two encodings.
+		Hashes:           []string{base64.RawURLEncoding.EncodeToString(digest)},
 		HashAlgorithmOID: signingprovider.HashAlgoSHA256OID,
 	})
 	s.put(state, &ceremony{
