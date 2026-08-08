@@ -74,6 +74,11 @@ func (c *Client) ExchangeToken(ctx context.Context, issuer, clientID, clientSecr
 	form.Set("code", code)
 	form.Set("redirect_uri", redirectURI)
 	form.Set("code_verifier", codeVerifier)
+	// The client is authenticated with client_secret_basic (the Authorization header
+	// below), but the reference QTSP's token endpoint additionally requires client_id
+	// as a form field and answers 400 "Missing parameter 'client_id'" without it.
+	// Sending it in the body too is harmless for a spec-compliant server.
+	form.Set("client_id", clientID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(issuer, "/oauth2/token"), strings.NewReader(form.Encode()))
 	if err != nil {
