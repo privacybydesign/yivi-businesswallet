@@ -26,6 +26,14 @@ type Service struct {
 	settings    connectionResolver
 	redirectURI string
 	appBaseURL  string
+	// issuerInternal, when set, is the OAuth issuer base the backend uses for its
+	// own server-side token exchange, instead of the issuer discovered from the
+	// provider's /info (which is the browser-facing one used to build the authorize
+	// URL). It exists only because in local Docker the authorization server is
+	// reachable at a different host from the browser (localhost:8084) than from the
+	// backend container (qtsp-authz:8084); in production the two are the same URL and
+	// this stays empty. Only the host differs — the token/claims are unaffected.
+	issuerInternal string
 
 	mu       sync.Mutex
 	sessions map[string]*ceremony
@@ -60,15 +68,29 @@ const (
 // NewService builds the signing service. redirectURI is the QTSP-registered OAuth
 // callback (must match the authorization server's client registration);
 // appBaseURL is where the browser is sent after the callback resolves.
-func NewService(store *Store, p provider, settings connectionResolver, redirectURI, appBaseURL string) *Service {
+// issuerInternal is an optional override for the backend's server-side token
+// exchange host (see the Service field); empty in production.
+func NewService(store *Store, p provider, settings connectionResolver, redirectURI, appBaseURL, issuerInternal string) *Service {
 	return &Service{
-		store:       store,
-		provider:    p,
-		settings:    settings,
-		redirectURI: redirectURI,
-		appBaseURL:  appBaseURL,
-		sessions:    make(map[string]*ceremony),
+		store:          store,
+		provider:       p,
+		settings:       settings,
+		redirectURI:    redirectURI,
+		appBaseURL:     appBaseURL,
+		issuerInternal: issuerInternal,
+		sessions:       make(map[string]*ceremony),
 	}
+}
+
+// tokenIssuer returns the OAuth issuer base to use for the backend's own
+// server-side token exchange: the internal override when configured (local Docker,
+// where the browser-facing issuer host is not reachable from the backend), else
+// the issuer discovered from the provider (the production case).
+func (s *Service) tokenIssuer(discovered string) string {
+	if s.issuerInternal != "" {
+		return s.issuerInternal
+	}
+	return discovered
 }
 
 // StartLink begins linking a signing credential for the acting user: a
@@ -163,7 +185,7 @@ func (s *Service) HandleCallback(ctx context.Context, code, state string) string
 	}
 	dest := s.resultURL(c, "")
 
-	token, err := s.provider.ExchangeToken(ctx, c.issuer, c.clientID, c.clientSecret, code, c.pkceVerifier, s.redirectURI)
+	token, err := s.provider.ExchangeToken(ctx, s.tokenIssuer(c.issuer), c.clientID, c.clientSecret, code, c.pkceVerifier, s.redirectURI)
 	if err != nil {
 		return s.failCeremony(ctx, c, "authorization could not be completed", err)
 	}

@@ -517,7 +517,7 @@ func run() error {
 	// Settings + connection test shipped separately; this is the signing ceremony.
 	signingStore := signing.NewStore(pool, recorder)
 	signingHandler := signing.NewHandler(
-		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signing.DefaultRedirectURI, cfg.AppBaseURL),
+		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signing.DefaultRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
 		requireUser, orgHandler.Authorize)
 
 	handler := server.New(

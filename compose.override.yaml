@@ -51,6 +51,12 @@ services:
       QERDS_AUTH_TOKEN: ${QERDS_AUTH_TOKEN:-}
       QERDS_DOMIBUS_FROM_PARTY: ${QERDS_DOMIBUS_FROM_PARTY:-}
       QERDS_DOMIBUS_TO_PARTY: ${QERDS_DOMIBUS_TO_PARTY:-}
+      # Signing ceremony (--profile signer): the QTSP authorization server is
+      # reachable at localhost:8084 from the browser (the authorize URL) but at
+      # qtsp-authz:8084 from this backend container (the server-side token exchange).
+      # This overrides only the backend's token-exchange host; empty in production
+      # where the QTSP is one URL for both. See internal/signing.
+      SIGNING_OAUTH_ISSUER_INTERNAL: ${SIGNING_OAUTH_ISSUER_INTERNAL:-http://qtsp-authz:8084}
     depends_on:
       seed:
         condition: service_completed_successfully
