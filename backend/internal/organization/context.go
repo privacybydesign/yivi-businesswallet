@@ -38,3 +38,16 @@ func roleFromContext(ctx context.Context) string {
 	role, _ := ctx.Value(roleCtxKey{}).(string)
 	return role
 }
+
+// RoleFromContext returns the caller's effective role in the resolved org, as set
+// by the Authorize middleware. Exported so a member-gated handler in another
+// package can distinguish an admin caller from an ordinary member (e.g. to widen
+// access to any org record) without a second membership lookup.
+func RoleFromContext(ctx context.Context) string {
+	return roleFromContext(ctx)
+}
+
+// IsAdmin reports whether the caller's effective role in the resolved org is admin.
+func IsAdmin(ctx context.Context) bool {
+	return roleFromContext(ctx) == RoleAdmin
+}

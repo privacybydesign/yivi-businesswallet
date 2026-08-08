@@ -19,6 +19,7 @@ type NavLabelKey =
   | "nav.attestations"
   | "nav.postguard"
   | "nav.signing"
+  | "nav.signedDocuments"
   | "nav.auditLog"
   | "nav.settings"
   | "nav.adminDashboard"
@@ -54,6 +55,15 @@ function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
     });
   }
   items.push(
+    ...(showSigning
+      ? ([
+          {
+            to: `/${slug}/signed-documents`,
+            labelKey: "nav.signedDocuments",
+            icon: "valid",
+          },
+        ] as NavItem[])
+      : []),
     { to: `/${slug}/audit-log`, labelKey: "nav.auditLog", icon: "time" },
     { to: `/${slug}/settings`, labelKey: "nav.settings", icon: "settings" },
   );

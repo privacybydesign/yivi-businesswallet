@@ -96,6 +96,16 @@
         { "type": "footer" }
       ]
     },
+    "signed_document": {
+      "subject": "{{orgName}} has sent you a signed document",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} has sent you a signed document" },
+        { "type": "paragraph", "text": "{{message}}" },
+        { "type": "paragraph", "text": "The signed document is attached to this e-mail as a PDF." },
+        { "type": "footer" }
+      ]
+    },
     "smtp_test": {
       "subject": "Test e-mail from your Business Wallet",
       "blocks": [

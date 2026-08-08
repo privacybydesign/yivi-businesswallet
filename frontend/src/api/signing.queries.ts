@@ -1,17 +1,32 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import type {
+  InfiniteData,
+  UseInfiniteQueryResult,
+  UseMutationResult,
+  UseQueryResult,
+} from "@tanstack/react-query";
 import {
   SIGNING_STATUS,
   createSigningRequest,
+  getPendingSigningRequests,
   getSigningAvailability,
   getSigningCredential,
   getSigningRequest,
   linkSigningCredential,
+  listSigningRequests,
+  startSignRequest,
 } from "./signing";
 import type {
   LinkedCredential,
+  NewSigningRequest,
   SigningAvailability,
   SigningRequest,
+  SigningRequestPage,
   SigningStart,
 } from "./signing";
 
@@ -45,6 +60,14 @@ export function signingRequestQueryKey(
   return ["organizations", "detail", slug, "signing", "request", id];
 }
 
+export function signingPendingQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "signing", "pending"];
+}
+
+export function signingRequestsQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "signing", "requests"];
+}
+
 export function useSigningCredentialQuery(
   slug: string,
   enabled = true,
@@ -66,9 +89,36 @@ export function useSigningRequestQuery(
     enabled: slug !== "" && id !== null,
     // Keep polling only while the ceremony is still in flight.
     refetchInterval: (query) =>
-      query.state.data?.status === SIGNING_STATUS.awaitingAuthorization
+      query.state.data?.status === SIGNING_STATUS.awaitingSignatures
         ? POLL_INTERVAL_MS
         : false,
+  });
+}
+
+// usePendingSigningRequestsQuery lists documents awaiting the caller's signature.
+export function usePendingSigningRequestsQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<SigningRequest[], Error> {
+  return useQuery({
+    queryKey: signingPendingQueryKey(slug),
+    queryFn: ({ signal }) => getPendingSigningRequests(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+// useSigningRequestsQuery is the admin-only signed-documents history, paginated.
+export function useSigningRequestsQuery(
+  slug: string,
+  enabled: boolean,
+): UseInfiniteQueryResult<InfiniteData<SigningRequestPage>, Error> {
+  return useInfiniteQuery({
+    queryKey: signingRequestsQueryKey(slug),
+    queryFn: ({ pageParam, signal }) =>
+      listSigningRequests(slug, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
+    enabled: enabled && slug !== "",
   });
 }
 
@@ -83,9 +133,28 @@ export function useLinkSigningCredentialMutation(
 
 export function useCreateSigningRequestMutation(
   slug: string,
-): UseMutationResult<SigningStart, Error, File> {
+): UseMutationResult<{ id: string }, Error, NewSigningRequest> {
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (document) => createSigningRequest(slug, document),
+    mutationFn: (input) => createSigningRequest(slug, input),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: signingRequestsQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: signingPendingQueryKey(slug),
+      });
+    },
+  });
+}
+
+// useStartSignRequestMutation starts the acting user's signing ceremony.
+export function useStartSignRequestMutation(
+  slug: string,
+): UseMutationResult<SigningStart, Error, string> {
+  return useMutation({
+    mutationFn: (id) => startSignRequest(slug, id),
     meta: { suppressErrorToast: true },
   });
 }
