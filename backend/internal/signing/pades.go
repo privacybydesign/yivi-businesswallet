@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -73,12 +74,31 @@ func startPAdES(input []byte, cred signingprovider.Credential) (*padesSession, [
 	sess := &padesSession{signer: signer, result: make(chan padesResult, 1)}
 
 	size := int64(len(input))
-	rdr, err := pdf.NewReader(bytes.NewReader(input), size)
+	// digitorus/pdf reports a malformed xref/trailer by panicking and never recovers,
+	// so a bad upload must not escape as a panic on the request goroutine: it is
+	// ErrInvalidPDF like any other unusable file.
+	rdr, err := func() (r *pdf.Reader, err error) {
+		defer func() {
+			if recover() != nil {
+				err = ErrInvalidPDF
+			}
+		}()
+		return pdf.NewReader(bytes.NewReader(input), size)
+	}()
 	if err != nil {
 		return nil, nil, ErrInvalidPDF
 	}
 
 	go func() {
+		// digitorus/pdf reports a malformed object graph by panicking (lex.go errorf)
+		// and pdfsign resolves objects lazily, so a document pdf.NewReader accepted can
+		// still panic here. This is NOT the request goroutine, so an unrecovered panic
+		// would take the whole process down — recover it into ErrInvalidPDF on result.
+		defer func() {
+			if r := recover(); r != nil {
+				sess.result <- padesResult{err: fmt.Errorf("%w: %v", ErrInvalidPDF, r)}
+			}
+		}()
 		out := &bytes.Buffer{}
 		data := sign.SignData{
 			Signer:            signer,
@@ -110,8 +130,16 @@ func startPAdES(input []byte, cred signingprovider.Credential) (*padesSession, [
 	case digest := <-signer.digestCh:
 		return sess, digest, nil
 	case r := <-sess.result:
+		// pdfsign rejected the document before it could sign (no signable page, empty
+		// xref, ...) or panicked assembling it. Either way that is a property of the
+		// upload, not a server fault, so it must reach the caller as ErrInvalidPDF —
+		// mapStartError turns anything else into a 500. The panic path already wrapped
+		// ErrInvalidPDF; don't double-wrap it.
 		if r.err != nil {
-			return nil, nil, r.err
+			if errors.Is(r.err, ErrInvalidPDF) {
+				return nil, nil, r.err
+			}
+			return nil, nil, fmt.Errorf("%w: %v", ErrInvalidPDF, r.err)
 		}
 		return nil, nil, ErrInvalidPDF
 	}
