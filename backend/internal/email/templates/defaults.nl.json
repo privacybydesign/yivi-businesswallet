@@ -96,6 +96,16 @@
         { "type": "footer" }
       ]
     },
+    "signed_document": {
+      "subject": "{{orgName}} heeft je een ondertekend document gestuurd",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} heeft je een ondertekend document gestuurd" },
+        { "type": "paragraph", "text": "{{message}}" },
+        { "type": "paragraph", "text": "Het ondertekende document is als PDF bij deze e-mail gevoegd." },
+        { "type": "footer" }
+      ]
+    },
     "smtp_test": {
       "subject": "Test-e-mail van je Business Wallet",
       "blocks": [

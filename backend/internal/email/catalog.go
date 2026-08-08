@@ -34,6 +34,9 @@ const (
 	// KindEventNotification is the notification channel's message: one wallet event
 	// the organization subscribed to, mailed to its admins.
 	KindEventNotification Kind = "event_notification"
+	// KindSignedDocument delivers a completed co-signed document to its recipient
+	// (a natural person) as a PDF attachment, with the org's cover message.
+	KindSignedDocument Kind = "signed_document"
 )
 
 // Variable names. Every placeholder a template may use is one of these, declared
@@ -88,6 +91,10 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varEventDetails},
 		{Name: varEventTime},
 		{Name: varAuditURL, IsURL: true},
+	},
+	KindSignedDocument: {
+		{Name: varOrgName},
+		{Name: varMessage},
 	},
 }
 

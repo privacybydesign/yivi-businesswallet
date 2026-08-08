@@ -32,6 +32,11 @@ func sampleVars(kind Kind) map[string]string {
 			varEventTime:    "2026-01-14 09:32 UTC",
 			varAuditURL:     "https://wallet.example.org/acme/audit-log",
 		}
+	case KindSignedDocument:
+		return map[string]string{
+			varOrgName: "Acme BV",
+			varMessage: "Please find the signed contract attached.",
+		}
 	default:
 		return nil
 	}

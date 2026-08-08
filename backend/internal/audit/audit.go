@@ -102,7 +102,9 @@ const (
 
 	SigningCredentialLinked = "signing.credential_linked"
 	SigningRequested        = "signing.requested"
+	SigningSigned           = "signing.signed"
 	SigningCompleted        = "signing.completed"
+	SigningDelivered        = "signing.delivered"
 	SigningFailed           = "signing.failed"
 )
 
