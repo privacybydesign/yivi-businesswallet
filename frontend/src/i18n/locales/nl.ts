@@ -45,7 +45,6 @@ export const nl: Translation<typeof en> = {
     attestations: "Attestaties",
     postguard: "PostGuard-bestanden",
     signing: "Documenten ondertekenen",
-    signedDocuments: "Ondertekende documenten",
     auditLog: "Auditlogboek",
     adminDashboard: "Overzicht",
     allOrganizations: "Organisaties",
@@ -702,6 +701,7 @@ export const nl: Translation<typeof en> = {
     tabToSign: "Te ondertekenen",
     tabNew: "Nieuw verzoek",
     tabCredential: "Mijn certificaat",
+    tabHistory: "Geschiedenis",
     newTitle: "Nieuw ondertekenverzoek",
     newDescription:
       "Upload een PDF, kies wie moet ondertekenen en waar het ondertekende document naartoe moet.",

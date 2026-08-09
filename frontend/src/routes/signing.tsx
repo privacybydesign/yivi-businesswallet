@@ -25,11 +25,15 @@ import {
   useSigningRequestQuery,
   useStartSignRequestMutation,
 } from "../api/signing.queries";
-import { useOrganizationMembersQuery } from "../api/organization.queries";
+import {
+  useOrganizationMembersQuery,
+  useOrganizationQuery,
+} from "../api/organization.queries";
 import type { MemberListEntry } from "../api/organization";
 import { modeLabel, signerStatusLabel } from "../lib/signing-labels";
 import { toast } from "../lib/toast";
 import { Button, Card, Input, Tag, TopBar } from "../ui";
+import { SigningHistoryPanel } from "./signing-history";
 
 const CONFLICT_STATUS = 409;
 const LABEL = "text-ink-soft text-[12px] font-semibold";
@@ -37,12 +41,17 @@ const CONTROL =
   "border-line bg-surface text-ink w-full rounded-md border px-3 py-2 text-[13px]";
 const MEMBER_PAGE_LIMIT = 200;
 
-type TabKey = "toSign" | "new" | "credential";
-const TABS = [
+type TabKey = "toSign" | "new" | "credential" | "history";
+// The "history" tab is admin-only; it is appended to the tab bar only for admins.
+const MEMBER_TABS = [
   { key: "toSign", labelKey: "signing.tabToSign" },
   { key: "new", labelKey: "signing.tabNew" },
   { key: "credential", labelKey: "signing.tabCredential" },
 ] as const;
+const HISTORY_TAB = {
+  key: "history",
+  labelKey: "signing.tabHistory",
+} as const;
 
 // The backend's own message for a rejected start (its APIError), or the transport
 // error when there is none. Mirrors the pattern used by the other settings screens.
@@ -90,7 +99,15 @@ export default function Signing(): React.JSX.Element {
   const credential = useSigningCredentialQuery(slug);
   const isLinked = credential.data != null;
 
-  const activeTab = (searchParams.get("tab") as TabKey | null) ?? "toSign";
+  const org = useOrganizationQuery(slug);
+  const isAdmin = org.data?.role === "admin";
+  const tabs = isAdmin ? [...MEMBER_TABS, HISTORY_TAB] : MEMBER_TABS;
+
+  const requestedTab = (searchParams.get("tab") as TabKey | null) ?? "toSign";
+  // Guard against a non-admin landing on ?tab=history (e.g. a shared link).
+  const activeTab: TabKey = tabs.some((tab) => tab.key === requestedTab)
+    ? requestedTab
+    : "toSign";
   const setTab = (tab: TabKey): void =>
     setSearchParams(
       (prev) => {
@@ -131,46 +148,55 @@ export default function Signing(): React.JSX.Element {
     <>
       <TopBar title={t("signing.title")} subtitle={t("signing.subtitle")} />
 
+      <div className="border-line bg-surface flex gap-1 border-b px-8">
+        {tabs.map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setTab(tab.key)}
+              className={[
+                "h-11 border-b-2 px-3.5 text-[13.5px] transition-colors",
+                active
+                  ? "border-primary text-ink font-semibold"
+                  : "text-ink-soft hover:text-ink border-transparent font-medium",
+              ].join(" ")}
+            >
+              {t(tab.labelKey)}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="p-8">
-        <div className="flex max-w-3xl flex-col gap-6">
-          {requestId && <ActiveRequestCard slug={slug} requestId={requestId} />}
+        {activeTab === "history" ? (
+          <SigningHistoryPanel slug={slug} enabled={isAdmin} />
+        ) : (
+          <div className="flex max-w-3xl flex-col gap-6">
+            {requestId && (
+              <ActiveRequestCard slug={slug} requestId={requestId} />
+            )}
 
-          <div className="border-line flex gap-1 border-b">
-            {TABS.map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setTab(tab.key)}
-                className={[
-                  "-mb-px border-b-2 px-4 py-2.5 text-[13px]",
-                  activeTab === tab.key
-                    ? "border-primary text-ink font-semibold"
-                    : "text-ink-soft border-transparent",
-                ].join(" ")}
-              >
-                {t(tab.labelKey)}
-              </button>
-            ))}
+            {activeTab === "toSign" && (
+              <ToSignTab
+                slug={slug}
+                isLinked={isLinked}
+                onGoLink={() => setTab("credential")}
+              />
+            )}
+            {activeTab === "new" && (
+              <NewRequestTab slug={slug} onCreated={() => setTab("toSign")} />
+            )}
+            {activeTab === "credential" && (
+              <CredentialTab
+                slug={slug}
+                credential={credential}
+                isLinked={isLinked}
+              />
+            )}
           </div>
-
-          {activeTab === "toSign" && (
-            <ToSignTab
-              slug={slug}
-              isLinked={isLinked}
-              onGoLink={() => setTab("credential")}
-            />
-          )}
-          {activeTab === "new" && (
-            <NewRequestTab slug={slug} onCreated={() => setTab("toSign")} />
-          )}
-          {activeTab === "credential" && (
-            <CredentialTab
-              slug={slug}
-              credential={credential}
-              isLinked={isLinked}
-            />
-          )}
-        </div>
+        )}
       </div>
     </>
   );

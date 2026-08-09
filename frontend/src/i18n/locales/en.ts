@@ -34,7 +34,6 @@ export const en = {
     attestations: "Attestations",
     postguard: "PostGuard files",
     signing: "Sign documents",
-    signedDocuments: "Signed documents",
     auditLog: "Audit log",
     adminDashboard: "Overview",
     allOrganizations: "Organizations",
@@ -682,6 +681,7 @@ export const en = {
     tabToSign: "To sign",
     tabNew: "New request",
     tabCredential: "My credential",
+    tabHistory: "History",
     newTitle: "New signing request",
     newDescription:
       "Upload a PDF, choose who must sign it, and where the signed document should be delivered.",
