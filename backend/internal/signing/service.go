@@ -43,8 +43,10 @@ type Service struct {
 	sessions map[string]*ceremony
 	// active guards one in-flight signing ceremony per request id, so two signers of
 	// a parallel request cannot both prepare against the same base document and clobber
-	// each other's incremental signature. Protected by mu.
-	active map[uuid.UUID]bool
+	// each other's incremental signature. It maps to the holding ceremony so the same
+	// signer re-initiating can reclaim their own stale slot (see reserveSign).
+	// Protected by mu.
+	active map[uuid.UUID]*ceremony
 }
 
 // ceremony is one in-flight authorization awaiting its callback.
@@ -65,6 +67,9 @@ type ceremony struct {
 	digestB64    string
 	pades        *padesSession
 
+	// state is this ceremony's own OAuth-state key in sessions, so it can be
+	// discarded (removed from sessions) when the same signer reclaims the slot.
+	state string
 	timer *time.Timer
 }
 
@@ -92,7 +97,7 @@ func NewService(store *Store, p provider, settings connectionResolver, members m
 		appBaseURL:     appBaseURL,
 		issuerInternal: issuerInternal,
 		sessions:       make(map[string]*ceremony),
-		active:         make(map[uuid.UUID]bool),
+		active:         make(map[uuid.UUID]*ceremony),
 	}
 }
 
@@ -198,7 +203,7 @@ func (s *Service) StartSign(ctx context.Context, orgID, userID uuid.UUID, slug s
 	if err := checkTurn(req, userID); err != nil {
 		return Start{}, err
 	}
-	if !s.acquire(requestID) {
+	if !s.reserveSign(requestID, userID) {
 		return Start{}, ErrSignInProgress
 	}
 	cred, err := s.store.GetCredential(ctx, orgID, userID)
@@ -507,16 +512,39 @@ func (s *Service) enrichSlice(ctx context.Context, orgID uuid.UUID, reqs []Reque
 	s.enrich(ctx, orgID, ptrs)
 }
 
-// acquire takes the per-request in-flight lock; false when a ceremony is already
-// running for the request.
-func (s *Service) acquire(requestID uuid.UUID) bool {
+// reserveSign takes the per-request in-flight slot for userID's new signing
+// ceremony. If another user's ceremony holds it, it returns false and the caller
+// answers ErrSignInProgress. If this same user already holds one — a reload, or an
+// attempt they walked away from — that stale ceremony is discarded (its parked
+// pdfsign pass abandoned, its timer stopped, its session dropped) so the user can
+// start over without waiting out SessionTTL. A reservation marker holds the slot
+// through the build; put replaces it with the real ceremony.
+func (s *Service) reserveSign(requestID, userID uuid.UUID) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active[requestID] {
-		return false
+	if existing := s.active[requestID]; existing != nil {
+		if existing.userID != userID {
+			return false
+		}
+		s.discardLocked(existing)
 	}
-	s.active[requestID] = true
+	s.active[requestID] = &ceremony{flow: flowSign, requestID: requestID, userID: userID}
 	return true
+}
+
+// discardLocked tears down a ceremony being replaced or abandoned. The caller
+// holds s.mu. It is safe on a reservation marker (nil pades, empty state).
+func (s *Service) discardLocked(c *ceremony) {
+	if c.timer != nil {
+		c.timer.Stop()
+	}
+	if c.state != "" {
+		delete(s.sessions, c.state)
+	}
+	if c.pades != nil {
+		c.pades.abandon(ErrSessionExpired)
+	}
+	delete(s.active, c.requestID)
 }
 
 func (s *Service) release(requestID uuid.UUID) {
@@ -527,9 +555,15 @@ func (s *Service) release(requestID uuid.UUID) {
 
 // put stores an in-flight ceremony and arms its TTL.
 func (s *Service) put(state string, c *ceremony) {
+	c.state = state
 	c.timer = time.AfterFunc(SessionTTL, func() { s.expire(state) })
 	s.mu.Lock()
 	s.sessions[state] = c
+	// Replace the reservation marker reserveSign put in active with the real
+	// ceremony, so a same-user re-take can discard this parked pass.
+	if c.flow == flowSign {
+		s.active[c.requestID] = c
+	}
 	s.mu.Unlock()
 }
 
@@ -552,13 +586,13 @@ func (s *Service) expire(state string) {
 		return
 	}
 	if c.flow == flowSign {
+		// A ceremony that outlived SessionTTL means the signer never finished the
+		// wallet step. Do NOT fail the whole multi-party request over one abandoned
+		// attempt: the signer is still `pending` and the request still
+		// `awaiting_signatures`, so just abandon the parked pass and free the
+		// in-flight lock, leaving it retryable by that signer or the next.
 		c.pades.abandon(ErrSessionExpired)
 		s.release(c.requestID)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := s.store.FailRequest(ctx, c.orgID, c.requestID, c.userID, "authorization was not completed in time"); err != nil {
-			slog.ErrorContext(ctx, "signing: expire request", slog.String("error", err.Error()))
-		}
 	}
 }
 

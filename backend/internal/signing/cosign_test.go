@@ -8,6 +8,65 @@ import (
 	"github.com/google/uuid"
 )
 
+func newTestService() *Service {
+	return &Service{
+		sessions: make(map[string]*ceremony),
+		active:   make(map[uuid.UUID]*ceremony),
+	}
+}
+
+func TestReserveSignLocksOutOtherSignersButLetsSameUserReclaim(t *testing.T) {
+	s := newTestService()
+	req := uuid.New()
+	alice, bob := uuid.New(), uuid.New()
+
+	if !s.reserveSign(req, alice) {
+		t.Fatal("first reserve should succeed")
+	}
+	if s.reserveSign(req, bob) {
+		t.Fatal("a different signer must be blocked while a ceremony is in flight")
+	}
+	if !s.reserveSign(req, alice) {
+		t.Fatal("the same signer should reclaim their own in-flight slot")
+	}
+
+	s.release(req)
+	if !s.reserveSign(req, bob) {
+		t.Fatal("after release the slot is free for anyone")
+	}
+}
+
+// Reclaiming an own slot must tear the stale ceremony down: drop its session entry
+// and unblock its parked pdfsign pass, so it does not leak until SessionTTL.
+func TestReserveSignDiscardsStaleCeremony(t *testing.T) {
+	s := newTestService()
+	req := uuid.New()
+	alice := uuid.New()
+
+	stale := &ceremony{
+		flow:      flowSign,
+		requestID: req,
+		userID:    alice,
+		state:     "stale-state",
+		pades:     &padesSession{signer: &padesSigner{errCh: make(chan error, 1)}, result: make(chan padesResult, 1)},
+	}
+	s.sessions[stale.state] = stale
+	s.active[req] = stale
+
+	if !s.reserveSign(req, alice) {
+		t.Fatal("same user should reclaim the slot")
+	}
+	if _, ok := s.sessions["stale-state"]; ok {
+		t.Fatal("the stale ceremony's session entry should be discarded")
+	}
+	select {
+	case <-stale.pades.signer.errCh:
+		// abandoned as expected
+	default:
+		t.Fatal("the stale parked pass should have been abandoned")
+	}
+}
+
 func TestCheckTurn(t *testing.T) {
 	a, b, c := uuid.New(), uuid.New(), uuid.New()
 	signers := func(states ...string) []Signer {
