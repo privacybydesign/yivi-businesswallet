@@ -164,6 +164,14 @@ export default function SigningExternal(): React.JSX.Element {
                 {t("signing.external.reviewDocument")}
               </a>
 
+              {/* A failed attempt leaves the request open and this signee able to try
+                  again, so say what happened rather than silently offering the button. */}
+              {view.data.signerStatus === SIGNER_STATUS.failed && (
+                <p className="text-error text-[13px]">
+                  {t("signing.external.attemptFailed")}
+                </p>
+              )}
+
               {!view.data.hasCredential ? (
                 <>
                   <p className="text-ink-soft text-[13px]">

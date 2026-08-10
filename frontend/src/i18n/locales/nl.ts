@@ -790,6 +790,8 @@ export const nl: Translation<typeof en> = {
       linkFailedToast:
         "Het koppelen van het ondertekencertificaat is niet voltooid.",
       startError: "Kon niet starten. Probeer het opnieuw.",
+      attemptFailed:
+        "Je laatste poging is niet voltooid. Je kunt het opnieuw proberen.",
       signedTitle: "Je hebt dit document ondertekend",
       signedAllHint: "Iedereen heeft ondertekend. Het document is compleet.",
       signedWaitingHint: "De andere ondertekenaars moeten nog tekenen.",

@@ -766,6 +766,8 @@ export const en = {
       linkedToast: "Signing certificate linked.",
       linkFailedToast: "Linking the signing certificate was not completed.",
       startError: "Could not start. Try again.",
+      attemptFailed:
+        "Your last attempt did not complete. You can try signing again.",
       signedTitle: "You signed this document",
       signedAllHint: "Everyone has signed. The document is complete.",
       signedWaitingHint: "The other signers still have to sign.",
