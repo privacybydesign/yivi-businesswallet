@@ -14,6 +14,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"mime"
 	"net"
 	"net/smtp"
 	"strconv"
@@ -71,7 +72,7 @@ func (c Config) authIdentity() string {
 }
 
 // Message is a single outbound e-mail (HTML + plain-text alternative), with any
-// inline images the HTML references by cid:.
+// inline images the HTML references by cid:, plus any file attachments.
 type Message struct {
 	To       string
 	Subject  string
@@ -81,6 +82,18 @@ type Message struct {
 	// by cid:<ContentID> (e.g. an org's logo). Empty for a plain message, in which
 	// case the wire form stays a bare multipart/alternative.
 	Inline []InlineImage
+	// Attachments holds files delivered alongside the message as downloadable parts
+	// (Content-Disposition: attachment). When present, the whole body is wrapped in a
+	// multipart/mixed so a client shows the message and the files separately.
+	Attachments []Attachment
+}
+
+// Attachment is a file delivered with the message as a downloadable part. The
+// bytes are sent as-is; the transport base64-encodes them.
+type Attachment struct {
+	Filename    string
+	ContentType string
+	Bytes       []byte
 }
 
 // InlineImage is an image carried inside the message as a related MIME part and
@@ -206,17 +219,20 @@ func (SMTPSender) Send(cfg Config, msg Message) error {
 // already CR/LF-validated by net/smtp; the hand-built MIME headers below are not.
 var headerReplacer = strings.NewReplacer("\r", "", "\n", "")
 
-// Distinct boundaries for the two nesting levels: the alternative (text + HTML)
-// and, when the message has inline images, the related wrapper around it.
+// Distinct boundaries for the three nesting levels: the alternative (text + HTML),
+// the related wrapper (when the message has inline images) around it, and the mixed
+// wrapper (when the message has attachments) around that.
 const (
-	altBoundary = "ybw-alt-9f1c2a"
-	relBoundary = "ybw-rel-7d2b4e"
+	altBoundary   = "ybw-alt-9f1c2a"
+	relBoundary   = "ybw-rel-7d2b4e"
+	mixedBoundary = "ybw-mix-3a8f61"
 )
 
-// buildMIME renders the message on the wire. With no inline images it is a bare
-// multipart/alternative (text + HTML), unchanged from before; with inline images
-// the alternative is wrapped in a multipart/related so the HTML's cid: references
-// resolve to the attached parts.
+// buildMIME renders the message on the wire. With no inline images or attachments
+// it is a bare multipart/alternative (text + HTML), unchanged from before; inline
+// images wrap it in a multipart/related so cid: references resolve; attachments
+// wrap the whole body in a multipart/mixed with each file as a disposition:attachment
+// part.
 func buildMIME(cfg Config, msg Message) string {
 	from := cfg.FromAddress
 	if cfg.FromName != "" {
@@ -228,19 +244,61 @@ func buildMIME(cfg Config, msg Message) string {
 	fmt.Fprintf(&b, "Subject: %s\r\n", headerReplacer.Replace(msg.Subject))
 	b.WriteString("MIME-Version: 1.0\r\n")
 
-	if len(msg.Inline) == 0 {
-		writeAlternative(&b, msg)
+	if len(msg.Attachments) == 0 {
+		writeBody(&b, msg)
 		return b.String()
 	}
 
-	fmt.Fprintf(&b, "Content-Type: multipart/related; boundary=%s\r\n\r\n", relBoundary)
-	fmt.Fprintf(&b, "--%s\r\n", relBoundary)
-	writeAlternative(&b, msg)
-	for _, img := range msg.Inline {
-		writeInlineImage(&b, img)
+	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%s\r\n\r\n", mixedBoundary)
+	fmt.Fprintf(&b, "--%s\r\n", mixedBoundary)
+	writeBody(&b, msg)
+	for _, att := range msg.Attachments {
+		writeAttachment(&b, att)
 	}
-	fmt.Fprintf(&b, "--%s--\r\n", relBoundary)
+	fmt.Fprintf(&b, "--%s--\r\n", mixedBoundary)
 	return b.String()
+}
+
+// writeBody writes the message body entity (its own Content-Type header first, so
+// it works both at the top level and as a part of the mixed wrapper): a bare
+// multipart/alternative with no inline images, or a multipart/related wrapping the
+// alternative when there are.
+func writeBody(b *strings.Builder, msg Message) {
+	if len(msg.Inline) == 0 {
+		writeAlternative(b, msg)
+		return
+	}
+	fmt.Fprintf(b, "Content-Type: multipart/related; boundary=%s\r\n\r\n", relBoundary)
+	fmt.Fprintf(b, "--%s\r\n", relBoundary)
+	writeAlternative(b, msg)
+	for _, img := range msg.Inline {
+		writeInlineImage(b, img)
+	}
+	fmt.Fprintf(b, "--%s--\r\n", relBoundary)
+}
+
+// writeAttachment writes one base64 file part of the mixed wrapper, shown by the
+// client as a downloadable attachment.
+func writeAttachment(b *strings.Builder, att Attachment) {
+	contentType := att.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	fmt.Fprintf(b, "--%s\r\n", mixedBoundary)
+	fmt.Fprintf(b, "Content-Type: %s\r\n", headerReplacer.Replace(contentType))
+	b.WriteString("Content-Transfer-Encoding: base64\r\n")
+	// mime.FormatMediaType emits the RFC 2231 filename*= form for a non-ASCII name
+	// (the normal case for a Dutch user base) and correctly escapes it — %q is Go
+	// quoting, not a MIME quoted-string, and would put raw 8-bit bytes in a header.
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": att.Filename})
+	if disposition == "" {
+		// FormatMediaType returns "" only for an unrepresentable value; fall back to a
+		// bare attachment disposition rather than emitting a malformed header.
+		disposition = "attachment"
+	}
+	fmt.Fprintf(b, "Content-Disposition: %s\r\n\r\n", disposition)
+	b.WriteString(wrapBase64(att.Bytes))
+	b.WriteString("\r\n")
 }
 
 // writeAlternative writes the multipart/alternative entity: its own Content-Type

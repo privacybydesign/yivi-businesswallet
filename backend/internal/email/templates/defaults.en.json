@@ -13,7 +13,9 @@
     "eventName": "Invited member",
     "eventDetails": "email: sam@example.org\nrole: member",
     "eventTime": "2026-01-14 09:32 UTC",
-    "auditUrl": "https://wallet.example.org/acme/audit-log"
+    "auditUrl": "https://wallet.example.org/acme/audit-log",
+    "documentName": "Contract.pdf",
+    "signingUrl": "https://wallet.example.org/acme/signing"
   },
   "events": {
     "membership.invited": "Invited member",
@@ -50,7 +52,11 @@
     "attestation.offer_cancelled": "Cancelled attestation offer",
     "attestation.key_added": "Added attestation key",
     "attestation.key_suspended": "Suspended attestation key",
-    "attestation.key_revoked": "Revoked attestation key"
+    "attestation.key_revoked": "Revoked attestation key",
+
+    "signing.requested": "Requested a document signature",
+    "signing.completed": "Completed a document signature",
+    "signing.failed": "Document signature failed"
   },
   "templates": {
     "credential_offer": {
@@ -93,6 +99,26 @@
         { "type": "paragraph", "text": "Recorded on {{eventTime}}." },
         { "type": "paragraph", "text": "{{eventDetails}}" },
         { "type": "button", "label": "Open the audit log", "url": "{{auditUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "signed_document": {
+      "subject": "{{orgName}} has sent you a signed document",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} has sent you a signed document" },
+        { "type": "paragraph", "text": "{{message}}" },
+        { "type": "paragraph", "text": "The signed document is attached to this e-mail as a PDF." },
+        { "type": "footer" }
+      ]
+    },
+    "signature_requested": {
+      "subject": "{{orgName}} asks you to sign a document",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "A document is waiting for your signature" },
+        { "type": "paragraph", "text": "{{orgName}} has asked you to sign {{documentName}}." },
+        { "type": "button", "label": "Review and sign", "url": "{{signingUrl}}" },
         { "type": "footer" }
       ]
     },

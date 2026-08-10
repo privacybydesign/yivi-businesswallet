@@ -60,6 +60,16 @@ func (s *padesSigner) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]b
 	}
 }
 
+// validatePDF reports whether input parses as a PDF the signing pass could open,
+// so a create-request call can reject a bad upload before storing it. It returns
+// ErrInvalidPDF on any parse failure.
+func validatePDF(input []byte) error {
+	if _, err := pdf.NewReader(bytes.NewReader(input), int64(len(input))); err != nil {
+		return ErrInvalidPDF
+	}
+	return nil
+}
+
 // startPAdES begins a PAdES signing pass over input using cred's certificate, and
 // returns the session plus the digest that must be signed (over which the OAuth
 // authorize step is bound). The signing certificate must already be known, since

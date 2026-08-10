@@ -135,3 +135,50 @@ cert that chains to an EU trust list, and the same signature would validate as t
 
 See also `.ai/features/qtsp-signing-demo.md` (the hosted QTSP + `--profile signer`, incl. the
 authorization_server) and `internal/csc` (per-org provider settings).
+
+## Co-signing (multiple signers + recipient delivery)
+
+The single-signer ceremony above is the building block; a **request** is now an org-level
+co-signing object.
+
+- **Model.** `signing_requests` carries `created_by`, the `original_document`, an accumulating
+  `signed_document`, a `signing_mode` (`parallel`/`sequential`), a recipient
+  (`recipient_channel` none/qerds/email + address/name/message) and a `delivery_status`.
+  `signing_request_signers` holds one row per selected member (`sign_order`, per-signer `status`).
+  Each member signs with **their own** linked credential — the PK on `signing_credentials` is
+  still `(org, user)` — so the finished PDF carries **N qualified signatures**, applied
+  incrementally (`pades_multisig_test.go` proves two incremental signatures both verify).
+- **Order.** *Parallel* = any order; *sequential* = ascending `sign_order`, and a signer's turn
+  is only offered once every lower-order signer has signed (`ListPendingForUser` /
+  `Service.checkTurn`). **"Parallel" is not simultaneous:** incremental PAdES appends to a specific
+  base document and cannot merge concurrent signatures, so an in-memory **per-request in-flight
+  lock** (`Service.acquire`/`release`) serialises the actual signing passes either way.
+- **Flow.** `POST /requests` (member) creates the request (validates signers against the member
+  directory, stores the PDF); `POST /requests/{id}/sign` (member, must be a pending signer whose
+  turn it is) runs *that signer's* ceremony over `GetLatestDocument` (signed ?? original);
+  `finishSign` writes the new bytes + marks the signer signed, and when all have signed marks the
+  request completed and **delivers** it.
+- **Delivery.** On completion the finished PDF goes to the recipient over the chosen channel:
+  `email` reuses `email.Service.SendSignedDocument` (a new `signed_document` mail Kind + the new
+  `mailer` attachment support — `multipart/mixed`); `qerds` reuses `qerds.Service.Send` with the
+  PDF as an attachment from the org's default QERDS address. Delivery is best-effort — a failure
+  leaves the request `completed` with `delivery_status=failed`, surfaced in the history, not fatal.
+  The `signing` slice stays decoupled via consumer interfaces (`memberDirectory`,
+  `documentDeliverer`) implemented by adapters in `cmd/api` (`signing_adapters.go`).
+- **UI.** The Sign page is tabbed: **To sign** (documents awaiting me → run my ceremony),
+  **New request** (upload + member multi-select + order + recipient), **My credential** (the
+  once-off link, moved out of the per-document flow). The admin **History** tab (styled like the
+  settings tabs) lists the org's requests, cursor-paginated, with per-signer + delivery status.
+- **Signer notifications.** Each selected signer is e-mailed that a document awaits their signature
+  (`email` Kind `signature_requested`, linking to the signing page) via the `signerNotifier` seam
+  (adapter in `cmd/api`). Parallel mode notifies every signer at create time; sequential mode
+  notifies only the first, then the next signer as each turn completes (`finishSign`). Best-effort:
+  a mail failure never blocks create or advance.
+- **Audit + subscriptions.** Adds `signing.signed` and `signing.delivered` alongside
+  `signing.requested`/`.completed`/`.failed`. The lifecycle events `signing.requested` /
+  `.completed` / `.failed` are a subscribable **`signing` group** in the notifications catalog
+  (`internal/notifications`), so admins can also be notified over their configured channels — safe
+  because that metadata is the org's own filename/mode/status, never a disclosed identity.
+- **Still in-memory/single-instance:** the active ceremony (parked pass + reservation) lives in
+  memory; only the between-signers document is persisted. An abandoned ceremony frees its lock at
+  `SessionTTL` without failing the request, and a signer can reclaim their own stale slot at once.

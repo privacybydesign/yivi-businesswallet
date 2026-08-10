@@ -32,6 +32,17 @@ func sampleVars(kind Kind) map[string]string {
 			varEventTime:    "2026-01-14 09:32 UTC",
 			varAuditURL:     "https://wallet.example.org/acme/audit-log",
 		}
+	case KindSignedDocument:
+		return map[string]string{
+			varOrgName: "Acme BV",
+			varMessage: "Please find the signed contract attached.",
+		}
+	case KindSignatureRequested:
+		return map[string]string{
+			varOrgName:      "Acme BV",
+			varDocumentName: "Contract.pdf",
+			varSigningURL:   "https://wallet.example.org/acme/signing",
+		}
 	default:
 		return nil
 	}
@@ -284,6 +295,8 @@ func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
 		varEventDetails:   "role: member",
 		varEventTime:      "2026-01-14 09:32 UTC",
 		varAuditURL:       "https://wallet.example.org/acme/audit-log",
+		varDocumentName:   "Contract.pdf",
+		varSigningURL:     "https://wallet.example.org/acme/signing",
 	}
 	if err := validateSamples(complete); err != nil {
 		t.Fatalf("validateSamples on the complete set = %v, want nil", err)

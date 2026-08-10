@@ -178,6 +178,8 @@ export const MAIL_TEMPLATE_KINDS = [
   "event_notification",
   "invitation",
   "postguard_file",
+  "signature_requested",
+  "signed_document",
   "smtp_test",
 ] as const;
 

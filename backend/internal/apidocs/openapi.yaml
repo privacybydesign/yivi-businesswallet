@@ -2809,15 +2809,47 @@ paths:
         schema:
           type: string
         description: Organisation slug.
+    get:
+      tags: [signing]
+      summary: List the organisation's signing requests (history)
+      description: >-
+        Requires organisation admin. Returns the org's signing requests newest
+        first, cursor-paginated (`{requests, nextCursor}`), for the signed-documents
+        history.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque pagination cursor from a previous page.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Page size (1–100, default 25).
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [signing]
-      summary: Start signing a document
+      summary: Create a co-signing request
       description: >-
-        Requires organisation membership and a linked signing credential. Accepts a
-        PDF in the `document` multipart field, prepares it, binds its hash into the
-        authorization, records a request, and returns `{requestId, authorizeUrl}`;
-        the browser opens `authorizeUrl` to complete the wallet ceremony, after which
-        the signed PAdES is assembled.
+        Requires organisation membership. Accepts a PDF in the `document` multipart
+        field plus the selected signer user ids (`signerIds`, repeated), the signing
+        `mode` (`parallel` or `sequential`), and the recipient (`recipientChannel`
+        one of `none`/`qerds`/`email`, plus `recipientAddress`, `recipientName`,
+        `message`). Stores the request awaiting signatures and returns `{id}`; each
+        selected signer later signs it via `.../requests/{id}/sign`.
       requestBody:
         required: true
         content:
@@ -2829,6 +2861,24 @@ paths:
                   type: string
                   format: binary
                   description: The PDF to sign.
+                signerIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: User ids of the members who must sign (order is the signing order for sequential mode).
+                mode:
+                  type: string
+                  enum: [parallel, sequential]
+                recipientChannel:
+                  type: string
+                  enum: [none, qerds, email]
+                recipientAddress:
+                  type: string
+                recipientName:
+                  type: string
+                message:
+                  type: string
       responses:
         '2XX':
           description: Successful response.
@@ -2843,7 +2893,70 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: No CSC provider configured, or no signing credential linked.
+          description: No CSC provider configured.
+  /api/v1/orgs/{slug}/signing/requests/pending:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [signing]
+      summary: List documents awaiting the caller's signature
+      description: >-
+        Requires organisation membership. Returns the requests where the acting user
+        is a still-pending signer whose turn it is (`{requests}`).
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/signing/requests/{id}/sign:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Signing request id.
+    post:
+      tags: [signing]
+      summary: Start the caller's signature for a request
+      description: >-
+        Requires organisation membership, a linked signing credential, and that the
+        caller is a pending signer whose turn it is. Prepares the current document,
+        binds its hash into the authorization, and returns `{requestId, authorizeUrl}`;
+        the browser opens `authorizeUrl` to complete the wallet ceremony.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: No credential linked, already signed, not your turn, or a signature is in progress.
   /api/v1/orgs/{slug}/signing/requests/{id}:
     parameters:
       - name: slug
@@ -2863,8 +2976,9 @@ paths:
       tags: [signing]
       summary: Get a signing request's status
       description: >-
-        Requires organisation membership; returns the acting user's own request
-        (status, filename, credential, error if any).
+        Requires organisation membership; the caller must be the request's creator or
+        a signer (org admins may read any). Returns the request with its signers and
+        their per-signer status, the recipient, and the delivery status.
       responses:
         '2XX':
           description: Successful response.

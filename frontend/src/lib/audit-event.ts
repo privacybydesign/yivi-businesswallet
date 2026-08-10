@@ -59,7 +59,9 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "csc.settings_updated": { icon: "settings", tone: "blue" },
   "signing.credential_linked": { icon: "settings", tone: "blue" },
   "signing.requested": { icon: "settings", tone: "blue" },
+  "signing.signed": { icon: "edit", tone: "blue" },
   "signing.completed": { icon: "valid", tone: "green" },
+  "signing.delivered": { icon: "email", tone: "green" },
   "signing.failed": { icon: "warning", tone: "red" },
 };
 
@@ -217,8 +219,12 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.signingCredentialLinked");
     case "signing.requested":
       return t("auditLog.actions.signingRequested");
+    case "signing.signed":
+      return t("auditLog.actions.signingSigned");
     case "signing.completed":
       return t("auditLog.actions.signingCompleted");
+    case "signing.delivered":
+      return t("auditLog.actions.signingDelivered");
     case "signing.failed":
       return t("auditLog.actions.signingFailed");
     default:

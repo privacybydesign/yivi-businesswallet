@@ -27,6 +27,7 @@ export const NOTIFICATION_GROUPS = [
   "qerds",
   "postguard",
   "attestation",
+  "signing",
 ] as const;
 export const notificationGroupSchema = z.enum(NOTIFICATION_GROUPS);
 export type NotificationGroup = z.infer<typeof notificationGroupSchema>;

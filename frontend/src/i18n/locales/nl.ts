@@ -572,7 +572,9 @@ export const nl: Translation<typeof en> = {
       cscSettingsUpdated: "Instellingen ondertekenprovider bijgewerkt",
       signingCredentialLinked: "Ondertekencredential gekoppeld",
       signingRequested: "Documenthandtekening aangevraagd",
+      signingSigned: "Document ondertekend",
       signingCompleted: "Documenthandtekening voltooid",
+      signingDelivered: "Ondertekend document bezorgd",
       signingFailed: "Documenthandtekening mislukt",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
@@ -696,6 +698,85 @@ export const nl: Translation<typeof en> = {
     noCredentialError:
       "Koppel een ondertekencertificaat voordat je ondertekent.",
     startError: "Kon het ondertekenen niet starten: {{message}}",
+    tabToSign: "Te ondertekenen",
+    tabNew: "Nieuw verzoek",
+    tabCredential: "Mijn certificaat",
+    tabHistory: "Geschiedenis",
+    newTitle: "Nieuw ondertekenverzoek",
+    newDescription:
+      "Upload een PDF, kies wie moet ondertekenen en waar het ondertekende document naartoe moet.",
+    documentLabel: "Document (PDF)",
+    documentChoose: "Bestand kiezen",
+    documentReplace: "Bestand vervangen",
+    documentRemove: "Verwijderen",
+    documentNone: "Geen bestand gekozen",
+    signersLabel: "Ondertekenaars",
+    signersHint: "Selecteer de leden die dit document moeten ondertekenen.",
+    searchMembers: "Zoek leden…",
+    noMembers: "Geen leden gevonden.",
+    orderLabel: "Volgorde van ondertekenen",
+    parallelHint: "Ondertekenaars mogen in willekeurige volgorde ondertekenen.",
+    sequentialHint:
+      "Ondertekenaars ondertekenen na elkaar, in de gekozen volgorde.",
+    recipientLabel: "Bezorgen aan",
+    recipientHint:
+      "Waar het voltooide document naartoe gaat zodra iedereen heeft ondertekend.",
+    recipientEmailPlaceholder: "ontvanger@voorbeeld.nl",
+    recipientQerdsPlaceholder: "QERDS-adres",
+    recipientNamePlaceholder: "Naam ontvanger (optioneel)",
+    messagePlaceholder: "Bericht aan de ontvanger (optioneel)",
+    createButton: "Verzoek aanmaken",
+    createdToast: "Ondertekenverzoek aangemaakt.",
+    toSignEmpty: "Er wachten geen documenten op jouw handtekening.",
+    toSignError:
+      "Kon de documenten die op jouw handtekening wachten niet laden.",
+    requestedBy: "Aangevraagd door {{name}}",
+    alreadySigned: "Je hebt dit document al ondertekend.",
+    notYourTurn: "Een eerdere ondertekenaar moet eerst tekenen.",
+    signInProgress:
+      "Er wordt al een handtekening gezet; probeer het zo opnieuw.",
+    modeLabel: {
+      parallel: "Willekeurige volgorde",
+      sequential: "Op volgorde",
+    },
+    channel: {
+      none: "Niet versturen (alleen downloaden)",
+      email: "E-mail",
+      qerds: "QERDS (aangetekende bezorging)",
+    },
+    signerStatus: {
+      pending: "In afwachting",
+      signed: "Ondertekend",
+      failed: "Mislukt",
+    },
+    requestStatus: {
+      awaitingSignatures: "Wacht op handtekeningen",
+      completed: "Voltooid",
+      failed: "Mislukt",
+    },
+    deliveryStatus: {
+      notRequested: "Geen bezorging",
+      pending: "Bezorgen…",
+      delivered: "Bezorgd",
+      failed: "Bezorging mislukt",
+    },
+  },
+  signedDocuments: {
+    title: "Ondertekende documenten",
+    subtitle: "Geschiedenis van ondertekenverzoeken en hun bezorging",
+    adminOnly:
+      "Alleen beheerders kunnen de geschiedenis van ondertekende documenten bekijken.",
+    loadError: "Kon de ondertekende documenten niet laden: {{message}}",
+    empty: "Nog geen ondertekenverzoeken.",
+    loadMore: "Meer laden",
+    download: "Downloaden",
+    columns: {
+      created: "Aangemaakt",
+      document: "Document",
+      signers: "Ondertekenaars",
+      recipient: "Ontvanger",
+      status: "Status",
+    },
   },
   settings: {
     title: "Instellingen",
@@ -727,6 +808,7 @@ export const nl: Translation<typeof en> = {
       qerds: "Beveiligd berichtenverkeer",
       postguard: "PostGuard",
       attestation: "Attestaties",
+      signing: "Documenten ondertekenen",
     },
     channels: {
       email: "E-mail",
@@ -970,6 +1052,8 @@ export const nl: Translation<typeof en> = {
       event_notification: "Melding van een gebeurtenis",
       invitation: "Uitnodiging voor lidmaatschap",
       postguard_file: "Versleuteld bestand",
+      signature_requested: "Ondertekenverzoek",
+      signed_document: "Ondertekend document",
       smtp_test: "SMTP-test",
     },
     kindDescriptions: {
@@ -981,6 +1065,10 @@ export const nl: Translation<typeof en> = {
         "Gaat naar iemand die is uitgenodigd om lid te worden van deze organisatie.",
       postguard_file:
         "Gaat naar de ontvanger van een versleuteld bestand, als deze organisatie via de eigen SMTP-server mailt.",
+      signature_requested:
+        "Gaat naar een lid dat is geselecteerd om een document mede te ondertekenen, met een link naar de ondertekenpagina.",
+      signed_document:
+        "Gaat naar een ontvanger met het voltooide, mede-ondertekende document als PDF-bijlage.",
       smtp_test:
         "De test die een beheerder verstuurt om de SMTP-instellingen te controleren.",
     },

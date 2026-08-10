@@ -158,6 +158,33 @@ func (s *Service) SendEventNotification(ctx context.Context, orgID uuid.UUID, re
 	})
 }
 
+// SendSignedDocument delivers a completed co-signed document to its recipient as a
+// PDF attachment, with the org's cover message. Returns ErrNotConfigured when the
+// org has no usable SMTP settings.
+func (s *Service) SendSignedDocument(ctx context.Context, orgID uuid.UUID, to, orgName, message, filename string, pdf []byte) error {
+	cfg, msg, err := s.compose(ctx, orgID, KindSignedDocument, s.locale(""), map[string]string{
+		varOrgName: orgName,
+		varMessage: message,
+	})
+	if err != nil {
+		return err
+	}
+	msg.To = to
+	msg.Attachments = []mailer.Attachment{{Filename: filename, ContentType: "application/pdf", Bytes: pdf}}
+	return s.sender.Send(cfg, msg)
+}
+
+// SendSignatureRequested tells a selected member that a document is waiting for
+// their signature, linking to the signing page. Returns ErrNotConfigured when the
+// org has no usable SMTP settings.
+func (s *Service) SendSignatureRequested(ctx context.Context, orgID uuid.UUID, to, orgName, documentName, signingURL string) error {
+	return s.sendLocalized(ctx, orgID, KindSignatureRequested, s.locale(""), []string{to}, map[string]string{
+		varOrgName:      orgName,
+		varDocumentName: documentName,
+		varSigningURL:   signingURL,
+	})
+}
+
 // SendSpecimen sends a sample of one kind to a single address, rendered from the
 // org's own template (or the shipped default) with the kind's sample variables, so
 // an admin can check a real, fully branded message of that cause against their own
