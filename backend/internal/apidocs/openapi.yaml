@@ -2851,9 +2851,15 @@ paths:
         `recipientName`, `message`). A signer is either an internal member
         (`{"kind":"internal","userId":"<uuid>"}`) or an external signee
         (`{"kind":"external","email":"...","name":"..."}`); the order of the values is
-        the signing order for sequential mode. Stores the request awaiting signatures
-        and returns `{id}`. A member signs via `.../requests/{id}/sign`; an external
-        signee is mailed a one-time link and signs under `/api/v1/signing/external/{token}`.
+        the signing order for sequential mode. Each signer object may carry
+        `placements`: where their visible marks land, in PDF user-space points with the
+        origin at the page's bottom-left — at most one `{"kind":"signature",...}` (it
+        becomes the visible appearance of their own PAdES signature) and at most one
+        `{"kind":"paraph",...}` per page. "A paraph on every page" is sent as one
+        placement per page. A signer with no placements signs invisibly. Stores the
+        request awaiting signatures and returns `{id}`. A member signs via
+        `.../requests/{id}/sign`; an external signee is mailed a one-time link and signs
+        under `/api/v1/signing/external/{token}`.
       requestBody:
         required: true
         content:
@@ -2873,6 +2879,9 @@ paths:
                     One JSON object per signer, in signing order (1–50): either
                     `{"kind":"internal","userId":"<uuid>"}` for an org member or
                     `{"kind":"external","email":"...","name":"..."}` for an external signee.
+                    Either may carry `"placements":[{"kind":"signature"|"paraph","page":1,
+                    "x":0,"y":0,"width":0,"height":0}]` — rectangles in PDF points on that
+                    page, refused (400) when they fall outside it or past the last page.
                 mode:
                   type: string
                   enum: [parallel, sequential]

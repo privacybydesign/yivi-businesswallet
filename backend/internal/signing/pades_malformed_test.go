@@ -36,7 +36,7 @@ func TestStartPAdESSurvivesMalformedPDF(t *testing.T) {
 		mutated := append([]byte(nil), original...)
 		mutated[off] ^= 0xFF
 
-		sess, _, serr := startPAdES(mutated, cred)
+		sess, _, serr := startPAdES(mutated, cred, nil)
 		if serr != nil {
 			if !errors.Is(serr, ErrInvalidPDF) {
 				t.Fatalf("offset %d: startPAdES error %v, want ErrInvalidPDF", off, serr)

@@ -63,6 +63,30 @@ export const SIGNER_KIND = {
 } as const;
 export type SignerKind = (typeof SIGNER_KIND)[keyof typeof SIGNER_KIND];
 
+// Where a signer's visible marks land. A signature placement becomes the visible
+// appearance of that signer's own PAdES signature (so there is at most one); a paraph
+// is their initials on one page, and "on every page" is sent as one placement per
+// page. The rectangle is in PDF user-space points with the origin at the page's
+// bottom-left — the space the backend stores and stamps in.
+export const PLACEMENT_KIND = {
+  signature: "signature",
+  paraph: "paraph",
+} as const;
+export type PlacementKind =
+  (typeof PLACEMENT_KIND)[keyof typeof PLACEMENT_KIND];
+
+export const placementSchema = z.object({
+  kind: z.string(),
+  page: z.number(),
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
+export type Placement = Omit<z.infer<typeof placementSchema>, "kind"> & {
+  kind: PlacementKind;
+};
+
 export const signerSchema = z.object({
   id: z.string(),
   kind: z.string(),
@@ -71,6 +95,7 @@ export const signerSchema = z.object({
   email: z.string(),
   order: z.number(),
   status: z.string(),
+  placements: z.array(placementSchema).nullable().default([]),
   signedAt: z.string().optional(),
 });
 export type Signer = z.infer<typeof signerSchema>;
@@ -119,8 +144,17 @@ const createdSchema = z.object({ id: z.string() });
 // signees share one ordered list, because that order is the sequential signing order
 // and two separate lists could not express an order across both.
 export type SignerSelection =
-  | { kind: typeof SIGNER_KIND.internal; userId: string }
-  | { kind: typeof SIGNER_KIND.external; email: string; name: string };
+  | {
+      kind: typeof SIGNER_KIND.internal;
+      userId: string;
+      placements: Placement[];
+    }
+  | {
+      kind: typeof SIGNER_KIND.external;
+      email: string;
+      name: string;
+      placements: Placement[];
+    };
 
 // NewSigningRequest is the create-request form payload.
 export interface NewSigningRequest {

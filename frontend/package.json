@@ -16,6 +16,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.101.1",
     "i18next": "^26.3.3",
+    "pdfjs-dist": "^6.2.108",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

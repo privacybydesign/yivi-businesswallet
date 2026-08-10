@@ -228,3 +228,79 @@ regardless of kind.
   signing order) fed by a per-signer *internal member / external signee* choice. The external
   signee's own page is the public route `/sign/:token`: review the document, link a certificate
   once, then sign.
+
+## Signature & paraph placement (where a signer's marks land)
+
+Every signature above is **invisible** — a `/Rect [0 0 0 0]` widget, cryptographically complete
+and visually absent. A real document usually wants a signature block per signee at a fixed spot
+and their initials (a *paraph*) on each page. Per signer, the requester now places both, and the
+signing pass renders them.
+
+- **Model.** `signing_signer_placements` (`20260810140000_…`) holds one rectangle per row:
+  `(signer_id, kind, page, x, y, width, height)`. `kind` is `signature` (**at most one per
+  signer** — a partial unique index says so, because a PAdES signature dictionary carries exactly
+  one appearance) or `paraph` (**at most one per page per signer**). "A paraph on every page" is
+  expanded by the requester into one row per page, so the table stays flat and nothing downstream
+  has to interpret a shorthand. The rectangle is in **PDF user-space points, origin bottom-left** —
+  the space pdfsign's appearance rectangle is in, so the conversion from viewer coordinates happens
+  exactly once, in the browser, which is the only place that knows the zoom, the page rotation and
+  the crop box.
+- **Validation, at create time.** `readGeometry` (`placement.go`) replaces the old `validatePDF`:
+  it parses the upload, reports every page's visible box (CropBox else MediaBox, inherited through
+  the page tree — digitorus/pdf ships that walk commented out) and doubles as the upload check.
+  `validatePlacements` then refuses a page the document does not have, a rectangle outside the page,
+  one below `minPlacementSize` (8 pt), a second signature block or a second paraph on a page. A
+  placement is **refused, not clamped**: it is where a person pointed at a rendering of *this*
+  document, so a value off the page means the two disagree, and quietly moving the signature
+  somewhere else is the one outcome nobody asked for. Placement stays optional as a whole — no
+  placements means the invisible signature that every signature was before this existed.
+- **The signature block is the signature's own appearance.** `signatureAppearance` hands the
+  rectangle to pdfsign's `Appearance{Visible, Page, …}`, so the widget *is* the placed rectangle
+  and the mark is the signature: it cannot be moved without breaking it
+  (`TestSignaturePlacementBecomesTheVisibleAppearance`).
+- **Paraphs are a revision the signer's own signature covers.** They cannot be part of that
+  appearance — one signature, one appearance stream, one page — so `stamp.go` appends an
+  incremental revision of printable, locked `/Stamp` annotations **immediately before** the signer's
+  pdfsign pass. Being inside the ByteRange their signature covers is what makes a paraph
+  attributable: editing one invalidates that signature
+  (`TestStampedParaphIsCoveredByTheSignature`). The annotation's appearance stream matches
+  pdfsign's own — Times-Roman, ballpoint blue — so the two marks on a page read as one hand, and
+  the text is the initials of the certificate's common name (`paraphText`).
+- **The appended section has to match the document's own.** `appendRevision` writes a classic
+  cross-reference table for a table-indexed document and a cross-reference **stream** for a
+  stream-indexed one (`rdr.XrefInformation.Type`): a table appended to an xref-stream file would
+  leave a reader that found it first with no way into the object streams the previous section
+  indexes. `TestParaphStampMatchesTheDocumentsXrefKind` covers both, and the page dictionary is
+  rebuilt key by key (not copied — digitorus/pdf resolves as it reads and hands back no raw
+  object), with `/Parent` and `/Contents` written as references rather than through
+  `Value.String()`, which would inline the page tree and a stream.
+- **Accepted cost, stated plainly.** A signer with paraphs adds **two** revisions instead of one,
+  and the extra one is not itself a signing operation. Earlier co-signatures stay cryptographically
+  valid (the revision is appended after their ByteRange, `TestCoSigningWithPlacementsKeepsBothSignaturesValid`),
+  but a viewer that lists changes since a signature will name it. Getting a paraph into the *same*
+  revision as the signature would mean patching pdfsign, whose `SignContext.addObject` is
+  unexported — the one thing this capability has so far avoided. This is also the answer to the
+  design question the issue left open: a paraph is **attributable** (inside that signer's signed
+  bytes) rather than being a second cryptographic signature of its own.
+- **UI.** `routes/signing-placement.tsx` renders the uploaded PDF with pdf.js, one page at a time,
+  and overlays each signee's marks colour-coded from the house accents (there is no "signee colour"
+  in the design system; every mark also carries the signer's name, so colour is never the only cue).
+  Click the page to place or move the selected mark; drag one to fine-tune; **place in the middle of
+  this page**, the arrow keys (Shift for larger steps) and the width/height fields are the paths that
+  need no dragging at all (WCAG 2.2 §2.5.7). The geometry is pure and unit-tested
+  (`lib/placement.ts` + `.test.ts`), and `placement-viewport.test.ts` pins the one assumption the
+  whole feature rests on — that a rectangle converted through the pdf.js viewport and back is the
+  same rectangle — against a real document at four rotations and two zooms.
+- **pdf.js is a chunk of its own.** It is larger than the rest of the app put together, so the
+  editor is a `React.lazy` import: the main bundle is unchanged for everyone who is not placing a
+  signature.
+
+### Follow-ups
+- A paraph is drawn as initials from the certificate's common name. A hand-drawn or uploaded
+  signature image would go in the same rectangle (pdfsign's `Appearance.Image` for the block, an
+  image XObject for the paraphs) and is the obvious next step.
+- Placement is defined once, by the requester. Letting a signee adjust their own block before
+  signing is a separate decision — it would have to be bounded, since the request is what they are
+  agreeing to.
+- Rotation is handled through the viewport in the browser; nothing on the backend reads `/Rotate`,
+  because it never has to convert a coordinate.

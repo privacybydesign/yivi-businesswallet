@@ -60,21 +60,33 @@ func (s *padesSigner) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]b
 	}
 }
 
-// validatePDF reports whether input parses as a PDF the signing pass could open,
-// so a create-request call can reject a bad upload before storing it. It returns
-// ErrInvalidPDF on any parse failure.
-func validatePDF(input []byte) error {
-	if _, err := pdf.NewReader(bytes.NewReader(input), int64(len(input))); err != nil {
-		return ErrInvalidPDF
+// openPDF parses input as a PDF. digitorus/pdf reports a malformed xref/trailer by
+// panicking and never recovers, so a bad upload must not escape as a panic on the
+// request goroutine: it is ErrInvalidPDF like any other unusable file.
+func openPDF(input []byte) (r *pdf.Reader, err error) {
+	defer func() {
+		if recover() != nil {
+			r, err = nil, ErrInvalidPDF
+		}
+	}()
+	rdr, err := pdf.NewReader(bytes.NewReader(input), int64(len(input)))
+	if err != nil {
+		return nil, ErrInvalidPDF
 	}
-	return nil
+	return rdr, nil
 }
 
 // startPAdES begins a PAdES signing pass over input using cred's certificate, and
 // returns the session plus the digest that must be signed (over which the OAuth
 // authorize step is bound). The signing certificate must already be known, since
 // the CMS SignedAttributes (and thus the digest) include a hash of the cert.
-func startPAdES(input []byte, cred signingprovider.Credential) (*padesSession, []byte, error) {
+//
+// placements are this signer's visible marks. Their signature block becomes the
+// visible appearance of the signature itself; their paraphs are stamped into a
+// revision appended first, so the signature covers them (see stamp.go). A signer
+// with no placements gets an invisible signature, which is what every signature was
+// before placements existed.
+func startPAdES(input []byte, cred signingprovider.Credential, placements []Placement) (*padesSession, []byte, error) {
 	signer := &padesSigner{
 		pub:      cred.Certificate.PublicKey,
 		digestCh: make(chan []byte, 1),
@@ -83,18 +95,13 @@ func startPAdES(input []byte, cred signingprovider.Credential) (*padesSession, [
 	}
 	sess := &padesSession{signer: signer, result: make(chan padesResult, 1)}
 
+	name := cred.Certificate.Subject.CommonName
+	input, err := stampSignerParaphs(input, paraphPlacements(placements), paraphText(name))
+	if err != nil {
+		return nil, nil, err
+	}
 	size := int64(len(input))
-	// digitorus/pdf reports a malformed xref/trailer by panicking and never recovers,
-	// so a bad upload must not escape as a panic on the request goroutine: it is
-	// ErrInvalidPDF like any other unusable file.
-	rdr, err := func() (r *pdf.Reader, err error) {
-		defer func() {
-			if recover() != nil {
-				err = ErrInvalidPDF
-			}
-		}()
-		return pdf.NewReader(bytes.NewReader(input), size)
-	}()
+	rdr, err := openPDF(input)
 	if err != nil {
 		return nil, nil, ErrInvalidPDF
 	}
@@ -119,11 +126,12 @@ func startPAdES(input []byte, cred signingprovider.Credential) (*padesSession, [
 				CertType:   sign.ApprovalSignature,
 				DocMDPPerm: sign.DoNotAllowAnyChangesPerms,
 				Info: sign.SignDataSignatureInfo{
-					Name:   cred.Certificate.Subject.CommonName,
+					Name:   name,
 					Reason: "Qualified electronic signature",
 					Date:   time.Now(),
 				},
 			},
+			Appearance: signatureAppearance(placements),
 		}
 		if err := sign.Sign(bytes.NewReader(input), out, rdr, size, data); err != nil {
 			sess.result <- padesResult{err: fmt.Errorf("signing: assemble PAdES: %w", err)}
@@ -153,6 +161,46 @@ func startPAdES(input []byte, cred signingprovider.Credential) (*padesSession, [
 		}
 		return nil, nil, ErrInvalidPDF
 	}
+}
+
+// signatureAppearance turns a signer's signature block into pdfsign's visible
+// appearance. With no signature block the appearance stays invisible: a signer may
+// legitimately have paraphs only, and an invisible signature is still a signature.
+func signatureAppearance(placements []Placement) sign.Appearance {
+	block := signaturePlacement(placements)
+	if block == nil {
+		return sign.Appearance{}
+	}
+	r := block.rect()
+	return sign.Appearance{
+		Visible: true,
+		//nolint:gosec // Page is validated to be within the document's page count.
+		Page:        uint32(block.Page),
+		LowerLeftX:  r[0],
+		LowerLeftY:  r[1],
+		UpperRightX: r[2],
+		UpperRightY: r[3],
+	}
+}
+
+// stampSignerParaphs draws a signer's paraphs into the document, returning it
+// unchanged when they have none. digitorus/pdf panics its way out of a malformed
+// object graph, and this runs on the request goroutine, so the read is recovered
+// into ErrInvalidPDF rather than taking the process down.
+func stampSignerParaphs(input []byte, marks []Placement, text string) (out []byte, err error) {
+	if len(marks) == 0 {
+		return input, nil
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			out, err = nil, fmt.Errorf("%w: %v", ErrInvalidPDF, r)
+		}
+	}()
+	rdr, err := openPDF(input)
+	if err != nil {
+		return nil, ErrInvalidPDF
+	}
+	return stampParaphs(input, rdr, marks, text)
 }
 
 // finish delivers the externally-produced signature and returns the signed PDF.

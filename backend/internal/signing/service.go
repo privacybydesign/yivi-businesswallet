@@ -197,14 +197,19 @@ func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID,
 	if err := validateRecipient(rec); err != nil {
 		return uuid.Nil, err
 	}
-	if err := validatePDF(pdf); err != nil {
+	// Reading the geometry doubles as the upload check: a file whose pages cannot be
+	// measured is one the signing pass could not open either. The placements are
+	// validated against it here, before the request exists — a rectangle off the page
+	// or past the last page would otherwise only surface when that signer signs.
+	geometry, err := readGeometry(pdf)
+	if err != nil {
 		return uuid.Nil, err
 	}
 	members, err := s.members.ListMembers(ctx, orgID)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	signers, err := validateSigners(in, members)
+	signers, err := validateSigners(in, members, geometry)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -229,7 +234,7 @@ func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID,
 // internal signer must be an active member of the org, an external one a plausible
 // e-mail address, and nobody may appear twice — an address that is also a member's is
 // rejected rather than silently signing twice as two different parties.
-func validateSigners(in []SignerInput, members []OrgMember) ([]SignerInput, error) {
+func validateSigners(in []SignerInput, members []OrgMember, geometry documentGeometry) ([]SignerInput, error) {
 	if len(in) == 0 || len(in) > maxSigners {
 		return nil, ErrInvalidRequest
 	}
@@ -261,6 +266,11 @@ func validateSigners(in []SignerInput, members []OrgMember) ([]SignerInput, erro
 		default:
 			return nil, ErrInvalidRequest
 		}
+		placements, err := validatePlacements(sg.Placements, geometry)
+		if err != nil {
+			return nil, err
+		}
+		sg.Placements = placements
 		out = append(out, sg)
 	}
 	return out, nil
@@ -294,6 +304,15 @@ func (s *Service) StartSign(ctx context.Context, orgID, userID uuid.UUID, slug s
 	return s.startSign(ctx, orgID, req, signerRef{signerID: me.ID, subj: me.subject()}, slug)
 }
 
+// placementsOf returns the placements of one signer of a request, or nil when they
+// placed none.
+func placementsOf(req Request, signerID uuid.UUID) []Placement {
+	if sg := signerByID(req, signerID); sg != nil {
+		return sg.Placements
+	}
+	return nil
+}
+
 // startSign is the shared signing ceremony: an org member and an external signee
 // differ only in how they were identified (ref) and where the browser is returned to.
 func (s *Service) startSign(ctx context.Context, orgID uuid.UUID, req Request, ref signerRef, slug string) (Start, error) {
@@ -325,7 +344,7 @@ func (s *Service) startSign(ctx context.Context, orgID uuid.UUID, req Request, r
 		s.release(requestID)
 		return Start{}, err
 	}
-	pades, digest, err := startPAdES(doc, cred)
+	pades, digest, err := startPAdES(doc, cred, placementsOf(req, ref.signerID))
 	if err != nil {
 		s.release(requestID)
 		return Start{}, err

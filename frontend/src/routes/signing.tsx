@@ -13,6 +13,7 @@ import {
   downloadSignedDocument,
 } from "../api/signing";
 import type {
+  Placement,
   RecipientChannel,
   SignerKind,
   SignerSelection,
@@ -40,9 +41,17 @@ import {
   signerStatusLabel,
 } from "../lib/signing-labels";
 import { alreadyChosen, isEmailish, signerKey } from "../lib/signer-selection";
+import { placementsIncomplete, signerAccent } from "../lib/placement";
 import { toast } from "../lib/toast";
 import { Button, Card, Input, Tag, TopBar } from "../ui";
 import { SigningHistoryPanel } from "./signing-history";
+
+// The placement editor pulls in pdf.js, which is larger than the rest of the app put
+// together, so it is a chunk of its own: nobody who is not placing a signature on a
+// document should be made to download a PDF renderer.
+const PlacementEditor = React.lazy(async () => ({
+  default: (await import("./signing-placement")).PlacementEditor,
+}));
 
 const CONFLICT_STATUS = 409;
 const LABEL = "text-ink-soft text-[12px] font-semibold";
@@ -484,7 +493,10 @@ function NewRequestTab({
   }, [members.data, search, chosenUserIds]);
 
   const addMember = (userId: string): void =>
-    setSigners((prev) => [...prev, { kind: SIGNER_KIND.internal, userId }]);
+    setSigners((prev) => [
+      ...prev,
+      { kind: SIGNER_KIND.internal, userId, placements: [] },
+    ]);
 
   const trimmedExternalEmail = externalEmail.trim();
   const canAddExternal =
@@ -499,6 +511,7 @@ function NewRequestTab({
         kind: SIGNER_KIND.external,
         email: trimmedExternalEmail,
         name: externalName.trim(),
+        placements: [],
       },
     ]);
     setExternalName("");
@@ -509,10 +522,21 @@ function NewRequestTab({
     setSigners((prev) => prev.filter((_, i) => i !== index));
 
   const recipientNeedsAddress = channel !== RECIPIENT_CHANNEL.none;
+  // Placement is optional as a whole, but a request where only some signatures are
+  // visible is a half-finished one — the backend would accept it, so it is caught here.
+  const incomplete = placementsIncomplete(signers);
   const canSubmit =
     file != null &&
     signers.length > 0 &&
+    incomplete.length === 0 &&
     (!recipientNeedsAddress || recipientAddress.trim() !== "");
+
+  const setPlacements = (index: number, placements: Placement[]): void =>
+    setSigners((prev) =>
+      prev.map((signer, i) =>
+        i === index ? { ...signer, placements } : signer,
+      ),
+    );
 
   const onSubmit = (event: React.FormEvent): void => {
     event.preventDefault();
@@ -572,6 +596,11 @@ function NewRequestTab({
                   className="sr-only"
                   onChange={(e) => {
                     setFile(e.target.files?.[0] ?? null);
+                    // Placements are rectangles on the pages of one document, so they
+                    // mean nothing once a different document is chosen.
+                    setSigners((prev) =>
+                      prev.map((signer) => ({ ...signer, placements: [] })),
+                    );
                     // Reset so picking the same file after removing it fires onChange again.
                     e.target.value = "";
                   }}
@@ -614,6 +643,12 @@ function NewRequestTab({
                       {index + 1}.
                     </span>
                   )}
+                  {/* The same accent the signer's marks carry in the placement
+                      editor, so the two lists can be read against each other. */}
+                  <span
+                    className={`h-2.5 w-2.5 shrink-0 rounded-full ${signerAccent(index).chip}`}
+                    aria-hidden="true"
+                  />
                   <span className="text-ink flex-1 truncate text-[13px]">
                     {signerLabel(signer)}
                   </span>
@@ -731,6 +766,36 @@ function NewRequestTab({
             </div>
           )}
         </div>
+
+        {/* Placement — only once there is a document and someone to place for. */}
+        {file != null && signers.length > 0 && (
+          <div className="border-line border-t pt-5">
+            <React.Suspense
+              fallback={
+                <p className="text-ink-soft text-[13px]">
+                  {t("common.loading")}
+                </p>
+              }
+            >
+              {/* Keyed on the file so a replaced document remounts the editor with a
+                  clean loading state rather than re-deriving one from the old page. */}
+              <PlacementEditor
+                key={`${file.name}:${file.size}:${file.lastModified}`}
+                file={file}
+                signers={signers.map((signer) => ({
+                  name: signerLabel(signer),
+                }))}
+                placements={signers.map((signer) => signer.placements)}
+                onChange={setPlacements}
+              />
+            </React.Suspense>
+            {incomplete.length > 0 && (
+              <p className="text-error mt-3 text-[13px]">
+                {t("signing.placement.incomplete")}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Mode */}
         <fieldset className="border-0 p-0">

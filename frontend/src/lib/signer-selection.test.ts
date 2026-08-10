@@ -28,14 +28,15 @@ describe("isEmailish", () => {
 
 describe("signerKey", () => {
   it("keys a member by user id and an external signee by address", () => {
-    expect(signerKey({ kind: SIGNER_KIND.internal, userId: "u-1" })).toBe(
-      "member:u-1",
-    );
+    expect(
+      signerKey({ kind: SIGNER_KIND.internal, userId: "u-1", placements: [] }),
+    ).toBe("member:u-1");
     expect(
       signerKey({
         kind: SIGNER_KIND.external,
         email: "Out@Example.ORG",
         name: "Out",
+        placements: [],
       }),
     ).toBe("external:out@example.org");
   });
@@ -43,8 +44,13 @@ describe("signerKey", () => {
 
 describe("alreadyChosen", () => {
   const signers: SignerSelection[] = [
-    { kind: SIGNER_KIND.internal, userId: "u-1" },
-    { kind: SIGNER_KIND.external, email: "Out@Example.ORG", name: "Out" },
+    { kind: SIGNER_KIND.internal, userId: "u-1", placements: [] },
+    {
+      kind: SIGNER_KIND.external,
+      email: "Out@Example.ORG",
+      name: "Out",
+      placements: [],
+    },
   ];
 
   it("matches an address however it was typed", () => {

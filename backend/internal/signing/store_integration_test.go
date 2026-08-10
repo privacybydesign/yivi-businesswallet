@@ -135,6 +135,59 @@ func TestCreateRequestPersistsMixedSigners(t *testing.T) {
 	}
 }
 
+// Placements are stored per signer and come back on the signer row, so the signing
+// pass can render each signer's own marks. The unique indexes are what keep the model
+// honest: one signature block per signer, one paraph per page.
+func TestCreateRequestPersistsPlacementsPerSigner(t *testing.T) {
+	store, pool := newStore(t)
+	ctx := context.Background()
+	orgID := makeOrg(t, pool, "acme")
+	alice := makeUser(t, pool, "alice@acme.example")
+
+	id, created, err := store.CreateRequest(ctx, orgID, alice, "Contract.pdf", []byte(samplePDF), ModeParallel,
+		[]SignerInput{
+			{Kind: KindInternal, UserID: alice, Order: 1, Placements: []Placement{
+				{Kind: PlacementSignature, Page: 1, X: 60, Y: 80, Width: 180, Height: 60},
+				{Kind: PlacementParaph, Page: 1, X: 500, Y: 40, Width: 48, Height: 24},
+				{Kind: PlacementParaph, Page: 2, X: 500, Y: 40, Width: 48, Height: 24},
+			}},
+			{Kind: KindExternal, Email: "outsider@example.org", Name: "Outsider", Order: 2},
+		}, RecipientInput{Channel: ChannelNone})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	req, err := store.GetRequest(ctx, orgID, id)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	member, external := req.Signers[0], req.Signers[1]
+	if len(member.Placements) != 3 {
+		t.Fatalf("member has %d placements, want 3", len(member.Placements))
+	}
+	// Ordered kind then page, so the signature block comes before the paraphs.
+	if got := member.Placements[0]; got.Kind != PlacementParaph || got.Page != 1 {
+		t.Errorf("first placement = %+v, want the page-1 paraph", got)
+	}
+	block := signaturePlacement(member.Placements)
+	if block == nil || block.X != 60 || block.Width != 180 {
+		t.Errorf("signature placement = %+v, want the stored rectangle", block)
+	}
+	if len(external.Placements) != 0 {
+		t.Errorf("a signer who placed nothing has %d placements", len(external.Placements))
+	}
+
+	// A second signature block for one signer is refused by the database, not just by
+	// the service: the one-appearance-per-signature rule is a property of PAdES.
+	_, err = pool.Exec(ctx,
+		`INSERT INTO signing_signer_placements (signer_id, kind, page, x, y, width, height)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		created[0].ID, PlacementSignature, 2, 10.0, 10.0, 40.0, 20.0)
+	if err == nil {
+		t.Error("a second signature placement for one signer should be refused")
+	}
+}
+
 // The invitation token is the external signee's only key: it resolves to exactly
 // their signer row, expires, and is replaced when re-issued.
 func TestExternalInvitationTokenLifecycle(t *testing.T) {

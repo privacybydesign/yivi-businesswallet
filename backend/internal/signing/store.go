@@ -153,7 +153,9 @@ func (s *Store) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, f
 		const insertSigner = `INSERT INTO signing_request_signers
 			(request_id, user_id, external_email, external_name, sign_order, status)
 			VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`
-		external := 0
+		const insertPlacement = `INSERT INTO signing_signer_placements
+			(signer_id, kind, page, x, y, width, height) VALUES ($1,$2,$3,$4,$5,$6,$7)`
+		external, placements := 0, 0
 		for _, sg := range signers {
 			var userID *uuid.UUID
 			email, name := "", ""
@@ -165,11 +167,17 @@ func (s *Store) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, f
 			}
 			row := Signer{
 				Kind: sg.Kind, UserID: userID, Email: email, Name: name,
-				Order: sg.Order, Status: SignerPending,
+				Order: sg.Order, Status: SignerPending, Placements: sg.Placements,
 			}
 			if err := q.QueryRow(ctx, insertSigner, id, userID, email, name, sg.Order, SignerPending).
 				Scan(&row.ID); err != nil {
 				return fmt.Errorf("signing: create request signer: %w", err)
+			}
+			for _, p := range sg.Placements {
+				if _, err := q.Exec(ctx, insertPlacement, row.ID, p.Kind, p.Page, p.X, p.Y, p.Width, p.Height); err != nil {
+					return fmt.Errorf("signing: create signer placement: %w", err)
+				}
+				placements++
 			}
 			created = append(created, row)
 		}
@@ -178,6 +186,7 @@ func (s *Store) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, f
 			audit.Created(map[string]any{
 				"filename": filename, "mode": mode, "signers": len(signers),
 				"externalSigners": external, "recipientChannel": rec.Channel,
+				"placements": placements,
 			}))
 	})
 	if err != nil {
@@ -543,6 +552,7 @@ func (s *Store) signersFor(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]
 	}
 	defer rows.Close()
 	out := make(map[uuid.UUID][]Signer, len(ids))
+	var signerIDs []uuid.UUID
 	for rows.Next() {
 		var requestID uuid.UUID
 		var sg Signer
@@ -556,6 +566,46 @@ func (s *Store) signersFor(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]
 			sg.Kind, sg.Email, sg.Name = KindExternal, email, name
 		}
 		out[requestID] = append(out[requestID], sg)
+		signerIDs = append(signerIDs, sg.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	placements, err := s.placementsFor(ctx, signerIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, signers := range out {
+		for i := range signers {
+			signers[i].Placements = placements[signers[i].ID]
+		}
+	}
+	return out, nil
+}
+
+// placementsFor loads the visible-mark placements of many signers in one query,
+// grouped by signer id. It is a second query rather than a join so a signer with no
+// placements — every signer of a request created before placements existed — still
+// reads as one row, and so the signer list is not multiplied by its placements.
+func (s *Store) placementsFor(ctx context.Context, signerIDs []uuid.UUID) (map[uuid.UUID][]Placement, error) {
+	if len(signerIDs) == 0 {
+		return nil, nil
+	}
+	const query = `SELECT signer_id, kind, page, x, y, width, height
+		FROM signing_signer_placements WHERE signer_id = ANY($1) ORDER BY signer_id, kind, page`
+	rows, err := s.db.Query(ctx, query, signerIDs)
+	if err != nil {
+		return nil, fmt.Errorf("signing: list placements for %d signers: %w", len(signerIDs), err)
+	}
+	defer rows.Close()
+	out := make(map[uuid.UUID][]Placement, len(signerIDs))
+	for rows.Next() {
+		var signerID uuid.UUID
+		var p Placement
+		if err := rows.Scan(&signerID, &p.Kind, &p.Page, &p.X, &p.Y, &p.Width, &p.Height); err != nil {
+			return nil, fmt.Errorf("signing: scan placement: %w", err)
+		}
+		out[signerID] = append(out[signerID], p)
 	}
 	return out, rows.Err()
 }

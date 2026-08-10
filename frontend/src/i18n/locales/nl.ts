@@ -737,6 +737,32 @@ export const nl: Translation<typeof en> = {
     messagePlaceholder: "Bericht aan de ontvanger (optioneel)",
     createButton: "Verzoek aanmaken",
     createdToast: "Ondertekenverzoek aangemaakt.",
+    placement: {
+      title: "Plaatsing van handtekening en paraaf",
+      hint: "Kies een ondertekenaar en klik op de pagina om daar het handtekeningveld of de paraaf te zetten. Laat dit leeg om zonder zichtbaar merkteken te ondertekenen.",
+      signerLegend: "Plaatsen voor",
+      markCount_one: "{{count}} merkteken",
+      markCount_other: "{{count}} merktekens",
+      kindLegend: "Plaats",
+      kindSignature: "Handtekeningveld",
+      kindParaph: "Paraaf",
+      previousPage: "Vorige pagina",
+      nextPage: "Volgende pagina",
+      pageOf: "Pagina {{page}} van {{count}}",
+      placeOnPage: "Midden op deze pagina plaatsen",
+      widthLabel: "Breedte (pt)",
+      heightLabel: "Hoogte (pt)",
+      removeMark: "Van deze pagina verwijderen",
+      paraphEveryPage: "Paraaf op elke pagina zetten",
+      removeParaphs: "Alle parafen verwijderen",
+      markLabel:
+        "{{kind}} voor {{name}} op pagina {{page}}, op {{x}} bij {{y}} punten. Gebruik de pijltjestoetsen om het te verplaatsen.",
+      keyboardHint:
+        "Sleep een merkteken om het te verplaatsen, of selecteer het en gebruik de pijltjestoetsen. Houd Shift ingedrukt voor grotere stappen.",
+      loadError: "Kon deze PDF niet openen om te plaatsen.",
+      incomplete:
+        "Geef elke ondertekenaar een handtekeningveld, of verwijder alle plaatsingen om zonder zichtbare merktekens te ondertekenen.",
+    },
     toSignEmpty: "Er wachten geen documenten op jouw handtekening.",
     toSignError:
       "Kon de documenten die op jouw handtekening wachten niet laden.",

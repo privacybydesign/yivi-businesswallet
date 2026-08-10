@@ -17,7 +17,7 @@ import (
 // the co-signing service repeats over the accumulating document.
 func signOnce(t *testing.T, stub *signingprovider.StubProvider, cred signingprovider.Credential, doc []byte) []byte {
 	t.Helper()
-	sess, digest, err := startPAdES(doc, cred)
+	sess, digest, err := startPAdES(doc, cred, nil)
 	if err != nil {
 		t.Fatalf("startPAdES: %v", err)
 	}

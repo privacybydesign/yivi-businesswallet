@@ -1,0 +1,459 @@
+package signing
+
+import (
+	"bytes"
+	"compress/zlib"
+	"encoding/binary"
+	"fmt"
+	"strings"
+
+	"github.com/digitorus/pdf"
+)
+
+// A signer's paraphs cannot be part of their PAdES signature's own appearance: a
+// signature dictionary carries exactly one appearance stream on one page, so
+// initials on every page have nowhere to live inside it. They are therefore drawn
+// as ordinary printable annotations in an incremental revision appended
+// immediately BEFORE that signer's signature pass — which is what makes them
+// attributable: the revision is inside the ByteRange their own signature covers,
+// so the initials cannot be added, moved or removed without breaking it.
+//
+// Cost of that choice, stated where it is made: a signer with paraphs adds two
+// revisions to the document instead of one, and the extra one is not itself a
+// signing operation. Earlier co-signatures stay cryptographically valid (the
+// revision is appended after their ByteRange), but a viewer that lists changes
+// since a signature will name it. See .ai/features/signing-ceremony.md.
+
+// paraphInk is the fill the paraph text is drawn in — the same ballpoint blue
+// pdfsign draws a visible signature's name in, so the two marks on one page read
+// as one hand rather than two tools.
+const paraphInk = "0.2 0.2 0.6 rg"
+
+// maxParaphChars bounds how much of a signer's name is drawn in a paraph box. A
+// paraph is initials, and the box is a few millimetres wide, so a long name is
+// initialised (see paraphText) rather than shrunk until it is a grey line.
+const maxParaphChars = 6
+
+// paraphText derives the mark drawn in a paraph box from the signer's name: their
+// initials, which is what a paraph is. A name that is already short enough is used
+// as it stands, so a two-letter name is not reduced to one.
+func paraphText(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "?"
+	}
+	if len([]rune(name)) <= maxParaphChars {
+		return name
+	}
+	var initials []rune
+	for _, part := range strings.Fields(name) {
+		initials = append(initials, []rune(part)[0])
+		if len(initials) == maxParaphChars {
+			break
+		}
+	}
+	if len(initials) == 0 {
+		return "?"
+	}
+	return strings.ToUpper(string(initials))
+}
+
+// incrObject is one object of an appended revision: a new one, or a replacement for
+// an object that already exists (a page, gaining an annotation). The two need no
+// distinguishing — a cross-reference section names an object by id and offset, and an
+// appended section that names an existing id is what replaces it.
+type incrObject struct {
+	id     uint32
+	gen    uint16
+	body   []byte
+	offset int64 // filled in while writing
+}
+
+// stampParaphs appends one incremental revision to input that draws text in each
+// of marks' rectangles as a printable, locked annotation, and returns the new
+// document. marks must already be validated against the document's geometry.
+// With no marks the input is returned untouched, so the no-paraph path adds no
+// revision at all.
+func stampParaphs(input []byte, rdr *pdf.Reader, marks []Placement, text string) ([]byte, error) {
+	if len(marks) == 0 {
+		return input, nil
+	}
+	nextID := lastObjectID(rdr) + 1
+	take := func() uint32 {
+		id := nextID
+		nextID++
+		return id
+	}
+
+	fontID := take()
+	objects := []incrObject{{id: fontID, body: paraphFont()}}
+
+	// One appearance + one annotation per mark, collected per page so each page
+	// object is rewritten once however many paraphs land on it.
+	annotsByPage := make(map[int][]uint32, len(marks))
+	pageOrder := make([]int, 0, len(marks))
+	for _, m := range marks {
+		appearanceID, annotID := take(), take()
+		pageRef, err := pageReference(rdr, m.Page)
+		if err != nil {
+			return nil, err
+		}
+		objects = append(objects,
+			incrObject{id: appearanceID, body: paraphAppearance(m, text, fontID)},
+			incrObject{id: annotID, body: paraphAnnotation(m, text, appearanceID, pageRef)},
+		)
+		if _, seen := annotsByPage[m.Page]; !seen {
+			pageOrder = append(pageOrder, m.Page)
+		}
+		annotsByPage[m.Page] = append(annotsByPage[m.Page], annotID)
+	}
+
+	for _, page := range pageOrder {
+		body, id, gen, err := pageWithAnnots(rdr, page, annotsByPage[page])
+		if err != nil {
+			return nil, err
+		}
+		objects = append(objects, incrObject{id: id, gen: gen, body: body})
+	}
+
+	return appendRevision(input, rdr, objects, nextID)
+}
+
+// lastObjectID reports the highest object id the document already uses, so the
+// appended revision can number its objects above it.
+func lastObjectID(rdr *pdf.Reader) uint32 {
+	var maxID uint32
+	for _, entry := range rdr.Xref() {
+		ptr := entry.Ptr()
+		if id := ptr.GetID(); id > maxID {
+			maxID = id
+		}
+	}
+	return maxID
+}
+
+// paraphFont is the appearance streams' shared font. It matches the font pdfsign
+// uses for a visible signature's name, for the same reason the ink does.
+func paraphFont() []byte {
+	return []byte("<<\n  /Type /Font\n  /Subtype /Type1\n  /BaseFont /Times-Roman\n>>")
+}
+
+// paraphAppearance is the Form XObject drawn inside the paraph's rectangle. Its
+// coordinate space is the rectangle itself (origin at its lower-left corner), so
+// the text is positioned without reference to where on the page the box sits.
+func paraphAppearance(m Placement, text string, fontID uint32) []byte {
+	fontSize, x, y := paraphTextLayout(text, m.Width, m.Height)
+	var stream bytes.Buffer
+	stream.WriteString("q\nBT\n")
+	fmt.Fprintf(&stream, "/F1 %.2f Tf\n", fontSize)
+	fmt.Fprintf(&stream, "%.2f %.2f Td\n", x, y)
+	stream.WriteString(paraphInk + "\n")
+	fmt.Fprintf(&stream, "%s Tj\n", pdfLiteral(text))
+	stream.WriteString("ET\nQ")
+
+	var obj bytes.Buffer
+	obj.WriteString("<<\n  /Type /XObject\n  /Subtype /Form\n  /FormType 1\n")
+	fmt.Fprintf(&obj, "  /BBox [0 0 %.2f %.2f]\n", m.Width, m.Height)
+	obj.WriteString("  /Matrix [1 0 0 1 0 0]\n")
+	fmt.Fprintf(&obj, "  /Resources << /Font << /F1 %d 0 R >> >>\n", fontID)
+	fmt.Fprintf(&obj, "  /Length %d\n>>\nstream\n", stream.Len())
+	obj.Write(stream.Bytes())
+	obj.WriteString("\nendstream")
+	return obj.Bytes()
+}
+
+// paraphTextLayout sizes the paraph text to its box and centres it, the same
+// approximation pdfsign uses for a signature appearance (Times-Roman averages
+// about half its point size per character).
+func paraphTextLayout(text string, width, height float64) (fontSize, x, y float64) {
+	const averageGlyphWidth = 0.5
+	chars := float64(len([]rune(text)))
+	fontSize = height * 0.8
+	if chars*fontSize*averageGlyphWidth > width {
+		fontSize = width / (chars * averageGlyphWidth)
+	}
+	x = max((width-chars*fontSize*averageGlyphWidth)/2, 0)
+	y = (height-fontSize)/2 + fontSize/3
+	return fontSize, x, y
+}
+
+// Annotation flags (PDF 32000-1 table 165): the paraph prints, and is read-only
+// and locked so a reader cannot drag it off its rectangle or delete it — the
+// signature covering it would then no longer verify, which is a worse way to find
+// out than not being offered the handle.
+const paraphAnnotationFlags = 4 | 64 | 128
+
+// paraphAnnotation is the annotation that puts the appearance on the page.
+func paraphAnnotation(m Placement, text string, appearanceID uint32, pageRef string) []byte {
+	r := m.rect()
+	var obj bytes.Buffer
+	obj.WriteString("<<\n  /Type /Annot\n  /Subtype /Stamp\n")
+	fmt.Fprintf(&obj, "  /Rect [%.2f %.2f %.2f %.2f]\n", r[0], r[1], r[2], r[3])
+	fmt.Fprintf(&obj, "  /F %d\n", paraphAnnotationFlags)
+	fmt.Fprintf(&obj, "  /AP << /N %d 0 R >>\n", appearanceID)
+	fmt.Fprintf(&obj, "  /Contents %s\n", pdfLiteral(text))
+	fmt.Fprintf(&obj, "  /P %s\n", pageRef)
+	obj.WriteString(">>")
+	return obj.Bytes()
+}
+
+// pageReference is the "id gen R" reference to a page object. A page that is not an
+// indirect object cannot be referenced — nor replaced by an incremental revision, so
+// its paraphs could not be attached either.
+func pageReference(rdr *pdf.Reader, number int) (string, error) {
+	page := rdr.Page(number)
+	if page.V.IsNull() {
+		return "", ErrInvalidPDF
+	}
+	ptr := page.V.GetPtr()
+	if ptr.GetID() == 0 {
+		return "", ErrInvalidPDF
+	}
+	return fmt.Sprintf("%d %d R", ptr.GetID(), ptr.GetGen()), nil
+}
+
+// pageWithAnnots re-serialises one page dictionary with extra annotation
+// references appended to its /Annots, and reports the page's own object id and
+// generation so the revision can replace it.
+//
+// The dictionary is rebuilt key by key rather than copied byte for byte because
+// digitorus/pdf resolves as it reads and does not hand back the raw object. Two
+// keys must not be written through Value.String(), which would inline what they
+// point at: /Parent (inlining the page tree) and /Contents (inlining a stream,
+// which is not even representable). This is the same reconstruction pdfsign does
+// to attach a visible signature's widget, so a page it can carry, this can too.
+func pageWithAnnots(rdr *pdf.Reader, number int, extra []uint32) ([]byte, uint32, uint16, error) {
+	page := rdr.Page(number)
+	if page.V.IsNull() {
+		return nil, 0, 0, ErrInvalidPDF
+	}
+	ptr := page.V.GetPtr()
+	if ptr.GetID() == 0 {
+		return nil, 0, 0, ErrInvalidPDF
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("<<\n")
+	for _, key := range page.V.Keys() {
+		value := page.V.Key(key)
+		switch key {
+		case "Parent", "Contents":
+			if value.Kind() == pdf.Array {
+				fmt.Fprintf(&buf, "  /%s [", key)
+				for i := 0; i < value.Len(); i++ {
+					item := value.Index(i).GetPtr()
+					fmt.Fprintf(&buf, " %d %d R", item.GetID(), item.GetGen())
+				}
+				buf.WriteString(" ]\n")
+				continue
+			}
+			p := value.GetPtr()
+			if p.GetID() == 0 {
+				return nil, 0, 0, ErrInvalidPDF
+			}
+			fmt.Fprintf(&buf, "  /%s %d %d R\n", key, p.GetID(), p.GetGen())
+		case "Annots":
+			buf.WriteString("  /Annots [")
+			for i := 0; i < value.Len(); i++ {
+				item := value.Index(i)
+				if p := item.GetPtr(); p.GetID() != 0 {
+					fmt.Fprintf(&buf, " %d %d R", p.GetID(), p.GetGen())
+					continue
+				}
+				// A directly-embedded annotation has no reference to carry over, so it is
+				// written back in place: an /Annots array may hold dictionaries as well.
+				fmt.Fprintf(&buf, " %s", item.String())
+			}
+			for _, id := range extra {
+				fmt.Fprintf(&buf, " %d 0 R", id)
+			}
+			buf.WriteString(" ]\n")
+		default:
+			fmt.Fprintf(&buf, "  /%s %s\n", key, value.String())
+		}
+	}
+	if page.V.Key("Annots").IsNull() {
+		buf.WriteString("  /Annots [")
+		for _, id := range extra {
+			fmt.Fprintf(&buf, " %d 0 R", id)
+		}
+		buf.WriteString(" ]\n")
+	}
+	buf.WriteString(">>")
+	return buf.Bytes(), ptr.GetID(), ptr.GetGen(), nil
+}
+
+// appendRevision writes objects as one incremental revision on the end of input:
+// the objects, a cross-reference section of the same kind the document already
+// uses, and a trailer pointing back at the previous section. nextID is the first
+// object id the document does not use yet — an xref stream is itself an object of
+// the revision it indexes, so it needs one of its own.
+func appendRevision(input []byte, rdr *pdf.Reader, objects []incrObject, nextID uint32) ([]byte, error) {
+	out := bytes.NewBuffer(make([]byte, 0, len(input)+revisionSizeGuess(objects)))
+	out.Write(input)
+	if !bytes.HasSuffix(input, []byte("\n")) {
+		out.WriteString("\n")
+	}
+
+	for i := range objects {
+		objects[i].offset = int64(out.Len())
+		fmt.Fprintf(out, "%d %d obj\n", objects[i].id, objects[i].gen)
+		out.Write(objects[i].body)
+		out.WriteString("\nendobj\n")
+	}
+
+	if rdr.XrefInformation.Type == "stream" {
+		return appendXrefStream(out, rdr, objects, nextID)
+	}
+	return appendXrefTable(out, rdr, objects)
+}
+
+// revisionSizeGuess pre-sizes the output buffer so appending a revision to a
+// multi-megabyte upload does not repeatedly copy it.
+func revisionSizeGuess(objects []incrObject) int {
+	const perObjectOverhead = 64
+	total := 512
+	for _, o := range objects {
+		total += len(o.body) + perObjectOverhead
+	}
+	return total
+}
+
+func appendXrefTable(out *bytes.Buffer, rdr *pdf.Reader, objects []incrObject) ([]byte, error) {
+	xrefStart := out.Len()
+	out.WriteString("xref\n")
+	// One subsection per object: the ids of an incremental revision are only
+	// contiguous by accident (the updated pages are not), and per-object subsections
+	// are always correct.
+	for _, o := range objects {
+		fmt.Fprintf(out, "%d 1\n", o.id)
+		fmt.Fprintf(out, "%010d %05d n\r\n", o.offset, o.gen)
+	}
+	out.WriteString("trailer\n<<\n")
+	fmt.Fprintf(out, "  /Size %d\n", trailerSize(rdr, objects, 0))
+	root, err := rootReference(rdr)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(out, "  /Root %s\n", root)
+	if id := documentID(rdr); id != "" {
+		fmt.Fprintf(out, "  /ID %s\n", id)
+	}
+	fmt.Fprintf(out, "  /Prev %d\n>>\n", rdr.XrefInformation.StartPos)
+	fmt.Fprintf(out, "startxref\n%d\n%%%%EOF\n", xrefStart)
+	return out.Bytes(), nil
+}
+
+// appendXrefStream writes the revision's cross-reference as an xref stream, which
+// is what a document that already uses one needs: a classic table would leave a
+// reader that found this section first with no way to read the object streams the
+// previous section indexes.
+func appendXrefStream(out *bytes.Buffer, rdr *pdf.Reader, objects []incrObject, streamID uint32) ([]byte, error) {
+	// The stream indexes itself, so its own offset has to be known before its
+	// entries are encoded — it is written at the current end of the buffer.
+	xrefStart := out.Len()
+
+	// /W [1 4 2]: one type byte, a four-byte offset, a two-byte generation.
+	var entries bytes.Buffer
+	writeEntry := func(offset int64, gen uint16) {
+		entries.WriteByte(1)
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], uint32(offset))
+		entries.Write(b[:])
+		var g [2]byte
+		binary.BigEndian.PutUint16(g[:], gen)
+		entries.Write(g[:])
+	}
+	var index bytes.Buffer
+	for _, o := range objects {
+		fmt.Fprintf(&index, " %d 1", o.id)
+		writeEntry(o.offset, o.gen)
+	}
+	fmt.Fprintf(&index, " %d 1", streamID)
+	writeEntry(int64(xrefStart), 0)
+
+	var deflated bytes.Buffer
+	w := zlib.NewWriter(&deflated)
+	if _, err := w.Write(entries.Bytes()); err != nil {
+		return nil, fmt.Errorf("signing: encode xref stream: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return nil, fmt.Errorf("signing: encode xref stream: %w", err)
+	}
+
+	root, err := rootReference(rdr)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(out, "%d 0 obj\n<<\n  /Type /XRef\n", streamID)
+	fmt.Fprintf(out, "  /Size %d\n", trailerSize(rdr, objects, streamID))
+	fmt.Fprintf(out, "  /Index [%s ]\n", index.String())
+	out.WriteString("  /W [ 1 4 2 ]\n")
+	fmt.Fprintf(out, "  /Root %s\n", root)
+	if id := documentID(rdr); id != "" {
+		fmt.Fprintf(out, "  /ID %s\n", id)
+	}
+	fmt.Fprintf(out, "  /Prev %d\n", rdr.XrefInformation.StartPos)
+	out.WriteString("  /Filter /FlateDecode\n")
+	fmt.Fprintf(out, "  /Length %d\n>>\nstream\n", deflated.Len())
+	out.Write(deflated.Bytes())
+	out.WriteString("\nendstream\nendobj\n")
+	fmt.Fprintf(out, "startxref\n%d\n%%%%EOF\n", xrefStart)
+	return out.Bytes(), nil
+}
+
+// trailerSize is the /Size the appended section reports: one past the highest object
+// id in the file. It never goes below the /Size the document already declared — a
+// document may reserve more object numbers than it uses, and a reader that trusts a
+// shrunken /Size would stop seeing the objects above it.
+func trailerSize(rdr *pdf.Reader, objects []incrObject, extra uint32) uint32 {
+	maxID := extra
+	for _, o := range objects {
+		if o.id > maxID {
+			maxID = o.id
+		}
+	}
+	size := maxID + 1
+	//nolint:gosec // A PDF object count does not reach 2^31; a negative one is ignored.
+	if declared := uint32(rdr.Trailer().Key("Size").Int64()); declared > size {
+		return declared
+	}
+	return size
+}
+
+// rootReference is the reference to the document catalogue. An appended section
+// carries its own trailer, so it has to name the catalogue again.
+func rootReference(rdr *pdf.Reader) (string, error) {
+	ptr := rdr.Trailer().Key("Root").GetPtr()
+	if ptr.GetID() == 0 {
+		return "", ErrInvalidPDF
+	}
+	return fmt.Sprintf("%d %d R", ptr.GetID(), ptr.GetGen()), nil
+}
+
+// documentID re-states the file identifier on the appended section, so the two
+// halves of the revision chain agree about which document this is. It is written
+// back as hex strings, which is the only form a binary identifier survives.
+func documentID(rdr *pdf.Reader) string {
+	id := rdr.Trailer().Key("ID")
+	if id.Kind() != pdf.Array || id.Len() != 2 {
+		return ""
+	}
+	return fmt.Sprintf("[<%X><%X>]", id.Index(0).RawString(), id.Index(1).RawString())
+}
+
+// pdfLiteral escapes text as a PDF literal string. Only the three characters that
+// can end or nest one need escaping.
+func pdfLiteral(text string) string {
+	var b strings.Builder
+	b.WriteByte('(')
+	for _, c := range []byte(text) {
+		switch c {
+		case '(', ')', '\\':
+			b.WriteByte('\\')
+		}
+		b.WriteByte(c)
+	}
+	b.WriteByte(')')
+	return b.String()
+}

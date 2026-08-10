@@ -274,11 +274,17 @@ type signerForm struct {
 	UserID string `json:"userId"`
 	Email  string `json:"email"`
 	Name   string `json:"name"`
+	// Placements travel inside the signer object rather than as their own form field
+	// because a placement only means anything as "this signer's mark", and the signer
+	// list has no stable key to correlate a parallel list against: an external signee
+	// is identified by an address and a member by an id.
+	Placements []Placement `json:"placements"`
 }
 
 // parseSigners parses the repeated `signers` form values, in order. It requires at
 // least one and rejects any malformed value; who may actually sign (an active member,
-// a usable address, nobody twice) is the service's call.
+// a usable address, nobody twice) and whether their placements fit the document are
+// the service's call.
 func parseSigners(values []string) ([]SignerInput, error) {
 	out := make([]SignerInput, 0, len(values))
 	for _, v := range values {
@@ -296,9 +302,11 @@ func parseSigners(values []string) ([]SignerInput, error) {
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, SignerInput{Kind: KindInternal, UserID: id})
+			out = append(out, SignerInput{Kind: KindInternal, UserID: id, Placements: form.Placements})
 		case KindExternal:
-			out = append(out, SignerInput{Kind: KindExternal, Email: form.Email, Name: form.Name})
+			out = append(out, SignerInput{
+				Kind: KindExternal, Email: form.Email, Name: form.Name, Placements: form.Placements,
+			})
 		default:
 			return nil, fmt.Errorf("signing: unknown signer kind %q", form.Kind)
 		}

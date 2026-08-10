@@ -196,14 +196,17 @@ type LinkedCredential struct {
 // the signer row's own id: it is what addresses a signer regardless of kind, since
 // an external signee has no UserID.
 type Signer struct {
-	ID       uuid.UUID  `json:"id"`
-	Kind     string     `json:"kind"`
-	UserID   *uuid.UUID `json:"userId,omitempty"`
-	Name     string     `json:"name"`
-	Email    string     `json:"email"`
-	Order    int        `json:"order"`
-	Status   string     `json:"status"`
-	SignedAt *time.Time `json:"signedAt,omitempty"`
+	ID     uuid.UUID  `json:"id"`
+	Kind   string     `json:"kind"`
+	UserID *uuid.UUID `json:"userId,omitempty"`
+	Name   string     `json:"name"`
+	Email  string     `json:"email"`
+	Order  int        `json:"order"`
+	Status string     `json:"status"`
+	// Placements is where this signer's visible marks land: at most one signature
+	// block plus a paraph per page. Empty for a signer whose signature is invisible.
+	Placements []Placement `json:"placements"`
+	SignedAt   *time.Time  `json:"signedAt,omitempty"`
 }
 
 // subject reports whose linked signing credential this signer signs with: their
@@ -224,6 +227,10 @@ type SignerInput struct {
 	Email  string
 	Name   string
 	Order  int
+	// Placements are this signer's visible marks, in PDF user-space points. Empty
+	// leaves their signature invisible, which is how every signature was applied
+	// before placement existed.
+	Placements []Placement
 }
 
 // RecipientInput is where the finished document is delivered, chosen at create time.

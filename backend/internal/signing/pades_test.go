@@ -33,7 +33,7 @@ func TestPAdESExternalSigningProducesVerifiablePDF(t *testing.T) {
 		t.Fatalf("read sample pdf: %v", err)
 	}
 
-	sess, digest, err := startPAdES(pdf, cred)
+	sess, digest, err := startPAdES(pdf, cred, nil)
 	if err != nil {
 		t.Fatalf("startPAdES: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestPAdESAbandonUnblocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read sample pdf: %v", err)
 	}
-	sess, _, err := startPAdES(pdf, cred)
+	sess, _, err := startPAdES(pdf, cred, nil)
 	if err != nil {
 		t.Fatalf("startPAdES: %v", err)
 	}

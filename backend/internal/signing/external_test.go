@@ -20,7 +20,7 @@ func TestValidateSignersMixesMembersAndExternalSigneesInOrder(t *testing.T) {
 		{Kind: KindExternal, Email: " Outsider@Example.ORG ", Name: "  Outsider  "},
 		{Kind: KindInternal, UserID: alice},
 		{Kind: KindExternal, Email: "second@example.org", Name: "Second"},
-	}, members)
+	}, members, a4Geometry(1))
 	if err != nil {
 		t.Fatalf("validateSigners: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestValidateSignersRejections(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := validateSigners(tc.in, members); !errors.Is(err, ErrInvalidRequest) {
+			if _, err := validateSigners(tc.in, members, a4Geometry(1)); !errors.Is(err, ErrInvalidRequest) {
 				t.Fatalf("validateSigners = %v, want ErrInvalidRequest", err)
 			}
 		})
