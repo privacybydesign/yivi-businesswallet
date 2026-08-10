@@ -28,6 +28,7 @@ type Service struct {
 	settings    connectionResolver
 	members     memberDirectory
 	deliverer   documentDeliverer
+	notifier    signerNotifier
 	redirectURI string
 	appBaseURL  string
 	// issuerInternal, when set, is the OAuth issuer base the backend uses for its
@@ -83,16 +84,18 @@ const (
 // appBaseURL is where the browser is sent after the callback resolves. members
 // lists the org's members (to validate/label selected signers); deliverer delivers
 // a completed document to its recipient (may be nil, in which case a request with a
-// recipient records a delivery failure). issuerInternal is an optional override for
-// the backend's server-side token exchange host (see the Service field); empty in
-// production.
-func NewService(store *Store, p provider, settings connectionResolver, members memberDirectory, deliverer documentDeliverer, redirectURI, appBaseURL, issuerInternal string) *Service {
+// recipient records a delivery failure). notifier tells a selected member a document
+// is waiting for their signature (may be nil to disable signer notifications).
+// issuerInternal is an optional override for the backend's server-side token
+// exchange host (see the Service field); empty in production.
+func NewService(store *Store, p provider, settings connectionResolver, members memberDirectory, deliverer documentDeliverer, notifier signerNotifier, redirectURI, appBaseURL, issuerInternal string) *Service {
 	return &Service{
 		store:          store,
 		provider:       p,
 		settings:       settings,
 		members:        members,
 		deliverer:      deliverer,
+		notifier:       notifier,
 		redirectURI:    redirectURI,
 		appBaseURL:     appBaseURL,
 		issuerInternal: issuerInternal,
@@ -146,8 +149,9 @@ func (s *Service) StartLink(ctx context.Context, orgID, userID uuid.UUID, slug s
 // uploaded PDF as a new co-signing request awaiting signatures, and returns its id.
 // It does not itself sign — each selected signer signs later via StartSign. The
 // creator need not be a signer. signerIDs order is the signing order for sequential
-// mode (1-based); it is ignored in parallel mode.
-func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, filename string, pdf []byte, signerIDs []uuid.UUID, mode string, rec RecipientInput) (uuid.UUID, error) {
+// mode (1-based); it is ignored in parallel mode. slug is used to build the signing
+// link in the notifications sent to the signers.
+func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, slug, filename string, pdf []byte, signerIDs []uuid.UUID, mode string, rec RecipientInput) (uuid.UUID, error) {
 	if _, err := s.connection(ctx, orgID); err != nil {
 		return uuid.Nil, err
 	}
@@ -180,7 +184,21 @@ func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID,
 		seen[id] = true
 		signers = append(signers, SignerInput{UserID: id, Order: i + 1})
 	}
-	return s.store.CreateRequest(ctx, orgID, createdBy, filename, pdf, mode, signers, rec)
+	requestID, err := s.store.CreateRequest(ctx, orgID, createdBy, filename, pdf, mode, signers, rec)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	// Notify the signers it is their turn: everyone in parallel mode, only the first
+	// (lowest order) in sequential mode — later signers are notified as their turn
+	// comes (see finishSign). Best-effort; a mail failure must not fail the create.
+	notify := signers
+	if mode == ModeSequential {
+		notify = signers[:1]
+	}
+	for _, sg := range notify {
+		s.notifySigner(ctx, orgID, slug, filename, sg.UserID, members)
+	}
+	return requestID, nil
 }
 
 // StartSign begins the acting user's signing ceremony for a request: it checks the
@@ -324,6 +342,9 @@ func (s *Service) finishSign(ctx context.Context, c *ceremony, accessToken strin
 			slog.ErrorContext(ctx, "signing: complete request", slog.String("error", err.Error()))
 		}
 		s.deliver(ctx, c.orgID, c.requestID)
+	} else {
+		// Sequential mode: it is now the next signer's turn — let them know.
+		s.notifyNextSequential(ctx, c.orgID, c.slug, c.requestID)
 	}
 	return s.resultURL(c, "request="+c.requestID.String())
 }
@@ -372,6 +393,61 @@ func (s *Service) setDeliveryFailed(ctx context.Context, orgID, requestID uuid.U
 	if err := s.store.SetDelivery(ctx, orgID, requestID, DeliveryFailed, reason); err != nil {
 		slog.ErrorContext(ctx, "signing: record delivery failure", slog.String("error", err.Error()))
 	}
+}
+
+// notifySigner e-mails one signer that a document awaits their signature, resolving
+// their address from the already-fetched member list. Best-effort: a nil notifier,
+// an unknown address, or a send failure is logged, never fatal.
+func (s *Service) notifySigner(ctx context.Context, orgID uuid.UUID, slug, documentName string, userID uuid.UUID, members []OrgMember) {
+	if s.notifier == nil {
+		return
+	}
+	var email string
+	for _, m := range members {
+		if m.UserID == userID {
+			email = m.Email
+			break
+		}
+	}
+	if email == "" {
+		return
+	}
+	if err := s.notifier.NotifySignatureRequested(ctx, orgID, email, documentName, slug); err != nil {
+		slog.WarnContext(ctx, "signing: notify signer", slog.String("error", err.Error()))
+	}
+}
+
+// notifyNextSequential notifies the signer whose turn it now is after a signature
+// completes in a sequential request (the lowest-order still-pending signer). It is a
+// no-op for a parallel request, where everyone was notified at create time.
+func (s *Service) notifyNextSequential(ctx context.Context, orgID uuid.UUID, slug string, requestID uuid.UUID) {
+	if s.notifier == nil {
+		return
+	}
+	req, err := s.store.GetRequest(ctx, orgID, requestID)
+	if err != nil {
+		slog.WarnContext(ctx, "signing: load request to notify next signer", slog.String("error", err.Error()))
+		return
+	}
+	if req.Mode != ModeSequential {
+		return
+	}
+	var next *Signer
+	for i := range req.Signers {
+		if req.Signers[i].Status == SignerPending {
+			next = &req.Signers[i] // signers come ordered by sign_order, so this is the next turn
+			break
+		}
+	}
+	if next == nil {
+		return
+	}
+	members, err := s.members.ListMembers(ctx, orgID)
+	if err != nil {
+		slog.WarnContext(ctx, "signing: list members to notify next signer", slog.String("error", err.Error()))
+		return
+	}
+	s.notifySigner(ctx, orgID, slug, req.Filename, next.UserID, members)
 }
 
 // failSign abandons the parked PAdES pass, releases the in-flight lock and marks

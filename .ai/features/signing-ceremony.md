@@ -167,10 +167,18 @@ co-signing object.
   `documentDeliverer`) implemented by adapters in `cmd/api` (`signing_adapters.go`).
 - **UI.** The Sign page is tabbed: **To sign** (documents awaiting me → run my ceremony),
   **New request** (upload + member multi-select + order + recipient), **My credential** (the
-  once-off link, moved out of the per-document flow). A separate admin **Signed documents** route
-  (next to Audit log) lists the org's requests, cursor-paginated, with per-signer + delivery status.
-- **Audit.** Adds `signing.signed` (a signer signed) and `signing.delivered` (delivered to the
-  recipient) alongside the existing `signing.requested`/`.completed`/`.failed`.
-- **Not in this iteration:** signer notifications are **in-app only** (the "To sign" tab) — no
-  per-signer notification email Kind yet; the active ceremony is still in-memory/single-instance
-  (intermediate document state is now persisted between signers).
+  once-off link, moved out of the per-document flow). The admin **History** tab (styled like the
+  settings tabs) lists the org's requests, cursor-paginated, with per-signer + delivery status.
+- **Signer notifications.** Each selected signer is e-mailed that a document awaits their signature
+  (`email` Kind `signature_requested`, linking to the signing page) via the `signerNotifier` seam
+  (adapter in `cmd/api`). Parallel mode notifies every signer at create time; sequential mode
+  notifies only the first, then the next signer as each turn completes (`finishSign`). Best-effort:
+  a mail failure never blocks create or advance.
+- **Audit + subscriptions.** Adds `signing.signed` and `signing.delivered` alongside
+  `signing.requested`/`.completed`/`.failed`. The lifecycle events `signing.requested` /
+  `.completed` / `.failed` are a subscribable **`signing` group** in the notifications catalog
+  (`internal/notifications`), so admins can also be notified over their configured channels — safe
+  because that metadata is the org's own filename/mode/status, never a disclosed identity.
+- **Still in-memory/single-instance:** the active ceremony (parked pass + reservation) lives in
+  memory; only the between-signers document is persisted. An abandoned ceremony frees its lock at
+  `SessionTTL` without failing the request, and a signer can reclaim their own stale slot at once.

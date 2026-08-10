@@ -34,6 +34,7 @@ const GROUP_LABEL_KEY = {
   qerds: "notifications.groups.qerds",
   postguard: "notifications.groups.postguard",
   attestation: "notifications.groups.attestation",
+  signing: "notifications.groups.signing",
 } as const satisfies Record<NotificationGroup, string>;
 
 // The channels that need a webhook of their own before they can deliver anything,

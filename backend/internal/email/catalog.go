@@ -37,6 +37,9 @@ const (
 	// KindSignedDocument delivers a completed co-signed document to its recipient
 	// (a natural person) as a PDF attachment, with the org's cover message.
 	KindSignedDocument Kind = "signed_document"
+	// KindSignatureRequested tells a selected member that a document is waiting for
+	// their signature, linking to the signing page.
+	KindSignatureRequested Kind = "signature_requested"
 )
 
 // Variable names. Every placeholder a template may use is one of these, declared
@@ -53,6 +56,8 @@ const (
 	varEventDetails   = "eventDetails"
 	varEventTime      = "eventTime"
 	varAuditURL       = "auditUrl"
+	varDocumentName   = "documentName"
+	varSigningURL     = "signingUrl"
 )
 
 // Variable is one substitutable value of a kind. URL variables are additionally
@@ -95,6 +100,11 @@ var kindVariables = map[Kind][]Variable{
 	KindSignedDocument: {
 		{Name: varOrgName},
 		{Name: varMessage},
+	},
+	KindSignatureRequested: {
+		{Name: varOrgName},
+		{Name: varDocumentName},
+		{Name: varSigningURL, IsURL: true},
 	},
 }
 

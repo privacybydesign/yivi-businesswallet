@@ -784,6 +784,7 @@ export const en = {
       qerds: "Secure messaging",
       postguard: "PostGuard",
       attestation: "Attestations",
+      signing: "Document signing",
     },
     channels: {
       email: "E-mail",
@@ -1017,6 +1018,7 @@ export const en = {
       event_notification: "Event notification",
       invitation: "Member invitation",
       postguard_file: "Encrypted file",
+      signature_requested: "Signature request",
       signed_document: "Signed document",
       smtp_test: "SMTP test",
     },
@@ -1028,6 +1030,8 @@ export const en = {
       invitation: "Sent to someone invited to join this organization.",
       postguard_file:
         "Sent to a recipient of an encrypted file, when this organization mails through its own SMTP server.",
+      signature_requested:
+        "Sent to a member selected to co-sign a document, linking them to the signing page.",
       signed_document:
         "Sent to a recipient with the completed co-signed document attached as a PDF.",
       smtp_test: "The test an admin sends to check the SMTP settings.",

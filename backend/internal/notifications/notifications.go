@@ -76,6 +76,7 @@ const (
 	GroupQerds       Group = "qerds"
 	GroupPostGuard   Group = "postguard"
 	GroupAttestation Group = "attestation"
+	GroupSigning     Group = "signing"
 )
 
 // CatalogEntry is one subscribable audit action.
@@ -141,6 +142,14 @@ var catalog = []CatalogEntry{
 	{audit.AttestationKeyAdded, GroupAttestation},
 	{audit.AttestationKeySuspended, GroupAttestation},
 	{audit.AttestationKeyRevoked, GroupAttestation},
+
+	// Signing lifecycle. Safe to publish: the metadata these actions record is the
+	// org's own document filename, the signing mode, signer counts, and redaction-safe
+	// status/error strings (see internal/signing/store.go) — never the disclosed legal
+	// identity that keeps signing.signed / accept_rejected out of this list.
+	{audit.SigningRequested, GroupSigning},
+	{audit.SigningCompleted, GroupSigning},
+	{audit.SigningFailed, GroupSigning},
 }
 
 // subscribable indexes the catalog for the per-event lookup on the write path.

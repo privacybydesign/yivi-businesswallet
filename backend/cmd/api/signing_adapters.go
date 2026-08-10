@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/url"
 	"strings"
 
 	"github.com/google/uuid"
@@ -71,4 +72,22 @@ func (d signingDeliverer) DeliverQERDS(ctx context.Context, orgID uuid.UUID, to,
 		Content:     pdf,
 	}})
 	return err
+}
+
+// signingNotifier adapts email.Service to signing.signerNotifier: it e-mails a
+// selected member that a document awaits their signature, building the signing-page
+// link from the org slug and the app base URL.
+type signingNotifier struct {
+	email      *email.Service
+	orgs       *organization.Store
+	appBaseURL string
+}
+
+func (n signingNotifier) NotifySignatureRequested(ctx context.Context, orgID uuid.UUID, signerEmail, documentName, slug string) error {
+	org, err := n.orgs.GetByID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	signingURL := strings.TrimRight(n.appBaseURL, "/") + "/" + url.PathEscape(slug) + "/signing"
+	return n.email.SendSignatureRequested(ctx, orgID, signerEmail, org.Name, documentName, signingURL)
 }

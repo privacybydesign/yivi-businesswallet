@@ -808,6 +808,7 @@ export const nl: Translation<typeof en> = {
       qerds: "Beveiligd berichtenverkeer",
       postguard: "PostGuard",
       attestation: "Attestaties",
+      signing: "Documenten ondertekenen",
     },
     channels: {
       email: "E-mail",
@@ -1051,6 +1052,7 @@ export const nl: Translation<typeof en> = {
       event_notification: "Melding van een gebeurtenis",
       invitation: "Uitnodiging voor lidmaatschap",
       postguard_file: "Versleuteld bestand",
+      signature_requested: "Ondertekenverzoek",
       signed_document: "Ondertekend document",
       smtp_test: "SMTP-test",
     },
@@ -1063,6 +1065,8 @@ export const nl: Translation<typeof en> = {
         "Gaat naar iemand die is uitgenodigd om lid te worden van deze organisatie.",
       postguard_file:
         "Gaat naar de ontvanger van een versleuteld bestand, als deze organisatie via de eigen SMTP-server mailt.",
+      signature_requested:
+        "Gaat naar een lid dat is geselecteerd om een document mede te ondertekenen, met een link naar de ondertekenpagina.",
       signed_document:
         "Gaat naar een ontvanger met het voltooide, mede-ondertekende document als PDF-bijlage.",
       smtp_test:

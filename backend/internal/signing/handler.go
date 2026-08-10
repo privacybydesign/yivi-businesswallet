@@ -28,7 +28,7 @@ const (
 
 type signingService interface {
 	StartLink(ctx context.Context, orgID, userID uuid.UUID, slug string) (Start, error)
-	CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, filename string, pdf []byte, signerIDs []uuid.UUID, mode string, rec RecipientInput) (uuid.UUID, error)
+	CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, slug, filename string, pdf []byte, signerIDs []uuid.UUID, mode string, rec RecipientInput) (uuid.UUID, error)
 	StartSign(ctx context.Context, orgID, userID uuid.UUID, slug string, requestID uuid.UUID) (Start, error)
 	HandleCallback(ctx context.Context, code, state string) string
 	GetRequest(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) (Request, error)
@@ -154,7 +154,7 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 		mode = ModeParallel
 	}
 
-	id, err := h.svc.CreateRequest(r.Context(), org.ID, u.ID, header.Filename, pdf, signerIDs, mode, rec)
+	id, err := h.svc.CreateRequest(r.Context(), org.ID, u.ID, org.Slug, header.Filename, pdf, signerIDs, mode, rec)
 	if err := h.mapStartError(err); err != nil {
 		return err
 	}

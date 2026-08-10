@@ -147,6 +147,14 @@ type documentDeliverer interface {
 	DeliverQERDS(ctx context.Context, orgID uuid.UUID, to, recipientName, subject, coverMessage, filename string, pdf []byte) error
 }
 
+// signerNotifier tells a selected member that a document is waiting for their
+// signature. The adapter in cmd/api wraps email.Service and builds the signing-page
+// link from the org slug. Notification is best-effort: a failure is logged, never
+// fatal to creating (or advancing) the request.
+type signerNotifier interface {
+	NotifySignatureRequested(ctx context.Context, orgID uuid.UUID, signerEmail, documentName, slug string) error
+}
+
 // LinkedCredential is a user's cached signing credential (fetched once, so the
 // signing ceremony is a single authorize — the cert must be known before the
 // document hash is computed, because the CMS SignedAttributes hash the cert).

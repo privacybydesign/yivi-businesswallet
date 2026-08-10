@@ -518,8 +518,9 @@ func run() error {
 	// once fully signed, delivered to a recipient over email or QERDS.
 	signingStore := signing.NewStore(pool, recorder)
 	signingDelivery := signingDeliverer{email: emailService, qerds: qerdsService, orgs: orgStore}
+	signingNotify := signingNotifier{email: emailService, orgs: orgStore, appBaseURL: cfg.AppBaseURL}
 	signingHandler := signing.NewHandler(
-		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingDelivery, signing.DefaultRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
+		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingDelivery, signingNotify, signing.DefaultRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
 		requireUser, orgHandler.Authorize)
 
 	handler := server.New(

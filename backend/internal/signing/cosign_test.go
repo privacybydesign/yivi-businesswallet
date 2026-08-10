@@ -1,12 +1,43 @@
 package signing
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+type fakeNotifier struct{ emails []string }
+
+func (f *fakeNotifier) NotifySignatureRequested(_ context.Context, _ uuid.UUID, email, _, _ string) error {
+	f.emails = append(f.emails, email)
+	return nil
+}
+
+func TestNotifySignerResolvesEmailAndSkipsUnknown(t *testing.T) {
+	fn := &fakeNotifier{}
+	s := &Service{notifier: fn}
+	alice := uuid.New()
+	members := []OrgMember{{UserID: alice, Email: "alice@example.org", Name: "Alice"}}
+
+	s.notifySigner(context.Background(), uuid.New(), "acme", "Doc.pdf", alice, members)
+	if len(fn.emails) != 1 || fn.emails[0] != "alice@example.org" {
+		t.Fatalf("expected one notification to alice, got %v", fn.emails)
+	}
+
+	// A signer not in the member list is skipped, not an error.
+	s.notifySigner(context.Background(), uuid.New(), "acme", "Doc.pdf", uuid.New(), members)
+	if len(fn.emails) != 1 {
+		t.Fatalf("an unknown signer should not be notified, got %v", fn.emails)
+	}
+}
+
+func TestNotifySignerNilNotifierIsNoop(t *testing.T) {
+	s := &Service{} // notifier nil
+	s.notifySigner(context.Background(), uuid.New(), "acme", "Doc.pdf", uuid.New(), nil)
+}
 
 func newTestService() *Service {
 	return &Service{

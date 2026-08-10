@@ -13,7 +13,9 @@
     "eventName": "Lid uitgenodigd",
     "eventDetails": "email: sam@example.org\nrole: member",
     "eventTime": "2026-01-14 09:32 UTC",
-    "auditUrl": "https://wallet.example.org/acme/audit-log"
+    "auditUrl": "https://wallet.example.org/acme/audit-log",
+    "documentName": "Contract.pdf",
+    "signingUrl": "https://wallet.example.org/acme/signing"
   },
   "events": {
     "membership.invited": "Lid uitgenodigd",
@@ -50,7 +52,11 @@
     "attestation.offer_cancelled": "Attestatieaanbod geannuleerd",
     "attestation.key_added": "Attestatiesleutel toegevoegd",
     "attestation.key_suspended": "Attestatiesleutel opgeschort",
-    "attestation.key_revoked": "Attestatiesleutel ingetrokken"
+    "attestation.key_revoked": "Attestatiesleutel ingetrokken",
+
+    "signing.requested": "Ondertekening aangevraagd",
+    "signing.completed": "Ondertekening voltooid",
+    "signing.failed": "Ondertekening mislukt"
   },
   "templates": {
     "credential_offer": {
@@ -103,6 +109,16 @@
         { "type": "heading", "text": "{{orgName}} heeft je een ondertekend document gestuurd" },
         { "type": "paragraph", "text": "{{message}}" },
         { "type": "paragraph", "text": "Het ondertekende document is als PDF bij deze e-mail gevoegd." },
+        { "type": "footer" }
+      ]
+    },
+    "signature_requested": {
+      "subject": "{{orgName}} vraagt je een document te ondertekenen",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Er wacht een document op jouw handtekening" },
+        { "type": "paragraph", "text": "{{orgName}} heeft je gevraagd {{documentName}} te ondertekenen." },
+        { "type": "button", "label": "Bekijken en ondertekenen", "url": "{{signingUrl}}" },
         { "type": "footer" }
       ]
     },
