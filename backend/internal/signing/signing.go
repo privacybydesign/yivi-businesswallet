@@ -35,6 +35,12 @@ const DefaultRedirectURI = "http://localhost:8080/api/v1/signing/callback"
 // window a person has to complete the wallet ceremony.
 const SessionTTL = 5 * time.Minute
 
+// ExternalInviteTTL bounds how long an external signee's invitation link stays
+// usable. The token is issued when the signee is actually invited (at create time
+// in parallel mode, when their turn comes in sequential mode), so the window is
+// counted from the moment they were asked, not from when the request was made.
+const ExternalInviteTTL = 30 * 24 * time.Hour
+
 // Request statuses. A request is awaiting_signatures until every selected signer
 // has signed; then completed (delivery, if any, is tracked separately on
 // DeliveryStatus). failed means a signer's ceremony errored out.
@@ -74,6 +80,14 @@ const (
 	SignerFailed  = "failed"
 )
 
+// Signer kinds: an internal org member (identified by their user id) or an
+// external signee outside the organisation (identified by name + e-mail, who gets
+// in over a one-time invitation link instead of a session).
+const (
+	KindInternal = "internal"
+	KindExternal = "external"
+)
+
 var (
 	// ErrNotConfigured means the org has no usable CSC provider configured.
 	ErrNotConfigured = errors.New("signing: no CSC signing provider configured for organization")
@@ -97,6 +111,8 @@ var (
 	ErrSignInProgress = errors.New("signing: another signature is in progress for this document")
 	// ErrInvalidRequest means the request parameters (signers, mode, recipient) are invalid.
 	ErrInvalidRequest = errors.New("signing: invalid signing request")
+	// ErrInvalidToken means an external signee's invitation link is unknown or expired.
+	ErrInvalidToken = errors.New("signing: the signing link is not valid or has expired")
 )
 
 // provider is the consumer-defined view of internal/signingprovider that this
@@ -137,6 +153,13 @@ type memberDirectory interface {
 	ListMembers(ctx context.Context, orgID uuid.UUID) ([]OrgMember, error)
 }
 
+// orgDirectory resolves an organisation's display name. The external signing page
+// is reached with nothing but an invitation token — it has no org context of its
+// own — so it needs to be told which organisation is asking.
+type orgDirectory interface {
+	OrgName(ctx context.Context, orgID uuid.UUID) (string, error)
+}
+
 // documentDeliverer delivers the finished signed PDF to an external natural
 // person over the recipient's chosen channel. The adapters in cmd/api wrap
 // email.Service (attachment) and qerds.Service (registered delivery). Delivery is
@@ -147,12 +170,17 @@ type documentDeliverer interface {
 	DeliverQERDS(ctx context.Context, orgID uuid.UUID, to, recipientName, subject, coverMessage, filename string, pdf []byte) error
 }
 
-// signerNotifier tells a selected member that a document is waiting for their
-// signature. The adapter in cmd/api wraps email.Service and builds the signing-page
-// link from the org slug. Notification is best-effort: a failure is logged, never
-// fatal to creating (or advancing) the request.
+// signerNotifier tells a signer that a document is waiting for their signature.
+// The adapter in cmd/api wraps email.Service and turns the destination into a link:
+// an internal member is sent to the org's signing page, an external signee to their
+// own one-time invitation link. Notification is best-effort: a failure is logged,
+// never fatal to creating (or advancing) the request.
 type signerNotifier interface {
 	NotifySignatureRequested(ctx context.Context, orgID uuid.UUID, signerEmail, documentName, slug string) error
+	// NotifyExternalSignatureRequested mails an external signee the invitation link
+	// (built from the raw token) that lets them link a credential and sign without an
+	// org membership.
+	NotifyExternalSignatureRequested(ctx context.Context, orgID uuid.UUID, signeeEmail, documentName, token string) error
 }
 
 // LinkedCredential is a user's cached signing credential (fetched once, so the
@@ -164,9 +192,13 @@ type LinkedCredential struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
-// Signer is one member who must sign a request, with their per-signer state.
+// Signer is one party who must sign a request, with their per-signer state. ID is
+// the signer row's own id: it is what addresses a signer regardless of kind, since
+// an external signee has no UserID.
 type Signer struct {
-	UserID   uuid.UUID  `json:"userId"`
+	ID       uuid.UUID  `json:"id"`
+	Kind     string     `json:"kind"`
+	UserID   *uuid.UUID `json:"userId,omitempty"`
 	Name     string     `json:"name"`
 	Email    string     `json:"email"`
 	Order    int        `json:"order"`
@@ -174,10 +206,23 @@ type Signer struct {
 	SignedAt *time.Time `json:"signedAt,omitempty"`
 }
 
+// subject reports whose linked signing credential this signer signs with: their
+// internal (org, user) row, or their external (org, e-mail) one.
+func (s Signer) subject() subject {
+	if s.UserID != nil {
+		return internalSubject(*s.UserID)
+	}
+	return externalSubject(s.Email)
+}
+
 // SignerInput is one selected signer at create time (order is 1-based; ignored in
-// parallel mode).
+// parallel mode). Kind decides which identity fields carry it: UserID for an
+// internal member, Email + Name for an external signee.
 type SignerInput struct {
+	Kind   string
 	UserID uuid.UUID
+	Email  string
+	Name   string
 	Order  int
 }
 
@@ -214,4 +259,27 @@ type Request struct {
 type Start struct {
 	RequestID    *uuid.UUID `json:"requestId,omitempty"`
 	AuthorizeURL string     `json:"authorizeUrl"`
+}
+
+// ExternalView is what an external signee sees behind their invitation link. It is
+// deliberately narrower than Request: the signee is outside the organisation, so
+// they are told who is asking, which document, their own state and how far the
+// request has got — never the other signers' names or addresses.
+type ExternalView struct {
+	OrgName      string `json:"orgName"`
+	Filename     string `json:"filename"`
+	SignerName   string `json:"signerName"`
+	SignerEmail  string `json:"signerEmail"`
+	Message      string `json:"message,omitempty"`
+	Status       string `json:"status"`
+	SignerStatus string `json:"signerStatus"`
+	Mode         string `json:"mode"`
+	SignerCount  int    `json:"signerCount"`
+	SignedCount  int    `json:"signedCount"`
+	// HasCredential reports whether this signee already linked a signing credential
+	// (so the page knows whether to offer linking first); CanSign whether it is their
+	// turn right now.
+	HasCredential bool      `json:"hasCredential"`
+	CanSign       bool      `json:"canSign"`
+	CreatedAt     time.Time `json:"createdAt"`
 }

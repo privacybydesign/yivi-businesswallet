@@ -2,6 +2,7 @@ package signing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +29,7 @@ const (
 
 type signingService interface {
 	StartLink(ctx context.Context, orgID, userID uuid.UUID, slug string) (Start, error)
-	CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, slug, filename string, pdf []byte, signerIDs []uuid.UUID, mode string, rec RecipientInput) (uuid.UUID, error)
+	CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, slug, filename string, pdf []byte, signers []SignerInput, mode string, rec RecipientInput) (uuid.UUID, error)
 	StartSign(ctx context.Context, orgID, userID uuid.UUID, slug string, requestID uuid.UUID) (Start, error)
 	HandleCallback(ctx context.Context, code, state string) string
 	GetRequest(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) (Request, error)
@@ -37,6 +38,12 @@ type signingService interface {
 	ListRequests(ctx context.Context, orgID uuid.UUID, cursor string, limit int) ([]Request, string, error)
 	GetCredential(ctx context.Context, orgID, userID uuid.UUID) (LinkedCredential, error)
 	Available(ctx context.Context, orgID uuid.UUID) (bool, error)
+
+	// The external-signee flow, keyed by the invitation token alone (no session).
+	ExternalView(ctx context.Context, token string) (ExternalView, error)
+	StartExternalLink(ctx context.Context, token string) (Start, error)
+	StartExternalSign(ctx context.Context, token string) (Start, error)
+	ExternalDocument(ctx context.Context, token string) ([]byte, string, error)
 }
 
 // Handler serves the co-signing workflow. The per-org routes are member-gated; the
@@ -74,6 +81,15 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// Central OAuth redirect target (matches the QTSP client registration). It is
 	// correlated by state, so it needs no session; it 302s the browser onward.
 	mux.HandleFunc("GET /signing/callback", h.callback)
+
+	// The external-signee routes are unauthenticated by design: an external signee has
+	// no membership and no session, so the unguessable one-time invitation token in the
+	// path is their whole authorization — exactly like GET /invite/{token}. Each route
+	// resolves the token to a single signer row and reads nothing else from the caller.
+	mux.Handle("GET /signing/external/{token}", respond.HandlerFunc(h.externalView))
+	mux.Handle("GET /signing/external/{token}/document", respond.HandlerFunc(h.externalDocument))
+	mux.Handle("POST /signing/external/{token}/credential/link", respond.HandlerFunc(h.externalLink))
+	mux.Handle("POST /signing/external/{token}/sign", respond.HandlerFunc(h.externalSign))
 }
 
 // getAvailability reports whether a signing provider is configured for the org.
@@ -136,7 +152,7 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 		return &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "document_too_large", Message: "the document is too large"}
 	}
 
-	signerIDs, err := parseSignerIDs(r.Form["signerIds"])
+	signers, err := parseSigners(r.Form["signers"])
 	if err != nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_signers", Message: "select one or more valid signers"}
 	}
@@ -154,7 +170,7 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 		mode = ModeParallel
 	}
 
-	id, err := h.svc.CreateRequest(r.Context(), org.ID, u.ID, org.Slug, header.Filename, pdf, signerIDs, mode, rec)
+	id, err := h.svc.CreateRequest(r.Context(), org.ID, u.ID, org.Slug, header.Filename, pdf, signers, mode, rec)
 	if err := h.mapStartError(err); err != nil {
 		return err
 	}
@@ -258,25 +274,104 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusFound)
 }
 
-// parseSignerIDs parses the repeated signerIds form values into unique user ids.
-// It requires at least one and rejects any malformed value.
-func parseSignerIDs(values []string) ([]uuid.UUID, error) {
-	out := make([]uuid.UUID, 0, len(values))
+// signerForm is one repeated `signers` multipart value. Each signer is sent as its
+// own small JSON object rather than as two parallel arrays (member ids + external
+// addresses), because the position in the list *is* the sequential signing order and
+// two lists cannot express one order across both kinds.
+type signerForm struct {
+	Kind   string `json:"kind"`
+	UserID string `json:"userId"`
+	Email  string `json:"email"`
+	Name   string `json:"name"`
+}
+
+// parseSigners parses the repeated `signers` form values, in order. It requires at
+// least one and rejects any malformed value; who may actually sign (an active member,
+// a usable address, nobody twice) is the service's call.
+func parseSigners(values []string) ([]SignerInput, error) {
+	out := make([]SignerInput, 0, len(values))
 	for _, v := range values {
 		v = strings.TrimSpace(v)
 		if v == "" {
 			continue
 		}
-		id, err := uuid.Parse(v)
-		if err != nil {
+		var form signerForm
+		if err := json.Unmarshal([]byte(v), &form); err != nil {
 			return nil, err
 		}
-		out = append(out, id)
+		switch form.Kind {
+		case KindInternal:
+			id, err := uuid.Parse(strings.TrimSpace(form.UserID))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, SignerInput{Kind: KindInternal, UserID: id})
+		case KindExternal:
+			out = append(out, SignerInput{Kind: KindExternal, Email: form.Email, Name: form.Name})
+		default:
+			return nil, fmt.Errorf("signing: unknown signer kind %q", form.Kind)
+		}
 	}
 	if len(out) == 0 {
 		return nil, errors.New("signing: no signers selected")
 	}
 	return out, nil
+}
+
+// externalView serves the external signing page's own view of the request behind an
+// invitation token.
+func (h *Handler) externalView(w http.ResponseWriter, r *http.Request) error {
+	view, err := h.svc.ExternalView(r.Context(), r.PathValue("token"))
+	if err := h.mapExternalError(err); err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, view)
+	return nil
+}
+
+// externalLink starts an external signee's credential-link ceremony.
+func (h *Handler) externalLink(w http.ResponseWriter, r *http.Request) error {
+	start, err := h.svc.StartExternalLink(r.Context(), r.PathValue("token"))
+	if err := h.mapExternalError(err); err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, start)
+	return nil
+}
+
+// externalSign starts an external signee's signing ceremony.
+func (h *Handler) externalSign(w http.ResponseWriter, r *http.Request) error {
+	start, err := h.svc.StartExternalSign(r.Context(), r.PathValue("token"))
+	if err := h.mapExternalError(err); err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, start)
+	return nil
+}
+
+// externalDocument serves the document an external signee is being asked to sign, so
+// they can read it before signing. It is the current state of the document (the
+// original upload, or the accumulating PAdES once earlier signers have signed).
+func (h *Handler) externalDocument(w http.ResponseWriter, r *http.Request) error {
+	doc, filename, err := h.svc.ExternalDocument(r.Context(), r.PathValue("token"))
+	if err := h.mapExternalError(err); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", documentName(filename)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(doc)
+	return nil
+}
+
+// mapExternalError adds the invitation-token cases to the shared mapping. An unknown
+// or expired link is a 404: an external signee is told the link is no longer usable,
+// never whether a request behind it exists.
+func (h *Handler) mapExternalError(err error) error {
+	if errors.Is(err, ErrInvalidToken) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "invalid_link", Message: "this signing link is not valid or has expired"}
+	}
+	return h.mapStartError(err)
 }
 
 // mapStartError translates domain errors into API errors.
@@ -312,4 +407,13 @@ func signedName(filename string) string {
 		return "signed.pdf"
 	}
 	return "signed-" + filename
+}
+
+// documentName is the filename for the not-yet-finished document an external signee
+// reviews — the upload's own name, since it is not the signed result.
+func documentName(filename string) string {
+	if filename == "" {
+		return "document.pdf"
+	}
+	return filename
 }

@@ -2845,11 +2845,15 @@ paths:
       summary: Create a co-signing request
       description: >-
         Requires organisation membership. Accepts a PDF in the `document` multipart
-        field plus the selected signer user ids (`signerIds`, repeated), the signing
-        `mode` (`parallel` or `sequential`), and the recipient (`recipientChannel`
-        one of `none`/`qerds`/`email`, plus `recipientAddress`, `recipientName`,
-        `message`). Stores the request awaiting signatures and returns `{id}`; each
-        selected signer later signs it via `.../requests/{id}/sign`.
+        field plus the chosen signers (`signers`, repeated — one JSON object each),
+        the signing `mode` (`parallel` or `sequential`), and the recipient
+        (`recipientChannel` one of `none`/`qerds`/`email`, plus `recipientAddress`,
+        `recipientName`, `message`). A signer is either an internal member
+        (`{"kind":"internal","userId":"<uuid>"}`) or an external signee
+        (`{"kind":"external","email":"...","name":"..."}`); the order of the values is
+        the signing order for sequential mode. Stores the request awaiting signatures
+        and returns `{id}`. A member signs via `.../requests/{id}/sign`; an external
+        signee is mailed a one-time link and signs under `/api/v1/signing/external/{token}`.
       requestBody:
         required: true
         content:
@@ -2861,12 +2865,14 @@ paths:
                   type: string
                   format: binary
                   description: The PDF to sign.
-                signerIds:
+                signers:
                   type: array
                   items:
                     type: string
-                    format: uuid
-                  description: User ids of the members who must sign (order is the signing order for sequential mode).
+                  description: >-
+                    One JSON object per signer, in signing order: either
+                    `{"kind":"internal","userId":"<uuid>"}` for an org member or
+                    `{"kind":"external","email":"...","name":"..."}` for an external signee.
                 mode:
                   type: string
                   enum: [parallel, sequential]
@@ -3030,6 +3036,112 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The signed document is not ready yet.
+  /api/v1/signing/external/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The external signee's one-time invitation token.
+    get:
+      tags: [signing]
+      summary: An external signee's view of the request they must sign
+      description: >-
+        Unauthenticated by design: an external signee has no membership and no
+        session, so the unguessable one-time token from their invitation mail is their
+        whole authorization (the same posture as `GET /api/v1/invite/{token}`).
+        Returns who is asking, the document name, their own signer status, how far the
+        request has got, whether they have linked a credential and whether it is their
+        turn — deliberately not the other signers' names or addresses. 404 when the
+        link is unknown, spent or expired.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          description: The signing link is not valid or has expired.
+  /api/v1/signing/external/{token}/document:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The external signee's one-time invitation token.
+    get:
+      tags: [signing]
+      summary: The document an external signee is being asked to sign
+      description: >-
+        Returns the current state of the document (`application/pdf`, inline) — the
+        original upload, or the accumulating PAdES once earlier signers have signed —
+        so the signee can read what they are signing. Keyed by the invitation token
+        only.
+      responses:
+        '2XX':
+          description: The document to review.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: The signing link is not valid or has expired.
+  /api/v1/signing/external/{token}/credential/link:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The external signee's one-time invitation token.
+    post:
+      tags: [signing]
+      summary: Start linking an external signee's signing credential
+      description: >-
+        Runs the same service-scope wallet ceremony a member runs, but caches the
+        resulting credential under the signee's (organisation, e-mail) subject rather
+        than an internal user row. Returns `{authorizeUrl}`.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          description: The signing link is not valid or has expired.
+        '409':
+          description: The organisation has no CSC signing provider configured.
+  /api/v1/signing/external/{token}/sign:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The external signee's one-time invitation token.
+    post:
+      tags: [signing]
+      summary: Start an external signee's signature
+      description: >-
+        Requires a linked credential and that it is this signee's turn (the same turn
+        and in-flight rules as a member's signature). Prepares the current document,
+        binds its hash into the authorization, and returns `{requestId, authorizeUrl}`.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          description: The signing link is not valid or has expired.
+        '409':
+          description: No credential linked, already signed, not your turn, or a signature is in progress.
   /api/v1/signing/callback:
     get:
       tags: [signing]

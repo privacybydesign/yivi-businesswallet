@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import {
   DELIVERY_STATUS,
   RECIPIENT_CHANNEL,
+  SIGNER_KIND,
   SIGNER_STATUS,
   SIGNING_MODE,
   SIGNING_STATUS,
@@ -32,6 +33,17 @@ export function signerStatusLabel(t: TFunction, status: string): string {
       return t("signing.signerStatus.failed");
     default:
       return status;
+  }
+}
+
+export function signerKindLabel(t: TFunction, kind: string): string {
+  switch (kind) {
+    case SIGNER_KIND.internal:
+      return t("signing.signerKind.internal");
+    case SIGNER_KIND.external:
+      return t("signing.signerKind.external");
+    default:
+      return kind;
   }
 }
 

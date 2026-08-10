@@ -514,13 +514,14 @@ func run() error {
 
 	// Qualified document signing: the business wallet as the RP-centric SCA driving
 	// the per-org CSC provider (base URL + OAuth client from cscStore). A request is
-	// co-signed by selected org members (each with their own linked credential) and,
-	// once fully signed, delivered to a recipient over email or QERDS.
+	// co-signed by its selected signers — org members and external signees alike, each
+	// with their own linked credential — and, once fully signed, delivered to a
+	// recipient over email or QERDS.
 	signingStore := signing.NewStore(pool, recorder)
 	signingDelivery := signingDeliverer{email: emailService, qerds: qerdsService, orgs: orgStore}
 	signingNotify := signingNotifier{email: emailService, orgs: orgStore, appBaseURL: cfg.AppBaseURL}
 	signingHandler := signing.NewHandler(
-		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingDelivery, signingNotify, signing.DefaultRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
+		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingOrgs{store: orgStore}, signingDelivery, signingNotify, signing.DefaultRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
 		requireUser, orgHandler.Authorize)
 
 	handler := server.New(

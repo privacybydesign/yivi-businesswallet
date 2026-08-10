@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"net/mail"
 	"net/url"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ type Service struct {
 	provider    provider
 	settings    connectionResolver
 	members     memberDirectory
+	orgs        orgDirectory
 	deliverer   documentDeliverer
 	notifier    signerNotifier
 	redirectURI string
@@ -50,11 +52,24 @@ type Service struct {
 	active map[uuid.UUID]*ceremony
 }
 
+// signerRef addresses one signer of a request without assuming they are an internal
+// member: signerID is the signer row's own id (always set), subj their credential
+// owner, and token their invitation token when the ceremony was started from an
+// external signing link (which is where the browser must be sent back to).
+type signerRef struct {
+	signerID uuid.UUID
+	subj     subject
+	token    string
+}
+
 // ceremony is one in-flight authorization awaiting its callback.
 type ceremony struct {
-	flow         string // "link" | "sign"
-	orgID        uuid.UUID
-	userID       uuid.UUID
+	flow  string // "link" | "sign"
+	orgID uuid.UUID
+	// signer is who this ceremony is for. For an org member it carries their user
+	// subject and an empty token; for an external signee, their e-mail subject and the
+	// invitation token the browser must be returned to.
+	signer       signerRef
 	slug         string
 	baseURL      string
 	clientID     string
@@ -79,6 +94,10 @@ const (
 	flowSign = "sign"
 )
 
+// maxEmailLength bounds an external signee's address (RFC 5321's forward-path limit),
+// so an absurd value is refused before it reaches the database or a mail header.
+const maxEmailLength = 254
+
 // NewService builds the signing service. redirectURI is the QTSP-registered OAuth
 // callback (must match the authorization server's client registration);
 // appBaseURL is where the browser is sent after the callback resolves. members
@@ -86,14 +105,17 @@ const (
 // a completed document to its recipient (may be nil, in which case a request with a
 // recipient records a delivery failure). notifier tells a selected member a document
 // is waiting for their signature (may be nil to disable signer notifications).
-// issuerInternal is an optional override for the backend's server-side token
-// exchange host (see the Service field); empty in production.
-func NewService(store *Store, p provider, settings connectionResolver, members memberDirectory, deliverer documentDeliverer, notifier signerNotifier, redirectURI, appBaseURL, issuerInternal string) *Service {
+// orgs resolves the organisation's name for the external signing page, which is
+// reached with nothing but an invitation token. issuerInternal is an optional
+// override for the backend's server-side token exchange host (see the Service
+// field); empty in production.
+func NewService(store *Store, p provider, settings connectionResolver, members memberDirectory, orgs orgDirectory, deliverer documentDeliverer, notifier signerNotifier, redirectURI, appBaseURL, issuerInternal string) *Service {
 	return &Service{
 		store:          store,
 		provider:       p,
 		settings:       settings,
 		members:        members,
+		orgs:           orgs,
 		deliverer:      deliverer,
 		notifier:       notifier,
 		redirectURI:    redirectURI,
@@ -115,9 +137,16 @@ func (s *Service) tokenIssuer(discovered string) string {
 	return discovered
 }
 
-// StartLink begins linking a signing credential for the acting user: a
+// StartLink begins linking a signing credential for the acting member: a
 // service-scope authorization whose callback lists + caches the credential.
 func (s *Service) StartLink(ctx context.Context, orgID, userID uuid.UUID, slug string) (Start, error) {
+	return s.startLink(ctx, orgID, signerRef{subj: internalSubject(userID)}, slug)
+}
+
+// startLink is the shared credential-link ceremony: it differs between an org member
+// and an external signee only in which subject the credential is cached under and
+// where the browser is sent back to.
+func (s *Service) startLink(ctx context.Context, orgID uuid.UUID, ref signerRef, slug string) (Start, error) {
 	conn, err := s.connection(ctx, orgID)
 	if err != nil {
 		return Start{}, err
@@ -138,7 +167,7 @@ func (s *Service) StartLink(ctx context.Context, orgID, userID uuid.UUID, slug s
 		Scope:         signingprovider.ScopeService,
 	})
 	s.put(state, &ceremony{
-		flow: flowLink, orgID: orgID, userID: userID, slug: slug,
+		flow: flowLink, orgID: orgID, signer: ref, slug: slug,
 		baseURL: conn.baseURL, clientID: conn.clientID, clientSecret: conn.clientSecret,
 		issuer: info.OAuth2, pkceVerifier: pkce.Verifier,
 	})
@@ -147,11 +176,12 @@ func (s *Service) StartLink(ctx context.Context, orgID, userID uuid.UUID, slug s
 
 // CreateRequest validates the selected signers, mode and recipient, stores the
 // uploaded PDF as a new co-signing request awaiting signatures, and returns its id.
-// It does not itself sign — each selected signer signs later via StartSign. The
-// creator need not be a signer. signerIDs order is the signing order for sequential
-// mode (1-based); it is ignored in parallel mode. slug is used to build the signing
-// link in the notifications sent to the signers.
-func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, slug, filename string, pdf []byte, signerIDs []uuid.UUID, mode string, rec RecipientInput) (uuid.UUID, error) {
+// It does not itself sign — each signer signs later, a member via StartSign and an
+// external signee via StartExternalSign. The creator need not be a signer. The order
+// of signers is the signing order for sequential mode (1-based); it is ignored in
+// parallel mode. slug is used to build the signing link in the notifications sent to
+// the member signers.
+func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, slug, filename string, pdf []byte, in []SignerInput, mode string, rec RecipientInput) (uuid.UUID, error) {
 	if _, err := s.connection(ctx, orgID); err != nil {
 		return uuid.Nil, err
 	}
@@ -161,9 +191,6 @@ func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID,
 	if err := validateRecipient(rec); err != nil {
 		return uuid.Nil, err
 	}
-	if len(signerIDs) == 0 {
-		return uuid.Nil, ErrInvalidRequest
-	}
 	if err := validatePDF(pdf); err != nil {
 		return uuid.Nil, err
 	}
@@ -171,60 +198,118 @@ func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID,
 	if err != nil {
 		return uuid.Nil, err
 	}
-	valid := make(map[uuid.UUID]bool, len(members))
-	for _, m := range members {
-		valid[m.UserID] = true
+	signers, err := validateSigners(in, members)
+	if err != nil {
+		return uuid.Nil, err
 	}
-	seen := make(map[uuid.UUID]bool, len(signerIDs))
-	signers := make([]SignerInput, 0, len(signerIDs))
-	for i, id := range signerIDs {
-		if !valid[id] || seen[id] {
-			return uuid.Nil, ErrInvalidRequest
-		}
-		seen[id] = true
-		signers = append(signers, SignerInput{UserID: id, Order: i + 1})
-	}
-	requestID, err := s.store.CreateRequest(ctx, orgID, createdBy, filename, pdf, mode, signers, rec)
+	requestID, created, err := s.store.CreateRequest(ctx, orgID, createdBy, filename, pdf, mode, signers, rec)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	// Notify the signers it is their turn: everyone in parallel mode, only the first
 	// (lowest order) in sequential mode — later signers are notified as their turn
 	// comes (see finishSign). Best-effort; a mail failure must not fail the create.
-	notify := signers
+	notify := created
 	if mode == ModeSequential {
-		notify = signers[:1]
+		notify = created[:1]
 	}
 	for _, sg := range notify {
-		s.notifySigner(ctx, orgID, slug, filename, sg.UserID, members)
+		s.notifySigner(ctx, orgID, slug, filename, requestID, sg, members)
 	}
 	return requestID, nil
 }
 
-// StartSign begins the acting user's signing ceremony for a request: it checks the
+// validateSigners checks the selected signers and assigns their 1-based order: an
+// internal signer must be an active member of the org, an external one a plausible
+// e-mail address, and nobody may appear twice — an address that is also a member's is
+// rejected rather than silently signing twice as two different parties.
+func validateSigners(in []SignerInput, members []OrgMember) ([]SignerInput, error) {
+	if len(in) == 0 {
+		return nil, ErrInvalidRequest
+	}
+	memberByID := make(map[uuid.UUID]OrgMember, len(members))
+	memberEmails := make(map[string]bool, len(members))
+	for _, m := range members {
+		memberByID[m.UserID] = m
+		memberEmails[strings.ToLower(m.Email)] = true
+	}
+	seenUsers := make(map[uuid.UUID]bool, len(in))
+	seenEmails := make(map[string]bool, len(in))
+	out := make([]SignerInput, 0, len(in))
+	for i, sg := range in {
+		sg.Order = i + 1
+		switch sg.Kind {
+		case KindInternal:
+			if _, ok := memberByID[sg.UserID]; !ok || seenUsers[sg.UserID] {
+				return nil, ErrInvalidRequest
+			}
+			seenUsers[sg.UserID] = true
+			sg.Email, sg.Name = "", ""
+		case KindExternal:
+			email := strings.ToLower(strings.TrimSpace(sg.Email))
+			if !validEmail(email) || seenEmails[email] || memberEmails[email] {
+				return nil, ErrInvalidRequest
+			}
+			seenEmails[email] = true
+			sg.Email, sg.Name, sg.UserID = email, strings.TrimSpace(sg.Name), uuid.Nil
+		default:
+			return nil, ErrInvalidRequest
+		}
+		out = append(out, sg)
+	}
+	return out, nil
+}
+
+// validEmail is a shape check, not a deliverability one: an external signee's address
+// is where their only way into the request is sent, so a value that cannot be an
+// address at all is refused at create time rather than failing silently at send.
+func validEmail(email string) bool {
+	if email == "" || len(email) > maxEmailLength || strings.ContainsAny(email, " \t\r\n") {
+		return false
+	}
+	addr, err := mail.ParseAddress(email)
+	return err == nil && addr.Address == email
+}
+
+// StartSign begins an org member's signing ceremony for a request: it checks the
 // user is a pending signer whose turn it is, takes the per-request in-flight lock,
 // prepares the current document (pass 1) to obtain the hash, binds that hash into a
 // credential-scope authorization, and returns the authorize URL. The callback
 // finishes the signature.
 func (s *Service) StartSign(ctx context.Context, orgID, userID uuid.UUID, slug string, requestID uuid.UUID) (Start, error) {
+	req, err := s.store.GetRequest(ctx, orgID, requestID)
+	if err != nil {
+		return Start{}, err
+	}
+	me := signerByUser(req, userID)
+	if me == nil {
+		return Start{}, ErrNotSigner
+	}
+	return s.startSign(ctx, orgID, req, signerRef{signerID: me.ID, subj: me.subject()}, slug)
+}
+
+// startSign is the shared signing ceremony: an org member and an external signee
+// differ only in how they were identified (ref) and where the browser is returned to.
+func (s *Service) startSign(ctx context.Context, orgID uuid.UUID, req Request, ref signerRef, slug string) (Start, error) {
 	conn, err := s.connection(ctx, orgID)
 	if err != nil {
 		return Start{}, err
 	}
-	req, err := s.store.GetRequest(ctx, orgID, requestID)
-	if err != nil {
+	requestID := req.ID
+	// The turn is checked before the request status, so a signer coming back to a
+	// finished request is told they already signed rather than that the request is
+	// invalid — on a completed request every signer has signed, and only a signer still
+	// pending on a failed one falls through to ErrInvalidRequest.
+	if err := checkTurn(req, ref.signerID); err != nil {
 		return Start{}, err
 	}
 	if req.Status != StatusAwaitingSignatures {
 		return Start{}, ErrInvalidRequest
 	}
-	if err := checkTurn(req, userID); err != nil {
-		return Start{}, err
-	}
-	if !s.reserveSign(requestID, userID) {
+	if !s.reserveSign(requestID, ref.signerID) {
 		return Start{}, ErrSignInProgress
 	}
-	cred, err := s.store.GetCredential(ctx, orgID, userID)
+	cred, err := s.store.GetCredential(ctx, orgID, ref.subj)
 	if err != nil {
 		s.release(requestID)
 		return Start{}, err
@@ -267,7 +352,7 @@ func (s *Service) StartSign(ctx context.Context, orgID, userID uuid.UUID, slug s
 		HashAlgorithmOID: signingprovider.HashAlgoSHA256OID,
 	})
 	s.put(state, &ceremony{
-		flow: flowSign, orgID: orgID, userID: userID, slug: slug,
+		flow: flowSign, orgID: orgID, signer: ref, slug: slug,
 		baseURL: conn.baseURL, clientID: conn.clientID, clientSecret: conn.clientSecret,
 		issuer: info.OAuth2, pkceVerifier: pkce.Verifier,
 		requestID: requestID, credentialID: cred.ID, digestB64: digestB64, pades: pades,
@@ -312,7 +397,7 @@ func (s *Service) finishLink(ctx context.Context, c *ceremony, accessToken strin
 	if err != nil {
 		return s.failCeremony(ctx, c, "could not read the credential", err)
 	}
-	if err := s.store.UpsertCredential(ctx, c.orgID, c.userID, cred); err != nil {
+	if err := s.store.UpsertCredential(ctx, c.orgID, c.signer.subj, cred); err != nil {
 		return s.failCeremony(ctx, c, "could not store the credential", err)
 	}
 	return s.resultURL(c, "link=ok")
@@ -332,7 +417,7 @@ func (s *Service) finishSign(ctx context.Context, c *ceremony, accessToken strin
 	if err != nil {
 		return s.failSign(ctx, c, "the signed document could not be assembled", err)
 	}
-	allSigned, err := s.store.RecordSignature(ctx, c.orgID, c.requestID, c.userID, signed)
+	allSigned, err := s.store.RecordSignature(ctx, c.orgID, c.requestID, c.signer.signerID, signed)
 	if err != nil {
 		return s.failSign(ctx, c, "the signature could not be stored", err)
 	}
@@ -395,16 +480,29 @@ func (s *Service) setDeliveryFailed(ctx context.Context, orgID, requestID uuid.U
 	}
 }
 
-// notifySigner e-mails one signer that a document awaits their signature, resolving
-// their address from the already-fetched member list. Best-effort: a nil notifier,
-// an unknown address, or a send failure is logged, never fatal.
-func (s *Service) notifySigner(ctx context.Context, orgID uuid.UUID, slug, documentName string, userID uuid.UUID, members []OrgMember) {
+// notifySigner e-mails one signer that a document awaits their signature. A member's
+// address is resolved from the already-fetched member list and links to the org's
+// signing page; an external signee gets a freshly issued one-time invitation link,
+// which is their only way in. Best-effort: a nil notifier, an unknown address, or a
+// send failure is logged, never fatal.
+func (s *Service) notifySigner(ctx context.Context, orgID uuid.UUID, slug, documentName string, requestID uuid.UUID, sg Signer, members []OrgMember) {
 	if s.notifier == nil {
+		return
+	}
+	if sg.Kind == KindExternal {
+		token, err := s.store.IssueExternalToken(ctx, requestID, sg.ID)
+		if err != nil {
+			slog.ErrorContext(ctx, "signing: issue external signing link", slog.String("error", err.Error()))
+			return
+		}
+		if err := s.notifier.NotifyExternalSignatureRequested(ctx, orgID, sg.Email, documentName, token); err != nil {
+			slog.WarnContext(ctx, "signing: notify external signee", slog.String("error", err.Error()))
+		}
 		return
 	}
 	var email string
 	for _, m := range members {
-		if m.UserID == userID {
+		if sg.UserID != nil && m.UserID == *sg.UserID {
 			email = m.Email
 			break
 		}
@@ -447,7 +545,7 @@ func (s *Service) notifyNextSequential(ctx context.Context, orgID uuid.UUID, slu
 		slog.WarnContext(ctx, "signing: list members to notify next signer", slog.String("error", err.Error()))
 		return
 	}
-	s.notifySigner(ctx, orgID, slug, req.Filename, next.UserID, members)
+	s.notifySigner(ctx, orgID, slug, req.Filename, requestID, *next, members)
 }
 
 // failSign abandons the parked PAdES pass, releases the in-flight lock and marks
@@ -457,7 +555,7 @@ func (s *Service) failSign(ctx context.Context, c *ceremony, reason string, caus
 		c.pades.abandon(cause)
 	}
 	s.release(c.requestID)
-	if err := s.store.FailRequest(ctx, c.orgID, c.requestID, c.userID, reason); err != nil {
+	if err := s.store.FailRequest(ctx, c.orgID, c.requestID, c.signer.signerID, reason); err != nil {
 		slog.ErrorContext(ctx, "signing: mark request failed", slog.String("error", err.Error()))
 	}
 	slog.ErrorContext(ctx, "signing: sign ceremony failed", slog.String("reason", reason), slog.String("error", cause.Error()))
@@ -525,7 +623,7 @@ func (s *Service) ListRequests(ctx context.Context, orgID uuid.UUID, cursor stri
 // GetCredential reports the acting user's linked credential (for the UI to show
 // whether linking is needed). Returns ErrNoCredential if none.
 func (s *Service) GetCredential(ctx context.Context, orgID, userID uuid.UUID) (LinkedCredential, error) {
-	cred, err := s.store.GetCredential(ctx, orgID, userID)
+	cred, err := s.store.GetCredential(ctx, orgID, internalSubject(userID))
 	if err != nil {
 		return LinkedCredential{}, err
 	}
@@ -572,7 +670,12 @@ func (s *Service) enrich(ctx context.Context, orgID uuid.UUID, reqs []*Request) 
 			r.CreatedByName = m.Name
 		}
 		for i := range r.Signers {
-			if m, ok := byID[r.Signers[i].UserID]; ok {
+			// An external signee carries their own name/e-mail on the row; only a member
+			// is looked up, and only that lookup can come back blank.
+			if r.Signers[i].UserID == nil {
+				continue
+			}
+			if m, ok := byID[*r.Signers[i].UserID]; ok {
 				r.Signers[i].Name = m.Name
 				r.Signers[i].Email = m.Email
 			}
@@ -588,23 +691,24 @@ func (s *Service) enrichSlice(ctx context.Context, orgID uuid.UUID, reqs []Reque
 	s.enrich(ctx, orgID, ptrs)
 }
 
-// reserveSign takes the per-request in-flight slot for userID's new signing
-// ceremony. If another user's ceremony holds it, it returns false and the caller
-// answers ErrSignInProgress. If this same user already holds one — a reload, or an
-// attempt they walked away from — that stale ceremony is discarded (its parked
-// pdfsign pass abandoned, its timer stopped, its session dropped) so the user can
-// start over without waiting out SessionTTL. A reservation marker holds the slot
-// through the build; put replaces it with the real ceremony.
-func (s *Service) reserveSign(requestID, userID uuid.UUID) bool {
+// reserveSign takes the per-request in-flight slot for one signer's new signing
+// ceremony, keyed by the signer row id so it covers an external signee as well. If
+// another signer's ceremony holds it, it returns false and the caller answers
+// ErrSignInProgress. If this same signer already holds one — a reload, or an attempt
+// they walked away from — that stale ceremony is discarded (its parked pdfsign pass
+// abandoned, its timer stopped, its session dropped) so they can start over without
+// waiting out SessionTTL. A reservation marker holds the slot through the build; put
+// replaces it with the real ceremony.
+func (s *Service) reserveSign(requestID, signerID uuid.UUID) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing := s.active[requestID]; existing != nil {
-		if existing.userID != userID {
+		if existing.signer.signerID != signerID {
 			return false
 		}
 		s.discardLocked(existing)
 	}
-	s.active[requestID] = &ceremony{flow: flowSign, requestID: requestID, userID: userID}
+	s.active[requestID] = &ceremony{flow: flowSign, requestID: requestID, signer: signerRef{signerID: signerID}}
 	return true
 }
 
@@ -673,26 +777,46 @@ func (s *Service) expire(state string) {
 }
 
 func (s *Service) resultURL(c *ceremony, query string) string {
-	// The frontend serves org pages at /{slug}/... (no /orgs prefix — that is the
-	// API path, not the SPA route), so the post-ceremony redirect targets that.
+	// An external signee has no org page to come back to (no membership, no session),
+	// so their ceremony returns to the invitation link they arrived on.
 	u := fmt.Sprintf("%s/%s/signing", s.appBaseURL, url.PathEscape(c.slug))
+	if c.signer.token != "" {
+		u = s.appBaseURL + ExternalSignPath(c.signer.token)
+	}
 	if query != "" {
 		u += "?" + query
 	}
 	return u
 }
 
-// checkTurn reports whether userID may start a signature now: they must be a
-// pending signer, and in sequential mode every lower-order signer must already have
-// signed.
-func checkTurn(req Request, userID uuid.UUID) error {
-	var me *Signer
+// signerByUser finds the request's signer row for an org member, or nil when that
+// member is not a signer. External signees are never matched: they have no user id.
+func signerByUser(req Request, userID uuid.UUID) *Signer {
 	for i := range req.Signers {
-		if req.Signers[i].UserID == userID {
-			me = &req.Signers[i]
-			break
+		if req.Signers[i].UserID != nil && *req.Signers[i].UserID == userID {
+			return &req.Signers[i]
 		}
 	}
+	return nil
+}
+
+// signerByID finds a signer row by its own id, which addresses a member and an
+// external signee alike.
+func signerByID(req Request, signerID uuid.UUID) *Signer {
+	for i := range req.Signers {
+		if req.Signers[i].ID == signerID {
+			return &req.Signers[i]
+		}
+	}
+	return nil
+}
+
+// checkTurn reports whether the given signer may start a signature now: they must be
+// a pending signer of the request, and in sequential mode every lower-order signer
+// must already have signed. Keyed by signer row id, so it holds for an external
+// signee too.
+func checkTurn(req Request, signerID uuid.UUID) error {
+	me := signerByID(req, signerID)
 	if me == nil {
 		return ErrNotSigner
 	}
@@ -709,17 +833,12 @@ func checkTurn(req Request, userID uuid.UUID) error {
 	return nil
 }
 
-// involves reports whether userID is the creator or a signer of the request.
+// involves reports whether userID is the creator or a member signer of the request.
 func involves(req Request, userID uuid.UUID) bool {
 	if req.CreatedBy == userID {
 		return true
 	}
-	for _, sg := range req.Signers {
-		if sg.UserID == userID {
-			return true
-		}
-	}
-	return false
+	return signerByUser(req, userID) != nil
 }
 
 func validateRecipient(rec RecipientInput) error {

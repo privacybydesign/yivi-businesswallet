@@ -1,12 +1,13 @@
 import { z } from "zod";
-import { ApiError, request, requestBlob } from "./http";
+import { ApiError, absoluteApiUrl, request, requestBlob } from "./http";
 
 // The qualified co-signing workflow: the business wallet is the RP-centric
-// Signature Creation Application. Each member links a signing credential once (in
-// the "My credential" tab), then a request routes a PDF to one or more member
-// signers; each signs via an OID4VP + CSC ceremony that hands the browser off to
-// the QTSP authorization server and returns here. When all have signed, the
-// document is delivered to the recipient over QERDS or email.
+// Signature Creation Application. Each signer links a signing credential once (a
+// member in the "My credential" tab, an external signee behind their invitation
+// link), then a request routes a PDF to its signers; each signs via an OID4VP + CSC
+// ceremony that hands the browser off to the QTSP authorization server and returns
+// here. When all have signed, the document is delivered to the recipient over QERDS
+// or email.
 
 const NOT_FOUND_STATUS = 404;
 
@@ -54,8 +55,18 @@ export const DELIVERY_STATUS = {
   failed: "failed",
 } as const;
 
+// A signer is either an internal org member or an external signee; only the first
+// has a userId, so the signer row's own id is what identifies either.
+export const SIGNER_KIND = {
+  internal: "internal",
+  external: "external",
+} as const;
+export type SignerKind = (typeof SIGNER_KIND)[keyof typeof SIGNER_KIND];
+
 export const signerSchema = z.object({
-  userId: z.string(),
+  id: z.string(),
+  kind: z.string(),
+  userId: z.string().optional(),
   name: z.string(),
   email: z.string(),
   order: z.number(),
@@ -104,10 +115,17 @@ export type SigningStart = z.infer<typeof signingStartSchema>;
 
 const createdSchema = z.object({ id: z.string() });
 
+// SignerSelection is one chosen signer on the create form. Members and external
+// signees share one ordered list, because that order is the sequential signing order
+// and two separate lists could not express an order across both.
+export type SignerSelection =
+  | { kind: typeof SIGNER_KIND.internal; userId: string }
+  | { kind: typeof SIGNER_KIND.external; email: string; name: string };
+
 // NewSigningRequest is the create-request form payload.
 export interface NewSigningRequest {
   document: File;
-  signerIds: string[];
+  signers: SignerSelection[];
   mode: SigningMode;
   recipientChannel: RecipientChannel;
   recipientAddress: string;
@@ -162,14 +180,17 @@ export function linkSigningCredential(slug: string): Promise<SigningStart> {
 }
 
 // createSigningRequest uploads a PDF plus the selected signers, mode and recipient,
-// and returns the new request id. It does not sign — signers sign later.
+// and returns the new request id. It does not sign — signers sign later. Each signer
+// goes over as its own JSON `signers` value, so one list carries both kinds in the
+// chosen order.
 export function createSigningRequest(
   slug: string,
   input: NewSigningRequest,
 ): Promise<{ id: string }> {
   const form = new FormData();
   form.append("document", input.document);
-  for (const id of input.signerIds) form.append("signerIds", id);
+  for (const signer of input.signers)
+    form.append("signers", JSON.stringify(signer));
   form.append("mode", input.mode);
   form.append("recipientChannel", input.recipientChannel);
   form.append("recipientAddress", input.recipientAddress);
@@ -227,6 +248,62 @@ export function listSigningRequests(
     schema: signingRequestPageSchema,
     signal,
   });
+}
+
+// The external-signee flow. An external signee has no membership and no session, so
+// every call here is keyed by the one-time invitation token from their mail; the
+// backend resolves it to a single signer row and takes nothing else from the caller.
+function externalBase(token: string): string {
+  return `/api/v1/signing/external/${encodeURIComponent(token)}`;
+}
+
+export const externalSigningSchema = z.object({
+  orgName: z.string(),
+  filename: z.string(),
+  signerName: z.string(),
+  signerEmail: z.string(),
+  message: z.string().optional(),
+  status: z.string(),
+  signerStatus: z.string(),
+  mode: z.string(),
+  signerCount: z.number(),
+  signedCount: z.number(),
+  hasCredential: z.boolean(),
+  canSign: z.boolean(),
+  createdAt: z.string(),
+});
+export type ExternalSigning = z.infer<typeof externalSigningSchema>;
+
+export function getExternalSigning(
+  token: string,
+  signal?: AbortSignal,
+): Promise<ExternalSigning> {
+  return request(externalBase(token), {
+    schema: externalSigningSchema,
+    signal,
+  });
+}
+
+// linkExternalCredential starts the external signee's one-off credential-link
+// ceremony (the same wallet ceremony a member runs from the "My credential" tab).
+export function linkExternalCredential(token: string): Promise<SigningStart> {
+  return request(`${externalBase(token)}/credential/link`, {
+    schema: signingStartSchema,
+    method: "POST",
+  });
+}
+
+export function startExternalSign(token: string): Promise<SigningStart> {
+  return request(`${externalBase(token)}/sign`, {
+    schema: signingStartSchema,
+    method: "POST",
+  });
+}
+
+// externalDocumentUrl is the document the signee is being asked to sign, served
+// inline so they can read it in the browser before signing.
+export function externalDocumentUrl(token: string): string {
+  return absoluteApiUrl(`${externalBase(token)}/document`);
 }
 
 // downloadSignedDocument fetches the signed PDF and triggers a browser save,

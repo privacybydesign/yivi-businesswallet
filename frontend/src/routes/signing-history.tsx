@@ -4,6 +4,7 @@ import { useSigningRequestsQuery } from "../api/signing.queries";
 import {
   DELIVERY_STATUS,
   RECIPIENT_CHANNEL,
+  SIGNER_KIND,
   SIGNER_STATUS,
   SIGNING_STATUS,
   downloadSignedDocument,
@@ -104,7 +105,7 @@ export function SigningHistoryPanel({
                     <div className="flex flex-wrap gap-1.5">
                       {(req.signers ?? []).map((s) => (
                         <Tag
-                          key={s.userId}
+                          key={s.id}
                           tone={
                             s.status === SIGNER_STATUS.signed
                               ? "green"
@@ -114,6 +115,9 @@ export function SigningHistoryPanel({
                           }
                         >
                           {s.name || s.email}
+                          {s.kind === SIGNER_KIND.external
+                            ? ` (${t("signing.externalTag")})`
+                            : ""}
                         </Tag>
                       ))}
                     </div>
