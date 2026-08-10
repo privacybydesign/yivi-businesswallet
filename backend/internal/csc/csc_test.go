@@ -18,6 +18,8 @@ func TestNormalizeBaseURL(t *testing.T) {
 		{name: "host is lowercased", in: "https://QTSP.Example.ORG/csc", want: "https://qtsp.example.org/csc"},
 		{name: "trailing slash dropped", in: "https://qtsp.example.org/", want: "https://qtsp.example.org"},
 		{name: "fragment dropped", in: "https://qtsp.example.org/csc#frag", want: "https://qtsp.example.org/csc"},
+		{name: "query dropped", in: "https://qtsp.example.org?tenant=acme", want: "https://qtsp.example.org"},
+		{name: "trailing question mark dropped", in: "https://qtsp.example.org?", want: "https://qtsp.example.org"},
 		{name: "embedded credentials refused", in: "https://user:pw@qtsp.example.org", wantErr: true},
 		{name: "non-http scheme refused", in: "ftp://qtsp.example.org", wantErr: true},
 		{name: "no host refused", in: "https://", wantErr: true},

@@ -140,10 +140,11 @@ func startPAdES(input []byte, cred signingprovider.Credential) (*padesSession, [
 	case digest := <-signer.digestCh:
 		return sess, digest, nil
 	case r := <-sess.result:
-		// pdfsign rejected the document before it could sign, or panicked assembling
-		// it. Either way that is a property of the upload, not a server fault, so it
-		// must reach the caller as ErrInvalidPDF — mapStartError turns anything else
-		// into a 500. The panic path already wrapped ErrInvalidPDF; don't double-wrap.
+		// pdfsign rejected the document before it could sign (no signable page, empty
+		// xref, ...) or panicked assembling it. Either way that is a property of the
+		// upload, not a server fault, so it must reach the caller as ErrInvalidPDF —
+		// mapStartError turns anything else into a 500. The panic path already wrapped
+		// ErrInvalidPDF; don't double-wrap it.
 		if r.err != nil {
 			if errors.Is(r.err, ErrInvalidPDF) {
 				return nil, nil, r.err
