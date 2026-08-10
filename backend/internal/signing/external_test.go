@@ -2,6 +2,7 @@ package signing
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -44,6 +45,19 @@ func TestValidateSignersMixesMembersAndExternalSigneesInOrder(t *testing.T) {
 	}
 }
 
+// tooManySigners is one signer over the per-request bound, each with a distinct
+// address so the only thing wrong with the list is its length.
+func tooManySigners() []SignerInput {
+	out := make([]SignerInput, 0, maxSigners+1)
+	for i := 0; i <= maxSigners; i++ {
+		out = append(out, SignerInput{
+			Kind:  KindExternal,
+			Email: fmt.Sprintf("signee%d@example.org", i),
+		})
+	}
+	return out
+}
+
 func TestValidateSignersRejections(t *testing.T) {
 	alice := uuid.New()
 	members := []OrgMember{{UserID: alice, Email: "alice@acme.example", Name: "Alice"}}
@@ -53,6 +67,7 @@ func TestValidateSignersRejections(t *testing.T) {
 		in   []SignerInput
 	}{
 		{"no signers", nil},
+		{"more signers than one request may carry", tooManySigners()},
 		{"unknown kind", []SignerInput{{Kind: "guest", Email: "x@example.org"}}},
 		{"member who is not in the org", []SignerInput{{Kind: KindInternal, UserID: uuid.New()}}},
 		{"the same member twice", []SignerInput{

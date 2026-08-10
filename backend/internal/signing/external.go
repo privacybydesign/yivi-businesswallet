@@ -43,6 +43,10 @@ func (s *Service) ExternalView(ctx context.Context, token string) (ExternalView,
 			view.SignedCount++
 		}
 	}
+	// Unlike the member-facing enrich, a failed org lookup is fatal here rather than
+	// cosmetic: the signee is being asked to put a qualified signature on a document by
+	// someone they have no other relationship with, so "who is asking" is not an
+	// optional label — better a retryable error than a page that asks anonymously.
 	if s.orgs != nil {
 		name, err := s.orgs.OrgName(ctx, ext.OrgID)
 		if err != nil {

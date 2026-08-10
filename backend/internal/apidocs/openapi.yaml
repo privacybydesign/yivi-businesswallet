@@ -2870,7 +2870,7 @@ paths:
                   items:
                     type: string
                   description: >-
-                    One JSON object per signer, in signing order: either
+                    One JSON object per signer, in signing order (1–50): either
                     `{"kind":"internal","userId":"<uuid>"}` for an org member or
                     `{"kind":"external","email":"...","name":"..."}` for an external signee.
                 mode:

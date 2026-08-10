@@ -98,6 +98,12 @@ const (
 // so an absurd value is refused before it reaches the database or a mail header.
 const maxEmailLength = 254
 
+// maxSigners bounds one request's signer list. Every signer costs a row, a turn and
+// (for an external signee) a mail, and each signature is a serialised PAdES pass over
+// the growing document — so a list this long is a mistake or an abuse either way, and
+// it is cheaper to say so than to accept it.
+const maxSigners = 50
+
 // NewService builds the signing service. redirectURI is the QTSP-registered OAuth
 // callback (must match the authorization server's client registration);
 // appBaseURL is where the browser is sent after the callback resolves. members
@@ -224,7 +230,7 @@ func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID,
 // e-mail address, and nobody may appear twice — an address that is also a member's is
 // rejected rather than silently signing twice as two different parties.
 func validateSigners(in []SignerInput, members []OrgMember) ([]SignerInput, error) {
-	if len(in) == 0 {
+	if len(in) == 0 || len(in) > maxSigners {
 		return nil, ErrInvalidRequest
 	}
 	memberByID := make(map[uuid.UUID]OrgMember, len(members))
