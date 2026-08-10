@@ -177,6 +177,132 @@ func TestDirectAnnotationOnTheSignaturePageSurvives(t *testing.T) {
 	}
 }
 
+// A producer that reuses an object number writes the reused object at a higher
+// generation, and pdfsign's page rewrite emits every /Parent, /Contents and /Annots
+// reference at generation 0 whatever it was handed — so the page comes back pointing
+// at objects that do not exist. There is nothing to normalise: pdfsign rewrites the
+// signature block's page from our version, so the page is refused instead, before the
+// digest is published. A blank page inside a document whose signature verifies is the
+// worst outcome available.
+func TestSignaturePageWithAReusedObjectNumberIsRefused(t *testing.T) {
+	// A content stream may also be an array, which pdfsign writes out entry by entry
+	// (sign/pdfvisualsignature.go:142) — so each entry has to be checked, not just the
+	// /Contents value itself. And the page dictionary may be the reused object: pdfsign
+	// replaces it as "id 0 obj" (sign/pdfxref.go:71), which loses the page entirely.
+	tests := []struct {
+		name     string
+		gens     map[int]int
+		contents func(i, firstExtraID int) string
+		objects  []string
+		want     string
+	}{
+		{
+			name: "content stream",
+			gens: map[int]int{testPDFContentID(0): 1},
+			want: "/Contents",
+		},
+		{
+			name:     "content stream in an array",
+			gens:     map[int]int{testPDFFirstExtraID(1): 1},
+			contents: func(_, id int) string { return fmt.Sprintf("[ %d 1 R ]", id) },
+			objects:  []string{"<< /Length 16 >>\nstream\nBT /F1 12 Tf ET\nendstream"},
+			want:     "/Contents",
+		},
+		{
+			name: "page tree node",
+			gens: map[int]int{testPDFPagesID: 1},
+			want: "/Parent",
+		},
+		{
+			name: "the page dictionary itself",
+			gens: map[int]int{testPDFPageID(0): 1},
+			want: "page 1 is itself at a reused object number",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := buildTestPDFWith(t, testPDFOptions{
+				pages:        1,
+				objectGens:   tc.gens,
+				pageContents: tc.contents,
+				extraObjects: tc.objects,
+			})
+			if _, err := readGeometry(doc); err != nil {
+				t.Fatalf("the test document itself does not parse: %v", err)
+			}
+
+			_, cred := stubCredential(t)
+			_, _, err := startPAdES(doc, cred, []Placement{
+				{Kind: PlacementSignature, Page: 1, X: 72, Y: 96, Width: 200, Height: 64},
+			})
+			if !errors.Is(err, ErrInvalidPDF) {
+				t.Fatalf("startPAdES = %v, want ErrInvalidPDF", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the error does not say which entry stopped it: %v", err)
+			}
+
+			// A paraph on that page needs no rewrite pdfsign can read back, so our own
+			// rewrite keeps the generation and the page still draws.
+			stamped, err := stampSignerMarks(doc, []Placement{
+				{Kind: PlacementParaph, Page: 1, X: 500, Y: 40, Width: 48, Height: 24},
+			}, "AB")
+			if err != nil {
+				t.Fatalf("stamp paraph: %v", err)
+			}
+			rdr, err := openPDF(stamped)
+			if err != nil {
+				t.Fatalf("open stamped document: %v", err)
+			}
+			if rdr.Page(1).V.Key("Contents").IsNull() {
+				t.Error("the paraph stamp blanked the page")
+			}
+		})
+	}
+}
+
+// The /Annots half of the same problem is fixable rather than fatal: an entry at a
+// reused object number is copied into an object of its own at generation 0, which is
+// a reference pdfsign can write back, so the annotation survives.
+func TestReusedAnnotationOnTheSignaturePageSurvives(t *testing.T) {
+	annotID := testPDFFirstExtraID(1)
+	doc := buildTestPDFWith(t, testPDFOptions{
+		pages:       1,
+		pageEntries: func(id int) string { return fmt.Sprintf("/Annots [ %d 1 R ]", id) },
+		extraObjects: []string{
+			"<< /Type /Annot /Subtype /Square /Rect [10 10 30 30] /F 4 >>",
+		},
+		objectGens: map[int]int{annotID: 1},
+	})
+	if _, err := readGeometry(doc); err != nil {
+		t.Fatalf("the test document itself does not parse: %v", err)
+	}
+
+	signed := signWithPlacements(t, doc, []Placement{
+		{Kind: PlacementSignature, Page: 1, X: 72, Y: 96, Width: 200, Height: 64},
+	})
+	mustVerify(t, signed, 1)
+
+	rdr, err := openPDF(signed)
+	if err != nil {
+		t.Fatalf("open signed document: %v", err)
+	}
+	page := rdr.Page(1).V
+	if page.Key("Contents").IsNull() {
+		t.Error("the page came back blank")
+	}
+	annots := page.Key("Annots")
+	found := false
+	for i := 0; i < annots.Len(); i++ {
+		if annots.Index(i).Key("Subtype").Name() == "Square" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the page's own annotation did not survive the signature (%d entries)", annots.Len())
+	}
+}
+
 // The paraph is drawn from the signer's name, and a Dutch or EU name carries
 // diacritics. The font declares WinAnsiEncoding, so the bytes in the content stream
 // have to be WinAnsi and not the UTF-8 they arrive as — Ü is one byte, and reading

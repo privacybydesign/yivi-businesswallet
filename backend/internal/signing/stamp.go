@@ -308,6 +308,15 @@ func rewritePage(rdr *pdf.Reader, number int, extra []uint32, forPdfsign bool, t
 	if ptr.GetID() == 0 {
 		return pageRewrite{}, ErrInvalidPDF
 	}
+	if forPdfsign && ptr.GetGen() != 0 {
+		// pdfsign writes the page object it replaces as "id 0 obj" (sign/pdfxref.go:71),
+		// so a page at a reused object number is replaced by one nothing points at and
+		// the page disappears from the document altogether. Our own revision keeps the
+		// generation (incrObject carries it), so this is only ever pdfsign's rewrite.
+		return pageRewrite{}, fmt.Errorf(
+			"%w: page %d is itself at a reused object number, which cannot be rewritten"+
+				" to hold a visible signature", ErrInvalidPDF, number)
+	}
 
 	var created []incrObject
 	var buf bytes.Buffer
@@ -317,6 +326,14 @@ func rewritePage(rdr *pdf.Reader, number int, extra []uint32, forPdfsign bool, t
 			continue // written below, with the new annotations appended
 		}
 		value := page.V.Key(key)
+		if forPdfsign && (key == "Parent" || key == "Contents") && !allRefsAtGenZero(value, page.V, 0) {
+			// Not fixable by rewriting: pdfsign rewrites this page from whatever it is
+			// handed and writes both keys at generation 0 regardless. See
+			// allRefsAtGenZero.
+			return pageRewrite{}, fmt.Errorf(
+				"%w: page %d carries /%s at a reused object number, which cannot be"+
+					" rewritten to hold a visible signature", ErrInvalidPDF, number, key)
+		}
 		if key == "Parent" {
 			// A page tree node is an indirect object by definition, and inlining it
 			// would detach the page from the tree it hangs off.
@@ -354,7 +371,24 @@ func rewritePage(rdr *pdf.Reader, number int, extra []uint32, forPdfsign bool, t
 		for i := 0; i < annots.Len(); i++ {
 			item := annots.Index(i)
 			if ref, ok := pdfRef(item, annots); ok {
-				buf.WriteString(" " + ref)
+				itemPtr := item.GetPtr()
+				if !forPdfsign || itemPtr.GetGen() == 0 {
+					buf.WriteString(" " + ref)
+					continue
+				}
+				// An entry at a reused object number IS fixable, unlike /Parent and
+				// /Contents: copy it into an object of its own at generation 0, which is
+				// the one reference shape pdfsign writes back intact. The original stays
+				// where it is — whatever else points at it still resolves.
+				id := take()
+				var obj bytes.Buffer
+				// The item is its own container here, so that writeValue writes the
+				// dictionary rather than the reference it was read from.
+				if err := writeValue(&obj, item, item, 0); err != nil {
+					return pageRewrite{}, err
+				}
+				created = append(created, incrObject{id: id, body: obj.Bytes()})
+				fmt.Fprintf(&buf, " %d 0 R", id)
 				continue
 			}
 			// An /Annots array may hold annotation dictionaries directly. pdfsign's
@@ -397,17 +431,30 @@ func pageNeedsNormalising(rdr *pdf.Reader, number int) (bool, error) {
 	if page.V.IsNull() {
 		return false, ErrInvalidPDF
 	}
-	if ptr := page.V.GetPtr(); ptr.GetID() == 0 {
+	ptr := page.V.GetPtr()
+	if ptr.GetID() == 0 {
 		return false, ErrInvalidPDF
+	}
+	if ptr.GetGen() != 0 {
+		return true, nil // refused by rewritePage: pdfsign would replace it at generation 0
 	}
 	for _, key := range page.V.Keys() {
 		switch key {
 		case "Parent", "Contents":
-			// pdfsign writes both back as references, which is what they are.
+			// pdfsign writes both back as references, which is what they are — but only
+			// ever at generation 0, so a reused object number has to reach rewritePage,
+			// which refuses the page.
+			if !allRefsAtGenZero(page.V.Key(key), page.V, 0) {
+				return true, nil
+			}
 		case "Annots":
 			annots := page.V.Key(key)
 			for i := 0; i < annots.Len(); i++ {
-				if _, ok := pdfRef(annots.Index(i), annots); !ok {
+				item := annots.Index(i)
+				if _, ok := pdfRef(item, annots); !ok {
+					return true, nil
+				}
+				if ptr := item.GetPtr(); ptr.GetGen() != 0 {
 					return true, nil
 				}
 			}
@@ -454,6 +501,35 @@ func pdfRef(value, container pdf.Value) (string, bool) {
 		return "", false
 	}
 	return fmt.Sprintf("%d %d R", id, gen), true
+}
+
+// allRefsAtGenZero reports whether every reference reachable in value sits at
+// generation 0, which is the only generation pdfsign's page rewrite can write back:
+// it formats each /Parent, /Contents and /Annots reference from GetPtr().GetID() with
+// the generation a literal 0 (sign/pdfvisualsignature.go:133, :142, :148, :154). A
+// producer that reuses an object number writes the reused object at a higher
+// generation — legal PDF — and pdfsign's copy of that reference then points at an
+// object that does not exist, so the page draws nothing and its annotations are gone
+// while the signature still verifies.
+//
+// Arrays are walked because /Contents may be one: pdfsign writes an array's entries
+// out individually, so each of them has to survive too.
+func allRefsAtGenZero(value, container pdf.Value, depth int) bool {
+	if depth > maxValueDepth {
+		return false
+	}
+	own, ptr := container.GetPtr(), value.GetPtr()
+	if id := ptr.GetID(); id != 0 && id != own.GetID() && ptr.GetGen() != 0 {
+		return false
+	}
+	if value.Kind() == pdf.Array {
+		for i := 0; i < value.Len(); i++ {
+			if !allRefsAtGenZero(value.Index(i), value, depth+1) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // writeValue writes value back as PDF syntax, following references by writing the

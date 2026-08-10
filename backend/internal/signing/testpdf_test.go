@@ -40,7 +40,32 @@ type testPDFOptions struct {
 	// pageEntries are appended to every page dictionary, which is how a case gets a
 	// page carrying the sort of entry a real producer writes.
 	pageEntries func(firstExtraID int) string
+	// pageContents replaces the /Contents value of page i, whose own content stream is
+	// still written either way. A page's contents may legally be an array of streams.
+	pageContents func(i, firstExtraID int) string
+	// objectGens gives an object a non-zero generation, keyed by object id. A producer
+	// that reuses an object number writes the reused object at a higher generation,
+	// which is legal PDF and which both the object header and the cross-reference
+	// entry carry. Key it by testPDFContentID or testPDFFirstExtraID; a reference
+	// written by pageEntries has to spell the generation itself.
+	objectGens map[int]int
 }
+
+// The objects buildTestPDFWith writes for page i, 0-based, so a case can name one.
+const (
+	testPDFCatalogID = 1
+	testPDFPagesID   = 2
+	testPDFFontID    = 3
+	testPDFFirstPage = 4
+)
+
+// Each page costs two objects: the page dictionary and its content stream.
+func testPDFPageID(i int) int    { return testPDFFirstPage + 2*i }
+func testPDFContentID(i int) int { return testPDFFirstPage + 2*i + 1 }
+
+// testPDFFirstExtraID is the id extraObjects are numbered from, which is also what
+// pageEntries is handed.
+func testPDFFirstExtraID(pages int) int { return testPDFContentID(pages-1) + 1 }
 
 // buildTestPDF writes a valid PDF of the given number of A4 pages, each carrying a
 // line of text. xrefStream selects a cross-reference stream over a table.
@@ -59,19 +84,19 @@ func buildTestPDFWith(t *testing.T, opts testPDFOptions) []byte {
 	pages, xrefStream := opts.pages, opts.xrefStream
 
 	const (
-		catalogID = 1
-		pagesID   = 2
-		fontID    = 3
-		firstPage = 4
+		catalogID = testPDFCatalogID
+		pagesID   = testPDFPagesID
+		fontID    = testPDFFontID
 	)
-	// Each page costs two objects: the page dictionary and its content stream.
-	pageID := func(i int) int { return firstPage + 2*i }
-	contentID := func(i int) int { return firstPage + 2*i + 1 }
-	firstExtraID := contentID(pages-1) + 1
+	pageID, contentID := testPDFPageID, testPDFContentID
+	firstExtraID := testPDFFirstExtraID(pages)
+
+	gen := func(id int) int { return opts.objectGens[id] }
+	ref := func(id int) string { return fmt.Sprintf("%d %d R", id, gen(id)) }
 
 	var kids bytes.Buffer
 	for i := 0; i < pages; i++ {
-		fmt.Fprintf(&kids, " %d 0 R", pageID(i))
+		fmt.Fprintf(&kids, " %s", ref(pageID(i)))
 	}
 
 	pageEntries := ""
@@ -80,15 +105,19 @@ func buildTestPDFWith(t *testing.T, opts testPDFOptions) []byte {
 	}
 
 	bodies := map[int]string{
-		catalogID: fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pagesID),
+		catalogID: fmt.Sprintf("<< /Type /Catalog /Pages %s >>", ref(pagesID)),
 		pagesID: fmt.Sprintf("<< /Type /Pages /Count %d /Kids [%s ] /MediaBox [0 0 %d %d] >>",
 			pages, kids.String(), testPageWidth, testPageHeight),
 		fontID: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
 	}
 	for i := 0; i < pages; i++ {
+		contents := ref(contentID(i))
+		if opts.pageContents != nil {
+			contents = opts.pageContents(i, firstExtraID)
+		}
 		bodies[pageID(i)] = fmt.Sprintf(
-			"<< /Type /Page /Parent %d 0 R /Contents %d 0 R /Resources << /Font << /F1 %d 0 R >> >>%s >>",
-			pagesID, contentID(i), fontID, pageEntries)
+			"<< /Type /Page /Parent %s /Contents %s /Resources << /Font << /F1 %s >> >>%s >>",
+			ref(pagesID), contents, ref(fontID), pageEntries)
 		stream := fmt.Sprintf("BT /F1 18 Tf 72 %d Td (Page %d) Tj ET", testPageHeight-100, i+1)
 		bodies[contentID(i)] = fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream)
 	}
@@ -105,7 +134,7 @@ func buildTestPDFWith(t *testing.T, opts testPDFOptions) []byte {
 	offsets := make(map[int]int, lastID)
 	for id := 1; id <= lastID; id++ {
 		offsets[id] = out.Len()
-		fmt.Fprintf(out, "%d 0 obj\n%s\nendobj\n", id, bodies[id])
+		fmt.Fprintf(out, "%d %d obj\n%s\nendobj\n", id, gen(id), bodies[id])
 	}
 
 	if !xrefStream {
@@ -113,7 +142,7 @@ func buildTestPDFWith(t *testing.T, opts testPDFOptions) []byte {
 		fmt.Fprintf(out, "xref\n0 %d\n", lastID+1)
 		out.WriteString("0000000000 65535 f\r\n")
 		for id := 1; id <= lastID; id++ {
-			fmt.Fprintf(out, "%010d 00000 n\r\n", offsets[id])
+			fmt.Fprintf(out, "%010d %05d n\r\n", offsets[id], gen(id))
 		}
 		fmt.Fprintf(out, "trailer\n<< /Size %d /Root %d 0 R >>\nstartxref\n%d\n%%%%EOF\n",
 			lastID+1, catalogID, start)
@@ -135,7 +164,7 @@ func buildTestPDFWith(t *testing.T, opts testPDFOptions) []byte {
 	}
 	entry(0, 0, 65535)
 	for id := 1; id <= lastID; id++ {
-		entry(1, offsets[id], 0)
+		entry(1, offsets[id], gen(id))
 	}
 	entry(1, start, 0)
 

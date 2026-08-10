@@ -302,6 +302,24 @@ signing pass renders them.
   `TestVisibleSignatureKeepsAnAwkwardPageReadable`, `TestParaphOnlyPageKeepsItsEntries`,
   `TestDirectAnnotationOnTheSignaturePageSurvives`,
   `TestSignaturePageWithAnUndroppableEntryIsRefused`).
+- **pdfsign writes every reference in that page at generation 0, and the page object too.** It
+  formats `/Parent`, `/Contents` (single and array) and each `/Annots` entry from `GetPtr().GetID()`
+  with the generation a literal `0` (`sign/pdfvisualsignature.go`:133, :142, :148, :154), and
+  replaces the page as `id 0 obj` (`sign/pdfxref.go`:71). A producer that reuses an object number
+  writes the reused object at a higher generation, which is legal PDF — pdfsign's copy of the
+  reference then points at nothing, so **the page draws blank, its own annotations vanish, or the
+  page disappears from the tree, while the signature still verifies**. Silent content loss inside a
+  document whose signature checks out is the worst outcome available, and it is reachable only on
+  this path: an invisible signature never rewrites the page, and `stamp.go`'s own revision keeps the
+  generation (`pdfRef` preserves it, `incrObject` carries it), so a paraph on the same page is fine.
+  `/Parent`, `/Contents` and the page object itself are therefore **refused** — pdfsign rewrites
+  that page from whatever it is handed, so there is nothing to normalise — and `allRefsAtGenZero`
+  walks arrays because a content array's entries are written out individually. An `/Annots` entry
+  **is** fixable and is copied into an object of its own at generation 0, alongside the promotion
+  direct annotations already get. `pageNeedsNormalising` has to agree with all of it, or a signature
+  block on a page with no paraph never reaches the refusal (`stamp_test.go`:
+  `TestSignaturePageWithAReusedObjectNumberIsRefused`,
+  `TestReusedAnnotationOnTheSignaturePageSurvives`; `testpdf_test.go`'s `objectGens` builds them).
 - **The paraph's font states its encoding.** Times-Roman with no `/Encoding` reads the content
   stream's bytes in Adobe StandardEncoding, where the UTF-8 of `Ünal` draws as a macron plus a
   notdef. The font declares `/WinAnsiEncoding` and `winAnsi` transcodes to it, with `?` for a
