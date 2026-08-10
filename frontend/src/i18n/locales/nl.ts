@@ -711,7 +711,17 @@ export const nl: Translation<typeof en> = {
     documentRemove: "Verwijderen",
     documentNone: "Geen bestand gekozen",
     signersLabel: "Ondertekenaars",
-    signersHint: "Selecteer de leden die dit document moeten ondertekenen.",
+    signersHint:
+      "Voeg iedereen toe die moet ondertekenen, in de volgorde waarin ze tekenen. Een lid tekent vanuit zijn eigen account; een externe ondertekenaar krijgt een link per e-mail en tekent met zijn eigen wallet.",
+    signersEmpty: "Nog geen ondertekenaars toegevoegd.",
+    addSignerLabel: "Ondertekenaar toevoegen",
+    addSigner: "Toevoegen",
+    removeSigner: "{{name}} verwijderen",
+    externalTag: "extern",
+    externalHint:
+      "De ondertekenaar krijgt een eenmalige link per e-mail. Een account is niet nodig.",
+    externalNamePlaceholder: "Naam (optioneel)",
+    externalEmailPlaceholder: "ondertekenaar@voorbeeld.nl",
     searchMembers: "Zoek leden…",
     noMembers: "Geen leden gevonden.",
     orderLabel: "Volgorde van ondertekenen",
@@ -749,6 +759,10 @@ export const nl: Translation<typeof en> = {
       signed: "Ondertekend",
       failed: "Mislukt",
     },
+    signerKind: {
+      internal: "Lid van de organisatie",
+      external: "Externe ondertekenaar",
+    },
     requestStatus: {
       awaitingSignatures: "Wacht op handtekeningen",
       completed: "Voltooid",
@@ -759,6 +773,39 @@ export const nl: Translation<typeof en> = {
       pending: "Bezorgen…",
       delivered: "Bezorgd",
       failed: "Bezorging mislukt",
+    },
+    external: {
+      askedBy: "{{org}} vraagt je dit document te ondertekenen",
+      youLabel: "Je ondertekent als",
+      progressLabel: "Handtekeningen",
+      progress: "{{signed}} van {{total}}",
+      reviewDocument: "Het document openen",
+      needsCredential:
+        "Koppel eerst een ondertekencertificaat. Daarvoor opent je wallet één keer; daarna kun je ondertekenen.",
+      linkButton: "Ondertekencertificaat koppelen",
+      signButton: "Document ondertekenen",
+      notYourTurn:
+        "Een eerdere ondertekenaar moet eerst tekenen. Kom later terug via deze link.",
+      linkedToast: "Ondertekencertificaat gekoppeld.",
+      linkFailedToast:
+        "Het koppelen van het ondertekencertificaat is niet voltooid.",
+      startError: "Kon niet starten. Probeer het opnieuw.",
+      attemptFailed:
+        "Je laatste poging is niet voltooid. Je kunt het opnieuw proberen.",
+      signedTitle: "Je hebt dit document ondertekend",
+      signedAllHint: "Iedereen heeft ondertekend. Het document is compleet.",
+      signedWaitingHint: "De andere ondertekenaars moeten nog tekenen.",
+      failedTitle: "Dit verzoek is niet voltooid",
+      failedHint:
+        "Neem contact op met de organisatie die je om een handtekening vroeg.",
+      invalidTitle: "Deze link is niet meer geldig",
+      invalidHint:
+        "De link is verlopen of al gebruikt. Vraag de organisatie om een nieuwe.",
+      errorTitle: "Er ging iets mis",
+      errorHint:
+        "Kon dit ondertekenverzoek niet laden. Probeer het later opnieuw.",
+      walletHint:
+        "Je wordt doorgestuurd naar de ondertekenprovider om te autoriseren met je wallet en daarna teruggebracht.",
     },
   },
   signedDocuments: {

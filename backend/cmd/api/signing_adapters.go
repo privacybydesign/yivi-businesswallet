@@ -35,6 +35,19 @@ func (m signingMembers) ListMembers(ctx context.Context, orgID uuid.UUID) ([]sig
 	return out, nil
 }
 
+// signingOrgs adapts organization.Store to signing.orgDirectory, so the external
+// signing page — which is reached with nothing but an invitation token — can name the
+// organisation that is asking for the signature.
+type signingOrgs struct{ store *organization.Store }
+
+func (o signingOrgs) OrgName(ctx context.Context, orgID uuid.UUID) (string, error) {
+	org, err := o.store.GetByID(ctx, orgID)
+	if err != nil {
+		return "", err
+	}
+	return org.Name, nil
+}
+
 func memberDisplayName(m organization.Member) string {
 	if m.PreferredName != nil && strings.TrimSpace(*m.PreferredName) != "" {
 		return strings.TrimSpace(*m.PreferredName)
@@ -90,4 +103,17 @@ func (n signingNotifier) NotifySignatureRequested(ctx context.Context, orgID uui
 	}
 	signingURL := strings.TrimRight(n.appBaseURL, "/") + "/" + url.PathEscape(slug) + "/signing"
 	return n.email.SendSignatureRequested(ctx, orgID, signerEmail, org.Name, documentName, signingURL)
+}
+
+// NotifyExternalSignatureRequested mails an external signee the same "a document is
+// waiting for your signature" message a member gets, but pointed at their one-time
+// invitation link — they have no org page to be sent to. The path comes from the
+// signing slice so the mail links exactly where the ceremony returns to.
+func (n signingNotifier) NotifyExternalSignatureRequested(ctx context.Context, orgID uuid.UUID, signeeEmail, documentName, token string) error {
+	org, err := n.orgs.GetByID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	signingURL := strings.TrimRight(n.appBaseURL, "/") + signing.ExternalSignPath(token)
+	return n.email.SendSignatureRequested(ctx, orgID, signeeEmail, org.Name, documentName, signingURL)
 }

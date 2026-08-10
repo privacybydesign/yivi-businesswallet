@@ -14,15 +14,19 @@ import {
   SIGNER_STATUS,
   SIGNING_STATUS,
   createSigningRequest,
+  getExternalSigning,
   getPendingSigningRequests,
   getSigningAvailability,
   getSigningCredential,
   getSigningRequest,
+  linkExternalCredential,
   linkSigningCredential,
   listSigningRequests,
+  startExternalSign,
   startSignRequest,
 } from "./signing";
 import type {
+  ExternalSigning,
   LinkedCredential,
   NewSigningRequest,
   SigningAvailability,
@@ -169,6 +173,46 @@ export function useStartSignRequestMutation(
 ): UseMutationResult<SigningStart, Error, string> {
   return useMutation({
     mutationFn: (id) => startSignRequest(slug, id),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+// The external-signee flow is keyed by the invitation token, not by an org slug —
+// the signee has no membership, so none of these queries live under an organisation.
+export function externalSigningQueryKey(token: string): readonly string[] {
+  return ["signing", "external", token];
+}
+
+export function useExternalSigningQuery(
+  token: string,
+): UseQueryResult<ExternalSigning, Error> {
+  return useQuery({
+    queryKey: externalSigningQueryKey(token),
+    queryFn: ({ signal }) => getExternalSigning(token, signal),
+    enabled: token !== "",
+    // The signature is completed out of band (the OAuth callback), so poll until the
+    // request settles — the same reason the org page polls.
+    refetchInterval: (query) =>
+      query.state.data?.status === SIGNING_STATUS.awaitingSignatures
+        ? POLL_INTERVAL_MS
+        : false,
+  });
+}
+
+export function useLinkExternalCredentialMutation(
+  token: string,
+): UseMutationResult<SigningStart, Error, void> {
+  return useMutation({
+    mutationFn: () => linkExternalCredential(token),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+export function useStartExternalSignMutation(
+  token: string,
+): UseMutationResult<SigningStart, Error, void> {
+  return useMutation({
+    mutationFn: () => startExternalSign(token),
     meta: { suppressErrorToast: true },
   });
 }

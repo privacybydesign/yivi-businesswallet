@@ -691,7 +691,17 @@ export const en = {
     documentRemove: "Remove",
     documentNone: "No file chosen",
     signersLabel: "Signers",
-    signersHint: "Select the members who must sign this document.",
+    signersHint:
+      "Add everyone who must sign, in the order you want them to sign. A member signs from their own account; an external signee gets a link by email and signs with their own wallet.",
+    signersEmpty: "No signers added yet.",
+    addSignerLabel: "Add a signer",
+    addSigner: "Add",
+    removeSigner: "Remove {{name}}",
+    externalTag: "external",
+    externalHint:
+      "The signee receives a one-time link by email. They do not need an account.",
+    externalNamePlaceholder: "Name (optional)",
+    externalEmailPlaceholder: "signee@example.org",
     searchMembers: "Search members…",
     noMembers: "No members found.",
     orderLabel: "Signing order",
@@ -726,6 +736,10 @@ export const en = {
       signed: "Signed",
       failed: "Failed",
     },
+    signerKind: {
+      internal: "Organization member",
+      external: "External signee",
+    },
     requestStatus: {
       awaitingSignatures: "Awaiting signatures",
       completed: "Completed",
@@ -736,6 +750,36 @@ export const en = {
       pending: "Delivering…",
       delivered: "Delivered",
       failed: "Delivery failed",
+    },
+    external: {
+      askedBy: "{{org}} asks you to sign this document",
+      youLabel: "Signing as",
+      progressLabel: "Signatures",
+      progress: "{{signed}} of {{total}}",
+      reviewDocument: "Open the document",
+      needsCredential:
+        "Link a signing certificate first. This opens your wallet once; after that you can sign.",
+      linkButton: "Link signing certificate",
+      signButton: "Sign document",
+      notYourTurn:
+        "An earlier signer must sign first. Come back to this link later.",
+      linkedToast: "Signing certificate linked.",
+      linkFailedToast: "Linking the signing certificate was not completed.",
+      startError: "Could not start. Try again.",
+      attemptFailed:
+        "Your last attempt did not complete. You can try signing again.",
+      signedTitle: "You signed this document",
+      signedAllHint: "Everyone has signed. The document is complete.",
+      signedWaitingHint: "The other signers still have to sign.",
+      failedTitle: "This request did not complete",
+      failedHint: "Contact the organization that asked you to sign.",
+      invalidTitle: "This link is no longer valid",
+      invalidHint:
+        "The link has expired or has already been used. Ask the organization for a new one.",
+      errorTitle: "Something went wrong",
+      errorHint: "Could not load this signing request. Try again later.",
+      walletHint:
+        "You will be sent to the signing provider to authorize with your wallet, then returned here.",
     },
   },
   signedDocuments: {

@@ -37,6 +37,7 @@ import AttestationHeldDetail from "./routes/attestations-held";
 import Claim from "./routes/claim";
 import Settings from "./routes/settings";
 import Signing from "./routes/signing";
+import SigningExternal from "./routes/signing-external";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
 import NotFound from "./routes/not-found";
@@ -120,6 +121,9 @@ export const router = createBrowserRouter([
       { path: "/register", Component: Register },
       { path: "/invite/:token", Component: InviteAccept },
       { path: "/claim/:token", Component: Claim },
+      // An external signee has no account, so their signing page is public and keyed
+      // by the one-time token from their invitation mail.
+      { path: "/sign/:token", Component: SigningExternal },
       { path: "*", Component: NotFound },
       {
         Component: ProtectedRoute,

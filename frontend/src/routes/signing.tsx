@@ -6,6 +6,7 @@ import * as React from "react";
 import { ApiError } from "../api/http";
 import {
   RECIPIENT_CHANNEL,
+  SIGNER_KIND,
   SIGNER_STATUS,
   SIGNING_MODE,
   SIGNING_STATUS,
@@ -13,6 +14,8 @@ import {
 } from "../api/signing";
 import type {
   RecipientChannel,
+  SignerKind,
+  SignerSelection,
   SigningMode,
   SigningRequest,
 } from "../api/signing";
@@ -31,7 +34,12 @@ import {
   useOrganizationQuery,
 } from "../api/organization.queries";
 import type { MemberListEntry } from "../api/organization";
-import { modeLabel, signerStatusLabel } from "../lib/signing-labels";
+import {
+  modeLabel,
+  signerKindLabel,
+  signerStatusLabel,
+} from "../lib/signing-labels";
+import { alreadyChosen, isEmailish, signerKey } from "../lib/signer-selection";
 import { toast } from "../lib/toast";
 import { Button, Card, Input, Tag, TopBar } from "../ui";
 import { SigningHistoryPanel } from "./signing-history";
@@ -292,7 +300,8 @@ function ActiveRequestCard({
   );
 }
 
-// SignerList renders each signer as a status chip.
+// SignerList renders each signer as a status chip, naming external signees as such —
+// who signed from outside the organisation is part of reading a co-signed document.
 function SignerList({
   request,
 }: {
@@ -304,7 +313,7 @@ function SignerList({
     <div className="flex flex-wrap gap-2">
       {signers.map((s) => (
         <Tag
-          key={s.userId}
+          key={s.id}
           tone={
             s.status === SIGNER_STATUS.signed
               ? "green"
@@ -314,6 +323,9 @@ function SignerList({
           }
         >
           {s.name || s.email}
+          {s.kind === SIGNER_KIND.external
+            ? ` (${t("signing.externalTag")})`
+            : ""}
           {" · "}
           {signerStatusLabel(t, s.status)}
         </Tag>
@@ -431,7 +443,12 @@ function NewRequestTab({
   const create = useCreateSigningRequestMutation(slug);
 
   const [file, setFile] = useState<File | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [signers, setSigners] = useState<SignerSelection[]>([]);
+  const [signerKind, setSignerKind] = useState<SignerKind>(
+    SIGNER_KIND.internal,
+  );
+  const [externalName, setExternalName] = useState("");
+  const [externalEmail, setExternalEmail] = useState("");
   const [mode, setMode] = useState<SigningMode>(SIGNING_MODE.parallel);
   const [channel, setChannel] = useState<RecipientChannel>(
     RECIPIENT_CHANNEL.none,
@@ -441,9 +458,21 @@ function NewRequestTab({
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
 
+  const chosenUserIds = useMemo(
+    () =>
+      new Set(
+        signers
+          .filter((s) => s.kind === SIGNER_KIND.internal)
+          .map((s) => s.userId),
+      ),
+    [signers],
+  );
+  // Members already chosen drop out of the picker: the list is who can still be
+  // added, so "add" never silently does nothing.
   const candidates = useMemo(() => {
     const entries = (members.data?.entries ?? []).filter(
-      (m): m is MemberListEntry & { userId: string } => m.userId != null,
+      (m): m is MemberListEntry & { userId: string } =>
+        m.userId != null && !chosenUserIds.has(m.userId),
     );
     const q = search.trim().toLowerCase();
     if (q === "") return entries;
@@ -452,19 +481,37 @@ function NewRequestTab({
         memberName(m).toLowerCase().includes(q) ||
         m.email.toLowerCase().includes(q),
     );
-  }, [members.data, search]);
+  }, [members.data, search, chosenUserIds]);
 
-  const toggle = (userId: string): void =>
-    setSelected((prev) =>
-      prev.includes(userId)
-        ? prev.filter((id) => id !== userId)
-        : [...prev, userId],
-    );
+  const addMember = (userId: string): void =>
+    setSigners((prev) => [...prev, { kind: SIGNER_KIND.internal, userId }]);
+
+  const trimmedExternalEmail = externalEmail.trim();
+  const canAddExternal =
+    isEmailish(trimmedExternalEmail) &&
+    !alreadyChosen(signers, trimmedExternalEmail);
+
+  const addExternal = (): void => {
+    if (!canAddExternal) return;
+    setSigners((prev) => [
+      ...prev,
+      {
+        kind: SIGNER_KIND.external,
+        email: trimmedExternalEmail,
+        name: externalName.trim(),
+      },
+    ]);
+    setExternalName("");
+    setExternalEmail("");
+  };
+
+  const removeSigner = (index: number): void =>
+    setSigners((prev) => prev.filter((_, i) => i !== index));
 
   const recipientNeedsAddress = channel !== RECIPIENT_CHANNEL.none;
   const canSubmit =
     file != null &&
-    selected.length > 0 &&
+    signers.length > 0 &&
     (!recipientNeedsAddress || recipientAddress.trim() !== "");
 
   const onSubmit = (event: React.FormEvent): void => {
@@ -473,7 +520,7 @@ function NewRequestTab({
     create.mutate(
       {
         document: file,
-        signerIds: selected,
+        signers,
         mode,
         recipientChannel: channel,
         recipientAddress: recipientAddress.trim(),
@@ -497,6 +544,11 @@ function NewRequestTab({
     }
     return map;
   }, [members.data]);
+
+  const signerLabel = (signer: SignerSelection): string =>
+    signer.kind === SIGNER_KIND.internal
+      ? (nameById.get(signer.userId) ?? signer.userId)
+      : signer.name || signer.email;
 
   return (
     <Card className="p-7">
@@ -546,48 +598,136 @@ function NewRequestTab({
           <p className="text-ink-soft mt-1 text-[12px]">
             {t("signing.signersHint")}
           </p>
-          <div className="mt-2">
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t("signing.searchMembers")}
-              aria-label={t("signing.searchMembers")}
-            />
-          </div>
-          <div className="border-line mt-2 max-h-56 overflow-y-auto rounded-md border">
-            {members.isPending ? (
-              <p className="text-ink-soft p-3 text-[13px]">
-                {t("common.loading")}
-              </p>
-            ) : candidates.length === 0 ? (
-              <p className="text-ink-soft p-3 text-[13px]">
-                {t("signing.noMembers")}
-              </p>
-            ) : (
-              candidates.map((m) => (
+          {signers.length === 0 ? (
+            <p className="text-ink-soft mt-2 text-[13px]">
+              {t("signing.signersEmpty")}
+            </p>
+          ) : (
+            <ul className="mt-2 flex flex-col gap-1.5">
+              {signers.map((signer, index) => (
+                <li
+                  key={signerKey(signer)}
+                  className="border-line bg-surface-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5"
+                >
+                  {mode === SIGNING_MODE.sequential && (
+                    <span className="text-ink-soft shrink-0 text-[12px]">
+                      {index + 1}.
+                    </span>
+                  )}
+                  <span className="text-ink flex-1 truncate text-[13px]">
+                    {signerLabel(signer)}
+                  </span>
+                  {signer.kind === SIGNER_KIND.external && (
+                    <span className="text-muted shrink-0 text-[11.5px]">
+                      {signer.email} · {t("signing.externalTag")}
+                    </span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="close"
+                    iconOnly
+                    onClick={() => removeSigner(index)}
+                    aria-label={t("signing.removeSigner", {
+                      name: signerLabel(signer),
+                    })}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <fieldset className="mt-4 border-0 p-0">
+            <legend className={LABEL}>{t("signing.addSignerLabel")}</legend>
+            <div className="mt-2 flex gap-4">
+              {[SIGNER_KIND.internal, SIGNER_KIND.external].map((kind) => (
                 <label
-                  key={m.userId}
-                  className="hover:bg-surface-2 flex cursor-pointer items-center gap-3 px-3 py-2"
+                  key={kind}
+                  className="flex items-center gap-2 text-[13px]"
                 >
                   <input
-                    type="checkbox"
-                    checked={selected.includes(m.userId)}
-                    onChange={() => toggle(m.userId)}
+                    type="radio"
+                    name="signerKind"
+                    checked={signerKind === kind}
+                    onChange={() => setSignerKind(kind)}
                   />
-                  <span className="text-ink text-[13px]">{memberName(m)}</span>
-                  <span className="text-ink-soft text-[12px]">{m.email}</span>
+                  <span className="text-ink">{signerKindLabel(t, kind)}</span>
                 </label>
-              ))
-            )}
-          </div>
-          {selected.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {selected.map((id, i) => (
-                <Tag key={id} tone="default">
-                  {mode === SIGNING_MODE.sequential ? `${i + 1}. ` : ""}
-                  {nameById.get(id) ?? id}
-                </Tag>
               ))}
+            </div>
+          </fieldset>
+
+          {signerKind === SIGNER_KIND.internal ? (
+            <>
+              <div className="mt-2">
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={t("signing.searchMembers")}
+                  aria-label={t("signing.searchMembers")}
+                />
+              </div>
+              <div className="border-line mt-2 max-h-56 overflow-y-auto rounded-md border">
+                {members.isPending ? (
+                  <p className="text-ink-soft p-3 text-[13px]">
+                    {t("common.loading")}
+                  </p>
+                ) : candidates.length === 0 ? (
+                  <p className="text-ink-soft p-3 text-[13px]">
+                    {t("signing.noMembers")}
+                  </p>
+                ) : (
+                  candidates.map((m) => (
+                    <div
+                      key={m.userId}
+                      className="hover:bg-surface-2 flex items-center gap-3 px-3 py-2"
+                    >
+                      <span className="text-ink flex-1 truncate text-[13px]">
+                        {memberName(m)}
+                      </span>
+                      <span className="text-ink-soft truncate text-[12px]">
+                        {m.email}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => addMember(m.userId)}
+                      >
+                        {t("signing.addSigner")}
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="mt-2 flex flex-col gap-2">
+              <p className="text-ink-soft text-[12px]">
+                {t("signing.externalHint")}
+              </p>
+              <Input
+                value={externalName}
+                onChange={(e) => setExternalName(e.target.value)}
+                placeholder={t("signing.externalNamePlaceholder")}
+                aria-label={t("signing.externalNamePlaceholder")}
+              />
+              <Input
+                type="email"
+                value={externalEmail}
+                onChange={(e) => setExternalEmail(e.target.value)}
+                placeholder={t("signing.externalEmailPlaceholder")}
+                aria-label={t("signing.externalEmailPlaceholder")}
+              />
+              <div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={addExternal}
+                  disabled={!canAddExternal}
+                >
+                  {t("signing.addSigner")}
+                </Button>
+              </div>
             </div>
           )}
         </div>

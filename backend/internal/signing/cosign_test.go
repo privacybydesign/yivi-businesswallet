@@ -9,11 +9,29 @@ import (
 	"github.com/google/uuid"
 )
 
-type fakeNotifier struct{ emails []string }
+type fakeNotifier struct {
+	emails   []string
+	external []string
+}
 
 func (f *fakeNotifier) NotifySignatureRequested(_ context.Context, _ uuid.UUID, email, _, _ string) error {
 	f.emails = append(f.emails, email)
 	return nil
+}
+
+func (f *fakeNotifier) NotifyExternalSignatureRequested(_ context.Context, _ uuid.UUID, email, _, _ string) error {
+	f.external = append(f.external, email)
+	return nil
+}
+
+// memberSigner is an internal signer row for a given member.
+func memberSigner(userID uuid.UUID) Signer {
+	return Signer{ID: uuid.New(), Kind: KindInternal, UserID: &userID, Status: SignerPending}
+}
+
+// externalSignerRow is an external signee's signer row.
+func externalSignerRow(email string) Signer {
+	return Signer{ID: uuid.New(), Kind: KindExternal, Email: email, Status: SignerPending}
 }
 
 func TestNotifySignerResolvesEmailAndSkipsUnknown(t *testing.T) {
@@ -21,14 +39,15 @@ func TestNotifySignerResolvesEmailAndSkipsUnknown(t *testing.T) {
 	s := &Service{notifier: fn}
 	alice := uuid.New()
 	members := []OrgMember{{UserID: alice, Email: "alice@example.org", Name: "Alice"}}
+	req := uuid.New()
 
-	s.notifySigner(context.Background(), uuid.New(), "acme", "Doc.pdf", alice, members)
+	s.notifySigner(context.Background(), uuid.New(), "acme", "Doc.pdf", req, memberSigner(alice), members)
 	if len(fn.emails) != 1 || fn.emails[0] != "alice@example.org" {
 		t.Fatalf("expected one notification to alice, got %v", fn.emails)
 	}
 
 	// A signer not in the member list is skipped, not an error.
-	s.notifySigner(context.Background(), uuid.New(), "acme", "Doc.pdf", uuid.New(), members)
+	s.notifySigner(context.Background(), uuid.New(), "acme", "Doc.pdf", req, memberSigner(uuid.New()), members)
 	if len(fn.emails) != 1 {
 		t.Fatalf("an unknown signer should not be notified, got %v", fn.emails)
 	}
@@ -36,7 +55,7 @@ func TestNotifySignerResolvesEmailAndSkipsUnknown(t *testing.T) {
 
 func TestNotifySignerNilNotifierIsNoop(t *testing.T) {
 	s := &Service{} // notifier nil
-	s.notifySigner(context.Background(), uuid.New(), "acme", "Doc.pdf", uuid.New(), nil)
+	s.notifySigner(context.Background(), uuid.New(), "acme", "Doc.pdf", uuid.New(), memberSigner(uuid.New()), nil)
 }
 
 func newTestService() *Service {
@@ -49,6 +68,8 @@ func newTestService() *Service {
 func TestReserveSignLocksOutOtherSignersButLetsSameUserReclaim(t *testing.T) {
 	s := newTestService()
 	req := uuid.New()
+	// Signer row ids, not user ids: the slot is keyed by the signer row so an external
+	// signee (who has no user id) is serialised with the members.
 	alice, bob := uuid.New(), uuid.New()
 
 	if !s.reserveSign(req, alice) {
@@ -77,7 +98,7 @@ func TestReserveSignDiscardsStaleCeremony(t *testing.T) {
 	stale := &ceremony{
 		flow:      flowSign,
 		requestID: req,
-		userID:    alice,
+		signer:    signerRef{signerID: alice},
 		state:     "stale-state",
 		pades:     &padesSession{signer: &padesSigner{errCh: make(chan error, 1)}, result: make(chan padesResult, 1)},
 	}
@@ -98,13 +119,18 @@ func TestReserveSignDiscardsStaleCeremony(t *testing.T) {
 	}
 }
 
+// checkTurn is keyed by signer row id, so the same table covers a member and an
+// external signee: the first signer is a member, the second an external signee.
 func TestCheckTurn(t *testing.T) {
-	a, b, c := uuid.New(), uuid.New(), uuid.New()
 	signers := func(states ...string) []Signer {
-		ids := []uuid.UUID{a, b, c}
 		out := make([]Signer, len(states))
 		for i, st := range states {
-			out[i] = Signer{UserID: ids[i], Order: i + 1, Status: st}
+			if i == 0 {
+				out[i] = memberSigner(uuid.New())
+			} else {
+				out[i] = externalSignerRow("outsider@example.org")
+			}
+			out[i].Order, out[i].Status = i+1, st
 		}
 		return out
 	}
@@ -113,25 +139,48 @@ func TestCheckTurn(t *testing.T) {
 		name    string
 		mode    string
 		signers []Signer
-		user    uuid.UUID
-		want    error
+		// which signer of the list is acting; -1 means someone who is not a signer.
+		acting int
+		want   error
 	}{
-		{"parallel first can sign", ModeParallel, signers(SignerPending, SignerPending), a, nil},
-		{"parallel second can sign before first", ModeParallel, signers(SignerPending, SignerPending), b, nil},
-		{"parallel already signed", ModeParallel, signers(SignerSigned, SignerPending), a, ErrAlreadySigned},
-		{"not a signer", ModeParallel, signers(SignerPending, SignerPending), c, ErrNotSigner},
-		{"sequential first can sign", ModeSequential, signers(SignerPending, SignerPending), a, nil},
-		{"sequential second must wait", ModeSequential, signers(SignerPending, SignerPending), b, ErrNotYourTurn},
-		{"sequential second after first signed", ModeSequential, signers(SignerSigned, SignerPending), b, nil},
-		{"sequential already signed", ModeSequential, signers(SignerSigned, SignerPending), a, ErrAlreadySigned},
+		{"parallel member can sign", ModeParallel, signers(SignerPending, SignerPending), 0, nil},
+		{"parallel external can sign before member", ModeParallel, signers(SignerPending, SignerPending), 1, nil},
+		{"parallel already signed", ModeParallel, signers(SignerSigned, SignerPending), 0, ErrAlreadySigned},
+		{"not a signer", ModeParallel, signers(SignerPending, SignerPending), -1, ErrNotSigner},
+		{"sequential first can sign", ModeSequential, signers(SignerPending, SignerPending), 0, nil},
+		{"sequential external must wait for the member", ModeSequential, signers(SignerPending, SignerPending), 1, ErrNotYourTurn},
+		{"sequential external after the member signed", ModeSequential, signers(SignerSigned, SignerPending), 1, nil},
+		{"sequential already signed", ModeSequential, signers(SignerSigned, SignerPending), 0, ErrAlreadySigned},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			req := Request{Mode: tc.mode, Signers: tc.signers}
-			if got := checkTurn(req, tc.user); !errors.Is(got, tc.want) {
+			acting := uuid.New()
+			if tc.acting >= 0 {
+				acting = tc.signers[tc.acting].ID
+			}
+			if got := checkTurn(req, acting); !errors.Is(got, tc.want) {
 				t.Fatalf("checkTurn = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A member blocked behind a pending external signee is the mixed case sequential
+// mode has to get right: the block comes from the sign_order, not the signer's kind.
+func TestCheckTurnSequentialMemberWaitsForExternal(t *testing.T) {
+	external := externalSignerRow("outsider@example.org")
+	external.Order = 1
+	member := memberSigner(uuid.New())
+	member.Order = 2
+	req := Request{Mode: ModeSequential, Signers: []Signer{external, member}}
+
+	if err := checkTurn(req, member.ID); !errors.Is(err, ErrNotYourTurn) {
+		t.Fatalf("member behind a pending external signee: checkTurn = %v, want ErrNotYourTurn", err)
+	}
+	req.Signers[0].Status = SignerSigned
+	if err := checkTurn(req, member.ID); err != nil {
+		t.Fatalf("member after the external signee signed: checkTurn = %v, want nil", err)
 	}
 }
 
@@ -159,7 +208,12 @@ func TestValidateRecipient(t *testing.T) {
 
 func TestInvolves(t *testing.T) {
 	creator, signer, stranger := uuid.New(), uuid.New(), uuid.New()
-	req := Request{CreatedBy: creator, Signers: []Signer{{UserID: signer}}}
+	// The external signee row carries no user id, so involves must skip it rather than
+	// dereference it.
+	req := Request{CreatedBy: creator, Signers: []Signer{
+		externalSignerRow("outsider@example.org"),
+		memberSigner(signer),
+	}}
 	if !involves(req, creator) {
 		t.Fatal("creator should be involved")
 	}

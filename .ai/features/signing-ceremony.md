@@ -182,3 +182,49 @@ co-signing object.
 - **Still in-memory/single-instance:** the active ceremony (parked pass + reservation) lives in
   memory; only the between-signers document is persisted. An abandoned ceremony frees its lock at
   `SessionTTL` without failing the request, and a signer can reclaim their own stale slot at once.
+
+## External signees (a signer who is not an org member)
+
+A signer no longer has to be someone in the organisation. Per signer, the requester picks
+**internal member** or **external signee** (name + e-mail), and one request may mix both.
+An external signee signs with **their own EUDI wallet**, through the same two ceremonies a
+member runs — so the finished PDF carries one incremental PAdES signature per signer
+regardless of kind.
+
+- **Model.** Both signing tables lost the "a signer is a row in `users`" assumption
+  (`20260810120000_signing_external_signees.sql`). `signing_request_signers` has a surrogate
+  `id` primary key and a **nullable** `user_id`, plus `external_email` / `external_name` and
+  the *hash* of the signee's invitation token; a `CHECK` keeps a row to exactly one kind, and
+  two partial unique indexes keep the old "one row per member per request" guarantee while
+  adding "one row per address per request". `signing_credentials` is re-keyed the same way, so
+  an external signee's linked credential lives under `(org, lower(external_email))` — the
+  `subject` type in the store is what names either kind, and it is deliberately unexported so a
+  caller cannot address a credential row without going through a signer.
+- **The signer row id is what addresses a signer.** `checkTurn`, `reserveSign`,
+  `RecordSignature` and `FailRequest` all key on it rather than on a user id, which is what
+  makes the parallel/sequential turn logic and the per-request in-flight lock work unchanged
+  for a mixed set of signers. `ListPendingForUser` still joins on `user_id` (a member's "to
+  sign" list), and its lower-order check counts external signers too, so a member queues behind
+  a pending external signee exactly as behind another member.
+- **The way in is a tokenised link, no session.** `IssueExternalToken` mints a 32-byte token
+  (only its SHA-256 is stored, same construction as an org invitation) with an
+  `ExternalInviteTTL` (30 days) expiry, and it is issued **when the signee is actually asked** —
+  at create time in parallel mode, when their turn comes in sequential mode — so a third-in-line
+  signee has no live link until it is their turn. The unauthenticated routes
+  `GET|POST /api/v1/signing/external/{token}[/document|/credential/link|/sign]` each resolve
+  that token to one signer row and read nothing else from the caller (the same posture as
+  `GET /invite/{token}`). Signing does **not** delete the token: the ceremony returns the signee
+  to that link and it is where they see their signature landed and can re-read what they signed.
+  Replay is stopped by their signer status (`ErrAlreadySigned`), and re-linking a credential is
+  refused once they have signed, so a stale link cannot swap the certificate that subject would
+  sign a later request with.
+- **Data minimisation.** `ExternalView` is deliberately narrower than `Request`: the signee is
+  outside the organisation, so they get who is asking, the document name, their own status and a
+  signed/total count — never the other signers' names or addresses.
+- **Notification.** The invitation reuses the existing `signature_requested` mail Kind; only the
+  `signingUrl` differs (their `/sign/{token}` page instead of the org's signing page), so there
+  is no new mail copy to translate. Best-effort, like the member notification.
+- **UI.** The create form's signer picker is an **ordered list** (that order is the sequential
+  signing order) fed by a per-signer *internal member / external signee* choice. The external
+  signee's own page is the public route `/sign/:token`: review the document, link a certificate
+  once, then sign.

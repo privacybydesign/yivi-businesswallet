@@ -2,6 +2,8 @@ package signing
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
@@ -28,26 +30,71 @@ type Store struct {
 	audit audit.Recorder
 }
 
+// externalTokenBytes is the entropy behind an external signee's invitation link —
+// their only credential for reaching a document they were never given an account
+// for, so it matches the org-invitation token (internal/organization).
+const externalTokenBytes = 32
+
 func NewStore(db database.DB, recorder audit.Recorder) *Store {
 	return &Store{db: db, audit: recorder}
 }
 
-// UpsertCredential caches a user's linked signing credential (id, certificate +
-// chain as PEM, key algo) and audits the link.
-func (s *Store) UpsertCredential(ctx context.Context, orgID, userID uuid.UUID, cred signingprovider.Credential) error {
+// subject names whose signing credential a store call is about: an internal member
+// (a row in users) or an external signee (an e-mail address with no users row).
+// Exactly one of the two is set, which is what the signing_credentials CHECK
+// enforces at the other end.
+type subject struct {
+	userID uuid.UUID // uuid.Nil for an external signee
+	email  string    // "" for an internal member
+}
+
+func internalSubject(userID uuid.UUID) subject { return subject{userID: userID} }
+
+// externalSubject keys an external signee by their address, lower-cased so the
+// same person is one subject however they (or the requester) typed it.
+func externalSubject(email string) subject {
+	return subject{email: strings.ToLower(strings.TrimSpace(email))}
+}
+
+func (s subject) isExternal() bool { return s.userID == uuid.Nil }
+
+// String describes the subject for an error or audit entry.
+func (s subject) String() string {
+	if s.isExternal() {
+		return s.email
+	}
+	return s.userID.String()
+}
+
+// UpsertCredential caches a signer's linked signing credential (id, certificate +
+// chain as PEM, key algo) and audits the link. The subject is an internal member or
+// an external signee; neither shares a row with the other.
+func (s *Store) UpsertCredential(ctx context.Context, orgID uuid.UUID, subj subject, cred signingprovider.Credential) error {
 	certPEM := encodeCertPEM(cred.Certificate)
 	chainPEM := encodeChainPEM(cred.Chain)
 	keyAlgo := strings.Join(cred.KeyAlgo, ",")
 
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		const upsert = `INSERT INTO signing_credentials
+		// The two subject kinds have their own partial unique index, so each needs its
+		// own conflict target; a single ON CONFLICT cannot name both.
+		const upsertMember = `INSERT INTO signing_credentials
 			(organization_id, user_id, credential_id, certificate_pem, chain_pem, key_algo)
 			VALUES ($1,$2,$3,$4,$5,$6)
-			ON CONFLICT (organization_id, user_id) DO UPDATE SET
+			ON CONFLICT (organization_id, user_id) WHERE user_id IS NOT NULL DO UPDATE SET
 				credential_id = EXCLUDED.credential_id, certificate_pem = EXCLUDED.certificate_pem,
 				chain_pem = EXCLUDED.chain_pem, key_algo = EXCLUDED.key_algo, updated_at = now()`
-		if _, err := q.Exec(ctx, upsert, orgID, userID, cred.ID, certPEM, chainPEM, keyAlgo); err != nil {
-			return fmt.Errorf("signing: upsert credential org %s user %s: %w", orgID, userID, err)
+		const upsertExternal = `INSERT INTO signing_credentials
+			(organization_id, external_email, credential_id, certificate_pem, chain_pem, key_algo)
+			VALUES ($1,$2,$3,$4,$5,$6)
+			ON CONFLICT (organization_id, lower(external_email)) WHERE user_id IS NULL DO UPDATE SET
+				credential_id = EXCLUDED.credential_id, certificate_pem = EXCLUDED.certificate_pem,
+				chain_pem = EXCLUDED.chain_pem, key_algo = EXCLUDED.key_algo, updated_at = now()`
+		upsert, key := upsertMember, any(subj.userID)
+		if subj.isExternal() {
+			upsert, key = upsertExternal, subj.email
+		}
+		if _, err := q.Exec(ctx, upsert, orgID, key, cred.ID, certPEM, chainPEM, keyAlgo); err != nil {
+			return fmt.Errorf("signing: upsert credential org %s subject %s: %w", orgID, subj, err)
 		}
 		return s.audit.Record(ctx, q, audit.SigningCredentialLinked,
 			audit.Target{Type: audit.TargetSigningCredential, ID: cred.ID, OrgID: &orgID},
@@ -55,17 +102,23 @@ func (s *Store) UpsertCredential(ctx context.Context, orgID, userID uuid.UUID, c
 	})
 }
 
-// GetCredential returns a user's linked credential, or ErrNoCredential if none.
-func (s *Store) GetCredential(ctx context.Context, orgID, userID uuid.UUID) (signingprovider.Credential, error) {
-	const query = `SELECT credential_id, certificate_pem, chain_pem, key_algo
+// GetCredential returns a subject's linked credential, or ErrNoCredential if none.
+func (s *Store) GetCredential(ctx context.Context, orgID uuid.UUID, subj subject) (signingprovider.Credential, error) {
+	const selectMember = `SELECT credential_id, certificate_pem, chain_pem, key_algo
 		FROM signing_credentials WHERE organization_id = $1 AND user_id = $2`
+	const selectExternal = `SELECT credential_id, certificate_pem, chain_pem, key_algo
+		FROM signing_credentials WHERE organization_id = $1 AND user_id IS NULL AND lower(external_email) = $2`
+	query, key := selectMember, any(subj.userID)
+	if subj.isExternal() {
+		query, key = selectExternal, subj.email
+	}
 	var credID, certPEM, chainPEM, keyAlgo string
-	err := s.db.QueryRow(ctx, query, orgID, userID).Scan(&credID, &certPEM, &chainPEM, &keyAlgo)
+	err := s.db.QueryRow(ctx, query, orgID, key).Scan(&credID, &certPEM, &chainPEM, &keyAlgo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return signingprovider.Credential{}, ErrNoCredential
 	}
 	if err != nil {
-		return signingprovider.Credential{}, fmt.Errorf("signing: get credential org %s user %s: %w", orgID, userID, err)
+		return signingprovider.Credential{}, fmt.Errorf("signing: get credential org %s subject %s: %w", orgID, subj, err)
 	}
 	chain, err := decodeChainPEM(chainPEM)
 	if err != nil {
@@ -78,9 +131,12 @@ func (s *Store) GetCredential(ctx context.Context, orgID, userID uuid.UUID) (sig
 }
 
 // CreateRequest records a new co-signing request (awaiting signatures), its signer
-// rows, and audits it. signers must be non-empty and their orders set (1-based).
-func (s *Store) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, filename string, pdf []byte, mode string, signers []SignerInput, rec RecipientInput) (uuid.UUID, error) {
+// rows, and audits it. signers must be non-empty and their orders set (1-based). It
+// returns the request id and the persisted signer rows — the caller needs their row
+// ids to invite the external signees, who have no user id to be addressed by.
+func (s *Store) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, filename string, pdf []byte, mode string, signers []SignerInput, rec RecipientInput) (uuid.UUID, []Signer, error) {
 	id := uuid.New()
+	created := make([]Signer, 0, len(signers))
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `INSERT INTO signing_requests
 			(id, organization_id, created_by, status, filename, original_document, signing_mode,
@@ -94,24 +150,40 @@ func (s *Store) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, f
 			rec.Channel, rec.Address, rec.Name, rec.Message, deliveryStatus); err != nil {
 			return fmt.Errorf("signing: create request org %s: %w", orgID, err)
 		}
-		const insertSigner = `INSERT INTO signing_request_signers (request_id, user_id, sign_order, status)
-			VALUES ($1,$2,$3,$4)`
+		const insertSigner = `INSERT INTO signing_request_signers
+			(request_id, user_id, external_email, external_name, sign_order, status)
+			VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`
+		external := 0
 		for _, sg := range signers {
-			if _, err := q.Exec(ctx, insertSigner, id, sg.UserID, sg.Order, SignerPending); err != nil {
+			var userID *uuid.UUID
+			email, name := "", ""
+			if sg.Kind == KindExternal {
+				email, name = sg.Email, sg.Name
+				external++
+			} else {
+				userID = &sg.UserID
+			}
+			row := Signer{
+				Kind: sg.Kind, UserID: userID, Email: email, Name: name,
+				Order: sg.Order, Status: SignerPending,
+			}
+			if err := q.QueryRow(ctx, insertSigner, id, userID, email, name, sg.Order, SignerPending).
+				Scan(&row.ID); err != nil {
 				return fmt.Errorf("signing: create request signer: %w", err)
 			}
+			created = append(created, row)
 		}
 		return s.audit.Record(ctx, q, audit.SigningRequested,
 			audit.Target{Type: audit.TargetSigningRequest, ID: id.String(), OrgID: &orgID},
 			audit.Created(map[string]any{
 				"filename": filename, "mode": mode, "signers": len(signers),
-				"recipientChannel": rec.Channel,
+				"externalSigners": external, "recipientChannel": rec.Channel,
 			}))
 	})
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, nil, err
 	}
-	return id, nil
+	return id, created, nil
 }
 
 // GetLatestDocument returns the current document to sign next: the accumulating
@@ -136,8 +208,13 @@ func (s *Store) GetLatestDocument(ctx context.Context, orgID, id uuid.UUID) ([]b
 }
 
 // RecordSignature persists the new signed document, marks the acting signer signed,
-// audits signing.signed, and reports whether every signer has now signed.
-func (s *Store) RecordSignature(ctx context.Context, orgID, id, userID uuid.UUID, signed []byte) (bool, error) {
+// audits signing.signed, and reports whether every signer has now signed. signerID
+// is the signer row's own id, so it addresses an internal member and an external
+// signee alike. An external signee's invitation token is deliberately left in place:
+// the ceremony returns them to that link, and it is where they see that their
+// signature landed and can re-read what they signed until it expires. What stops it
+// being replayed is their signer status, not deleting the row's token.
+func (s *Store) RecordSignature(ctx context.Context, orgID, id, signerID uuid.UUID, signed []byte) (bool, error) {
 	var allSigned bool
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const updateDoc = `UPDATE signing_requests SET signed_document=$2, updated_at=now() WHERE id=$1`
@@ -145,8 +222,8 @@ func (s *Store) RecordSignature(ctx context.Context, orgID, id, userID uuid.UUID
 			return fmt.Errorf("signing: record signed document %s: %w", id, err)
 		}
 		const markSigner = `UPDATE signing_request_signers SET status=$3, signed_at=now()
-			WHERE request_id=$1 AND user_id=$2`
-		tag, err := q.Exec(ctx, markSigner, id, userID, SignerSigned)
+			WHERE request_id=$1 AND id=$2`
+		tag, err := q.Exec(ctx, markSigner, id, signerID, SignerSigned)
 		if err != nil {
 			return fmt.Errorf("signing: mark signer signed %s: %w", id, err)
 		}
@@ -162,10 +239,66 @@ func (s *Store) RecordSignature(ctx context.Context, orgID, id, userID uuid.UUID
 		allSigned = pending == 0
 		return s.audit.Record(ctx, q, audit.SigningSigned,
 			audit.Target{Type: audit.TargetSigningRequest, ID: id.String(), OrgID: &orgID},
-			audit.Updated(map[string]any{"signer": userID.String(), "status": SignerPending},
-				map[string]any{"signer": userID.String(), "status": SignerSigned}))
+			audit.Updated(map[string]any{"signer": signerID.String(), "status": SignerPending},
+				map[string]any{"signer": signerID.String(), "status": SignerSigned}))
 	})
 	return allSigned, err
+}
+
+// IssueExternalToken mints an external signee's one-time invitation token, storing
+// only its hash plus an ExternalInviteTTL expiry, and returns the raw token for the
+// invitation mail. Issuing again replaces the previous token, so a link is only live
+// while that signee is actually being asked.
+func (s *Store) IssueExternalToken(ctx context.Context, requestID, signerID uuid.UUID) (string, error) {
+	raw, hash, err := newExternalToken()
+	if err != nil {
+		return "", err
+	}
+	const update = `UPDATE signing_request_signers
+		SET invite_token_hash=$3, invite_expires_at=$4
+		WHERE request_id=$1 AND id=$2 AND user_id IS NULL`
+	tag, err := s.db.Exec(ctx, update, requestID, signerID, hash[:], time.Now().Add(ExternalInviteTTL))
+	if err != nil {
+		return "", fmt.Errorf("signing: issue external token %s: %w", signerID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return "", ErrNotSigner
+	}
+	return raw, nil
+}
+
+// externalSigner is an external signee resolved from their invitation token: which
+// org and request they were invited to, and which signer row they are.
+type externalSigner struct {
+	OrgID     uuid.UUID
+	RequestID uuid.UUID
+	SignerID  uuid.UUID
+	Email     string
+	Name      string
+}
+
+// SignerByToken resolves an external signee's invitation token to their signer row,
+// or ErrInvalidToken when the token is unknown, spent or expired. The token is
+// looked up by hash — the raw value only ever exists in the invitation mail.
+func (s *Store) SignerByToken(ctx context.Context, rawToken string) (externalSigner, error) {
+	if strings.TrimSpace(rawToken) == "" {
+		return externalSigner{}, ErrInvalidToken
+	}
+	hash := hashExternalToken(rawToken)
+	const query = `SELECT r.organization_id, sg.request_id, sg.id, sg.external_email, sg.external_name
+		FROM signing_request_signers sg
+		JOIN signing_requests r ON r.id = sg.request_id
+		WHERE sg.invite_token_hash = $1 AND sg.invite_expires_at > now()`
+	var out externalSigner
+	err := s.db.QueryRow(ctx, query, hash[:]).
+		Scan(&out.OrgID, &out.RequestID, &out.SignerID, &out.Email, &out.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return externalSigner{}, ErrInvalidToken
+	}
+	if err != nil {
+		return externalSigner{}, fmt.Errorf("signing: resolve signing link: %w", err)
+	}
+	return out, nil
 }
 
 // CompleteRequest marks the request completed (all signers signed) and audits it.
@@ -203,10 +336,11 @@ func (s *Store) SetDelivery(ctx context.Context, orgID, id uuid.UUID, status, re
 // timeout) on one signer must leave the request awaiting_signatures and retryable,
 // not brick a co-signing request that may already carry other qualified signatures.
 // A failed signer is offered the document again (see ListPendingForUser), and a
-// successful retry flips them to signed.
+// successful retry flips them to signed. signerID is the signer row's own id, so it
+// addresses an internal member and an external signee alike.
 func (s *Store) MarkSignerFailed(ctx context.Context, orgID, id, signerID uuid.UUID, reason string) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		const markSigner = `UPDATE signing_request_signers SET status=$3 WHERE request_id=$1 AND user_id=$2`
+		const markSigner = `UPDATE signing_request_signers SET status=$3 WHERE request_id=$1 AND id=$2`
 		if _, err := q.Exec(ctx, markSigner, id, signerID, SignerFailed); err != nil {
 			return fmt.Errorf("signing: mark signer failed %s: %w", id, err)
 		}
@@ -243,24 +377,15 @@ func (s *Store) GetRequest(ctx context.Context, orgID, id uuid.UUID) (Request, e
 	return req, nil
 }
 
-// getSigners loads a request's signer rows (no names) ordered by sign_order.
+// getSigners loads one request's signer rows ordered by sign_order. It goes through
+// signersFor so a single request and a page of them read the same columns and derive
+// a signer's kind the same way.
 func (s *Store) getSigners(ctx context.Context, id uuid.UUID) ([]Signer, error) {
-	const query = `SELECT user_id, sign_order, status, signed_at
-		FROM signing_request_signers WHERE request_id=$1 ORDER BY sign_order, user_id`
-	rows, err := s.db.Query(ctx, query, id)
+	byRequest, err := s.signersFor(ctx, []uuid.UUID{id})
 	if err != nil {
-		return nil, fmt.Errorf("signing: list signers %s: %w", id, err)
+		return nil, err
 	}
-	defer rows.Close()
-	var out []Signer
-	for rows.Next() {
-		var sg Signer
-		if err := rows.Scan(&sg.UserID, &sg.Order, &sg.Status, &sg.SignedAt); err != nil {
-			return nil, fmt.Errorf("signing: scan signer: %w", err)
-		}
-		out = append(out, sg)
-	}
-	return out, rows.Err()
+	return byRequest[id], nil
 }
 
 // GetSignedDocument returns the final signed PDF + filename, or ErrNotCompleted.
@@ -406,10 +531,12 @@ func (s *Store) scanRequestList(ctx context.Context, rows pgx.Rows) ([]Request, 
 }
 
 // signersFor loads the signer rows for many requests in one query, grouped by
-// request id (ordered by sign_order within each).
+// request id (ordered by sign_order within each). An internal member's name/email is
+// left to the service to enrich from the member directory; an external signee carries
+// their own, since there is no directory to look them up in.
 func (s *Store) signersFor(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]Signer, error) {
-	const query = `SELECT request_id, user_id, sign_order, status, signed_at
-		FROM signing_request_signers WHERE request_id = ANY($1) ORDER BY request_id, sign_order, user_id`
+	const query = `SELECT request_id, id, user_id, external_email, external_name, sign_order, status, signed_at
+		FROM signing_request_signers WHERE request_id = ANY($1) ORDER BY request_id, sign_order, id`
 	rows, err := s.db.Query(ctx, query, ids)
 	if err != nil {
 		return nil, fmt.Errorf("signing: list signers for %d requests: %w", len(ids), err)
@@ -419,8 +546,14 @@ func (s *Store) signersFor(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]
 	for rows.Next() {
 		var requestID uuid.UUID
 		var sg Signer
-		if err := rows.Scan(&requestID, &sg.UserID, &sg.Order, &sg.Status, &sg.SignedAt); err != nil {
+		var email, name string
+		if err := rows.Scan(&requestID, &sg.ID, &sg.UserID, &email, &name,
+			&sg.Order, &sg.Status, &sg.SignedAt); err != nil {
 			return nil, fmt.Errorf("signing: scan signer: %w", err)
+		}
+		sg.Kind = KindInternal
+		if sg.UserID == nil {
+			sg.Kind, sg.Email, sg.Name = KindExternal, email, name
 		}
 		out[requestID] = append(out[requestID], sg)
 	}
@@ -471,6 +604,23 @@ func decodeCursor(cursor string) (time.Time, uuid.UUID, bool, error) {
 		return time.Time{}, uuid.Nil, false, ErrInvalidRequest
 	}
 	return time.Unix(0, nanos).UTC(), id, true, nil
+}
+
+// newExternalToken mints an external signee's invitation token: the raw value for
+// the mail and the SHA-256 hash that is all the database keeps, so a leaked dump
+// cannot be replayed as a signing link. Same construction as an org invitation
+// (internal/organization).
+func newExternalToken() (string, [sha256.Size]byte, error) {
+	b := make([]byte, externalTokenBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", [sha256.Size]byte{}, fmt.Errorf("signing: external signing token: %w", err)
+	}
+	raw := base64.RawURLEncoding.EncodeToString(b)
+	return raw, sha256.Sum256([]byte(raw)), nil
+}
+
+func hashExternalToken(raw string) [sha256.Size]byte {
+	return sha256.Sum256([]byte(raw))
 }
 
 func encodeCertPEM(cert *x509.Certificate) string {
