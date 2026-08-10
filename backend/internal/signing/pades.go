@@ -96,7 +96,7 @@ func startPAdES(input []byte, cred signingprovider.Credential, placements []Plac
 	sess := &padesSession{signer: signer, result: make(chan padesResult, 1)}
 
 	name := cred.Certificate.Subject.CommonName
-	input, err := stampSignerParaphs(input, paraphPlacements(placements), paraphText(name))
+	input, err := stampSignerMarks(input, placements, paraphText(name))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -183,12 +183,19 @@ func signatureAppearance(placements []Placement) sign.Appearance {
 	}
 }
 
-// stampSignerParaphs draws a signer's paraphs into the document, returning it
-// unchanged when they have none. digitorus/pdf panics its way out of a malformed
-// object graph, and this runs on the request goroutine, so the read is recovered
-// into ErrInvalidPDF rather than taking the process down.
-func stampSignerParaphs(input []byte, marks []Placement, text string) (out []byte, err error) {
-	if len(marks) == 0 {
+// stampSignerMarks prepares the document for one signer's pass: it draws their
+// paraphs into it, and normalises the page their signature block lands on when
+// pdfsign could not rewrite that page as it stands. It returns the input unchanged
+// when neither is needed. digitorus/pdf panics its way out of a malformed object
+// graph, and this runs on the request goroutine, so the read is recovered into
+// ErrInvalidPDF rather than taking the process down.
+func stampSignerMarks(input []byte, placements []Placement, text string) (out []byte, err error) {
+	paraphs := paraphPlacements(placements)
+	signaturePage := 0
+	if block := signaturePlacement(placements); block != nil {
+		signaturePage = block.Page
+	}
+	if len(paraphs) == 0 && signaturePage == 0 {
 		return input, nil
 	}
 	defer func() {
@@ -200,7 +207,7 @@ func stampSignerParaphs(input []byte, marks []Placement, text string) (out []byt
 	if err != nil {
 		return nil, ErrInvalidPDF
 	}
-	return stampParaphs(input, rdr, marks, text)
+	return stampMarks(input, rdr, paraphs, signaturePage, text)
 }
 
 // finish delivers the externally-produced signature and returns the signed PDF.

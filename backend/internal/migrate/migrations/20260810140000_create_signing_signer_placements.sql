@@ -9,14 +9,19 @@
 -- bottom-left, the same space pdfsign's appearance rectangle is in — the requester
 -- converts from viewer coordinates once, at placement time, so nothing downstream
 -- has to know the zoom, the rotation or the crop box the document was placed at.
+--
+-- x and y carry no bound: a page's box is only anchored at the origin when its crop
+-- box is, and one that starts below it makes every rectangle on that page negative.
+-- Whether a rectangle is on its page is a question about the document, which this
+-- table does not have, so validatePlacements answers it before the insert.
 CREATE TABLE signing_signer_placements
 (
     id        UUID             NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
     signer_id UUID             NOT NULL REFERENCES signing_request_signers (id) ON DELETE CASCADE,
     kind      TEXT             NOT NULL CHECK (kind IN ('signature', 'paraph')),
     page      INT              NOT NULL CHECK (page >= 1),
-    x         DOUBLE PRECISION NOT NULL CHECK (x >= 0),
-    y         DOUBLE PRECISION NOT NULL CHECK (y >= 0),
+    x         DOUBLE PRECISION NOT NULL,
+    y         DOUBLE PRECISION NOT NULL,
     width     DOUBLE PRECISION NOT NULL CHECK (width > 0),
     height    DOUBLE PRECISION NOT NULL CHECK (height > 0)
 );

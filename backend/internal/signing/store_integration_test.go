@@ -186,6 +186,17 @@ func TestCreateRequestPersistsPlacementsPerSigner(t *testing.T) {
 	if err == nil {
 		t.Error("a second signature placement for one signer should be refused")
 	}
+
+	// A page whose crop box starts below the origin puts every rectangle on it in
+	// negative coordinates. validatePlacements is what decides whether a rectangle is
+	// on its page, and it accepts this one, so the table must store it.
+	_, err = pool.Exec(ctx,
+		`INSERT INTO signing_signer_placements (signer_id, kind, page, x, y, width, height)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		created[0].ID, PlacementParaph, 3, -10.0, -800.0, 48.0, 24.0)
+	if err != nil {
+		t.Errorf("a rectangle on a page with a negative-origin crop box was refused: %v", err)
+	}
 }
 
 // The invitation token is the external signee's only key: it resolves to exactly

@@ -248,8 +248,15 @@ signing pass renders them.
 - **Validation, at create time.** `readGeometry` (`placement.go`) replaces the old `validatePDF`:
   it parses the upload, reports every page's visible box (CropBox else MediaBox, inherited through
   the page tree — digitorus/pdf ships that walk commented out) and doubles as the upload check.
-  `validatePlacements` then refuses a page the document does not have, a rectangle outside the page,
-  one below `minPlacementSize` (8 pt), a second signature block or a second paraph on a page. A
+  Being the upload check is what bounds it: what it refuses is what cannot be uploaded at all, so
+  it refuses a page with **no area** and not merely a small one. Whether a mark fits is a question
+  about the mark, and refusing the document would reject it over a page nobody is placing anything
+  on. `validatePlacements`
+  then refuses a page the document does not have, a rectangle outside the page, one below
+  `minPlacementSize` (8 pt), a second signature block or a second paraph on a page. Nothing
+  constrains the *sign* of a rectangle, in Go or in the table: a page whose crop box starts below
+  the origin puts every rectangle on it in negative coordinates, and containment in the page box
+  is the whole rule. A
   placement is **refused, not clamped**: it is where a person pointed at a rendering of *this*
   document, so a value off the page means the two disagree, and quietly moving the signature
   somewhere else is the one outcome nobody asked for. Placement stays optional as a whole — no
@@ -272,8 +279,35 @@ signing pass renders them.
   leave a reader that found it first with no way into the object streams the previous section
   indexes. `TestParaphStampMatchesTheDocumentsXrefKind` covers both, and the page dictionary is
   rebuilt key by key (not copied — digitorus/pdf resolves as it reads and hands back no raw
-  object), with `/Parent` and `/Contents` written as references rather than through
-  `Value.String()`, which would inline the page tree and a stream.
+  object) by `writeValue`, which emits only forms that are valid PDF.
+- **`pdf.Value.String()` is a debug formatter and neither library may use it here.** It renders a
+  stream as `<<…>>@offset` and a PDF string through `strconv.Quote`, so a page carrying
+  `/Metadata`, `/Thumb`, or the `/LastModified` + `/PieceInfo` pair InDesign and Illustrator write
+  routinely stops parsing once it has been rewritten through it. `writeValue` avoids it by telling
+  a reference from a direct value the only way digitorus/pdf allows — comparing the resolved
+  value's `GetPtr()` with its container's — and writing the reference rather than what it points
+  at. **pdfsign has the same bug in its own page rewrite** (`createIncPageUpdate`), which runs only
+  when `Appearance.Visible` — so nothing reached it until placement existed; it also writes every
+  `/Annots` entry as a reference, turning a directly-embedded annotation into a reference to the
+  page. Since no form of such an entry survives being resolved and re-formatted, `stampMarks` hands
+  pdfsign a page it can round-trip: on the **signature block's page only**, the entries in
+  `droppablePageEntries` are dropped and direct annotations are promoted to objects of their own.
+  That list is page metadata and nothing else — `/Metadata`, `/Thumb`, `/LastModified` with its
+  `/PieceInfo`, `/ID` — none of it drawn on the page or changing what the page does, and the drop
+  happens in the revision the signature then covers, the only place a change to a signed document
+  may be. **Anything else pdfsign cannot emit is refused rather than dropped**: a page quietly
+  stripped of its `/Resources` would come out blank, and the refusal lands in `stampSignerMarks`,
+  before the digest is published, so no signature is spent on it. A page carrying just a paraph is
+  never handed to pdfsign's rewrite and keeps everything (`stamp_test.go`:
+  `TestVisibleSignatureKeepsAnAwkwardPageReadable`, `TestParaphOnlyPageKeepsItsEntries`,
+  `TestDirectAnnotationOnTheSignaturePageSurvives`,
+  `TestSignaturePageWithAnUndroppableEntryIsRefused`).
+- **The paraph's font states its encoding.** Times-Roman with no `/Encoding` reads the content
+  stream's bytes in Adobe StandardEncoding, where the UTF-8 of `Ünal` draws as a macron plus a
+  notdef. The font declares `/WinAnsiEncoding` and `winAnsi` transcodes to it, with `?` for a
+  character it has no place for; the box is measured in the bytes that are drawn, not the runes
+  they came from. The annotation's `/Contents` is a PDF *text* string, a different encoding again,
+  so it is written UTF-16BE (`pdfTextString`) and carries a name in any script.
 - **Accepted cost, stated plainly.** A signer with paraphs adds **two** revisions instead of one,
   and the extra one is not itself a signing operation. Earlier co-signatures stay cryptographically
   valid (the revision is appended after their ByteRange, `TestCoSigningWithPlacementsKeepsBothSignaturesValid`),
@@ -290,7 +324,10 @@ signing pass renders them.
   need no dragging at all (WCAG 2.2 §2.5.7). The geometry is pure and unit-tested
   (`lib/placement.ts` + `.test.ts`), and `placement-viewport.test.ts` pins the one assumption the
   whole feature rests on — that a rectangle converted through the pdf.js viewport and back is the
-  same rectangle — against a real document at four rotations and two zooms.
+  same rectangle — against a real document at four rotations and two zooms. Paging is the primary
+  flow here (a paraph on every page), and pdf.js refuses a second `render()` on a canvas a live
+  task still holds, so the render lifecycle is `lib/pdf-page-render.ts`: one task at a time,
+  cancelled before the next starts, with a cancelled render reported rather than thrown.
 - **pdf.js is a chunk of its own.** It is larger than the rest of the app put together, so the
   editor is a `React.lazy` import: the main bundle is unchanged for everyone who is not placing a
   signature.

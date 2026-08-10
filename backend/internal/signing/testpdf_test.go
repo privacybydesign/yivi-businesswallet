@@ -29,13 +29,34 @@ func a4Geometry(pages int) documentGeometry {
 	return documentGeometry{pages: boxes}
 }
 
+// testPDFOptions describes the document buildTestPDF writes.
+type testPDFOptions struct {
+	pages int
+	// xrefStream selects a cross-reference stream over a table.
+	xrefStream bool
+	// extraObjects are written after the pages, numbered from the first free object
+	// id. pageEntries is handed that id, so a page dictionary can point at one.
+	extraObjects []string
+	// pageEntries are appended to every page dictionary, which is how a case gets a
+	// page carrying the sort of entry a real producer writes.
+	pageEntries func(firstExtraID int) string
+}
+
 // buildTestPDF writes a valid PDF of the given number of A4 pages, each carrying a
 // line of text. xrefStream selects a cross-reference stream over a table.
 func buildTestPDF(t *testing.T, pages int, xrefStream bool) []byte {
 	t.Helper()
-	if pages < 1 {
-		t.Fatalf("a PDF needs at least one page, got %d", pages)
+	return buildTestPDFWith(t, testPDFOptions{pages: pages, xrefStream: xrefStream})
+}
+
+// buildTestPDFWith is buildTestPDF with the page dictionaries and the object list
+// under the caller's control.
+func buildTestPDFWith(t *testing.T, opts testPDFOptions) []byte {
+	t.Helper()
+	if opts.pages < 1 {
+		t.Fatalf("a PDF needs at least one page, got %d", opts.pages)
 	}
+	pages, xrefStream := opts.pages, opts.xrefStream
 
 	const (
 		catalogID = 1
@@ -46,10 +67,16 @@ func buildTestPDF(t *testing.T, pages int, xrefStream bool) []byte {
 	// Each page costs two objects: the page dictionary and its content stream.
 	pageID := func(i int) int { return firstPage + 2*i }
 	contentID := func(i int) int { return firstPage + 2*i + 1 }
+	firstExtraID := contentID(pages-1) + 1
 
 	var kids bytes.Buffer
 	for i := 0; i < pages; i++ {
 		fmt.Fprintf(&kids, " %d 0 R", pageID(i))
+	}
+
+	pageEntries := ""
+	if opts.pageEntries != nil {
+		pageEntries = " " + opts.pageEntries(firstExtraID)
 	}
 
 	bodies := map[int]string{
@@ -60,13 +87,16 @@ func buildTestPDF(t *testing.T, pages int, xrefStream bool) []byte {
 	}
 	for i := 0; i < pages; i++ {
 		bodies[pageID(i)] = fmt.Sprintf(
-			"<< /Type /Page /Parent %d 0 R /Contents %d 0 R /Resources << /Font << /F1 %d 0 R >> >> >>",
-			pagesID, contentID(i), fontID)
+			"<< /Type /Page /Parent %d 0 R /Contents %d 0 R /Resources << /Font << /F1 %d 0 R >> >>%s >>",
+			pagesID, contentID(i), fontID, pageEntries)
 		stream := fmt.Sprintf("BT /F1 18 Tf 72 %d Td (Page %d) Tj ET", testPageHeight-100, i+1)
 		bodies[contentID(i)] = fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream)
 	}
+	for i, body := range opts.extraObjects {
+		bodies[firstExtraID+i] = body
+	}
 
-	lastID := contentID(pages - 1)
+	lastID := contentID(pages-1) + len(opts.extraObjects)
 	header := "%PDF-1.4\n"
 	if xrefStream {
 		header = "%PDF-1.5\n"

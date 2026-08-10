@@ -117,7 +117,11 @@ func inherited(page pdf.Value, key string) pdf.Value {
 }
 
 // boxValue reads a [llx lly urx ury] rectangle, normalising the corners: the
-// order of the two corners in a PDF rectangle is not guaranteed.
+// order of the two corners in a PDF rectangle is not guaranteed. A box with no area
+// is refused, because it cannot be the box a page was rendered at — but a small one
+// is not: whether a page is big enough for a mark is a question about the mark, and
+// validatePlacements answers it. Rejecting the page here would reject the whole
+// upload over a page nobody is placing anything on.
 func boxValue(v pdf.Value) (pageBox, bool) {
 	if v.Kind() != pdf.Array || v.Len() != 4 {
 		return pageBox{}, false
@@ -134,7 +138,7 @@ func boxValue(v pdf.Value) (pageBox, bool) {
 		minX: min(c[0], c[2]), minY: min(c[1], c[3]),
 		maxX: max(c[0], c[2]), maxY: max(c[1], c[3]),
 	}
-	if box.maxX-box.minX < minPlacementSize || box.maxY-box.minY < minPlacementSize {
+	if box.maxX <= box.minX || box.maxY <= box.minY {
 		return pageBox{}, false
 	}
 	return box, true

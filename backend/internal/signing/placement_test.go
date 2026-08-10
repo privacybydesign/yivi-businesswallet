@@ -98,6 +98,56 @@ func TestValidatePlacementsRejects(t *testing.T) {
 	}
 }
 
+// A page's box is not always anchored at the origin: one whose crop box starts
+// below it makes every rectangle on that page negative. The rule is containment in
+// the box, not a sign, and nothing between here and the database may add one.
+func TestValidatePlacementsAcceptsANegativeOriginPage(t *testing.T) {
+	geometry := documentGeometry{pages: []pageBox{{minX: -20, minY: -842, maxX: 575, maxY: 0}}}
+	in := []Placement{{Kind: PlacementSignature, Page: 1, X: -10, Y: -800, Width: 180, Height: 56}}
+	got, err := validatePlacements(in, geometry)
+	if err != nil {
+		t.Fatalf("validatePlacements: %v", err)
+	}
+	if len(got) != 1 || got[0].X != -10 {
+		t.Fatalf("got %+v, want the rectangle as placed", got)
+	}
+}
+
+// readGeometry is the upload check, so what it refuses is what cannot be uploaded at
+// all. A page too small to hold a mark is not that: whether a mark fits is a question
+// about the mark, and a document is not unreadable because one of its pages is tiny.
+func TestReadGeometryAcceptsAPageSmallerThanAMark(t *testing.T) {
+	doc := buildTestPDFWith(t, testPDFOptions{
+		pages:       1,
+		pageEntries: func(int) string { return "/MediaBox [0 0 6 6]" },
+	})
+	geometry, err := readGeometry(doc)
+	if err != nil {
+		t.Fatalf("readGeometry: %v", err)
+	}
+	if len(geometry.pages) != 1 || geometry.pages[0].maxX != 6 {
+		t.Fatalf("got %+v, want the 6x6 page measured as it is", geometry.pages)
+	}
+	// It is the placement that is refused, not the document.
+	_, err = validatePlacements([]Placement{
+		{Kind: PlacementSignature, Page: 1, X: 0, Y: 0, Width: 6, Height: 6},
+	}, geometry)
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("validatePlacements = %v, want ErrInvalidRequest", err)
+	}
+}
+
+// A page with no area was never a page anyone rendered a rectangle against.
+func TestReadGeometryRejectsAPageWithNoArea(t *testing.T) {
+	doc := buildTestPDFWith(t, testPDFOptions{
+		pages:       1,
+		pageEntries: func(int) string { return "/MediaBox [0 0 0 842]" },
+	})
+	if _, err := readGeometry(doc); !errors.Is(err, ErrInvalidPDF) {
+		t.Fatalf("readGeometry = %v, want ErrInvalidPDF", err)
+	}
+}
+
 func TestParaphTextInitialisesALongName(t *testing.T) {
 	tests := map[string]string{
 		"":                    "?",

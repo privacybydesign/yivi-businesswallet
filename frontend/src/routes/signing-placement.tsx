@@ -7,7 +7,9 @@ import type {
   PDFDocumentLoadingTask,
   PDFDocumentProxy,
 } from "pdfjs-dist";
+import type { RenderParameters } from "pdfjs-dist/types/src/display/api";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { PageRenderer } from "../lib/pdf-page-render";
 import { PLACEMENT_KIND } from "../api/signing";
 import type { Placement, PlacementKind } from "../api/signing";
 import {
@@ -81,6 +83,8 @@ export function PlacementEditor({
   // destroy() lives on the loading task, not on the document, and it is what tears
   // the worker down — a file replaced mid-render must not leave one running.
   const taskRef = useRef<PDFDocumentLoadingTask | null>(null);
+  // One render at a time on this canvas: see lib/pdf-page-render.
+  const rendererRef = useRef<PageRenderer<RenderParameters> | null>(null);
 
   const [boxes, setBoxes] = useState<PageBox[]>([]);
   const [page, setPage] = useState(1);
@@ -148,27 +152,39 @@ export function PlacementEditor({
     const doc = documentRef.current;
     const canvas = canvasRef.current;
     if (doc == null || canvas == null || boxes.length === 0) return;
+    const renderer = (rendererRef.current ??=
+      new PageRenderer<RenderParameters>());
+    // The effect that replaced this one runs its own body first, so a run abandoned
+    // while awaiting getPage must not go on to resize the canvas under it.
     let cancelled = false;
     void (async () => {
-      const pdfPage = await doc.getPage(page);
-      const unscaled = pdfPage.getViewport({ scale: 1 });
-      const scale = Math.min(MAX_PAGE_WIDTH / unscaled.width, 1);
-      const viewport = pdfPage.getViewport({ scale });
-      if (cancelled) return;
-      const ratio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
-      canvas.width = Math.floor(viewport.width * ratio);
-      canvas.height = Math.floor(viewport.height * ratio);
-      canvas.style.width = `${viewport.width}px`;
-      canvas.style.height = `${viewport.height}px`;
-      const context = canvas.getContext("2d");
-      if (context == null) return;
-      context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      setViewport(viewport);
-      await pdfPage.render({ canvas, canvasContext: context, viewport })
-        .promise;
+      try {
+        const pdfPage = await doc.getPage(page);
+        const unscaled = pdfPage.getViewport({ scale: 1 });
+        const scale = Math.min(MAX_PAGE_WIDTH / unscaled.width, 1);
+        const viewport = pdfPage.getViewport({ scale });
+        if (cancelled) return;
+        const ratio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
+        canvas.width = Math.floor(viewport.width * ratio);
+        canvas.height = Math.floor(viewport.height * ratio);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        const context = canvas.getContext("2d");
+        if (context == null) return;
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        setViewport(viewport);
+        await renderer.draw(pdfPage, {
+          canvas,
+          canvasContext: context,
+          viewport,
+        });
+      } catch {
+        if (!cancelled) setStatus("error");
+      }
     })();
     return () => {
       cancelled = true;
+      renderer.stop();
     };
   }, [page, boxes]);
 

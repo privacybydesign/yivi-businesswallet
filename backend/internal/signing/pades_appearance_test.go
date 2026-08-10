@@ -139,7 +139,7 @@ func TestStampedParaphIsCoveredByTheSignature(t *testing.T) {
 	stub, cred := stubCredential(t)
 	// The paraph text comes from the certificate's common name, so the tamper below
 	// has something known to look for.
-	mark := []byte(pdfLiteral(paraphText(cred.Certificate.Subject.CommonName)) + " Tj")
+	mark := []byte(pdfLiteral(winAnsi(paraphText(cred.Certificate.Subject.CommonName))) + " Tj")
 
 	sess, digest, err := startPAdES(buildTestPDF(t, 1, false), cred, []Placement{
 		{Kind: PlacementParaph, Page: 1, X: 500, Y: 40, Width: 48, Height: 24},

@@ -5,7 +5,9 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/digitorus/pdf"
 )
@@ -69,15 +71,13 @@ type incrObject struct {
 	offset int64 // filled in while writing
 }
 
-// stampParaphs appends one incremental revision to input that draws text in each
-// of marks' rectangles as a printable, locked annotation, and returns the new
-// document. marks must already be validated against the document's geometry.
-// With no marks the input is returned untouched, so the no-paraph path adds no
-// revision at all.
-func stampParaphs(input []byte, rdr *pdf.Reader, marks []Placement, text string) ([]byte, error) {
-	if len(marks) == 0 {
-		return input, nil
-	}
+// stampMarks appends one incremental revision to input and returns the new
+// document. The revision draws text in each of paraphs' rectangles as a printable,
+// locked annotation, and — when signaturePage names a page pdfsign could not rewrite
+// as it stands (see pdfsignCanEmit) — replaces that page with one it can. Marks must
+// already be validated against the document's geometry. With nothing to do the input
+// is returned untouched, so the plain path still adds no revision at all.
+func stampMarks(input []byte, rdr *pdf.Reader, paraphs []Placement, signaturePage int, text string) ([]byte, error) {
 	nextID := lastObjectID(rdr) + 1
 	take := func() uint32 {
 		id := nextID
@@ -85,35 +85,55 @@ func stampParaphs(input []byte, rdr *pdf.Reader, marks []Placement, text string)
 		return id
 	}
 
-	fontID := take()
-	objects := []incrObject{{id: fontID, body: paraphFont()}}
-
+	var objects []incrObject
 	// One appearance + one annotation per mark, collected per page so each page
 	// object is rewritten once however many paraphs land on it.
-	annotsByPage := make(map[int][]uint32, len(marks))
-	pageOrder := make([]int, 0, len(marks))
-	for _, m := range marks {
-		appearanceID, annotID := take(), take()
-		pageRef, err := pageReference(rdr, m.Page)
-		if err != nil {
-			return nil, err
+	annotsByPage := make(map[int][]uint32, len(paraphs))
+	pageOrder := make([]int, 0, len(paraphs)+1)
+	if len(paraphs) > 0 {
+		fontID := take()
+		objects = append(objects, incrObject{id: fontID, body: paraphFont()})
+		for _, m := range paraphs {
+			appearanceID, annotID := take(), take()
+			pageRef, err := pageReference(rdr, m.Page)
+			if err != nil {
+				return nil, err
+			}
+			objects = append(objects,
+				incrObject{id: appearanceID, body: paraphAppearance(m, text, fontID)},
+				incrObject{id: annotID, body: paraphAnnotation(m, text, appearanceID, pageRef)},
+			)
+			if _, seen := annotsByPage[m.Page]; !seen {
+				pageOrder = append(pageOrder, m.Page)
+			}
+			annotsByPage[m.Page] = append(annotsByPage[m.Page], annotID)
 		}
-		objects = append(objects,
-			incrObject{id: appearanceID, body: paraphAppearance(m, text, fontID)},
-			incrObject{id: annotID, body: paraphAnnotation(m, text, appearanceID, pageRef)},
-		)
-		if _, seen := annotsByPage[m.Page]; !seen {
-			pageOrder = append(pageOrder, m.Page)
+	}
+
+	if signaturePage > 0 {
+		if _, queued := annotsByPage[signaturePage]; !queued {
+			needed, err := pageNeedsNormalising(rdr, signaturePage)
+			if err != nil {
+				return nil, err
+			}
+			if needed {
+				pageOrder = append(pageOrder, signaturePage)
+				annotsByPage[signaturePage] = nil
+			}
 		}
-		annotsByPage[m.Page] = append(annotsByPage[m.Page], annotID)
+	}
+
+	if len(objects) == 0 && len(pageOrder) == 0 {
+		return input, nil
 	}
 
 	for _, page := range pageOrder {
-		body, id, gen, err := pageWithAnnots(rdr, page, annotsByPage[page])
+		rewrite, err := rewritePage(rdr, page, annotsByPage[page], page == signaturePage, take)
 		if err != nil {
 			return nil, err
 		}
-		objects = append(objects, incrObject{id: id, gen: gen, body: body})
+		objects = append(objects, rewrite.created...)
+		objects = append(objects, rewrite.page)
 	}
 
 	return appendRevision(input, rdr, objects, nextID)
@@ -134,21 +154,66 @@ func lastObjectID(rdr *pdf.Reader) uint32 {
 
 // paraphFont is the appearance streams' shared font. It matches the font pdfsign
 // uses for a visible signature's name, for the same reason the ink does.
+//
+// The encoding is stated rather than left to default: without it the bytes of the
+// content stream are read in Adobe StandardEncoding, in which the UTF-8 of any name
+// with a diacritic draws as something else entirely. WinAnsiEncoding covers the
+// accented Latin letters a Dutch or EU name is made of; winAnsi does the transcode.
 func paraphFont() []byte {
-	return []byte("<<\n  /Type /Font\n  /Subtype /Type1\n  /BaseFont /Times-Roman\n>>")
+	return []byte("<<\n  /Type /Font\n  /Subtype /Type1\n  /BaseFont /Times-Roman\n" +
+		"  /Encoding /WinAnsiEncoding\n>>")
+}
+
+// winAnsiUnmappable is drawn for a character WinAnsiEncoding has no place for — a
+// paraph in a non-Latin script. A defined substitute is the honest outcome: the
+// alternative is a notdef box or, worse, a different letter.
+const winAnsiUnmappable = '?'
+
+// winAnsiHigh maps the characters WinAnsiEncoding puts in 0x80-0x9F, where it and
+// Latin-1 disagree. Everything else it encodes is either ASCII or at its Unicode
+// code point (PDF 32000-1 annex D.2).
+var winAnsiHigh = map[rune]byte{
+	'€': 0x80, '‚': 0x82, 'ƒ': 0x83, '„': 0x84, '…': 0x85,
+	'†': 0x86, '‡': 0x87, 'ˆ': 0x88, '‰': 0x89, 'Š': 0x8A,
+	'‹': 0x8B, 'Œ': 0x8C, 'Ž': 0x8E, '‘': 0x91, '’': 0x92,
+	'“': 0x93, '”': 0x94, '•': 0x95, '–': 0x96, '—': 0x97,
+	'˜': 0x98, '™': 0x99, 'š': 0x9A, '›': 0x9B, 'œ': 0x9C,
+	'ž': 0x9E, 'Ÿ': 0x9F,
+}
+
+// winAnsi encodes text for a font declaring /WinAnsiEncoding: one byte per drawn
+// glyph, which is also what the box is measured in.
+func winAnsi(text string) []byte {
+	out := make([]byte, 0, len(text))
+	for _, r := range text {
+		switch {
+		case r >= 0x20 && r < 0x7F:
+			out = append(out, byte(r))
+		case r >= 0xA0 && r <= 0xFF:
+			out = append(out, byte(r))
+		default:
+			if b, ok := winAnsiHigh[r]; ok {
+				out = append(out, b)
+				continue
+			}
+			out = append(out, winAnsiUnmappable)
+		}
+	}
+	return out
 }
 
 // paraphAppearance is the Form XObject drawn inside the paraph's rectangle. Its
 // coordinate space is the rectangle itself (origin at its lower-left corner), so
 // the text is positioned without reference to where on the page the box sits.
 func paraphAppearance(m Placement, text string, fontID uint32) []byte {
-	fontSize, x, y := paraphTextLayout(text, m.Width, m.Height)
+	drawn := winAnsi(text)
+	fontSize, x, y := paraphTextLayout(len(drawn), m.Width, m.Height)
 	var stream bytes.Buffer
 	stream.WriteString("q\nBT\n")
 	fmt.Fprintf(&stream, "/F1 %.2f Tf\n", fontSize)
 	fmt.Fprintf(&stream, "%.2f %.2f Td\n", x, y)
 	stream.WriteString(paraphInk + "\n")
-	fmt.Fprintf(&stream, "%s Tj\n", pdfLiteral(text))
+	fmt.Fprintf(&stream, "%s Tj\n", pdfLiteral(drawn))
 	stream.WriteString("ET\nQ")
 
 	var obj bytes.Buffer
@@ -164,10 +229,11 @@ func paraphAppearance(m Placement, text string, fontID uint32) []byte {
 
 // paraphTextLayout sizes the paraph text to its box and centres it, the same
 // approximation pdfsign uses for a signature appearance (Times-Roman averages
-// about half its point size per character).
-func paraphTextLayout(text string, width, height float64) (fontSize, x, y float64) {
+// about half its point size per character). It counts the glyphs the content stream
+// actually draws — one per encoded byte — not the runes they came from.
+func paraphTextLayout(glyphs int, width, height float64) (fontSize, x, y float64) {
 	const averageGlyphWidth = 0.5
-	chars := float64(len([]rune(text)))
+	chars := float64(glyphs)
 	fontSize = height * 0.8
 	if chars*fontSize*averageGlyphWidth > width {
 		fontSize = width / (chars * averageGlyphWidth)
@@ -191,7 +257,9 @@ func paraphAnnotation(m Placement, text string, appearanceID uint32, pageRef str
 	fmt.Fprintf(&obj, "  /Rect [%.2f %.2f %.2f %.2f]\n", r[0], r[1], r[2], r[3])
 	fmt.Fprintf(&obj, "  /F %d\n", paraphAnnotationFlags)
 	fmt.Fprintf(&obj, "  /AP << /N %d 0 R >>\n", appearanceID)
-	fmt.Fprintf(&obj, "  /Contents %s\n", pdfLiteral(text))
+	// /Contents is a PDF text string, which is a different encoding from the
+	// appearance stream's bytes: UTF-16BE with a byte-order mark carries any name.
+	fmt.Fprintf(&obj, "  /Contents %s\n", pdfTextString(text))
 	fmt.Fprintf(&obj, "  /P %s\n", pageRef)
 	obj.WriteString(">>")
 	return obj.Bytes()
@@ -212,75 +280,292 @@ func pageReference(rdr *pdf.Reader, number int) (string, error) {
 	return fmt.Sprintf("%d %d R", ptr.GetID(), ptr.GetGen()), nil
 }
 
-// pageWithAnnots re-serialises one page dictionary with extra annotation
-// references appended to its /Annots, and reports the page's own object id and
-// generation so the revision can replace it.
+// pageRewrite is one page dictionary rebuilt for the appended revision, together
+// with the objects rebuilding it had to create.
+type pageRewrite struct {
+	page    incrObject
+	created []incrObject
+}
+
+// rewritePage rebuilds one page dictionary with extra annotation references
+// appended to its /Annots, as an object the revision can put in the page's place.
 //
 // The dictionary is rebuilt key by key rather than copied byte for byte because
-// digitorus/pdf resolves as it reads and does not hand back the raw object. Two
-// keys must not be written through Value.String(), which would inline what they
-// point at: /Parent (inlining the page tree) and /Contents (inlining a stream,
-// which is not even representable). This is the same reconstruction pdfsign does
-// to attach a visible signature's widget, so a page it can carry, this can too.
-func pageWithAnnots(rdr *pdf.Reader, number int, extra []uint32) ([]byte, uint32, uint16, error) {
+// digitorus/pdf resolves as it reads and does not hand back the raw object. What it
+// hands back instead is written out by writeValue, which emits only forms that are
+// valid PDF — never Value.String(), which is a debug formatter.
+//
+// forPdfsign additionally makes the result a page pdfsign's own createIncPageUpdate
+// can round-trip, which the page carrying the signature block has to be: pdfsign
+// rewrites that page again, from this version, and still uses Value.String(). See
+// pdfsignCanEmit for what that costs.
+func rewritePage(rdr *pdf.Reader, number int, extra []uint32, forPdfsign bool, take func() uint32) (pageRewrite, error) {
 	page := rdr.Page(number)
 	if page.V.IsNull() {
-		return nil, 0, 0, ErrInvalidPDF
+		return pageRewrite{}, ErrInvalidPDF
 	}
 	ptr := page.V.GetPtr()
 	if ptr.GetID() == 0 {
-		return nil, 0, 0, ErrInvalidPDF
+		return pageRewrite{}, ErrInvalidPDF
 	}
 
+	var created []incrObject
 	var buf bytes.Buffer
 	buf.WriteString("<<\n")
 	for _, key := range page.V.Keys() {
+		if key == "Annots" {
+			continue // written below, with the new annotations appended
+		}
 		value := page.V.Key(key)
-		switch key {
-		case "Parent", "Contents":
-			if value.Kind() == pdf.Array {
-				fmt.Fprintf(&buf, "  /%s [", key)
-				for i := 0; i < value.Len(); i++ {
-					item := value.Index(i).GetPtr()
-					fmt.Fprintf(&buf, " %d %d R", item.GetID(), item.GetGen())
-				}
-				buf.WriteString(" ]\n")
+		if key == "Parent" {
+			// A page tree node is an indirect object by definition, and inlining it
+			// would detach the page from the tree it hangs off.
+			ref, ok := pdfRef(value, page.V)
+			if !ok {
+				return pageRewrite{}, ErrInvalidPDF
+			}
+			fmt.Fprintf(&buf, "  /Parent %s\n", ref)
+			continue
+		}
+		if forPdfsign && key != "Contents" && !pdfsignCanEmit(value) {
+			if !droppablePageEntries[key] {
+				return pageRewrite{}, fmt.Errorf(
+					"%w: page %d carries /%s, which cannot be rewritten to hold a visible signature",
+					ErrInvalidPDF, number, key)
+			}
+			continue // see droppablePageEntries
+		}
+		// /PieceInfo is a producer's private data and /LastModified is its timestamp;
+		// PDF 32000-1 §14.5 requires the second wherever the first is. The date is a
+		// string, so it never survives pdfsign — and the pair goes together.
+		if forPdfsign && key == "PieceInfo" && !pdfsignCanEmit(page.V.Key("LastModified")) {
+			continue
+		}
+		buf.WriteString("  " + pdfName(key) + " ")
+		if err := writeValue(&buf, value, page.V, 0); err != nil {
+			return pageRewrite{}, err
+		}
+		buf.WriteString("\n")
+	}
+
+	annots := page.V.Key("Annots")
+	if !annots.IsNull() || len(extra) > 0 {
+		buf.WriteString("  /Annots [")
+		for i := 0; i < annots.Len(); i++ {
+			item := annots.Index(i)
+			if ref, ok := pdfRef(item, annots); ok {
+				buf.WriteString(" " + ref)
 				continue
 			}
-			p := value.GetPtr()
-			if p.GetID() == 0 {
-				return nil, 0, 0, ErrInvalidPDF
-			}
-			fmt.Fprintf(&buf, "  /%s %d %d R\n", key, p.GetID(), p.GetGen())
-		case "Annots":
-			buf.WriteString("  /Annots [")
-			for i := 0; i < value.Len(); i++ {
-				item := value.Index(i)
-				if p := item.GetPtr(); p.GetID() != 0 {
-					fmt.Fprintf(&buf, " %d %d R", p.GetID(), p.GetGen())
-					continue
+			// An /Annots array may hold annotation dictionaries directly. pdfsign's
+			// rewrite writes every entry as a reference and so would turn one into a
+			// reference to the page itself, which is why the signature page's are
+			// promoted to objects of their own first — losing nothing.
+			if forPdfsign {
+				id := take()
+				var obj bytes.Buffer
+				if err := writeValue(&obj, item, annots, 0); err != nil {
+					return pageRewrite{}, err
 				}
-				// A directly-embedded annotation has no reference to carry over, so it is
-				// written back in place: an /Annots array may hold dictionaries as well.
-				fmt.Fprintf(&buf, " %s", item.String())
-			}
-			for _, id := range extra {
+				created = append(created, incrObject{id: id, body: obj.Bytes()})
 				fmt.Fprintf(&buf, " %d 0 R", id)
+				continue
 			}
-			buf.WriteString(" ]\n")
-		default:
-			fmt.Fprintf(&buf, "  /%s %s\n", key, value.String())
+			buf.WriteString(" ")
+			if err := writeValue(&buf, item, annots, 0); err != nil {
+				return pageRewrite{}, err
+			}
 		}
-	}
-	if page.V.Key("Annots").IsNull() {
-		buf.WriteString("  /Annots [")
 		for _, id := range extra {
 			fmt.Fprintf(&buf, " %d 0 R", id)
 		}
 		buf.WriteString(" ]\n")
 	}
 	buf.WriteString(">>")
-	return buf.Bytes(), ptr.GetID(), ptr.GetGen(), nil
+
+	return pageRewrite{
+		page:    incrObject{id: ptr.GetID(), gen: ptr.GetGen(), body: buf.Bytes()},
+		created: created,
+	}, nil
+}
+
+// pageNeedsNormalising reports whether the page carrying the signature block has to
+// be rewritten before pdfsign is handed the document — that is, whether pdfsign's
+// own page rewrite would produce something that is not valid PDF.
+func pageNeedsNormalising(rdr *pdf.Reader, number int) (bool, error) {
+	page := rdr.Page(number)
+	if page.V.IsNull() {
+		return false, ErrInvalidPDF
+	}
+	if ptr := page.V.GetPtr(); ptr.GetID() == 0 {
+		return false, ErrInvalidPDF
+	}
+	for _, key := range page.V.Keys() {
+		switch key {
+		case "Parent", "Contents":
+			// pdfsign writes both back as references, which is what they are.
+		case "Annots":
+			annots := page.V.Key(key)
+			for i := 0; i < annots.Len(); i++ {
+				if _, ok := pdfRef(annots.Index(i), annots); !ok {
+					return true, nil
+				}
+			}
+		default:
+			if !pdfsignCanEmit(page.V.Key(key)) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// droppablePageEntries are the page-dictionary keys that may be dropped from the
+// signature block's page when pdfsign cannot write them back. All of it is metadata:
+// none of it is drawn on the page or changes what the page does, and the drop
+// happens inside the bytes that signature covers, which is the only place a change
+// to a signed document may be. Any other entry pdfsign cannot write back is refused
+// instead — a page that quietly lost, say, its /Resources would come out blank, and
+// blank is not better than an error.
+var droppablePageEntries = map[string]bool{
+	"Metadata":     true, // page-level XMP
+	"Thumb":        true, // a pre-rendered thumbnail of the page
+	"LastModified": true, // the timestamp /PieceInfo is required to carry
+	"PieceInfo":    true, // a producer's private data (InDesign, Illustrator)
+	"ID":           true, // the PDF 2.0 page identifier
+}
+
+// maxValueDepth bounds how far into a page entry these walks go. Nothing in a page
+// dictionary is legitimately this nested, and a document whose page dictionary holds
+// a direct reference to itself would otherwise recurse until the stack gives out —
+// which, unlike digitorus/pdf's panics, no recover() can catch.
+const maxValueDepth = 32
+
+// pdfRef reports the "id gen R" reference a value was read from, and whether it was
+// read from one at all. digitorus/pdf resolves a reference as it reads (both
+// Value.Key and Value.Index go through Reader.resolve), and the resolved value
+// carries the object it came from, while a value written out directly carries its
+// container's instead. Comparing the two is the only way back to "was this a
+// reference", and it is what lets a page be rebuilt without inlining half the file.
+func pdfRef(value, container pdf.Value) (string, bool) {
+	ptr, own := value.GetPtr(), container.GetPtr()
+	id, gen := ptr.GetID(), ptr.GetGen()
+	if id == 0 || (id == own.GetID() && gen == own.GetGen()) {
+		return "", false
+	}
+	return fmt.Sprintf("%d %d R", id, gen), true
+}
+
+// writeValue writes value back as PDF syntax, following references by writing the
+// reference rather than what it points at. Anything it cannot represent is an error
+// rather than a guess: this runs over a document that is about to be signed.
+func writeValue(buf *bytes.Buffer, value, container pdf.Value, depth int) error {
+	if depth > maxValueDepth {
+		return ErrInvalidPDF
+	}
+	if ref, ok := pdfRef(value, container); ok {
+		buf.WriteString(ref)
+		return nil
+	}
+	switch value.Kind() {
+	case pdf.Null:
+		buf.WriteString("null")
+	case pdf.Bool:
+		fmt.Fprintf(buf, "%t", value.Bool())
+	case pdf.Integer:
+		fmt.Fprintf(buf, "%d", value.Int64())
+	case pdf.Real:
+		buf.WriteString(strconv.FormatFloat(value.Float64(), 'f', -1, 64))
+	case pdf.Name:
+		buf.WriteString(pdfName(value.Name()))
+	case pdf.String:
+		// A hex string carries any byte sequence and needs no escaping, so it is the
+		// one form a string read back out of a document always survives.
+		fmt.Fprintf(buf, "<%X>", value.RawString())
+	case pdf.Array:
+		buf.WriteString("[")
+		for i := 0; i < value.Len(); i++ {
+			if i > 0 {
+				buf.WriteString(" ")
+			}
+			if err := writeValue(buf, value.Index(i), value, depth+1); err != nil {
+				return err
+			}
+		}
+		buf.WriteString("]")
+	case pdf.Dict:
+		buf.WriteString("<<")
+		for _, key := range value.Keys() {
+			buf.WriteString(" " + pdfName(key) + " ")
+			if err := writeValue(buf, value.Key(key), value, depth+1); err != nil {
+				return err
+			}
+		}
+		buf.WriteString(" >>")
+	default:
+		// A stream is an indirect object, so one reached here was written directly
+		// into a dictionary: not representable, and not a document to sign blind.
+		return ErrInvalidPDF
+	}
+	return nil
+}
+
+// pdfsignCanEmit reports whether pdfsign's createIncPageUpdate would write a page
+// entry back as valid PDF. Every key it does not special-case goes through
+// digitorus/pdf's Value.String(), which is a debug formatter: a stream comes out as
+// `<<...>>@offset` and a string Go-quoted, and neither parses. Value.String() does
+// not resolve references, so a nested reference is fine — only a value written into
+// the page dictionary itself can carry a string or a stream this far.
+//
+// An entry it cannot emit has to leave the page before pdfsign sees it: pdfsign
+// rewrites that page whatever we do, and there is no form of such an entry that
+// survives being resolved and re-formatted, so keeping it means a signed document
+// that does not parse. What may be dropped is droppablePageEntries and nothing else.
+// See AGENTS.md.
+func pdfsignCanEmit(value pdf.Value) bool {
+	return valueSurvivesObjfmt(value, value, 0)
+}
+
+func valueSurvivesObjfmt(value, container pdf.Value, depth int) bool {
+	if depth > maxValueDepth {
+		return false
+	}
+	if _, ok := pdfRef(value, container); ok {
+		return true // written as "id gen R"
+	}
+	switch value.Kind() {
+	case pdf.Stream, pdf.String:
+		return false
+	case pdf.Array:
+		for i := 0; i < value.Len(); i++ {
+			if !valueSurvivesObjfmt(value.Index(i), value, depth+1) {
+				return false
+			}
+		}
+	case pdf.Dict:
+		for _, key := range value.Keys() {
+			if !valueSurvivesObjfmt(value.Key(key), value, depth+1) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// pdfName writes a name back, escaping everything a name may not carry directly
+// (PDF 32000-1 §7.3.5). digitorus/pdf hands names back decoded, so a name that
+// arrived escaped has to be escaped again.
+func pdfName(name string) string {
+	var b strings.Builder
+	b.WriteByte('/')
+	for _, c := range []byte(name) {
+		if c < '!' || c > '~' || strings.IndexByte("()<>[]{}/%#", c) >= 0 {
+			fmt.Fprintf(&b, "#%02X", c)
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 // appendRevision writes objects as one incremental revision on the end of input:
@@ -442,12 +727,12 @@ func documentID(rdr *pdf.Reader) string {
 	return fmt.Sprintf("[<%X><%X>]", id.Index(0).RawString(), id.Index(1).RawString())
 }
 
-// pdfLiteral escapes text as a PDF literal string. Only the three characters that
-// can end or nest one need escaping.
-func pdfLiteral(text string) string {
+// pdfLiteral escapes already-encoded bytes as a PDF literal string. Only the three
+// characters that can end or nest one need escaping.
+func pdfLiteral(encoded []byte) string {
 	var b strings.Builder
 	b.WriteByte('(')
-	for _, c := range []byte(text) {
+	for _, c := range encoded {
 		switch c {
 		case '(', ')', '\\':
 			b.WriteByte('\\')
@@ -455,5 +740,18 @@ func pdfLiteral(text string) string {
 		b.WriteByte(c)
 	}
 	b.WriteByte(')')
+	return b.String()
+}
+
+// pdfTextString writes text as a PDF text string (PDF 32000-1 §7.9.2.2): UTF-16BE
+// behind a byte-order mark, as a hex string, which needs no escaping and carries a
+// name from any script.
+func pdfTextString(text string) string {
+	var b strings.Builder
+	b.WriteString("<FEFF")
+	for _, unit := range utf16.Encode([]rune(text)) {
+		fmt.Fprintf(&b, "%04X", unit)
+	}
+	b.WriteByte('>')
 	return b.String()
 }
