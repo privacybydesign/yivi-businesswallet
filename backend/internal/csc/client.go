@@ -72,5 +72,12 @@ func (c *Client) Info(ctx context.Context, baseURL string) (Info, error) {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxInfoBody)).Decode(&info); err != nil {
 		return Info{}, &TestError{Reason: "the CSC endpoint did not return a valid /info response"}
 	}
+	// name and specs are both required in a CSC API v2 /info response, so a 2xx that
+	// decodes as any JSON object (e.g. a bare {"ok":true} from some other endpoint the
+	// probe reached) is not proof it speaks CSC v2. Reject an empty one as a failed
+	// test rather than reporting a blank "Connected to  (CSC )." success.
+	if info.Name == "" || info.Specs == "" {
+		return Info{}, &TestError{Reason: "the CSC endpoint did not return a valid /info response"}
+	}
 	return info, nil
 }

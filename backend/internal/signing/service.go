@@ -426,12 +426,37 @@ func (s *Service) finishSign(ctx context.Context, c *ceremony, accessToken strin
 		if err := s.store.CompleteRequest(ctx, c.orgID, c.requestID); err != nil {
 			slog.ErrorContext(ctx, "signing: complete request", slog.String("error", err.Error()))
 		}
-		s.deliver(ctx, c.orgID, c.requestID)
+		// Deliver off the request goroutine: it is best-effort (outcome polled from
+		// delivery_status) and would otherwise make the last signer's browser wait on
+		// the SMTP/QERDS round trip carrying the full PDF before the redirect. Its own
+		// background context also survives the redirect that cancels the request's ctx.
+		s.deliverAsync(c.orgID, c.requestID)
 	} else {
 		// Sequential mode: it is now the next signer's turn — let them know.
 		s.notifyNextSequential(ctx, c.orgID, c.slug, c.requestID)
 	}
 	return s.resultURL(c, "request="+c.requestID.String())
+}
+
+// DeliverTimeout bounds a background delivery (SMTP conversation or QERDS round
+// trip) so a stalled recipient server cannot leak the goroutine indefinitely.
+const DeliverTimeout = 2 * time.Minute
+
+// deliverAsync runs deliver on its own goroutine with a detached, bounded context,
+// so a completed request's callback returns to the browser immediately and the
+// delivery outcome is still recorded after the request's own context is cancelled.
+// It recovers panics: a panic on a spawned goroutine would otherwise kill the process.
+func (s *Service) deliverAsync(orgID, requestID uuid.UUID) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("signing: deliver panicked", slog.Any("recover", r))
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), DeliverTimeout)
+		defer cancel()
+		s.deliver(ctx, orgID, requestID)
+	}()
 }
 
 // deliver dispatches a completed request's signed document to its recipient over
@@ -549,14 +574,17 @@ func (s *Service) notifyNextSequential(ctx context.Context, orgID uuid.UUID, slu
 }
 
 // failSign abandons the parked PAdES pass, releases the in-flight lock and marks
-// the request (and the acting signer) failed.
+// only the acting signer's attempt failed — never the whole request. The request
+// stays awaiting_signatures so a transient error (a QTSP reject, a token-exchange
+// blip) leaves it retryable and does not strand co-signers' already-applied
+// signatures. The failed signer is offered the document again (ListPendingForUser).
 func (s *Service) failSign(ctx context.Context, c *ceremony, reason string, cause error) string {
 	if c.pades != nil {
 		c.pades.abandon(cause)
 	}
 	s.release(c.requestID)
-	if err := s.store.FailRequest(ctx, c.orgID, c.requestID, c.signer.signerID, reason); err != nil {
-		slog.ErrorContext(ctx, "signing: mark request failed", slog.String("error", err.Error()))
+	if err := s.store.MarkSignerFailed(ctx, c.orgID, c.requestID, c.signer.signerID, reason); err != nil {
+		slog.ErrorContext(ctx, "signing: mark signer failed", slog.String("error", err.Error()))
 	}
 	slog.ErrorContext(ctx, "signing: sign ceremony failed", slog.String("reason", reason), slog.String("error", cause.Error()))
 	return s.resultURL(c, "request="+c.requestID.String())

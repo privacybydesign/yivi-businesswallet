@@ -38,7 +38,8 @@ func TestBuildMIMEWithAttachment(t *testing.T) {
 	if !strings.Contains(got, "Content-Type: multipart/alternative") {
 		t.Fatal("the body alternative must still be present inside the mixed wrapper")
 	}
-	if !strings.Contains(got, `Content-Disposition: attachment; filename="contract.pdf"`) {
+	// mime.FormatMediaType emits an unquoted token for a plain ASCII filename.
+	if !strings.Contains(got, "Content-Disposition: attachment; filename=contract.pdf") {
 		t.Fatal("expected the PDF as a disposition:attachment part")
 	}
 	if !strings.Contains(got, "Content-Type: application/pdf") {
@@ -49,5 +50,25 @@ func TestBuildMIMEWithAttachment(t *testing.T) {
 	}
 	if !strings.HasSuffix(strings.TrimRight(got, "\r\n"), "--"+mixedBoundary+"--") {
 		t.Fatal("expected the mixed wrapper to be closed")
+	}
+}
+
+// A non-ASCII (Dutch) filename must ride as the RFC 2231 filename*= form, not raw
+// 8-bit bytes in a header, and must not inject header lines.
+func TestBuildMIMEAttachmentEncodesNonASCIIFilename(t *testing.T) {
+	cfg := Config{FromAddress: "no-reply@example.org"}
+	msg := Message{
+		To:      "recipient@example.org",
+		Subject: "Doc",
+		Attachments: []Attachment{
+			{Filename: "reçu \"final\".pdf", ContentType: "application/pdf", Bytes: []byte("x")},
+		},
+	}
+	got := buildMIME(cfg, msg)
+	if !strings.Contains(got, "filename*=utf-8''") {
+		t.Fatalf("expected an RFC 2231 filename* form, got:\n%s", got)
+	}
+	if strings.Contains(got, "reçu") {
+		t.Fatal("the raw non-ASCII filename must not appear unencoded in the header")
 	}
 }

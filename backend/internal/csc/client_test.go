@@ -28,6 +28,24 @@ func TestClientInfoParsesProviderInfo(t *testing.T) {
 	}
 }
 
+// A 2xx that decodes as a JSON object but lacks the required CSC v2 /info fields
+// (name, specs) is a failed test, not a blank success — otherwise any endpoint the
+// probe happens to reach would read as "connected".
+func TestClientInfoRejectsEmptyInfo(t *testing.T) {
+	for _, body := range []string{`{"ok":true}`, `{"name":"","specs":""}`, `{"specs":"2.2.0.0"}`} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		}))
+		_, err := NewClient().Info(context.Background(), server.URL)
+		server.Close()
+		var testErr *TestError
+		if !errors.As(err, &testErr) {
+			t.Fatalf("Info(%s) error = %v, want *TestError", body, err)
+		}
+	}
+}
+
 // A non-2xx answer becomes a TestError carrying the status code only — never the
 // far side's error document, and never the URL that would have been reachable.
 func TestClientInfoRedactsNon2xx(t *testing.T) {

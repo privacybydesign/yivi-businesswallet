@@ -28,6 +28,7 @@ import {
   useSigningRequestQuery,
   useStartSignRequestMutation,
 } from "../api/signing.queries";
+import { useMeQuery } from "../api/auth.queries";
 import {
   useOrganizationMembersQuery,
   useOrganizationQuery,
@@ -161,13 +162,31 @@ export default function Signing(): React.JSX.Element {
     <>
       <TopBar title={t("signing.title")} subtitle={t("signing.subtitle")} />
 
-      <div className="border-line bg-surface flex gap-1 border-b px-8">
+      <div
+        role="tablist"
+        aria-label={t("signing.title")}
+        className="border-line bg-surface flex gap-1 border-b px-8"
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+          e.preventDefault();
+          const i = tabs.findIndex((tab) => tab.key === activeTab);
+          const delta = e.key === "ArrowRight" ? 1 : -1;
+          const nextTab = tabs[(i + delta + tabs.length) % tabs.length];
+          setTab(nextTab.key);
+          document.getElementById(`signing-tab-${nextTab.key}`)?.focus();
+        }}
+      >
         {tabs.map((tab) => {
           const active = activeTab === tab.key;
           return (
             <button
               key={tab.key}
+              id={`signing-tab-${tab.key}`}
               type="button"
+              role="tab"
+              aria-selected={active}
+              aria-controls="signing-tabpanel"
+              tabIndex={active ? 0 : -1}
               onClick={() => setTab(tab.key)}
               className={[
                 "h-11 border-b-2 px-3.5 text-[13.5px] transition-colors",
@@ -182,7 +201,12 @@ export default function Signing(): React.JSX.Element {
         })}
       </div>
 
-      <div className="p-8">
+      <div
+        id="signing-tabpanel"
+        role="tabpanel"
+        aria-labelledby={`signing-tab-${activeTab}`}
+        className="p-8"
+      >
         {activeTab === "history" ? (
           <SigningHistoryPanel slug={slug} enabled={isAdmin} />
         ) : (
@@ -225,7 +249,8 @@ function ActiveRequestCard({
   requestId: string;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const request = useSigningRequestQuery(slug, requestId);
+  const me = useMeQuery();
+  const request = useSigningRequestQuery(slug, requestId, me.data?.id);
 
   const onDownload = (): void => {
     if (!request.data) return;
@@ -537,7 +562,7 @@ function NewRequestTab({
       <form className="mt-5 flex flex-col gap-5" onSubmit={onSubmit}>
         {/* Document */}
         <div>
-          <label className={LABEL}>{t("signing.documentLabel")}</label>
+          <span className={LABEL}>{t("signing.documentLabel")}</span>
           <div className="mt-2 flex flex-col gap-1.5">
             <div className="flex items-center gap-2">
               <label className={FILE_BUTTON}>
@@ -569,11 +594,10 @@ function NewRequestTab({
 
         {/* Signers */}
         <div>
-          <label className={LABEL}>{t("signing.signersLabel")}</label>
+          <span className={LABEL}>{t("signing.signersLabel")}</span>
           <p className="text-ink-soft mt-1 text-[12px]">
             {t("signing.signersHint")}
           </p>
-
           {signers.length === 0 ? (
             <p className="text-ink-soft mt-2 text-[13px]">
               {t("signing.signersEmpty")}
@@ -613,20 +637,25 @@ function NewRequestTab({
             </ul>
           )}
 
-          <p className={`${LABEL} mt-4`}>{t("signing.addSignerLabel")}</p>
-          <div className="mt-2 flex gap-4">
-            {[SIGNER_KIND.internal, SIGNER_KIND.external].map((kind) => (
-              <label key={kind} className="flex items-center gap-2 text-[13px]">
-                <input
-                  type="radio"
-                  name="signerKind"
-                  checked={signerKind === kind}
-                  onChange={() => setSignerKind(kind)}
-                />
-                <span className="text-ink">{signerKindLabel(t, kind)}</span>
-              </label>
-            ))}
-          </div>
+          <fieldset className="mt-4 border-0 p-0">
+            <legend className={LABEL}>{t("signing.addSignerLabel")}</legend>
+            <div className="mt-2 flex gap-4">
+              {[SIGNER_KIND.internal, SIGNER_KIND.external].map((kind) => (
+                <label
+                  key={kind}
+                  className="flex items-center gap-2 text-[13px]"
+                >
+                  <input
+                    type="radio"
+                    name="signerKind"
+                    checked={signerKind === kind}
+                    onChange={() => setSignerKind(kind)}
+                  />
+                  <span className="text-ink">{signerKindLabel(t, kind)}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
 
           {signerKind === SIGNER_KIND.internal ? (
             <>
@@ -635,6 +664,7 @@ function NewRequestTab({
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={t("signing.searchMembers")}
+                  aria-label={t("signing.searchMembers")}
                 />
               </div>
               <div className="border-line mt-2 max-h-56 overflow-y-auto rounded-md border">
@@ -679,12 +709,14 @@ function NewRequestTab({
                 value={externalName}
                 onChange={(e) => setExternalName(e.target.value)}
                 placeholder={t("signing.externalNamePlaceholder")}
+                aria-label={t("signing.externalNamePlaceholder")}
               />
               <Input
                 type="email"
                 value={externalEmail}
                 onChange={(e) => setExternalEmail(e.target.value)}
                 placeholder={t("signing.externalEmailPlaceholder")}
+                aria-label={t("signing.externalEmailPlaceholder")}
               />
               <div>
                 <Button
@@ -701,8 +733,8 @@ function NewRequestTab({
         </div>
 
         {/* Mode */}
-        <div>
-          <label className={LABEL}>{t("signing.orderLabel")}</label>
+        <fieldset className="border-0 p-0">
+          <legend className={LABEL}>{t("signing.orderLabel")}</legend>
           <div className="mt-2 flex gap-4">
             {[SIGNING_MODE.parallel, SIGNING_MODE.sequential].map((m) => (
               <label key={m} className="flex items-center gap-2 text-[13px]">
@@ -721,16 +753,17 @@ function NewRequestTab({
               ? t("signing.sequentialHint")
               : t("signing.parallelHint")}
           </p>
-        </div>
+        </fieldset>
 
         {/* Recipient */}
         <div>
-          <label className={LABEL}>{t("signing.recipientLabel")}</label>
+          <span className={LABEL}>{t("signing.recipientLabel")}</span>
           <p className="text-ink-soft mt-1 text-[12px]">
             {t("signing.recipientHint")}
           </p>
           <select
             className={`${CONTROL} mt-2 h-9`}
+            aria-label={t("signing.recipientLabel")}
             value={channel}
             onChange={(e) => setChannel(e.target.value as RecipientChannel)}
           >
@@ -755,11 +788,17 @@ function NewRequestTab({
                     ? t("signing.recipientEmailPlaceholder")
                     : t("signing.recipientQerdsPlaceholder")
                 }
+                aria-label={
+                  channel === RECIPIENT_CHANNEL.email
+                    ? t("signing.recipientEmailPlaceholder")
+                    : t("signing.recipientQerdsPlaceholder")
+                }
               />
               <Input
                 value={recipientName}
                 onChange={(e) => setRecipientName(e.target.value)}
                 placeholder={t("signing.recipientNamePlaceholder")}
+                aria-label={t("signing.recipientNamePlaceholder")}
               />
               <textarea
                 className={CONTROL}
@@ -767,6 +806,7 @@ function NewRequestTab({
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder={t("signing.messagePlaceholder")}
+                aria-label={t("signing.messagePlaceholder")}
               />
             </div>
           )}

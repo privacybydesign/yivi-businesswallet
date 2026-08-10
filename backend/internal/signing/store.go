@@ -331,23 +331,24 @@ func (s *Store) SetDelivery(ctx context.Context, orgID, id uuid.UUID, status, re
 	})
 }
 
-// FailRequest marks a request (and, when set, the acting signer row) failed with a
-// redaction-safe reason and audits it.
-func (s *Store) FailRequest(ctx context.Context, orgID, id, signerID uuid.UUID, reason string) error {
+// MarkSignerFailed marks one signer's attempt failed with a redaction-safe reason
+// and audits it. It deliberately does NOT touch the request status: an error (or
+// timeout) on one signer must leave the request awaiting_signatures and retryable,
+// not brick a co-signing request that may already carry other qualified signatures.
+// A failed signer is offered the document again (see ListPendingForUser), and a
+// successful retry flips them to signed. signerID is the signer row's own id, so it
+// addresses an internal member and an external signee alike.
+func (s *Store) MarkSignerFailed(ctx context.Context, orgID, id, signerID uuid.UUID, reason string) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		const update = `UPDATE signing_requests SET status=$2, error=$3, updated_at=now() WHERE id=$1`
-		if _, err := q.Exec(ctx, update, id, StatusFailed, reason); err != nil {
-			return fmt.Errorf("signing: fail request %s: %w", id, err)
-		}
-		if signerID != uuid.Nil {
-			const markSigner = `UPDATE signing_request_signers SET status=$3 WHERE request_id=$1 AND id=$2`
-			if _, err := q.Exec(ctx, markSigner, id, signerID, SignerFailed); err != nil {
-				return fmt.Errorf("signing: mark signer failed %s: %w", id, err)
-			}
+		const markSigner = `UPDATE signing_request_signers SET status=$3 WHERE request_id=$1 AND id=$2`
+		if _, err := q.Exec(ctx, markSigner, id, signerID, SignerFailed); err != nil {
+			return fmt.Errorf("signing: mark signer failed %s: %w", id, err)
 		}
 		return s.audit.Record(ctx, q, audit.SigningFailed,
 			audit.Target{Type: audit.TargetSigningRequest, ID: id.String(), OrgID: &orgID},
-			audit.Updated(map[string]any{"status": StatusAwaitingSignatures}, map[string]any{"status": StatusFailed, "error": reason}))
+			audit.Updated(
+				map[string]any{"signer": signerID.String(), "status": SignerPending},
+				map[string]any{"signer": signerID.String(), "status": SignerFailed, "error": reason}))
 	})
 }
 
@@ -376,31 +377,15 @@ func (s *Store) GetRequest(ctx context.Context, orgID, id uuid.UUID) (Request, e
 	return req, nil
 }
 
-// getSigners loads a request's signer rows ordered by sign_order. An internal
-// member's name/email is left to the service to enrich from the member directory; an
-// external signee carries their own, since there is no directory to look them up in.
+// getSigners loads one request's signer rows ordered by sign_order. It goes through
+// signersFor so a single request and a page of them read the same columns and derive
+// a signer's kind the same way.
 func (s *Store) getSigners(ctx context.Context, id uuid.UUID) ([]Signer, error) {
-	const query = `SELECT id, user_id, external_email, external_name, sign_order, status, signed_at
-		FROM signing_request_signers WHERE request_id=$1 ORDER BY sign_order, id`
-	rows, err := s.db.Query(ctx, query, id)
+	byRequest, err := s.signersFor(ctx, []uuid.UUID{id})
 	if err != nil {
-		return nil, fmt.Errorf("signing: list signers %s: %w", id, err)
+		return nil, err
 	}
-	defer rows.Close()
-	var out []Signer
-	for rows.Next() {
-		var sg Signer
-		var email, name string
-		if err := rows.Scan(&sg.ID, &sg.UserID, &email, &name, &sg.Order, &sg.Status, &sg.SignedAt); err != nil {
-			return nil, fmt.Errorf("signing: scan signer: %w", err)
-		}
-		sg.Kind = KindInternal
-		if sg.UserID == nil {
-			sg.Kind, sg.Email, sg.Name = KindExternal, email, name
-		}
-		out = append(out, sg)
-	}
-	return out, rows.Err()
+	return byRequest[id], nil
 }
 
 // GetSignedDocument returns the final signed PDF + filename, or ErrNotCompleted.
@@ -422,9 +407,10 @@ func (s *Store) GetSignedDocument(ctx context.Context, orgID, id uuid.UUID) ([]b
 	return doc, filename, nil
 }
 
-// ListPendingForUser returns the awaiting-signature requests where userID is a
-// still-pending signer whose turn it is: for sequential mode, every signer with a
-// lower sign_order must already have signed. Newest first.
+// ListPendingForUser returns the awaiting-signature requests where userID still
+// has to sign and it is their turn: their own signer row is not yet signed (pending
+// or a failed attempt they can retry), and for sequential mode every signer with a
+// lower sign_order has already signed. Newest first.
 func (s *Store) ListPendingForUser(ctx context.Context, orgID, userID uuid.UUID) ([]Request, error) {
 	const query = `
 		SELECT r.id, r.status, r.filename, r.signing_mode, r.created_by, r.recipient_channel,
@@ -434,31 +420,39 @@ func (s *Store) ListPendingForUser(ctx context.Context, orgID, userID uuid.UUID)
 		JOIN signing_request_signers me ON me.request_id = r.id AND me.user_id = $2
 		WHERE r.organization_id = $1
 			AND r.status = $3
-			AND me.status = $4
+			AND me.status <> $4
 			AND (
 				r.signing_mode = $5
 				OR NOT EXISTS (
 					SELECT 1 FROM signing_request_signers earlier
 					WHERE earlier.request_id = r.id
 						AND earlier.sign_order < me.sign_order
-						AND earlier.status <> $6
+						AND earlier.status <> $4
 				)
 			)
 		ORDER BY r.created_at DESC, r.id DESC`
 	rows, err := s.db.Query(ctx, query, orgID, userID, StatusAwaitingSignatures,
-		SignerPending, ModeParallel, SignerSigned)
+		SignerSigned, ModeParallel)
 	if err != nil {
 		return nil, fmt.Errorf("signing: list pending for user %s: %w", userID, err)
 	}
 	return s.scanRequestList(ctx, rows)
 }
 
+// Page-size bounds for ListRequests. This is the single authority that clamps the
+// history page size — the handler passes the raw ?limit through (0 when unset or
+// unparseable) and this brings it into range.
+const (
+	defaultPageLimit = 25
+	maxPageLimit     = 100
+)
+
 // ListRequests returns the org's signing requests, newest first, cursor-paginated.
 // An empty cursor starts at the newest; the returned cursor is empty when there is
 // no further page.
 func (s *Store) ListRequests(ctx context.Context, orgID uuid.UUID, cursor string, limit int) ([]Request, string, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 25
+	if limit <= 0 || limit > maxPageLimit {
+		limit = defaultPageLimit
 	}
 	curTime, curID, hasCursor, err := decodeCursor(cursor)
 	if err != nil {
@@ -517,14 +511,53 @@ func (s *Store) scanRequestList(ctx context.Context, rows pgx.Rows) ([]Request, 
 		return nil, err
 	}
 	rows.Close()
+	if len(requests) == 0 {
+		return requests, nil
+	}
+	// Load all signers in one query rather than one per request (the history page
+	// and the 2s To-sign poll would otherwise be N+1).
+	ids := make([]uuid.UUID, len(requests))
 	for i := range requests {
-		signers, err := s.getSigners(ctx, requests[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		requests[i].Signers = signers
+		ids[i] = requests[i].ID
+	}
+	byRequest, err := s.signersFor(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range requests {
+		requests[i].Signers = byRequest[requests[i].ID]
 	}
 	return requests, nil
+}
+
+// signersFor loads the signer rows for many requests in one query, grouped by
+// request id (ordered by sign_order within each). An internal member's name/email is
+// left to the service to enrich from the member directory; an external signee carries
+// their own, since there is no directory to look them up in.
+func (s *Store) signersFor(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]Signer, error) {
+	const query = `SELECT request_id, id, user_id, external_email, external_name, sign_order, status, signed_at
+		FROM signing_request_signers WHERE request_id = ANY($1) ORDER BY request_id, sign_order, id`
+	rows, err := s.db.Query(ctx, query, ids)
+	if err != nil {
+		return nil, fmt.Errorf("signing: list signers for %d requests: %w", len(ids), err)
+	}
+	defer rows.Close()
+	out := make(map[uuid.UUID][]Signer, len(ids))
+	for rows.Next() {
+		var requestID uuid.UUID
+		var sg Signer
+		var email, name string
+		if err := rows.Scan(&requestID, &sg.ID, &sg.UserID, &email, &name,
+			&sg.Order, &sg.Status, &sg.SignedAt); err != nil {
+			return nil, fmt.Errorf("signing: scan signer: %w", err)
+		}
+		sg.Kind = KindInternal
+		if sg.UserID == nil {
+			sg.Kind, sg.Email, sg.Name = KindExternal, email, name
+		}
+		out[requestID] = append(out[requestID], sg)
+	}
+	return out, rows.Err()
 }
 
 // scanRow is the subset of pgx.Row/pgx.Rows scanRequest reads from.

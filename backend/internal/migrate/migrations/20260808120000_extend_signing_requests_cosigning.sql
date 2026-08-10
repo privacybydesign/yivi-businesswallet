@@ -24,8 +24,10 @@ ALTER TABLE signing_requests
 -- Default it so inserts that omit it still satisfy the NOT NULL.
 ALTER TABLE signing_requests ALTER COLUMN credential_id SET DEFAULT '';
 
--- Cursor pagination for the org-wide signed-documents history (newest first).
-CREATE INDEX idx_signing_requests_org_created ON signing_requests (organization_id, created_at DESC, id);
+-- Cursor pagination for the org-wide signed-documents history (newest first). The
+-- trailing id is DESC to match ListRequests' ORDER BY created_at DESC, id DESC and
+-- its (created_at, id) < (cursor) keyset, so the page is a clean index range scan.
+CREATE INDEX idx_signing_requests_org_created ON signing_requests (organization_id, created_at DESC, id DESC);
 
 -- +goose Down
 DROP INDEX idx_signing_requests_org_created;
