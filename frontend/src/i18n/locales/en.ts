@@ -686,6 +686,10 @@ export const en = {
     newDescription:
       "Upload a PDF, choose who must sign it, and where the signed document should be delivered.",
     documentLabel: "Document (PDF)",
+    documentChoose: "Choose file",
+    documentReplace: "Replace file",
+    documentRemove: "Remove",
+    documentNone: "No file chosen",
     signersLabel: "Signers",
     signersHint: "Select the members who must sign this document.",
     searchMembers: "Search members…",

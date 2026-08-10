@@ -39,6 +39,11 @@ const CONFLICT_STATUS = 409;
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const CONTROL =
   "border-line bg-surface text-ink w-full rounded-md border px-3 py-2 text-[13px]";
+// The native file input's `file:` button carries no hover/focus affordance, so the
+// input is visually hidden and the wrapping label is styled as a button — the same
+// pattern the profile, theme and issuer screens use.
+const FILE_BUTTON =
+  "rounded-yivi border-line-strong bg-surface text-ink hover:bg-surface-3 focus-within:border-ink focus-within:ring-ink/10 inline-flex h-9 cursor-pointer items-center border px-3 text-[13px] font-medium transition-colors focus-within:ring-3";
 const MEMBER_PAGE_LIMIT = 200;
 
 type TabKey = "toSign" | "new" | "credential" | "history";
@@ -481,12 +486,33 @@ function NewRequestTab({
         {/* Document */}
         <div>
           <label className={LABEL}>{t("signing.documentLabel")}</label>
-          <input
-            type="file"
-            accept="application/pdf"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="text-ink file:bg-surface-2 mt-2 block text-[13px] file:mr-3 file:rounded-md file:border-0 file:px-3 file:py-1.5 file:text-[13px] file:font-medium"
-          />
+          <div className="mt-2 flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <label className={FILE_BUTTON}>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  className="sr-only"
+                  onChange={(e) => {
+                    setFile(e.target.files?.[0] ?? null);
+                    // Reset so picking the same file after removing it fires onChange again.
+                    e.target.value = "";
+                  }}
+                />
+                {file
+                  ? t("signing.documentReplace")
+                  : t("signing.documentChoose")}
+              </label>
+              {file && (
+                <Button variant="ghost" size="sm" onClick={() => setFile(null)}>
+                  {t("signing.documentRemove")}
+                </Button>
+              )}
+            </div>
+            <span className="text-ink-soft truncate text-[12px]">
+              {file ? file.name : t("signing.documentNone")}
+            </span>
+          </div>
         </div>
 
         {/* Signers */}

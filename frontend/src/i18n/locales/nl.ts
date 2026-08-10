@@ -706,6 +706,10 @@ export const nl: Translation<typeof en> = {
     newDescription:
       "Upload een PDF, kies wie moet ondertekenen en waar het ondertekende document naartoe moet.",
     documentLabel: "Document (PDF)",
+    documentChoose: "Bestand kiezen",
+    documentReplace: "Bestand vervangen",
+    documentRemove: "Verwijderen",
+    documentNone: "Geen bestand gekozen",
     signersLabel: "Ondertekenaars",
     signersHint: "Selecteer de leden die dit document moeten ondertekenen.",
     searchMembers: "Zoek leden…",
