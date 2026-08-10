@@ -20,12 +20,6 @@ import (
 // memory; a QES demo signs ordinary documents.
 const maxUploadBytes = 10 << 20
 
-// defaultHistoryLimit / maxHistoryLimit bound the signed-documents history page.
-const (
-	defaultHistoryLimit = 25
-	maxHistoryLimit     = 100
-)
-
 type signingService interface {
 	StartLink(ctx context.Context, orgID, userID uuid.UUID, slug string) (Start, error)
 	CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, slug, filename string, pdf []byte, signerIDs []uuid.UUID, mode string, rec RecipientInput) (uuid.UUID, error)
@@ -192,12 +186,9 @@ func (h *Handler) listPending(w http.ResponseWriter, r *http.Request) error {
 
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
-	limit := defaultHistoryLimit
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= maxHistoryLimit {
-			limit = n
-		}
-	}
+	// A missing or unparseable limit becomes 0; Store.ListRequests is the single
+	// authority that clamps it into range (see its page-limit consts).
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	reqs, next, err := h.svc.ListRequests(r.Context(), org.ID, r.URL.Query().Get("cursor"), limit)
 	if errors.Is(err, ErrInvalidRequest) {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_cursor", Message: "invalid pagination cursor"}

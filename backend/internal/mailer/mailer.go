@@ -14,6 +14,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"mime"
 	"net"
 	"net/smtp"
 	"strconv"
@@ -286,7 +287,16 @@ func writeAttachment(b *strings.Builder, att Attachment) {
 	fmt.Fprintf(b, "--%s\r\n", mixedBoundary)
 	fmt.Fprintf(b, "Content-Type: %s\r\n", headerReplacer.Replace(contentType))
 	b.WriteString("Content-Transfer-Encoding: base64\r\n")
-	fmt.Fprintf(b, "Content-Disposition: attachment; filename=%q\r\n\r\n", headerReplacer.Replace(att.Filename))
+	// mime.FormatMediaType emits the RFC 2231 filename*= form for a non-ASCII name
+	// (the normal case for a Dutch user base) and correctly escapes it — %q is Go
+	// quoting, not a MIME quoted-string, and would put raw 8-bit bytes in a header.
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": att.Filename})
+	if disposition == "" {
+		// FormatMediaType returns "" only for an unrepresentable value; fall back to a
+		// bare attachment disposition rather than emitting a malformed header.
+		disposition = "attachment"
+	}
+	fmt.Fprintf(b, "Content-Disposition: %s\r\n\r\n", disposition)
 	b.WriteString(wrapBase64(att.Bytes))
 	b.WriteString("\r\n")
 }

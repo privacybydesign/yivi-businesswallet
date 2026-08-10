@@ -71,9 +71,7 @@ export function SigningHistoryPanel({
             <Table.HeaderCell>
               {t("signedDocuments.columns.status")}
             </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("signedDocuments.columns.document")}
-            </Table.HeaderCell>
+            <Table.HeaderCell>{t("signedDocuments.download")}</Table.HeaderCell>
           </Table.Head>
           <Table.Body>
             {history.isPending ? (

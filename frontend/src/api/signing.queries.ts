@@ -11,6 +11,7 @@ import type {
   UseQueryResult,
 } from "@tanstack/react-query";
 import {
+  SIGNER_STATUS,
   SIGNING_STATUS,
   createSigningRequest,
   getPendingSigningRequests,
@@ -82,16 +83,29 @@ export function useSigningCredentialQuery(
 export function useSigningRequestQuery(
   slug: string,
   id: string | null,
+  myUserId?: string,
 ): UseQueryResult<SigningRequest, Error> {
   return useQuery({
     queryKey: signingRequestQueryKey(slug, id ?? ""),
     queryFn: ({ signal }) => getSigningRequest(slug, id!, signal),
     enabled: slug !== "" && id !== null,
-    // Keep polling only while the ceremony is still in flight.
-    refetchInterval: (query) =>
-      query.state.data?.status === SIGNING_STATUS.awaitingSignatures
+    // Poll only while the acting user's own signature is still settling. With
+    // co-signing a request stays `awaiting_signatures` until every OTHER signer has
+    // signed — which can be days — so polling on the request status alone would never
+    // stop. Once the caller's own signer entry is signed (or the request is completed
+    // or failed), there is nothing left for this card to wait on.
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data || data.status !== SIGNING_STATUS.awaitingSignatures) {
+        return false;
+      }
+      const mine = myUserId
+        ? (data.signers ?? []).find((s) => s.userId === myUserId)
+        : undefined;
+      return mine && mine.status !== SIGNER_STATUS.signed
         ? POLL_INTERVAL_MS
-        : false,
+        : false;
+    },
   });
 }
 
