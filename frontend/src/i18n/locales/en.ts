@@ -831,6 +831,7 @@ export const en = {
     subtitle: "Organization profile and preferences",
     tabOrg: "Organization",
     tabBranding: "Branding",
+    tabCommunication: "Communication",
     tabEmail: "E-mail",
     tabMailTemplates: "Mail templates",
     tabSlack: "Slack",

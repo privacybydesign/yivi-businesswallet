@@ -216,7 +216,8 @@ is rejected as a leftover.
 
 ## 8. The designer UI
 
-`frontend/src/routes/email-templates.tsx`, a tab on the Settings page beside e-mail and branding.
+`frontend/src/routes/email-templates.tsx`, a section of the Settings page's **Communication** tab
+beside e-mail, Slack, Microsoft Teams and notifications (`frontend/src/lib/settings-tabs.ts`).
 It lists the causes for one language at a time, with a customised/default badge, and opens one
 template at a time in a block designer: the tenant adds, reorders and removes blocks, and edits
 each block's fields in place.

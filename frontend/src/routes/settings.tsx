@@ -2,6 +2,14 @@ import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
+import {
+  COMMUNICATION_SECTIONS,
+  COMMUNICATION_TAB,
+  SETTINGS_TABS,
+  resolveSettingsLocation,
+  settingsTabParam,
+} from "../lib/settings-tabs";
+import type { SettingsLocation } from "../lib/settings-tabs";
 import { Card, TopBar } from "../ui";
 import { DepartmentSettings } from "./department-settings";
 import { EmailSettingsPanel } from "./email-settings";
@@ -20,33 +28,6 @@ import { ThemeSettingsPanel } from "./theme-settings";
 import { WscaWalletPanel } from "./wsca-wallet-settings";
 import * as React from "react";
 
-const TABS = [
-  { key: "org", labelKey: "settings.tabOrg" },
-  { key: "branding", labelKey: "settings.tabBranding" },
-  { key: "email", labelKey: "settings.tabEmail" },
-  { key: "mailTemplates", labelKey: "settings.tabMailTemplates" },
-  { key: "slack", labelKey: "settings.tabSlack" },
-  { key: "msteams", labelKey: "settings.tabTeams" },
-  { key: "notifications", labelKey: "settings.tabNotifications" },
-  { key: "issuer", labelKey: "settings.tabIssuer" },
-  { key: "provisioning", labelKey: "settings.tabProvisioning" },
-  { key: "signing", labelKey: "settings.tabSigning" },
-  { key: "postguard", labelKey: "settings.tabPostguard" },
-  { key: "wallets", labelKey: "settings.tabWallets" },
-] as const;
-
-type TabKey = (typeof TABS)[number]["key"];
-
-const DEFAULT_TAB: TabKey = TABS[0].key;
-
-// The active tab is addressable via ?tab=<key> so links can deep-link to a
-// specific panel (e.g. ?tab=wallets for WSCA activation); an unknown or missing
-// value falls back to the first tab.
-function readTab(params: URLSearchParams): TabKey {
-  const value = params.get("tab");
-  return TABS.find((item) => item.key === value)?.key ?? DEFAULT_TAB;
-}
-
 export default function Settings(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug } = useParams();
@@ -55,15 +36,19 @@ export default function Settings(): React.JSX.Element {
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = readTab(searchParams);
+  // Both nav levels are addressable via ?tab=<key> so links can deep-link to a
+  // specific panel (e.g. ?tab=wallets for WSCA activation, ?tab=slack for the
+  // Slack panel under Communication); see lib/settings-tabs.ts.
+  const { tab, section } = resolveSettingsLocation(searchParams.get("tab"));
 
-  const setTab = (value: TabKey): void => {
+  const goTo = (next: SettingsLocation): void => {
     setSearchParams(
       (prev) => {
-        const next = new URLSearchParams(prev);
-        if (value === DEFAULT_TAB) next.delete("tab");
-        else next.set("tab", value);
-        return next;
+        const params = new URLSearchParams(prev);
+        const value = settingsTabParam(next);
+        if (value === null) params.delete("tab");
+        else params.set("tab", value);
+        return params;
       },
       { replace: true },
     );
@@ -74,13 +59,13 @@ export default function Settings(): React.JSX.Element {
       <TopBar title={t("settings.title")} subtitle={t("settings.subtitle")} />
 
       <div className="border-line bg-surface flex gap-1 border-b px-8">
-        {TABS.map((item) => {
+        {SETTINGS_TABS.map((item) => {
           const active = tab === item.key;
           return (
             <button
               key={item.key}
               type="button"
-              onClick={() => setTab(item.key)}
+              onClick={() => goTo({ tab: item.key, section })}
               className={[
                 "h-11 border-b-2 px-3.5 text-[13.5px] transition-colors",
                 active
@@ -118,16 +103,44 @@ export default function Settings(): React.JSX.Element {
           </div>
         ) : tab === "branding" ? (
           <ThemeSettingsPanel slug={slug} />
-        ) : tab === "email" ? (
-          <EmailSettingsPanel slug={slug} />
-        ) : tab === "mailTemplates" ? (
-          <EmailTemplatesPanel slug={slug} />
-        ) : tab === "slack" ? (
-          <SlackSettingsPanel slug={slug} />
-        ) : tab === "msteams" ? (
-          <TeamsSettingsPanel slug={slug} />
-        ) : tab === "notifications" ? (
-          <NotificationsSettingsPanel slug={slug} />
+        ) : tab === COMMUNICATION_TAB ? (
+          <div className="flex flex-col gap-6">
+            <div
+              role="group"
+              aria-label={t("settings.tabCommunication")}
+              className="bg-surface-3 rounded-yivi inline-flex w-fit flex-wrap gap-1 p-[3px]"
+            >
+              {COMMUNICATION_SECTIONS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() =>
+                    goTo({ tab: COMMUNICATION_TAB, section: item.key })
+                  }
+                  aria-pressed={section === item.key}
+                  className={[
+                    "h-[26px] cursor-pointer rounded-md px-2.5 text-[12.5px] font-semibold transition-colors",
+                    section === item.key
+                      ? "bg-surface text-ink shadow-sm"
+                      : "text-ink-soft hover:text-ink",
+                  ].join(" ")}
+                >
+                  {t(item.labelKey)}
+                </button>
+              ))}
+            </div>
+            {section === "notifications" ? (
+              <NotificationsSettingsPanel slug={slug} />
+            ) : section === "email" ? (
+              <EmailSettingsPanel slug={slug} />
+            ) : section === "mailTemplates" ? (
+              <EmailTemplatesPanel slug={slug} />
+            ) : section === "slack" ? (
+              <SlackSettingsPanel slug={slug} />
+            ) : section === "msteams" ? (
+              <TeamsSettingsPanel slug={slug} />
+            ) : null}
+          </div>
         ) : tab === "issuer" ? (
           <IssuerSettingsPanel slug={slug} />
         ) : tab === "provisioning" ? (

@@ -858,6 +858,7 @@ export const nl: Translation<typeof en> = {
     subtitle: "Profiel en voorkeuren van de organisatie",
     tabOrg: "Organisatie",
     tabBranding: "Branding",
+    tabCommunication: "Communicatie",
     tabEmail: "E-mail",
     tabMailTemplates: "E-mailteksten",
     tabSlack: "Slack",
