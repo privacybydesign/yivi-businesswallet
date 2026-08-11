@@ -2,10 +2,13 @@ package signing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -20,17 +23,28 @@ const maxUploadBytes = 10 << 20
 
 type signingService interface {
 	StartLink(ctx context.Context, orgID, userID uuid.UUID, slug string) (Start, error)
-	StartSign(ctx context.Context, orgID, userID uuid.UUID, slug, filename string, pdf []byte) (Start, error)
+	CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, slug, filename string, pdf []byte, signers []SignerInput, mode string, rec RecipientInput) (uuid.UUID, error)
+	StartSign(ctx context.Context, orgID, userID uuid.UUID, slug string, requestID uuid.UUID) (Start, error)
 	HandleCallback(ctx context.Context, code, state string) string
-	GetRequest(ctx context.Context, orgID, userID, id uuid.UUID) (Request, error)
-	GetSignedDocument(ctx context.Context, orgID, userID, id uuid.UUID) ([]byte, string, error)
+	GetRequest(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) (Request, error)
+	GetSignedDocument(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) ([]byte, string, error)
+	ListPending(ctx context.Context, orgID, userID uuid.UUID) ([]Request, error)
+	ListRequests(ctx context.Context, orgID uuid.UUID, cursor string, limit int) ([]Request, string, error)
 	GetCredential(ctx context.Context, orgID, userID uuid.UUID) (LinkedCredential, error)
 	Available(ctx context.Context, orgID uuid.UUID) (bool, error)
+
+	// The external-signee flow, keyed by the invitation token alone (no session).
+	ExternalView(ctx context.Context, token string) (ExternalView, error)
+	StartExternalLink(ctx context.Context, token string) (Start, error)
+	StartExternalSign(ctx context.Context, token string) (Start, error)
+	ExternalDocument(ctx context.Context, token string) ([]byte, string, error)
 }
 
-// Handler serves the signing ceremony. The per-org routes are member-gated and
-// act on the calling user's own credential/requests; the OAuth callback is a
-// central, unauthenticated route correlated by an unguessable state.
+// Handler serves the co-signing workflow. The per-org routes are member-gated; the
+// history list is additionally admin-gated. Routes that read a specific request
+// widen access to org admins, else require the caller to be its creator or a
+// signer. The OAuth callback is a central, unauthenticated route correlated by an
+// unguessable state.
 type Handler struct {
 	svc         signingService
 	requireUser func(http.Handler) http.Handler
@@ -45,16 +59,31 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	member := func(next http.Handler) http.Handler {
 		return h.requireUser(h.authorize(next))
 	}
+	admin := func(next http.Handler) http.Handler {
+		return h.requireUser(h.authorize(organization.RequireOrgAdmin(next)))
+	}
 	mux.Handle("GET /orgs/{slug}/signing/availability", member(respond.HandlerFunc(h.getAvailability)))
 	mux.Handle("GET /orgs/{slug}/signing/credential", member(respond.HandlerFunc(h.getCredential)))
 	mux.Handle("POST /orgs/{slug}/signing/credential/link", member(respond.HandlerFunc(h.linkCredential)))
 	mux.Handle("POST /orgs/{slug}/signing/requests", member(respond.HandlerFunc(h.createRequest)))
+	mux.Handle("GET /orgs/{slug}/signing/requests", admin(respond.HandlerFunc(h.listRequests)))
+	mux.Handle("GET /orgs/{slug}/signing/requests/pending", member(respond.HandlerFunc(h.listPending)))
+	mux.Handle("POST /orgs/{slug}/signing/requests/{id}/sign", member(respond.HandlerFunc(h.signRequest)))
 	mux.Handle("GET /orgs/{slug}/signing/requests/{id}", member(respond.HandlerFunc(h.getRequest)))
 	mux.Handle("GET /orgs/{slug}/signing/requests/{id}/document", member(respond.HandlerFunc(h.getDocument)))
 
 	// Central OAuth redirect target (matches the QTSP client registration). It is
 	// correlated by state, so it needs no session; it 302s the browser onward.
 	mux.HandleFunc("GET /signing/callback", h.callback)
+
+	// The external-signee routes are unauthenticated by design: an external signee has
+	// no membership and no session, so the unguessable one-time invitation token in the
+	// path is their whole authorization — exactly like GET /invite/{token}. Each route
+	// resolves the token to a single signer row and reads nothing else from the caller.
+	mux.Handle("GET /signing/external/{token}", respond.HandlerFunc(h.externalView))
+	mux.Handle("GET /signing/external/{token}/document", respond.HandlerFunc(h.externalDocument))
+	mux.Handle("POST /signing/external/{token}/credential/link", respond.HandlerFunc(h.externalLink))
+	mux.Handle("POST /signing/external/{token}/sign", respond.HandlerFunc(h.externalSign))
 }
 
 // getAvailability reports whether a signing provider is configured for the org.
@@ -95,6 +124,8 @@ func (h *Handler) linkCredential(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// createRequest stores a new co-signing request: a PDF plus the selected signers,
+// mode and recipient. It does not sign — each signer signs later via signRequest.
 func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	u := auth.UserFromContext(r.Context())
@@ -115,11 +146,73 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 		return &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "document_too_large", Message: "the document is too large"}
 	}
 
-	start, err := h.svc.StartSign(r.Context(), org.ID, u.ID, org.Slug, header.Filename, pdf)
+	signers, err := parseSigners(r.Form["signers"])
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_signers", Message: "select one or more valid signers"}
+	}
+	rec := RecipientInput{
+		Channel: strings.TrimSpace(r.FormValue("recipientChannel")),
+		Address: strings.TrimSpace(r.FormValue("recipientAddress")),
+		Name:    strings.TrimSpace(r.FormValue("recipientName")),
+		Message: r.FormValue("message"),
+	}
+	if rec.Channel == "" {
+		rec.Channel = ChannelNone
+	}
+	mode := strings.TrimSpace(r.FormValue("mode"))
+	if mode == "" {
+		mode = ModeParallel
+	}
+
+	id, err := h.svc.CreateRequest(r.Context(), org.ID, u.ID, org.Slug, header.Filename, pdf, signers, mode, rec)
+	if err := h.mapStartError(err); err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusCreated, map[string]string{"id": id.String()})
+	return nil
+}
+
+// signRequest starts the acting user's signing ceremony for a request and returns
+// the authorize URL to hand off to.
+func (h *Handler) signRequest(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	u := auth.UserFromContext(r.Context())
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+	}
+	start, err := h.svc.StartSign(r.Context(), org.ID, u.ID, org.Slug, id)
 	if err := h.mapStartError(err); err != nil {
 		return err
 	}
 	respond.JSON(w, r, http.StatusOK, start)
+	return nil
+}
+
+func (h *Handler) listPending(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	u := auth.UserFromContext(r.Context())
+	reqs, err := h.svc.ListPending(r.Context(), org.ID, u.ID)
+	if err != nil {
+		return fmt.Errorf("listing pending signing requests: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, map[string]any{"requests": reqs})
+	return nil
+}
+
+func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	// A missing or unparseable limit becomes 0; Store.ListRequests is the single
+	// authority that clamps it into range (see its page-limit consts).
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	reqs, next, err := h.svc.ListRequests(r.Context(), org.ID, r.URL.Query().Get("cursor"), limit)
+	if errors.Is(err, ErrInvalidRequest) {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_cursor", Message: "invalid pagination cursor"}
+	}
+	if err != nil {
+		return fmt.Errorf("listing signing requests: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, map[string]any{"requests": reqs, "nextCursor": next})
 	return nil
 }
 
@@ -130,7 +223,7 @@ func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
 	}
-	req, err := h.svc.GetRequest(r.Context(), org.ID, u.ID, id)
+	req, err := h.svc.GetRequest(r.Context(), org.ID, u.ID, id, organization.IsAdmin(r.Context()))
 	if errors.Is(err, ErrNotFound) {
 		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "signing request not found"}
 	}
@@ -148,7 +241,7 @@ func (h *Handler) getDocument(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
 	}
-	doc, filename, err := h.svc.GetSignedDocument(r.Context(), org.ID, u.ID, id)
+	doc, filename, err := h.svc.GetSignedDocument(r.Context(), org.ID, u.ID, id, organization.IsAdmin(r.Context()))
 	if errors.Is(err, ErrNotFound) {
 		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "signing request not found"}
 	}
@@ -172,7 +265,115 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusFound)
 }
 
-// mapStartError translates domain errors from StartLink/StartSign into API errors.
+// signerForm is one repeated `signers` multipart value. Each signer is sent as its
+// own small JSON object rather than as two parallel arrays (member ids + external
+// addresses), because the position in the list *is* the sequential signing order and
+// two lists cannot express one order across both kinds.
+type signerForm struct {
+	Kind   string `json:"kind"`
+	UserID string `json:"userId"`
+	Email  string `json:"email"`
+	Name   string `json:"name"`
+	// Placements travel inside the signer object rather than as their own form field
+	// because a placement only means anything as "this signer's mark", and the signer
+	// list has no stable key to correlate a parallel list against: an external signee
+	// is identified by an address and a member by an id.
+	Placements []Placement `json:"placements"`
+}
+
+// parseSigners parses the repeated `signers` form values, in order. It requires at
+// least one and rejects any malformed value; who may actually sign (an active member,
+// a usable address, nobody twice) and whether their placements fit the document are
+// the service's call.
+func parseSigners(values []string) ([]SignerInput, error) {
+	out := make([]SignerInput, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		var form signerForm
+		if err := json.Unmarshal([]byte(v), &form); err != nil {
+			return nil, err
+		}
+		switch form.Kind {
+		case KindInternal:
+			id, err := uuid.Parse(strings.TrimSpace(form.UserID))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, SignerInput{Kind: KindInternal, UserID: id, Placements: form.Placements})
+		case KindExternal:
+			out = append(out, SignerInput{
+				Kind: KindExternal, Email: form.Email, Name: form.Name, Placements: form.Placements,
+			})
+		default:
+			return nil, fmt.Errorf("signing: unknown signer kind %q", form.Kind)
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("signing: no signers selected")
+	}
+	return out, nil
+}
+
+// externalView serves the external signing page's own view of the request behind an
+// invitation token.
+func (h *Handler) externalView(w http.ResponseWriter, r *http.Request) error {
+	view, err := h.svc.ExternalView(r.Context(), r.PathValue("token"))
+	if err := h.mapExternalError(err); err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, view)
+	return nil
+}
+
+// externalLink starts an external signee's credential-link ceremony.
+func (h *Handler) externalLink(w http.ResponseWriter, r *http.Request) error {
+	start, err := h.svc.StartExternalLink(r.Context(), r.PathValue("token"))
+	if err := h.mapExternalError(err); err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, start)
+	return nil
+}
+
+// externalSign starts an external signee's signing ceremony.
+func (h *Handler) externalSign(w http.ResponseWriter, r *http.Request) error {
+	start, err := h.svc.StartExternalSign(r.Context(), r.PathValue("token"))
+	if err := h.mapExternalError(err); err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, start)
+	return nil
+}
+
+// externalDocument serves the document an external signee is being asked to sign, so
+// they can read it before signing. It is the current state of the document (the
+// original upload, or the accumulating PAdES once earlier signers have signed).
+func (h *Handler) externalDocument(w http.ResponseWriter, r *http.Request) error {
+	doc, filename, err := h.svc.ExternalDocument(r.Context(), r.PathValue("token"))
+	if err := h.mapExternalError(err); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", documentName(filename)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(doc)
+	return nil
+}
+
+// mapExternalError adds the invitation-token cases to the shared mapping. An unknown
+// or expired link is a 404: an external signee is told the link is no longer usable,
+// never whether a request behind it exists.
+func (h *Handler) mapExternalError(err error) error {
+	if errors.Is(err, ErrInvalidToken) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "invalid_link", Message: "this signing link is not valid or has expired"}
+	}
+	return h.mapStartError(err)
+}
+
+// mapStartError translates domain errors into API errors.
 func (h *Handler) mapStartError(err error) error {
 	switch {
 	case err == nil:
@@ -183,6 +384,18 @@ func (h *Handler) mapStartError(err error) error {
 		return &respond.APIError{Status: http.StatusConflict, Code: "no_credential", Message: "link a signing credential before signing"}
 	case errors.Is(err, ErrInvalidPDF):
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_pdf", Message: "the uploaded file is not a valid PDF"}
+	case errors.Is(err, ErrInvalidRequest):
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_request", Message: "the signing request is invalid"}
+	case errors.Is(err, ErrNotFound):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "signing request not found"}
+	case errors.Is(err, ErrNotSigner):
+		return &respond.APIError{Status: http.StatusForbidden, Code: "not_signer", Message: "you are not a signer of this request"}
+	case errors.Is(err, ErrAlreadySigned):
+		return &respond.APIError{Status: http.StatusConflict, Code: "already_signed", Message: "you have already signed this document"}
+	case errors.Is(err, ErrNotYourTurn):
+		return &respond.APIError{Status: http.StatusConflict, Code: "not_your_turn", Message: "an earlier signer must sign first"}
+	case errors.Is(err, ErrSignInProgress):
+		return &respond.APIError{Status: http.StatusConflict, Code: "sign_in_progress", Message: "another signature is in progress; try again shortly"}
 	default:
 		return fmt.Errorf("starting signing ceremony: %w", err)
 	}
@@ -193,4 +406,13 @@ func signedName(filename string) string {
 		return "signed.pdf"
 	}
 	return "signed-" + filename
+}
+
+// documentName is the filename for the not-yet-finished document an external signee
+// reviews — the upload's own name, since it is not the signed result.
+func documentName(filename string) string {
+	if filename == "" {
+		return "document.pdf"
+	}
+	return filename
 }

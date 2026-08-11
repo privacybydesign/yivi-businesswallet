@@ -572,7 +572,9 @@ export const nl: Translation<typeof en> = {
       cscSettingsUpdated: "Instellingen ondertekenprovider bijgewerkt",
       signingCredentialLinked: "Ondertekencredential gekoppeld",
       signingRequested: "Documenthandtekening aangevraagd",
+      signingSigned: "Document ondertekend",
       signingCompleted: "Documenthandtekening voltooid",
+      signingDelivered: "Ondertekend document bezorgd",
       signingFailed: "Documenthandtekening mislukt",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
@@ -696,6 +698,160 @@ export const nl: Translation<typeof en> = {
     noCredentialError:
       "Koppel een ondertekencertificaat voordat je ondertekent.",
     startError: "Kon het ondertekenen niet starten: {{message}}",
+    tabToSign: "Te ondertekenen",
+    tabNew: "Nieuw verzoek",
+    tabCredential: "Mijn certificaat",
+    tabHistory: "Geschiedenis",
+    newTitle: "Nieuw ondertekenverzoek",
+    newDescription:
+      "Upload een PDF, kies wie moet ondertekenen en waar het ondertekende document naartoe moet.",
+    documentLabel: "Document (PDF)",
+    documentChoose: "Bestand kiezen",
+    documentReplace: "Bestand vervangen",
+    documentRemove: "Verwijderen",
+    documentNone: "Geen bestand gekozen",
+    signersLabel: "Ondertekenaars",
+    signersHint:
+      "Voeg iedereen toe die moet ondertekenen, in de volgorde waarin ze tekenen. Een lid tekent vanuit zijn eigen account; een externe ondertekenaar krijgt een link per e-mail en tekent met zijn eigen wallet.",
+    signersEmpty: "Nog geen ondertekenaars toegevoegd.",
+    addSignerLabel: "Ondertekenaar toevoegen",
+    addSigner: "Toevoegen",
+    removeSigner: "{{name}} verwijderen",
+    externalTag: "extern",
+    externalHint:
+      "De ondertekenaar krijgt een eenmalige link per e-mail. Een account is niet nodig.",
+    externalNamePlaceholder: "Naam (optioneel)",
+    externalEmailPlaceholder: "ondertekenaar@voorbeeld.nl",
+    searchMembers: "Zoek leden…",
+    noMembers: "Geen leden gevonden.",
+    orderLabel: "Volgorde van ondertekenen",
+    parallelHint: "Ondertekenaars mogen in willekeurige volgorde ondertekenen.",
+    sequentialHint:
+      "Ondertekenaars ondertekenen na elkaar, in de gekozen volgorde.",
+    recipientLabel: "Bezorgen aan",
+    recipientHint:
+      "Waar het voltooide document naartoe gaat zodra iedereen heeft ondertekend.",
+    recipientEmailPlaceholder: "ontvanger@voorbeeld.nl",
+    recipientQerdsPlaceholder: "QERDS-adres",
+    recipientNamePlaceholder: "Naam ontvanger (optioneel)",
+    messagePlaceholder: "Bericht aan de ontvanger (optioneel)",
+    createButton: "Verzoek aanmaken",
+    createdToast: "Ondertekenverzoek aangemaakt.",
+    placement: {
+      title: "Plaatsing van handtekening en paraaf",
+      hint: "Kies een ondertekenaar en klik op de pagina om daar het handtekeningveld of de paraaf te zetten. Laat dit leeg om zonder zichtbaar merkteken te ondertekenen.",
+      signerLegend: "Plaatsen voor",
+      markCount_one: "{{count}} merkteken",
+      markCount_other: "{{count}} merktekens",
+      kindLegend: "Plaats",
+      kindSignature: "Handtekeningveld",
+      kindParaph: "Paraaf",
+      firstPage: "Eerste pagina",
+      previousPage: "Vorige pagina",
+      nextPage: "Volgende pagina",
+      lastPage: "Laatste pagina",
+      pageOf: "Pagina {{page}} van {{count}}",
+      placeOnPage: "Midden op deze pagina plaatsen",
+      widthLabel: "Breedte (pt)",
+      heightLabel: "Hoogte (pt)",
+      removeMark: "Van deze pagina verwijderen",
+      paraphEveryPage: "Paraaf op elke pagina zetten",
+      removeParaphs: "Alle parafen verwijderen",
+      markLabel:
+        "{{kind}} voor {{name}} op pagina {{page}}, op {{x}} bij {{y}} punten. Gebruik de pijltjestoetsen om het te verplaatsen.",
+      keyboardHint:
+        "Sleep een merkteken om het te verplaatsen, of selecteer het en gebruik de pijltjestoetsen. Houd Shift ingedrukt voor grotere stappen.",
+      loadError: "Kon deze PDF niet openen om te plaatsen.",
+      incomplete:
+        "Geef elke ondertekenaar een handtekeningveld, of verwijder alle plaatsingen om zonder zichtbare merktekens te ondertekenen.",
+    },
+    toSignEmpty: "Er wachten geen documenten op jouw handtekening.",
+    toSignError:
+      "Kon de documenten die op jouw handtekening wachten niet laden.",
+    requestedBy: "Aangevraagd door {{name}}",
+    alreadySigned: "Je hebt dit document al ondertekend.",
+    notYourTurn: "Een eerdere ondertekenaar moet eerst tekenen.",
+    signInProgress:
+      "Er wordt al een handtekening gezet; probeer het zo opnieuw.",
+    modeLabel: {
+      parallel: "Willekeurige volgorde",
+      sequential: "Op volgorde",
+    },
+    channel: {
+      none: "Niet versturen (alleen downloaden)",
+      email: "E-mail",
+      qerds: "QERDS (aangetekende bezorging)",
+    },
+    signerStatus: {
+      pending: "In afwachting",
+      signed: "Ondertekend",
+      failed: "Mislukt",
+    },
+    signerKind: {
+      internal: "Lid van de organisatie",
+      external: "Externe ondertekenaar",
+    },
+    requestStatus: {
+      awaitingSignatures: "Wacht op handtekeningen",
+      completed: "Voltooid",
+      failed: "Mislukt",
+    },
+    deliveryStatus: {
+      notRequested: "Geen bezorging",
+      pending: "Bezorgen…",
+      delivered: "Bezorgd",
+      failed: "Bezorging mislukt",
+    },
+    external: {
+      askedBy: "{{org}} vraagt je dit document te ondertekenen",
+      youLabel: "Je ondertekent als",
+      progressLabel: "Handtekeningen",
+      progress: "{{signed}} van {{total}}",
+      reviewDocument: "Het document openen",
+      needsCredential:
+        "Koppel eerst een ondertekencertificaat. Daarvoor opent je wallet één keer; daarna kun je ondertekenen.",
+      linkButton: "Ondertekencertificaat koppelen",
+      signButton: "Document ondertekenen",
+      notYourTurn:
+        "Een eerdere ondertekenaar moet eerst tekenen. Kom later terug via deze link.",
+      linkedToast: "Ondertekencertificaat gekoppeld.",
+      linkFailedToast:
+        "Het koppelen van het ondertekencertificaat is niet voltooid.",
+      startError: "Kon niet starten. Probeer het opnieuw.",
+      attemptFailed:
+        "Je laatste poging is niet voltooid. Je kunt het opnieuw proberen.",
+      signedTitle: "Je hebt dit document ondertekend",
+      signedAllHint: "Iedereen heeft ondertekend. Het document is compleet.",
+      signedWaitingHint: "De andere ondertekenaars moeten nog tekenen.",
+      failedTitle: "Dit verzoek is niet voltooid",
+      failedHint:
+        "Neem contact op met de organisatie die je om een handtekening vroeg.",
+      invalidTitle: "Deze link is niet meer geldig",
+      invalidHint:
+        "De link is verlopen of al gebruikt. Vraag de organisatie om een nieuwe.",
+      errorTitle: "Er ging iets mis",
+      errorHint:
+        "Kon dit ondertekenverzoek niet laden. Probeer het later opnieuw.",
+      walletHint:
+        "Je wordt doorgestuurd naar de ondertekenprovider om te autoriseren met je wallet en daarna teruggebracht.",
+    },
+  },
+  signedDocuments: {
+    title: "Ondertekende documenten",
+    subtitle: "Geschiedenis van ondertekenverzoeken en hun bezorging",
+    adminOnly:
+      "Alleen beheerders kunnen de geschiedenis van ondertekende documenten bekijken.",
+    loadError: "Kon de ondertekende documenten niet laden: {{message}}",
+    empty: "Nog geen ondertekenverzoeken.",
+    loadMore: "Meer laden",
+    download: "Downloaden",
+    columns: {
+      created: "Aangemaakt",
+      document: "Document",
+      signers: "Ondertekenaars",
+      recipient: "Ontvanger",
+      status: "Status",
+    },
   },
   settings: {
     title: "Instellingen",
@@ -727,6 +883,7 @@ export const nl: Translation<typeof en> = {
       qerds: "Beveiligd berichtenverkeer",
       postguard: "PostGuard",
       attestation: "Attestaties",
+      signing: "Documenten ondertekenen",
     },
     channels: {
       email: "E-mail",
@@ -970,6 +1127,8 @@ export const nl: Translation<typeof en> = {
       event_notification: "Melding van een gebeurtenis",
       invitation: "Uitnodiging voor lidmaatschap",
       postguard_file: "Versleuteld bestand",
+      signature_requested: "Ondertekenverzoek",
+      signed_document: "Ondertekend document",
       smtp_test: "SMTP-test",
     },
     kindDescriptions: {
@@ -981,6 +1140,10 @@ export const nl: Translation<typeof en> = {
         "Gaat naar iemand die is uitgenodigd om lid te worden van deze organisatie.",
       postguard_file:
         "Gaat naar de ontvanger van een versleuteld bestand, als deze organisatie via de eigen SMTP-server mailt.",
+      signature_requested:
+        "Gaat naar een lid dat is geselecteerd om een document mede te ondertekenen, met een link naar de ondertekenpagina.",
+      signed_document:
+        "Gaat naar een ontvanger met het voltooide, mede-ondertekende document als PDF-bijlage.",
       smtp_test:
         "De test die een beheerder verstuurt om de SMTP-instellingen te controleren.",
     },

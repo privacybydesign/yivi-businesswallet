@@ -1,17 +1,37 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import type {
+  InfiniteData,
+  UseInfiniteQueryResult,
+  UseMutationResult,
+  UseQueryResult,
+} from "@tanstack/react-query";
+import {
+  SIGNER_STATUS,
   SIGNING_STATUS,
   createSigningRequest,
+  getExternalSigning,
+  getPendingSigningRequests,
   getSigningAvailability,
   getSigningCredential,
   getSigningRequest,
+  linkExternalCredential,
   linkSigningCredential,
+  listSigningRequests,
+  startExternalSign,
+  startSignRequest,
 } from "./signing";
 import type {
+  ExternalSigning,
   LinkedCredential,
+  NewSigningRequest,
   SigningAvailability,
   SigningRequest,
+  SigningRequestPage,
   SigningStart,
 } from "./signing";
 
@@ -45,6 +65,14 @@ export function signingRequestQueryKey(
   return ["organizations", "detail", slug, "signing", "request", id];
 }
 
+export function signingPendingQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "signing", "pending"];
+}
+
+export function signingRequestsQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "signing", "requests"];
+}
+
 export function useSigningCredentialQuery(
   slug: string,
   enabled = true,
@@ -59,16 +87,56 @@ export function useSigningCredentialQuery(
 export function useSigningRequestQuery(
   slug: string,
   id: string | null,
+  myUserId?: string,
 ): UseQueryResult<SigningRequest, Error> {
   return useQuery({
     queryKey: signingRequestQueryKey(slug, id ?? ""),
     queryFn: ({ signal }) => getSigningRequest(slug, id!, signal),
     enabled: slug !== "" && id !== null,
-    // Keep polling only while the ceremony is still in flight.
-    refetchInterval: (query) =>
-      query.state.data?.status === SIGNING_STATUS.awaitingAuthorization
+    // Poll only while the acting user's own signature is still settling. With
+    // co-signing a request stays `awaiting_signatures` until every OTHER signer has
+    // signed — which can be days — so polling on the request status alone would never
+    // stop. Once the caller's own signer entry is signed (or the request is completed
+    // or failed), there is nothing left for this card to wait on.
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data || data.status !== SIGNING_STATUS.awaitingSignatures) {
+        return false;
+      }
+      const mine = myUserId
+        ? (data.signers ?? []).find((s) => s.userId === myUserId)
+        : undefined;
+      return mine && mine.status !== SIGNER_STATUS.signed
         ? POLL_INTERVAL_MS
-        : false,
+        : false;
+    },
+  });
+}
+
+// usePendingSigningRequestsQuery lists documents awaiting the caller's signature.
+export function usePendingSigningRequestsQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<SigningRequest[], Error> {
+  return useQuery({
+    queryKey: signingPendingQueryKey(slug),
+    queryFn: ({ signal }) => getPendingSigningRequests(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+// useSigningRequestsQuery is the admin-only signed-documents history, paginated.
+export function useSigningRequestsQuery(
+  slug: string,
+  enabled: boolean,
+): UseInfiniteQueryResult<InfiniteData<SigningRequestPage>, Error> {
+  return useInfiniteQuery({
+    queryKey: signingRequestsQueryKey(slug),
+    queryFn: ({ pageParam, signal }) =>
+      listSigningRequests(slug, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
+    enabled: enabled && slug !== "",
   });
 }
 
@@ -83,9 +151,68 @@ export function useLinkSigningCredentialMutation(
 
 export function useCreateSigningRequestMutation(
   slug: string,
-): UseMutationResult<SigningStart, Error, File> {
+): UseMutationResult<{ id: string }, Error, NewSigningRequest> {
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (document) => createSigningRequest(slug, document),
+    mutationFn: (input) => createSigningRequest(slug, input),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: signingRequestsQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: signingPendingQueryKey(slug),
+      });
+    },
+  });
+}
+
+// useStartSignRequestMutation starts the acting user's signing ceremony.
+export function useStartSignRequestMutation(
+  slug: string,
+): UseMutationResult<SigningStart, Error, string> {
+  return useMutation({
+    mutationFn: (id) => startSignRequest(slug, id),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+// The external-signee flow is keyed by the invitation token, not by an org slug —
+// the signee has no membership, so none of these queries live under an organisation.
+export function externalSigningQueryKey(token: string): readonly string[] {
+  return ["signing", "external", token];
+}
+
+export function useExternalSigningQuery(
+  token: string,
+): UseQueryResult<ExternalSigning, Error> {
+  return useQuery({
+    queryKey: externalSigningQueryKey(token),
+    queryFn: ({ signal }) => getExternalSigning(token, signal),
+    enabled: token !== "",
+    // The signature is completed out of band (the OAuth callback), so poll until the
+    // request settles — the same reason the org page polls.
+    refetchInterval: (query) =>
+      query.state.data?.status === SIGNING_STATUS.awaitingSignatures
+        ? POLL_INTERVAL_MS
+        : false,
+  });
+}
+
+export function useLinkExternalCredentialMutation(
+  token: string,
+): UseMutationResult<SigningStart, Error, void> {
+  return useMutation({
+    mutationFn: () => linkExternalCredential(token),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+export function useStartExternalSignMutation(
+  token: string,
+): UseMutationResult<SigningStart, Error, void> {
+  return useMutation({
+    mutationFn: () => startExternalSign(token),
     meta: { suppressErrorToast: true },
   });
 }

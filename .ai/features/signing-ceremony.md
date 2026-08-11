@@ -135,3 +135,208 @@ cert that chains to an EU trust list, and the same signature would validate as t
 
 See also `.ai/features/qtsp-signing-demo.md` (the hosted QTSP + `--profile signer`, incl. the
 authorization_server) and `internal/csc` (per-org provider settings).
+
+## Co-signing (multiple signers + recipient delivery)
+
+The single-signer ceremony above is the building block; a **request** is now an org-level
+co-signing object.
+
+- **Model.** `signing_requests` carries `created_by`, the `original_document`, an accumulating
+  `signed_document`, a `signing_mode` (`parallel`/`sequential`), a recipient
+  (`recipient_channel` none/qerds/email + address/name/message) and a `delivery_status`.
+  `signing_request_signers` holds one row per selected member (`sign_order`, per-signer `status`).
+  Each member signs with **their own** linked credential — the PK on `signing_credentials` is
+  still `(org, user)` — so the finished PDF carries **N qualified signatures**, applied
+  incrementally (`pades_multisig_test.go` proves two incremental signatures both verify).
+- **Order.** *Parallel* = any order; *sequential* = ascending `sign_order`, and a signer's turn
+  is only offered once every lower-order signer has signed (`ListPendingForUser` /
+  `Service.checkTurn`). **"Parallel" is not simultaneous:** incremental PAdES appends to a specific
+  base document and cannot merge concurrent signatures, so an in-memory **per-request in-flight
+  lock** (`Service.acquire`/`release`) serialises the actual signing passes either way.
+- **Flow.** `POST /requests` (member) creates the request (validates signers against the member
+  directory, stores the PDF); `POST /requests/{id}/sign` (member, must be a pending signer whose
+  turn it is) runs *that signer's* ceremony over `GetLatestDocument` (signed ?? original);
+  `finishSign` writes the new bytes + marks the signer signed, and when all have signed marks the
+  request completed and **delivers** it.
+- **Delivery.** On completion the finished PDF goes to the recipient over the chosen channel:
+  `email` reuses `email.Service.SendSignedDocument` (a new `signed_document` mail Kind + the new
+  `mailer` attachment support — `multipart/mixed`); `qerds` reuses `qerds.Service.Send` with the
+  PDF as an attachment from the org's default QERDS address. Delivery is best-effort — a failure
+  leaves the request `completed` with `delivery_status=failed`, surfaced in the history, not fatal.
+  The `signing` slice stays decoupled via consumer interfaces (`memberDirectory`,
+  `documentDeliverer`) implemented by adapters in `cmd/api` (`signing_adapters.go`).
+- **UI.** The Sign page is tabbed: **To sign** (documents awaiting me → run my ceremony),
+  **New request** (upload + member multi-select + order + recipient), **My credential** (the
+  once-off link, moved out of the per-document flow). The admin **History** tab (styled like the
+  settings tabs) lists the org's requests, cursor-paginated, with per-signer + delivery status.
+- **Signer notifications.** Each selected signer is e-mailed that a document awaits their signature
+  (`email` Kind `signature_requested`, linking to the signing page) via the `signerNotifier` seam
+  (adapter in `cmd/api`). Parallel mode notifies every signer at create time; sequential mode
+  notifies only the first, then the next signer as each turn completes (`finishSign`). Best-effort:
+  a mail failure never blocks create or advance.
+- **Audit + subscriptions.** Adds `signing.signed` and `signing.delivered` alongside
+  `signing.requested`/`.completed`/`.failed`. The lifecycle events `signing.requested` /
+  `.completed` / `.failed` are a subscribable **`signing` group** in the notifications catalog
+  (`internal/notifications`), so admins can also be notified over their configured channels — safe
+  because that metadata is the org's own filename/mode/status, never a disclosed identity.
+- **Still in-memory/single-instance:** the active ceremony (parked pass + reservation) lives in
+  memory; only the between-signers document is persisted. An abandoned ceremony frees its lock at
+  `SessionTTL` without failing the request, and a signer can reclaim their own stale slot at once.
+
+## External signees (a signer who is not an org member)
+
+A signer no longer has to be someone in the organisation. Per signer, the requester picks
+**internal member** or **external signee** (name + e-mail), and one request may mix both.
+An external signee signs with **their own EUDI wallet**, through the same two ceremonies a
+member runs — so the finished PDF carries one incremental PAdES signature per signer
+regardless of kind.
+
+- **Model.** Both signing tables lost the "a signer is a row in `users`" assumption
+  (`20260810120000_signing_external_signees.sql`). `signing_request_signers` has a surrogate
+  `id` primary key and a **nullable** `user_id`, plus `external_email` / `external_name` and
+  the *hash* of the signee's invitation token; a `CHECK` keeps a row to exactly one kind, and
+  two partial unique indexes keep the old "one row per member per request" guarantee while
+  adding "one row per address per request". `signing_credentials` is re-keyed the same way, so
+  an external signee's linked credential lives under `(org, lower(external_email))` — the
+  `subject` type in the store is what names either kind, and it is deliberately unexported so a
+  caller cannot address a credential row without going through a signer.
+- **The signer row id is what addresses a signer.** `checkTurn`, `reserveSign`,
+  `RecordSignature` and `FailRequest` all key on it rather than on a user id, which is what
+  makes the parallel/sequential turn logic and the per-request in-flight lock work unchanged
+  for a mixed set of signers. `ListPendingForUser` still joins on `user_id` (a member's "to
+  sign" list), and its lower-order check counts external signers too, so a member queues behind
+  a pending external signee exactly as behind another member.
+- **The way in is a tokenised link, no session.** `IssueExternalToken` mints a 32-byte token
+  (only its SHA-256 is stored, same construction as an org invitation) with an
+  `ExternalInviteTTL` (30 days) expiry, and it is issued **when the signee is actually asked** —
+  at create time in parallel mode, when their turn comes in sequential mode — so a third-in-line
+  signee has no live link until it is their turn. The unauthenticated routes
+  `GET|POST /api/v1/signing/external/{token}[/document|/credential/link|/sign]` each resolve
+  that token to one signer row and read nothing else from the caller (the same posture as
+  `GET /invite/{token}`). Signing does **not** delete the token: the ceremony returns the signee
+  to that link and it is where they see their signature landed and can re-read what they signed.
+  Replay is stopped by their signer status (`ErrAlreadySigned`), and re-linking a credential is
+  refused once they have signed, so a stale link cannot swap the certificate that subject would
+  sign a later request with.
+- **Data minimisation.** `ExternalView` is deliberately narrower than `Request`: the signee is
+  outside the organisation, so they get who is asking, the document name, their own status and a
+  signed/total count — never the other signers' names or addresses.
+- **Notification.** The invitation reuses the existing `signature_requested` mail Kind; only the
+  `signingUrl` differs (their `/sign/{token}` page instead of the org's signing page), so there
+  is no new mail copy to translate. Best-effort, like the member notification.
+- **UI.** The create form's signer picker is an **ordered list** (that order is the sequential
+  signing order) fed by a per-signer *internal member / external signee* choice. The external
+  signee's own page is the public route `/sign/:token`: review the document, link a certificate
+  once, then sign.
+
+## Signature & paraph placement (where a signer's marks land)
+
+Every signature above is **invisible** — a `/Rect [0 0 0 0]` widget, cryptographically complete
+and visually absent. A real document usually wants a signature block per signee at a fixed spot
+and their initials (a *paraph*) on each page. Per signer, the requester now places both, and the
+signing pass renders them.
+
+- **Model.** `signing_signer_placements` (`20260810140000_…`) holds one rectangle per row:
+  `(signer_id, kind, page, x, y, width, height)`. `kind` is `signature` (**at most one per
+  signer** — a partial unique index says so, because a PAdES signature dictionary carries exactly
+  one appearance) or `paraph` (**at most one per page per signer**). "A paraph on every page" is
+  expanded by the requester into one row per page, so the table stays flat and nothing downstream
+  has to interpret a shorthand. The rectangle is in **PDF user-space points, origin bottom-left** —
+  the space pdfsign's appearance rectangle is in, so the conversion from viewer coordinates happens
+  exactly once, in the browser, which is the only place that knows the zoom, the page rotation and
+  the crop box.
+- **Validation, at create time.** `readGeometry` (`placement.go`) replaces the old `validatePDF`:
+  it parses the upload, reports every page's visible box (CropBox else MediaBox, inherited through
+  the page tree — digitorus/pdf ships that walk commented out) and doubles as the upload check.
+  Being the upload check is what bounds it: what it refuses is what cannot be uploaded at all, so
+  it refuses a page with **no area** and not merely a small one. Whether a mark fits is a question
+  about the mark, and refusing the document would reject it over a page nobody is placing anything
+  on. `validatePlacements`
+  then refuses a page the document does not have, a rectangle outside the page, one below
+  `minPlacementSize` (8 pt), a second signature block or a second paraph on a page. Nothing
+  constrains the *sign* of a rectangle, in Go or in the table: a page whose crop box starts below
+  the origin puts every rectangle on it in negative coordinates, and containment in the page box
+  is the whole rule. A
+  placement is **refused, not clamped**: it is where a person pointed at a rendering of *this*
+  document, so a value off the page means the two disagree, and quietly moving the signature
+  somewhere else is the one outcome nobody asked for. Placement stays optional as a whole — no
+  placements means the invisible signature that every signature was before this existed.
+- **Both marks are our own stamps; the signature stays invisible.** A signer's signature block and
+  their paraphs are all drawn by `stamp.go` as printable, locked `/Stamp` annotations in one
+  incremental revision appended **immediately before** that signer's pdfsign pass. Being inside the
+  ByteRange their signature covers is what makes both attributable: editing one invalidates that
+  signature (`TestStampedParaphIsCoveredByTheSignature`, `TestSignaturePlacementBecomesAVisibleStamp`).
+  The PAdES signature itself is left **invisible** — `sign.Appearance` at its zero value, so the
+  widget is `/Rect [0 0 0 0]` — while `Info.Name` still carries the certificate common name into the
+  signature dictionary's `/Name`. The signature block draws three lines (`signatureLines`):
+  `Electronically signed by:`, the common name reordered to `Surname, given names` (`reorderName`, a
+  last-space heuristic that leaves a one-word name alone), and `at date: <server-local time>`. A
+  paraph draws the initials (`paraphText`). Both use Times-Roman in ballpoint blue so every mark on a
+  page reads as one hand.
+- **The appended section has to match the document's own.** `appendRevision` writes a classic
+  cross-reference table for a table-indexed document and a cross-reference **stream** for a
+  stream-indexed one (`rdr.XrefInformation.Type`): a table appended to an xref-stream file would
+  leave a reader that found it first with no way into the object streams the previous section
+  indexes. `TestParaphStampMatchesTheDocumentsXrefKind` covers both.
+- **Why the signature is invisible: pdfsign's visible-appearance path has an unsafe page rewrite.**
+  pdfsign rewrites the signature's page only when `Appearance.Visible` (`createIncPageUpdate`,
+  reached from `sign/sign.go`), and that rewrite runs every page entry through `pdf.Value.String()` —
+  a debug formatter that renders a stream as `<<…>>@offset` and a PDF string through `strconv.Quote`,
+  and that writes every reference (and the page object) at generation `0`. So a page carrying
+  `/Metadata`, `/Thumb`, the `/LastModified` + `/PieceInfo` pair InDesign writes, or an object at a
+  reused (higher-generation) number would come back unparseable, blank, or gone from the tree — *with
+  a signature that still verifies*. Keeping the signature invisible means pdfsign never touches a
+  page, so all of that is unreachable, and the normalisation machinery this once needed (droppable
+  page entries, generation-0 refusals, `pageNeedsNormalising`) is gone.
+- **Our own page rewrite carries every page.** `stamp.go` rebuilds a page dictionary key by key
+  (digitorus/pdf resolves as it reads and hands back no raw object) with `writeValue`, which emits
+  only valid PDF and never `Value.String()`: it tells a reference from a direct value the one way
+  digitorus/pdf allows — comparing the resolved value's `GetPtr()` with its container's — and writes
+  the reference rather than what it points at. `rewritePage` keeps the page's own object number and
+  generation (`incrObject` carries it, `pdfRef` preserves each reference), so a producer that reuses
+  object numbers is preserved exactly. The upshot is that a page which used to be refused now simply
+  **signs** (`stamp_test.go`: `TestSignatureBlockKeepsAnAwkwardPageReadable`,
+  `TestSignaturePageEntryPdfsignCouldNotEmitSurvives`, `TestSignaturePageWithAReusedObjectNumberSigns`,
+  `TestParaphOnlyPageKeepsItsEntries`, `TestDirectAnnotationOnTheSignaturePageSurvives`,
+  `TestReusedAnnotationOnTheSignaturePageSurvives`; `testpdf_test.go`'s `objectGens` builds the
+  reused-number cases).
+- **The paraph's font states its encoding.** Times-Roman with no `/Encoding` reads the content
+  stream's bytes in Adobe StandardEncoding, where the UTF-8 of `Ünal` draws as a macron plus a
+  notdef. The font declares `/WinAnsiEncoding` and `winAnsi` transcodes to it, with `?` for a
+  character it has no place for; the box is measured in the bytes that are drawn, not the runes
+  they came from. The annotation's `/Contents` is a PDF *text* string, a different encoding again,
+  so it is written UTF-16BE (`pdfTextString`) and carries a name in any script.
+- **Accepted cost, stated plainly.** A signer with paraphs adds **two** revisions instead of one,
+  and the extra one is not itself a signing operation. Earlier co-signatures stay cryptographically
+  valid (the revision is appended after their ByteRange, `TestCoSigningWithPlacementsKeepsBothSignaturesValid`),
+  but a viewer that lists changes since a signature will name it. Getting a paraph into the *same*
+  revision as the signature would mean patching pdfsign, whose `SignContext.addObject` is
+  unexported — the one thing this capability has so far avoided. This is also the answer to the
+  design question the issue left open: a paraph is **attributable** (inside that signer's signed
+  bytes) rather than being a second cryptographic signature of its own.
+- **UI.** `routes/signing-placement.tsx` renders the uploaded PDF with pdf.js, one page at a time,
+  and overlays each signee's marks colour-coded from the house accents (there is no "signee colour"
+  in the design system; every mark also carries the signer's name, so colour is never the only cue).
+  Click the page to place or move the selected mark; drag one to fine-tune; **place in the middle of
+  this page**, the arrow keys (Shift for larger steps) and the width/height fields are the paths that
+  need no dragging at all (WCAG 2.2 §2.5.7). The geometry is pure and unit-tested
+  (`lib/placement.ts` + `.test.ts`), and `placement-viewport.test.ts` pins the one assumption the
+  whole feature rests on — that a rectangle converted through the pdf.js viewport and back is the
+  same rectangle — against a real document at four rotations and two zooms. Paging is the primary
+  flow here (a paraph on every page), and pdf.js refuses a second `render()` on a canvas a live
+  task still holds, so the render lifecycle is `lib/pdf-page-render.ts`: one task at a time,
+  cancelled before the next starts, with a cancelled render reported rather than thrown.
+- **pdf.js is a chunk of its own.** It is larger than the rest of the app put together, so the
+  editor is a `React.lazy` import: the main bundle is unchanged for everyone who is not placing a
+  signature.
+
+### Follow-ups
+- A paraph is drawn as initials from the certificate's common name, and the signature block draws
+  the "electronically signed by" lines. A hand-drawn or uploaded signature image would go in the
+  same rectangle as an image XObject inside the stamp (both marks are our own stamps now, not
+  pdfsign's appearance) and is the obvious next step.
+- Placement is defined once, by the requester. Letting a signee adjust their own block before
+  signing is a separate decision — it would have to be bounded, since the request is what they are
+  agreeing to.
+- Rotation is handled through the viewport in the browser; nothing on the backend reads `/Rotate`,
+  because it never has to convert a coordinate.

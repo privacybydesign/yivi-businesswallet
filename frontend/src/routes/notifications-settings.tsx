@@ -34,6 +34,7 @@ const GROUP_LABEL_KEY = {
   qerds: "notifications.groups.qerds",
   postguard: "notifications.groups.postguard",
   attestation: "notifications.groups.attestation",
+  signing: "notifications.groups.signing",
 } as const satisfies Record<NotificationGroup, string>;
 
 // The channels that need a webhook of their own before they can deliver anything,
@@ -227,7 +228,10 @@ function NotificationsForm({
                   </Table.Row>
                   {events.map((event) => (
                     <Table.Row key={event} className="hover:bg-surface-2">
-                      <Table.Cell scope="row" className="text-ink">
+                      <Table.Cell
+                        scope="row"
+                        className="text-ink text-left font-normal"
+                      >
                         {auditActionLabel(event, t)}
                       </Table.Cell>
                       {columns.map((channel) => {
