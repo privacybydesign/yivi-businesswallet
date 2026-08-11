@@ -101,6 +101,12 @@ const (
 	// authorization server is localhost:8084 to the browser but qtsp-authz:8084 to
 	// the backend container). Empty in production, where the two are the same URL.
 	envSigningOAuthIssuerInternal = "SIGNING_OAUTH_ISSUER_INTERNAL"
+	// SIGNING_REDIRECT_URI overrides the OAuth callback the browser is sent back to
+	// after the signing ceremony (and which the QTSP registers for the SCA client).
+	// Empty means the built-in localhost default, which is correct for local Docker;
+	// a hosted deployment sets it to its own public /api/v1/signing/callback so the
+	// redirect_uri the backend sends matches what the QTSP has registered.
+	envSigningRedirectURI = "SIGNING_REDIRECT_URI"
 	// STATIC_DIR points at the built frontend; when set the API also serves it as
 	// an SPA on "/". Unset in dev (Vite serves the frontend).
 	envStaticDir = "STATIC_DIR"
@@ -265,6 +271,10 @@ type Config struct {
 	// SigningOAuthIssuerInternal overrides the OAuth issuer base for the backend's
 	// server-side token exchange during signing (local Docker only; empty in prod).
 	SigningOAuthIssuerInternal string
+	// SigningRedirectURI overrides the OAuth callback sent to the QTSP during
+	// signing. Empty means the built-in localhost default; a hosted deployment sets
+	// its own public /api/v1/signing/callback.
+	SigningRedirectURI string
 	// MailDefaultLocale is the fallback language for outbound transactional mail.
 	MailDefaultLocale string
 
@@ -362,6 +372,17 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	// SIGNING_REDIRECT_URI is optional (empty keeps the built-in localhost default),
+	// but a set value is concatenated into the QTSP authorize URL and the token
+	// exchange's redirect_uri, so a scheme-less, spaced or relative value must fail
+	// at boot rather than deep inside the signing ceremony at the QTSP.
+	signingRedirectURI := os.Getenv(envSigningRedirectURI)
+	if signingRedirectURI != "" {
+		if err := requireAbsoluteHTTPURL(envSigningRedirectURI, signingRedirectURI); err != nil {
+			return Config{}, err
+		}
+	}
+
 	return Config{
 		DatabaseDSN: dsn,
 		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
@@ -417,6 +438,7 @@ func Load() (Config, error) {
 		ProvisioningEncryptionKey:  os.Getenv(envProvisioningEncryptionKey),
 		CSCEncryptionKey:           os.Getenv(envCSCEncryptionKey),
 		SigningOAuthIssuerInternal: os.Getenv(envSigningOAuthIssuerInternal),
+		SigningRedirectURI:         signingRedirectURI,
 		MailDefaultLocale:          envOrDefault(envMailDefaultLocale, defaultMailLocale),
 		StaticDir:                  os.Getenv(envStaticDir),
 

@@ -105,7 +105,9 @@ const maxEmailLength = 254
 const maxSigners = 50
 
 // NewService builds the signing service. redirectURI is the QTSP-registered OAuth
-// callback (must match the authorization server's client registration);
+// callback (must match the authorization server's client registration); an empty
+// value falls back to DefaultRedirectURI (the localhost default), so "unset means
+// the local default" lives next to the constant that defines it.
 // appBaseURL is where the browser is sent after the callback resolves. members
 // lists the org's members (to validate/label selected signers); deliverer delivers
 // a completed document to its recipient (may be nil, in which case a request with a
@@ -116,6 +118,9 @@ const maxSigners = 50
 // override for the backend's server-side token exchange host (see the Service
 // field); empty in production.
 func NewService(store *Store, p provider, settings connectionResolver, members memberDirectory, orgs orgDirectory, deliverer documentDeliverer, notifier signerNotifier, redirectURI, appBaseURL, issuerInternal string) *Service {
+	if redirectURI == "" {
+		redirectURI = DefaultRedirectURI
+	}
 	return &Service{
 		store:          store,
 		provider:       p,

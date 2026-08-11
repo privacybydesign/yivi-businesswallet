@@ -1,0 +1,73 @@
+name: Deliver QTSP signer image
+
+# The EUDI wallet-driven / RP-centric QTSP reference implementation, built from
+# docker/development/qtsp-signer (a full Maven build of a pinned upstream commit,
+# with SoftHSM2 as the QSCD stand-in) and pushed to the Scaleway registry so the
+# ops repo (yivi-businesswallet-ops) can deploy it to staging.
+#
+# DEMO / STAGING ONLY. This proves QES-over-CSC plumbing on a software HSM; it is
+# not a qualified trust service. It is a heavy build (clones + compiles a Java
+# project) and staging-only, so it is NOT part of the main Delivery pipeline and
+# runs on manual dispatch only — bump the pinned upstream ref in the Dockerfile
+# and re-run this when you want a new image.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two manual dispatches would otherwise race on the same :edge tag; serialise
+  # them (queue rather than cancel, so an in-flight build finishes and pushes).
+  group: deliver-qtsp
+  cancel-in-progress: false
+
+jobs:
+  deliver-qtsp:
+    runs-on: ubuntu-latest
+    name: Build and push qtsp-signer to Scaleway
+    # A wedged Maven build would otherwise hold a runner for the 6-hour default.
+    timeout-minutes: 60
+    # SCW_SECRET_KEY lives in the `dev` environment (same as the mirror job in
+    # delivery.yml); without it docker login falls back to an interactive prompt.
+    environment: dev
+    env:
+      IMAGE: rg.nl-ams.scw.cloud/yivi-containter-registry/qtsp-signer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to Scaleway container registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: rg.nl-ams.scw.cloud
+          username: nologin
+          password: ${{ secrets.SCW_SECRET_KEY }}
+
+      - name: Build and push
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        # NB: unlike delivery.yml, this image is deliberately NOT Anchore-scanned
+        # before push. It is a staging-only, software-HSM demo built from an upstream
+        # Maven clone whose whole point is proving QES plumbing, so the scan gate is
+        # skipped here — do not assume the Scaleway registry's scan covers it.
+        with:
+          # The Dockerfile clones upstream itself, so the build context is just the
+          # demo directory (Dockerfile + patch + entrypoint + the seed controller).
+          context: docker/development/qtsp-signer
+          file: docker/development/qtsp-signer/Dockerfile
+          push: true
+          # Both the mutable :edge tag (what the ops repo tracks) and an immutable
+          # :<sha> tag, so a build is traceable to the commit / pinned upstream ref
+          # that produced it and can be rolled back to.
+          tags: |
+            ${{ env.IMAGE }}:edge
+            ${{ env.IMAGE }}:${{ github.sha }}
+          # linux/amd64 only: the Scaleway nodes are amd64, and the upstream build
+          # is not exercised on arm.
+          platforms: linux/amd64
+          cache-from: type=gha,scope=qtsp-signer
+          cache-to: type=gha,mode=max,scope=qtsp-signer

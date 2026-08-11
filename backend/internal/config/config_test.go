@@ -126,6 +126,54 @@ func TestLoadAcceptsAppBaseURLDefaultAndOverride(t *testing.T) {
 	}
 }
 
+// SIGNING_REDIRECT_URI is concatenated into the QTSP authorize URL and the token
+// exchange's redirect_uri, so a scheme-less, relative, host-less or spaced value
+// must fail at boot rather than deep in the ceremony. Empty is allowed (it keeps
+// the localhost default), so it is not in this set.
+func TestLoadRejectsNonAbsoluteSigningRedirectURI(t *testing.T) {
+	for _, raw := range []string{
+		"wallet.staging.example.org/api/v1/signing/callback",
+		" https://wallet.staging.example.org/api/v1/signing/callback",
+		"/api/v1/signing/callback",
+		"ftp://wallet.staging.example.org/callback",
+		"https://",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			_, err := loadWith(t, map[string]string{envSigningRedirectURI: raw})
+			if err == nil {
+				t.Fatalf("Load succeeded for %s=%q, want an error", envSigningRedirectURI, raw)
+			}
+			// The error names the variable on both rejection paths — the
+			// scheme/host check ("must be an absolute http(s) URL") and a raw
+			// url.Parse failure (e.g. the leading-space case) — so assert on that.
+			if !strings.Contains(err.Error(), envSigningRedirectURI) {
+				t.Errorf("error = %v, want it to name %s", err, envSigningRedirectURI)
+			}
+		})
+	}
+}
+
+// Unset leaves it empty (the caller applies the localhost default); a valid
+// absolute URL is taken as configured.
+func TestLoadAcceptsSigningRedirectURIEmptyOrAbsolute(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SigningRedirectURI != "" {
+		t.Errorf("signing redirect URI = %q, want empty when unset", cfg.SigningRedirectURI)
+	}
+
+	const want = "https://business-wallet.staging.yivi.app/api/v1/signing/callback"
+	cfg, err = loadWith(t, map[string]string{envSigningRedirectURI: want})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SigningRedirectURI != want {
+		t.Errorf("signing redirect URI = %q, want %q", cfg.SigningRedirectURI, want)
+	}
+}
+
 func TestLoadAcceptsPostGuardURLsWithTrailingSlashAndPort(t *testing.T) {
 	cfg, err := loadWith(t, map[string]string{
 		envPostGuardPkgURL:      "http://localhost:8081",

@@ -132,3 +132,22 @@ func TestComposePassesCSCEncryptionKeyToBackend(t *testing.T) {
 		t.Errorf("backend %s = %q, want %q", envCSCEncryptionKey, value, want)
 	}
 }
+
+// TestComposePassesSigningRedirectURIToBackend holds the signing redirect URI to
+// the same passthrough rule. It is hosted-deploy config, the same class as
+// APP_BASE_URL: without the declaration a value set in .env never reaches the
+// container, so the signing ceremony silently keeps the localhost default and the
+// redirect_uri never matches what the QTSP registered — the exact failure this
+// variable exists to fix. (Unlike SIGNING_OAUTH_ISSUER_INTERNAL, which is dev-only
+// and so lives only in compose.override.yaml.)
+func TestComposePassesSigningRedirectURIToBackend(t *testing.T) {
+	backendEnvironment := backendComposeEnvironment(t)
+
+	value, ok := backendEnvironment[envSigningRedirectURI]
+	if !ok {
+		t.Fatalf("backend service does not pass %s through; setting it in .env would do nothing", envSigningRedirectURI)
+	}
+	if want := "${" + envSigningRedirectURI + ":-}"; value != want {
+		t.Errorf("backend %s = %q, want %q", envSigningRedirectURI, value, want)
+	}
+}

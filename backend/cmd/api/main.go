@@ -520,8 +520,11 @@ func run() error {
 	signingStore := signing.NewStore(pool, recorder)
 	signingDelivery := signingDeliverer{email: emailService, qerds: qerdsService, orgs: orgStore}
 	signingNotify := signingNotifier{email: emailService, orgs: orgStore, appBaseURL: cfg.AppBaseURL}
+	// SigningRedirectURI is the QTSP-registered OAuth callback; empty falls back to
+	// the localhost default inside NewService (see signing.DefaultRedirectURI). A
+	// hosted deploy sets SIGNING_REDIRECT_URI to its own public callback.
 	signingHandler := signing.NewHandler(
-		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingOrgs{store: orgStore}, signingDelivery, signingNotify, signing.DefaultRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
+		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingOrgs{store: orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
 		requireUser, orgHandler.Authorize)
 
 	handler := server.New(

@@ -73,9 +73,10 @@ B-LT/B-LTA (validation data, archival timestamp) need a separate DSS augmentatio
 - **In-memory sessions:** an in-flight signing session (goroutine + prepared PDF) lives in memory
   — it does not survive a backend restart and assumes a single API instance. Fine for a demo;
   a durable/multi-instance version would persist the prepared state and reconcile the callback.
-- **`DefaultRedirectURI`** is a dev constant (`http://localhost:8080/api/v1/signing/callback`,
-  matching the AS client registration); a real deployment behind another host must make it
-  configurable.
+- **`DefaultRedirectURI`** (`http://localhost:8080/api/v1/signing/callback`, matching the AS
+  client registration) is the fallback used when `SIGNING_REDIRECT_URI` is unset; a deployment
+  behind another host sets that variable to its own public callback (validated as an absolute
+  http(s) URL at boot, like `APP_BASE_URL`).
 - Sign algorithm is ECDSA-P256 / SHA-256 only (the reference QTSP's supported set).
 
 ## Running it locally (verified end to end against a real EUDI wallet)
@@ -130,8 +131,10 @@ cert that chains to an EU trust list, and the same signature would validate as t
 ### Follow-ups
 - The signature subfilter is `adbe.pkcs7.detached` (a widely-accepted CMS detached signature).
   For strict PAdES-baseline badging, switch pdfsign to the `ETSI.CAdES.detached` subfilter.
-- `DefaultRedirectURI` and the local-Docker host overrides above are dev conveniences; a real
-  deployment points at one publicly-reachable QTSP URL and needs none of them.
+- A hosted deployment sets `SIGNING_REDIRECT_URI` to its own public callback (the QTSP must have
+  that URL registered). `SIGNING_OAUTH_ISSUER_INTERNAL` stays a local-Docker convenience — needed
+  only when the browser-facing issuer and the backend's server-side token-exchange host differ;
+  a deployment where the QTSP is one URL for both leaves it empty.
 
 See also `.ai/features/qtsp-signing-demo.md` (the hosted QTSP + `--profile signer`, incl. the
 authorization_server) and `internal/csc` (per-org provider settings).
