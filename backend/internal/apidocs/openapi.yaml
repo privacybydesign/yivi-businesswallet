@@ -2198,6 +2198,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The parent mandate is no longer active.
   /api/v1/orgs/{slug}/mandates/{id}/revoke:
     parameters:
       - name: slug
@@ -2244,6 +2246,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The mandate has already been revoked or has expired.
   /api/v1/orgs/{slug}/members:
     parameters:
       - name: slug
