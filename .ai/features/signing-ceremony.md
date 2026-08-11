@@ -261,65 +261,45 @@ signing pass renders them.
   document, so a value off the page means the two disagree, and quietly moving the signature
   somewhere else is the one outcome nobody asked for. Placement stays optional as a whole — no
   placements means the invisible signature that every signature was before this existed.
-- **The signature block is the signature's own appearance.** `signatureAppearance` hands the
-  rectangle to pdfsign's `Appearance{Visible, Page, …}`, so the widget *is* the placed rectangle
-  and the mark is the signature: it cannot be moved without breaking it
-  (`TestSignaturePlacementBecomesTheVisibleAppearance`).
-- **Paraphs are a revision the signer's own signature covers.** They cannot be part of that
-  appearance — one signature, one appearance stream, one page — so `stamp.go` appends an
-  incremental revision of printable, locked `/Stamp` annotations **immediately before** the signer's
-  pdfsign pass. Being inside the ByteRange their signature covers is what makes a paraph
-  attributable: editing one invalidates that signature
-  (`TestStampedParaphIsCoveredByTheSignature`). The annotation's appearance stream matches
-  pdfsign's own — Times-Roman, ballpoint blue — so the two marks on a page read as one hand, and
-  the text is the initials of the certificate's common name (`paraphText`).
+- **Both marks are our own stamps; the signature stays invisible.** A signer's signature block and
+  their paraphs are all drawn by `stamp.go` as printable, locked `/Stamp` annotations in one
+  incremental revision appended **immediately before** that signer's pdfsign pass. Being inside the
+  ByteRange their signature covers is what makes both attributable: editing one invalidates that
+  signature (`TestStampedParaphIsCoveredByTheSignature`, `TestSignaturePlacementBecomesAVisibleStamp`).
+  The PAdES signature itself is left **invisible** — `sign.Appearance` at its zero value, so the
+  widget is `/Rect [0 0 0 0]` — while `Info.Name` still carries the certificate common name into the
+  signature dictionary's `/Name`. The signature block draws three lines (`signatureLines`):
+  `Electronically signed by:`, the common name reordered to `Surname, given names` (`reorderName`, a
+  last-space heuristic that leaves a one-word name alone), and `at date: <server-local time>`. A
+  paraph draws the initials (`paraphText`). Both use Times-Roman in ballpoint blue so every mark on a
+  page reads as one hand.
 - **The appended section has to match the document's own.** `appendRevision` writes a classic
   cross-reference table for a table-indexed document and a cross-reference **stream** for a
   stream-indexed one (`rdr.XrefInformation.Type`): a table appended to an xref-stream file would
   leave a reader that found it first with no way into the object streams the previous section
-  indexes. `TestParaphStampMatchesTheDocumentsXrefKind` covers both, and the page dictionary is
-  rebuilt key by key (not copied — digitorus/pdf resolves as it reads and hands back no raw
-  object) by `writeValue`, which emits only forms that are valid PDF.
-- **`pdf.Value.String()` is a debug formatter and neither library may use it here.** It renders a
-  stream as `<<…>>@offset` and a PDF string through `strconv.Quote`, so a page carrying
-  `/Metadata`, `/Thumb`, or the `/LastModified` + `/PieceInfo` pair InDesign and Illustrator write
-  routinely stops parsing once it has been rewritten through it. `writeValue` avoids it by telling
-  a reference from a direct value the only way digitorus/pdf allows — comparing the resolved
-  value's `GetPtr()` with its container's — and writing the reference rather than what it points
-  at. **pdfsign has the same bug in its own page rewrite** (`createIncPageUpdate`), which runs only
-  when `Appearance.Visible` — so nothing reached it until placement existed; it also writes every
-  `/Annots` entry as a reference, turning a directly-embedded annotation into a reference to the
-  page. Since no form of such an entry survives being resolved and re-formatted, `stampMarks` hands
-  pdfsign a page it can round-trip: on the **signature block's page only**, the entries in
-  `droppablePageEntries` are dropped and direct annotations are promoted to objects of their own.
-  That list is page metadata and nothing else — `/Metadata`, `/Thumb`, `/LastModified` with its
-  `/PieceInfo`, `/ID` — none of it drawn on the page or changing what the page does, and the drop
-  happens in the revision the signature then covers, the only place a change to a signed document
-  may be. **Anything else pdfsign cannot emit is refused rather than dropped**: a page quietly
-  stripped of its `/Resources` would come out blank, and the refusal lands in `stampSignerMarks`,
-  before the digest is published, so no signature is spent on it. A page carrying just a paraph is
-  never handed to pdfsign's rewrite and keeps everything (`stamp_test.go`:
-  `TestVisibleSignatureKeepsAnAwkwardPageReadable`, `TestParaphOnlyPageKeepsItsEntries`,
-  `TestDirectAnnotationOnTheSignaturePageSurvives`,
-  `TestSignaturePageWithAnUndroppableEntryIsRefused`).
-- **pdfsign writes every reference in that page at generation 0, and the page object too.** It
-  formats `/Parent`, `/Contents` (single and array) and each `/Annots` entry from `GetPtr().GetID()`
-  with the generation a literal `0` (`sign/pdfvisualsignature.go`:133, :142, :148, :154), and
-  replaces the page as `id 0 obj` (`sign/pdfxref.go`:71). A producer that reuses an object number
-  writes the reused object at a higher generation, which is legal PDF — pdfsign's copy of the
-  reference then points at nothing, so **the page draws blank, its own annotations vanish, or the
-  page disappears from the tree, while the signature still verifies**. Silent content loss inside a
-  document whose signature checks out is the worst outcome available, and it is reachable only on
-  this path: an invisible signature never rewrites the page, and `stamp.go`'s own revision keeps the
-  generation (`pdfRef` preserves it, `incrObject` carries it), so a paraph on the same page is fine.
-  `/Parent`, `/Contents` and the page object itself are therefore **refused** — pdfsign rewrites
-  that page from whatever it is handed, so there is nothing to normalise — and `allRefsAtGenZero`
-  walks arrays because a content array's entries are written out individually. An `/Annots` entry
-  **is** fixable and is copied into an object of its own at generation 0, alongside the promotion
-  direct annotations already get. `pageNeedsNormalising` has to agree with all of it, or a signature
-  block on a page with no paraph never reaches the refusal (`stamp_test.go`:
-  `TestSignaturePageWithAReusedObjectNumberIsRefused`,
-  `TestReusedAnnotationOnTheSignaturePageSurvives`; `testpdf_test.go`'s `objectGens` builds them).
+  indexes. `TestParaphStampMatchesTheDocumentsXrefKind` covers both.
+- **Why the signature is invisible: pdfsign's visible-appearance path has an unsafe page rewrite.**
+  pdfsign rewrites the signature's page only when `Appearance.Visible` (`createIncPageUpdate`,
+  reached from `sign/sign.go`), and that rewrite runs every page entry through `pdf.Value.String()` —
+  a debug formatter that renders a stream as `<<…>>@offset` and a PDF string through `strconv.Quote`,
+  and that writes every reference (and the page object) at generation `0`. So a page carrying
+  `/Metadata`, `/Thumb`, the `/LastModified` + `/PieceInfo` pair InDesign writes, or an object at a
+  reused (higher-generation) number would come back unparseable, blank, or gone from the tree — *with
+  a signature that still verifies*. Keeping the signature invisible means pdfsign never touches a
+  page, so all of that is unreachable, and the normalisation machinery this once needed (droppable
+  page entries, generation-0 refusals, `pageNeedsNormalising`) is gone.
+- **Our own page rewrite carries every page.** `stamp.go` rebuilds a page dictionary key by key
+  (digitorus/pdf resolves as it reads and hands back no raw object) with `writeValue`, which emits
+  only valid PDF and never `Value.String()`: it tells a reference from a direct value the one way
+  digitorus/pdf allows — comparing the resolved value's `GetPtr()` with its container's — and writes
+  the reference rather than what it points at. `rewritePage` keeps the page's own object number and
+  generation (`incrObject` carries it, `pdfRef` preserves each reference), so a producer that reuses
+  object numbers is preserved exactly. The upshot is that a page which used to be refused now simply
+  **signs** (`stamp_test.go`: `TestSignatureBlockKeepsAnAwkwardPageReadable`,
+  `TestSignaturePageEntryPdfsignCouldNotEmitSurvives`, `TestSignaturePageWithAReusedObjectNumberSigns`,
+  `TestParaphOnlyPageKeepsItsEntries`, `TestDirectAnnotationOnTheSignaturePageSurvives`,
+  `TestReusedAnnotationOnTheSignaturePageSurvives`; `testpdf_test.go`'s `objectGens` builds the
+  reused-number cases).
 - **The paraph's font states its encoding.** Times-Roman with no `/Encoding` reads the content
   stream's bytes in Adobe StandardEncoding, where the UTF-8 of `Ünal` draws as a macron plus a
   notdef. The font declares `/WinAnsiEncoding` and `winAnsi` transcodes to it, with `?` for a
@@ -351,9 +331,10 @@ signing pass renders them.
   signature.
 
 ### Follow-ups
-- A paraph is drawn as initials from the certificate's common name. A hand-drawn or uploaded
-  signature image would go in the same rectangle (pdfsign's `Appearance.Image` for the block, an
-  image XObject for the paraphs) and is the obvious next step.
+- A paraph is drawn as initials from the certificate's common name, and the signature block draws
+  the "electronically signed by" lines. A hand-drawn or uploaded signature image would go in the
+  same rectangle as an image XObject inside the stamp (both marks are our own stamps now, not
+  pdfsign's appearance) and is the obvious next step.
 - Placement is defined once, by the requester. Letting a signee adjust their own block before
   signing is a separate decision — it would have to be bounded, since the request is what they are
   agreeing to.

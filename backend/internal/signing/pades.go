@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,7 +97,11 @@ func startPAdES(input []byte, cred signingprovider.Credential, placements []Plac
 	sess := &padesSession{signer: signer, result: make(chan padesResult, 1)}
 
 	name := cred.Certificate.Subject.CommonName
-	input, err := stampSignerMarks(input, placements, paraphText(name))
+	// One timestamp for both the visible "at date" line and the signature's own
+	// signing time, so the stamp drawn before this pass and the /M it is covered by
+	// name the same moment.
+	signedAt := time.Now()
+	input, err := stampSignerMarks(input, placements, name, signedAt)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -128,10 +133,14 @@ func startPAdES(input []byte, cred signingprovider.Credential, placements []Plac
 				Info: sign.SignDataSignatureInfo{
 					Name:   name,
 					Reason: "Qualified electronic signature",
-					Date:   time.Now(),
+					Date:   signedAt,
 				},
 			},
-			Appearance: signatureAppearance(placements),
+			// The signature itself is invisible; its visible mark is the multi-line block
+			// stampSignerMarks drew above, inside this signer's ByteRange. pdfsign rewrites
+			// a page only for a VISIBLE appearance (sign/sign.go), and that rewrite is what
+			// forced the delicate page normalisation this used to need — an invisible
+			// signature never touches a page, so our own robust rewrite carries the block.
 		}
 		if err := sign.Sign(bytes.NewReader(input), out, rdr, size, data); err != nil {
 			sess.result <- padesResult{err: fmt.Errorf("signing: assemble PAdES: %w", err)}
@@ -163,39 +172,17 @@ func startPAdES(input []byte, cred signingprovider.Credential, placements []Plac
 	}
 }
 
-// signatureAppearance turns a signer's signature block into pdfsign's visible
-// appearance. With no signature block the appearance stays invisible: a signer may
-// legitimately have paraphs only, and an invisible signature is still a signature.
-func signatureAppearance(placements []Placement) sign.Appearance {
-	block := signaturePlacement(placements)
-	if block == nil {
-		return sign.Appearance{}
-	}
-	r := block.rect()
-	return sign.Appearance{
-		Visible: true,
-		//nolint:gosec // Page is validated to be within the document's page count.
-		Page:        uint32(block.Page),
-		LowerLeftX:  r[0],
-		LowerLeftY:  r[1],
-		UpperRightX: r[2],
-		UpperRightY: r[3],
-	}
-}
-
 // stampSignerMarks prepares the document for one signer's pass: it draws their
-// paraphs into it, and normalises the page their signature block lands on when
-// pdfsign could not rewrite that page as it stands. It returns the input unchanged
-// when neither is needed. digitorus/pdf panics its way out of a malformed object
-// graph, and this runs on the request goroutine, so the read is recovered into
-// ErrInvalidPDF rather than taking the process down.
-func stampSignerMarks(input []byte, placements []Placement, text string) (out []byte, err error) {
+// paraphs and their signature block into it as locked stamp annotations, in one
+// incremental revision appended BEFORE the signing pass — so this signer's own
+// signature covers them and they cannot be moved or altered without breaking it. It
+// returns the input unchanged when the signer placed nothing. digitorus/pdf panics
+// its way out of a malformed object graph, and this runs on the request goroutine,
+// so the read is recovered into ErrInvalidPDF rather than taking the process down.
+func stampSignerMarks(input []byte, placements []Placement, name string, signedAt time.Time) (out []byte, err error) {
 	paraphs := paraphPlacements(placements)
-	signaturePage := 0
-	if block := signaturePlacement(placements); block != nil {
-		signaturePage = block.Page
-	}
-	if len(paraphs) == 0 && signaturePage == 0 {
+	block := signaturePlacement(placements)
+	if len(paraphs) == 0 && block == nil {
 		return input, nil
 	}
 	defer func() {
@@ -207,7 +194,38 @@ func stampSignerMarks(input []byte, placements []Placement, text string) (out []
 	if err != nil {
 		return nil, ErrInvalidPDF
 	}
-	return stampMarks(input, rdr, paraphs, signaturePage, text)
+	return stampMarks(input, rdr, paraphs, paraphText(name), block, signatureLines(name, signedAt))
+}
+
+// signatureLines is the text drawn inside a signer's signature block, one string
+// per line. The name is reordered to "Surname, given names" and the moment is the
+// same one the signature dictionary records, in the server's local time zone.
+func signatureLines(name string, signedAt time.Time) []string {
+	return []string{
+		"Electronically signed by:",
+		reorderName(name),
+		"at date: " + signedAt.Format(signatureDateLayout),
+	}
+}
+
+// signatureDateLayout renders the signing time as e.g. "2026-08-11 14:32 CET": a
+// stated zone rather than a bare local time, so the mark is unambiguous wherever it
+// is read. MST in a Go layout prints the zone abbreviation of the time's location.
+const signatureDateLayout = "2006-01-02 15:04 MST"
+
+// reorderName turns the certificate's common name ("Dibran Mulder") into
+// "Mulder, Dibran": the last whitespace-separated field is taken as the surname and
+// the rest as the given names. It is a heuristic — a multi-word surname like "van
+// der Berg" splits on its last word — so a name with fewer than two fields is left
+// exactly as it stands rather than guessed at.
+func reorderName(name string) string {
+	fields := strings.Fields(name)
+	if len(fields) < 2 {
+		return strings.TrimSpace(name)
+	}
+	surname := fields[len(fields)-1]
+	given := strings.Join(fields[:len(fields)-1], " ")
+	return surname + ", " + given
 }
 
 // finish delivers the externally-produced signature and returns the signed PDF.

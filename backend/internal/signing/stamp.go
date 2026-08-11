@@ -72,12 +72,11 @@ type incrObject struct {
 }
 
 // stampMarks appends one incremental revision to input and returns the new
-// document. The revision draws text in each of paraphs' rectangles as a printable,
-// locked annotation, and — when signaturePage names a page pdfsign could not rewrite
-// as it stands (see pdfsignCanEmit) — replaces that page with one it can. Marks must
-// already be validated against the document's geometry. With nothing to do the input
-// is returned untouched, so the plain path still adds no revision at all.
-func stampMarks(input []byte, rdr *pdf.Reader, paraphs []Placement, signaturePage int, text string) ([]byte, error) {
+// document. The revision draws each paraph's initials and, when the signer placed
+// one, their signature block, each as a printable, locked stamp annotation. Marks
+// must already be validated against the document's geometry. With nothing to draw the
+// input is returned untouched, so a signer with no placements adds no revision at all.
+func stampMarks(input []byte, rdr *pdf.Reader, paraphs []Placement, paraphMark string, block *Placement, blockLines []string) ([]byte, error) {
 	nextID := lastObjectID(rdr) + 1
 	take := func() uint32 {
 		id := nextID
@@ -87,12 +86,20 @@ func stampMarks(input []byte, rdr *pdf.Reader, paraphs []Placement, signaturePag
 
 	var objects []incrObject
 	// One appearance + one annotation per mark, collected per page so each page
-	// object is rewritten once however many paraphs land on it.
-	annotsByPage := make(map[int][]uint32, len(paraphs))
+	// object is rewritten once however many marks land on it.
+	annotsByPage := make(map[int][]uint32, len(paraphs)+1)
 	pageOrder := make([]int, 0, len(paraphs)+1)
-	if len(paraphs) > 0 {
+	queue := func(page int, annotID uint32) {
+		if _, seen := annotsByPage[page]; !seen {
+			pageOrder = append(pageOrder, page)
+		}
+		annotsByPage[page] = append(annotsByPage[page], annotID)
+	}
+
+	if len(paraphs) > 0 || block != nil {
 		fontID := take()
 		objects = append(objects, incrObject{id: fontID, body: paraphFont()})
+
 		for _, m := range paraphs {
 			appearanceID, annotID := take(), take()
 			pageRef, err := pageReference(rdr, m.Page)
@@ -100,40 +107,36 @@ func stampMarks(input []byte, rdr *pdf.Reader, paraphs []Placement, signaturePag
 				return nil, err
 			}
 			objects = append(objects,
-				incrObject{id: appearanceID, body: paraphAppearance(m, text, fontID)},
-				incrObject{id: annotID, body: paraphAnnotation(m, text, appearanceID, pageRef)},
+				incrObject{id: appearanceID, body: paraphAppearance(m, paraphMark, fontID)},
+				incrObject{id: annotID, body: stampAnnotation(m, paraphMark, appearanceID, pageRef)},
 			)
-			if _, seen := annotsByPage[m.Page]; !seen {
-				pageOrder = append(pageOrder, m.Page)
-			}
-			annotsByPage[m.Page] = append(annotsByPage[m.Page], annotID)
+			queue(m.Page, annotID)
 		}
-	}
 
-	if signaturePage > 0 {
-		if _, queued := annotsByPage[signaturePage]; !queued {
-			needed, err := pageNeedsNormalising(rdr, signaturePage)
+		if block != nil {
+			appearanceID, annotID := take(), take()
+			pageRef, err := pageReference(rdr, block.Page)
 			if err != nil {
 				return nil, err
 			}
-			if needed {
-				pageOrder = append(pageOrder, signaturePage)
-				annotsByPage[signaturePage] = nil
-			}
+			objects = append(objects,
+				incrObject{id: appearanceID, body: signatureBlockAppearance(*block, blockLines, fontID)},
+				incrObject{id: annotID, body: stampAnnotation(*block, strings.Join(blockLines, " "), appearanceID, pageRef)},
+			)
+			queue(block.Page, annotID)
 		}
 	}
 
-	if len(objects) == 0 && len(pageOrder) == 0 {
+	if len(objects) == 0 {
 		return input, nil
 	}
 
 	for _, page := range pageOrder {
-		rewrite, err := rewritePage(rdr, page, annotsByPage[page], page == signaturePage, take)
+		pageObj, err := rewritePage(rdr, page, annotsByPage[page])
 		if err != nil {
 			return nil, err
 		}
-		objects = append(objects, rewrite.created...)
-		objects = append(objects, rewrite.page)
+		objects = append(objects, pageObj)
 	}
 
 	return appendRevision(input, rdr, objects, nextID)
@@ -243,19 +246,93 @@ func paraphTextLayout(glyphs int, width, height float64) (fontSize, x, y float64
 	return fontSize, x, y
 }
 
-// Annotation flags (PDF 32000-1 table 165): the paraph prints, and is read-only
-// and locked so a reader cannot drag it off its rectangle or delete it — the
-// signature covering it would then no longer verify, which is a worse way to find
-// out than not being offered the handle.
-const paraphAnnotationFlags = 4 | 64 | 128
+// signatureBlockPadding is the inset, in points, between the block's rectangle and
+// its text, so the lines do not sit flush against the annotation's edge.
+const signatureBlockPadding = 3
 
-// paraphAnnotation is the annotation that puts the appearance on the page.
-func paraphAnnotation(m Placement, text string, appearanceID uint32, pageRef string) []byte {
+// signatureLinePitch is the baseline-to-baseline distance as a multiple of the font
+// size, giving the stacked lines a little air.
+const signatureLinePitch = 1.25
+
+// signatureBlockAppearance is the Form XObject drawn inside a signer's signature
+// block: their lines top-to-bottom, left-aligned, in the same font and ink the
+// paraphs use so the two marks read as one hand. Its coordinate space is the
+// rectangle itself (origin at the lower-left corner), so the text is positioned
+// without reference to where on the page the box sits.
+func signatureBlockAppearance(m Placement, lines []string, fontID uint32) []byte {
+	drawn := make([][]byte, len(lines))
+	widest := 0
+	for i, line := range lines {
+		drawn[i] = winAnsi(line)
+		if len(drawn[i]) > widest {
+			widest = len(drawn[i])
+		}
+	}
+	fontSize, x, top, pitch := signatureTextLayout(len(drawn), widest, m.Width, m.Height)
+
+	var stream bytes.Buffer
+	stream.WriteString("q\nBT\n")
+	fmt.Fprintf(&stream, "/F1 %.2f Tf\n", fontSize)
+	stream.WriteString(paraphInk + "\n")
+	fmt.Fprintf(&stream, "%.2f %.2f Td\n", x, top)
+	for i, line := range drawn {
+		if i > 0 {
+			// Td is relative in text space, so each line steps down from the last.
+			fmt.Fprintf(&stream, "0 %.2f Td\n", -pitch)
+		}
+		fmt.Fprintf(&stream, "%s Tj\n", pdfLiteral(line))
+	}
+	stream.WriteString("ET\nQ")
+
+	var obj bytes.Buffer
+	obj.WriteString("<<\n  /Type /XObject\n  /Subtype /Form\n  /FormType 1\n")
+	fmt.Fprintf(&obj, "  /BBox [0 0 %.2f %.2f]\n", m.Width, m.Height)
+	obj.WriteString("  /Matrix [1 0 0 1 0 0]\n")
+	fmt.Fprintf(&obj, "  /Resources << /Font << /F1 %d 0 R >> >>\n", fontID)
+	fmt.Fprintf(&obj, "  /Length %d\n>>\nstream\n", stream.Len())
+	obj.Write(stream.Bytes())
+	obj.WriteString("\nendstream")
+	return obj.Bytes()
+}
+
+// signatureTextLayout sizes a signature block's lines to its rectangle: a font size
+// that stacks every line at signatureLinePitch within the height and keeps the widest
+// line within the width (Times-Roman averages about half its point size per glyph,
+// the approximation paraphs use). It returns the size, the left inset, the first
+// baseline and the baseline-to-baseline pitch. Glyphs are counted as encoded bytes,
+// which is what the content stream draws.
+func signatureTextLayout(lineCount, widestGlyphs int, width, height float64) (fontSize, x, top, pitch float64) {
+	const averageGlyphWidth = 0.5
+	availWidth := max(width-2*signatureBlockPadding, 1)
+	availHeight := max(height-2*signatureBlockPadding, 1)
+	lines := float64(max(lineCount, 1))
+	fontSize = availHeight / (lines * signatureLinePitch)
+	if glyphs := float64(widestGlyphs); glyphs > 0 {
+		if byWidth := availWidth / (glyphs * averageGlyphWidth); byWidth < fontSize {
+			fontSize = byWidth
+		}
+	}
+	pitch = fontSize * signatureLinePitch
+	x = signatureBlockPadding
+	top = height - signatureBlockPadding - fontSize
+	return fontSize, x, top, pitch
+}
+
+// Annotation flags (PDF 32000-1 table 165): the mark prints, and is read-only and
+// locked so a reader cannot drag it off its rectangle or delete it — the signature
+// covering it would then no longer verify, which is a worse way to find out than not
+// being offered the handle.
+const stampAnnotationFlags = 4 | 64 | 128
+
+// stampAnnotation is the annotation that puts a mark's appearance on the page. It
+// serves both a paraph and a signer's signature block: the two differ only in what
+// their appearance stream draws, not in how the annotation is attached or locked.
+func stampAnnotation(m Placement, text string, appearanceID uint32, pageRef string) []byte {
 	r := m.rect()
 	var obj bytes.Buffer
 	obj.WriteString("<<\n  /Type /Annot\n  /Subtype /Stamp\n")
 	fmt.Fprintf(&obj, "  /Rect [%.2f %.2f %.2f %.2f]\n", r[0], r[1], r[2], r[3])
-	fmt.Fprintf(&obj, "  /F %d\n", paraphAnnotationFlags)
+	fmt.Fprintf(&obj, "  /F %d\n", stampAnnotationFlags)
 	fmt.Fprintf(&obj, "  /AP << /N %d 0 R >>\n", appearanceID)
 	// /Contents is a PDF text string, which is a different encoding from the
 	// appearance stream's bytes: UTF-16BE with a byte-order mark carries any name.
@@ -280,87 +357,37 @@ func pageReference(rdr *pdf.Reader, number int) (string, error) {
 	return fmt.Sprintf("%d %d R", ptr.GetID(), ptr.GetGen()), nil
 }
 
-// pageRewrite is one page dictionary rebuilt for the appended revision, together
-// with the objects rebuilding it had to create.
-type pageRewrite struct {
-	page    incrObject
-	created []incrObject
-}
-
 // rewritePage rebuilds one page dictionary with extra annotation references
-// appended to its /Annots, as an object the revision can put in the page's place.
+// appended to its /Annots, as an object the revision can put in the page's place. The
+// page keeps its own object number and generation, and every reference is written
+// back as-is, so a producer that reused object numbers is preserved exactly.
 //
 // The dictionary is rebuilt key by key rather than copied byte for byte because
 // digitorus/pdf resolves as it reads and does not hand back the raw object. What it
 // hands back instead is written out by writeValue, which emits only forms that are
-// valid PDF — never Value.String(), which is a debug formatter.
-//
-// forPdfsign additionally makes the result a page pdfsign's own createIncPageUpdate
-// can round-trip, which the page carrying the signature block has to be: pdfsign
-// rewrites that page again, from this version, and still uses Value.String(). See
-// pdfsignCanEmit for what that costs.
-func rewritePage(rdr *pdf.Reader, number int, extra []uint32, forPdfsign bool, take func() uint32) (pageRewrite, error) {
+// valid PDF — never Value.String(), which is a debug formatter (a stream comes out as
+// `<<...>>@offset` and a string Go-quoted, and neither parses). References are
+// followed by writing the reference, not what it points at, so the rest of the file
+// is not inlined.
+func rewritePage(rdr *pdf.Reader, number int, extra []uint32) (incrObject, error) {
 	page := rdr.Page(number)
 	if page.V.IsNull() {
-		return pageRewrite{}, ErrInvalidPDF
+		return incrObject{}, ErrInvalidPDF
 	}
 	ptr := page.V.GetPtr()
 	if ptr.GetID() == 0 {
-		return pageRewrite{}, ErrInvalidPDF
-	}
-	if forPdfsign && ptr.GetGen() != 0 {
-		// pdfsign writes the page object it replaces as "id 0 obj" (sign/pdfxref.go:71),
-		// so a page at a reused object number is replaced by one nothing points at and
-		// the page disappears from the document altogether. Our own revision keeps the
-		// generation (incrObject carries it), so this is only ever pdfsign's rewrite.
-		return pageRewrite{}, fmt.Errorf(
-			"%w: page %d is itself at a reused object number, which cannot be rewritten"+
-				" to hold a visible signature", ErrInvalidPDF, number)
+		return incrObject{}, ErrInvalidPDF
 	}
 
-	var created []incrObject
 	var buf bytes.Buffer
 	buf.WriteString("<<\n")
 	for _, key := range page.V.Keys() {
 		if key == "Annots" {
 			continue // written below, with the new annotations appended
 		}
-		value := page.V.Key(key)
-		if forPdfsign && (key == "Parent" || key == "Contents") && !allRefsAtGenZero(value, page.V, 0) {
-			// Not fixable by rewriting: pdfsign rewrites this page from whatever it is
-			// handed and writes both keys at generation 0 regardless. See
-			// allRefsAtGenZero.
-			return pageRewrite{}, fmt.Errorf(
-				"%w: page %d carries /%s at a reused object number, which cannot be"+
-					" rewritten to hold a visible signature", ErrInvalidPDF, number, key)
-		}
-		if key == "Parent" {
-			// A page tree node is an indirect object by definition, and inlining it
-			// would detach the page from the tree it hangs off.
-			ref, ok := pdfRef(value, page.V)
-			if !ok {
-				return pageRewrite{}, ErrInvalidPDF
-			}
-			fmt.Fprintf(&buf, "  /Parent %s\n", ref)
-			continue
-		}
-		if forPdfsign && key != "Contents" && !pdfsignCanEmit(value) {
-			if !droppablePageEntries[key] {
-				return pageRewrite{}, fmt.Errorf(
-					"%w: page %d carries /%s, which cannot be rewritten to hold a visible signature",
-					ErrInvalidPDF, number, key)
-			}
-			continue // see droppablePageEntries
-		}
-		// /PieceInfo is a producer's private data and /LastModified is its timestamp;
-		// PDF 32000-1 §14.5 requires the second wherever the first is. The date is a
-		// string, so it never survives pdfsign — and the pair goes together.
-		if forPdfsign && key == "PieceInfo" && !pdfsignCanEmit(page.V.Key("LastModified")) {
-			continue
-		}
 		buf.WriteString("  " + pdfName(key) + " ")
-		if err := writeValue(&buf, value, page.V, 0); err != nil {
-			return pageRewrite{}, err
+		if err := writeValue(&buf, page.V.Key(key), page.V, 0); err != nil {
+			return incrObject{}, err
 		}
 		buf.WriteString("\n")
 	}
@@ -369,45 +396,11 @@ func rewritePage(rdr *pdf.Reader, number int, extra []uint32, forPdfsign bool, t
 	if !annots.IsNull() || len(extra) > 0 {
 		buf.WriteString("  /Annots [")
 		for i := 0; i < annots.Len(); i++ {
-			item := annots.Index(i)
-			if ref, ok := pdfRef(item, annots); ok {
-				itemPtr := item.GetPtr()
-				if !forPdfsign || itemPtr.GetGen() == 0 {
-					buf.WriteString(" " + ref)
-					continue
-				}
-				// An entry at a reused object number IS fixable, unlike /Parent and
-				// /Contents: copy it into an object of its own at generation 0, which is
-				// the one reference shape pdfsign writes back intact. The original stays
-				// where it is — whatever else points at it still resolves.
-				id := take()
-				var obj bytes.Buffer
-				// The item is its own container here, so that writeValue writes the
-				// dictionary rather than the reference it was read from.
-				if err := writeValue(&obj, item, item, 0); err != nil {
-					return pageRewrite{}, err
-				}
-				created = append(created, incrObject{id: id, body: obj.Bytes()})
-				fmt.Fprintf(&buf, " %d 0 R", id)
-				continue
-			}
-			// An /Annots array may hold annotation dictionaries directly. pdfsign's
-			// rewrite writes every entry as a reference and so would turn one into a
-			// reference to the page itself, which is why the signature page's are
-			// promoted to objects of their own first — losing nothing.
-			if forPdfsign {
-				id := take()
-				var obj bytes.Buffer
-				if err := writeValue(&obj, item, annots, 0); err != nil {
-					return pageRewrite{}, err
-				}
-				created = append(created, incrObject{id: id, body: obj.Bytes()})
-				fmt.Fprintf(&buf, " %d 0 R", id)
-				continue
-			}
+			// writeValue writes a reference entry as "id gen R" and a directly-embedded
+			// annotation dictionary inline — both valid, and both kept as they were.
 			buf.WriteString(" ")
-			if err := writeValue(&buf, item, annots, 0); err != nil {
-				return pageRewrite{}, err
+			if err := writeValue(&buf, annots.Index(i), annots, 0); err != nil {
+				return incrObject{}, err
 			}
 		}
 		for _, id := range extra {
@@ -417,69 +410,7 @@ func rewritePage(rdr *pdf.Reader, number int, extra []uint32, forPdfsign bool, t
 	}
 	buf.WriteString(">>")
 
-	return pageRewrite{
-		page:    incrObject{id: ptr.GetID(), gen: ptr.GetGen(), body: buf.Bytes()},
-		created: created,
-	}, nil
-}
-
-// pageNeedsNormalising reports whether the page carrying the signature block has to
-// be rewritten before pdfsign is handed the document — that is, whether pdfsign's
-// own page rewrite would produce something that is not valid PDF.
-func pageNeedsNormalising(rdr *pdf.Reader, number int) (bool, error) {
-	page := rdr.Page(number)
-	if page.V.IsNull() {
-		return false, ErrInvalidPDF
-	}
-	ptr := page.V.GetPtr()
-	if ptr.GetID() == 0 {
-		return false, ErrInvalidPDF
-	}
-	if ptr.GetGen() != 0 {
-		return true, nil // refused by rewritePage: pdfsign would replace it at generation 0
-	}
-	for _, key := range page.V.Keys() {
-		switch key {
-		case "Parent", "Contents":
-			// pdfsign writes both back as references, which is what they are — but only
-			// ever at generation 0, so a reused object number has to reach rewritePage,
-			// which refuses the page.
-			if !allRefsAtGenZero(page.V.Key(key), page.V, 0) {
-				return true, nil
-			}
-		case "Annots":
-			annots := page.V.Key(key)
-			for i := 0; i < annots.Len(); i++ {
-				item := annots.Index(i)
-				if _, ok := pdfRef(item, annots); !ok {
-					return true, nil
-				}
-				if ptr := item.GetPtr(); ptr.GetGen() != 0 {
-					return true, nil
-				}
-			}
-		default:
-			if !pdfsignCanEmit(page.V.Key(key)) {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
-}
-
-// droppablePageEntries are the page-dictionary keys that may be dropped from the
-// signature block's page when pdfsign cannot write them back. All of it is metadata:
-// none of it is drawn on the page or changes what the page does, and the drop
-// happens inside the bytes that signature covers, which is the only place a change
-// to a signed document may be. Any other entry pdfsign cannot write back is refused
-// instead — a page that quietly lost, say, its /Resources would come out blank, and
-// blank is not better than an error.
-var droppablePageEntries = map[string]bool{
-	"Metadata":     true, // page-level XMP
-	"Thumb":        true, // a pre-rendered thumbnail of the page
-	"LastModified": true, // the timestamp /PieceInfo is required to carry
-	"PieceInfo":    true, // a producer's private data (InDesign, Illustrator)
-	"ID":           true, // the PDF 2.0 page identifier
+	return incrObject{id: ptr.GetID(), gen: ptr.GetGen(), body: buf.Bytes()}, nil
 }
 
 // maxValueDepth bounds how far into a page entry these walks go. Nothing in a page
@@ -501,35 +432,6 @@ func pdfRef(value, container pdf.Value) (string, bool) {
 		return "", false
 	}
 	return fmt.Sprintf("%d %d R", id, gen), true
-}
-
-// allRefsAtGenZero reports whether every reference reachable in value sits at
-// generation 0, which is the only generation pdfsign's page rewrite can write back:
-// it formats each /Parent, /Contents and /Annots reference from GetPtr().GetID() with
-// the generation a literal 0 (sign/pdfvisualsignature.go:133, :142, :148, :154). A
-// producer that reuses an object number writes the reused object at a higher
-// generation — legal PDF — and pdfsign's copy of that reference then points at an
-// object that does not exist, so the page draws nothing and its annotations are gone
-// while the signature still verifies.
-//
-// Arrays are walked because /Contents may be one: pdfsign writes an array's entries
-// out individually, so each of them has to survive too.
-func allRefsAtGenZero(value, container pdf.Value, depth int) bool {
-	if depth > maxValueDepth {
-		return false
-	}
-	own, ptr := container.GetPtr(), value.GetPtr()
-	if id := ptr.GetID(); id != 0 && id != own.GetID() && ptr.GetGen() != 0 {
-		return false
-	}
-	if value.Kind() == pdf.Array {
-		for i := 0; i < value.Len(); i++ {
-			if !allRefsAtGenZero(value.Index(i), value, depth+1) {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // writeValue writes value back as PDF syntax, following references by writing the
@@ -584,48 +486,6 @@ func writeValue(buf *bytes.Buffer, value, container pdf.Value, depth int) error 
 		return ErrInvalidPDF
 	}
 	return nil
-}
-
-// pdfsignCanEmit reports whether pdfsign's createIncPageUpdate would write a page
-// entry back as valid PDF. Every key it does not special-case goes through
-// digitorus/pdf's Value.String(), which is a debug formatter: a stream comes out as
-// `<<...>>@offset` and a string Go-quoted, and neither parses. Value.String() does
-// not resolve references, so a nested reference is fine — only a value written into
-// the page dictionary itself can carry a string or a stream this far.
-//
-// An entry it cannot emit has to leave the page before pdfsign sees it: pdfsign
-// rewrites that page whatever we do, and there is no form of such an entry that
-// survives being resolved and re-formatted, so keeping it means a signed document
-// that does not parse. What may be dropped is droppablePageEntries and nothing else.
-// See AGENTS.md.
-func pdfsignCanEmit(value pdf.Value) bool {
-	return valueSurvivesObjfmt(value, value, 0)
-}
-
-func valueSurvivesObjfmt(value, container pdf.Value, depth int) bool {
-	if depth > maxValueDepth {
-		return false
-	}
-	if _, ok := pdfRef(value, container); ok {
-		return true // written as "id gen R"
-	}
-	switch value.Kind() {
-	case pdf.Stream, pdf.String:
-		return false
-	case pdf.Array:
-		for i := 0; i < value.Len(); i++ {
-			if !valueSurvivesObjfmt(value.Index(i), value, depth+1) {
-				return false
-			}
-		}
-	case pdf.Dict:
-		for _, key := range value.Keys() {
-			if !valueSurvivesObjfmt(value.Key(key), value, depth+1) {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // pdfName writes a name back, escaping everything a name may not carry directly

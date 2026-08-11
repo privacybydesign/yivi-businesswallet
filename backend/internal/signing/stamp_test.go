@@ -2,19 +2,23 @@ package signing
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"strings"
 	"testing"
+	"time"
 )
 
-// Both the paraph stamp and the visible signature rewrite the page dictionary they
-// land on, and a page dictionary legally carries entries that are not a name, a
-// number or a reference: /Metadata and /Thumb are streams, and /LastModified is a
-// date string (required whenever /PieceInfo is present, which InDesign and
+// testSignedAt is a fixed signing time for the stamp tests that do not care what the
+// date reads, only that a mark was drawn or a page survived.
+var testSignedAt = time.Date(2026, 8, 11, 14, 32, 0, 0, time.UTC)
+
+// Both a paraph and a signature block are stamps now, and each rewrites the page
+// dictionary it lands on. A page dictionary legally carries entries that are not a
+// name, a number or a reference: /Metadata and /Thumb are streams, and /LastModified
+// is a date string (required whenever /PieceInfo is present, which InDesign and
 // Illustrator write routinely). digitorus/pdf hands those back resolved and its
 // Value.String() is a debug formatter — a stream comes out as `<<...>>@offset` and a
-// string Go-quoted — so a page rewritten through it stops parsing.
+// string Go-quoted — so a page rewritten through it would stop parsing; writeValue
+// emits only forms that are valid PDF.
 //
 // These are the pages the plain ones buildTestPDF writes do not cover.
 var awkwardPageEntries = []struct {
@@ -77,7 +81,7 @@ func TestParaphStampKeepsAnAwkwardPageReadable(t *testing.T) {
 
 			stamped, err := stampSignerMarks(doc, []Placement{
 				{Kind: PlacementParaph, Page: 1, X: 500, Y: 40, Width: 48, Height: 24},
-			}, "AB")
+			}, "AB", testSignedAt)
 			if err != nil {
 				t.Fatalf("stamp paraph: %v", err)
 			}
@@ -91,11 +95,11 @@ func TestParaphStampKeepsAnAwkwardPageReadable(t *testing.T) {
 	}
 }
 
-// TestVisibleSignatureKeepsAnAwkwardPageReadable is the signature half. The rewrite
-// is pdfsign's there, not ours, and it has the same bug: it writes every entry it
-// does not special-case through Value.String(). The page is therefore handed to it
-// already stripped of the entries it cannot re-emit, so what it writes back parses.
-func TestVisibleSignatureKeepsAnAwkwardPageReadable(t *testing.T) {
+// TestSignatureBlockKeepsAnAwkwardPageReadable is the signature half. The signature
+// block is our own stamp, so the page it lands on goes through our rewrite — the same
+// one the paraph uses — and writeValue re-emits every awkward entry (a metadata
+// stream as a reference, a /LastModified date as a hex string) as valid PDF.
+func TestSignatureBlockKeepsAnAwkwardPageReadable(t *testing.T) {
 	for i, c := range awkwardPageEntries {
 		t.Run(c.name, func(t *testing.T) {
 			signed := signWithPlacements(t, awkwardPageDocument(t, 1, i), []Placement{
@@ -114,14 +118,14 @@ func TestVisibleSignatureKeepsAnAwkwardPageReadable(t *testing.T) {
 	}
 }
 
-// Only page metadata may be dropped to get a page past pdfsign. An entry that
-// changes what the page draws or does is refused instead — before any signature has
-// been produced, since the document is prepared before the digest is published.
-func TestSignaturePageWithAnUndroppableEntryIsRefused(t *testing.T) {
+// The signature block is now our own stamp inside an invisible signature, so no page
+// is ever handed to pdfsign's fragile rewrite. A page entry pdfsign could not re-emit
+// — here an additional-action holding a JavaScript string — is kept verbatim by our
+// own writeValue, so the document signs and the entry survives rather than being
+// refused or silently dropped.
+func TestSignaturePageEntryPdfsignCouldNotEmitSurvives(t *testing.T) {
 	doc := buildTestPDFWith(t, testPDFOptions{
 		pages: 1,
-		// An additional-action holding JavaScript: a string, so pdfsign cannot write
-		// it back, and not something to silently remove from a document being signed.
 		pageEntries: func(int) string {
 			return "/AA << /O << /S /JavaScript /JS (app.alert\\(1\\)) >> >>"
 		},
@@ -130,19 +134,18 @@ func TestSignaturePageWithAnUndroppableEntryIsRefused(t *testing.T) {
 		t.Fatalf("the test document itself does not parse: %v", err)
 	}
 
-	_, cred := stubCredential(t)
-	_, _, err := startPAdES(doc, cred, []Placement{
+	signed := signWithPlacements(t, doc, []Placement{
 		{Kind: PlacementSignature, Page: 1, X: 72, Y: 96, Width: 200, Height: 64},
 	})
-	if !errors.Is(err, ErrInvalidPDF) {
-		t.Fatalf("startPAdES = %v, want ErrInvalidPDF", err)
+	mustVerify(t, signed, 1)
+	if _, err := readGeometry(signed); err != nil {
+		t.Fatalf("the signed document no longer parses: %v", err)
 	}
-	if !strings.Contains(err.Error(), "/AA") {
-		t.Errorf("the error does not say which entry stopped it: %v", err)
+	// The action is a name plus a JavaScript string; writeValue keeps the string as a
+	// hex literal, so the /S /JavaScript key is still there.
+	if !bytes.Contains(signed, []byte("/JavaScript")) {
+		t.Error("the page's /AA action did not survive signing")
 	}
-
-	// The same document signs as before when nobody asked for a visible signature.
-	mustVerify(t, signWithPlacements(t, doc, nil), 1)
 }
 
 // An /Annots array may hold an annotation dictionary directly rather than a
@@ -178,45 +181,35 @@ func TestDirectAnnotationOnTheSignaturePageSurvives(t *testing.T) {
 }
 
 // A producer that reuses an object number writes the reused object at a higher
-// generation, and pdfsign's page rewrite emits every /Parent, /Contents and /Annots
-// reference at generation 0 whatever it was handed — so the page comes back pointing
-// at objects that do not exist. There is nothing to normalise: pdfsign rewrites the
-// signature block's page from our version, so the page is refused instead, before the
-// digest is published. A blank page inside a document whose signature verifies is the
-// worst outcome available.
-func TestSignaturePageWithAReusedObjectNumberIsRefused(t *testing.T) {
-	// A content stream may also be an array, which pdfsign writes out entry by entry
-	// (sign/pdfvisualsignature.go:142) — so each entry has to be checked, not just the
-	// /Contents value itself. And the page dictionary may be the reused object: pdfsign
-	// replaces it as "id 0 obj" (sign/pdfxref.go:71), which loses the page entirely.
+// generation — legal PDF, and the case pdfsign's own page rewrite could not handle
+// (it emits every reference at generation 0). The signature block no longer goes
+// through that rewrite: it is our own stamp, and our rewrite keeps each reference and
+// the page object at the generation it was read at. So a document with a reused object
+// number on its signature page signs and still draws, where it used to be refused.
+func TestSignaturePageWithAReusedObjectNumberSigns(t *testing.T) {
 	tests := []struct {
 		name     string
 		gens     map[int]int
 		contents func(i, firstExtraID int) string
 		objects  []string
-		want     string
 	}{
 		{
 			name: "content stream",
 			gens: map[int]int{testPDFContentID(0): 1},
-			want: "/Contents",
 		},
 		{
 			name:     "content stream in an array",
 			gens:     map[int]int{testPDFFirstExtraID(1): 1},
 			contents: func(_, id int) string { return fmt.Sprintf("[ %d 1 R ]", id) },
 			objects:  []string{"<< /Length 16 >>\nstream\nBT /F1 12 Tf ET\nendstream"},
-			want:     "/Contents",
 		},
 		{
 			name: "page tree node",
 			gens: map[int]int{testPDFPagesID: 1},
-			want: "/Parent",
 		},
 		{
 			name: "the page dictionary itself",
 			gens: map[int]int{testPDFPageID(0): 1},
-			want: "page 1 is itself at a reused object number",
 		},
 	}
 	for _, tc := range tests {
@@ -231,31 +224,16 @@ func TestSignaturePageWithAReusedObjectNumberIsRefused(t *testing.T) {
 				t.Fatalf("the test document itself does not parse: %v", err)
 			}
 
-			_, cred := stubCredential(t)
-			_, _, err := startPAdES(doc, cred, []Placement{
+			signed := signWithPlacements(t, doc, []Placement{
 				{Kind: PlacementSignature, Page: 1, X: 72, Y: 96, Width: 200, Height: 64},
 			})
-			if !errors.Is(err, ErrInvalidPDF) {
-				t.Fatalf("startPAdES = %v, want ErrInvalidPDF", err)
-			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("the error does not say which entry stopped it: %v", err)
-			}
-
-			// A paraph on that page needs no rewrite pdfsign can read back, so our own
-			// rewrite keeps the generation and the page still draws.
-			stamped, err := stampSignerMarks(doc, []Placement{
-				{Kind: PlacementParaph, Page: 1, X: 500, Y: 40, Width: 48, Height: 24},
-			}, "AB")
+			mustVerify(t, signed, 1)
+			rdr, err := openPDF(signed)
 			if err != nil {
-				t.Fatalf("stamp paraph: %v", err)
-			}
-			rdr, err := openPDF(stamped)
-			if err != nil {
-				t.Fatalf("open stamped document: %v", err)
+				t.Fatalf("open signed document: %v", err)
 			}
 			if rdr.Page(1).V.Key("Contents").IsNull() {
-				t.Error("the paraph stamp blanked the page")
+				t.Error("signing blanked the page")
 			}
 		})
 	}
@@ -340,15 +318,16 @@ func TestParaphTextIsEncodedForTheFontItIsDrawnIn(t *testing.T) {
 // /Contents is a PDF text string rather than content-stream bytes, so it carries a
 // name in any script — including one WinAnsi has no glyphs for.
 func TestParaphAnnotationCarriesTheNameAsATextString(t *testing.T) {
-	annotation := paraphAnnotation(
+	annotation := stampAnnotation(
 		Placement{Kind: PlacementParaph, Page: 1, Width: 48, Height: 24}, "JÖ", 9, "3 0 R")
 	if !bytes.Contains(annotation, []byte("/Contents <FEFF004A00D6>")) {
 		t.Fatalf("annotation does not carry the name as UTF-16BE:\n%s", annotation)
 	}
 }
 
-// A page that only carries a paraph is never handed to pdfsign's page rewrite, so
-// nothing has to be stripped from it: what the producer wrote stays in the document.
+// No page is handed to pdfsign's page rewrite any more — both marks are our own
+// stamps — so nothing is ever stripped from a page: what the producer wrote stays in
+// the document, on the paraph page as much as on the signature page.
 func TestParaphOnlyPageKeepsItsEntries(t *testing.T) {
 	doc := awkwardPageDocument(t, 2, 2) // /LastModified + /PieceInfo on both pages
 	signed := signWithPlacements(t, doc, []Placement{

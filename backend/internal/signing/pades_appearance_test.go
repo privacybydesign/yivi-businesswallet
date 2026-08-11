@@ -77,22 +77,35 @@ func mustVerify(t *testing.T, signed []byte, wantSigners int) {
 	}
 }
 
-// TestSignaturePlacementBecomesTheVisibleAppearance is the signature half of the
-// feature: the rectangle the requester placed is the rectangle the signature's own
-// widget occupies, and binding it that way leaves the signature verifiable.
-func TestSignaturePlacementBecomesTheVisibleAppearance(t *testing.T) {
+// TestSignaturePlacementBecomesAVisibleStamp is the signature half of the feature:
+// the rectangle the requester placed becomes a visible stamp drawn inside this
+// signer's own revision (so the signature covers it), while the signature field
+// itself is invisible. The stamp carries the placed rectangle and the "signed by"
+// text; the signature stays verifiable.
+func TestSignaturePlacementBecomesAVisibleStamp(t *testing.T) {
 	block := Placement{Kind: PlacementSignature, Page: 2, X: 72, Y: 96, Width: 200, Height: 64}
 	signed := signWithPlacements(t, buildTestPDF(t, 2, false), []Placement{block})
 
 	mustVerify(t, signed, 1)
-	// The widget carries the placed rectangle: pdfsign writes /Rect with %f, so the
-	// comparison is on that formatting.
-	want := fmt.Sprintf("/Rect [%f %f %f %f]", block.X, block.Y, block.X+block.Width, block.Y+block.Height)
+	// The stamp annotation carries the placed rectangle (our stamp writes /Rect with
+	// %.2f), and the signature field itself is invisible (zero rectangle).
+	want := fmt.Sprintf("/Rect [%.2f %.2f %.2f %.2f]", block.X, block.Y, block.X+block.Width, block.Y+block.Height)
 	if !bytes.Contains(signed, []byte(want)) {
 		t.Fatalf("signed PDF does not carry the placed signature rectangle %q", want)
 	}
+	if !bytes.Contains(signed, []byte("/Subtype /Stamp")) {
+		t.Fatal("signed PDF carries no signature-block stamp")
+	}
+	if !bytes.Contains(signed, []byte("/Rect [0 0 0 0]")) {
+		t.Fatal("the signature field should be invisible now the block is a stamp")
+	}
 	if !bytes.Contains(signed, []byte("/FT /Sig")) {
 		t.Fatal("signed PDF has no signature field")
+	}
+	// The block draws the "electronically signed by" text — the stub cert's common
+	// name reordered to "Signer, Stub".
+	if !bytes.Contains(signed, []byte("(Electronically signed by:)")) {
+		t.Fatal("the signature block does not draw the signed-by line")
 	}
 }
 
@@ -122,8 +135,9 @@ func TestParaphsAreStampedOnEveryPlacedPage(t *testing.T) {
 	signed := signWithPlacements(t, buildTestPDF(t, pages, false), placements)
 
 	mustVerify(t, signed, 1)
-	if got := bytes.Count(signed, []byte("/Subtype /Stamp")); got != pages {
-		t.Fatalf("got %d paraph annotations, want %d", got, pages)
+	// One stamp per paraph plus the one signature block.
+	if got := bytes.Count(signed, []byte("/Subtype /Stamp")); got != pages+1 {
+		t.Fatalf("got %d stamp annotations, want %d", got, pages+1)
 	}
 	// One appearance rectangle per paraph, at the placed position.
 	if got := bytes.Count(signed, []byte("/Rect [500.00 40.00 548.00 64.00]")); got != pages {
@@ -207,8 +221,9 @@ func TestCoSigningWithPlacementsKeepsBothSignaturesValid(t *testing.T) {
 		{Kind: PlacementParaph, Page: 1, X: 530, Y: 40, Width: 48, Height: 24},
 	})
 	mustVerify(t, afterB, 2)
-	if got := bytes.Count(afterB, []byte("/Subtype /Stamp")); got != 2 {
-		t.Fatalf("got %d paraph annotations after two signers, want 2", got)
+	// Two signers, each contributing one signature block and one paraph.
+	if got := bytes.Count(afterB, []byte("/Subtype /Stamp")); got != 4 {
+		t.Fatalf("got %d stamp annotations after two signers, want 4", got)
 	}
 }
 
