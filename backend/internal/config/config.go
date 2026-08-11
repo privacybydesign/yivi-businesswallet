@@ -372,6 +372,17 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	// SIGNING_REDIRECT_URI is optional (empty keeps the built-in localhost default),
+	// but a set value is concatenated into the QTSP authorize URL and the token
+	// exchange's redirect_uri, so a scheme-less, spaced or relative value must fail
+	// at boot rather than deep inside the signing ceremony at the QTSP.
+	signingRedirectURI := os.Getenv(envSigningRedirectURI)
+	if signingRedirectURI != "" {
+		if err := requireAbsoluteHTTPURL(envSigningRedirectURI, signingRedirectURI); err != nil {
+			return Config{}, err
+		}
+	}
+
 	return Config{
 		DatabaseDSN: dsn,
 		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
@@ -427,7 +438,7 @@ func Load() (Config, error) {
 		ProvisioningEncryptionKey:  os.Getenv(envProvisioningEncryptionKey),
 		CSCEncryptionKey:           os.Getenv(envCSCEncryptionKey),
 		SigningOAuthIssuerInternal: os.Getenv(envSigningOAuthIssuerInternal),
-		SigningRedirectURI:         os.Getenv(envSigningRedirectURI),
+		SigningRedirectURI:         signingRedirectURI,
 		MailDefaultLocale:          envOrDefault(envMailDefaultLocale, defaultMailLocale),
 		StaticDir:                  os.Getenv(envStaticDir),
 

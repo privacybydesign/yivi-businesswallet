@@ -17,15 +17,23 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Two manual dispatches would otherwise race on the same :edge tag; serialise
+  # them (queue rather than cancel, so an in-flight build finishes and pushes).
+  group: deliver-qtsp
+  cancel-in-progress: false
+
 jobs:
   deliver-qtsp:
     runs-on: ubuntu-latest
     name: Build and push qtsp-signer to Scaleway
+    # A wedged Maven build would otherwise hold a runner for the 6-hour default.
+    timeout-minutes: 60
     # SCW_SECRET_KEY lives in the `dev` environment (same as the mirror job in
     # delivery.yml); without it docker login falls back to an interactive prompt.
     environment: dev
     env:
-      TARGET_IMAGE: rg.nl-ams.scw.cloud/yivi-containter-registry/qtsp-signer:edge
+      IMAGE: rg.nl-ams.scw.cloud/yivi-containter-registry/qtsp-signer
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -42,13 +50,22 @@ jobs:
 
       - name: Build and push
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        # NB: unlike delivery.yml, this image is deliberately NOT Anchore-scanned
+        # before push. It is a staging-only, software-HSM demo built from an upstream
+        # Maven clone whose whole point is proving QES plumbing, so the scan gate is
+        # skipped here — do not assume the Scaleway registry's scan covers it.
         with:
           # The Dockerfile clones upstream itself, so the build context is just the
           # demo directory (Dockerfile + patch + entrypoint + the seed controller).
           context: docker/development/qtsp-signer
           file: docker/development/qtsp-signer/Dockerfile
           push: true
-          tags: ${{ env.TARGET_IMAGE }}
+          # Both the mutable :edge tag (what the ops repo tracks) and an immutable
+          # :<sha> tag, so a build is traceable to the commit / pinned upstream ref
+          # that produced it and can be rolled back to.
+          tags: |
+            ${{ env.IMAGE }}:edge
+            ${{ env.IMAGE }}:${{ github.sha }}
           # linux/amd64 only: the Scaleway nodes are amd64, and the upstream build
           # is not exercised on arm.
           platforms: linux/amd64

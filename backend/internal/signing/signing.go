@@ -26,8 +26,9 @@ import (
 // DefaultRedirectURI is the QTSP-registered OAuth callback the browser is sent
 // back to after the wallet ceremony. It must match a redirect-uri in the
 // authorization server's client registration (see the --profile signer demo's
-// config/application-secret.yml). This dev default targets the local backend;
-// a real deployment behind a different host would need this made configurable.
+// config/application-secret.yml). This targets the local backend and is the
+// fallback used when SIGNING_REDIRECT_URI is unset; a hosted deployment behind a
+// different host sets that variable to its own public callback.
 const DefaultRedirectURI = "http://localhost:8080/api/v1/signing/callback"
 
 // SessionTTL bounds how long a signing/link authorization may stay in flight

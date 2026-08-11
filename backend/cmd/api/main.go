@@ -520,15 +520,11 @@ func run() error {
 	signingStore := signing.NewStore(pool, recorder)
 	signingDelivery := signingDeliverer{email: emailService, qerds: qerdsService, orgs: orgStore}
 	signingNotify := signingNotifier{email: emailService, orgs: orgStore, appBaseURL: cfg.AppBaseURL}
-	// The OAuth callback the QTSP registers for the SCA client. Defaults to the
-	// localhost value for local Docker; a hosted deployment sets SIGNING_REDIRECT_URI
-	// to its own public callback so redirect_uri matches what the QTSP registered.
-	signingRedirectURI := cfg.SigningRedirectURI
-	if signingRedirectURI == "" {
-		signingRedirectURI = signing.DefaultRedirectURI
-	}
+	// SigningRedirectURI is the QTSP-registered OAuth callback; empty falls back to
+	// the localhost default inside NewService (see signing.DefaultRedirectURI). A
+	// hosted deploy sets SIGNING_REDIRECT_URI to its own public callback.
 	signingHandler := signing.NewHandler(
-		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingOrgs{store: orgStore}, signingDelivery, signingNotify, signingRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
+		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingOrgs{store: orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
 		requireUser, orgHandler.Authorize)
 
 	handler := server.New(

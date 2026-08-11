@@ -85,6 +85,11 @@ services:
       # Encrypts the per-org CSC signing-provider client secret at rest (hex 32
       # bytes). Without it an org cannot store one (internal/csc).
       CSC_ENCRYPTION_KEY: ${CSC_ENCRYPTION_KEY:-}
+      # The OAuth callback the QTSP redirects the browser to after the signing
+      # ceremony (and which the QTSP registers for the SCA client). Empty keeps the
+      # built-in localhost default; a hosted deploy sets its own public callback.
+      # Declared here so Compose forwards a root .env value into the container.
+      SIGNING_REDIRECT_URI: ${SIGNING_REDIRECT_URI:-}
       # Attestation issuer (OpenID4VCI). Defaults to the in-process stub; set to
       # `veramo` with a URL/instance/token to issue real credentials.
       ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}
