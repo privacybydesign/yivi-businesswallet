@@ -137,9 +137,9 @@ export default function Settings(): React.JSX.Element {
               <EmailTemplatesPanel slug={slug} />
             ) : section === "slack" ? (
               <SlackSettingsPanel slug={slug} />
-            ) : (
+            ) : section === "msteams" ? (
               <TeamsSettingsPanel slug={slug} />
-            )}
+            ) : null}
           </div>
         ) : tab === "issuer" ? (
           <IssuerSettingsPanel slug={slug} />
