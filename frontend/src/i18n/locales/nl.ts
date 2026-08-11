@@ -1315,7 +1315,7 @@ export const nl: Translation<typeof en> = {
       custom: "Eigen CSC-endpoint",
     },
     sampleHint:
-      "De voorbeeldprovider is de meegeleverde referentie-QTSP. Start hem met `docker compose --profile signer up`; hij draait op http://localhost:8085.",
+      "De voorbeeldprovider is onze gehoste demo-QTSP op https://csc-signer.staging.yivi.app. Vraag inloggegevens aan via support@yivi.app.",
     baseUrl: "CSC-basis-URL",
     baseUrlPlaceholder: "https://qtsp.example.org",
     clientId: "OAuth-client-ID",

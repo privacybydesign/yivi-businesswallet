@@ -1271,7 +1271,7 @@ export const en = {
       custom: "Custom CSC endpoint",
     },
     sampleHint:
-      "The sample provider is the bundled reference QTSP. Run it with `docker compose --profile signer up`; it listens on http://localhost:8085.",
+      "The sample provider is our hosted demo QTSP at https://csc-signer.staging.yivi.app. Request credentials at support@yivi.app.",
     baseUrl: "CSC base URL",
     baseUrlPlaceholder: "https://qtsp.example.org",
     clientId: "OAuth client ID",
