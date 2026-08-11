@@ -2139,6 +2139,109 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/mandates:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [organizations]
+      summary: List the organisation's mandate register
+      description: >-
+        Every mandate the organisation has granted, active and ended alike, each
+        with its derived lifecycle status (pending, active, revoked, expired).
+        Requires an administrator role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [organizations]
+      summary: Grant a mandate
+      description: >-
+        Grants a full or administrative mandate to a member. Requires a
+        register-backed legal representative or an active full mandate — an
+        administrator role does not reach this endpoint. A grantor who is not a
+        legal representative is delegating, so the grant is cut from the mandate
+        they hold and clamped to its scope and validity window.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/mandates/{id}/revoke:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [organizations]
+      summary: Revoke a mandate
+      description: >-
+        Ends a mandate and everything delegated from it. An empty body revokes at
+        once; an effectiveAt in the future closes the validity window on that date
+        instead. Requires a legal representative, or the grantor of the mandate.
+        Returns every mandate the revocation reached, the target first.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/members:
     parameters:
       - name: slug
