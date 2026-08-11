@@ -77,11 +77,20 @@ export function Breadcrumbs(): React.JSX.Element | null {
 
   // Crumbs may read from the query cache (e.g. the org name); re-render when it
   // changes so a name that resolves after first paint replaces its fallback.
-  const [, bumpVersion] = React.useReducer((n: number): number => n + 1, 0);
-  React.useEffect(
-    () => queryClient.getQueryCache().subscribe(bumpVersion),
+  // useSyncExternalStore (not a manual subscribe + setState) because a query
+  // mounting during another component's render notifies cache subscribers
+  // synchronously; a plain setState there warns "cannot update a component while
+  // rendering a different component" — React handles a store change mid-render.
+  const versionRef = React.useRef(0);
+  const subscribe = React.useCallback(
+    (onStoreChange: () => void): (() => void) =>
+      queryClient.getQueryCache().subscribe(() => {
+        versionRef.current += 1;
+        onStoreChange();
+      }),
     [queryClient],
   );
+  React.useSyncExternalStore(subscribe, () => versionRef.current);
 
   const items: BreadcrumbItem[] = matches.flatMap((match) => {
     const handle = match.handle as RouteHandle | undefined;

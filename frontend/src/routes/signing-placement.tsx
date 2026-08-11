@@ -392,7 +392,17 @@ export function PlacementEditor({
 
       {/* Page + the mark's own controls */}
       <div className="flex flex-wrap items-end gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setPage(1)}
+            disabled={page <= 1}
+            aria-label={t("signing.placement.firstPage")}
+            title={t("signing.placement.firstPage")}
+          >
+            «
+          </Button>
           <Button
             variant="secondary"
             size="sm"
@@ -401,7 +411,7 @@ export function PlacementEditor({
           >
             {t("signing.placement.previousPage")}
           </Button>
-          <span className="text-ink-soft text-[12.5px]">
+          <span className="text-ink-soft min-w-[7rem] text-center text-[12.5px]">
             {t("signing.placement.pageOf", { page, count: pageCount })}
           </span>
           <Button
@@ -411,6 +421,16 @@ export function PlacementEditor({
             disabled={page >= pageCount}
           >
             {t("signing.placement.nextPage")}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setPage(pageCount)}
+            disabled={page >= pageCount}
+            aria-label={t("signing.placement.lastPage")}
+            title={t("signing.placement.lastPage")}
+          >
+            »
           </Button>
         </div>
 
@@ -519,81 +539,89 @@ export function PlacementEditor({
         </div>
       )}
 
-      {/* The page and its marks */}
-      <div className="bg-surface-2 border-line flex justify-center rounded-md border p-4">
-        {status === "loading" || viewport == null ? (
-          <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
-        ) : (
-          <div
-            className="relative"
-            style={{ width: viewport.width, height: viewport.height }}
-          >
-            <canvas
-              ref={canvasRef}
-              className="border-line block border bg-white"
-              role="img"
-              aria-label={t("signing.placement.pageOf", {
-                page,
-                count: pageCount,
-              })}
-            />
-            {/* The click surface. Placing without a pointer goes through "place on
-                this page" above, and moving through the arrow keys on a mark. */}
-            <div
-              className="absolute inset-0 cursor-crosshair"
-              onClick={onOverlayClick}
-              role="presentation"
-            />
-            {signers.map((signer, index) =>
-              placementsOnPage(placements[index] ?? [], page).map(
-                (placement) => {
-                  const tone = signerAccent(index);
-                  const css = toCss(placement);
-                  const isActive = index === activeSigner;
-                  return (
-                    <button
-                      key={`${index}-${placement.kind}-${placement.page}`}
-                      type="button"
-                      onPointerDown={(event) => {
-                        setSignerIndex(index);
-                        setKind(placement.kind);
-                        if (isActive) onPointerDown(event, placement);
-                      }}
-                      onKeyDown={(event) =>
-                        isActive && onBoxKeyDown(event, placement)
-                      }
-                      aria-label={t("signing.placement.markLabel", {
-                        name: signer.name,
-                        kind:
-                          placement.kind === PLACEMENT_KIND.signature
-                            ? t("signing.placement.kindSignature")
-                            : t("signing.placement.kindParaph"),
-                        page: placement.page,
-                        x: Math.round(placement.x),
-                        y: Math.round(placement.y),
-                      })}
-                      className={[
-                        "absolute flex items-center justify-center overflow-hidden border-2 text-[10px] font-semibold",
-                        FOCUS_RING,
-                        tone.box,
-                        tone.text,
-                        isActive ? "cursor-move" : "cursor-pointer opacity-70",
-                      ].join(" ")}
-                      style={{
-                        left: css.left,
-                        top: css.top,
-                        width: css.width,
-                        height: css.height,
-                      }}
-                    >
-                      <span className="truncate px-1">{signer.name}</span>
-                    </button>
-                  );
-                },
-              ),
-            )}
-          </div>
-        )}
+      {/* The page and its marks. The canvas is always mounted — the draw effect
+          needs canvasRef to exist to produce the viewport, and the viewport is
+          what mounts the marks overlay, so gating the canvas on the viewport
+          would deadlock the two (the page would load forever). The loading text
+          is an overlay shown until the first page is drawn. */}
+      <div className="bg-surface-2 border-line relative flex justify-center rounded-md border p-4">
+        <div className="relative">
+          <canvas
+            ref={canvasRef}
+            className="border-line block border bg-white"
+            role="img"
+            aria-label={t("signing.placement.pageOf", {
+              page,
+              count: pageCount,
+            })}
+          />
+          {(status === "loading" || viewport == null) && (
+            <p className="text-ink-soft absolute inset-0 flex items-center justify-center text-[13px]">
+              {t("common.loading")}
+            </p>
+          )}
+          {status === "ready" && viewport != null && (
+            <>
+              {/* The click surface. Placing without a pointer goes through "place on
+                  this page" above, and moving through the arrow keys on a mark. */}
+              <div
+                className="absolute inset-0 cursor-crosshair"
+                onClick={onOverlayClick}
+                role="presentation"
+              />
+              {signers.map((signer, index) =>
+                placementsOnPage(placements[index] ?? [], page).map(
+                  (placement) => {
+                    const tone = signerAccent(index);
+                    const css = toCss(placement);
+                    const isActive = index === activeSigner;
+                    return (
+                      <button
+                        key={`${index}-${placement.kind}-${placement.page}`}
+                        type="button"
+                        onPointerDown={(event) => {
+                          setSignerIndex(index);
+                          setKind(placement.kind);
+                          if (isActive) onPointerDown(event, placement);
+                        }}
+                        onKeyDown={(event) =>
+                          isActive && onBoxKeyDown(event, placement)
+                        }
+                        aria-label={t("signing.placement.markLabel", {
+                          name: signer.name,
+                          kind:
+                            placement.kind === PLACEMENT_KIND.signature
+                              ? t("signing.placement.kindSignature")
+                              : t("signing.placement.kindParaph"),
+                          page: placement.page,
+                          x: Math.round(placement.x),
+                          y: Math.round(placement.y),
+                        })}
+                        className={[
+                          "absolute flex items-center justify-center overflow-hidden border-2 text-[10px] font-semibold",
+                          FOCUS_RING,
+                          tone.box,
+                          tone.text,
+                          isActive
+                            ? "cursor-move"
+                            : "cursor-pointer opacity-70",
+                        ].join(" ")}
+                        style={{
+                          left: css.left,
+                          top: css.top,
+                          width: css.width,
+                          height: css.height,
+                        }}
+                      >
+                        <span className="truncate px-1">{signer.name}</span>
+                      </button>
+                    );
+                  },
+                ),
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       <p className="text-ink-soft text-[12px]">
