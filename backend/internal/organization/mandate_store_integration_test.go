@@ -56,6 +56,34 @@ func mandateAudit(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID, action stri
 	return out
 }
 
+// mandateAuditFor is mandateAudit narrowed to one mandate. Every user the helpers
+// create is "Test User", so the metadata cannot tell two events apart — the target
+// id can.
+func mandateAuditFor(t *testing.T, pool *pgxpool.Pool, orgID, mandateID uuid.UUID, action string) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	rows, err := pool.Query(context.Background(),
+		`SELECT metadata FROM audit_events
+		 WHERE organization_id = $1 AND action = $2 AND target_id = $3
+		 ORDER BY occurred_at, id`, orgID, action, mandateID.String())
+	if err != nil {
+		t.Fatalf("read audit events: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var meta map[string]any
+		if err := rows.Scan(&meta); err != nil {
+			t.Fatalf("scan audit metadata: %v", err)
+		}
+		out = append(out, meta)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("audit event rows: %v", err)
+	}
+	return out
+}
+
 func TestResolveAuthority(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := organization.NewStore(pool, audit.NopRecorder{})
@@ -158,6 +186,15 @@ func TestResolveAuthority(t *testing.T) {
 		if got.Mandated {
 			t.Errorf("authority = %+v, want not mandated", got)
 		}
+		// Nor does it count as a mandate they once held and lost: pre-provisioning
+		// a deputy for next month must not cost them the admin surface they hold
+		// today. The lockout would start at the moment the mandate does.
+		if got.Granted != 0 {
+			t.Errorf("Granted = %d, want 0 for a mandate that is not in force yet", got.Granted)
+		}
+		if got.Withdrawn() {
+			t.Error("Withdrawn() = true for a holder whose only mandate has not started yet")
+		}
 	})
 
 	t.Run("a department-scoped mandate carries no org-wide authority", func(t *testing.T) {
@@ -207,6 +244,33 @@ func TestResolveAuthority(t *testing.T) {
 		}
 		if !got.MayGrantMandate() {
 			t.Error("MayGrantMandate() = false for a full-mandate holder")
+		}
+	})
+
+	t.Run("the legal representative keeps org-wide admin after a mandate of theirs ends", func(t *testing.T) {
+		// Their own authority is the register's, so the mandate register cannot take
+		// it away. Without the exemption they would still pass
+		// RequireMandateAuthority and be refused every RequireOrgAdmin route —
+		// able to grant mandates but not to read the register they wrote to.
+		if _, err := store.GrantMandate(ctx, org.ID, boss, organization.MandateGrant{
+			Type:          organization.MandateAdministrative,
+			GranteeUserID: boss,
+			Scope:         organization.MandateScopeOrganization,
+			ValidFrom:     time.Now().Add(-2 * time.Hour),
+			ValidUntil:    ptrTime(time.Now().Add(-time.Hour)),
+		}); err != nil {
+			t.Fatalf("GrantMandate: %v", err)
+		}
+
+		got, err := store.ResolveAuthority(ctx, org.ID, boss)
+		if err != nil {
+			t.Fatalf("ResolveAuthority: %v", err)
+		}
+		if got.Granted == 0 || got.Mandated {
+			t.Fatalf("authority = %+v, want a granted mandate that is no longer active", got)
+		}
+		if got.Withdrawn() {
+			t.Error("Withdrawn() = true for the legal representative")
 		}
 	})
 }
@@ -546,6 +610,32 @@ func TestRevokeMandate(t *testing.T) {
 				t.Errorf("pending delegation status = %q, want revoked", m.Status)
 			}
 		}
+
+		// The cascade decides per row, so the audit event has to as well. This row
+		// was revoked outright, and an event reading "window closed on that date,
+		// still active until then" would contradict both the row and the response.
+		events := mandateAuditFor(t, pool, org.ID, pending.ID, audit.MandateRevoked)
+		if len(events) != 1 {
+			t.Fatalf("audit events for the outright-revoked delegation = %d, want 1", len(events))
+		}
+		before, _ := events[0]["before"].(map[string]any)
+		if before == nil {
+			t.Errorf("event = %v, want the revocation detail under before", events[0])
+		}
+		if _, dated := before["effectiveAt"]; dated {
+			t.Error("audited effectiveAt on a mandate that was revoked outright, not window-trimmed")
+		}
+
+		// The target itself was window-trimmed on that date, so it keeps the
+		// effective-dated shape.
+		events = mandateAuditFor(t, pool, org.ID, parent.ID, audit.MandateRevoked)
+		if len(events) != 1 {
+			t.Fatalf("audit events for the window-trimmed target = %d, want 1", len(events))
+		}
+		after, _ := events[0]["after"].(map[string]any)
+		if after == nil || after["effectiveAt"] == nil {
+			t.Errorf("event = %v, want the effective date under after", events[0])
+		}
 	})
 
 	t.Run("only the legal representative or the grantor may revoke", func(t *testing.T) {
@@ -567,6 +657,81 @@ func TestRevokeMandate(t *testing.T) {
 		}
 		if _, err := store.RevokeMandate(ctx, org.ID, parent.ID, boss, nil, ""); !errors.Is(err, organization.ErrMandateInactive) {
 			t.Errorf("err = %v, want ErrMandateInactive", err)
+		}
+	})
+
+	t.Run("revoking an already expired mandate is a conflict", func(t *testing.T) {
+		// It ended on its own date. Stamping revoked_at = now() on it would relabel
+		// a historical mandate from expired to revoked in the register.
+		holder := createUser(t, pool, "h8@acme.example")
+		addMembership(t, pool, holder, org.ID, nil)
+		expired, err := store.GrantMandate(ctx, org.ID, boss, organization.MandateGrant{
+			Type:          organization.MandateFull,
+			GranteeUserID: holder,
+			Scope:         organization.MandateScopeOrganization,
+			ValidFrom:     time.Now().Add(-2 * time.Hour),
+			ValidUntil:    ptrTime(time.Now().Add(-time.Hour)),
+		})
+		if err != nil {
+			t.Fatalf("GrantMandate: %v", err)
+		}
+		if _, err := store.RevokeMandate(ctx, org.ID, expired.ID, boss, nil, ""); !errors.Is(err, organization.ErrMandateInactive) {
+			t.Errorf("err = %v, want ErrMandateInactive", err)
+		}
+	})
+
+	t.Run("a cascade leaves an already expired delegation alone", func(t *testing.T) {
+		// The parent is back-dated so the delegation's own closed window survives
+		// clampToParent — a window clamped up to a parent starting now would leave
+		// nothing to cut and be rejected as over-delegation.
+		holder := createUser(t, pool, "h9@acme.example")
+		addMembership(t, pool, holder, org.ID, nil)
+		parent, err := store.GrantMandate(ctx, org.ID, boss, organization.MandateGrant{
+			Type:          organization.MandateFull,
+			GranteeUserID: holder,
+			Scope:         organization.MandateScopeOrganization,
+			ValidFrom:     time.Now().Add(-3 * time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("GrantMandate parent: %v", err)
+		}
+		gone := createUser(t, pool, "gone@acme.example")
+		addMembership(t, pool, gone, org.ID, nil)
+		// Cut from the parent before it is revoked, with a window that has closed.
+		expired, err := store.GrantMandate(ctx, org.ID, holder, organization.MandateGrant{
+			Type:            organization.MandateAdministrative,
+			GranteeUserID:   gone,
+			Scope:           organization.MandateScopeOrganization,
+			ParentMandateID: &parent.ID,
+			ValidFrom:       time.Now().Add(-2 * time.Hour),
+			ValidUntil:      ptrTime(time.Now().Add(-time.Hour)),
+		})
+		if err != nil {
+			t.Fatalf("GrantMandate expired delegation: %v", err)
+		}
+
+		touched, err := store.RevokeMandate(ctx, org.ID, parent.ID, boss, nil, "")
+		if err != nil {
+			t.Fatalf("RevokeMandate: %v", err)
+		}
+		for _, m := range touched {
+			if m.ID == expired.ID {
+				t.Errorf("cascade touched the already expired delegation %s", m.ID)
+			}
+		}
+		if events := mandateAuditFor(t, pool, org.ID, expired.ID, audit.MandateRevoked); len(events) != 0 {
+			t.Errorf("audit events for the expired delegation = %d, want 0", len(events))
+		}
+
+		// It still reads as expired, not revoked.
+		list, err := store.ListMandates(ctx, org.ID)
+		if err != nil {
+			t.Fatalf("ListMandates: %v", err)
+		}
+		for _, m := range list {
+			if m.ID == expired.ID && m.Status != organization.MandateStatusExpired {
+				t.Errorf("expired delegation status = %q, want expired", m.Status)
+			}
 		}
 	})
 

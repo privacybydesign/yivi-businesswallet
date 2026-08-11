@@ -240,6 +240,14 @@ func TestAuthorityWithdrawn(t *testing.T) {
 			a:    Authority{Granted: 1, Mandated: false, PlatformAdmin: true},
 			want: false,
 		},
+		{
+			// Their authority is the register's, not a delegation, so a mandate they
+			// happened to also be granted running out cannot take it away — the
+			// register cannot withdraw the root it hangs from.
+			name: "a legal representative is never withdrawn by the register they control",
+			a:    Authority{Granted: 1, Mandated: false, LegalRepresentative: true},
+			want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

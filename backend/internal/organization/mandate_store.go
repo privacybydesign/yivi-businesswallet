@@ -43,7 +43,7 @@ func (s *Store) ResolveAuthority(ctx context.Context, orgID, userID uuid.UUID) (
 			FROM mandates WHERE organization_id = $1 AND grantee_user_id = $2
 		)
 		SELECT ` + legalRepresentativeExists + `,
-		       (SELECT count(*) FROM held),
+		       (SELECT count(*) FROM held WHERE valid_from <= now()),
 		       (SELECT count(*) FROM held WHERE ` + mandateActive + ` AND scope = '` + MandateScopeOrganization + `'),
 		       (SELECT count(*) FROM held WHERE ` + mandateActive + ` AND scope = '` + MandateScopeOrganization + `'
 		                                    AND type = '` + MandateFull + `')`
@@ -237,7 +237,13 @@ func (s *Store) RevokeMandate(ctx context.Context, orgID, mandateID, revokedBy u
 		if err != nil {
 			return err
 		}
-		if mandateStatus(target, time.Now()) == MandateStatusRevoked {
+		// Only a mandate that still has a life ahead of it can be ended. Revoking
+		// one that is already revoked or expired would stamp revoked_at = now() on
+		// a window that closed months ago and relabel it in the register this
+		// layer exists to keep honest.
+		switch mandateStatus(target, time.Now()) {
+		case MandateStatusPending, MandateStatusActive:
+		default:
 			return ErrMandateInactive
 		}
 
@@ -263,6 +269,11 @@ func (s *Store) RevokeMandate(ctx context.Context, orgID, mandateID, revokedBy u
 		// valid_until would land at or before valid_from and trip
 		// mandates_window_check — so it is revoked outright instead. It could never
 		// have become effective anyway.
+		//
+		// A descendant that has already expired is left out, for the same reason the
+		// target has to be pending or active: its authority ended on its own date,
+		// and stamping revoked_at = now() on it would rewrite how a historical
+		// mandate reads.
 		const revoke = `
 			WITH RECURSIVE subtree AS (
 				SELECT id FROM mandates WHERE id = $1 AND organization_id = $2
@@ -279,6 +290,7 @@ func (s *Store) RevokeMandate(ctx context.Context, orgID, mandateID, revokedBy u
 				updated_at = now()
 			FROM subtree s
 			WHERE m.id = s.id AND m.revoked_at IS NULL
+			  AND (m.valid_until IS NULL OR m.valid_until > now())
 			RETURNING ` + mandateReturning
 
 		// RETURNING takes no ORDER BY, so the target-first order the caller is
@@ -324,8 +336,14 @@ func (s *Store) RevokeMandate(ctx context.Context, orgID, mandateID, revokedBy u
 			if reasonArg != nil {
 				meta["reason"] = reason
 			}
+			// Branch on what actually happened to this row, not on what was asked:
+			// the cascade revokes a descendant outright when its window had not
+			// opened by the effective date, so effectiveAt alone does not say which.
+			// m comes from UPDATE ... RETURNING and the statement only touches rows
+			// whose revoked_at was NULL, so a non-nil RevokedAt here means the
+			// now() branch fired for this row.
 			envelope := audit.Deleted(meta)
-			if effectiveAt != nil {
+			if effectiveAt != nil && m.RevokedAt == nil {
 				// Not gone yet: the window was closed on a date, so the mandate
 				// stays active until then and expires on its own.
 				meta["effectiveAt"] = effectiveAt.UTC()

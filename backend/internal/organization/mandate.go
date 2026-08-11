@@ -114,9 +114,11 @@ type Authority struct {
 	FullMandate bool
 	// Mandated reports at least one active org-wide mandate, of either type.
 	Mandated bool
-	// Granted counts every mandate ever granted to the caller in this
-	// organization, whatever its state — what tells "never had one" apart from
-	// "had one and lost it".
+	// Granted counts the mandates granted to the caller in this organization
+	// whose window has opened, whatever became of them since — what tells "never
+	// had one" apart from "had one and lost it". A mandate that is not yet in
+	// force is deliberately not counted: scheduling a deputy for next month must
+	// not cost the grantee the admin surface they hold today.
 	Granted int
 	// PlatformAdmin marks the deployment-level platform admin. It is orthogonal to
 	// the org's own authority (rbac-model.md: "Platform admin stays
@@ -127,10 +129,17 @@ type Authority struct {
 
 // Withdrawn reports that the caller's mandated authority has been taken away:
 // they have been granted mandates in this organization, and none of them is now
-// an active org-wide one — every grant revoked, expired, not yet in force, or
-// narrowed to a single department. An organization that has never granted a
-// mandate is never withdrawn, so the mandate layer stays opt-in per org.
-func (a Authority) Withdrawn() bool { return !a.PlatformAdmin && a.Granted > 0 && !a.Mandated }
+// an active org-wide one — every grant revoked, expired or narrowed to a single
+// department. An organization that has never granted a mandate is never
+// withdrawn, so the mandate layer stays opt-in per org.
+//
+// Neither basis of authority that comes from outside the mandate register can be
+// withdrawn by it: PlatformAdmin is deployment-level and orthogonal, and a
+// LegalRepresentative holds the register-backed root of authority, so a mandate
+// they were also granted running out does not cost them the org's admin surface.
+func (a Authority) Withdrawn() bool {
+	return !a.PlatformAdmin && !a.LegalRepresentative && a.Granted > 0 && !a.Mandated
+}
 
 // MayGrantMandate reports whether the caller may grant or revoke a mandate. Gated
 // on Axis A alone: no functional role reaches it, so an admin cannot mint itself

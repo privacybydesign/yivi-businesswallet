@@ -67,7 +67,7 @@ type Authority struct {
 	LegalRepresentative bool // claimed, unrevoked, in-window `bestuurder`
 	FullMandate         bool // active org-wide mandate of type full
 	Mandated            bool // at least one active org-wide mandate, either tier
-	Granted             int  // mandates ever granted here, whatever their state
+	Granted             int  // mandates granted here whose window has opened
 	PlatformAdmin       bool
 }
 ```
@@ -76,12 +76,24 @@ Two gates read it.
 
 **`RequireOrgAdmin`** — role `admin` *and* `!Authority.Withdrawn()`. Authority is withdrawn when the
 caller has been granted mandates in this organisation and none is now an active org-wide one: every
-grant revoked, expired, not yet in force, or narrowed to a single department. So a revocation takes
-effect on the caller's next request without a second write to the membership row, a
-department-scoped mandate does not carry org-wide admin, and — because `Granted == 0` is never
-withdrawn — **an organisation that has never granted a mandate behaves exactly as before**. The
-mandate layer is opt-in per organisation. `PlatformAdmin` is exempt: it is deployment-level and
-orthogonal, and an org's register must not lock the operator out of its own deployment.
+grant revoked, expired, or narrowed to a single department. So a revocation takes effect on the
+caller's next request without a second write to the membership row, a department-scoped mandate does
+not carry org-wide admin, and — because `Granted == 0` is never withdrawn — **an organisation that
+has never granted a mandate behaves exactly as before**. The mandate layer is opt-in per
+organisation.
+
+Two things it does not withdraw, because neither draws its authority from the mandate register:
+
+- **`PlatformAdmin`** — deployment-level and orthogonal, and an org's register must not lock the
+  operator out of its own deployment.
+- **`LegalRepresentative`** — the register-backed root. They may grant and revoke through
+  `RequireMandateAuthority`, so refusing them `RequireOrgAdmin` would let them write a register they
+  cannot read.
+
+`Granted` counts only mandates whose window has **opened**. A mandate that is not in force yet is
+neither "never had one" nor "had one and lost it": counting it would mean scheduling a deputy for
+next month strips the grantee's admin access today and hands it back when the mandate starts. The
+narrowing begins when the mandate does.
 
 **`RequireMandateAuthority`** — gates granting and revoking on Axis A alone: legal representative, or
 an active org-wide full mandate. No functional role reaches it, so an `admin` cannot mint itself a
@@ -114,6 +126,10 @@ mandate should not be told they got one.
 `POST /orgs/{slug}/mandates/{id}/revoke`, by a legal representative (any mandate) or the mandate's
 own grantor (only what they gave).
 
+Only a mandate that still has a life ahead of it can be revoked — `pending` or `active`. One that is
+already `revoked` or `expired` is a 409: it ended on its own date, and stamping `revoked_at = now()`
+on it would relabel a historical mandate in the register this layer exists to keep honest.
+
 - **Immediate** (no body): `revoked_at = now()`.
 - **Effective-dated** (`effectiveAt` in the future): closes the validity window on that date, so the
   mandate stays active until then and expires on its own.
@@ -121,12 +137,18 @@ own grantor (only what they gave).
 Either way the revocation **cascades down the delegation chain** — a delegate cannot outlive the
 authority it was cut from. A descendant whose window has not opened by the effective date cannot
 have it trimmed (`valid_until` would land at or before `valid_from`), so it is revoked outright; it
-could never have become effective anyway.
+could never have become effective anyway. An already expired descendant is left out of the cascade
+for the same reason the target has to be pending or active.
 
 Every mandate the revocation reaches gets its own `mandate.revoked` audit event, carrying
 `cascadedFrom` when it was reached through the chain, so the whole cascade is readable from the log.
 Grants write `mandate.granted`. Both record the `basis` the mandate stands on, in the standard
 `{before, after}` envelope with readable values.
+
+The envelope is chosen **per row**, not per request: a row the cascade revoked outright is a
+`Deleted` (detail under `before`), a row whose window was trimmed to a future date is an `Updated`
+carrying `effectiveAt`. Branching on the request's `effectiveAt` alone would log a row that is gone
+as one that is still active until that date.
 
 ## 6. API
 
@@ -150,5 +172,13 @@ Grants write `mandate.granted`. Both record the `basis` the mandate stands on, i
   belongs with `RequirePermission`.
 - **External legal persons as grantees** (Art 3(18) allows one). The grantee is a user; an
   `accounting firm holds a mandate` needs onboarding that does not exist yet.
+- **Joint authority.** `legalRepresentativeExists` reads `kind = 'bestuurder'` and ignores
+  `wallet_representations.authority`, so a director registered `jointly` — who under Dutch law
+  cannot bind the company alone — is treated here as a full legal representative. Honouring the
+  column properly means co-signing: two directors together making one root grant, with a pending
+  grant waiting for the second. That is a slice of its own. Refusing them outright instead would
+  leave a jointly-managed company with no way to grant a mandate at all, which is worse than the
+  gap. This is the first code in the repo to decide anything from that row, so nothing regresses —
+  but it must be closed before the layer carries a legal claim.
 - **Conflict-of-roles detection**, relying-party authorisations (Art 5(1)(k)), and cross-Member-State
   interoperability — separate slices per #27.

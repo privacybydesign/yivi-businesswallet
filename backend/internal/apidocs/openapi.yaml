@@ -2219,7 +2219,9 @@ paths:
         Ends a mandate and everything delegated from it. An empty body revokes at
         once; an effectiveAt in the future closes the validity window on that date
         instead. Requires a legal representative, or the grantor of the mandate.
-        Returns every mandate the revocation reached, the target first.
+        Returns every mandate the revocation reached, the target first; a mandate
+        that had already ended on its own is left out. Only a pending or active
+        mandate can be revoked — one already revoked or expired is a conflict.
       requestBody:
         required: false
         content:

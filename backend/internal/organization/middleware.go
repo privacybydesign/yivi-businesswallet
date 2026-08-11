@@ -65,9 +65,10 @@ func (h *Handler) Authorize(next http.Handler) http.Handler {
 // RequireOrgAdmin gates the administrative surface. The caller's functional role
 // must be admin and their administrative authority must not have been withdrawn:
 // once an organization starts granting mandates, an admin whose mandates are all
-// revoked, expired, not yet in force, or narrowed to one department stops being an
-// admin org-wide, without a second write to the membership row. An organization
-// that has never granted a mandate is unaffected.
+// revoked, expired, or narrowed to one department stops being an admin org-wide,
+// without a second write to the membership row. An organization that has never
+// granted a mandate is unaffected, and so is a caller whose authority does not
+// come from the register in the first place — see Authority.Withdrawn.
 func RequireOrgAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()

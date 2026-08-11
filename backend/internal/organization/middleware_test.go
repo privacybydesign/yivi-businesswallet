@@ -229,6 +229,15 @@ func TestRequireOrgAdmin(t *testing.T) {
 			authority: Authority{Granted: 1, PlatformAdmin: true},
 			want:      http.StatusOK,
 		},
+		{
+			// RequireMandateAuthority already lets them grant and revoke; refusing
+			// them the register they just wrote to would be the same authority
+			// answering two ways.
+			name:      "a legal representative is not withdrawn by the org's register",
+			role:      RoleAdmin,
+			authority: Authority{Granted: 1, LegalRepresentative: true},
+			want:      http.StatusOK,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
