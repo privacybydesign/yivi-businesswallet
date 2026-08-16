@@ -564,6 +564,8 @@ export const en = {
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
       exportRequested: "Exported organization data",
+      organizationTerminated: "Terminated service for the organization",
+      dataInstructionUpdated: "Updated the data instruction for termination",
     },
   },
   memberInvite: {
@@ -1091,6 +1093,7 @@ export const en = {
     kinds: {
       credential_offer: "Credential offer",
       event_notification: "Event notification",
+      export_ready: "Data export ready",
       invitation: "Member invitation",
       postguard_file: "Encrypted file",
       signature_requested: "Signature request",
@@ -1102,6 +1105,8 @@ export const en = {
         "Sent to a person when this organization issues them a credential.",
       event_notification:
         "Sent to this organization's admins when something happens that they subscribed to.",
+      export_ready:
+        "Sent to this organization's admins when service ends, carrying a one-time link to their data-portability bundle.",
       invitation: "Sent to someone invited to join this organization.",
       postguard_file:
         "Sent to a recipient of an encrypted file, when this organization mails through its own SMTP server.",

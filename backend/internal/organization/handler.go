@@ -22,6 +22,8 @@ type repository interface {
 	GetBySlug(ctx context.Context, slug string) (Organization, error)
 	Update(ctx context.Context, id uuid.UUID, name string) (Organization, error)
 	Delete(ctx context.Context, id uuid.UUID) error
+	SetDataInstruction(ctx context.Context, orgID uuid.UUID, instruction string) (Organization, error)
+	Terminate(ctx context.Context, orgID uuid.UUID, exports exportQueuer) (Organization, error)
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
 	GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
@@ -72,6 +74,9 @@ type inviteMailer interface {
 	SendInvitation(ctx context.Context, orgID uuid.UUID, to, orgName, acceptURL string) error
 }
 
+// exports queues the bundle a termination owes. Nil disables the route: a
+// deployment without the export slice cannot honour Art 7(6)(f), and refusing is
+// better than terminating with no handover.
 type Handler struct {
 	store       repository
 	service     inviter
@@ -81,10 +86,11 @@ type Handler struct {
 	appBaseURL  string
 	requireUser func(http.Handler) http.Handler
 	admins      auth.PlatformAdmins
+	exports     exportQueuer
 }
 
-func NewHandler(store repository, service inviter, reader auditReader, issuer sessionIssuer, mailer inviteMailer, appBaseURL string, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
-	return &Handler{store: store, service: service, reader: reader, issuer: issuer, mailer: mailer, appBaseURL: strings.TrimRight(appBaseURL, "/"), requireUser: requireUser, admins: admins}
+func NewHandler(store repository, service inviter, reader auditReader, issuer sessionIssuer, mailer inviteMailer, appBaseURL string, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins, exports exportQueuer) *Handler {
+	return &Handler{store: store, service: service, reader: reader, issuer: issuer, mailer: mailer, appBaseURL: strings.TrimRight(appBaseURL, "/"), requireUser: requireUser, admins: admins, exports: exports}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -98,6 +104,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /organizations", platform(respond.HandlerFunc(h.list)))
 	mux.Handle("GET /organizations/{id}", platform(respond.HandlerFunc(h.get)))
 	mux.Handle("DELETE /organizations/{id}", platform(respond.HandlerFunc(h.delete)))
+	mux.Handle("POST /organizations/{id}/terminate", platform(respond.HandlerFunc(h.terminate)))
 
 	mux.Handle("GET /admin/identity-reviews", platform(respond.HandlerFunc(h.listIdentityReviews)))
 	mux.Handle("POST /admin/identity-reviews/{id}/approve", platform(respond.HandlerFunc(h.approveIdentityReview)))
@@ -117,6 +124,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
 	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))
+	mux.Handle("PUT /orgs/{slug}/data-instruction", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.setDataInstruction))))
 	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.member))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}/avatar", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberAvatar))))

@@ -349,7 +349,11 @@ func run() error {
 		mailoauth.NewMicrosoft(&http.Client{Timeout: mailOAuthHTTPTimeout}),
 		mailBranding{theme: themeSettingsStore}, mailLocale)
 
-	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins)
+	// The export store is built here rather than beside the rest of the export
+	// wiring: terminating an organisation queues the bundle it owes in the same
+	// transaction, so the org handler needs it.
+	exportStore := export.NewStore(pool, recorder)
+	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins, exportStore)
 
 	qerdsProv, err := newQerdsProvider(cfg)
 	if err != nil {
@@ -551,7 +555,6 @@ func run() error {
 	// identification data, attestations, QERDS logs and audit trail. A section is
 	// registered only once it can be written; an unregistered one is refused by
 	// name rather than exported empty.
-	exportStore := export.NewStore(pool, recorder)
 	exportService := export.NewService(exportStore, []export.SectionWriter{
 		export.NewOwnerIdentificationWriter(orgStore),
 		export.NewAttestationsWriter(attestationStore, attHolder),
@@ -564,6 +567,9 @@ func run() error {
 	// its bundle in the background instead; the pruner drops the stored bytes once
 	// a bundle is spent or expired.
 	exportWorker := export.NewWorker(exportStore, exportOrgs{store: orgStore}, exportService)
+	exportWorker.OnReady(exportDelivery{
+		orgs: orgStore, email: emailService, appBaseURL: cfg.AppBaseURL, ttl: export.DefaultBundleTTL,
+	}.notify)
 	go exportWorker.Run(ctx)
 	startPruner(ctx, "export_jobs", exportPruneInterval, exportStore.PruneExpired)
 

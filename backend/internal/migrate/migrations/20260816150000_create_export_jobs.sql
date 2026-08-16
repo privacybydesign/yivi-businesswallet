@@ -18,6 +18,11 @@ CREATE TABLE export_jobs
     status              TEXT        NOT NULL DEFAULT 'queued'
         CHECK (status IN ('queued', 'running', 'ready', 'failed')),
     sections            TEXT[]      NOT NULL DEFAULT '{}',
+    -- 'request' is an admin asking; 'termination' is the provider's own Art 7(6)(f)
+    -- obligation firing, which is what decides whether the finished bundle is
+    -- mailed to the organisation's admins rather than waiting to be collected.
+    origin              TEXT        NOT NULL DEFAULT 'request'
+        CHECK (origin IN ('request', 'termination')),
     -- The trail survives the person: an export stays attributable after the
     -- account that asked for it is gone.
     requested_by        UUID                 REFERENCES users (id) ON DELETE SET NULL,

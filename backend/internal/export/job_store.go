@@ -16,6 +16,16 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
+// Job origins: who caused the export to exist.
+const (
+	// OriginRequest is an admin asking for the bundle.
+	OriginRequest = "request"
+	// OriginTermination is the provider's own Art 7(6)(f) obligation firing. Its
+	// bundle is pushed to the organisation's admins rather than waiting to be
+	// collected, because by then nobody there can necessarily sign in.
+	OriginTermination = "termination"
+)
+
 // Job statuses.
 const (
 	JobQueued  = "queued"
@@ -46,6 +56,7 @@ type Job struct {
 	ID             uuid.UUID  `json:"id"`
 	OrganizationID uuid.UUID  `json:"organizationId"`
 	Status         string     `json:"status"`
+	Origin         string     `json:"origin"`
 	Sections       []string   `json:"sections"`
 	RequestedBy    *uuid.UUID `json:"requestedBy,omitempty"`
 	BundleID       *uuid.UUID `json:"bundleId,omitempty"`
@@ -59,7 +70,7 @@ type Job struct {
 	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
-const jobColumns = `id, organization_id, status, sections, requested_by, bundle_id,
+const jobColumns = `id, organization_id, status, origin, sections, requested_by, bundle_id,
 	filename, size_bytes, checksum, downloaded_at, error, expires_at, created_at, updated_at`
 
 type rowScanner interface {
@@ -68,7 +79,7 @@ type rowScanner interface {
 
 func scanJob(row rowScanner) (Job, error) {
 	var j Job
-	err := row.Scan(&j.ID, &j.OrganizationID, &j.Status, &j.Sections, &j.RequestedBy,
+	err := row.Scan(&j.ID, &j.OrganizationID, &j.Status, &j.Origin, &j.Sections, &j.RequestedBy,
 		&j.BundleID, &j.Filename, &j.SizeBytes, &j.Checksum, &j.DownloadedAt,
 		&j.Error, &j.ExpiresAt, &j.CreatedAt, &j.UpdatedAt)
 	return j, err
@@ -77,31 +88,48 @@ func scanJob(row rowScanner) (Job, error) {
 // Enqueue records a requested export. The bundle is assembled by the worker, so
 // this only writes the request and its audit event.
 func (s *Store) Enqueue(ctx context.Context, orgID uuid.UUID, sections []string, requestedBy *uuid.UUID) (Job, error) {
+	var job Job
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		var err error
+		job, err = s.enqueue(ctx, q, orgID, OriginRequest, sections, requestedBy)
+		return err
+	})
+	return job, err
+}
+
+// EnqueueTx queues an export inside a caller's transaction, so a termination and
+// the export it owes commit together — a termination recorded without its export
+// would leave the obligation with nothing tracking it.
+func (s *Store) EnqueueTx(ctx context.Context, q database.Querier, orgID uuid.UUID, origin string, requestedBy *uuid.UUID) error {
+	_, err := s.enqueue(ctx, q, orgID, origin, nil, requestedBy)
+	return err
+}
+
+func (s *Store) enqueue(ctx context.Context, q database.Querier, orgID uuid.UUID, origin string, sections []string, requestedBy *uuid.UUID) (Job, error) {
 	// A nil slice writes NULL, which the column refuses. "Every section" is an
 	// empty list here, resolved against the registered writers when the run
 	// starts.
 	if sections == nil {
 		sections = []string{}
 	}
-	var job Job
-	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const insert = `INSERT INTO export_jobs (organization_id, sections, requested_by)
-			VALUES ($1, $2, $3) RETURNING ` + jobColumns
-		var err error
-		job, err = scanJob(q.QueryRow(ctx, insert, orgID, sections, requestedBy))
-		if err != nil {
-			return fmt.Errorf("export: enqueue job org %s: %w", orgID, err)
-		}
-		return s.audit.Record(ctx, q, audit.ExportRequested,
-			audit.Target{Type: audit.TargetExport, ID: job.ID.String(), OrgID: &orgID},
-			audit.Created(map[string]any{
-				"jobId":         job.ID.String(),
-				"schemaVersion": SchemaVersion,
-				"sections":      sections,
-				"mode":          "background",
-			}))
-	})
-	return job, err
+	const insert = `INSERT INTO export_jobs (organization_id, origin, sections, requested_by)
+		VALUES ($1, $2, $3, $4) RETURNING ` + jobColumns
+	job, err := scanJob(q.QueryRow(ctx, insert, orgID, origin, sections, requestedBy))
+	if err != nil {
+		return Job{}, fmt.Errorf("export: enqueue job org %s: %w", orgID, err)
+	}
+	if err := s.audit.Record(ctx, q, audit.ExportRequested,
+		audit.Target{Type: audit.TargetExport, ID: job.ID.String(), OrgID: &orgID},
+		audit.Created(map[string]any{
+			"jobId":         job.ID.String(),
+			"schemaVersion": SchemaVersion,
+			"sections":      sections,
+			"origin":        origin,
+			"mode":          "background",
+		})); err != nil {
+		return Job{}, err
+	}
+	return job, nil
 }
 
 // Claim takes the oldest queued job off the queue and marks it running. SKIP
@@ -203,7 +231,7 @@ func (s *Store) BundleForJob(ctx context.Context, orgID, jobID uuid.UUID) (Job, 
 	var job Job
 	var content []byte
 	err := s.db.QueryRow(ctx, query, jobID, orgID).Scan(&job.ID, &job.OrganizationID, &job.Status,
-		&job.Sections, &job.RequestedBy, &job.BundleID, &job.Filename, &job.SizeBytes,
+		&job.Origin, &job.Sections, &job.RequestedBy, &job.BundleID, &job.Filename, &job.SizeBytes,
 		&job.Checksum, &job.DownloadedAt, &job.Error, &job.ExpiresAt, &job.CreatedAt,
 		&job.UpdatedAt, &content)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -231,9 +259,9 @@ func (s *Store) Bundle(ctx context.Context, token string) (Job, []byte, error) {
 	var job Job
 	var content []byte
 	row := s.db.QueryRow(ctx, update, hashToken(token), JobReady)
-	err := row.Scan(&job.ID, &job.OrganizationID, &job.Status, &job.Sections, &job.RequestedBy,
-		&job.BundleID, &job.Filename, &job.SizeBytes, &job.Checksum, &job.DownloadedAt,
-		&job.Error, &job.ExpiresAt, &job.CreatedAt, &job.UpdatedAt, &content)
+	err := row.Scan(&job.ID, &job.OrganizationID, &job.Status, &job.Origin, &job.Sections,
+		&job.RequestedBy, &job.BundleID, &job.Filename, &job.SizeBytes, &job.Checksum,
+		&job.DownloadedAt, &job.Error, &job.ExpiresAt, &job.CreatedAt, &job.UpdatedAt, &content)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, nil, ErrBundleUnavailable
 	}
