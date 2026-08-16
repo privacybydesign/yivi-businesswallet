@@ -538,6 +538,7 @@ func run() error {
 		export.NewService(export.NewStore(pool, recorder), []export.SectionWriter{
 			export.NewOwnerIdentificationWriter(orgStore),
 			export.NewAttestationsWriter(attestationStore, attHolder),
+			export.NewQerdsWriter(qerdsStore),
 			export.NewAuditRecordsWriter(audit.NewReader(pool)),
 		}),
 		requireUser, orgHandler.Authorize)

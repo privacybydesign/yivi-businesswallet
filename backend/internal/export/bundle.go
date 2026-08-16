@@ -80,13 +80,18 @@ func (s *SectionBundle) AddBytes(name, mediaType string, data []byte) error {
 		return err
 	}
 	if !s.bundle.admits(int64(len(data))) {
-		sum := sha256.Sum256(data)
-		s.Omit(name, ReasonSizeLimit, int64(len(data)), &Checksum{
-			Algorithm: checksumAlgorithm,
-			Value:     hex.EncodeToString(sum[:]),
-		})
+		checksum := checksumOf(data)
+		s.Omit(name, ReasonSizeLimit, int64(len(data)), &checksum)
 		return nil
 	}
+	return s.write(name, mediaType, data)
+}
+
+// writeUnbudgeted carries a payload the bundle must never drop, whatever the
+// budget. Raw ERDS evidence is the only such payload: it is what gives a message
+// legal effect, and it is bounded in practice (receipts, not the payloads they
+// attest to).
+func (s *SectionBundle) writeUnbudgeted(name, mediaType string, data []byte) error {
 	return s.write(name, mediaType, data)
 }
 
@@ -120,12 +125,11 @@ func (s *SectionBundle) write(name, mediaType string, data []byte) error {
 		return fmt.Errorf("export: staging %s: %w", bundlePath, err)
 	}
 
-	sum := sha256.Sum256(data)
 	s.files = append(s.files, FileEntry{
 		Path:      bundlePath,
 		MediaType: mediaType,
 		SizeBytes: int64(len(data)),
-		Checksum:  Checksum{Algorithm: checksumAlgorithm, Value: hex.EncodeToString(sum[:])},
+		Checksum:  checksumOf(data),
 	})
 	return nil
 }
@@ -179,4 +183,9 @@ func validPath(p string) error {
 		}
 	}
 	return nil
+}
+
+func checksumOf(data []byte) Checksum {
+	sum := sha256.Sum256(data)
+	return Checksum{Algorithm: checksumAlgorithm, Value: hex.EncodeToString(sum[:])}
 }

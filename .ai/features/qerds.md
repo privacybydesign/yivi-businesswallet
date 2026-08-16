@@ -355,6 +355,19 @@ When the European Digital Directory arrives it becomes one more resolver behind 
 transition is limited to recipients already on an interoperating registered-delivery network — the
 UI must not imply EU-wide coverage that doesn't exist yet.
 
+## 10a. Export
+
+Messages, their evidence chain, attachments, addresses and contacts are one section of
+the data-portability bundle (`GET /orgs/{slug}/export`, [`export.md`](./export.md)).
+Two things there constrain this slice. Each message's evidence is packaged as an
+**ASiC-E** container (ETSI EN 319 162) holding the raw blobs **byte-for-byte** plus an
+index binding each to its qualified timestamp — re-encoding evidence destroys the
+timestamps' effect, so `Evidence.Raw` must stay exactly what the QTSP returned, all the
+way from `insertEvidence` to the container. Evidence is also the one payload the export
+carries regardless of any size budget, for the same reason. `ProviderRef` on messages,
+addresses and evidence is exported deliberately: it is what lets a receiving system
+correlate with the QTSP's own records.
+
 ## 11. Open questions / follow-ups
 
 - Which NL QTSP to partner with (drives the concrete `qerdsprovider` driver + auth shape).
