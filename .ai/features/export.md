@@ -1,16 +1,15 @@
 # Feature: Export (data portability bundle, Art 5(1)(l))
 
-**Status:** Three of four sections built. `internal/export` assembles the ZIP, the
-manifest and the audit event behind `GET /orgs/{slug}/export`, and registers writers
-for owner identification, attestations and audit records. `qerds` has no writer yet, so
-asking for it is refused `section_unavailable` and a full export simply omits it —
-the export says what it cannot do rather than shipping an empty section that would read
-as "the org holds none". This file is the contract the export series builds to: #119
-(this doc), #120 (`internal/export` service + admin-gated endpoint), #121 (owner
-identification data), #122 (EAAs, issued + held), #124 (interaction / audit records) —
-all landed — then #123 (QERDS logs + evidence), #125 (service-termination trigger),
-#126 (frontend request + download), #127 (async job + large bundles). Parent
-issue: #30.
+**Status:** All four sections built. `internal/export` assembles the ZIP, the manifest
+and the audit event behind `GET /orgs/{slug}/export`, and registers writers for owner
+identification, attestations, QERDS logs and evidence, and audit records. A section
+with no registered writer is refused `section_unavailable` rather than shipped empty,
+which is what an unbuilt section looked like while the series was landing. This file
+is the contract the export series built to: #119 (this doc), #120 (`internal/export`
+service + admin-gated endpoint), #121 (owner identification data), #122 (EAAs, issued +
+held), #123 (QERDS logs + evidence), #124 (interaction / audit records) — all landed —
+then #125 (service-termination trigger), #126 (frontend request + download), #127
+(async job + large bundles). Parent issue: #30.
 **Regulation:** COM(2025) 838 Art 5(1)(l) (export owner identification data, EAAs,
 communication logs and interaction records in a structured, commonly used,
 machine-readable format, on owner request or on termination of service / revocation of
@@ -87,6 +86,15 @@ index, so evidence and its qualified timestamps travel bound together instead of
 loose files. The ASiC-E is a *packaging* profile here. We add no signature of our own;
 the qualified timestamps inside are the QTSP's.
 
+The container's layout is `mimetype` (first entry, **stored** uncompressed, so a reader
+identifies it from the leading bytes without inflating anything — the format's one hard
+rule, and why `asice.go` writes that ZIP by hand rather than reusing `Bundle`), then
+`evidence/<evidenceId>` per raw blob, then `evidence-index.json` binding each blob to
+its type, provider reference, qualified timestamp and digest. A blob is named by its id
+with no extension for the same reason an attachment is: the type is data, not a path.
+The QTSP declares no media type with the bytes, so the index sniffs one (`application/xml`
+for what looks like XML, else opaque) rather than asserting a type it was not told.
+
 ```
 manifest.json
 owner-identification/
@@ -117,7 +125,7 @@ Section keys, directories and their sources:
 |---|---|---|---|
 | `ownerIdentification` | `owner-identification/` | `organization.Store.GetByID`, `ListDepartments`, `ListMemberEntries` (paged to the end) | #121, landed |
 | `attestations` | `attestations/` | `attestation.Store.ListIssued`, `ListHeld`, `ListSchemas`, `ListTemplates`, `ListKeys`, plus `eudiholder.Holder.Raw` for credential bytes | #122, landed |
-| `qerds` | `qerds/` | `qerds.Store.List`, `GetWithEvidence`, `GetAttachmentContent`, `ListAddresses`, `ListContacts` | #123 |
+| `qerds` | `qerds/` | `qerds.Store.List`, `GetWithEvidence`, `GetAttachmentContent`, `ListAddresses`, `ListContacts` | #123, landed |
 | `auditRecords` | `audit-records/` | `audit.Reader.ListForOrganization` (cursor loop; limits clamp to 200) | #124, landed |
 
 **A section appears in the manifest only when the export produced it.** Presence means
