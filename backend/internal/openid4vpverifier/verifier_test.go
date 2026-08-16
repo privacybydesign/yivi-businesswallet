@@ -1,8 +1,12 @@
 package openid4vpverifier
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -95,5 +99,64 @@ func TestQueryForScope(t *testing.T) {
 	}
 	if got := len(queryFor(ScopeIdentity).Credentials); got != 4 {
 		t.Errorf("ScopeIdentity credentials = %d, want 4", got)
+	}
+}
+
+// startBody runs one StartPresentation against a stub verifier and returns the
+// JSON body it received.
+func startBody(t *testing.T, intendedUseID, registrationCertificate string) map[string]any {
+	t.Helper()
+
+	var raw []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"transaction_id":"tx","client_id":"cid","request_uri":"https://verifier.example/req"}`))
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "", intendedUseID, registrationCertificate, srv.Client())
+	if _, err := client.StartPresentation(context.Background(), ScopeLogin); err != nil {
+		t.Fatalf("StartPresentation: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("unmarshal start body: %v", err)
+	}
+	return body
+}
+
+// The verifier refuses a request naming neither an intended use nor a
+// registration certificate, so the field has to reach the wire.
+func TestStartPresentationSendsIntendedUseID(t *testing.T) {
+	body := startBody(t, "1", "")
+
+	if body["intended_use_id"] != "1" {
+		t.Errorf("intended_use_id = %v, want \"1\"", body["intended_use_id"])
+	}
+	if _, ok := body["registration_certificate"]; ok {
+		t.Error("registration_certificate present, want it omitted when unset")
+	}
+}
+
+func TestStartPresentationSendsRegistrationCertificate(t *testing.T) {
+	body := startBody(t, "", "header.payload.signature")
+
+	if body["registration_certificate"] != "header.payload.signature" {
+		t.Errorf("registration_certificate = %v, want the configured certificate", body["registration_certificate"])
+	}
+	if _, ok := body["intended_use_id"]; ok {
+		t.Error("intended_use_id present, want it omitted when unset")
+	}
+}
+
+func TestStartPresentationOmitsBothWhenUnset(t *testing.T) {
+	body := startBody(t, "", "")
+
+	for _, key := range []string{"intended_use_id", "registration_certificate"} {
+		if _, ok := body[key]; ok {
+			t.Errorf("%s present, want it omitted when unset", key)
+		}
 	}
 }

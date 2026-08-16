@@ -260,6 +260,8 @@ func run() error {
 	verifier := openid4vpverifier.New(
 		cfg.EudiVerifierURL,
 		cfg.EudiIssuerChain,
+		cfg.EudiIntendedUseID,
+		cfg.EudiRegistrationCertificate,
 		&http.Client{Timeout: verifierHTTPTimeout},
 	)
 

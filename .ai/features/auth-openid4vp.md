@@ -64,7 +64,8 @@ New package replacing `internal/irmarequestor`. Two calls, mirroring the demo
   ```jsonc
   { "type": "vp_token", "dcql_query": <DCQL>, "nonce": <random>,
     "jar_mode": "by_reference", "request_uri_method": "post",
-    "issuer_chain": <trusted-issuer CA PEM> }
+    "issuer_chain": <trusted-issuer CA PEM>,
+    "intended_use_id": <configured intent> | "registration_certificate": <JWS> }
   ```
   Returns `{ transactionId, walletParams }`; `walletLink = openid4vp://?<urlencode(walletParams)>`.
   **Generate a real random `nonce`** (the demo hardcodes `"nonce"` — must NOT copy).
@@ -77,6 +78,34 @@ New package replacing `internal/irmarequestor`. Two calls, mirroring the demo
 The `RequestAuthenticator` seam carries over conceptually: today it auths to the IRMA
 daemon; here it auths to the verifier backend if the deployment requires it (the demo's
 EUDI calls are unauthenticated; self-hosted may differ).
+
+### The registration certificate a start request must carry
+
+Verifier Endpoint **v0.11.0** (upstream PR #582, released 2026-07-24) made a Wallet
+Relying Party Registration Certificate mandatory on every start: `resolveRegistrationCertificate`
+ends in `?: raise(ValidationError.MissingRegistrationCertificate)`, and there is no
+setting that turns it off. A request naming neither is refused `400
+{"error":"MissingRegistrationCertificate"}`. The certificate is carried on to the wallet
+as `verifier_info` in the request object, so it is the RP identity the holder is shown.
+
+Two ways to satisfy it, mutually exclusive (`EUDI_INTENDED_USE_ID`,
+`EUDI_REGISTRATION_CERTIFICATE`; `config.Load` refuses both, `cmd/api` fails the boot
+probe on a bad one):
+
+- **`intended_use_id`** names an intent the verifier itself has configured
+  (`VERIFIER_INTENDEDUSES_XX_*` on its side), listed at `GET /ui/intended-uses`.
+- **`registration_certificate`** carries our own, JWS compact serialization.
+
+The id defaults to `1` **only when the verifier URL is also the default**, because an
+intent id is one verifier's own configuration and means nothing on another. That
+particular id is not Yivi's choice: it is the demo intent v0.11.0 ships in
+`src/main/resources/application.properties` (`CN=Verifier Dev, O=Niscy`, `sub
+LEIEU-987654321`, PID-only), and `privacybydesign/openid4vc-poc-ops` sets no
+`VERIFIER_INTENDEDUSES_*` of its own — so staging currently presents the wallet that
+demo identity. When Yivi registers a real one the id will change, which is what the
+environment variable is for. The verifier does **not** check the DCQL query against the
+certificate's declared credentials at start (a `pbdf-*` query is accepted under the
+PID-only demo intent); whether a wallet enforces it at presentation is untested here.
 
 ### Credential requests are DCQL (not IRMA condiscon, not Presentation Exchange)
 

@@ -151,3 +151,20 @@ func TestComposePassesSigningRedirectURIToBackend(t *testing.T) {
 		t.Errorf("backend %s = %q, want %q", envSigningRedirectURI, value, want)
 	}
 }
+
+// Same passthrough rule: a certificate set in .env that never reaches the
+// container fails the boot probe while looking configured.
+func TestComposePassesEudiVerifierConfigToBackend(t *testing.T) {
+	backendEnvironment := backendComposeEnvironment(t)
+
+	for _, key := range []string{envEudiVerifierURL, envEudiIssuerChain, envEudiIntendedUseID, envEudiRegistrationCertificate} {
+		value, ok := backendEnvironment[key]
+		if !ok {
+			t.Errorf("backend service does not pass %s through; setting it in .env would do nothing", key)
+			continue
+		}
+		if want := "${" + key + ":-}"; value != want {
+			t.Errorf("backend %s = %q, want %q", key, value, want)
+		}
+	}
+}
