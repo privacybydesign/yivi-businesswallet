@@ -55,7 +55,7 @@ func exportRequest(t *testing.T, h *Handler, query, role string) *httptest.Respo
 }
 
 func TestExportIsAdminOnly(t *testing.T) {
-	h := testHandler(t, DefaultWriters())
+	h := testHandler(t, allWriters())
 
 	rec := exportRequest(t, h, "", organization.RoleMember)
 
@@ -68,7 +68,7 @@ func TestExportIsAdminOnly(t *testing.T) {
 }
 
 func TestExportServesACompleteZip(t *testing.T) {
-	h := testHandler(t, DefaultWriters())
+	h := testHandler(t, allWriters())
 
 	rec := exportRequest(t, h, "", organization.RoleAdmin)
 
@@ -101,7 +101,7 @@ func TestExportServesACompleteZip(t *testing.T) {
 }
 
 func TestExportRejectsAnUnknownSectionWithA400(t *testing.T) {
-	h := testHandler(t, DefaultWriters())
+	h := testHandler(t, allWriters())
 
 	rec := exportRequest(t, h, "sections=nope", organization.RoleAdmin)
 
@@ -121,7 +121,7 @@ func TestExportRejectsAnUnknownSectionWithA400(t *testing.T) {
 
 func TestExportPassesTheSectionFilterThrough(t *testing.T) {
 	var seen []string
-	svc := NewService(&fakeRecorder{}, DefaultWriters())
+	svc := NewService(&fakeRecorder{}, allWriters())
 	fixedClock(svc)
 	h := NewHandler(sectionSpy{inner: svc, seen: &seen}, passthrough, passthrough)
 
@@ -144,7 +144,7 @@ func (s sectionSpy) Export(ctx context.Context, org Organization, sections []str
 }
 
 func TestExportManifestCarriesTheResolvedOrganization(t *testing.T) {
-	h := testHandler(t, DefaultWriters())
+	h := testHandler(t, allWriters())
 
 	rec := exportRequest(t, h, "", organization.RoleAdmin)
 
@@ -162,7 +162,7 @@ func TestExportManifestCarriesTheResolvedOrganization(t *testing.T) {
 }
 
 func TestExportCleansUpAfterAFailedWrite(t *testing.T) {
-	svc := NewService(&fakeRecorder{}, DefaultWriters())
+	svc := NewService(&fakeRecorder{}, allWriters())
 	fixedClock(svc)
 	archive, err := svc.Export(context.Background(), testOrg(), nil)
 	if err != nil {

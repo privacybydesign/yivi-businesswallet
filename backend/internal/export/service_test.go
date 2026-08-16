@@ -57,6 +57,16 @@ func (w stubWriter) Write(_ context.Context, _ uuid.UUID, s *SectionBundle) erro
 	return w.write(s)
 }
 
+// allWriters registers every section, standing in for the point at which all
+// four are built. DefaultWriters registers only the ones that exist.
+func allWriters() []SectionWriter {
+	writers := make([]SectionWriter, 0, len(SectionOrder))
+	for _, key := range SectionOrder {
+		writers = append(writers, stubWriter{key: key})
+	}
+	return writers
+}
+
 func testOrg() Organization {
 	return Organization{
 		ID:             uuid.MustParse("3d1f0c8e-5b77-4a41-9f0e-0a2c6c2ad4b1"),
@@ -135,7 +145,7 @@ func readEntry(t *testing.T, zr *zip.Reader, name string) []byte {
 
 func TestExportProducesAConformantManifest(t *testing.T) {
 	audit := &fakeRecorder{}
-	svc := NewService(audit, DefaultWriters())
+	svc := NewService(audit, allWriters())
 	fixedClock(svc)
 
 	_, manifest, _ := exportBundle(t, svc, nil)
@@ -159,18 +169,12 @@ func TestExportProducesAConformantManifest(t *testing.T) {
 	var keys []string
 	for _, section := range manifest.Sections {
 		keys = append(keys, section.Key)
-		if !section.Requested {
-			t.Errorf("section %q requested = false on a full export", section.Key)
-		}
 		if section.Files == nil || section.Omitted == nil {
 			t.Errorf("section %q has a null files/omitted list, want []", section.Key)
 		}
 	}
 	if !slices.Equal(keys, SectionOrder) {
 		t.Errorf("section keys = %v, want %v", keys, SectionOrder)
-	}
-	if !slices.Equal(manifest.RequestedSections, SectionOrder) {
-		t.Errorf("requestedSections = %v, want %v", manifest.RequestedSections, SectionOrder)
 	}
 
 	if len(audit.calls) != 1 {
@@ -184,7 +188,9 @@ func TestExportProducesAConformantManifest(t *testing.T) {
 	}
 }
 
-func TestExportSectionFilterMarksUnrequestedSections(t *testing.T) {
+// An unrequested section is absent, not present-and-empty: zero counts are a
+// claim that the organization holds none of that data.
+func TestExportSectionFilterOmitsUnrequestedSections(t *testing.T) {
 	audit := &fakeRecorder{}
 	svc := NewService(audit, []SectionWriter{
 		stubWriter{key: SectionOwnerIdentification, write: func(s *SectionBundle) error {
@@ -202,17 +208,11 @@ func TestExportSectionFilterMarksUnrequestedSections(t *testing.T) {
 
 	_, manifest, zr := exportBundle(t, svc, []string{SectionAttestations})
 
-	if !slices.Equal(manifest.RequestedSections, []string{SectionAttestations}) {
-		t.Errorf("requestedSections = %v, want [%s]", manifest.RequestedSections, SectionAttestations)
+	if len(manifest.Sections) != 1 || manifest.Sections[0].Key != SectionAttestations {
+		t.Fatalf("sections = %+v, want only %s", manifest.Sections, SectionAttestations)
 	}
-	for _, section := range manifest.Sections {
-		want := section.Key == SectionAttestations
-		if section.Requested != want {
-			t.Errorf("section %q requested = %v, want %v", section.Key, section.Requested, want)
-		}
-		if !want && len(section.Files) != 0 {
-			t.Errorf("unrequested section %q carried %d files", section.Key, len(section.Files))
-		}
+	if got := manifest.Sections[0].Counts["issued"]; got != 2 {
+		t.Errorf("issued count = %d, want 2", got)
 	}
 	if got := len(zr.File); got != 2 {
 		t.Errorf("bundle holds %d entries, want the manifest plus one section file", got)
@@ -222,8 +222,35 @@ func TestExportSectionFilterMarksUnrequestedSections(t *testing.T) {
 	}
 }
 
+// A section with no registered writer is refused by name rather than shipped
+// empty, which would claim the organization holds none of it.
+func TestExportRefusesASectionItCannotWrite(t *testing.T) {
+	svc := NewService(&fakeRecorder{}, []SectionWriter{stubWriter{key: SectionAttestations}})
+
+	_, err := svc.Export(context.Background(), testOrg(), []string{SectionQerds})
+	if err == nil {
+		t.Fatal("Export() = nil, want an error for an unavailable section")
+	}
+	var apiErr *respond.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "section_unavailable" {
+		t.Fatalf("err = %v, want a section_unavailable APIError", err)
+	}
+}
+
+// A full export carries what this producer can write, and nothing it cannot.
+func TestExportCarriesOnlyRegisteredSections(t *testing.T) {
+	svc := NewService(&fakeRecorder{}, []SectionWriter{stubWriter{key: SectionAttestations}})
+	fixedClock(svc)
+
+	_, manifest, _ := exportBundle(t, svc, nil)
+
+	if len(manifest.Sections) != 1 || manifest.Sections[0].Key != SectionAttestations {
+		t.Errorf("sections = %+v, want only the registered one", manifest.Sections)
+	}
+}
+
 func TestExportRejectsAnUnknownSection(t *testing.T) {
-	svc := NewService(&fakeRecorder{}, DefaultWriters())
+	svc := NewService(&fakeRecorder{}, allWriters())
 
 	_, err := svc.Export(context.Background(), testOrg(), []string{"attestation"})
 	if err == nil {
@@ -341,7 +368,7 @@ func TestExportFailsWhenASectionFails(t *testing.T) {
 }
 
 func TestExportFailsWhenTheAuditWriteFails(t *testing.T) {
-	svc := NewService(&fakeRecorder{err: errors.New("no database")}, DefaultWriters())
+	svc := NewService(&fakeRecorder{err: errors.New("no database")}, allWriters())
 
 	if _, err := svc.Export(context.Background(), testOrg(), nil); err == nil {
 		t.Fatal("Export() = nil, want the audit error")
@@ -349,7 +376,7 @@ func TestExportFailsWhenTheAuditWriteFails(t *testing.T) {
 }
 
 func TestArchiveCloseRemovesTheStagingDirectory(t *testing.T) {
-	svc := NewService(&fakeRecorder{}, DefaultWriters())
+	svc := NewService(&fakeRecorder{}, allWriters())
 
 	archive, err := svc.Export(context.Background(), testOrg(), nil)
 	if err != nil {
@@ -389,7 +416,9 @@ func TestParseSections(t *testing.T) {
 }
 
 func TestResolveSectionsIsCanonicallyOrdered(t *testing.T) {
-	got, err := resolveSections([]string{SectionAuditRecords, SectionOwnerIdentification, SectionAuditRecords})
+	svc := NewService(&fakeRecorder{}, allWriters())
+
+	got, err := svc.resolveSections([]string{SectionAuditRecords, SectionOwnerIdentification, SectionAuditRecords})
 	if err != nil {
 		t.Fatalf("resolveSections() = %v, want nil", err)
 	}

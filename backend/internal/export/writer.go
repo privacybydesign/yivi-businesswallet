@@ -21,19 +21,10 @@ var sectionDirs = map[string]string{
 	SectionAuditRecords:        "audit-records",
 }
 
-type emptyWriter struct{ key string }
-
-func (w emptyWriter) Key() string { return w.key }
-
-func (w emptyWriter) Write(context.Context, uuid.UUID, *SectionBundle) error { return nil }
-
-// DefaultWriters is the set every export runs, in manifest order. Each entry is
-// replaced by the real writer as its section lands.
+// DefaultWriters is the set every export runs. A section is registered here
+// only once it can actually be written: an unregistered one is absent from the
+// bundle and refused by name, rather than appearing empty and claiming the
+// organization holds none of it.
 func DefaultWriters() []SectionWriter {
-	return []SectionWriter{
-		emptyWriter{key: SectionOwnerIdentification},
-		emptyWriter{key: SectionAttestations},
-		emptyWriter{key: SectionQerds},
-		emptyWriter{key: SectionAuditRecords},
-	}
+	return nil
 }
