@@ -1509,6 +1509,35 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/export/download/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: One-time download token.
+    get:
+      tags: [export]
+      summary: Download an export bundle by token
+      description: >-
+        No session required: the token is the credential, because a
+        termination-triggered export has to reach an owner who can no longer sign
+        in. Single-use — a completed download spends it. An unknown, spent or
+        expired token is one indistinguishable 404, so a caller cannot confirm a
+        token exists.
+      responses:
+        '2XX':
+          description: The bundle.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/departments:
     parameters:
       - name: slug
@@ -1917,6 +1946,128 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/export/jobs:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [export]
+      summary: List the organisation's background exports
+      description: Requires organisation admin. Newest first.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [export]
+      summary: Queue a background export
+      description: >-
+        Requires organisation admin. Queues the bundle for assembly by a
+        background worker and returns the job immediately, for an organisation
+        whose evidence and attachments outgrow a single request. The section
+        filter is validated here, so a typo is refused rather than producing a
+        job that fails later.
+      parameters:
+        - name: sections
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated subset of the export sections; omit for all.
+      responses:
+        '202':
+          description: The queued job.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/export/jobs/{id}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    get:
+      tags: [export]
+      summary: Read one background export
+      description: >-
+        Requires organisation admin. Reports queued / running / ready / failed,
+        and carries `downloadPath` while the bundle is actually fetchable.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/export/jobs/{id}/download:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    get:
+      tags: [export]
+      summary: Download a finished background export
+      description: >-
+        Requires organisation admin. Serves the assembled ZIP. Spends no one-time
+        token — that token exists for a caller who cannot authenticate — so the
+        bundle stays fetchable until it expires.
+      responses:
+        '2XX':
+          description: The bundle.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/orgs/{slug}/invitations/{id}:
     parameters:
       - name: slug
@@ -4302,6 +4453,12 @@ components:
             $ref: '#/components/schemas/Error'
     NotFound:
       description: The referenced resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: The resource is not in a state that allows this request.
       content:
         application/json:
           schema:

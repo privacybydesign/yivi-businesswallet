@@ -24,7 +24,7 @@ func testHandler(t *testing.T, writers []SectionWriter) *Handler {
 	t.Helper()
 	svc := NewService(&fakeRecorder{}, writers)
 	fixedClock(svc)
-	return NewHandler(svc, passthrough, passthrough)
+	return NewHandler(svc, newFakeJobs(), passthrough, passthrough)
 }
 
 func exportRequest(t *testing.T, h *Handler, query, role string) *httptest.ResponseRecorder {
@@ -123,7 +123,7 @@ func TestExportPassesTheSectionFilterThrough(t *testing.T) {
 	var seen []string
 	svc := NewService(&fakeRecorder{}, allWriters())
 	fixedClock(svc)
-	h := NewHandler(sectionSpy{inner: svc, seen: &seen}, passthrough, passthrough)
+	h := NewHandler(sectionSpy{inner: svc, seen: &seen}, newFakeJobs(), passthrough, passthrough)
 
 	if rec := exportRequest(t, h, "sections=qerds,auditRecords", organization.RoleAdmin); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
@@ -141,6 +141,10 @@ type sectionSpy struct {
 func (s sectionSpy) Export(ctx context.Context, org Organization, sections []string) (*Archive, error) {
 	*s.seen = sections
 	return s.inner.Export(ctx, org, sections)
+}
+
+func (s sectionSpy) Sections(requested []string) ([]string, error) {
+	return s.inner.Sections(requested)
 }
 
 func TestExportManifestCarriesTheResolvedOrganization(t *testing.T) {
@@ -170,7 +174,7 @@ func TestExportCleansUpAfterAFailedWrite(t *testing.T) {
 	}
 	dir := archive.dir
 
-	h := NewHandler(handedArchive{archive: archive}, passthrough, passthrough)
+	h := NewHandler(handedArchive{archive: archive}, newFakeJobs(), passthrough, passthrough)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -190,6 +194,8 @@ type handedArchive struct{ archive *Archive }
 func (h handedArchive) Export(context.Context, Organization, []string) (*Archive, error) {
 	return h.archive, nil
 }
+
+func (handedArchive) Sections(requested []string) ([]string, error) { return requested, nil }
 
 type failingWriter struct{ http.ResponseWriter }
 
