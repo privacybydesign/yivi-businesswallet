@@ -486,6 +486,7 @@ export const en = {
       orgCscSettings: "Signing provider settings",
       signingCredentials: "Signing credential",
       signingRequests: "Signing request",
+      export: "Data export",
     },
     actions: {
       orgCreated: "Created organization",
@@ -562,6 +563,7 @@ export const en = {
       signingFailed: "Document signature failed",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
+      exportRequested: "Exported organization data",
     },
   },
   memberInvite: {

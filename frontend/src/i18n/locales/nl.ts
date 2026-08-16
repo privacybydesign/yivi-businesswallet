@@ -501,6 +501,7 @@ export const nl: Translation<typeof en> = {
       orgCscSettings: "Instellingen ondertekenprovider",
       signingCredentials: "Ondertekencredential",
       signingRequests: "Ondertekenverzoek",
+      export: "Gegevensexport",
     },
     actions: {
       orgCreated: "Organisatie aangemaakt",
@@ -578,6 +579,7 @@ export const nl: Translation<typeof en> = {
       signingFailed: "Documenthandtekening mislukt",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
+      exportRequested: "Organisatiegegevens geëxporteerd",
     },
   },
   memberInvite: {

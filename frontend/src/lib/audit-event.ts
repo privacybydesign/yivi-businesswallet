@@ -63,6 +63,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "signing.completed": { icon: "valid", tone: "green" },
   "signing.delivered": { icon: "email", tone: "green" },
   "signing.failed": { icon: "warning", tone: "red" },
+  "organization.export_requested": { icon: "arrow_front", tone: "amber" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -227,6 +228,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.signingDelivered");
     case "signing.failed":
       return t("auditLog.actions.signingFailed");
+    case "organization.export_requested":
+      return t("auditLog.actions.exportRequested");
     default:
       return action;
   }
@@ -296,6 +299,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.signingCredentials");
     case "signing_requests":
       return t("auditLog.targets.signingRequests");
+    case "export":
+      return t("auditLog.targets.export");
     default:
       return targetType;
   }

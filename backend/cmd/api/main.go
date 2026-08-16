@@ -24,6 +24,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/emailchannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/export"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
@@ -529,6 +530,13 @@ func run() error {
 		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingOrgs{store: orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
 		requireUser, orgHandler.Authorize)
 
+	// Data portability (Art 5(1)(l)): one admin-gated download carrying the org's
+	// identification data, attestations, QERDS logs and audit trail. The section
+	// writers are still empty; each data point lands as its own change.
+	exportHandler := export.NewHandler(
+		export.NewService(export.NewStore(pool, recorder), export.DefaultWriters()),
+		requireUser, orgHandler.Authorize)
+
 	handler := server.New(
 		pool,
 		cfg.StaticDir,
@@ -548,6 +556,7 @@ func run() error {
 		provisioningHandler,
 		cscHandler,
 		signingHandler,
+		exportHandler,
 	)
 
 	httpServer := &http.Server{

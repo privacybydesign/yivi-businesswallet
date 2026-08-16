@@ -1,11 +1,13 @@
 # Feature: Export (data portability bundle, Art 5(1)(l))
 
-**Status:** Design, contract only. No export code exists yet (`internal/export` is
-unwritten). This file is the contract the export series builds to: #119 (this doc),
-#120 (`internal/export` service + admin-gated endpoint), #121 (owner identification
-data), #122 (EAAs, issued + held), #123 (QERDS logs + evidence), #124 (interaction /
-audit records), #125 (service-termination trigger), #126 (frontend request + download),
-#127 (async job + large bundles). Parent issue: #30.
+**Status:** Contract and plumbing. `internal/export` assembles the ZIP, the manifest
+and the audit event behind `GET /orgs/{slug}/export`; the four section writers are
+still empty, so a bundle carries a conformant manifest and no data yet. This file is
+the contract the export series builds to: #119 (this doc), #120 (`internal/export`
+service + admin-gated endpoint, landed), #121 (owner identification data), #122 (EAAs,
+issued + held), #123 (QERDS logs + evidence), #124 (interaction / audit records), #125
+(service-termination trigger), #126 (frontend request + download), #127 (async job +
+large bundles). Parent issue: #30.
 **Regulation:** COM(2025) 838 Art 5(1)(l) (export owner identification data, EAAs,
 communication logs and interaction records in a structured, commonly used,
 machine-readable format, on owner request or on termination of service / revocation of
@@ -91,6 +93,11 @@ All four keys always appear in the manifest. A section with nothing to export ap
 with zero counts and an empty file list, so a consumer can tell "the org holds none"
 from "this producer did not write that section".
 
+A caller may ask for a subset (`?sections=`, §3.1). A section left out of that subset
+is also written with zero counts and no files, which would otherwise be
+indistinguishable from an org that holds none — so the manifest states the requested
+set explicitly and every section carries `requested`.
+
 Two cross-section rules keep the same bytes from being written twice:
 
 - `qerds/messages.json` references each ASiC-E container by path. The per-message
@@ -122,9 +129,11 @@ when, what is inside each section, and the digest of every file.
     "status": "active",
     "bootstrappedAt": "2026-01-08T11:22:31Z"
   },
+  "requestedSections": ["ownerIdentification", "qerds"],   // §3.1
   "sections": [
     {
       "key": "ownerIdentification",
+      "requested": true,
       "counts": { "departments": 3, "members": 12, "credentials": 1 },
       "files": [
         {
@@ -144,6 +153,7 @@ when, what is inside each section, and the digest of every file.
     },
     {
       "key": "qerds",
+      "requested": true,
       "counts": { "messages": 41, "evidence": 96, "attachments": 12, "addresses": 1, "contacts": 7 },
       "files": [
         {
@@ -176,8 +186,10 @@ Field rules:
 | `producer.name` | string | Fixed `yivi-businesswallet` |
 | `producer.version` | string | Build version. Diagnostic only, never a compatibility signal |
 | `organization` | object | Denormalised `organization.Organization` (minus `logoUri`). Duplicated in `owner-identification/organization.json`; the manifest copy lets a reader identify the bundle without unpacking it |
+| `requestedSections` | array | The section keys this run was asked for, in the fixed section order. A full export lists all four. §3.1 |
 | `sections[]` | array | Fixed order: `ownerIdentification`, `attestations`, `qerds`, `auditRecords`. Always all four |
-| `sections[].counts` | object | Per-collection row counts as exported, after exclusions. Keys are per section and additive |
+| `sections[].requested` | bool | Whether this section was asked for. `false` means the section was not written and its zero counts say nothing about what the org holds |
+| `sections[].counts` | object | Per-collection row counts as exported, after exclusions. Keys are per section and additive. All-zero on an unrequested section |
 | `sections[].files[]` | array | Every file the section wrote. Sorted by `path` |
 | `files[].checksum` | object | `{algorithm, value}`; `sha-256` with a lowercase hex digest over the extracted (uncompressed) bytes |
 | `sections[].omitted[]` | array | Payloads a section record references but the bundle does not carry (§6). `reason` is `size_limit` or `unavailable`; `checksum`/`sizeBytes` come from the stored integrity metadata when known, else omitted |
@@ -188,6 +200,22 @@ unchanged data differ only in `bundleId`, `generatedAt` and `producer.version`.
 The manifest does not list itself, so it cannot carry its own digest. Bundle-level
 integrity (a digest over the whole ZIP, handed to the client alongside the download)
 belongs to the delivery path in #120/#127, not to this file.
+
+### 3.1 Section filter
+
+`GET /orgs/{slug}/export` exports all four sections. `?sections=` narrows it to a
+comma-separated subset (`?sections=attestations`), which is what an admin who wants
+their credential ledger without every member's personal data and the whole audit trail
+asks for. There is no second route and no second response shape: a filtered bundle is
+the same ZIP with the same manifest, fewer writers run. An unknown key is a 400 —
+silently returning an empty bundle for a typo would be indistinguishable from an org
+that holds nothing.
+
+`requestedSections` and the per-section `requested` flag exist because the filter would
+otherwise be invisible in the output, and a receiver reading `"messages": 0` has to be
+able to tell an org with no messages from an export that never looked. The audit event
+records the requested set for the same reason: exporting one section is a different act
+from exporting everything the organisation holds about its members.
 
 ## 4. Bundle versioning
 
@@ -343,12 +371,15 @@ requested it.
 
 ## 8. Open questions
 
-1. **Per-slice route.** `attestations.md` §10 documents `GET .../attestations/export`.
-   Does it survive as a section-scoped download, or fold entirely into
-   `GET /api/v1/orgs/{slug}/export`? Decided in #120/#122.
-2. **Version gate for new formats.** Do we hold `1.0` until the holder can emit mdoc,
-   or ship `1.0` SD-JWT-only now and bump to `1.1` when mdoc lands? This doc assumes
-   the second.
+1. ~~**Per-slice route.**~~ **Resolved in #120: folded.** `attestations.md` §10's
+   `GET .../attestations/export` does not survive as its own route;
+   `GET /api/v1/orgs/{slug}/export?sections=attestations` (§3.1) is the section-scoped
+   download. One route, one format, one set of writers — a second route would grow its
+   own response shape and drift.
+2. ~~**Version gate for new formats.**~~ **Resolved in #120: ship SD-JWT-only.** `1.0`
+   carries `dc+sd-jwt` credentials; the mdoc and W3C VCDM rows in §5 stay as the
+   contract for when those formats land, and adding one is a MINOR bump (§4). Nothing
+   in the repo issues, holds or receives either format today (§5.1).
 3. **Sealing the bundle.** Art 5(1)(l) does not require a seal, but a qualified seal
    over `manifest.json` (Art 5(1)(d), the key material in `attestations.md` §7) would
    let a receiving wallet verify provenance rather than trust the transport. Out of
