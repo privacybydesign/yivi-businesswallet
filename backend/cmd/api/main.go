@@ -531,10 +531,15 @@ func run() error {
 		requireUser, orgHandler.Authorize)
 
 	// Data portability (Art 5(1)(l)): one admin-gated download carrying the org's
-	// identification data, attestations, QERDS logs and audit trail. The section
-	// writers are still empty; each data point lands as its own change.
+	// identification data, attestations, QERDS logs and audit trail. A section is
+	// registered only once it can be written; an unregistered one is refused by
+	// name rather than exported empty.
 	exportHandler := export.NewHandler(
-		export.NewService(export.NewStore(pool, recorder), export.DefaultWriters()),
+		export.NewService(export.NewStore(pool, recorder), []export.SectionWriter{
+			export.NewOwnerIdentificationWriter(orgStore),
+			export.NewAttestationsWriter(attestationStore, attHolder),
+			export.NewAuditRecordsWriter(audit.NewReader(pool)),
+		}),
 		requireUser, orgHandler.Authorize)
 
 	handler := server.New(

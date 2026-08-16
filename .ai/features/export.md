@@ -1,15 +1,16 @@
 # Feature: Export (data portability bundle, Art 5(1)(l))
 
-**Status:** Contract and plumbing. `internal/export` assembles the ZIP, the manifest
-and the audit event behind `GET /orgs/{slug}/export`. No section writer is registered
-yet, so a bundle today carries a conformant manifest with no sections and any
-`?sections=` is refused `section_unavailable` — the export says what it cannot do
-rather than shipping empty sections that would read as "the org holds none". This file
-is the contract the export series builds to: #119 (this doc), #120 (`internal/export`
-service + admin-gated endpoint, landed), #121 (owner identification data), #122 (EAAs,
-issued + held), #123 (QERDS logs + evidence), #124 (interaction / audit records), #125
-(service-termination trigger), #126 (frontend request + download), #127 (async job +
-large bundles). Parent issue: #30.
+**Status:** Three of four sections built. `internal/export` assembles the ZIP, the
+manifest and the audit event behind `GET /orgs/{slug}/export`, and registers writers
+for owner identification, attestations and audit records. `qerds` has no writer yet, so
+asking for it is refused `section_unavailable` and a full export simply omits it —
+the export says what it cannot do rather than shipping an empty section that would read
+as "the org holds none". This file is the contract the export series builds to: #119
+(this doc), #120 (`internal/export` service + admin-gated endpoint), #121 (owner
+identification data), #122 (EAAs, issued + held), #124 (interaction / audit records) —
+all landed — then #123 (QERDS logs + evidence), #125 (service-termination trigger),
+#126 (frontend request + download), #127 (async job + large bundles). Parent
+issue: #30.
 **Regulation:** COM(2025) 838 Art 5(1)(l) (export owner identification data, EAAs,
 communication logs and interaction records in a structured, commonly used,
 machine-readable format, on owner request or on termination of service / revocation of
@@ -114,10 +115,10 @@ Section keys, directories and their sources:
 
 | Section key | Directory | Sources | Filled by |
 |---|---|---|---|
-| `ownerIdentification` | `owner-identification/` | `organization.Store.GetBySlug`, `ListDepartments`, `ListMemberEntries` | #121 |
-| `attestations` | `attestations/` | `attestation.Store.ListIssued`, `ListHeld`, `ListSchemas`, `ListTemplates`, `ListKeys`, plus the holder engine for credential bytes | #122 |
+| `ownerIdentification` | `owner-identification/` | `organization.Store.GetByID`, `ListDepartments`, `ListMemberEntries` (paged to the end) | #121, landed |
+| `attestations` | `attestations/` | `attestation.Store.ListIssued`, `ListHeld`, `ListSchemas`, `ListTemplates`, `ListKeys`, plus `eudiholder.Holder.Raw` for credential bytes | #122, landed |
 | `qerds` | `qerds/` | `qerds.Store.List`, `GetWithEvidence`, `GetAttachmentContent`, `ListAddresses`, `ListContacts` | #123 |
-| `auditRecords` | `audit-records/` | `audit.Reader.ListForOrganization` (cursor loop; limits clamp to 200) | #124 |
+| `auditRecords` | `audit-records/` | `audit.Reader.ListForOrganization` (cursor loop; limits clamp to 200) | #124, landed |
 
 **A section appears in the manifest only when the export produced it.** Presence means
 "we looked"; zero counts then mean the org holds none of that data. Absence means we
@@ -307,11 +308,12 @@ gap is in the credential rows:
   out of v1. So v1 exports `dc+sd-jwt` credentials plus the JSON profile record, and
   the mdoc / VCDM rows stay as the contract for when those formats land. Adding one is
   a MINOR bump: a new `format` token and a new file extension, no layout change.
-- `eudiholder.Holder` exposes `Claims` and `Displays` (decoded, localized views) but no
-  read of the raw credential bytes. Exporting native serialization therefore needs a
-  new holder read (a `Raw(ctx, orgID, ref)`-shaped method returning
-  `IssuedCredentialInstance.RawCredential`) rather than a re-encode from `Claims`,
-  which would break the issuer's signature. That seam is #122's first task.
+- `eudiholder.Holder.Raw(ctx, orgID, ref)` is the read that makes native serialization
+  possible: it returns `IssuedCredentialInstance.RawCredential` rather than re-encoding
+  what `Claims` decoded, which would break the issuer's signature. Unlike `Claims` it
+  has no vct fallback — a sibling credential's bytes are not an acceptable substitute
+  the way a display view is — and reports `ErrCredentialNotFound` otherwise, which the
+  section records as an `unavailable` omission rather than failing the export.
 - The issued ledger (`attestation.Issued`) holds attribute *values*, not a signed
   credential: the recipient's wallet holds the signed EAA, we hold the ledger row. The
   `attestations/issued.json` index is therefore JSON only, with no credential file.
@@ -386,11 +388,19 @@ Enforcement, so this survives contact with new fields:
   explicitly. Never `json.Marshal` a store struct straight into the bundle: a
   `json:"-"` tag is one edit away from disappearing, and the next field added to
   `Issued` would ship silently.
-- `internal/export` carries a test that seeds an org with a known invitation token, a
-  known claim token and a known SMTP password, exports it, and asserts none of those
-  literal values appears anywhere in the bundle bytes, manifest included. A byte-level
-  assertion catches a leak through a nested JSONB `metadata` envelope that a
-  field-by-field test would miss.
+- `internal/export` carries a test that runs the **real** section writers over stores
+  seeded with those literals in the fields that carry them, and asserts none appears
+  anywhere in the bundle bytes, manifest included. The assertion is byte-level so a
+  leak through a nested JSONB envelope is caught too, and it carries a positive control
+  asserting the scan does find values the bundle genuinely holds — without one, a
+  bundle that stopped carrying anything would still pass.
+- **`audit-records/events.json` copies each event's `metadata` verbatim**, because the
+  `{before, after}` envelope is the event's own record of what changed and this package
+  cannot know which keys a future action adds. The exclusion there is therefore
+  upstream, in the auditing convention that says not to record token hashes or session
+  material (`.ai/conventions/BACKEND.md`) — the byte scan only catches the literals it
+  is told about. An action that puts a credential in its metadata leaks it into the
+  bundle, and the fix belongs at the `audit.Record` call.
 - Org settings (SMTP, theme, issuer instance) are out of the bundle's scope for `1.0`.
   Art 5(1)(l) names identification data, EAAs, communication logs and interaction
   records; deployment configuration is none of those. If a later version adds them, the

@@ -31,6 +31,10 @@ import (
 // the stub is selected and the operation has no meaningful in-memory behaviour.
 var ErrNotConfigured = errors.New("eudiholder: engine not configured")
 
+// ErrCredentialNotFound is returned when the engine holds no credential material
+// under a ref.
+var ErrCredentialNotFound = errors.New("eudiholder: credential not found")
+
 // Holder is the per-organization holder-wallet engine seam. Accept the
 // interface; the concrete engine (stub or irmago-backed) is injected at boot.
 type Holder interface {
@@ -81,6 +85,15 @@ type Holder interface {
 	// shows a friendly, localized name and logo without a per-row Claims fetch. An
 	// org that holds nothing yields an empty (non-nil) map.
 	Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]HeldDisplay, error)
+
+	// Raw returns the credential material stored under ref: the SD-JWT VC exactly
+	// as its issuer signed it, without the key-binding JWT. The issuer's signature
+	// covers those bytes, so a caller that has to keep the credential verifiable —
+	// the data-portability export — copies them rather than re-encoding what Claims
+	// decoded. Reports ErrCredentialNotFound for a ref the engine does not know;
+	// unlike Claims there is no vct fallback, since a credential's bytes are not
+	// interchangeable with a sibling's the way a display view is.
+	Raw(ctx context.Context, orgID uuid.UUID, ref string) ([]byte, error)
 
 	// Validities resolves, for every credential the organization holds, its expiry
 	// and last known revocation state keyed by the engine credential-instance id —

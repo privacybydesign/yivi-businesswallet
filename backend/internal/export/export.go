@@ -122,3 +122,11 @@ func producerVersion() string {
 	}
 	return "dev"
 }
+
+func optionalTimestamp(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := timestamp(*t)
+	return &s
+}

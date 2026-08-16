@@ -83,6 +83,19 @@ func (h *StubHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI strin
 	return Redeemed{Ref: ref, VCT: cred.VCT, Issuer: cred.CredentialIssuer}, nil
 }
 
+// Raw returns the stored credential's raw token. The stub's Redeem synthesises a
+// credential with no token, so a redeemed ref reports ErrCredentialNotFound here
+// while Claims still answers from the processed payload.
+func (h *StubHolder) Raw(_ context.Context, orgID uuid.UUID, ref string) ([]byte, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	cred, ok := h.creds[orgID][ref]
+	if !ok || len(cred.RawToken) == 0 {
+		return nil, ErrCredentialNotFound
+	}
+	return cred.RawToken, nil
+}
+
 // Claims decodes the stored credential's processed payload into its disclosed
 // attributes, resolving by ref then falling back to vct — but only when the vct
 // names exactly one held credential, mirroring the engine (see
