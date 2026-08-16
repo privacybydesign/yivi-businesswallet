@@ -41,16 +41,39 @@ func NewService(audit recorder, writers []SectionWriter) *Service {
 	}
 }
 
+// WithBudget caps how many payload bytes one bundle carries. Over it, a payload
+// becomes a reference-only record rather than being dropped in silence. Zero
+// removes the cap.
+func (s *Service) WithBudget(bytes int64) *Service {
+	s.budget = bytes
+	return s
+}
+
 // Archive is a finished bundle. Close removes the temp files behind it.
 type Archive struct {
 	file     *os.File
 	dir      string
 	Size     int64
 	BundleID uuid.UUID
+	Sections []string
 	Filename string
 }
 
 func (a *Archive) Reader() io.Reader { return a.file }
+
+// Bytes reads the whole bundle into memory. Only the background worker uses it,
+// because storing a bundle means holding it; the synchronous download streams
+// from Reader instead.
+func (a *Archive) Bytes() ([]byte, error) {
+	if _, err := a.file.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("export: rewinding bundle: %w", err)
+	}
+	data, err := io.ReadAll(a.file)
+	if err != nil {
+		return nil, fmt.Errorf("export: reading bundle: %w", err)
+	}
+	return data, nil
+}
 
 func (a *Archive) Close() error {
 	err := a.file.Close()
@@ -64,6 +87,21 @@ func (a *Archive) Close() error {
 // all of them. The audit event is written before the archive is returned, so
 // nothing carrying members' personal data is served unrecorded.
 func (s *Service) Export(ctx context.Context, org Organization, sections []string) (*Archive, error) {
+	archive, err := s.build(ctx, org, sections)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.audit.RecordExport(ctx, org.ID, archive.BundleID, archive.Sections); err != nil {
+		_ = archive.Close()
+		return nil, fmt.Errorf("export: recording export: %w", err)
+	}
+	return archive, nil
+}
+
+// build assembles the bundle without recording anything. The background worker
+// uses it directly: a queued export is audited when it is requested, and
+// auditing it again on assembly would report one act twice.
+func (s *Service) build(ctx context.Context, org Organization, sections []string) (*Archive, error) {
 	requested, err := s.resolveSections(sections)
 	if err != nil {
 		return nil, err
@@ -101,17 +139,13 @@ func (s *Service) Export(ctx context.Context, org Organization, sections []strin
 		return nil, fmt.Errorf("export: sizing bundle: %w", err)
 	}
 
-	if err := s.audit.RecordExport(ctx, org.ID, manifest.BundleID, requested); err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("export: recording export: %w", err)
-	}
-
 	success = true
 	return &Archive{
 		file:     file,
 		dir:      dir,
 		Size:     info.Size(),
 		BundleID: manifest.BundleID,
+		Sections: requested,
 		Filename: filename(org.Slug, manifest.GeneratedAt),
 	}, nil
 }
@@ -227,6 +261,10 @@ func marshalManifest(m Manifest) ([]byte, error) {
 // Both refusals are explicit rather than an empty section, because a section
 // present with zero counts is a claim that the organization holds none of that
 // data — which a typo or an unbuilt writer has no business making.
+func (s *Service) Sections(requested []string) ([]string, error) {
+	return s.resolveSections(requested)
+}
+
 func (s *Service) resolveSections(requested []string) ([]string, error) {
 	registered := make(map[string]bool, len(s.writers))
 	for _, w := range s.writers {

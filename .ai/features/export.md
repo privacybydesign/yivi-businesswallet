@@ -7,9 +7,9 @@ with no registered writer is refused `section_unavailable` rather than shipped e
 which is what an unbuilt section looked like while the series was landing. This file
 is the contract the export series built to: #119 (this doc), #120 (`internal/export`
 service + admin-gated endpoint), #121 (owner identification data), #122 (EAAs, issued +
-held), #123 (QERDS logs + evidence), #124 (interaction / audit records) — all landed —
-then #125 (service-termination trigger), #126 (frontend request + download), #127
-(async job + large bundles). Parent issue: #30.
+held), #123 (QERDS logs + evidence), #124 (interaction / audit records), #127 (async
+job + large bundles) — all landed — then #125 (service-termination trigger) and #126
+(frontend request + download). Parent issue: #30.
 **Regulation:** COM(2025) 838 Art 5(1)(l) (export owner identification data, EAAs,
 communication logs and interaction records in a structured, commonly used,
 machine-readable format, on owner request or on termination of service / revocation of
@@ -257,6 +257,38 @@ A key this deployment cannot write yet is refused the same way an unknown key is
 `section_unavailable`, naming the section. Section writers are registered as they land,
 so before a section is built it is neither offered nor silently shipped empty.
 
+### 3.2 Background jobs
+
+`GET /orgs/{slug}/export` assembles the bundle inside the request, which is fine
+until an organisation's evidence and attachments outgrow one. `POST
+/orgs/{slug}/export/jobs` queues the same assembly instead and returns immediately;
+`GET .../export/jobs/{id}` reports `queued` / `running` / `ready` / `failed`, and
+carries a `downloadPath` while the bundle is actually fetchable.
+
+The section filter is validated at enqueue, not at assembly: a typo must be refused
+while someone is still looking at it, rather than producing a job that fails minutes
+later in a worker.
+
+**Queueing is the audited act.** `organization.export_requested` is written when the
+job is created, so the trail records who asked before any bundle exists, and the
+worker deliberately does not record it again (`Service.build` skips the audit that
+`Service.Export` writes).
+
+**A finished bundle is stored inline and expires.** It is held in an `export_jobs`
+row like every other payload this codebase keeps, lives for `DefaultBundleTTL`, and
+is dropped by a pruner once spent or expired — the job row stays, because the export
+is part of the org's history and only the bundle is transient.
+
+**There are two ways to download, for two different callers.** An admin uses
+`GET .../export/jobs/{id}/download`, which is session-authenticated and spends
+nothing, so the bundle stays fetchable while it lives. `GET /export/download/{token}`
+takes no session at all: the token is the credential, because a termination-triggered
+export (§8 q5) has to reach an owner who can no longer sign in. That one is
+single-use, and unknown, spent and expired are one indistinguishable 404 — the caller
+is unauthenticated, so telling them apart would confirm a token exists. A download
+whose body never reached the client puts the token back rather than spending it on a
+dropped connection.
+
 ## 4. Bundle versioning
 
 `schemaVersion` is a two-part `MAJOR.MINOR` string on the bundle as a whole. There is
@@ -351,14 +383,16 @@ The rule, in order of precedence:
    and duplicate-name class instead of sanitising a provider-supplied string.
 4. **Held credential material is carried as files** under the section's `credentials/`
    directory, named by `credential_ref` (§5).
-5. **Over the bundle budget, a payload becomes a reference-only record.** The
-   synchronous export stays synchronous: when carrying a payload would push the bundle
-   past its byte budget, the exporter still writes the full JSON record and lists the
-   payload under the section's `omitted[]` with `reason: "size_limit"`, keeping its
-   stored hash and size so the receiver can still verify it if fetched another way. The
-   budget value and its config name are #127's decision; #120 should implement the
-   `omitted[]` mechanics with an effectively unlimited budget so #127 only sets a
-   number.
+5. **Over the bundle budget, a payload becomes a reference-only record.** When
+   carrying a payload would push the bundle past its byte budget, the exporter still
+   writes the full JSON record and lists the payload under the section's `omitted[]`
+   with `reason: "size_limit"`, keeping its stored hash and size so the receiver can
+   still verify it if fetched another way. The budget is `EXPORT_MAX_BUNDLE_BYTES`,
+   defaulting to 1 GiB — a ceiling on the pathological case, not a target, since a
+   background job holds the finished bundle whole in memory to store it. Raw evidence
+   is exempt (rule 2). **A cap is never applied in silence**: an omission always names
+   the payload and why, because a bundle that quietly lost an attachment reads as
+   "everything was exported" when it was not.
 6. **A payload the store cannot return is also reference-only**, with
    `reason: "unavailable"`. One missing attachment never fails an export: the manifest
    and the audit event tell the truth about what shipped.

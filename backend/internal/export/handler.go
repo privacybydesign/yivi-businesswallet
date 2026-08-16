@@ -14,18 +14,20 @@ import (
 
 type exporter interface {
 	Export(ctx context.Context, org Organization, sections []string) (*Archive, error)
+	Sections(requested []string) ([]string, error)
 }
 
 // Handler serves the data-portability download. The bundle carries every
 // member's personal data, so it is org-admin only and audited.
 type Handler struct {
 	service     exporter
+	jobs        jobManager
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
 }
 
-func NewHandler(service exporter, requireUser, authorize func(http.Handler) http.Handler) *Handler {
-	return &Handler{service: service, requireUser: requireUser, authorize: authorize}
+func NewHandler(service exporter, jobs jobManager, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+	return &Handler{service: service, jobs: jobs, requireUser: requireUser, authorize: authorize}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -33,12 +35,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 		return h.requireUser(h.authorize(organization.RequireOrgAdmin(next)))
 	}
 	mux.Handle("GET /orgs/{slug}/export", admin(respond.HandlerFunc(h.export)))
+	h.registerJobs(mux, admin)
 }
 
 func (h *Handler) export(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 
-	archive, err := h.service.Export(r.Context(), owner(org), ParseSections(r.URL.Query().Get("sections")))
+	archive, err := h.service.Export(r.Context(), OwnerOf(org), ParseSections(r.URL.Query().Get("sections")))
 	if err != nil {
 		return err
 	}
@@ -63,7 +66,8 @@ func (h *Handler) export(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func owner(org organization.Organization) Organization {
+// OwnerOf projects the org identity the manifest denormalises.
+func OwnerOf(org organization.Organization) Organization {
 	return Organization{
 		ID:             org.ID,
 		Name:           org.Name,
@@ -74,4 +78,8 @@ func owner(org organization.Organization) Organization {
 		Status:         org.Status,
 		BootstrappedAt: timestamp(org.BootstrappedAt),
 	}
+}
+
+func badRequest(code, msg string) error {
+	return &respond.APIError{Status: http.StatusBadRequest, Code: code, Message: msg}
 }

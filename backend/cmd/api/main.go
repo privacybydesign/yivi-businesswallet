@@ -78,6 +78,11 @@ const (
 	// One token request to the identity platform, on the path of a send.
 	mailOAuthHTTPTimeout = 15 * time.Second
 
+	// How often spent and expired export bundles have their stored bytes dropped.
+	// The rows stay — a job is part of the org's export history — so this only
+	// reclaims the payload.
+	exportPruneInterval = 1 * time.Hour
+
 	serverAddr = ":8080"
 
 	// Server-level ingest bounds. ReadHeaderTimeout caps the slowloris header
@@ -89,6 +94,18 @@ const (
 	serverIdleTimeout       = 120 * time.Second
 	serverMaxHeaderBytes    = 1 << 20 // 1 MiB
 )
+
+// exportOrgs adapts the organization store to the identity the export manifest
+// denormalises, so the export worker does not import the whole org surface.
+type exportOrgs struct{ store *organization.Store }
+
+func (a exportOrgs) Resolve(ctx context.Context, orgID uuid.UUID) (export.Organization, error) {
+	org, err := a.store.GetByID(ctx, orgID)
+	if err != nil {
+		return export.Organization{}, err
+	}
+	return export.OwnerOf(org), nil
+}
 
 // qerdsProvider is the boot-time provider surface: the readiness probe plus the
 // operations the qerds service uses. The concrete provider is chosen by config.
@@ -534,14 +551,21 @@ func run() error {
 	// identification data, attestations, QERDS logs and audit trail. A section is
 	// registered only once it can be written; an unregistered one is refused by
 	// name rather than exported empty.
-	exportHandler := export.NewHandler(
-		export.NewService(export.NewStore(pool, recorder), []export.SectionWriter{
-			export.NewOwnerIdentificationWriter(orgStore),
-			export.NewAttestationsWriter(attestationStore, attHolder),
-			export.NewQerdsWriter(qerdsStore),
-			export.NewAuditRecordsWriter(audit.NewReader(pool)),
-		}),
-		requireUser, orgHandler.Authorize)
+	exportStore := export.NewStore(pool, recorder)
+	exportService := export.NewService(exportStore, []export.SectionWriter{
+		export.NewOwnerIdentificationWriter(orgStore),
+		export.NewAttestationsWriter(attestationStore, attHolder),
+		export.NewQerdsWriter(qerdsStore),
+		export.NewAuditRecordsWriter(audit.NewReader(pool)),
+	}).WithBudget(cfg.ExportMaxBundleBytes)
+	exportHandler := export.NewHandler(exportService, exportStore, requireUser, orgHandler.Authorize)
+
+	// An organisation whose evidence and attachments outgrow one request builds
+	// its bundle in the background instead; the pruner drops the stored bytes once
+	// a bundle is spent or expired.
+	exportWorker := export.NewWorker(exportStore, exportOrgs{store: orgStore}, exportService)
+	go exportWorker.Run(ctx)
+	startPruner(ctx, "export_jobs", exportPruneInterval, exportStore.PruneExpired)
 
 	handler := server.New(
 		pool,
