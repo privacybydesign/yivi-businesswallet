@@ -160,3 +160,13 @@ func TestStartPresentationOmitsBothWhenUnset(t *testing.T) {
 		}
 	}
 }
+
+// irmago's wallet GETs the request object and ignores request_uri_method, so a
+// presentation announced as "post" is refused when the wallet fetches it.
+func TestStartPresentationAsksForAGetRequestURI(t *testing.T) {
+	body := startBody(t, "1", "")
+
+	if body["request_uri_method"] != requestURIMethodGet {
+		t.Errorf("request_uri_method = %v, want %q", body["request_uri_method"], requestURIMethodGet)
+	}
+}

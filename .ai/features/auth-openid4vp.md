@@ -63,7 +63,7 @@ New package replacing `internal/irmarequestor`. Two calls, mirroring the demo
   `POST {EUDI_VERIFIER_URL}/ui/presentations` with the envelope:
   ```jsonc
   { "type": "vp_token", "dcql_query": <DCQL>, "nonce": <random>,
-    "jar_mode": "by_reference", "request_uri_method": "post",
+    "jar_mode": "by_reference", "request_uri_method": "get",
     "issuer_chain": <trusted-issuer CA PEM>,
     "intended_use_id": <configured intent> | "registration_certificate": <JWS> }
   ```
@@ -78,6 +78,20 @@ New package replacing `internal/irmarequestor`. Two calls, mirroring the demo
 The `RequestAuthenticator` seam carries over conceptually: today it auths to the IRMA
 daemon; here it auths to the verifier backend if the deployment requires it (the demo's
 EUDI calls are unauthenticated; self-hosted may differ).
+
+### `request_uri_method` must be `get`, because the wallet only GETs
+
+irmago's OpenID4VP client fetches the request object with `common.HTTPClient.Get(requestUri)`
+(`eudi/openid4vp/client.go`) and never reads `request_uri_method`, so it cannot POST and
+sends no `wallet_metadata`. v0.11.0 binds the request to the method the start call
+announced and answers the other one `400` (`RetrieveRequestObjectError.InvalidRequestUriMethod`),
+which the app surfaces as "openid4vp authorization request returned HTTP 400". Announcing
+`get` is therefore the only value that works with this wallet.
+
+The POST path additionally negotiates five things against `wallet_metadata` — vp formats,
+client-id prefix, JAR signing algorithm, response type, response mode — and a wallet that
+omits `client_id_prefixes_supported` or `response_modes_supported` is refused, since the
+spec defaults cover neither `x509_san_dns` nor `direct_post`. GET skips all of it.
 
 ### The registration certificate a start request must carry
 

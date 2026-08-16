@@ -16,7 +16,10 @@ import (
 
 const (
 	presentationsPath = "/ui/presentations"
-	nonceBytes        = 16
+	// The wallet fetches the request object with GET and ignores this field; the
+	// verifier refuses the other method it was told to expect.
+	requestURIMethodGet = "get"
+	nonceBytes          = 16
 	// bodyLimit caps the verifier response we read, guarding against a hostile or
 	// broken upstream.
 	bodyLimit = 1 << 20
@@ -68,7 +71,7 @@ func (c *Client) StartPresentation(ctx context.Context, scope Scope) (Session, e
 		DCQLQuery:               queryFor(scope),
 		Nonce:                   nonce,
 		JARMode:                 "by_reference",
-		RequestURIMethod:        "post",
+		RequestURIMethod:        requestURIMethodGet,
 		IssuerChain:             c.issuerChain,
 		IntendedUseID:           c.intendedUseID,
 		RegistrationCertificate: c.registrationCertificate,
