@@ -106,6 +106,8 @@ const (
 	SigningCompleted        = "signing.completed"
 	SigningDelivered        = "signing.delivered"
 	SigningFailed           = "signing.failed"
+
+	ExportRequested = "organization.export_requested"
 )
 
 const (
@@ -153,6 +155,8 @@ const (
 
 	TargetSigningCredential = "signing_credentials"
 	TargetSigningRequest    = "signing_requests"
+
+	TargetExport = "export"
 )
 
 type Actor struct {

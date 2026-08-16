@@ -45,6 +45,8 @@ tags:
     description: Per-organisation CSC API v2 signing-provider (remote QTSP) connection settings.
   - name: signing
     description: Qualified document signing — the RP-centric signing ceremony against a CSC provider.
+  - name: export
+    description: Data portability — the organisation's export bundle (Art 5(1)(l)).
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -1867,6 +1869,52 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/export:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [export]
+      summary: Download the organisation's data-portability bundle
+      description: >-
+        Requires organisation admin. Returns a ZIP whose first entry is
+        `manifest.json`: a versioned index naming the organisation, what each
+        section carries, and a SHA-256 over every file. The four sections mirror
+        the data points of COM(2025) 838 Art 5(1)(l) — owner identification data,
+        electronic attestations of attributes, QERDS communication logs and
+        evidence, and interaction/audit records. Signed credentials and qualified
+        evidence are copied byte for byte, never re-encoded, so they still verify
+        outside this deployment. Access tokens, claim tokens, SMTP passwords and
+        private key material are excluded. The download is audited.
+      parameters:
+        - name: sections
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >-
+            Comma-separated subset of `ownerIdentification`, `attestations`,
+            `qerds`, `auditRecords`. Omit for the whole bundle. The manifest's
+            `requestedSections` records what was asked for, so a filtered bundle
+            cannot be mistaken for a complete one. An unknown key is rejected.
+      responses:
+        '2XX':
+          description: The bundle.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/invitations/{id}:
     parameters:
       - name: slug
