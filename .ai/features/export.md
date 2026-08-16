@@ -7,9 +7,9 @@ with no registered writer is refused `section_unavailable` rather than shipped e
 which is what an unbuilt section looked like while the series was landing. This file
 is the contract the export series built to: #119 (this doc), #120 (`internal/export`
 service + admin-gated endpoint), #121 (owner identification data), #122 (EAAs, issued +
-held), #123 (QERDS logs + evidence), #124 (interaction / audit records), #127 (async
-job + large bundles) — all landed — then #125 (service-termination trigger) and #126
-(frontend request + download). Parent issue: #30.
+held), #123 (QERDS logs + evidence), #124 (interaction / audit records), #125
+(service-termination trigger), #126 (frontend request + download) and #127 (async job +
+large bundles) — all landed. Parent issue: #30.
 **Regulation:** COM(2025) 838 Art 5(1)(l) (export owner identification data, EAAs,
 communication logs and interaction records in a structured, commonly used,
 machine-readable format, on owner request or on termination of service / revocation of
@@ -288,6 +288,17 @@ single-use, and unknown, spent and expired are one indistinguishable 404 — the
 is unauthenticated, so telling them apart would confirm a token exists. A download
 whose body never reached the client puts the token back rather than spending it on a
 dropped connection.
+
+### 3.3 The screen
+
+Settings → **Data export** (`?tab=export`, org-admin only — a member sees why rather
+than an empty panel). It queues a background job, polls only while one is in flight,
+and offers a download link exactly when the bundle is fetchable. Section checkboxes
+default to none selected, which means the whole bundle: that is what portability asks
+for, and the filter is there for an admin who wants one data point.
+
+The same screen carries the owner's **termination instruction** (§8 q5), because the
+question only makes sense beside the export it governs.
 
 ## 4. Bundle versioning
 

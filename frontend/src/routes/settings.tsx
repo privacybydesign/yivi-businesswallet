@@ -13,6 +13,7 @@ import type { SettingsLocation } from "../lib/settings-tabs";
 import { Card, TopBar } from "../ui";
 import { DepartmentSettings } from "./department-settings";
 import { EmailSettingsPanel } from "./email-settings";
+import { ExportSettingsPanel } from "./export-settings";
 import { EmailTemplatesPanel } from "./email-templates";
 import { IssuerSettingsPanel } from "./issuer-settings";
 import { NotificationsSettingsPanel } from "./notifications-settings";
@@ -147,6 +148,8 @@ export default function Settings(): React.JSX.Element {
           <ProvisioningSettingsPanel slug={slug} />
         ) : tab === "signing" ? (
           <CscSettingsPanel slug={slug} />
+        ) : tab === "export" ? (
+          <ExportSettingsPanel slug={slug} isAdmin={isAdmin} />
         ) : tab === "postguard" ? (
           <div className="flex max-w-2xl flex-col gap-6">
             <PostguardEncryptionKeyCard slug={slug} isAdmin={isAdmin} />
