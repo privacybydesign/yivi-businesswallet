@@ -23,6 +23,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/export"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
@@ -121,7 +122,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	orgService := organization.NewService(userStore, orgStore, authService)
 	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)
 	// nil mailer: invitation e-mail delivery is best-effort and not exercised here.
-	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins)
+	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins, export.NewStore(pool, audit.NewDBRecorder()))
 
 	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
 	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())

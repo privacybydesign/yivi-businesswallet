@@ -580,6 +580,8 @@ export const nl: Translation<typeof en> = {
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
       exportRequested: "Organisatiegegevens geëxporteerd",
+      organizationTerminated: "Dienstverlening voor de organisatie beëindigd",
+      dataInstructionUpdated: "Gegevensinstructie bij beëindiging bijgewerkt",
     },
   },
   memberInvite: {
@@ -1128,6 +1130,7 @@ export const nl: Translation<typeof en> = {
     kinds: {
       credential_offer: "Credential uitgegeven",
       event_notification: "Melding van een gebeurtenis",
+      export_ready: "Gegevensexport gereed",
       invitation: "Uitnodiging voor lidmaatschap",
       postguard_file: "Versleuteld bestand",
       signature_requested: "Ondertekenverzoek",
@@ -1139,6 +1142,8 @@ export const nl: Translation<typeof en> = {
         "Gaat naar een persoon als deze organisatie een credential aan die persoon uitgeeft.",
       event_notification:
         "Gaat naar de beheerders van deze organisatie als er iets gebeurt waarop zij zich hebben geabonneerd.",
+      export_ready:
+        "Gaat naar de beheerders van deze organisatie wanneer de dienstverlening eindigt, met een eenmalige link naar hun gegevensexport.",
       invitation:
         "Gaat naar iemand die is uitgenodigd om lid te worden van deze organisatie.",
       postguard_file:

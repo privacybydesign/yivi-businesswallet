@@ -471,10 +471,24 @@ requested it.
    the KVK registration attestation as SD-JWT VC (`wallet-bootstrap.md`). Whether that
    satisfies Art 8(3)'s Annex II reference, or whether an mdoc profile is required
    alongside it, is a regulatory reading we have not confirmed.
-5. **Termination bundles.** #125 exports on service termination or provider
-   deregistration, when the requesting admin may no longer be able to log in. Delivery
-   for that case (QERDS to the org's digital address, an operator-run job) is #125's
-   to settle; the bundle format is the same.
+5. ~~**Termination bundles.**~~ **Resolved in #125: mailed, one-time link.**
+   `POST /organizations/{id}/terminate` (platform admin — this is the provider acting,
+   not the owner) revokes the organisation and queues the export in the same
+   transaction, so a termination cannot be recorded without the handover it owes. The
+   finished bundle is mailed to the org's admins as an `export_ready` message carrying
+   `/export/download/{token}`, which takes no session precisely because by then nobody
+   there can necessarily sign in. Delivery is best-effort: the bundle stays downloadable
+   until it expires whether or not the mail landed. QERDS delivery to the org's own
+   digital address was not built — the address may be part of what is being wound down.
+
+   **The owner's instruction is captured in advance**, on `organizations.data_instruction`
+   (`transfer` | `delete`), because termination is exactly the moment nobody can be
+   asked. A `delete` instruction is *marked* (`erasure_pending_at`), never carried out
+   by the trigger: erasure is irreversible and destroys the very trail that proves the
+   handover happened, so destruction stays a deliberate operator step. Art 7(6)(f) says
+   "transfer or delete in accordance with the owner's instructions" — this records and
+   honours the instruction up to the point where honouring it means destroying evidence
+   unattended.
 
 ## Harvest
 

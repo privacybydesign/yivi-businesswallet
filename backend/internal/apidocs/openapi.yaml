@@ -1538,6 +1538,46 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/data-instruction:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    put:
+      tags: [organizations]
+      summary: Set what happens to the organisation's data on termination
+      description: >-
+        Requires organisation admin. `transfer` hands the export bundle over;
+        `delete` hands it over and records that erasure is owed. Captured in
+        advance because termination is exactly the moment nobody can be asked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dataInstruction:
+                  type: string
+                  enum: [transfer, delete]
+      responses:
+        '2XX':
+          description: The updated organisation.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/departments:
     parameters:
       - name: slug
@@ -4328,6 +4368,40 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/organizations/{id}/terminate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [organizations]
+      summary: Terminate service for an organisation (platform admin)
+      description: >-
+        Requires the platform administrator role — this is the provider acting,
+        not the owner. Revokes the organisation and queues, in the same
+        transaction, the data-portability export Art 7(6)(f) owes it; the finished
+        bundle is mailed to the organisation's admins with a one-time link. A
+        `delete` data instruction is *marked* as erasure-pending, never carried
+        out here: destruction is irreversible and would destroy the trail proving
+        the handover, so it stays a deliberate operator step.
+      responses:
+        '2XX':
+          description: The terminated organisation.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/qerds/webhook:
     post:
       tags: [qerds]
