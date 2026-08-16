@@ -134,7 +134,7 @@ func (s *SectionBundle) path(name string) string {
 	return s.subdir + "/" + name
 }
 
-func (s *SectionBundle) manifest(requested bool) Section {
+func (s *SectionBundle) manifest() Section {
 	files := s.files
 	if files == nil {
 		files = []FileEntry{}
@@ -148,11 +148,10 @@ func (s *SectionBundle) manifest(requested bool) Section {
 	sort.Slice(omitted, func(i, j int) bool { return omitted[i].Path < omitted[j].Path })
 
 	return Section{
-		Key:       s.key,
-		Requested: requested,
-		Counts:    s.counts,
-		Files:     files,
-		Omitted:   omitted,
+		Key:     s.key,
+		Counts:  s.counts,
+		Files:   files,
+		Omitted: omitted,
 	}
 }
 

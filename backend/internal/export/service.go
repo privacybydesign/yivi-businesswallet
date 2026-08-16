@@ -64,7 +64,7 @@ func (a *Archive) Close() error {
 // all of them. The audit event is written before the archive is returned, so
 // nothing carrying members' personal data is served unrecorded.
 func (s *Service) Export(ctx context.Context, org Organization, sections []string) (*Archive, error) {
-	requested, err := resolveSections(sections)
+	requested, err := s.resolveSections(sections)
 	if err != nil {
 		return nil, err
 	}
@@ -125,31 +125,28 @@ func (s *Service) stage(ctx context.Context, dir string, org Organization, reque
 	}
 
 	manifest := Manifest{
-		SchemaVersion:     SchemaVersion,
-		BundleID:          uuid.New(),
-		GeneratedAt:       timestamp(s.now()),
-		Producer:          Producer{Name: producerName, Version: producerVersion()},
-		Organization:      org,
-		RequestedSections: requested,
+		SchemaVersion: SchemaVersion,
+		BundleID:      uuid.New(),
+		GeneratedAt:   timestamp(s.now()),
+		Producer:      Producer{Name: producerName, Version: producerVersion()},
+		Organization:  org,
+		Sections:      []Section{},
 	}
 
 	var staged []FileEntry
-	for _, key := range SectionOrder {
-		section := bundle.section(key, sectionDirs[key])
-		isRequested := slices.Contains(requested, key)
-		if isRequested {
-			writer, ok := byKey[key]
-			if !ok {
-				return Manifest{}, nil, fmt.Errorf("export: no writer registered for section %q", key)
-			}
-			// A section that cannot be read fails the whole export: a bundle
-			// silently missing a data point is indistinguishable from an
-			// organization that holds none of it.
-			if err := writer.Write(ctx, org.ID, section); err != nil {
-				return Manifest{}, nil, fmt.Errorf("export: writing section %q: %w", key, err)
-			}
+	for _, key := range requested {
+		writer, ok := byKey[key]
+		if !ok {
+			return Manifest{}, nil, fmt.Errorf("export: no writer registered for section %q", key)
 		}
-		entry := section.manifest(isRequested)
+		section := bundle.section(key, sectionDirs[key])
+		// A section that cannot be read fails the whole export: a bundle
+		// silently missing a data point is indistinguishable from an
+		// organization that holds none of it.
+		if err := writer.Write(ctx, org.ID, section); err != nil {
+			return Manifest{}, nil, fmt.Errorf("export: writing section %q: %w", key, err)
+		}
+		entry := section.manifest()
 		manifest.Sections = append(manifest.Sections, entry)
 		staged = append(staged, entry.Files...)
 	}
@@ -223,13 +220,29 @@ func marshalManifest(m Manifest) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// resolveSections validates a requested subset and returns it in canonical
-// order. An unknown key is rejected rather than ignored: an empty section for a
-// typo is indistinguishable from an organization that holds nothing.
-func resolveSections(requested []string) ([]string, error) {
-	if len(requested) == 0 {
-		return slices.Clone(SectionOrder), nil
+// resolveSections validates a requested subset against the registered writers
+// and returns it in canonical order. An empty request means every section this
+// producer can write.
+//
+// Both refusals are explicit rather than an empty section, because a section
+// present with zero counts is a claim that the organization holds none of that
+// data — which a typo or an unbuilt writer has no business making.
+func (s *Service) resolveSections(requested []string) ([]string, error) {
+	registered := make(map[string]bool, len(s.writers))
+	for _, w := range s.writers {
+		registered[w.Key()] = true
 	}
+
+	if len(requested) == 0 {
+		resolved := make([]string, 0, len(registered))
+		for _, key := range SectionOrder {
+			if registered[key] {
+				resolved = append(resolved, key)
+			}
+		}
+		return resolved, nil
+	}
+
 	seen := make(map[string]bool, len(requested))
 	for _, key := range requested {
 		if !slices.Contains(SectionOrder, key) {
@@ -237,6 +250,13 @@ func resolveSections(requested []string) ([]string, error) {
 				Status:  http.StatusBadRequest,
 				Code:    "invalid_section",
 				Message: fmt.Sprintf("unknown export section %q", key),
+			}
+		}
+		if !registered[key] {
+			return nil, &respond.APIError{
+				Status:  http.StatusBadRequest,
+				Code:    "section_unavailable",
+				Message: fmt.Sprintf("export section %q is not available yet", key),
 			}
 		}
 		seen[key] = true

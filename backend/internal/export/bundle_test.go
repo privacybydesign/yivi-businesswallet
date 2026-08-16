@@ -113,7 +113,7 @@ func TestSectionBundleAlwaysWritesIndexes(t *testing.T) {
 func TestSectionManifestNormalisesEmptyLists(t *testing.T) {
 	section, _ := stagedSection(t, unlimitedBudget)
 
-	got := section.manifest(true)
+	got := section.manifest()
 	if got.Files == nil || got.Omitted == nil {
 		t.Errorf("manifest = %+v, want empty slices rather than nulls", got)
 	}

@@ -1888,7 +1888,8 @@ paths:
         electronic attestations of attributes, QERDS communication logs and
         evidence, and interaction/audit records. Signed credentials and qualified
         evidence are copied byte for byte, never re-encoded, so they still verify
-        outside this deployment. Access tokens, claim tokens, SMTP passwords and
+        outside this deployment. A section appears in the manifest only when the
+        export produced it. Access tokens, claim tokens, SMTP passwords and
         private key material are excluded. The download is audited.
       parameters:
         - name: sections
@@ -1898,9 +1899,10 @@ paths:
             type: string
           description: >-
             Comma-separated subset of `ownerIdentification`, `attestations`,
-            `qerds`, `auditRecords`. Omit for the whole bundle. The manifest's
-            `requestedSections` records what was asked for, so a filtered bundle
-            cannot be mistaken for a complete one. An unknown key is rejected.
+            `qerds`, `auditRecords`. Omit for the whole bundle. Only the sections
+            the export produced appear in the manifest, so zero counts always mean
+            the organisation holds none of that data. An unknown key, or one this
+            deployment cannot write yet, is rejected rather than returned empty.
       responses:
         '2XX':
           description: The bundle.

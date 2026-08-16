@@ -44,13 +44,12 @@ const checksumAlgorithm = "sha-256"
 // Manifest is the bundle's index. It does not list itself, so it carries no
 // digest of its own.
 type Manifest struct {
-	SchemaVersion     string       `json:"schemaVersion"`
-	BundleID          uuid.UUID    `json:"bundleId"`
-	GeneratedAt       string       `json:"generatedAt"`
-	Producer          Producer     `json:"producer"`
-	Organization      Organization `json:"organization"`
-	RequestedSections []string     `json:"requestedSections"`
-	Sections          []Section    `json:"sections"`
+	SchemaVersion string       `json:"schemaVersion"`
+	BundleID      uuid.UUID    `json:"bundleId"`
+	GeneratedAt   string       `json:"generatedAt"`
+	Producer      Producer     `json:"producer"`
+	Organization  Organization `json:"organization"`
+	Sections      []Section    `json:"sections"`
 }
 
 // Producer identifies what wrote the bundle. Version is diagnostic only;
@@ -73,15 +72,14 @@ type Organization struct {
 	BootstrappedAt string    `json:"bootstrappedAt"`
 }
 
-// Section is one data point's manifest entry. Requested distinguishes a section
-// nobody asked for from one the organization holds nothing in — both are
-// otherwise all-zero.
+// Section is one data point's manifest entry. A section appears only when the
+// export produced it, so zero counts mean the organization holds none of that
+// data — a section nobody asked for is absent instead.
 type Section struct {
-	Key       string         `json:"key"`
-	Requested bool           `json:"requested"`
-	Counts    map[string]int `json:"counts"`
-	Files     []FileEntry    `json:"files"`
-	Omitted   []Omission     `json:"omitted"`
+	Key     string         `json:"key"`
+	Counts  map[string]int `json:"counts"`
+	Files   []FileEntry    `json:"files"`
+	Omitted []Omission     `json:"omitted"`
 }
 
 // FileEntry describes one file the bundle carries. SizeBytes and Checksum are

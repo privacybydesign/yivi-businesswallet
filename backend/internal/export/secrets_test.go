@@ -24,7 +24,7 @@ var secretLiterals = map[string]string{
 func bundleBytes(t *testing.T, sections []string) []byte {
 	t.Helper()
 
-	svc := NewService(&fakeRecorder{}, DefaultWriters())
+	svc := NewService(&fakeRecorder{}, allWriters())
 	fixedClock(svc)
 	archive, err := svc.Export(context.Background(), testOrg(), sections)
 	if err != nil {

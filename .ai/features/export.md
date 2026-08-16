@@ -1,9 +1,11 @@
 # Feature: Export (data portability bundle, Art 5(1)(l))
 
 **Status:** Contract and plumbing. `internal/export` assembles the ZIP, the manifest
-and the audit event behind `GET /orgs/{slug}/export`; the four section writers are
-still empty, so a bundle carries a conformant manifest and no data yet. This file is
-the contract the export series builds to: #119 (this doc), #120 (`internal/export`
+and the audit event behind `GET /orgs/{slug}/export`. No section writer is registered
+yet, so a bundle today carries a conformant manifest with no sections and any
+`?sections=` is refused `section_unavailable` — the export says what it cannot do
+rather than shipping empty sections that would read as "the org holds none". This file
+is the contract the export series builds to: #119 (this doc), #120 (`internal/export`
 service + admin-gated endpoint, landed), #121 (owner identification data), #122 (EAAs,
 issued + held), #123 (QERDS logs + evidence), #124 (interaction / audit records), #125
 (service-termination trigger), #126 (frontend request + download), #127 (async job +
@@ -21,6 +23,34 @@ Implementing Regulation (EU) 2024/2979). The Annex requires at least an open for
 EN 319 522 (ERDS evidence), ETSI EN 319 162 (ASiC-E containers), ZIP, RFC 3339.
 
 ---
+
+## 0. What is required, and what is ours
+
+Almost everything below is design, not requirement. The law is short, and reading this
+file as if it were regulation is how an unforced choice becomes an invariant nobody
+questions — which already happened once, to §2's presence rule.
+
+**Required.** Art 5(1)(l), in full: export the owner's data, *including* owner
+identification data, EAAs, communication logs and interaction records, "in a
+structured, commonly used and machine-readable format", on owner request or on
+termination of service / revocation of the provider's notification. Annex §10 adds:
+"at least an open format", and the purpose — enabling the owner to migrate to another
+Business Wallet solution at assurance level "substantial" or higher. Art 8(3) points
+owner identification data at Annex II of Reg (EU) 2024/2979. That is the entire
+external constraint.
+
+**Not yet decided anywhere.** Art 5(5) says the Commission will pin reference standards
+and specifications for the core functionalities by implementing act. None exists for
+export. When one lands it may contradict choices here, and that is a MAJOR bump (§4),
+not a defect.
+
+**Ours.** The ZIP container, `manifest.json` and everything in it, the four section
+keys and their directory names, per-file checksums, `schemaVersion`, the presence rule
+(§2), the `?sections=` filter (§3.1), the omission mechanics (§6) and the secrets
+exclusions (§7). These follow from the Annex's migration purpose and from what the data
+actually is, but nothing outside this repo asks for them. Change them when they stop
+serving that purpose; they carry no more authority than the argument written beside
+them.
 
 ## 1. What this is
 
@@ -89,14 +119,16 @@ Section keys, directories and their sources:
 | `qerds` | `qerds/` | `qerds.Store.List`, `GetWithEvidence`, `GetAttachmentContent`, `ListAddresses`, `ListContacts` | #123 |
 | `auditRecords` | `audit-records/` | `audit.Reader.ListForOrganization` (cursor loop; limits clamp to 200) | #124 |
 
-All four keys always appear in the manifest. A section with nothing to export appears
-with zero counts and an empty file list, so a consumer can tell "the org holds none"
-from "this producer did not write that section".
+**A section appears in the manifest only when the export produced it.** Presence means
+"we looked"; zero counts then mean the org holds none of that data. Absence means we
+did not look — the caller narrowed the export (`?sections=`, §3.1), or this producer
+cannot write that section yet. `schemaVersion` is what tells a consumer which keys a
+complete bundle of this version contains, so a missing key is never ambiguous about
+what the org holds.
 
-A caller may ask for a subset (`?sections=`, §3.1). A section left out of that subset
-is also written with zero counts and no files, which would otherwise be
-indistinguishable from an org that holds none — so the manifest states the requested
-set explicitly and every section carries `requested`.
+The two ways to be absent are both refused rather than silently produced: an unknown
+key is a 400, and a known key with no writer registered is a 400 naming it (§3.1). A
+bundle never ships an empty section as a stand-in, because an empty section is a claim.
 
 Two cross-section rules keep the same bytes from being written twice:
 
@@ -129,11 +161,9 @@ when, what is inside each section, and the digest of every file.
     "status": "active",
     "bootstrappedAt": "2026-01-08T11:22:31Z"
   },
-  "requestedSections": ["ownerIdentification", "qerds"],   // §3.1
   "sections": [
     {
       "key": "ownerIdentification",
-      "requested": true,
       "counts": { "departments": 3, "members": 12, "credentials": 1 },
       "files": [
         {
@@ -153,7 +183,6 @@ when, what is inside each section, and the digest of every file.
     },
     {
       "key": "qerds",
-      "requested": true,
       "counts": { "messages": 41, "evidence": 96, "attachments": 12, "addresses": 1, "contacts": 7 },
       "files": [
         {
@@ -186,10 +215,8 @@ Field rules:
 | `producer.name` | string | Fixed `yivi-businesswallet` |
 | `producer.version` | string | Build version. Diagnostic only, never a compatibility signal |
 | `organization` | object | Denormalised `organization.Organization` (minus `logoUri`). Duplicated in `owner-identification/organization.json`; the manifest copy lets a reader identify the bundle without unpacking it |
-| `requestedSections` | array | The section keys this run was asked for, in the fixed section order. A full export lists all four. §3.1 |
-| `sections[]` | array | Fixed order: `ownerIdentification`, `attestations`, `qerds`, `auditRecords`. Always all four |
-| `sections[].requested` | bool | Whether this section was asked for. `false` means the section was not written and its zero counts say nothing about what the org holds |
-| `sections[].counts` | object | Per-collection row counts as exported, after exclusions. Keys are per section and additive. All-zero on an unrequested section |
+| `sections[]` | array | The sections this export produced, in the fixed order `ownerIdentification`, `attestations`, `qerds`, `auditRecords`. A section the export did not produce is absent, not empty (§2) |
+| `sections[].counts` | object | Per-collection row counts as exported, after exclusions. Keys are per section and additive. All-zero means the org holds none |
 | `sections[].files[]` | array | Every file the section wrote. Sorted by `path` |
 | `files[].checksum` | object | `{algorithm, value}`; `sha-256` with a lowercase hex digest over the extracted (uncompressed) bytes |
 | `sections[].omitted[]` | array | Payloads a section record references but the bundle does not carry (§6). `reason` is `size_limit` or `unavailable`; `checksum`/`sizeBytes` come from the stored integrity metadata when known, else omitted |
@@ -211,11 +238,15 @@ the same ZIP with the same manifest, fewer writers run. An unknown key is a 400 
 silently returning an empty bundle for a typo would be indistinguishable from an org
 that holds nothing.
 
-`requestedSections` and the per-section `requested` flag exist because the filter would
-otherwise be invisible in the output, and a receiver reading `"messages": 0` has to be
-able to tell an org with no messages from an export that never looked. The audit event
-records the requested set for the same reason: exporting one section is a different act
-from exporting everything the organisation holds about its members.
+A narrowed export is visible in the output by what is absent, not by a flag: only the
+sections that ran appear (§2), so a receiver reading `"messages": 0` knows the export
+looked and found none. The audit event records the requested set, because exporting one
+section is a different act from exporting everything the organisation holds about its
+members.
+
+A key this deployment cannot write yet is refused the same way an unknown key is —
+`section_unavailable`, naming the section. Section writers are registered as they land,
+so before a section is built it is neither offered nor silently shipped empty.
 
 ## 4. Bundle versioning
 
