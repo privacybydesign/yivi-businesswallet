@@ -25,6 +25,7 @@ export const SETTINGS_TABS = [
   { key: "signing", labelKey: "settings.tabSigning" },
   { key: "postguard", labelKey: "settings.tabPostguard" },
   { key: "wallets", labelKey: "settings.tabWallets" },
+  { key: "export", labelKey: "settings.tabExport" },
 ] as const;
 
 export type CommunicationSection =

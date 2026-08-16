@@ -340,6 +340,8 @@ export const en = {
     home: "Back to home",
   },
   toasts: {
+    exportQueued: "Preparing your export. You can leave this page.",
+    dataInstructionSaved: "Saved what happens to your data.",
     dismiss: "Dismiss",
     error: "Something went wrong. Please try again.",
     invitationSent: "Invitation sent",
@@ -846,6 +848,7 @@ export const en = {
     tabSigning: "Signing",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
+    tabExport: "Data export",
     adminOnly: "Only organization admins can manage settings.",
     orgProfile: "Organization profile",
     discard: "Discard",
@@ -876,6 +879,59 @@ export const en = {
     configureTeams: "Configure Microsoft Teams",
     loadError: "Could not load notification settings: {{message}}",
     saveError: "Could not save notification settings: {{message}}",
+  },
+  exportSettings: {
+    adminOnly:
+      "The export contains every member's personal data, so only organization admins can request it.",
+    requestTitle: "Export your data",
+    requestIntro:
+      "Download everything this wallet holds for your organization, in an open format another provider can read. You have this right under Article 5(1)(l) of the European Business Wallet Regulation.",
+    sectionsLabel: "What to include",
+    sectionsHint:
+      "Leave everything unchecked to export the whole bundle, which is what you want if you are moving to another provider.",
+    sections: {
+      ownerIdentification: "Organization and people",
+      attestations: "Attestations",
+      qerds: "Registered delivery",
+      auditRecords: "Activity log",
+    },
+    sectionHints: {
+      ownerIdentification:
+        "Your organization's registry identity, departments, and everyone who is a member or invited.",
+      attestations:
+        "Attestations you issued, attestations you hold, and the credentials behind them.",
+      qerds:
+        "Messages sent and received, their attachments, and the qualified evidence proving delivery.",
+      auditRecords: "Everything that has happened in this wallet.",
+    },
+    requestAll: "Export everything",
+    requestSelected_one: "Export {{count}} section",
+    requestSelected_other: "Export {{count}} sections",
+    historyTitle: "Recent exports",
+    noExports: "You have not exported anything yet.",
+    download: "Download",
+    originTermination: "Service ended",
+    status: {
+      queued: "Queued",
+      running: "Preparing",
+      ready: "Ready",
+      failed: "Failed",
+    },
+    instructionTitle: "If this service ends",
+    instructionIntro:
+      "Tell us now what should happen to your data if we stop serving your organization. We ask in advance because at that point there may be nobody left to ask.",
+    instructions: {
+      transfer: "Hand my data over",
+      delete: "Hand my data over, then erase it",
+    },
+    instructionHints: {
+      transfer:
+        "We produce your export and send it to your admins. Your data stays until you ask us to remove it.",
+      delete:
+        "We produce your export and send it to your admins, then record that your data is to be erased.",
+    },
+    erasurePending:
+      "Service has ended for this organization and erasure of your data has been recorded as owed.",
   },
   provisioningSettings: {
     heading: "Microsoft Entra ID",
