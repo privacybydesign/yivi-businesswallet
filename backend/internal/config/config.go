@@ -14,12 +14,14 @@ const (
 	envLogFormat   = "LOG_FORMAT"
 	envLogSource   = "LOG_SOURCE"
 
-	envEudiVerifierURL     = "EUDI_VERIFIER_URL"
-	envEudiIssuerChain     = "EUDI_ISSUER_CHAIN"
-	envSessionCookieSecure = "SESSION_COOKIE_SECURE"
-	envSessionTTL          = "SESSION_TTL"
-	envSessionPruneEvery   = "SESSION_PRUNE_INTERVAL"
-	envPresentationTTL     = "PRESENTATION_SESSION_TTL"
+	envEudiVerifierURL             = "EUDI_VERIFIER_URL"
+	envEudiIssuerChain             = "EUDI_ISSUER_CHAIN"
+	envEudiIntendedUseID           = "EUDI_INTENDED_USE_ID"
+	envEudiRegistrationCertificate = "EUDI_REGISTRATION_CERTIFICATE"
+	envSessionCookieSecure         = "SESSION_COOKIE_SECURE"
+	envSessionTTL                  = "SESSION_TTL"
+	envSessionPruneEvery           = "SESSION_PRUNE_INTERVAL"
+	envPresentationTTL             = "PRESENTATION_SESSION_TTL"
 
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
@@ -154,6 +156,7 @@ const (
 	// The hosted EUDI reference Verifier Endpoint (Yivi staging). Overridable so a
 	// deployment can point at its own verifier.
 	defaultEudiVerifierURL     = "https://verifierapi.openid4vc.staging.yivi.app"
+	defaultEudiIntendedUseID   = "1"
 	defaultSessionCookieSecure = "false"
 	defaultSessionTTL          = "24h"
 	defaultSessionPruneEvery   = "1h"
@@ -200,12 +203,14 @@ type Config struct {
 	LogFormat   string
 	LogSource   bool
 
-	EudiVerifierURL     string
-	EudiIssuerChain     string
-	SessionCookieSecure bool
-	SessionTTL          time.Duration
-	SessionPruneEvery   time.Duration
-	PresentationTTL     time.Duration
+	EudiVerifierURL             string
+	EudiIssuerChain             string
+	EudiIntendedUseID           string
+	EudiRegistrationCertificate string
+	SessionCookieSecure         bool
+	SessionTTL                  time.Duration
+	SessionPruneEvery           time.Duration
+	PresentationTTL             time.Duration
 
 	QerdsProvider             string
 	QerdsProviderURL          string
@@ -313,6 +318,15 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: %s must be set when %s is true", envEudiVerifierURL, envSessionCookieSecure)
 	}
 
+	intendedUseID := os.Getenv(envEudiIntendedUseID)
+	registrationCertificate := os.Getenv(envEudiRegistrationCertificate)
+	if intendedUseID != "" && registrationCertificate != "" {
+		return Config{}, fmt.Errorf("config: %s and %s are mutually exclusive", envEudiIntendedUseID, envEudiRegistrationCertificate)
+	}
+	if intendedUseID == "" && registrationCertificate == "" && verifierURL == defaultEudiVerifierURL {
+		intendedUseID = defaultEudiIntendedUseID
+	}
+
 	sessionTTL, err := parseDuration(envSessionTTL, defaultSessionTTL)
 	if err != nil {
 		return Config{}, err
@@ -389,12 +403,14 @@ func Load() (Config, error) {
 		LogFormat:   envOrDefault(envLogFormat, defaultLogFormat),
 		LogSource:   strings.EqualFold(envOrDefault(envLogSource, defaultLogSource), "true"),
 
-		EudiVerifierURL:     verifierURL,
-		EudiIssuerChain:     os.Getenv(envEudiIssuerChain),
-		SessionCookieSecure: cookieSecure,
-		SessionTTL:          sessionTTL,
-		SessionPruneEvery:   sessionPruneEvery,
-		PresentationTTL:     presentationTTL,
+		EudiVerifierURL:             verifierURL,
+		EudiIssuerChain:             os.Getenv(envEudiIssuerChain),
+		EudiIntendedUseID:           intendedUseID,
+		EudiRegistrationCertificate: registrationCertificate,
+		SessionCookieSecure:         cookieSecure,
+		SessionTTL:                  sessionTTL,
+		SessionPruneEvery:           sessionPruneEvery,
+		PresentationTTL:             presentationTTL,
 
 		QerdsProvider:             qerdsProvider,
 		QerdsProviderURL:          qerdsProviderURL,

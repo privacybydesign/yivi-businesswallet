@@ -16,7 +16,10 @@ import (
 
 const (
 	presentationsPath = "/ui/presentations"
-	nonceBytes        = 16
+	// The wallet fetches the request object with GET and ignores this field; the
+	// verifier refuses the other method it was told to expect.
+	requestURIMethodGet = "get"
+	nonceBytes          = 16
 	// bodyLimit caps the verifier response we read, guarding against a hostile or
 	// broken upstream.
 	bodyLimit = 1 << 20
@@ -26,23 +29,33 @@ const (
 // the trusted credential issuer CA (PEM) so the verifier accepts the wallet's
 // credentials; it is configuration, never hardcoded.
 type Client struct {
-	baseURL     string
-	issuerChain string
-	http        *http.Client
+	baseURL                 string
+	issuerChain             string
+	intendedUseID           string
+	registrationCertificate string
+	http                    *http.Client
 }
 
-func New(baseURL, issuerChain string, httpClient *http.Client) *Client {
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), issuerChain: issuerChain, http: httpClient}
+func New(baseURL, issuerChain, intendedUseID, registrationCertificate string, httpClient *http.Client) *Client {
+	return &Client{
+		baseURL:                 strings.TrimRight(baseURL, "/"),
+		issuerChain:             issuerChain,
+		intendedUseID:           intendedUseID,
+		registrationCertificate: registrationCertificate,
+		http:                    httpClient,
+	}
 }
 
 // startRequest is the envelope the EUDI verifier's /ui/presentations expects.
 type startRequest struct {
-	Type             string    `json:"type"`
-	DCQLQuery        dcqlQuery `json:"dcql_query"`
-	Nonce            string    `json:"nonce"`
-	JARMode          string    `json:"jar_mode"`
-	RequestURIMethod string    `json:"request_uri_method"`
-	IssuerChain      string    `json:"issuer_chain,omitempty"`
+	Type                    string    `json:"type"`
+	DCQLQuery               dcqlQuery `json:"dcql_query"`
+	Nonce                   string    `json:"nonce"`
+	JARMode                 string    `json:"jar_mode"`
+	RequestURIMethod        string    `json:"request_uri_method"`
+	IssuerChain             string    `json:"issuer_chain,omitempty"`
+	IntendedUseID           string    `json:"intended_use_id,omitempty"`
+	RegistrationCertificate string    `json:"registration_certificate,omitempty"`
 }
 
 // StartPresentation creates a presentation request at the verifier for the given
@@ -54,12 +67,14 @@ func (c *Client) StartPresentation(ctx context.Context, scope Scope) (Session, e
 		return Session{}, err
 	}
 	body, err := json.Marshal(startRequest{
-		Type:             "vp_token",
-		DCQLQuery:        queryFor(scope),
-		Nonce:            nonce,
-		JARMode:          "by_reference",
-		RequestURIMethod: "post",
-		IssuerChain:      c.issuerChain,
+		Type:                    "vp_token",
+		DCQLQuery:               queryFor(scope),
+		Nonce:                   nonce,
+		JARMode:                 "by_reference",
+		RequestURIMethod:        requestURIMethodGet,
+		IssuerChain:             c.issuerChain,
+		IntendedUseID:           c.intendedUseID,
+		RegistrationCertificate: c.registrationCertificate,
 	})
 	if err != nil {
 		return Session{}, fmt.Errorf("openid4vpverifier: marshal start request: %w", err)

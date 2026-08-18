@@ -18,6 +18,8 @@ services:
       # Empty falls back to the config default (Yivi staging verifier).
       EUDI_VERIFIER_URL: ${EUDI_VERIFIER_URL:-}
       EUDI_ISSUER_CHAIN: ${EUDI_ISSUER_CHAIN:-}
+      EUDI_INTENDED_USE_ID: ${EUDI_INTENDED_USE_ID:-}
+      EUDI_REGISTRATION_CERTIFICATE: ${EUDI_REGISTRATION_CERTIFICATE:-}
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-admin@yivi.app}
       # Claim links in dev point at the local frontend.
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
