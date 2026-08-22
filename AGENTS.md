@@ -33,7 +33,7 @@ It is a product heading for customers, not a demo.
 - **`privacybydesign/openid4vc-poc-ops`** deploys that verifier, and it moves under us: a
   verifier upgrade has failed an untouched `main` before.
 
-## Verify before finishing (what CI runs)
+## Verify before finishing (what CI runs, plus one thing it does not)
 
 Run commands from `backend/` or `frontend/`, never the repo root.
 
@@ -42,7 +42,7 @@ cd frontend && npm run format && npm run lint && npm run typecheck && npm run bu
 cd backend && go tool golangci-lint fmt --diff && go vet ./... && go vet -tags=integration ./... && go build ./... && go tool golangci-lint run ./... && go test -race ./...
 ```
 
-The tagged `go vet` needs no database, and nothing else above compiles the 49
+The tagged `go vet` needs no database, and nothing else above compiles the
 `//go:build integration` files — without it a changed exported signature passes this whole
 sequence and still reddens `backend-integration-test`.
 
