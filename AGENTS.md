@@ -42,6 +42,9 @@ cd frontend && npm run format && npm run lint && npm run typecheck && npm run bu
 cd backend && gofmt -l . && go vet ./... && go build ./... && go tool golangci-lint run ./... && go test -race ./...
 ```
 
+CI also runs `backend-integration-test` (`go test -tags=integration -race ./...` against a real
+Postgres) and `backend-build-wsca`; `.ai/conventions/BACKEND.md` says when to run the former locally.
+
 ## General conventions
 
 No magic values. The formatter is authoritative — never hand-format. No new lint disables
