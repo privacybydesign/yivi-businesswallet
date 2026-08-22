@@ -26,6 +26,7 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 - Routes in `src/routes/`, wired through `src/router.tsx` (react-router).
 - All backend calls go through `src/api/` — never `fetch` directly from components.
 - API base URL: `import.meta.env.VITE_API_BASE_URL ?? ""` (empty = Vite proxy). Don't hardcode hosts.
+- **That proxy only resolves inside Docker.** `vite.config.ts` hardcodes `http://backend:8080` as the target for `/healthz` and `/api`, which is a Compose service name — so a bare `npm run dev` in `frontend/` serves the UI but reaches no backend. Use the dev stack (`npm run dev` from the repo root); the static production build has no proxy at all and needs `VITE_API_BASE_URL` set at build time.
 - File names: kebab-case.
 - Organize by feature as the app grows; co-locate route + its API concerns where it reads cleanly.
 
