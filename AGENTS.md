@@ -39,11 +39,16 @@ Run commands from `backend/` or `frontend/`, never the repo root.
 
 ```bash
 cd frontend && npm run format && npm run lint && npm run typecheck && npm run build && npm test
-cd backend && go tool golangci-lint fmt --diff && go vet ./... && go build ./... && go tool golangci-lint run ./... && go test -race ./...
+cd backend && go tool golangci-lint fmt --diff && go vet ./... && go vet -tags=integration ./... && go build ./... && go tool golangci-lint run ./... && go test -race ./...
 ```
 
-CI also runs `backend-integration-test` (`go test -tags=integration -race ./...` against a real
-Postgres) and `backend-build-wsca`; `.ai/conventions/BACKEND.md` says when to run the former locally.
+The tagged `go vet` needs no database, and nothing else above compiles the 49
+`//go:build integration` files — without it a changed exported signature passes this whole
+sequence and still reddens `backend-integration-test`.
+
+CI also runs that job (`go test -tags=integration -race ./...` against a real Postgres) and
+`backend-build-wsca`; running it locally needs a Postgres, which
+`.ai/conventions/BACKEND.md` sets up.
 
 ## General conventions
 
