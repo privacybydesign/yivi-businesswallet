@@ -55,3 +55,10 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 - Presentational `ui/` components stay translation-free — they take already-translated strings as props; `t()` is called at the route/feature level. (`sidebar.tsx` is the exception: it owns its own nav copy.)
 - **Add a language**: copy `locales/en.ts` → `<lng>.ts` (same shape), register it in `index.ts` `resources`, add a switcher. No language detector is wired yet.
 - Backend error prose (raw `error.message`) is **not** localizable from the frontend — only mapped status codes (403/404) are. True localized errors need backend error codes.
+
+## Testing
+
+- Vitest, `node` environment, no jsdom (`vitest.config.ts`). Tests cover extracted pure logic rather than rendered components, and live beside their source. CI runs them in the `frontend-test` job.
+- **The `include` glob is `src/**/*.test.ts`, so a `.test.tsx` is silently skipped** — it is never collected, so the run reports the same file and test counts as if it did not exist and stays green. Extract the logic under test and name the file `.ts`; do not reach for a `.tsx` test.
+- Vitest transpiles without type-checking, so a type error *inside a test* surfaces only in `npm run typecheck`, never in `npm test`. Both are in the verify sequence for that reason.
+- **Cross-boundary guards** live in `src/lib/` and read files outside `frontend/` to pin a mirror the type system cannot see across: `audit-event.test.ts`, `mail-template.test.ts` and `held-credential.test.ts` parse the constants out of their Go source and assert each has both its `src/api/` enum member and its i18n copy; `agents-md.test.ts` bounds the repo-root `AGENTS.md`. Mirroring a backend enum in the frontend means adding to this pattern, and asserting membership **in both directions** — a length check alone passes on exactly the drift it exists to catch, both lists being short by the same one.
