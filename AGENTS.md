@@ -39,7 +39,7 @@ Run commands from `backend/` or `frontend/`, never the repo root.
 
 ```bash
 cd frontend && npm run format && npm run lint && npm run typecheck && npm run build && npm test
-cd backend && gofmt -l . && go vet ./... && go build ./... && go tool golangci-lint run ./... && go test -race ./...
+cd backend && go tool golangci-lint fmt --diff && go vet ./... && go build ./... && go tool golangci-lint run ./... && go test -race ./...
 ```
 
 CI also runs `backend-integration-test` (`go test -tags=integration -race ./...` against a real
