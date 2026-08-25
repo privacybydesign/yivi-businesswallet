@@ -1,0 +1,9 @@
+# Shell scripts are executed inside Linux containers (e.g. the Domibus
+# provisioners mounted into curlimages/curl). A CRLF checkout on Windows makes
+# them fail with an unreadable "\r: not found", so pin them to LF regardless of
+# core.autocrlf.
+*.sh text eol=lf
+
+# Keystores are binary: never let line-ending normalisation touch them, or the
+# JKS files silently corrupt on a Windows checkout.
+*.jks binary

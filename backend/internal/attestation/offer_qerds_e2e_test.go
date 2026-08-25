@@ -84,6 +84,10 @@ func (m *memQerds) ListAddresses(_ context.Context, _ uuid.UUID) ([]qerds.Addres
 	return []qerds.Address{{ID: uuid.New(), OrganizationID: m.orgID, Address: m.address, IsDefault: true}}, nil
 }
 
+func (m *memQerds) AllAddresses(_ context.Context) ([]qerds.Address, error) {
+	return []qerds.Address{{ID: uuid.New(), OrganizationID: m.orgID, Address: m.address, IsDefault: true}}, nil
+}
+
 func (m *memQerds) OrgByAddress(_ context.Context, address string) (uuid.UUID, error) {
 	if address == m.address {
 		return m.orgID, nil
@@ -162,7 +166,7 @@ func TestCredentialOfferOverQERDSEndToEnd(t *testing.T) {
 
 	holder := eudiholder.NewStubHolder()
 	held := newMemHeld()
-	svcRU.SetInboundConsumer(attestation.NewOfferReceiver(holder, held))
+	svcRU.SetInboundConsumer(attestation.NewOfferReceiver(holder, held, attestation.NewTrustedOfferSenders(nil, nil)))
 
 	body, err := attestation.MarshalCredentialOfferEnvelope("Yivi", "Approved supplier", "openid-credential-offer://?x=1")
 	if err != nil {
@@ -216,7 +220,7 @@ func TestCredentialOfferRetriedOnRedelivery(t *testing.T) {
 	holder := eudiholder.NewStubHolder()
 	held := newMemHeld()
 	redeemer := &flakyRedeemer{inner: holder, failuresLeft: 1}
-	svcRU.SetInboundConsumer(attestation.NewOfferReceiver(redeemer, held))
+	svcRU.SetInboundConsumer(attestation.NewOfferReceiver(redeemer, held, attestation.NewTrustedOfferSenders(nil, nil)))
 
 	body, err := attestation.MarshalCredentialOfferEnvelope("Yivi", "Approved supplier", "openid-credential-offer://?x=1")
 	if err != nil {

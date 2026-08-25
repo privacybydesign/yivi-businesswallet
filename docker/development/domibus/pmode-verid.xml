@@ -1,32 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Domibus PMode for the QERDS AS4 dev/test bench: a single Domibus gateway
-  sending to itself (party blue_gw -> red_gw) over the one-way push MEP. The
-  party/service/action values match the QERDS_DOMIBUS_* config defaults
-  (internal/config), which the DomibusProvider puts on every submitMessage.
+  VER.ID's gateway PMode for the two-gateway QERDS bench (`verid` compose
+  profile). This models the access point ver.id operates, so it is also the
+  reference for what they configure on their own gateway — see
+  partners/verid/README.md.
 
-  The strict <payloadProfile> is deliberately NOT referenced by the leg: the
-  backend sends a text/plain body plus arbitrarily-typed attachments under
-  cid:attachment-N, which a fixed profile would reject. This proves AS4
-  transport plumbing, not qualified compliance.
+  Note the party attribute: this gateway IS verid_gw. Its private signing key is
+  the verid_gw alias in verid_keystore.jks, and its truststore holds our
+  blue_gw/red_gw certificates.
 
-  It also declares ver.id as an INITIATOR-ONLY third party, so this one file is
-  the single PMode our gateway ever runs. That is deliberate: it used to live in
-  a separate pmode-ours-with-verid.xml uploaded by its own provisioner, which
-  meant two files competed for one gateway. `go test -tags=integration ./...`
-  parallelises across packages, so domibus_integration_test.go's provisionDomibus
-  could strip verid_gw while the two-gateway test in internal/qerds was mid-flight
-  — the message was then rejected and that test failed on a 180s timeout with no
-  usable diagnostic. One file, no ordering, no race.
+  SEND-ONLY from ver.id's own side too: verid_gw is the only initiator and
+  blue_gw the only responder, so this gateway can push to us and nothing else.
+  Combined with our PMode (backend/internal/qerdsprovider/testdata/pmode.xml) omitting verid_gw from
+  responderParties, the channel is one-way at BOTH ends.
 
-  Carrying verid_gw here costs the loopback nothing: the party is initiator-only,
-  so its endpoint is never dereferenced, and its certificate is already in
-  gateway_truststore.jks (which CI mounts).
+  Everything under <businessProcesses> that is not party-specific — the service,
+  action, leg, security policy and property set — is byte-identical to our PMode.
+  It has to be: AS4 legs only match when both gateways agree.
 
-  Consumed by: compose `domibus-provision` service and the live-Domibus
-  integration test (domibus_integration_test.go, go:embed).
+  Uploaded by the `domibus-verid-provision` compose service.
 -->
-<db:configuration xmlns:db="http://domibus.eu/configuration" party="blue_gw">
+<db:configuration xmlns:db="http://domibus.eu/configuration" party="verid_gw">
     <mpcs>
         <mpc name="defaultMpc"
              qualifiedName="http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/defaultMPC"
@@ -47,29 +41,21 @@
                 <partyIdType name="partyTypeUrn"
                              value="urn:oasis:names:tc:ebcore:partyid-type:unregistered"/>
             </partyIdTypes>
-            <party name="blue_gw"
-                   endpoint="http://localhost:8080/domibus/services/msh"
-                   allowChunking="false">
-                <identifier partyId="domibus-blue" partyIdType="partyTypeUrn"/>
-            </party>
-            <party name="red_gw"
-                   endpoint="http://localhost:8080/domibus/services/msh"
-                   allowChunking="false">
-                <identifier partyId="domibus-red" partyIdType="partyTypeUrn"/>
-            </party>
-            <!-- ver.id's access point: an external issuing platform that pushes
-                 credential offers to us and never receives. The endpoint is
-                 REQUIRED by the schema but never dereferenced for a send-only
-                 party (the process below gives us no leg toward it), and the host
-                 only resolves when the `verid` compose profile is up.
-
-                 partyIdType is the bench's "unregistered" URN to stay
-                 loopback-compatible; a real counterparty gets a registered scheme
-                 (e.g. ISO 6523 ICD 0106 for KVK). See partners/verid/README.md. -->
+            <!-- This gateway. Its own endpoint is never dereferenced by itself,
+                 and because we never push to ver.id nobody else dereferences it
+                 either — a send-only party needs no reachable MSH. -->
             <party name="verid_gw"
                    endpoint="http://domibus-verid:8080/domibus/services/msh"
                    allowChunking="false">
                 <identifier partyId="verid" partyIdType="partyTypeUrn"/>
+            </party>
+            <!-- The business wallet's gateway: the real destination. Resolved over
+                 the shared `as4` compose network by service name. In a real
+                 deployment this is the wallet operator's public MSH URL. -->
+            <party name="blue_gw"
+                   endpoint="http://domibus:8080/domibus/services/msh"
+                   allowChunking="false">
+                <identifier partyId="domibus-blue" partyIdType="partyTypeUrn"/>
             </party>
         </parties>
         <meps>
@@ -85,9 +71,6 @@
         <properties>
             <property name="originalSenderProperty" key="originalSender" datatype="string" required="true"/>
             <property name="finalRecipientProperty" key="finalRecipient" datatype="string" required="true"/>
-            <!-- Optional message subject. Must be in the property set or Domibus
-                 rejects it: "Property profiling ... does not include a property
-                 named [subject]". Carries the message title to the recipient. -->
             <property name="subjectProperty" key="subject" datatype="string" required="false"/>
             <propertySet name="ecodexPropertySet">
                 <propertyRef property="finalRecipientProperty"/>
@@ -124,6 +107,9 @@
         </actions>
         <as4>
             <receptionAwareness name="receptionAwareness" retry="12;4;CONSTANT" duplicateDetection="true"/>
+            <!-- replyPattern="response" is why a send-only party needs no inbound
+                 endpoint: the AS4 receipt (non-repudiation of receipt) comes back
+                 on the HTTP response to ver.id's own outbound POST. -->
             <reliability name="AS4Reliability" nonRepudiation="true" replyPattern="response"/>
         </as4>
         <legConfigurations>
@@ -145,16 +131,10 @@
                  initiatorRole="defaultInitiatorRole"
                  responderRole="defaultResponderRole">
             <initiatorParties>
-                <initiatorParty name="blue_gw"/>
-                <initiatorParty name="red_gw"/>
-                <!-- ver.id may initiate to us. Adding verid_gw to
-                     responderParties below would silently make the channel
-                     bidirectional; that asymmetry IS the send-only guarantee. -->
                 <initiatorParty name="verid_gw"/>
             </initiatorParties>
             <responderParties>
                 <responderParty name="blue_gw"/>
-                <responderParty name="red_gw"/>
             </responderParties>
             <legs>
                 <leg name="pushTestcase1tc1Action"/>
