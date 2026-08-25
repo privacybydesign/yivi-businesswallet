@@ -5,38 +5,16 @@ import (
 )
 
 // TrustedOfferSenders decides whose inbound QERDS credential offers may be
-// redeemed automatically.
+// redeemed automatically. It is separate from issuer trust because a credential
+// offer is a BEARER TOKEN: an offer minted for org A and replayed with
+// finalRecipient=orgB yields a genuinely-signed, unrevoked credential in org B's
+// wallet, so every content check the holder runs still passes.
 //
-// This is deliberately separate from issuer trust. The holder already validates
-// the credential it fetches: issuer x5c chain, signature, validity, status list,
-// and holder binding (see eudiholder). That
-// answers "is this credential authentic". It cannot answer "was this offer meant
-// for this organization", because a credential offer is a BEARER TOKEN — whoever
-// redeems the pre-authorized code gets the credential.
-//
-// Concretely: a legitimate offer minted for org A, replayed by any party on the
-// AS4 network with finalRecipient=orgB, yields a genuinely-signed,
-// correctly-chained, unrevoked credential bound to org B's key. Every content
-// check passes; it simply landed in the wrong wallet. That is what this policy
-// exists to stop, and only the transport identity can.
-//
-// It therefore gates on TWO identities, because they are trustworthy to very
-// different degrees:
-//
-//   - The AS4 party (ebMS3 From PartyId) that delivered the message. The
-//     receiving gateway only accepts a UserMessage whose party is in its PMode
-//     and whose signature chains to that party's certificate, so this identity
-//     is cryptographically verified before we ever see the message. It is the
-//     only one that can bound WHO may hand us offers.
-//   - The originalSender digital address. The sending side writes this into a
-//     message property, so any party the PMode admits can claim any address.
-//     Gating on it alone is not a boundary: a peered party that is allowed to
-//     send us anything can simply claim an allowlisted address. It refines the
-//     decision within a party; it cannot make it.
-//
-// Both lists are optional and applied with AND, so a deployment can configure
-// the party bound and leave addresses open, or vice versa. Configuring neither
-// trusts every sender.
+// The two identities it gates on are ANDed and trustworthy to different degrees:
+// the AS4 party (ebMS3 From PartyId) is verified by the receiving gateway against
+// its PMode, while the originalSender address is a property the sending side
+// writes and so cannot bound anything by itself. See .ai/features/qerds.md for
+// the full argument and the deployment guidance.
 //
 // Address matching mirrors the QERDS address shape: an exact address, "*@domain"
 // for a whole address domain, or "*" for any sender. Party ids are opaque, so
