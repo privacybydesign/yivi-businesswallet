@@ -76,10 +76,34 @@ type Service struct {
 	addresses addressStore
 	provider  provider
 	consumer  InboundConsumer
+	// drain serialises inbound drains, capacity 1. Both Poll and PollAll
+	// listPendingMessages then retrieveMessage against the same access-point
+	// queue, and retrieveMessage CONSUMES: two drains running at once can both
+	// see the same message id, and the loser's retrieve fails. Set up by
+	// NewService, which is the only way to get a usable Service.
+	drain chan struct{}
 }
 
 func NewService(messages messageStore, addresses addressStore, prov provider) *Service {
-	return &Service{messages: messages, addresses: addresses, provider: prov}
+	return &Service{
+		messages:  messages,
+		addresses: addresses,
+		provider:  prov,
+		drain:     make(chan struct{}, 1),
+	}
+}
+
+// acquireDrain takes the inbound-drain slot and returns the release func. It
+// waits on ctx rather than blocking outright, so a console poll queued behind a
+// long background sweep fails with the request's own deadline instead of leaving
+// a handler goroutine parked past it.
+func (s *Service) acquireDrain(ctx context.Context) (func(), error) {
+	select {
+	case s.drain <- struct{}{}:
+		return func() { <-s.drain }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // SetInboundConsumer registers the (optional) consumer notified on every inbound
@@ -187,14 +211,63 @@ func (s *Service) resolveSender(ctx context.Context, orgID uuid.UUID, from strin
 	return Address{}, ErrSenderNotOwned
 }
 
+// attributeInbound decides which organization a fetched message belongs to.
+//
+// It keys on the message's own finalRecipient when that names an address we
+// know, not on the address we happened to poll: the WS-plugin queue is shared
+// across the access point, so a provider that hands back a message for another
+// recipient must not have it filed under the polling org. Both drains read that
+// same queue, so both need this.
+//
+// EqualFold, not ==: Domibus matches the finalRecipient filter
+// case-insensitively, so a sender that varies the case of an address we own
+// still ends up in that address's pending list. Comparing exactly would send the
+// message down the unknown-recipient path — and retrieveMessage has already
+// consumed it, so that drop is permanent.
+func (s *Service) attributeInbound(ctx context.Context, polled Address, in qerdsprovider.InboundMessage) (uuid.UUID, error) {
+	recipient := string(in.Recipient)
+	if recipient == "" || strings.EqualFold(recipient, polled.Address) {
+		return polled.OrganizationID, nil
+	}
+	orgID, err := s.addresses.OrgByAddress(ctx, recipient)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("qerds: inbound message for unknown recipient %q (polled %q): %w", recipient, polled.Address, err)
+	}
+	return orgID, nil
+}
+
+// intake stores one fetched message and notifies the consumer, reporting whether
+// it was newly stored.
+func (s *Service) intake(ctx context.Context, orgID uuid.UUID, in qerdsprovider.InboundMessage) (bool, error) {
+	msg, created, err := s.messages.CreateInbound(ctx, orgID, in)
+	if err != nil {
+		return false, err
+	}
+	// Notify on every intake, not only newly-stored rows: the consumer is
+	// idempotent and a re-delivered offer whose earlier redeem failed must be
+	// retried. CreateInbound returns the existing row on a dedupe hit, so msg is
+	// populated either way.
+	s.notifyConsumer(ctx, orgID, in, msg)
+	return created, nil
+}
+
 // Poll pulls new inbound messages for all of an organization's addresses and
-// returns how many were newly stored. Intake is idempotent (dedupe on provider
-// ref), so repeated polls are safe.
+// returns how many were newly stored for THAT org. Intake is idempotent (dedupe
+// on provider ref), so repeated polls are safe.
+//
+// It shares the access point's queue with the background sweep, so it takes the
+// drain slot for the same reason PollAll does.
 func (s *Service) Poll(ctx context.Context, orgID uuid.UUID) (int, error) {
 	addresses, err := s.addresses.ListAddresses(ctx, orgID)
 	if err != nil {
 		return 0, err
 	}
+
+	release, err := s.acquireDrain(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
 
 	count := 0
 	for _, addr := range addresses {
@@ -203,18 +276,33 @@ func (s *Service) Poll(ctx context.Context, orgID uuid.UUID) (int, error) {
 			return count, fmt.Errorf("qerds: fetch %q: %w", addr.Address, err)
 		}
 		for _, in := range inbound {
-			msg, created, err := s.messages.CreateInbound(ctx, orgID, in)
+			// The fallback owner is the org that asked, not addr.OrganizationID:
+			// these addresses came from ListAddresses(orgID), so the two agree by
+			// construction, and saying so here keeps Poll's attribution from
+			// depending on which fields the store fills in.
+			polled := Address{Address: addr.Address, OrganizationID: orgID}
+			attributed, err := s.attributeInbound(ctx, polled, in)
+			if err != nil {
+				// Logged, not returned: this org's own messages were still drained
+				// and stored, and a message addressed to nobody is not something
+				// the operator who pressed "check inbox" can act on. Failing the
+				// request would hide the messages that did arrive.
+				slog.ErrorContext(ctx, "qerds poll: unknown recipient, message dropped",
+					slog.String("polledAddress", addr.Address),
+					slog.String("recipient", string(in.Recipient)),
+					slog.String("providerRef", in.ProviderRef))
+				continue
+			}
+			created, err := s.intake(ctx, attributed, in)
 			if err != nil {
 				return count, err
 			}
-			if created {
+			// Count only what landed in the asking org's inbox: a message the queue
+			// handed us for another org is stored under that org, and reporting it
+			// here would tell this operator to look for something they cannot see.
+			if created && attributed == orgID {
 				count++
 			}
-			// Notify on every intake, not only newly-stored rows: the consumer is
-			// idempotent and a re-delivered offer whose earlier redeem failed must
-			// be retried. CreateInbound returns the existing row on a dedupe hit,
-			// so msg is populated either way.
-			s.notifyConsumer(ctx, orgID, in, msg)
 		}
 	}
 	return count, nil
@@ -234,6 +322,12 @@ func (s *Service) PollAll(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
+	release, err := s.acquireDrain(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+
 	count := 0
 	var lastErr error
 	for _, addr := range addresses {
@@ -248,38 +342,21 @@ func (s *Service) PollAll(ctx context.Context) (int, error) {
 			continue
 		}
 		for _, in := range inbound {
-			// Attribute by the message's own finalRecipient when it names an
-			// address we know, not by the address we happened to poll: the WS
-			// plugin queue is shared across the access point, so a provider that
-			// returns a message for another recipient must not have it filed
-			// under this org.
-			//
-			// EqualFold, not ==: Domibus matches the finalRecipient filter
-			// case-insensitively, so a sender that varies the case of an address
-			// we own still ends up in this address's pending list. Comparing
-			// exactly would send that message down the unknown-recipient path
-			// below and drop it — and retrieveMessage has already consumed it,
-			// so the drop is permanent.
-			orgID := addr.OrganizationID
-			if recipient := string(in.Recipient); recipient != "" && !strings.EqualFold(recipient, addr.Address) {
-				resolved, err := s.addresses.OrgByAddress(ctx, recipient)
-				if err != nil {
-					// Report it: the provider has already handed the message over
-					// and will not offer it again, so this is a lost message, not
-					// a skipped one. Filing it under the polled org instead would
-					// be worse — it would put another party's message in this
-					// org's inbox.
-					lastErr = fmt.Errorf("qerds: inbound message for unknown recipient %q (polled %q): %w", recipient, addr.Address, err)
-					slog.ErrorContext(ctx, "qerds background poll: unknown recipient, message dropped",
-						slog.String("polledAddress", addr.Address),
-						slog.String("recipient", recipient),
-						slog.String("providerRef", in.ProviderRef))
-					continue
-				}
-				orgID = resolved
+			orgID, err := s.attributeInbound(ctx, addr, in)
+			if err != nil {
+				// Reported, not just skipped: the provider has already handed the
+				// message over and will not offer it again, so it is lost. Filing
+				// it under the polled org instead would be worse — it would put
+				// another party's message in this org's inbox.
+				lastErr = err
+				slog.ErrorContext(ctx, "qerds background poll: unknown recipient, message dropped",
+					slog.String("polledAddress", addr.Address),
+					slog.String("recipient", string(in.Recipient)),
+					slog.String("providerRef", in.ProviderRef))
+				continue
 			}
 
-			msg, created, err := s.messages.CreateInbound(ctx, orgID, in)
+			created, err := s.intake(ctx, orgID, in)
 			if err != nil {
 				lastErr = err
 				slog.ErrorContext(ctx, "qerds background poll: store failed",
@@ -289,7 +366,6 @@ func (s *Service) PollAll(ctx context.Context) (int, error) {
 			if created {
 				count++
 			}
-			s.notifyConsumer(ctx, orgID, in, msg)
 		}
 	}
 	return count, lastErr

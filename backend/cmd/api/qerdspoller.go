@@ -23,11 +23,17 @@ type inboundPoller interface {
 //
 // Interval 0 disables it, restoring the console-only behaviour.
 //
-// Single-replica assumption, same as the pruner: two replicas both polling would
-// race on the access point's queue. Intake is idempotent (dedupe on provider
-// ref) so the outcome stays correct, but retrieveMessage acknowledges and
-// consumes, so a shared queue plus concurrent pollers wastes work. Multi-replica
-// inbound is an open item in .ai/features/qerds.md.
+// Within one process this sweep and the console's org-scoped Poll cannot overlap:
+// qerds.Service serialises inbound drains. They read the same access-point queue,
+// and retrieveMessage acknowledges and consumes, so two concurrent drains can
+// both see one message id and the loser's retrieve fails — on the console path
+// that surfaced as a 500 on "check inbox".
+//
+// ACROSS processes it is still a single-replica assumption, same as the pruner:
+// two replicas both polling race on that queue with nothing to serialise them.
+// Intake is idempotent (dedupe on provider ref) so the outcome stays correct, but
+// the work is wasted and one of the two retrieves fails. Multi-replica inbound is
+// an open item in .ai/features/qerds.md.
 func startQerdsInboundPoller(ctx context.Context, svc inboundPoller, every time.Duration) {
 	if every <= 0 {
 		slog.InfoContext(ctx, "qerds background inbound poller disabled",

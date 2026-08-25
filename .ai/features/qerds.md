@@ -492,4 +492,6 @@ UI must not imply EU-wide coverage that doesn't exist yet.
 - European Digital Directory (SMP/SML) integration for cross-border address resolution (replaces the
   interim contacts address book as the primary resolver).
 - Multi-replica inbound: webhook idempotency store vs the daemon-style single-replica assumption.
+  `qerds.Service` serialises its own inbound drains, so the console `Poll` and the background
+  `PollAll` cannot both consume one message id within a process; nothing serialises two replicas.
 - Frontend evidence-verification UX (validate qualified timestamps client-side vs server-side).
