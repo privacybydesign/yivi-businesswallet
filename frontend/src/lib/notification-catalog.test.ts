@@ -13,9 +13,10 @@ import { en } from "../i18n/locales/en";
 // notificationGroupSchema) that every settings response is parsed through, so a
 // channel id or group the backend adds and these lists omit fails the whole
 // document and takes the Notifications tab down with it — the same failure mode
-// AGENTS.md documents for MAIL_TEMPLATE_KINDS. This test parses the Go constants
-// and asserts each one is in the frontend list and has its i18n label, so a new
-// backend channel/group can't silently break the screen or render a raw key.
+// `.ai/conventions/FRONTEND.md` documents for MAIL_TEMPLATE_KINDS. This test
+// parses the Go constants and asserts each one is in the frontend list and has
+// its i18n label, so a new backend channel/group can't silently break the screen
+// or render a raw key.
 
 const goPath = fileURLToPath(
   new URL(
