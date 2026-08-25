@@ -21,42 +21,42 @@ func TestTrustedOfferSendersMatching(t *testing.T) {
 	}{
 		// Unset must keep today's behaviour: a deployment that only exchanges
 		// offers between its own orgs is unaffected by this policy existing.
-		{"unset trusts anyone", nil, nil, "verid_gw", "whoever@wherever.test", true},
-		{"unset trusts empty sender", nil, nil, "verid_gw", "", true},
-		{"blank entries are not a config", []string{"", "  "}, nil, "verid_gw", "x@y.test", true},
+		{"unset trusts anyone", nil, nil, "verid-qerds", "whoever@wherever.test", true},
+		{"unset trusts empty sender", nil, nil, "verid-qerds", "", true},
+		{"blank entries are not a config", []string{"", "  "}, nil, "verid-qerds", "x@y.test", true},
 
-		{"exact match", []string{"verid@partners.test"}, nil, "verid_gw", "verid@partners.test", true},
-		{"exact mismatch", []string{"verid@partners.test"}, nil, "verid_gw", "evil@partners.test", false},
-		{"case insensitive", []string{"verid@partners.test"}, nil, "verid_gw", "VerID@Partners.Test", true},
-		{"domain wildcard", []string{"*@partners.test"}, nil, "verid_gw", "anyone@partners.test", true},
-		{"domain wildcard other domain", []string{"*@partners.test"}, nil, "verid_gw", "anyone@evil.test", false},
-		{"allow all", []string{"*"}, nil, "verid_gw", "anyone@evil.test", true},
-		{"multiple patterns", []string{"a@x.test", "*@partners.test"}, nil, "verid_gw", "b@partners.test", true},
+		{"exact match", []string{"verid@partners.test"}, nil, "verid-qerds", "verid@partners.test", true},
+		{"exact mismatch", []string{"verid@partners.test"}, nil, "verid-qerds", "evil@partners.test", false},
+		{"case insensitive", []string{"verid@partners.test"}, nil, "verid-qerds", "VerID@Partners.Test", true},
+		{"domain wildcard", []string{"*@partners.test"}, nil, "verid-qerds", "anyone@partners.test", true},
+		{"domain wildcard other domain", []string{"*@partners.test"}, nil, "verid-qerds", "anyone@evil.test", false},
+		{"allow all", []string{"*"}, nil, "verid-qerds", "anyone@evil.test", true},
+		{"multiple patterns", []string{"a@x.test", "*@partners.test"}, nil, "verid-qerds", "b@partners.test", true},
 
 		// A configured allowlist must not be satisfiable by an unattributable
 		// message: with no originalSender there is nothing to match.
-		{"configured rejects empty sender", []string{"*@partners.test"}, nil, "verid_gw", "", false},
+		{"configured rejects empty sender", []string{"*@partners.test"}, nil, "verid-qerds", "", false},
 		// The domain pattern compares the domain part, not a bare suffix — else a
 		// crafted local part defeats the allowlist.
-		{"domain in local part", []string{"*@partners.test"}, nil, "verid_gw", "a@partners.test@evil.test", false},
+		{"domain in local part", []string{"*@partners.test"}, nil, "verid-qerds", "a@partners.test@evil.test", false},
 
 		// The party half. This is the one a remote sender cannot claim its way
 		// past: originalSender is a property the sender writes, so an allowlisted
 		// address proves nothing on its own.
-		{"party allowlist admits its party", nil, []string{"verid_gw"}, "verid_gw", "verid@partners.test", true},
-		{"party allowlist rejects another party", nil, []string{"verid_gw"}, "evil_gw", "verid@partners.test", false},
-		{"party match is case insensitive", nil, []string{"verid_gw"}, "VERID_GW", "x@y.test", true},
+		{"party allowlist admits its party", nil, []string{"verid-qerds"}, "verid-qerds", "verid@partners.test", true},
+		{"party allowlist rejects another party", nil, []string{"verid-qerds"}, "evil-party", "verid@partners.test", false},
+		{"party match is case insensitive", nil, []string{"verid-qerds"}, "VERID-QERDS", "x@y.test", true},
 		{"party wildcard", nil, []string{"*"}, "whoever_gw", "x@y.test", true},
 		// No transport identity at all: a configured party allowlist must not fall
 		// back to the sender-written property.
-		{"configured party rejects empty party", nil, []string{"verid_gw"}, "", "verid@partners.test", false},
+		{"configured party rejects empty party", nil, []string{"verid-qerds"}, "", "verid@partners.test", false},
 		{"unset party tolerates empty party", nil, nil, "", "verid@partners.test", true},
 
 		// ANDed: a spoofed originalSender does not survive the party check, and an
 		// admitted party does not bypass the address check.
-		{"spoofed sender from wrong party", []string{"verid@partners.test"}, []string{"verid_gw"}, "evil_gw", "verid@partners.test", false},
-		{"right party, unlisted sender", []string{"verid@partners.test"}, []string{"verid_gw"}, "verid_gw", "someone@partners.test", false},
-		{"right party, listed sender", []string{"verid@partners.test"}, []string{"verid_gw"}, "verid_gw", "verid@partners.test", true},
+		{"spoofed sender from wrong party", []string{"verid@partners.test"}, []string{"verid-qerds"}, "evil-party", "verid@partners.test", false},
+		{"right party, unlisted sender", []string{"verid@partners.test"}, []string{"verid-qerds"}, "verid-qerds", "someone@partners.test", false},
+		{"right party, listed sender", []string{"verid@partners.test"}, []string{"verid-qerds"}, "verid-qerds", "verid@partners.test", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := attestation.NewTrustedOfferSenders(tc.patterns, tc.parties)
@@ -86,12 +86,12 @@ func TestTrustedOfferSendersConfigured(t *testing.T) {
 	if attestation.NewTrustedOfferSenders(nil, []string{"  "}).PartiesConfigured() {
 		t.Error("blank-only parties must report not configured")
 	}
-	p := attestation.NewTrustedOfferSenders(nil, []string{"Verid_GW"})
+	p := attestation.NewTrustedOfferSenders(nil, []string{"Verid-QERDS"})
 	if !p.PartiesConfigured() {
 		t.Error("a configured party list must report configured")
 	}
-	if got := p.Parties(); len(got) != 1 || got[0] != "verid_gw" {
-		t.Errorf("Parties() = %v, want the normalized [verid_gw] for the boot log", got)
+	if got := p.Parties(); len(got) != 1 || got[0] != "verid-qerds" {
+		t.Errorf("Parties() = %v, want the normalized [verid-qerds] for the boot log", got)
 	}
 }
 
@@ -108,7 +108,7 @@ func TestOfferReceiverRejectsUntrustedSender(t *testing.T) {
 	// Not an error: the message stays in the inbox for an operator. Only the
 	// automatic redemption is withheld.
 	err := rec.OnInboundMessage(context.Background(),
-		inbound(uuid.New(), uuid.New(), "verid_gw", "attacker@evil.test", offerBody(t)))
+		inbound(uuid.New(), uuid.New(), "verid-qerds", "attacker@evil.test", offerBody(t)))
 	if err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
@@ -129,10 +129,10 @@ func TestOfferReceiverRejectsSpoofedSenderFromUntrustedParty(t *testing.T) {
 	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "r", VCT: "v", Issuer: "i"}}
 	store := &fakeHeldStore{}
 	rec := attestation.NewOfferReceiver(redeemer, store,
-		attestation.NewTrustedOfferSenders([]string{"verid@partners.test"}, []string{"verid_gw"}))
+		attestation.NewTrustedOfferSenders([]string{"verid@partners.test"}, []string{"verid-qerds"}))
 
 	err := rec.OnInboundMessage(context.Background(),
-		inbound(uuid.New(), uuid.New(), "evil_gw", "verid@partners.test", offerBody(t)))
+		inbound(uuid.New(), uuid.New(), "evil-party", "verid@partners.test", offerBody(t)))
 	if err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestOfferReceiverRejectsMissingPartyWhenPartiesConfigured(t *testing.T) {
 	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "r", VCT: "v", Issuer: "i"}}
 	store := &fakeHeldStore{}
 	rec := attestation.NewOfferReceiver(redeemer, store,
-		attestation.NewTrustedOfferSenders(nil, []string{"verid_gw"}))
+		attestation.NewTrustedOfferSenders(nil, []string{"verid-qerds"}))
 
 	if err := rec.OnInboundMessage(context.Background(),
 		inbound(uuid.New(), uuid.New(), "", "verid@partners.test", offerBody(t))); err != nil {
@@ -166,10 +166,10 @@ func TestOfferReceiverRedeemsTrustedSender(t *testing.T) {
 	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "r", VCT: "v", Issuer: "i"}}
 	store := &fakeHeldStore{}
 	rec := attestation.NewOfferReceiver(redeemer, store,
-		attestation.NewTrustedOfferSenders([]string{"*@partners.test"}, []string{"verid_gw"}))
+		attestation.NewTrustedOfferSenders([]string{"*@partners.test"}, []string{"verid-qerds"}))
 
 	if err := rec.OnInboundMessage(context.Background(),
-		inbound(uuid.New(), uuid.New(), "verid_gw", "verid@partners.test", offerBody(t))); err != nil {
+		inbound(uuid.New(), uuid.New(), "verid-qerds", "verid@partners.test", offerBody(t))); err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
 	if redeemer.calls != 1 {

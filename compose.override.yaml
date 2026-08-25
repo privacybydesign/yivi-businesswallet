@@ -60,7 +60,7 @@ services:
       # The `verid` profile's walkthrough sets both; see partners/verid/README.md.
       QERDS_TRUSTED_OFFER_SENDERS: ${QERDS_TRUSTED_OFFER_SENDERS:-}
       # Which AS4 parties may deliver a redeemable offer: the ebMS3 From PartyId
-      # (e.g. "verid"; comma-separated, "*" for any). This is the identity the
+      # (e.g. "verid-qerds"; comma-separated, "*" for any). This is the identity the
       # gateway verified against its PMode and the party's signing certificate,
       # so unlike QERDS_TRUSTED_OFFER_SENDERS — which matches the sender-written
       # originalSender property — it is the allowlist a remote party cannot claim

@@ -47,7 +47,7 @@
             <party name="verid_gw"
                    endpoint="http://domibus-verid:8080/domibus/services/msh"
                    allowChunking="false">
-                <identifier partyId="verid" partyIdType="partyTypeUrn"/>
+                <identifier partyId="verid-qerds" partyIdType="partyTypeUrn"/>
             </party>
             <!-- The business wallet's gateway: the real destination. Resolved over
                  the shared `as4` compose network by service name. In a real
