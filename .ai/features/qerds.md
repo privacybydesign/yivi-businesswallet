@@ -342,7 +342,7 @@ domibus-verid-mysql                        domibus-mysql
 docker compose --profile domibus --profile verid up -d
 ```
 
-Both profiles are required: `verid` adds ver.id's side and re-points our PMode; it
+Both profiles are required: `verid` adds ver.id's side only; it
 does not bring up our gateway. ver.id's console is on
 `http://localhost:8091/domibus` (`admin` / `123456`).
 
