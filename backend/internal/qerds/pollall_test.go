@@ -101,11 +101,11 @@ func TestPollAllSweepsEveryOrgAndThreadsSender(t *testing.T) {
 	)
 	prov := &scriptedProvider{inbound: map[string][]qerdsprovider.InboundMessage{
 		"acme@qerds.localhost": {{
-			ProviderRef: "ref-acme", FromParty: "verid_gw", Sender: "verid@partners.test",
+			ProviderRef: "ref-acme", FromParty: "verid-qerds", Sender: "verid@partners.test",
 			Recipient: "acme@qerds.localhost", Body: "offer for acme",
 		}},
 		"globex@qerds.localhost": {{
-			ProviderRef: "ref-globex", FromParty: "verid_gw", Sender: "verid@partners.test",
+			ProviderRef: "ref-globex", FromParty: "verid-qerds", Sender: "verid@partners.test",
 			Recipient: "globex@qerds.localhost", Body: "offer for globex",
 		}},
 	}}
@@ -135,7 +135,7 @@ func TestPollAllSweepsEveryOrgAndThreadsSender(t *testing.T) {
 		if c.Sender != "verid@partners.test" {
 			t.Errorf("consumer sender = %q, want the originalSender", c.Sender)
 		}
-		if c.FromParty != "verid_gw" {
+		if c.FromParty != "verid-qerds" {
 			t.Errorf("consumer fromParty = %q, want the verified ebMS3 From party", c.FromParty)
 		}
 	}
@@ -293,7 +293,7 @@ func TestPollAttributesByFinalRecipient(t *testing.T) {
 	)
 	prov := &scriptedProvider{inbound: map[string][]qerdsprovider.InboundMessage{
 		"acme@qerds.localhost": {{
-			ProviderRef: "ref-strayed", FromParty: "verid_gw", Sender: "verid@partners.test",
+			ProviderRef: "ref-strayed", FromParty: "verid-qerds", Sender: "verid@partners.test",
 			Recipient: "globex@qerds.localhost", Body: "offer for globex",
 		}},
 	}}
@@ -327,11 +327,11 @@ func TestPollSkipsUnknownRecipientWithoutFailing(t *testing.T) {
 	prov := &scriptedProvider{inbound: map[string][]qerdsprovider.InboundMessage{
 		"acme@qerds.localhost": {
 			{
-				ProviderRef: "ref-unknown", FromParty: "verid_gw", Sender: "verid@partners.test",
+				ProviderRef: "ref-unknown", FromParty: "verid-qerds", Sender: "verid@partners.test",
 				Recipient: "nobody@qerds.localhost", Body: "offer for nobody",
 			},
 			{
-				ProviderRef: "ref-ours", FromParty: "verid_gw", Sender: "verid@partners.test",
+				ProviderRef: "ref-ours", FromParty: "verid-qerds", Sender: "verid@partners.test",
 				Recipient: "acme@qerds.localhost", Body: "offer for acme",
 			},
 		},

@@ -52,7 +52,7 @@ func run() error {
 	authToken := fs.String("auth-token", "", "bearer token for the WS plugin, if it requires one")
 
 	// ebMS3 addressing. Defaults match docker/development/domibus/pmode-verid.xml.
-	fromParty := fs.String("from-party", "verid", "ebMS3 From party id (the sender's own party)")
+	fromParty := fs.String("from-party", "verid-qerds", "ebMS3 From party id (the sender's own party)")
 	toParty := fs.String("to-party", "domibus-blue", "ebMS3 To party id (the wallet's gateway)")
 	partyType := fs.String("party-type", "urn:oasis:names:tc:ebcore:partyid-type:unregistered",
 		"ebMS3 party id type; a real deployment uses a registered scheme (e.g. ISO 6523)")
@@ -62,7 +62,7 @@ func run() error {
 
 	// Business addressing: these are the QERDS digital addresses, not parties.
 	// The recipient is how the wallet resolves WHICH organization gets the offer.
-	sender := fs.String("sender", "verid@partners.qerds.localhost",
+	sender := fs.String("sender", "verid@ver.id",
 		"originalSender: the partner's QERDS digital address")
 	recipient := fs.String("recipient", "",
 		"finalRecipient: the receiving organization's QERDS digital address (required)")

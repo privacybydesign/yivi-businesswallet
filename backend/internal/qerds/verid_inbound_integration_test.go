@@ -49,11 +49,11 @@ const (
 	envVeridDomibusURL = "QERDS_TEST_VERID_DOMIBUS_URL"
 
 	// ebMS3 addressing from docker/development/domibus/pmode-verid.xml.
-	veridPartyID  = "verid"
+	veridPartyID  = "verid-qerds"
 	ourPartyID    = "domibus-blue"
 	benchPartyURN = "urn:oasis:names:tc:ebcore:partyid-type:unregistered"
 
-	veridSenderAddress = "verid@partners.qerds.localhost"
+	veridSenderAddress = "verid@ver.id"
 )
 
 func veridBenchURLs(t *testing.T) (ours, verid string) {
@@ -134,7 +134,7 @@ func TestVeridInboundOfferIsPolledAndRedeemed(t *testing.T) {
 	consumer := &countingConsumer{inner: holder}
 	svc.SetInboundConsumer(consumer)
 
-	// ver.id's side: submit through THEIR gateway, From=verid.
+	// ver.id's side: submit through THEIR gateway, From=verid-qerds.
 	offer := "openid-credential-offer://?credential_offer=%7B%22credential_issuer%22%3A%22https%3A%2F%2Fissuer.ver.id%22%7D"
 	body, err := attestation.MarshalCredentialOfferEnvelope("Ver.ID", "Bewijs van inschrijving", offer)
 	if err != nil {

@@ -82,13 +82,26 @@ eDelivery network recognizes — not self-signed.
 Send the wallet operator:
 
 - `verid_gw.cer` — your AS4 signing certificate
-- your **party id** and its **id type**. Use a registered scheme, e.g. ISO 6523
-  ICD `0106` (Dutch KVK): `0106:<your KVK number>`. The bench uses the
-  `unregistered` URN, which is fine for a loopback and meaningless to anyone else
+- your **party id** and its **id type**. It has to be unique in the operator's
+  PMode, so it may come back **assigned rather than accepted** — and note that a
+  stock Domibus defaults to partyId `domibus-blue`, which is the wallet gateway's
+  own. You do not need to rename your party or your keystore alias to change it:
+  the party id is the `<identifier partyId="…">` on your own party entry,
+  independent of the party name and of `domibus.security.key.private.alias`.
+  Production eventually uses a registered scheme, e.g. ISO 6523 ICD `0106`
+  (Dutch KVK): `0106:<your KVK number>`; the `unregistered` URN is what is in use
+  today
 - your **QERDS digital address** (`originalSender`), e.g. `verid@<your domain>`.
   Note that both this and the party id above are allowlisted on the wallet side
   before an offer is auto-redeemed — see
   [Two separate trust decisions](#two-separate-trust-decisions)
+
+**Agreed with ver.iD:** party id `verid-qerds`, `originalSender` `verid@ver.id`,
+gateway certificate `verid-gateway-blue_gw.crt`. The bench below uses the same two
+values, deliberately, so what it exercises is what a real deployment expects. The
+wallet side registers the party under the *name* `verid_gw` and files the
+certificate under that alias — an internal detail of its PMode, but it is why the
+certificate's `CN=blue_gw` subject collides with nothing.
 - your issuer's **trust anchor / certificate chain** for the credentials you will
   issue (see [Two separate trust decisions](#two-separate-trust-decisions))
 
@@ -126,7 +139,7 @@ Submit through your own access point with:
 
 | Field | Value (bench) | Notes |
 |---|---|---|
-| `From` PartyId | `verid` | your party; a real deployment uses `0106:<KVK>` |
+| `From` PartyId | `verid-qerds` | your party. Not a registered scheme yet; a production deployment uses `0106:<KVK>` |
 | `To` PartyId | `domibus-blue` | the wallet gateway's party |
 | PartyId type | `urn:oasis:names:tc:ebcore:partyid-type:unregistered` | replace with the registered scheme |
 | `Service` | `bdx:noprocess` (type `tc1`) | must match the wallet's PMode |
@@ -141,7 +154,7 @@ message is either rejected as unknown or delivered to the wrong wallet.
 
 | Property | Required | Value |
 |---|---|---|
-| `originalSender` | yes | your QERDS digital address, e.g. `verid@partners.example` |
+| `originalSender` | yes | your QERDS digital address: `verid@ver.id` |
 | `finalRecipient` | yes | the receiving organization's QERDS digital address |
 | `subject` | no | inbox subject line |
 
@@ -287,8 +300,8 @@ you run compose in) — otherwise the backend trusts every party and every sende
 warns about it at boot, and you are not exercising the gate at all:
 
 ```sh
-QERDS_TRUSTED_OFFER_PARTIES=verid                          # the ebMS3 From PartyId
-QERDS_TRUSTED_OFFER_SENDERS=verid@partners.qerds.localhost  # the originalSender address
+QERDS_TRUSTED_OFFER_PARTIES=verid-qerds   # the ebMS3 From PartyId
+QERDS_TRUSTED_OFFER_SENDERS=verid@ver.id  # the originalSender address
 ```
 
 - your simulated gateway's admin console: <http://localhost:8091/domibus> (`admin` / `123456`)

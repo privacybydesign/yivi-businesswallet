@@ -242,7 +242,7 @@ type Config struct {
 	// SENDING side populates. It refines the decision; it cannot bound it.
 	QerdsTrustedOfferSenders []string
 	// QerdsTrustedOfferParties allowlists the AS4 parties (ebMS3 From PartyId,
-	// e.g. "verid") that may deliver a redeemable credential offer, or "*" for
+	// e.g. "verid-qerds") that may deliver a redeemable credential offer, or "*" for
 	// any. Unlike QerdsTrustedOfferSenders this is the identity the receiving
 	// gateway verified against its PMode and the party's signing certificate, so
 	// it is the allowlist a remote sender cannot claim its way past. Empty trusts

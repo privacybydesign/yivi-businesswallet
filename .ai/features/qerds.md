@@ -395,9 +395,9 @@ tells you where to look:
 | Check | Where |
 |---|---|
 | ver.id's gateway accepted the submission | `as4offer` prints a message id |
-| The AS4 leg completed | ver.id's console: message `SENT`/`ACKNOWLEDGED`; ours: `RECEIVED` from party `verid` |
+| The AS4 leg completed | ver.id's console: message `SENT`/`ACKNOWLEDGED`; ours: `RECEIVED` from party `verid-qerds` |
 | The WS plugin routed a foreign sender | ours: `listPendingMessages(finalRecipient=<org address>)` returns it (the message filter must be persisted) |
-| The right org was resolved | `qerds_messages` row, `direction=inbound`, expected `organization_id`, `sender_address=verid@...` |
+| The right org was resolved | `qerds_messages` row, `direction=inbound`, expected `organization_id`, `sender_address=verid@ver.id` |
 | The trust gate let it through | backend log: redeemed, not "offer from untrusted sender not redeemed" |
 | The credential landed | `held_attestations` row, `source=qerds`, `sourceMessageId` set |
 | No operator was needed | all of the above with no browser session open (the background poller) |
@@ -410,7 +410,7 @@ identities on an inbound message are not equally trustworthy:
 
 | Env | Matched against | Who controls it |
 |---|---|---|
-| `QERDS_TRUSTED_OFFER_PARTIES` | ebMS3 `From` PartyId (e.g. `verid`) | the receiving gateway: it only accepts a message whose party is in its PMode and whose signature chains to that party's certificate |
+| `QERDS_TRUSTED_OFFER_PARTIES` | ebMS3 `From` PartyId (e.g. `verid-qerds`) | the receiving gateway: it only accepts a message whose party is in its PMode and whose signature chains to that party's certificate |
 | `QERDS_TRUSTED_OFFER_SENDERS` | the `originalSender` property (`addr@domain`, `*@domain`, `*`) | the **sending** side — any party the PMode admits can claim any address |
 
 So `QERDS_TRUSTED_OFFER_PARTIES` is the one that bounds who may hand us redeemable
