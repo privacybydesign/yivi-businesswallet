@@ -70,8 +70,8 @@ type InboundMessage struct {
 	// i.e. the QERDS digital address. The SENDING side populates it, so a party
 	// admitted by the PMode can put any value here. Never make a trust decision
 	// on it alone — see attestation.TrustedOfferSenders.
-	Sender    Address
-	Recipient Address
+	Sender      Address
+	Recipient   Address
 	Subject     string
 	Body        string
 	Attachments []Attachment
