@@ -57,8 +57,15 @@ services:
       # ("addr@domain", "*@domain" or "*"; comma-separated). EMPTY TRUSTS EVERY
       # SENDER — fine while every sender is an org on this deployment, but it
       # must be set before peering with an external AS4 party such as ver.id.
-      # The `verid` profile's walkthrough sets it; see partners/verid/README.md.
+      # The `verid` profile's walkthrough sets both; see partners/verid/README.md.
       QERDS_TRUSTED_OFFER_SENDERS: ${QERDS_TRUSTED_OFFER_SENDERS:-}
+      # Which AS4 parties may deliver a redeemable offer: the ebMS3 From PartyId
+      # (e.g. "verid"; comma-separated, "*" for any). This is the identity the
+      # gateway verified against its PMode and the party's signing certificate,
+      # so unlike QERDS_TRUSTED_OFFER_SENDERS — which matches the sender-written
+      # originalSender property — it is the allowlist a remote party cannot claim
+      # its way past. EMPTY TRUSTS EVERY PARTY THE PMODE ADMITS.
+      QERDS_TRUSTED_OFFER_PARTIES: ${QERDS_TRUSTED_OFFER_PARTIES:-}
       # How often the backend drains inbound QERDS messages for every provisioned
       # address. Without this, inbound only arrives when an org console polls —
       # i.e. when a human has a tab open — and a pushed offer's pre-authorized

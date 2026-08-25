@@ -193,7 +193,10 @@ If the provider call fails after the DB commit, the message sits in a retryable 
 
 - **Webhook push (preferred):** provider POSTs to `webhook.go`, authenticated out-of-band
   (HMAC/mTLS). Records the inbound message + delivery evidence (that evidence itself has legal
-  effect — it proves *we* received it). Idempotent on `provider_ref`.
+  effect — it proves *we* received it). Idempotent on `provider_ref`. A provider that pushes
+  credential offers should send `fromParty` (the ebMS3 `From` PartyId it authenticated); without
+  it a configured `QERDS_TRUSTED_OFFER_PARTIES` cannot be satisfied, so pushed offers are stored
+  but not auto-redeemed.
 - **Polling fallback:** a background worker pulls new messages by address (a `cmd/` binary or a
   ticker, consistent with the migrate/seed-as-separate-service pattern). Simpler, no inbound
   network exposure, higher latency.
@@ -238,6 +241,9 @@ Env-driven like everything else (`internal/config`):
 | `QERDS_AUTH_TOKEN` | bearer / creds material | when the driver needs it |
 | `QERDS_WEBHOOK_SECRET` | HMAC secret for inbound webhook auth | when webhook enabled |
 | `QERDS_DEFAULT_ADDRESS_DOMAIN` | domain for minted digital addresses | no (has default) |
+| `QERDS_TRUSTED_OFFER_PARTIES` | AS4 parties whose credential offers are auto-redeemed | when peering with an external AS4 party |
+| `QERDS_TRUSTED_OFFER_SENDERS` | sender addresses whose credential offers are auto-redeemed | when peering with an external AS4 party |
+| `QERDS_INBOUND_POLL_INTERVAL` | background inbound sweep interval (`0` disables) | no (default `30s`) |
 
 Boot `Ping` is **fatal** (matches the Yivi readiness gate). `/readyz` stays DB-only.
 
@@ -392,25 +398,43 @@ tells you where to look:
 | The AS4 leg completed | ver.id's console: message `SENT`/`ACKNOWLEDGED`; ours: `RECEIVED` from party `verid` |
 | The WS plugin routed a foreign sender | ours: `listPendingMessages(finalRecipient=<org address>)` returns it (the message filter must be persisted) |
 | The right org was resolved | `qerds_messages` row, `direction=inbound`, expected `organization_id`, `sender_address=verid@...` |
-| The sender allowlist let it through | backend log: redeemed, not "offer from untrusted sender not redeemed" |
+| The trust gate let it through | backend log: redeemed, not "offer from untrusted sender not redeemed" |
 | The credential landed | `held_attestations` row, `source=qerds`, `sourceMessageId` set |
 | No operator was needed | all of the above with no browser session open (the background poller) |
 
-Two backend behaviours exist specifically for this path. `QERDS_TRUSTED_OFFER_SENDERS`
-gates which senders' offers are auto-redeemed — **empty trusts everyone**, which is
-safe only while every sender is an org on this deployment, so the backend warns at
-boot when it is unset. And `QERDS_INBOUND_POLL_INTERVAL` (default `30s`) drains
-inbound for every provisioned address on a ticker; without it inbound only arrives
-when an org console polls, i.e. when a human has a tab open, and a pushed offer's
+Two backend behaviours exist specifically for this path.
+
+The first is the offer trust gate, which decides whose offers are **auto-redeemed**
+rather than merely stored. It is two allowlists, ANDed, because the two sender
+identities on an inbound message are not equally trustworthy:
+
+| Env | Matched against | Who controls it |
+|---|---|---|
+| `QERDS_TRUSTED_OFFER_PARTIES` | ebMS3 `From` PartyId (e.g. `verid`) | the receiving gateway: it only accepts a message whose party is in its PMode and whose signature chains to that party's certificate |
+| `QERDS_TRUSTED_OFFER_SENDERS` | the `originalSender` property (`addr@domain`, `*@domain`, `*`) | the **sending** side — any party the PMode admits can claim any address |
+
+So `QERDS_TRUSTED_OFFER_PARTIES` is the one that bounds who may hand us redeemable
+offers; `QERDS_TRUSTED_OFFER_SENDERS` refines the decision within a party but
+cannot make it. Each is **empty-trusts-everyone**, safe only while every sender is
+an org on this deployment, and the backend warns at boot for each one that is
+unset. A deployment peering with an external AS4 party must set both.
+
+The second is `QERDS_INBOUND_POLL_INTERVAL` (default `30s`), which drains inbound
+for every provisioned address on a ticker; without it inbound only arrives when an
+org console polls, i.e. when a human has a tab open, and a pushed offer's
 pre-authorized code can expire first.
 
 The wallet-side half is covered by
 `internal/qerds/verid_inbound_integration_test.go` (`//go:build integration`,
 skipped unless **both** `QERDS_TEST_DOMIBUS_URL` and
 `QERDS_TEST_VERID_DOMIBUS_URL` are set): ver.id submits through its own gateway,
-`PollAll` drains ours, and the offer is attributed, gated and redeemed. It also
-covers the negative branch — an offer from a sender outside
-`QERDS_TRUSTED_OFFER_SENDERS` is stored but **not** redeemed.
+`PollAll` drains ours, and the offer is attributed, gated and redeemed. It asserts
+the gate sees the *verified* `From` party a real Domibus put on the message — the
+one thing an offline test cannot check — and covers the negative branch: an offer
+from a sender outside `QERDS_TRUSTED_OFFER_SENDERS` is stored but **not** redeemed.
+The party half of the gate is unit-tested in
+`internal/attestation/offer_sender_policy_test.go`, including the case that
+motivates it: an unlisted party claiming an allowlisted `originalSender`.
 
 **Still not qualified.** Self-signed certs, no QTSP, no qualified timestamps. This
 bench proves two-party AS4 plumbing and the wallet-side receive path — nothing more.

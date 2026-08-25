@@ -85,7 +85,10 @@ Send the wallet operator:
 - your **party id** and its **id type**. Use a registered scheme, e.g. ISO 6523
   ICD `0106` (Dutch KVK): `0106:<your KVK number>`. The bench uses the
   `unregistered` URN, which is fine for a loopback and meaningless to anyone else
-- your **QERDS digital address** (`originalSender`), e.g. `verid@<your domain>`
+- your **QERDS digital address** (`originalSender`), e.g. `verid@<your domain>`.
+  Note that both this and the party id above are allowlisted on the wallet side
+  before an offer is auto-redeemed — see
+  [Two separate trust decisions](#two-separate-trust-decisions)
 - your issuer's **trust anchor / certificate chain** for the credentials you will
   issue (see [Two separate trust decisions](#two-separate-trust-decisions))
 
@@ -218,7 +221,7 @@ Worth being explicit, because these are easy to conflate:
 
 | Question | Answered by |
 |---|---|
-| Who delivered this offer? | your **AS4 signature**, plus a sender allowlist on the wallet side |
+| Who delivered this offer? | your **AS4 signature**, plus the wallet-side allowlists below |
 | Is the credential authentic? | the **SD-JWT VC issuer chain**, validated by the receiving wallet |
 
 Being registered as an AS4 party authenticates you as a *sender*. It does not
@@ -232,6 +235,20 @@ genuine offer replayed at a different organization would produce a correctly
 signed, correctly chained credential in the wrong wallet. Content validation
 cannot catch that; transport identity can.
 
+Which is why the wallet side allowlists **your party id**, not just your address:
+
+| Wallet setting | Matched against | Who controls the value |
+|---|---|---|
+| `QERDS_TRUSTED_OFFER_PARTIES` | your ebMS3 `From` PartyId | the wallet's gateway, which checks it against its PMode and your signing certificate |
+| `QERDS_TRUSTED_OFFER_SENDERS` | your `originalSender` address | you — it is a message property, so any admitted party can write any value in it |
+
+Both are checked, so give the wallet operator both values in
+[step 2](#2-exchange-certificates-and-identifiers) and keep them stable: rotating
+your party id without telling them stops offers being redeemed (they are still
+stored, and the backend logs `credential offer from untrusted sender not
+redeemed`). An offer that fails either check is not rejected or lost — it lands in
+the organization's inbox and waits for a human.
+
 ## Trying it locally
 
 The wallet repo ships a **two-gateway bench**: a second, independent Domibus
@@ -240,6 +257,15 @@ genuinely foreign party over a real cross-gateway AS4 leg.
 
 ```sh
 docker compose --profile domibus --profile verid up -d   # slow on first boot
+```
+
+Set the wallet-side trust gate to the bench's identities (in `.env`, or the shell
+you run compose in) — otherwise the backend trusts every party and every sender,
+warns about it at boot, and you are not exercising the gate at all:
+
+```sh
+QERDS_TRUSTED_OFFER_PARTIES=verid                          # the ebMS3 From PartyId
+QERDS_TRUSTED_OFFER_SENDERS=verid@partners.qerds.localhost  # the originalSender address
 ```
 
 - your simulated gateway's admin console: <http://localhost:8091/domibus> (`admin` / `123456`)

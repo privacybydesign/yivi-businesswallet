@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
@@ -88,13 +86,15 @@ func benchProvider(base, fromParty, toParty string) *qerdsprovider.DomibusProvid
 // countingConsumer records what the inbound consumer saw, and wraps the real
 // OfferReceiver so the allowlist decision is the production one.
 type countingConsumer struct {
-	inner qerds.InboundConsumer
-	seen  []string // senders, in arrival order
+	inner   qerds.InboundConsumer
+	seen    []string // originalSender addresses, in arrival order
+	parties []string // ebMS3 From party ids, in arrival order
 }
 
-func (c *countingConsumer) OnInboundMessage(ctx context.Context, orgID, messageID uuid.UUID, sender, subject, body string) error {
-	c.seen = append(c.seen, sender)
-	return c.inner.OnInboundMessage(ctx, orgID, messageID, sender, subject, body)
+func (c *countingConsumer) OnInboundMessage(ctx context.Context, in qerds.Inbound) error {
+	c.seen = append(c.seen, in.Sender)
+	c.parties = append(c.parties, in.FromParty)
+	return c.inner.OnInboundMessage(ctx, in)
 }
 
 func TestVeridInboundOfferIsPolledAndRedeemed(t *testing.T) {
@@ -129,7 +129,7 @@ func TestVeridInboundOfferIsPolledAndRedeemed(t *testing.T) {
 	// the QERDS receive path and the allowlist, not irmago's OpenID4VCI client.
 	holder := attestation.NewOfferReceiver(
 		eudiholder.NewStubHolder(), attStore,
-		attestation.NewTrustedOfferSenders([]string{veridSenderAddress}),
+		attestation.NewTrustedOfferSenders([]string{veridSenderAddress}, []string{veridPartyID}),
 	)
 	consumer := &countingConsumer{inner: holder}
 	svc.SetInboundConsumer(consumer)
@@ -202,6 +202,13 @@ func TestVeridInboundOfferIsPolledAndRedeemed(t *testing.T) {
 	if consumer.seen[0] != veridSenderAddress {
 		t.Errorf("consumer sender = %q, want %q", consumer.seen[0], veridSenderAddress)
 	}
+	// And it saw the VERIFIED identity: the ebMS3 From party a real Domibus put
+	// on the message, which is the half of the allowlist a remote sender cannot
+	// claim its way past. Getting this from a live gateway is the point — it is
+	// the one assertion here that offline tests cannot make.
+	if consumer.parties[0] != veridPartyID {
+		t.Errorf("consumer fromParty = %q, want %q", consumer.parties[0], veridPartyID)
+	}
 
 	// The offer was redeemed into the held index, linked to this message.
 	held, err := attStore.ListHeld(ctx, org.ID)
@@ -249,10 +256,13 @@ func TestVeridInboundOfferFromUntrustedSenderIsNotRedeemed(t *testing.T) {
 
 	svc := qerds.NewService(store, store, benchProvider(ourURL, ourPartyID, "domibus-red"))
 	attStore := attestation.NewStore(pool, audit.NopRecorder{})
-	// An allowlist that does NOT include ver.id.
+	// A sender-address allowlist that does NOT include ver.id. The party half is
+	// satisfied on purpose, so what rejects this delivery is unambiguously the
+	// address check. (The party half rejecting is unit-tested in
+	// internal/attestation/offer_sender_policy_test.go — it needs no live gateway.)
 	svc.SetInboundConsumer(attestation.NewOfferReceiver(
 		eudiholder.NewStubHolder(), attStore,
-		attestation.NewTrustedOfferSenders([]string{"someone-else@partners.qerds.localhost"}),
+		attestation.NewTrustedOfferSenders([]string{"someone-else@partners.qerds.localhost"}, []string{veridPartyID}),
 	))
 
 	offer := "openid-credential-offer://?credential_offer=%7B%22credential_issuer%22%3A%22https%3A%2F%2Fissuer.ver.id%22%7D"

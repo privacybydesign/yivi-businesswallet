@@ -9,6 +9,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 )
 
 type fakeRedeemer struct {
@@ -40,6 +41,20 @@ func (f *fakeHeldStore) RecordHeld(_ context.Context, _ uuid.UUID, in attestatio
 	return attestation.HeldAttestation{}, nil
 }
 
+// inbound builds the notification qerds.Service hands the receiver. Both sender
+// identities are explicit: fromParty is what the gateway verified, sender is what
+// the sending side claimed.
+func inbound(orgID, msgID uuid.UUID, fromParty, sender, body string) qerds.Inbound {
+	return qerds.Inbound{
+		OrgID:     orgID,
+		MessageID: msgID,
+		FromParty: fromParty,
+		Sender:    sender,
+		Subject:   "subject",
+		Body:      body,
+	}
+}
+
 func offerBody(t *testing.T) string {
 	t.Helper()
 	body, err := attestation.MarshalCredentialOfferEnvelope("Acme", "Registration", "openid-credential-offer://?x=1")
@@ -52,10 +67,10 @@ func offerBody(t *testing.T) string {
 func TestOfferReceiverRedeemsAndRecords(t *testing.T) {
 	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "ref-1", VCT: "nl.kvk.registration", Issuer: "https://issuer.test"}}
 	store := &fakeHeldStore{}
-	rec := attestation.NewOfferReceiver(redeemer, store, attestation.NewTrustedOfferSenders(nil))
+	rec := attestation.NewOfferReceiver(redeemer, store, attestation.NewTrustedOfferSenders(nil, nil))
 
 	orgID, msgID := uuid.New(), uuid.New()
-	if err := rec.OnInboundMessage(context.Background(), orgID, msgID, "acme@qerds.localhost", "subject", offerBody(t)); err != nil {
+	if err := rec.OnInboundMessage(context.Background(), inbound(orgID, msgID, "blue_gw", "acme@qerds.localhost", offerBody(t))); err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
 
@@ -80,9 +95,9 @@ func TestOfferReceiverRedeemsAndRecords(t *testing.T) {
 func TestOfferReceiverIgnoresNonOffer(t *testing.T) {
 	redeemer := &fakeRedeemer{}
 	store := &fakeHeldStore{}
-	rec := attestation.NewOfferReceiver(redeemer, store, attestation.NewTrustedOfferSenders(nil))
+	rec := attestation.NewOfferReceiver(redeemer, store, attestation.NewTrustedOfferSenders(nil, nil))
 
-	if err := rec.OnInboundMessage(context.Background(), uuid.New(), uuid.New(), "acme@qerds.localhost", "subject", "just a human message"); err != nil {
+	if err := rec.OnInboundMessage(context.Background(), inbound(uuid.New(), uuid.New(), "blue_gw", "acme@qerds.localhost", "just a human message")); err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
 	if redeemer.calls != 0 || len(store.recorded) != 0 {
@@ -93,9 +108,9 @@ func TestOfferReceiverIgnoresNonOffer(t *testing.T) {
 func TestOfferReceiverIdempotentWhenAlreadyHeld(t *testing.T) {
 	redeemer := &fakeRedeemer{}
 	store := &fakeHeldStore{exists: true}
-	rec := attestation.NewOfferReceiver(redeemer, store, attestation.NewTrustedOfferSenders(nil))
+	rec := attestation.NewOfferReceiver(redeemer, store, attestation.NewTrustedOfferSenders(nil, nil))
 
-	if err := rec.OnInboundMessage(context.Background(), uuid.New(), uuid.New(), "acme@qerds.localhost", "subject", offerBody(t)); err != nil {
+	if err := rec.OnInboundMessage(context.Background(), inbound(uuid.New(), uuid.New(), "blue_gw", "acme@qerds.localhost", offerBody(t))); err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
 	if redeemer.calls != 0 || len(store.recorded) != 0 {
@@ -127,13 +142,13 @@ func (s *stagedRedeemer) Redeem(_ context.Context, _ uuid.UUID, offerURI string)
 func TestOfferReceiverRedeemableAfterActivation(t *testing.T) {
 	redeemer := &stagedRedeemer{result: eudiholder.Redeemed{VCT: "nl.kvk.registration", Issuer: "https://issuer.test"}}
 	store := &fakeHeldStore{}
-	rec := attestation.NewOfferReceiver(redeemer, store, attestation.NewTrustedOfferSenders(nil))
+	rec := attestation.NewOfferReceiver(redeemer, store, attestation.NewTrustedOfferSenders(nil, nil))
 
 	orgID, msgID := uuid.New(), uuid.New()
 	body := offerBody(t)
 
 	// Delivery 1: wallet not activated — redeem fails, nothing recorded.
-	if err := rec.OnInboundMessage(context.Background(), orgID, msgID, "acme@qerds.localhost", "subject", body); err == nil {
+	if err := rec.OnInboundMessage(context.Background(), inbound(orgID, msgID, "blue_gw", "acme@qerds.localhost", body)); err == nil {
 		t.Fatal("expected an error while the wallet is not activated")
 	}
 	if len(store.recorded) != 0 {
@@ -141,7 +156,7 @@ func TestOfferReceiverRedeemableAfterActivation(t *testing.T) {
 	}
 
 	// Delivery 2: wallet now activated — redeem succeeds and records the credential.
-	if err := rec.OnInboundMessage(context.Background(), orgID, msgID, "acme@qerds.localhost", "subject", body); err != nil {
+	if err := rec.OnInboundMessage(context.Background(), inbound(orgID, msgID, "blue_gw", "acme@qerds.localhost", body)); err != nil {
 		t.Fatalf("OnInboundMessage after activation: %v", err)
 	}
 	if len(store.recorded) != 1 {
@@ -149,7 +164,7 @@ func TestOfferReceiverRedeemableAfterActivation(t *testing.T) {
 	}
 
 	// Delivery 3: idempotency guard skips the already-held offer.
-	if err := rec.OnInboundMessage(context.Background(), orgID, msgID, "acme@qerds.localhost", "subject", body); err != nil {
+	if err := rec.OnInboundMessage(context.Background(), inbound(orgID, msgID, "blue_gw", "acme@qerds.localhost", body)); err != nil {
 		t.Fatalf("OnInboundMessage on re-delivery: %v", err)
 	}
 	if len(store.recorded) != 1 {
@@ -163,9 +178,9 @@ func TestOfferReceiverRedeemableAfterActivation(t *testing.T) {
 func TestOfferReceiverReturnsRedeemError(t *testing.T) {
 	redeemer := &fakeRedeemer{err: errors.New("token endpoint down")}
 	store := &fakeHeldStore{}
-	rec := attestation.NewOfferReceiver(redeemer, store, attestation.NewTrustedOfferSenders(nil))
+	rec := attestation.NewOfferReceiver(redeemer, store, attestation.NewTrustedOfferSenders(nil, nil))
 
-	err := rec.OnInboundMessage(context.Background(), uuid.New(), uuid.New(), "acme@qerds.localhost", "subject", offerBody(t))
+	err := rec.OnInboundMessage(context.Background(), inbound(uuid.New(), uuid.New(), "blue_gw", "acme@qerds.localhost", offerBody(t)))
 	if err == nil {
 		t.Fatal("expected an error when redemption fails")
 	}

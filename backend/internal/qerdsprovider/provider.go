@@ -57,8 +57,21 @@ type SendReceipt struct {
 // InboundMessage is a message pulled from (or pushed by) the provider.
 type InboundMessage struct {
 	ProviderRef string
-	Sender      Address
-	Recipient   Address
+	// FromParty is the transport-level sender: the ebMS3 From PartyId of the
+	// access point that delivered the message. Unlike Sender it is not something
+	// the sender can choose freely — the receiving gateway only accepts a
+	// UserMessage whose From party is in its PMode and whose signature chains to
+	// that party's certificate, so this is the one sender identity that has been
+	// cryptographically verified by the time we see the message.
+	//
+	// Empty for providers that do not expose a transport party.
+	FromParty string
+	// Sender is the business-level sender: the originalSender message property,
+	// i.e. the QERDS digital address. The SENDING side populates it, so a party
+	// admitted by the PMode can put any value here. Never make a trust decision
+	// on it alone — see attestation.TrustedOfferSenders.
+	Sender    Address
+	Recipient Address
 	Subject     string
 	Body        string
 	Attachments []Attachment

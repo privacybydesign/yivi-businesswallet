@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -32,21 +33,40 @@ type provider interface {
 	ResolveAddress(ctx context.Context, identifier string) (qerdsprovider.Address, error)
 }
 
+// Inbound describes a received message for an InboundConsumer.
+//
+// It carries BOTH sender identities, deliberately. A consumer that acts on
+// content — redeeming a credential offer, say — needs to know who delivered it:
+// an offer is a bearer token, so once a foreign AS4 party can put messages on
+// the network, "is this credential authentic" and "was this offer meant for this
+// org" become different questions, and content validation answers only the
+// first. The two identities answer "who" with very different authority, so
+// keeping them in one struct with names on them beats a row of positional
+// strings a caller can silently transpose.
+type Inbound struct {
+	OrgID     uuid.UUID
+	MessageID uuid.UUID
+	// FromParty is the ebMS3 From PartyId of the access point that delivered the
+	// message: verified, because the gateway only accepts a message whose party
+	// is in its PMode and whose signature chains to that party's certificate.
+	// Empty when the provider exposes no transport party.
+	FromParty string
+	// Sender is the originalSender address. The sending side populates it, so any
+	// party the PMode admits can claim any value — it identifies the sender for
+	// display and audit, and cannot carry a trust decision by itself.
+	Sender  string
+	Subject string
+	Body    string
+}
+
 // InboundConsumer is notified of each received message so a domain slice can act
 // on its content — e.g. detect an OpenID4VCI credential offer in the body and
 // redeem it into the org's holder engine (see internal/attestation). It is
 // optional and best-effort: a consumer error is logged, never fatal, so it can
 // never lose or reject an already-stored QERDS message. Implementations must be
 // idempotent — the consumer runs again if the same message is re-delivered.
-//
-// sender is the message's originalSender address. It is passed because a
-// consumer that acts on content — redeeming a credential offer, say — needs to
-// know WHO delivered it: an offer is a bearer token, so once a foreign AS4 party
-// can put messages on the network, "is this credential authentic" and "was this
-// offer meant for this org" become different questions. Content validation
-// answers only the first.
 type InboundConsumer interface {
-	OnInboundMessage(ctx context.Context, orgID, messageID uuid.UUID, sender, subject, body string) error
+	OnInboundMessage(ctx context.Context, in Inbound) error
 }
 
 // Service coordinates the send flow, inbound intake and evidence persistence
@@ -69,13 +89,27 @@ func (s *Service) SetInboundConsumer(c InboundConsumer) { s.consumer = c }
 // notifyConsumer runs the inbound consumer best-effort: a failure is logged and
 // swallowed so it never rejects an already-persisted message. The consumer is
 // idempotent, so a later re-delivery re-attempts a failed redemption.
-func (s *Service) notifyConsumer(ctx context.Context, orgID uuid.UUID, msg Message) {
+//
+// The stored row supplies the content, but the transport party comes from THIS
+// delivery (in), not from the row: on a dedupe hit CreateInbound returns the
+// first delivery's row, and the consumer's trust decision must be about the
+// party that just handed us the message.
+func (s *Service) notifyConsumer(ctx context.Context, orgID uuid.UUID, in qerdsprovider.InboundMessage, msg Message) {
 	if s.consumer == nil {
 		return
 	}
-	if err := s.consumer.OnInboundMessage(ctx, orgID, msg.ID, msg.SenderAddress, msg.Subject, msg.Body); err != nil {
+	err := s.consumer.OnInboundMessage(ctx, Inbound{
+		OrgID:     orgID,
+		MessageID: msg.ID,
+		FromParty: in.FromParty,
+		Sender:    msg.SenderAddress,
+		Subject:   msg.Subject,
+		Body:      msg.Body,
+	})
+	if err != nil {
 		slog.ErrorContext(ctx, "qerds inbound consumer failed",
 			slog.String("messageId", msg.ID.String()),
+			slog.String("fromParty", in.FromParty),
 			slog.String("sender", msg.SenderAddress),
 			slog.String("error", err.Error()))
 	}
@@ -180,7 +214,7 @@ func (s *Service) Poll(ctx context.Context, orgID uuid.UUID) (int, error) {
 			// idempotent and a re-delivered offer whose earlier redeem failed must
 			// be retried. CreateInbound returns the existing row on a dedupe hit,
 			// so msg is populated either way.
-			s.notifyConsumer(ctx, orgID, msg)
+			s.notifyConsumer(ctx, orgID, in, msg)
 		}
 	}
 	return count, nil
@@ -219,13 +253,27 @@ func (s *Service) PollAll(ctx context.Context) (int, error) {
 			// plugin queue is shared across the access point, so a provider that
 			// returns a message for another recipient must not have it filed
 			// under this org.
+			//
+			// EqualFold, not ==: Domibus matches the finalRecipient filter
+			// case-insensitively, so a sender that varies the case of an address
+			// we own still ends up in this address's pending list. Comparing
+			// exactly would send that message down the unknown-recipient path
+			// below and drop it — and retrieveMessage has already consumed it,
+			// so the drop is permanent.
 			orgID := addr.OrganizationID
-			if recipient := string(in.Recipient); recipient != "" && recipient != addr.Address {
+			if recipient := string(in.Recipient); recipient != "" && !strings.EqualFold(recipient, addr.Address) {
 				resolved, err := s.addresses.OrgByAddress(ctx, recipient)
 				if err != nil {
-					slog.WarnContext(ctx, "qerds background poll: unknown recipient, skipping",
+					// Report it: the provider has already handed the message over
+					// and will not offer it again, so this is a lost message, not
+					// a skipped one. Filing it under the polled org instead would
+					// be worse — it would put another party's message in this
+					// org's inbox.
+					lastErr = fmt.Errorf("qerds: inbound message for unknown recipient %q (polled %q): %w", recipient, addr.Address, err)
+					slog.ErrorContext(ctx, "qerds background poll: unknown recipient, message dropped",
 						slog.String("polledAddress", addr.Address),
-						slog.String("recipient", recipient))
+						slog.String("recipient", recipient),
+						slog.String("providerRef", in.ProviderRef))
 					continue
 				}
 				orgID = resolved
@@ -241,7 +289,7 @@ func (s *Service) PollAll(ctx context.Context) (int, error) {
 			if created {
 				count++
 			}
-			s.notifyConsumer(ctx, orgID, msg)
+			s.notifyConsumer(ctx, orgID, in, msg)
 		}
 	}
 	return count, lastErr
@@ -260,6 +308,6 @@ func (s *Service) ReceiveInbound(ctx context.Context, in qerdsprovider.InboundMe
 	}
 	// Notify on every delivery (not only the first): the consumer is idempotent
 	// and a re-delivered offer whose earlier redeem failed must be retried.
-	s.notifyConsumer(ctx, orgID, msg)
+	s.notifyConsumer(ctx, orgID, in, msg)
 	return nil
 }

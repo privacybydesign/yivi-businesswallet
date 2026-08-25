@@ -96,21 +96,30 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	// Probe first: a WS plugin that is not serving yet produces a much less
-	// obvious failure from submitMessage than from a WSDL fetch.
-	if err := provider.Ping(ctx); err != nil {
-		return fmt.Errorf("access point not reachable at %s: %w", *endpoint, err)
-	}
 	if *pingOnly {
+		// Probe only: a WS plugin that is not serving yet produces a much less
+		// obvious failure from submitMessage than from a WSDL fetch.
+		if err := provider.Ping(ctx); err != nil {
+			return fmt.Errorf("access point not reachable at %s: %w", *endpoint, err)
+		}
 		fmt.Printf("access point OK: %s\n", *endpoint)
 		return nil
 	}
 
+	// Validate the required flags before touching the network, so a bare
+	// `go run ./cmd/as4offer` says what is missing rather than how it failed to
+	// connect.
 	if *recipient == "" {
 		return errors.New("-recipient is required (the organization's QERDS digital address)")
 	}
 	if *offer == "" {
 		return errors.New("-offer is required (the OpenID4VCI credential offer)")
+	}
+
+	// Probe before submitting: a WS plugin that is not serving yet produces a
+	// much less obvious failure from submitMessage than from a WSDL fetch.
+	if err := provider.Ping(ctx); err != nil {
+		return fmt.Errorf("access point not reachable at %s: %w", *endpoint, err)
 	}
 
 	// Built with the wallet's own marshaller, so the body is exactly the

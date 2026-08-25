@@ -12,50 +12,86 @@ import (
 
 func TestTrustedOfferSendersMatching(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		patterns []string
-		sender   string
-		want     bool
+		name      string
+		patterns  []string
+		parties   []string
+		fromParty string
+		sender    string
+		want      bool
 	}{
 		// Unset must keep today's behaviour: a deployment that only exchanges
 		// offers between its own orgs is unaffected by this policy existing.
-		{"unset trusts anyone", nil, "whoever@wherever.test", true},
-		{"unset trusts empty sender", nil, "", true},
-		{"blank entries are not a config", []string{"", "  "}, "x@y.test", true},
+		{"unset trusts anyone", nil, nil, "verid_gw", "whoever@wherever.test", true},
+		{"unset trusts empty sender", nil, nil, "verid_gw", "", true},
+		{"blank entries are not a config", []string{"", "  "}, nil, "verid_gw", "x@y.test", true},
 
-		{"exact match", []string{"verid@partners.test"}, "verid@partners.test", true},
-		{"exact mismatch", []string{"verid@partners.test"}, "evil@partners.test", false},
-		{"case insensitive", []string{"verid@partners.test"}, "VerID@Partners.Test", true},
-		{"domain wildcard", []string{"*@partners.test"}, "anyone@partners.test", true},
-		{"domain wildcard other domain", []string{"*@partners.test"}, "anyone@evil.test", false},
-		{"allow all", []string{"*"}, "anyone@evil.test", true},
-		{"multiple patterns", []string{"a@x.test", "*@partners.test"}, "b@partners.test", true},
+		{"exact match", []string{"verid@partners.test"}, nil, "verid_gw", "verid@partners.test", true},
+		{"exact mismatch", []string{"verid@partners.test"}, nil, "verid_gw", "evil@partners.test", false},
+		{"case insensitive", []string{"verid@partners.test"}, nil, "verid_gw", "VerID@Partners.Test", true},
+		{"domain wildcard", []string{"*@partners.test"}, nil, "verid_gw", "anyone@partners.test", true},
+		{"domain wildcard other domain", []string{"*@partners.test"}, nil, "verid_gw", "anyone@evil.test", false},
+		{"allow all", []string{"*"}, nil, "verid_gw", "anyone@evil.test", true},
+		{"multiple patterns", []string{"a@x.test", "*@partners.test"}, nil, "verid_gw", "b@partners.test", true},
 
 		// A configured allowlist must not be satisfiable by an unattributable
 		// message: with no originalSender there is nothing to match.
-		{"configured rejects empty sender", []string{"*@partners.test"}, "", false},
+		{"configured rejects empty sender", []string{"*@partners.test"}, nil, "verid_gw", "", false},
 		// The domain pattern compares the domain part, not a bare suffix — else a
 		// crafted local part defeats the allowlist.
-		{"domain in local part", []string{"*@partners.test"}, "a@partners.test@evil.test", false},
+		{"domain in local part", []string{"*@partners.test"}, nil, "verid_gw", "a@partners.test@evil.test", false},
+
+		// The party half. This is the one a remote sender cannot claim its way
+		// past: originalSender is a property the sender writes, so an allowlisted
+		// address proves nothing on its own.
+		{"party allowlist admits its party", nil, []string{"verid_gw"}, "verid_gw", "verid@partners.test", true},
+		{"party allowlist rejects another party", nil, []string{"verid_gw"}, "evil_gw", "verid@partners.test", false},
+		{"party match is case insensitive", nil, []string{"verid_gw"}, "VERID_GW", "x@y.test", true},
+		{"party wildcard", nil, []string{"*"}, "whoever_gw", "x@y.test", true},
+		// No transport identity at all: a configured party allowlist must not fall
+		// back to the sender-written property.
+		{"configured party rejects empty party", nil, []string{"verid_gw"}, "", "verid@partners.test", false},
+		{"unset party tolerates empty party", nil, nil, "", "verid@partners.test", true},
+
+		// ANDed: a spoofed originalSender does not survive the party check, and an
+		// admitted party does not bypass the address check.
+		{"spoofed sender from wrong party", []string{"verid@partners.test"}, []string{"verid_gw"}, "evil_gw", "verid@partners.test", false},
+		{"right party, unlisted sender", []string{"verid@partners.test"}, []string{"verid_gw"}, "verid_gw", "someone@partners.test", false},
+		{"right party, listed sender", []string{"verid@partners.test"}, []string{"verid_gw"}, "verid_gw", "verid@partners.test", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := attestation.NewTrustedOfferSenders(tc.patterns)
-			if got := p.Trusts(tc.sender); got != tc.want {
-				t.Errorf("Trusts(%q) = %v, want %v", tc.sender, got, tc.want)
+			p := attestation.NewTrustedOfferSenders(tc.patterns, tc.parties)
+			if got := p.Trusts(tc.fromParty, tc.sender); got != tc.want {
+				t.Errorf("Trusts(%q, %q) = %v, want %v", tc.fromParty, tc.sender, got, tc.want)
 			}
 		})
 	}
 }
 
 func TestTrustedOfferSendersConfigured(t *testing.T) {
-	if attestation.NewTrustedOfferSenders(nil).Configured() {
+	if attestation.NewTrustedOfferSenders(nil, nil).Configured() {
 		t.Error("nil patterns must report not configured (boot warns on this)")
 	}
-	if attestation.NewTrustedOfferSenders([]string{" "}).Configured() {
+	if attestation.NewTrustedOfferSenders([]string{" "}, nil).Configured() {
 		t.Error("blank-only patterns must report not configured")
 	}
-	if !attestation.NewTrustedOfferSenders([]string{"*"}).Configured() {
+	if !attestation.NewTrustedOfferSenders([]string{"*"}, nil).Configured() {
 		t.Error(`["*"] is an explicit decision and must report configured`)
+	}
+
+	// The party half reports separately: boot warns about each, and a deployment
+	// may reasonably configure one and not the other.
+	if attestation.NewTrustedOfferSenders([]string{"*"}, nil).PartiesConfigured() {
+		t.Error("nil parties must report not configured (boot warns on this)")
+	}
+	if attestation.NewTrustedOfferSenders(nil, []string{"  "}).PartiesConfigured() {
+		t.Error("blank-only parties must report not configured")
+	}
+	p := attestation.NewTrustedOfferSenders(nil, []string{"Verid_GW"})
+	if !p.PartiesConfigured() {
+		t.Error("a configured party list must report configured")
+	}
+	if got := p.Parties(); len(got) != 1 || got[0] != "verid_gw" {
+		t.Errorf("Parties() = %v, want the normalized [verid_gw] for the boot log", got)
 	}
 }
 
@@ -67,12 +103,12 @@ func TestOfferReceiverRejectsUntrustedSender(t *testing.T) {
 	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "r", VCT: "v", Issuer: "i"}}
 	store := &fakeHeldStore{}
 	rec := attestation.NewOfferReceiver(redeemer, store,
-		attestation.NewTrustedOfferSenders([]string{"verid@partners.test"}))
+		attestation.NewTrustedOfferSenders([]string{"verid@partners.test"}, nil))
 
 	// Not an error: the message stays in the inbox for an operator. Only the
 	// automatic redemption is withheld.
-	err := rec.OnInboundMessage(context.Background(), uuid.New(), uuid.New(),
-		"attacker@evil.test", "subject", offerBody(t))
+	err := rec.OnInboundMessage(context.Background(),
+		inbound(uuid.New(), uuid.New(), "verid_gw", "attacker@evil.test", offerBody(t)))
 	if err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
@@ -84,14 +120,56 @@ func TestOfferReceiverRejectsUntrustedSender(t *testing.T) {
 	}
 }
 
+// The sender allowlist is matched against originalSender, which the SENDING side
+// writes. So an address allowlist alone is not a boundary: any party the PMode
+// admits can claim an allowlisted address. The party allowlist is what actually
+// bounds it, and it must reject the delivery even though every address on the
+// message is one we trust.
+func TestOfferReceiverRejectsSpoofedSenderFromUntrustedParty(t *testing.T) {
+	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "r", VCT: "v", Issuer: "i"}}
+	store := &fakeHeldStore{}
+	rec := attestation.NewOfferReceiver(redeemer, store,
+		attestation.NewTrustedOfferSenders([]string{"verid@partners.test"}, []string{"verid_gw"}))
+
+	err := rec.OnInboundMessage(context.Background(),
+		inbound(uuid.New(), uuid.New(), "evil_gw", "verid@partners.test", offerBody(t)))
+	if err != nil {
+		t.Fatalf("OnInboundMessage: %v", err)
+	}
+	if redeemer.calls != 0 {
+		t.Errorf("an unlisted AS4 party claiming a trusted originalSender got its offer redeemed (%d calls)", redeemer.calls)
+	}
+	if len(store.recorded) != 0 {
+		t.Errorf("spoofed sender's offer was recorded as held (%d records)", len(store.recorded))
+	}
+}
+
+// A provider that exposes no transport party cannot satisfy a party allowlist
+// that is deliberately in force — falling back to the sender-written property
+// would defeat the point of configuring it.
+func TestOfferReceiverRejectsMissingPartyWhenPartiesConfigured(t *testing.T) {
+	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "r", VCT: "v", Issuer: "i"}}
+	store := &fakeHeldStore{}
+	rec := attestation.NewOfferReceiver(redeemer, store,
+		attestation.NewTrustedOfferSenders(nil, []string{"verid_gw"}))
+
+	if err := rec.OnInboundMessage(context.Background(),
+		inbound(uuid.New(), uuid.New(), "", "verid@partners.test", offerBody(t))); err != nil {
+		t.Fatalf("OnInboundMessage: %v", err)
+	}
+	if redeemer.calls != 0 {
+		t.Errorf("offer with no transport party was redeemed (%d calls)", redeemer.calls)
+	}
+}
+
 func TestOfferReceiverRedeemsTrustedSender(t *testing.T) {
 	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "r", VCT: "v", Issuer: "i"}}
 	store := &fakeHeldStore{}
 	rec := attestation.NewOfferReceiver(redeemer, store,
-		attestation.NewTrustedOfferSenders([]string{"*@partners.test"}))
+		attestation.NewTrustedOfferSenders([]string{"*@partners.test"}, []string{"verid_gw"}))
 
-	if err := rec.OnInboundMessage(context.Background(), uuid.New(), uuid.New(),
-		"verid@partners.test", "subject", offerBody(t)); err != nil {
+	if err := rec.OnInboundMessage(context.Background(),
+		inbound(uuid.New(), uuid.New(), "verid_gw", "verid@partners.test", offerBody(t))); err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
 	if redeemer.calls != 1 {

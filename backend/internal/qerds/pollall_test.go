@@ -3,6 +3,7 @@ package qerds
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -26,9 +27,10 @@ func (m *multiOrgStore) AllAddresses(_ context.Context) ([]Address, error) {
 	return m.addresses, nil
 }
 
+// Folds case, like the real store's lower(address) = lower($1).
 func (m *multiOrgStore) OrgByAddress(_ context.Context, address string) (uuid.UUID, error) {
 	for _, a := range m.addresses {
-		if a.Address == address {
+		if strings.EqualFold(a.Address, address) {
 			return a.OrganizationID, nil
 		}
 	}
@@ -71,19 +73,11 @@ func (p *scriptedProvider) Fetch(_ context.Context, addr qerdsprovider.Address) 
 
 // recordingConsumer captures what the inbound consumer was told.
 type recordingConsumer struct {
-	calls []struct {
-		orgID  uuid.UUID
-		sender string
-		body   string
-	}
+	calls []Inbound
 }
 
-func (c *recordingConsumer) OnInboundMessage(_ context.Context, orgID, _ uuid.UUID, sender, _, body string) error {
-	c.calls = append(c.calls, struct {
-		orgID  uuid.UUID
-		sender string
-		body   string
-	}{orgID, sender, body})
+func (c *recordingConsumer) OnInboundMessage(_ context.Context, in Inbound) error {
+	c.calls = append(c.calls, in)
 	return nil
 }
 
@@ -95,11 +89,11 @@ func TestPollAllSweepsEveryOrgAndThreadsSender(t *testing.T) {
 	)
 	prov := &scriptedProvider{inbound: map[string][]qerdsprovider.InboundMessage{
 		"acme@qerds.localhost": {{
-			ProviderRef: "ref-acme", Sender: "verid@partners.test",
+			ProviderRef: "ref-acme", FromParty: "verid_gw", Sender: "verid@partners.test",
 			Recipient: "acme@qerds.localhost", Body: "offer for acme",
 		}},
 		"globex@qerds.localhost": {{
-			ProviderRef: "ref-globex", Sender: "verid@partners.test",
+			ProviderRef: "ref-globex", FromParty: "verid_gw", Sender: "verid@partners.test",
 			Recipient: "globex@qerds.localhost", Body: "offer for globex",
 		}},
 	}}
@@ -121,13 +115,16 @@ func TestPollAllSweepsEveryOrgAndThreadsSender(t *testing.T) {
 		t.Fatalf("consumer calls = %d, want 2", len(consumer.calls))
 	}
 
-	// Each org must get its own message, and the sender must reach the consumer —
-	// the trusted-sender gate is useless if it always sees "".
+	// Each org must get its own message, and both sender identities must reach the
+	// consumer — the trust gate is useless if it always sees "".
 	byOrg := map[uuid.UUID]string{}
 	for _, c := range consumer.calls {
-		byOrg[c.orgID] = c.body
-		if c.sender != "verid@partners.test" {
-			t.Errorf("consumer sender = %q, want the originalSender", c.sender)
+		byOrg[c.OrgID] = c.Body
+		if c.Sender != "verid@partners.test" {
+			t.Errorf("consumer sender = %q, want the originalSender", c.Sender)
+		}
+		if c.FromParty != "verid_gw" {
+			t.Errorf("consumer fromParty = %q, want the verified ebMS3 From party", c.FromParty)
 		}
 	}
 	if byOrg[orgA] != "offer for acme" || byOrg[orgB] != "offer for globex" {
@@ -201,13 +198,15 @@ func TestPollAllAttributesByFinalRecipient(t *testing.T) {
 	if len(consumer.calls) != 1 {
 		t.Fatalf("consumer calls = %d, want 1", len(consumer.calls))
 	}
-	if consumer.calls[0].orgID != orgB {
+	if consumer.calls[0].OrgID != orgB {
 		t.Errorf("message filed under the polled org, not its finalRecipient owner")
 	}
 }
 
 // A message for an address no org owns must be skipped, not filed under the
-// polling org — that would hand one org another party's credential offer.
+// polling org — that would hand one org another party's credential offer. The
+// sweep still reports the drop: retrieveMessage has already consumed the
+// message, so nothing will offer it again.
 func TestPollAllSkipsUnknownRecipient(t *testing.T) {
 	orgA := uuid.New()
 	store := newMultiOrgStore(
@@ -224,13 +223,48 @@ func TestPollAllSkipsUnknownRecipient(t *testing.T) {
 	svc.SetInboundConsumer(consumer)
 
 	got, err := svc.PollAll(context.Background())
-	if err != nil {
-		t.Fatalf("PollAll: %v", err)
+	if err == nil {
+		t.Error("PollAll returned no error for a dropped message")
 	}
 	if got != 0 {
 		t.Errorf("received = %d, want 0 for an unowned recipient", got)
 	}
 	if len(consumer.calls) != 0 {
 		t.Errorf("consumer was notified for an unowned recipient")
+	}
+}
+
+// Domibus filters listPendingMessages on finalRecipient case-insensitively, so a
+// sender that varies the case of an address we own still lands in that address's
+// pending list. Attribution must fold too: an exact compare would send this down
+// the unknown-recipient path and lose a message retrieveMessage has already
+// consumed.
+func TestPollAllAttributesRecipientCaseInsensitively(t *testing.T) {
+	orgA := uuid.New()
+	store := newMultiOrgStore(
+		Address{ID: uuid.New(), OrganizationID: orgA, Address: "acme@qerds.localhost"},
+	)
+	prov := &scriptedProvider{inbound: map[string][]qerdsprovider.InboundMessage{
+		"acme@qerds.localhost": {{
+			ProviderRef: "ref-cased", Sender: "verid@partners.test",
+			Recipient: "Acme@QERDS.localhost", Body: "offer for acme",
+		}},
+	}}
+	consumer := &recordingConsumer{}
+	svc := NewService(store, store, prov)
+	svc.SetInboundConsumer(consumer)
+
+	got, err := svc.PollAll(context.Background())
+	if err != nil {
+		t.Fatalf("PollAll: %v", err)
+	}
+	if got != 1 {
+		t.Fatalf("received = %d, want 1", got)
+	}
+	if len(consumer.calls) != 1 {
+		t.Fatalf("consumer calls = %d, want 1", len(consumer.calls))
+	}
+	if consumer.calls[0].OrgID != orgA {
+		t.Errorf("orgID = %s, want %s", consumer.calls[0].OrgID, orgA)
 	}
 }

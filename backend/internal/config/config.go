@@ -36,6 +36,9 @@ const (
 	// QerdsTrustedOfferSenders allowlists which QERDS senders may have their
 	// credential offers auto-redeemed. Empty trusts every sender.
 	envQerdsTrustedOfferSenders = "QERDS_TRUSTED_OFFER_SENDERS"
+	// QerdsTrustedOfferParties allowlists which AS4 parties may deliver a
+	// redeemable credential offer. Empty trusts every party the PMode admits.
+	envQerdsTrustedOfferParties = "QERDS_TRUSTED_OFFER_PARTIES"
 
 	envWalletRegistryProvider = "WALLET_REGISTRY_PROVIDER"
 
@@ -234,7 +237,17 @@ type Config struct {
 	// are auto-redeemed ("addr@domain", "*@domain" or "*"). Empty trusts every
 	// sender, which is safe only while every sender is an org on this deployment
 	// — a deployment peering with an external AS4 party must set it.
+	//
+	// It is matched against the originalSender message property, which the
+	// SENDING side populates. It refines the decision; it cannot bound it.
 	QerdsTrustedOfferSenders []string
+	// QerdsTrustedOfferParties allowlists the AS4 parties (ebMS3 From PartyId,
+	// e.g. "verid") that may deliver a redeemable credential offer, or "*" for
+	// any. Unlike QerdsTrustedOfferSenders this is the identity the receiving
+	// gateway verified against its PMode and the party's signing certificate, so
+	// it is the allowlist a remote sender cannot claim its way past. Empty trusts
+	// every party the PMode admits.
+	QerdsTrustedOfferParties []string
 
 	QerdsDomibusFromParty   string
 	QerdsDomibusToParty     string
@@ -443,6 +456,7 @@ func Load() (Config, error) {
 		QerdsDefaultAddressDomain: envOrDefault(envQerdsDefaultAddressDomain, defaultQerdsDefaultAddressDomain),
 		QerdsInboundPollInterval:  qerdsInboundPollInterval,
 		QerdsTrustedOfferSenders:  parseList(os.Getenv(envQerdsTrustedOfferSenders)),
+		QerdsTrustedOfferParties:  parseList(os.Getenv(envQerdsTrustedOfferParties)),
 
 		QerdsDomibusFromParty:   envOrDefault(envQerdsDomibusFromParty, defaultQerdsDomibusFromParty),
 		QerdsDomibusToParty:     envOrDefault(envQerdsDomibusToParty, defaultQerdsDomibusToParty),

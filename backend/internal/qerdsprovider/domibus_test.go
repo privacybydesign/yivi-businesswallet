@@ -178,6 +178,11 @@ func TestDomibusRetrieveToInbound(t *testing.T) {
 	if inbound.Sender != "alice@qerds.localhost" {
 		t.Errorf("sender = %q, want originalSender property", inbound.Sender)
 	}
+	// The verified transport identity survives originalSender overwriting Sender:
+	// the offer trust gate keys on it.
+	if inbound.FromParty != "domibus-red" {
+		t.Errorf("fromParty = %q, want the ebMS3 From PartyId", inbound.FromParty)
+	}
 	if inbound.Subject != "Quarterly filing" {
 		t.Errorf("subject = %q", inbound.Subject)
 	}

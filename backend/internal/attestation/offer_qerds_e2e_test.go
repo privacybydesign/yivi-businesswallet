@@ -166,7 +166,7 @@ func TestCredentialOfferOverQERDSEndToEnd(t *testing.T) {
 
 	holder := eudiholder.NewStubHolder()
 	held := newMemHeld()
-	svcRU.SetInboundConsumer(attestation.NewOfferReceiver(holder, held, attestation.NewTrustedOfferSenders(nil)))
+	svcRU.SetInboundConsumer(attestation.NewOfferReceiver(holder, held, attestation.NewTrustedOfferSenders(nil, nil)))
 
 	body, err := attestation.MarshalCredentialOfferEnvelope("Yivi", "Approved supplier", "openid-credential-offer://?x=1")
 	if err != nil {
@@ -220,7 +220,7 @@ func TestCredentialOfferRetriedOnRedelivery(t *testing.T) {
 	holder := eudiholder.NewStubHolder()
 	held := newMemHeld()
 	redeemer := &flakyRedeemer{inner: holder, failuresLeft: 1}
-	svcRU.SetInboundConsumer(attestation.NewOfferReceiver(redeemer, held, attestation.NewTrustedOfferSenders(nil)))
+	svcRU.SetInboundConsumer(attestation.NewOfferReceiver(redeemer, held, attestation.NewTrustedOfferSenders(nil, nil)))
 
 	body, err := attestation.MarshalCredentialOfferEnvelope("Yivi", "Approved supplier", "openid-credential-offer://?x=1")
 	if err != nil {
