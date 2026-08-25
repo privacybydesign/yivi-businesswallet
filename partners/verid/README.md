@@ -98,6 +98,22 @@ You receive:
 - the wallet gateway's **party id** and **MSH endpoint URL**
 - the ebMS3 service/action to use, if it differs from the bench values below
 
+The party id may also come back **assigned rather than accepted**: the operator
+has to register it in their PMode, and it has to be unique there, so a value that
+collides with one of their own parties will be replaced. Two things follow if
+your gateway is a stock Domibus. Its sample identity is `blue_gw` /
+`domibus-blue`, and `domibus-blue` is what the wallet's own gateway uses — so
+sending the default would attribute your messages to their gateway. You do not
+need to rename your party or your keystore alias to change it: the party id is the
+`<identifier partyId="…">` on your own party entry, independent of the party name
+and of `domibus.security.key.private.alias`.
+
+**Agreed for Yivi staging:** party id `verid-qerds`, `originalSender`
+`verid@ver.id`, gateway certificate `verid-gateway-blue_gw.crt`. The wallet side
+registers the party under the *name* `verid_gw` and files your certificate under
+that alias — an internal detail of their PMode, but it is why your certificate's
+`CN=blue_gw` subject causes no collision with their own `blue_gw`.
+
 ### 3. Configure your PMode
 
 [`../../docker/development/domibus/pmode-verid.xml`](../../docker/development/domibus/pmode-verid.xml)
@@ -124,14 +140,20 @@ step disappears.
 
 Submit through your own access point with:
 
-| Field | Value (bench) | Notes |
-|---|---|---|
-| `From` PartyId | `verid` | your party; a real deployment uses `0106:<KVK>` |
-| `To` PartyId | `domibus-blue` | the wallet gateway's party |
-| PartyId type | `urn:oasis:names:tc:ebcore:partyid-type:unregistered` | replace with the registered scheme |
-| `Service` | `bdx:noprocess` (type `tc1`) | must match the wallet's PMode |
-| `Action` | `TC1Leg1` | must match the wallet's PMode |
-| MEP / binding | one-way / push | |
+| Field | Value (bench) | Value (Yivi staging) | Notes |
+|---|---|---|---|
+| `From` PartyId | `verid` | `verid-qerds` | your party. Neither is a registered scheme yet; a production deployment uses `0106:<KVK>` |
+| `To` PartyId | `domibus-blue` | `domibus-blue` | the wallet gateway's party |
+| PartyId type | `urn:oasis:names:tc:ebcore:partyid-type:unregistered` | same | replace with the registered scheme in production |
+| `Service` | `bdx:noprocess` (type `tc1`) | same | must match the wallet's PMode |
+| `Action` | `TC1Leg1` | same | must match the wallet's PMode |
+| MEP / binding | one-way / push | same | |
+
+The bench and staging party ids differ **on purpose**. The bench is a loopback
+whose two gateways only have to agree with each other, so it keeps `verid`; the
+staging value is whatever was agreed with the deployment operator and registered
+in their PMode. Do not assume the bench value works against a real deployment —
+that is exactly the mismatch that gets offers stored and never redeemed.
 
 ### Message properties
 
