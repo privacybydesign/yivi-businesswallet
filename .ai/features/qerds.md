@@ -363,11 +363,17 @@ copy of ours:
   gateway-to-gateway leg). Attaching it to `default` as well would make `mysql`
   ambiguous and is the single easiest way to break this bench.
 
-PMode files are split so CI stays untouched: `testdata/pmode.xml` remains the
-loopback that `domibus_integration_test.go` embeds, while
-`pmode-ours-with-verid.xml` (loopback **plus** ver.id as initiator) and
-`pmode-verid.xml` (their side) are uploaded by the `verid` profile's provisioners.
-`domibus-provision-verid` is ordered after `domibus-provision` so its PMode wins.
+**Our gateway runs exactly one PMode.** `testdata/pmode.xml` carries the loopback
+*and* ver.id as an initiator-only party; `pmode-verid.xml` is ver.id's side. That
+merge is deliberate. The two used to be separate files with their own
+provisioners, which meant two PModes competed for one gateway: `go test
+-tags=integration ./...` parallelises across packages, so
+`domibus_integration_test.go`'s `provisionDomibus` could strip `verid_gw` while
+the two-gateway test in `internal/qerds` was mid-flight — that test then failed on
+a 180s timeout with no usable diagnostic. Carrying the party in the shared fixture
+costs the loopback nothing: it is initiator-only, so its endpoint is never
+dereferenced, and its certificate is already in the `gateway_truststore.jks` that
+CI mounts. Verified on a single gateway with `domibus-verid` unresolvable.
 
 Drive it with `cmd/as4offer`, which submits a real credential-offer envelope
 through ver.id's gateway:
@@ -405,17 +411,6 @@ skipped unless **both** `QERDS_TEST_DOMIBUS_URL` and
 `PollAll` drains ours, and the offer is attributed, gated and redeemed. It also
 covers the negative branch — an offer from a sender outside
 `QERDS_TRUSTED_OFFER_SENDERS` is stored but **not** redeemed.
-
-**Gotcha: the single-gateway integration test resets our PMode.**
-`domibus_integration_test.go` calls `provisionDomibus`, which uploads
-`testdata/pmode.xml` — the loopback-only PMode, with no `verid_gw` party. Running
-it against the two-gateway bench therefore silently un-configures ver.id, and the
-next inbound offer is rejected by our gateway with the message never arriving. Run
-`domibus-provision-verid` again afterwards:
-
-```sh
-docker compose --profile domibus --profile verid up domibus-provision-verid
-```
 
 **Still not qualified.** Self-signed certs, no QTSP, no qualified timestamps. This
 bench proves two-party AS4 plumbing and the wallet-side receive path — nothing more.

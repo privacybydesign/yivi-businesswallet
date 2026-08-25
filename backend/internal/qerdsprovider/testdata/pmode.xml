@@ -10,6 +10,19 @@
   cid:attachment-N, which a fixed profile would reject. This proves AS4
   transport plumbing, not qualified compliance.
 
+  It also declares ver.id as an INITIATOR-ONLY third party, so this one file is
+  the single PMode our gateway ever runs. That is deliberate: it used to live in
+  a separate pmode-ours-with-verid.xml uploaded by its own provisioner, which
+  meant two files competed for one gateway. `go test -tags=integration ./...`
+  parallelises across packages, so domibus_integration_test.go's provisionDomibus
+  could strip verid_gw while the two-gateway test in internal/qerds was mid-flight
+  — the message was then rejected and that test failed on a 180s timeout with no
+  usable diagnostic. One file, no ordering, no race.
+
+  Carrying verid_gw here costs the loopback nothing: the party is initiator-only,
+  so its endpoint is never dereferenced, and its certificate is already in
+  gateway_truststore.jks (which CI mounts).
+
   Consumed by: compose `domibus-provision` service and the live-Domibus
   integration test (domibus_integration_test.go, go:embed).
 -->
@@ -43,6 +56,20 @@
                    endpoint="http://localhost:8080/domibus/services/msh"
                    allowChunking="false">
                 <identifier partyId="domibus-red" partyIdType="partyTypeUrn"/>
+            </party>
+            <!-- ver.id's access point: an external issuing platform that pushes
+                 credential offers to us and never receives. The endpoint is
+                 REQUIRED by the schema but never dereferenced for a send-only
+                 party (the process below gives us no leg toward it), and the host
+                 only resolves when the `verid` compose profile is up.
+
+                 partyIdType is the bench's "unregistered" URN to stay
+                 loopback-compatible; a real counterparty gets a registered scheme
+                 (e.g. ISO 6523 ICD 0106 for KVK). See partners/verid/README.md. -->
+            <party name="verid_gw"
+                   endpoint="http://domibus-verid:8080/domibus/services/msh"
+                   allowChunking="false">
+                <identifier partyId="verid" partyIdType="partyTypeUrn"/>
             </party>
         </parties>
         <meps>
@@ -120,6 +147,10 @@
             <initiatorParties>
                 <initiatorParty name="blue_gw"/>
                 <initiatorParty name="red_gw"/>
+                <!-- ver.id may initiate to us. Adding verid_gw to
+                     responderParties below would silently make the channel
+                     bidirectional; that asymmetry IS the send-only guarantee. -->
+                <initiatorParty name="verid_gw"/>
             </initiatorParties>
             <responderParties>
                 <responderParty name="blue_gw"/>

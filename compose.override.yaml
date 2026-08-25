@@ -440,8 +440,10 @@ services:
   #
   #   docker compose --profile domibus --profile verid up -d
   #
-  # Both profiles are needed — this one adds ver.id's side and re-points our
-  # gateway's PMode; it does not bring up our gateway.
+  # Both profiles are needed — this one adds ver.id's side only; it does not
+  # bring up our gateway. Our gateway already declares ver.id as an
+  # initiator-only party in its single PMode (qerdsprovider/testdata/pmode.xml),
+  # so nothing here re-points it.
   #
   # ver.id's admin console: http://localhost:8091/domibus (admin / 123456)
   # NOTE: proves AS4 plumbing across two parties, NOT qualified compliance.
@@ -511,26 +513,6 @@ services:
     networks:
       - verid-internal
       - as4
-
-  # Re-uploads OUR gateway's PMode with ver.id added as an initiator-only party.
-  # Ordered after the single-gateway provisioner (which uploads the loopback-only
-  # PMode) so this one wins; Domibus replaces the active PMode on each upload.
-  domibus-provision-verid:
-    image: curlimages/curl:latest
-    platform: linux/amd64
-    profiles: ["verid"]
-    restart: "no"
-    depends_on:
-      domibus:
-        condition: service_healthy
-      domibus-provision:
-        condition: service_completed_successfully
-    volumes:
-      - ./docker/development/domibus/pmode-ours-with-verid.xml:/pmode.xml:ro
-      - ./docker/development/domibus/provision.sh:/provision.sh:ro
-    entrypoint: ["/bin/sh", "/provision.sh", "domibus", "ours + verid initiator-only"]
-    networks:
-      - default
 
   # ver.id's gateway needs the same two things any fresh Domibus does: a PMode,
   # and a message filter so a received message reaches a backend plugin.

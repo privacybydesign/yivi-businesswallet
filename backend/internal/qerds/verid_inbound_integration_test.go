@@ -35,7 +35,11 @@ import (
 //
 //	docker compose --profile domibus --profile verid up -d --wait
 //	docker compose --profile domibus --profile verid up \
-//	  domibus-provision domibus-provision-verid domibus-verid-provision
+//	  domibus-provision domibus-verid-provision
+//
+// Our gateway runs a single PMode that already declares ver.id as an
+// initiator-only party, so nothing here can strip it — this test and the
+// single-gateway suite in internal/qerdsprovider are safe to run together.
 //
 // then run with both gateway URLs set:
 //

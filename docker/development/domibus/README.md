@@ -94,15 +94,14 @@ line-ending-normalise these files and silently corrupt them.
 
 | File | Gateway | Purpose |
 |---|---|---|
-| `../../../backend/internal/qerdsprovider/testdata/pmode.xml` | ours | blue→red loopback. Embedded by the integration test, uploaded by `domibus-provision`. **Leave alone** — CI depends on it |
-| `pmode-ours-with-verid.xml` | ours | the loopback **plus** ver.id as an initiator-only party. Uploaded by `domibus-provision-verid`, which is ordered after the loopback provisioner so it wins |
+| `../../../backend/internal/qerdsprovider/testdata/pmode.xml` | ours | The **only** PMode our gateway runs: blue→red loopback **plus** ver.id as an initiator-only party. Embedded by the integration test, uploaded by `domibus-provision` |
 | `pmode-verid.xml` | ver.id's | their side: `verid_gw` initiates, our `blue_gw` responds |
 
 Send-only is structural in both files: `verid_gw` never appears under
 `<responderParties>`, so neither gateway will push toward ver.id. Nothing else
 enforces the one-way channel, so do not "tidy" that asymmetry away.
 
-`provision.sh` is the shared login + PMode-upload + message-filter script the two
-`verid` provisioners use. The older `domibus-provision` service keeps its own
+`provision.sh` is the shared login + PMode-upload + message-filter script the
+`verid` profile's provisioner uses. The older `domibus-provision` service keeps its own
 inline copy; it predates the script and is left as-is deliberately.
 
