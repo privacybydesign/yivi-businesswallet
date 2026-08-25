@@ -11,7 +11,7 @@
 
   SEND-ONLY from ver.id's own side too: verid_gw is the only initiator and
   blue_gw the only responder, so this gateway can push to us and nothing else.
-  Combined with our PMode (pmode-ours-with-verid.xml) omitting verid_gw from
+  Combined with our PMode (backend/internal/qerdsprovider/testdata/pmode.xml) omitting verid_gw from
   responderParties, the channel is one-way at BOTH ends.
 
   Everything under <businessProcesses> that is not party-specific — the service,
