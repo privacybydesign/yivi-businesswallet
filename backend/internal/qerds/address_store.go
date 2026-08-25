@@ -159,8 +159,8 @@ func (s *Store) AllAddresses(ctx context.Context) ([]Address, error) {
 // and eDelivery access points treat the finalRecipient property
 // case-insensitively, so an exact comparison would fail to resolve an address we
 // do own and drop a message the provider has already handed over. Provisioning
-// keeps the unique constraint on the stored form, so this can only ever resolve
-// one row.
+// lowercases every address it mints, so the fold resolves one row — the UNIQUE
+// constraint on `address` is case-sensitive and does not enforce that.
 func (s *Store) OrgByAddress(ctx context.Context, address string) (uuid.UUID, error) {
 	const query = `SELECT organization_id FROM qerds_addresses WHERE lower(address) = lower($1)`
 	var orgID uuid.UUID
