@@ -10,6 +10,8 @@ import (
 	"math/big"
 	"testing"
 	"time"
+
+	eudijwt "github.com/privacybydesign/irmago/eudi/jwt"
 )
 
 // baseContext stands in for irmago's TrustModel: a template carrying the anchors
@@ -56,7 +58,8 @@ func TestMergeTrustChainKeepsBaseAnchors(t *testing.T) {
 		})
 	}
 
-	// The base pool is shared across redemptions, so the merge must have copied it.
+	// The template hands back the trust model's own pool pointers, so the merge
+	// must have copied rather than added in place: the base must still reject.
 	if _, err := leafSignedBy(t, added, addedKey, "leaf").Verify(base.GetVerificationOptionsTemplate()); err == nil {
 		t.Fatal("merge mutated the base trust model's root pool")
 	}
@@ -160,6 +163,70 @@ func TestIsSelfSignedRejectsForgedIssuerName(t *testing.T) {
 	}
 	if !isSelfSigned(root) {
 		t.Fatal("genuine self-signed root not classified as self-signed")
+	}
+}
+
+func TestTrustContextMergesConfiguredChain(t *testing.T) {
+	builtIn, builtInKey := selfSignedCA(t, "Built-in Root")
+	partner, partnerKey := selfSignedCA(t, "Ver.iD Dev Root CA")
+
+	basePool := x509.NewCertPool()
+	basePool.AddCert(builtIn)
+	base := &baseContext{opts: x509.VerifyOptions{
+		Roots:     basePool,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}}
+
+	e := &Engine{redeem: RedeemConfig{TrustChainPEM: pemOf(partner)}}
+	merged, err := e.trustContext(base)
+	if err != nil {
+		t.Fatalf("trustContext: %v", err)
+	}
+
+	// Redeem derives every x5c consumer from this one context — the credential's
+	// own issuer chain and the Status List Token its status.status_list reference
+	// resolves to. Both are signed under the partner root, so a context that
+	// carried only the built-in anchors would fail redemption on the status list
+	// with "unauthorized: certificate validation" even though the credential
+	// itself verified.
+	for _, tc := range []struct {
+		name   string
+		issuer *x509.Certificate
+		key    *ecdsa.PrivateKey
+	}{
+		{"built-in anchor", builtIn, builtInKey},
+		{"configured partner anchor", partner, partnerKey},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			leaf := leafSignedBy(t, tc.issuer, tc.key, "leaf")
+			if _, err := leaf.Verify(merged.GetVerificationOptionsTemplate()); err != nil {
+				t.Fatalf("leaf under %s did not verify: %v", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestTrustContextWithoutChainReturnsBase(t *testing.T) {
+	base := &baseContext{opts: x509.VerifyOptions{Roots: x509.NewCertPool()}}
+
+	e := &Engine{}
+	got, err := e.trustContext(base)
+	if err != nil {
+		t.Fatalf("trustContext: %v", err)
+	}
+	// Unconfigured, the built-in trust model must be handed through untouched
+	// rather than copied into an equivalent-looking context.
+	if got != eudijwt.X509VerificationContext(base) {
+		t.Fatalf("base context not passed through: %#v", got)
+	}
+}
+
+func TestTrustContextRejectsUnusableChain(t *testing.T) {
+	base := &baseContext{opts: x509.VerifyOptions{Roots: x509.NewCertPool()}}
+
+	e := &Engine{redeem: RedeemConfig{TrustChainPEM: []byte("not a pem")}}
+	if _, err := e.trustContext(base); err == nil {
+		t.Fatal("expected an error, got none")
 	}
 }
 

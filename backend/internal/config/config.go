@@ -267,9 +267,11 @@ type Config struct {
 	AttestationHolder           string
 	AttestationHolderStorageDir string
 	AttestationHolderMasterKey  string
-	// AttestationHolderTrustChain is the trusted-issuer CA PEM the holder verifies
-	// received credentials against (holder analogue of EudiIssuerChain). Empty uses
-	// irmago's built-in trust model.
+	// AttestationHolderTrustChain is extra trusted-issuer CA PEM the holder
+	// verifies received credentials against (holder analogue of EudiIssuerChain).
+	// It is *added* to irmago's built-in trust model, not a replacement for it, so
+	// setting it keeps every issuer that already verified working; concatenate to
+	// trust several partners. Empty uses the built-in trust model alone.
 	AttestationHolderTrustChain string
 	// AttestationHolderStagingAnchors adds irmago's staging trust anchors (for the
 	// Yivi staging Veramo issuer in dev/staging).

@@ -27,6 +27,14 @@ import (
 // The base template also carries the KeyUsages the built-in path verifies under
 // (ExtKeyUsageAny — irmago checks the digitalSignature key usage itself), which
 // is inherited here rather than narrowed to ExtKeyUsageClientAuth.
+//
+// A PEM holding no self-signed certificate is accepted and adds no roots. That
+// is deliberate, not an oversight: adding an intermediate under a root the base
+// context already trusts is legitimate, and rejecting it to catch the other case
+// would break it. The cost is that a partner chain pasted without its root
+// verifies nothing and says so only later, as "certificate signed by unknown
+// authority" at redemption — so when a newly configured anchor has no effect,
+// check the PEM actually carries the root.
 func mergeTrustChain(base eudijwt.X509VerificationContext, pemChain []byte) (eudijwt.X509VerificationContext, error) {
 	certs, err := utils.ParsePemCertificateChain(pemChain)
 	if err != nil {
@@ -55,8 +63,9 @@ func mergeTrustChain(base eudijwt.X509VerificationContext, pemChain []byte) (eud
 	}, nil
 }
 
-// clonePool copies pool so adding the configured anchors cannot mutate the
-// trust model's own pools, which are shared across redemptions.
+// clonePool copies pool because GetVerificationOptionsTemplate hands back the
+// trust model's own pool pointers: adding to them in place would change what
+// the base context itself trusts.
 func clonePool(pool *x509.CertPool) *x509.CertPool {
 	if pool == nil {
 		return x509.NewCertPool()

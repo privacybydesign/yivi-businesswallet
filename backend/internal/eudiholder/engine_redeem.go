@@ -56,6 +56,18 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		return Redeemed{}, fmt.Errorf("eudiholder: redeem load trust anchors org %s: %w", orgID, err)
 	}
 
+	// x509Context is the trust material *both* x5c validations run against — the
+	// credential's own issuer certificate and, separately, the Status List Token
+	// its status.status_list reference resolves to. It is built here, above
+	// statusChecker, precisely so the checker inherits the merged anchors: built
+	// from the unmerged conf.Issuers, a partner credential would verify while its
+	// status list failed the redemption with "unauthorized: certificate
+	// validation" (statuslist/verifier.go).
+	x509Context, err := e.trustContext(&conf.Issuers)
+	if err != nil {
+		return Redeemed{}, err
+	}
+
 	// statusChecker performs the IETF Token Status List check the newer irmago
 	// holder pipeline supports. It is shared between the receive-time verification
 	// context (which rejects a credential whose status-list bit is not valid) and
@@ -64,13 +76,15 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	// with the rest of the holder schema). Credentials that carry no
 	// status.status_list reference are unaffected — the check is a no-op for them.
 	statusChecker := statuslist.NewChecker(statuslist.VerificationContext{
-		X509Context: &conf.Issuers,
+		X509Context: x509Context,
 		Clock:       eudijwt.NewSystemClock(),
 	}, db.NewStatusListCacheStore(st.Db()))
 
-	verCtx, err := e.verificationContext(conf, statusChecker)
-	if err != nil {
-		return Redeemed{}, err
+	verCtx := sdjwtvc.SdJwtVcVerificationContext{
+		X509VerificationContext: x509Context,
+		Clock:                   eudijwt.NewSystemClock(),
+		JwtVerifier:             sdjwt.NewJwxJwtVerifier(),
+		StatusChecker:           statusChecker,
 	}
 	// holderKeyBinder is required by NewClient (non-nil): the WSCA-backed binder
 	// when configured (holder key + proof of possession produced by the
@@ -143,28 +157,27 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	}
 }
 
-// verificationContext builds the SD-JWT VC trust context: irmago's built-in
-// trust model loaded into conf.Issuers (plus its staging anchors when enabled),
-// with any configured trusted-issuer CA chain merged on top. The chain adds
-// anchors, it does not replace the built-in model — a partner issuer has to be
-// trusted alongside the ones already there, not instead of them. statusChecker
-// is set so a received credential that references a Token Status List is rejected
-// unless its bit reads valid (a no-op for credentials that carry no reference).
-func (e *Engine) verificationContext(conf *eudi.Configuration, statusChecker *statuslist.Checker) (sdjwtvc.SdJwtVcVerificationContext, error) {
-	var x509Context eudijwt.X509VerificationContext = &conf.Issuers
-	if len(e.redeem.TrustChainPEM) > 0 {
-		merged, err := mergeTrustChain(x509Context, e.redeem.TrustChainPEM)
-		if err != nil {
-			return sdjwtvc.SdJwtVcVerificationContext{}, fmt.Errorf("eudiholder: holder trust chain: %w", err)
-		}
-		x509Context = merged
+// trustContext builds the X.509 trust material received credentials are verified
+// against: base — irmago's built-in trust model, conf.Issuers, carrying its
+// staging anchors when enabled — with any configured trusted-issuer CA chain
+// merged on top. The chain adds anchors, it does not replace the built-in model
+// — a partner issuer has to be trusted alongside the ones already there, not
+// instead of them.
+//
+// One context serves every x5c path a redemption takes, which is why the caller
+// builds it before anything that consumes it. A credential and the Status List
+// Token it points at are two separate chain validations, and a partner signs
+// both under the same root: trusting the root for one and not the other rejects
+// the credential just as surely as trusting it for neither.
+func (e *Engine) trustContext(base eudijwt.X509VerificationContext) (eudijwt.X509VerificationContext, error) {
+	if len(e.redeem.TrustChainPEM) == 0 {
+		return base, nil
 	}
-	return sdjwtvc.SdJwtVcVerificationContext{
-		X509VerificationContext: x509Context,
-		Clock:                   eudijwt.NewSystemClock(),
-		JwtVerifier:             sdjwt.NewJwxJwtVerifier(),
-		StatusChecker:           statusChecker,
-	}, nil
+	merged, err := mergeTrustChain(base, e.redeem.TrustChainPEM)
+	if err != nil {
+		return nil, fmt.Errorf("eudiholder: holder trust chain: %w", err)
+	}
+	return merged, nil
 }
 
 // storeRecorder decorates irmago's holder credential store to capture the batches
