@@ -35,19 +35,33 @@ type heldRecorder interface {
 type OfferReceiver struct {
 	redeemer offerRedeemer
 	store    heldRecorder
+	// trusted bounds whose offers are redeemed. See TrustedOfferSenders for why
+	// the holder's issuer-trust validation does not make this redundant.
+	trusted TrustedOfferSenders
 }
 
-func NewOfferReceiver(redeemer offerRedeemer, store heldRecorder) *OfferReceiver {
-	return &OfferReceiver{redeemer: redeemer, store: store}
+func NewOfferReceiver(redeemer offerRedeemer, store heldRecorder, trusted TrustedOfferSenders) *OfferReceiver {
+	return &OfferReceiver{redeemer: redeemer, store: store, trusted: trusted}
 }
 
 // OnInboundMessage implements qerds.InboundConsumer. It is idempotent: a message
 // whose offer has already been redeemed (an active held row links it) is skipped,
 // so a re-delivered offer is never redeemed twice.
-func (r *OfferReceiver) OnInboundMessage(ctx context.Context, orgID, messageID uuid.UUID, _ string, body string) error {
+func (r *OfferReceiver) OnInboundMessage(ctx context.Context, orgID, messageID uuid.UUID, sender, _ string, body string) error {
 	env, ok := ParseCredentialOfferEnvelope(body)
 	if !ok {
 		return nil // not a credential offer — an ordinary QERDS message
+	}
+
+	if !r.trusted.Trusts(sender) {
+		// Not an error: the message is legitimately stored and stays in the org's
+		// inbox for an operator to look at. Only automatic redemption is withheld,
+		// so an untrusted sender can never silently write into a wallet.
+		slog.WarnContext(ctx, "attestation: credential offer from untrusted sender not redeemed",
+			slog.String("orgId", orgID.String()),
+			slog.String("sender", sender),
+			slog.String("messageId", messageID.String()))
+		return nil
 	}
 
 	already, err := r.store.HeldForMessage(ctx, orgID, messageID)
@@ -76,6 +90,7 @@ func (r *OfferReceiver) OnInboundMessage(ctx context.Context, orgID, messageID u
 
 	slog.InfoContext(ctx, "attestation: redeemed QERDS credential offer",
 		slog.String("orgId", orgID.String()),
+		slog.String("sender", sender),
 		slog.String("vct", redeemed.VCT),
 		slog.String("messageId", messageID.String()))
 	return nil

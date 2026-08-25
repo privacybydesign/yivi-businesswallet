@@ -423,7 +423,24 @@ func run() error {
 	attestationStore := attestation.NewStore(pool, recorder)
 	// An inbound QERDS message carrying an OpenID4VCI credential offer is redeemed
 	// into the org's holder engine and indexed (source=qerds).
-	qerdsService.SetInboundConsumer(attestation.NewOfferReceiver(attHolder, attestationStore))
+	// The sender allowlist decides whose offers are auto-redeemed. Unset trusts
+	// every sender, which is only safe while every sender is an org on this
+	// deployment — warn loudly, because peering with an external AS4 party (see
+	// partners/verid/) makes that assumption false.
+	trustedSenders := attestation.NewTrustedOfferSenders(cfg.QerdsTrustedOfferSenders)
+	if trustedSenders.Configured() {
+		slog.InfoContext(ctx, "qerds credential-offer sender allowlist active",
+			slog.Any("trustedSenders", trustedSenders.Patterns()))
+	} else {
+		slog.WarnContext(ctx, "qerds credential-offer sender allowlist NOT configured; "+
+			"offers from ANY sender will be auto-redeemed. Set QERDS_TRUSTED_OFFER_SENDERS "+
+			"before peering with an external AS4 party.")
+	}
+	qerdsService.SetInboundConsumer(attestation.NewOfferReceiver(attHolder, attestationStore, trustedSenders))
+
+	// Drain inbound for every provisioned address on a ticker, so a remote party's
+	// credential offer is received without an operator being logged in.
+	startQerdsInboundPoller(ctx, qerdsService, cfg.QerdsInboundPollInterval)
 	attestationService := attestation.NewService(
 		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, attestationStore, attHolder, cfg.AppBaseURL,
 	)

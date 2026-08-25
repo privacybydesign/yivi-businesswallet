@@ -124,6 +124,33 @@ func (s *Store) ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, 
 	return addresses, nil
 }
 
+// AllAddresses returns every provisioned digital address across all
+// organizations, each carrying its owning org. It backs the background inbound
+// poller, which must drain the access point's queue for addresses nobody is
+// currently looking at — an offer pushed by a remote party must land without an
+// operator having a browser tab open.
+func (s *Store) AllAddresses(ctx context.Context) ([]Address, error) {
+	const query = `SELECT ` + addressColumns + ` FROM qerds_addresses ORDER BY created_at`
+	rows, err := s.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("qerds: list all addresses: %w", err)
+	}
+	defer rows.Close()
+
+	addresses := []Address{}
+	for rows.Next() {
+		a, err := scanAddress(rows)
+		if err != nil {
+			return nil, fmt.Errorf("qerds: list all addresses scan: %w", err)
+		}
+		addresses = append(addresses, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("qerds: list all addresses rows: %w", err)
+	}
+	return addresses, nil
+}
+
 // OrgByAddress resolves the organization that owns a digital address. Used by
 // the inbound webhook, which is keyed on recipient address, not org slug.
 func (s *Store) OrgByAddress(ctx context.Context, address string) (uuid.UUID, error) {

@@ -59,10 +59,14 @@ func (f *fakeStore) CreateInbound(_ context.Context, orgID uuid.UUID, in qerdspr
 		ID:               uuid.New(),
 		OrganizationID:   orgID,
 		Direction:        DirectionInbound,
+		SenderAddress:    string(in.Sender),
 		RecipientAddress: string(in.Recipient),
 		Subject:          in.Subject,
-		ProviderRef:      in.ProviderRef,
-		Status:           StatusReceived,
+		// Body matters: the inbound consumer parses it to find a credential offer,
+		// so a fake that drops it cannot catch a body-threading regression.
+		Body:        in.Body,
+		ProviderRef: in.ProviderRef,
+		Status:      StatusReceived,
 	}
 	f.messages = append(f.messages, m)
 	return m, true, nil
@@ -76,6 +80,13 @@ func (f *fakeStore) DefaultAddress(_ context.Context, _ uuid.UUID) (Address, err
 }
 
 func (f *fakeStore) ListAddresses(_ context.Context, _ uuid.UUID) ([]Address, error) {
+	if f.defaultAddr.Address == "" {
+		return []Address{}, nil
+	}
+	return []Address{f.defaultAddr}, nil
+}
+
+func (f *fakeStore) AllAddresses(_ context.Context) ([]Address, error) {
 	if f.defaultAddr.Address == "" {
 		return []Address{}, nil
 	}

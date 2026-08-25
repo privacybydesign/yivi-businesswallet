@@ -22,6 +22,7 @@ type addressStore interface {
 	DefaultAddress(ctx context.Context, orgID uuid.UUID) (Address, error)
 	ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, error)
 	OrgByAddress(ctx context.Context, address string) (uuid.UUID, error)
+	AllAddresses(ctx context.Context) ([]Address, error)
 }
 
 // provider is the external QERDS provider seam (see internal/qerdsprovider).
@@ -37,8 +38,15 @@ type provider interface {
 // optional and best-effort: a consumer error is logged, never fatal, so it can
 // never lose or reject an already-stored QERDS message. Implementations must be
 // idempotent — the consumer runs again if the same message is re-delivered.
+//
+// sender is the message's originalSender address. It is passed because a
+// consumer that acts on content — redeeming a credential offer, say — needs to
+// know WHO delivered it: an offer is a bearer token, so once a foreign AS4 party
+// can put messages on the network, "is this credential authentic" and "was this
+// offer meant for this org" become different questions. Content validation
+// answers only the first.
 type InboundConsumer interface {
-	OnInboundMessage(ctx context.Context, orgID, messageID uuid.UUID, subject, body string) error
+	OnInboundMessage(ctx context.Context, orgID, messageID uuid.UUID, sender, subject, body string) error
 }
 
 // Service coordinates the send flow, inbound intake and evidence persistence
@@ -65,9 +73,11 @@ func (s *Service) notifyConsumer(ctx context.Context, orgID uuid.UUID, msg Messa
 	if s.consumer == nil {
 		return
 	}
-	if err := s.consumer.OnInboundMessage(ctx, orgID, msg.ID, msg.Subject, msg.Body); err != nil {
+	if err := s.consumer.OnInboundMessage(ctx, orgID, msg.ID, msg.SenderAddress, msg.Subject, msg.Body); err != nil {
 		slog.ErrorContext(ctx, "qerds inbound consumer failed",
-			slog.String("messageId", msg.ID.String()), slog.String("error", err.Error()))
+			slog.String("messageId", msg.ID.String()),
+			slog.String("sender", msg.SenderAddress),
+			slog.String("error", err.Error()))
 	}
 }
 
@@ -174,6 +184,67 @@ func (s *Service) Poll(ctx context.Context, orgID uuid.UUID) (int, error) {
 		}
 	}
 	return count, nil
+}
+
+// PollAll drains inbound messages for every provisioned address on the
+// deployment and returns how many were newly stored. It backs the background
+// poller, so an offer pushed by a remote AS4 party is received without anyone
+// being logged in — Poll only ever runs for an org whose console asks.
+//
+// A failure on one address is logged and the sweep continues: one org's
+// unreachable address must not stop every other org from receiving. The last
+// error is returned for the caller's log.
+func (s *Service) PollAll(ctx context.Context) (int, error) {
+	addresses, err := s.addresses.AllAddresses(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+	var lastErr error
+	for _, addr := range addresses {
+		if ctx.Err() != nil {
+			return count, ctx.Err()
+		}
+		inbound, err := s.provider.Fetch(ctx, qerdsprovider.Address(addr.Address))
+		if err != nil {
+			lastErr = fmt.Errorf("qerds: fetch %q: %w", addr.Address, err)
+			slog.ErrorContext(ctx, "qerds background poll: fetch failed",
+				slog.String("address", addr.Address), slog.String("error", err.Error()))
+			continue
+		}
+		for _, in := range inbound {
+			// Attribute by the message's own finalRecipient when it names an
+			// address we know, not by the address we happened to poll: the WS
+			// plugin queue is shared across the access point, so a provider that
+			// returns a message for another recipient must not have it filed
+			// under this org.
+			orgID := addr.OrganizationID
+			if recipient := string(in.Recipient); recipient != "" && recipient != addr.Address {
+				resolved, err := s.addresses.OrgByAddress(ctx, recipient)
+				if err != nil {
+					slog.WarnContext(ctx, "qerds background poll: unknown recipient, skipping",
+						slog.String("polledAddress", addr.Address),
+						slog.String("recipient", recipient))
+					continue
+				}
+				orgID = resolved
+			}
+
+			msg, created, err := s.messages.CreateInbound(ctx, orgID, in)
+			if err != nil {
+				lastErr = err
+				slog.ErrorContext(ctx, "qerds background poll: store failed",
+					slog.String("address", addr.Address), slog.String("error", err.Error()))
+				continue
+			}
+			if created {
+				count++
+			}
+			s.notifyConsumer(ctx, orgID, msg)
+		}
+	}
+	return count, lastErr
 }
 
 // ReceiveInbound stores a single message pushed by the provider (webhook path).

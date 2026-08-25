@@ -313,6 +313,116 @@ mounted over the image's expired ones. With those, the loopback completes end to
 `ACKNOWLEDGED`, receiving side `RECEIVED`. This proves AS4 transport plumbing, **not** qualified
 compliance — the certs are self-signed and real qualified delivery keeps cert validation on.
 
+### Two-gateway bench: a remote party sending in (`verid` profile)
+
+The `domibus` profile above is a **loopback**: one gateway sending to itself. It
+proves the transport, but it structurally cannot prove the case that matters for
+onboarding an external issuer like ver.id — a message arriving from a party that
+is not us. A loopback signs with our own key, and Domibus will not let a WS-plugin
+submission claim a `From` party that is not the submitting gateway's own, so it
+cannot be faked either.
+
+The `verid` profile therefore adds a **second, independent access point** with its
+own key, PMode and database, standing in for ver.id:
+
+```
+ver.id's side (simulated)                     our side
+domibus-verid  (party verid_gw) ──AS4──▶ domibus (party blue_gw) ──▶ backend
+  key alias verid_gw                       key alias blue_gw
+domibus-verid-mysql                        domibus-mysql
+```
+
+```sh
+docker compose --profile domibus --profile verid up -d
+```
+
+Both profiles are required: `verid` adds ver.id's side and re-points our PMode; it
+does not bring up our gateway. ver.id's console is on
+`http://localhost:8091/domibus` (`admin` / `123456`).
+
+**Send-only is structural, not conventional.** `verid_gw` appears under
+`<initiatorParties>` and never under `<responderParties>`, in *both* PModes, so
+neither gateway will push toward ver.id. `replyPattern="response"` means the AS4
+receipt travels back on the HTTP response to ver.id's own POST — which is why a
+send-only partner needs no inbound endpoint, no MSH TLS certificate and no
+firewall hole. Do not "tidy" that party-list asymmetry away.
+
+Three things make the second gateway a genuinely separate party rather than a
+copy of ours:
+
+- **Its own signing key.** `verid_keystore.jks` holds alias `verid_gw`, and
+  `-Ddomibus.security.key.private.alias=verid_gw` selects it. Without that
+  override the image would sign as `blue_gw`.
+- **Mutual truststores.** Our `gateway_truststore.jks` gained `verid_gw`;
+  `verid_truststore.jks` holds our `blue_gw`/`red_gw`. This is the certificate
+  exchange a real onboarding performs out of band.
+- **A dedicated network per gateway/database pair.** The Domibus Tomcat image
+  resolves its datasource host as `mysql`, and two services cannot share that
+  alias on one network. `domibus-verid` is therefore deliberately **not** attached
+  to `default` — it sits on `verid-internal` (its own database) plus `as4` (the
+  gateway-to-gateway leg). Attaching it to `default` as well would make `mysql`
+  ambiguous and is the single easiest way to break this bench.
+
+PMode files are split so CI stays untouched: `testdata/pmode.xml` remains the
+loopback that `domibus_integration_test.go` embeds, while
+`pmode-ours-with-verid.xml` (loopback **plus** ver.id as initiator) and
+`pmode-verid.xml` (their side) are uploaded by the `verid` profile's provisioners.
+`domibus-provision-verid` is ordered after `domibus-provision` so its PMode wins.
+
+Drive it with `cmd/as4offer`, which submits a real credential-offer envelope
+through ver.id's gateway:
+
+```sh
+cd backend
+go run ./cmd/as4offer -recipient <org-slug>@qerds.localhost   -name 'Bewijs van inschrijving' -offer 'openid-credential-offer://?credential_offer=%7B...%7D'
+```
+
+What to check, in order — each row fails differently, so the first failing row
+tells you where to look:
+
+| Check | Where |
+|---|---|
+| ver.id's gateway accepted the submission | `as4offer` prints a message id |
+| The AS4 leg completed | ver.id's console: message `SENT`/`ACKNOWLEDGED`; ours: `RECEIVED` from party `verid` |
+| The WS plugin routed a foreign sender | ours: `listPendingMessages(finalRecipient=<org address>)` returns it (the message filter must be persisted) |
+| The right org was resolved | `qerds_messages` row, `direction=inbound`, expected `organization_id`, `sender_address=verid@...` |
+| The sender allowlist let it through | backend log: redeemed, not "offer from untrusted sender not redeemed" |
+| The credential landed | `held_attestations` row, `source=qerds`, `sourceMessageId` set |
+| No operator was needed | all of the above with no browser session open (the background poller) |
+
+Two backend behaviours exist specifically for this path. `QERDS_TRUSTED_OFFER_SENDERS`
+gates which senders' offers are auto-redeemed — **empty trusts everyone**, which is
+safe only while every sender is an org on this deployment, so the backend warns at
+boot when it is unset. And `QERDS_INBOUND_POLL_INTERVAL` (default `30s`) drains
+inbound for every provisioned address on a ticker; without it inbound only arrives
+when an org console polls, i.e. when a human has a tab open, and a pushed offer's
+pre-authorized code can expire first.
+
+The wallet-side half is covered by
+`internal/qerds/verid_inbound_integration_test.go` (`//go:build integration`,
+skipped unless **both** `QERDS_TEST_DOMIBUS_URL` and
+`QERDS_TEST_VERID_DOMIBUS_URL` are set): ver.id submits through its own gateway,
+`PollAll` drains ours, and the offer is attributed, gated and redeemed. It also
+covers the negative branch — an offer from a sender outside
+`QERDS_TRUSTED_OFFER_SENDERS` is stored but **not** redeemed.
+
+**Gotcha: the single-gateway integration test resets our PMode.**
+`domibus_integration_test.go` calls `provisionDomibus`, which uploads
+`testdata/pmode.xml` — the loopback-only PMode, with no `verid_gw` party. Running
+it against the two-gateway bench therefore silently un-configures ver.id, and the
+next inbound offer is rejected by our gateway with the message never arriving. Run
+`domibus-provision-verid` again afterwards:
+
+```sh
+docker compose --profile domibus --profile verid up domibus-provision-verid
+```
+
+**Still not qualified.** Self-signed certs, no QTSP, no qualified timestamps. This
+bench proves two-party AS4 plumbing and the wallet-side receive path — nothing more.
+Note also that `compose.override.yaml` disables Domibus's certificate-validation
+checks; an environment that actually peers with an external party must turn those
+back on, or it accepts messages signed by anything.
+
 The `payload`/`value` `elementFormDefault`-unqualified reset (WS-plugin `submitRequest`) that the
 offline marshalling tests pin was a real bug shaken out here. Coverage: `domibus_test.go` unit-tests
 envelope construction + response parsing offline (runs in the default `go test`), and
