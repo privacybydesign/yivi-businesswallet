@@ -229,6 +229,29 @@ authorize your *issuer*. Both must be configured, and they are different
 identities — a party registration without the issuer trust anchor gets you
 accepted messages whose redemption then fails.
 
+Where each one lands on the wallet side:
+
+| Trust decision | Where it is configured |
+|---|---|
+| AS4 sender | your gateway certificate in the wallet's Domibus truststore, plus your digital address in `QERDS_TRUSTED_OFFER_SENDERS` |
+| Credential issuer | your root CA in `ATTESTATION_HOLDER_TRUST_CHAIN` |
+
+`ATTESTATION_HOLDER_TRUST_CHAIN` takes the PEM itself, not a path, and *adds* to
+the anchors the wallet already trusts rather than replacing them — so several
+partners can be trusted at once by concatenating their roots. Self-signed
+certificates are taken as roots and everything else as intermediates, so the
+order does not matter. Your current dev root is checked in at
+[`verid-dev-root-ca.crt`](verid-dev-root-ca.crt):
+
+```
+CN=Ver.iD Dev Root CA, O=Subst.id B.V., C=NL
+SHA-256 02:4C:01:51:EE:C4:AC:7D:CB:D8:01:0B:15:B7:87:73:74:93:F5:23:9A:64:BE:BF:EE:89:26:9B:39:9A:7D:8B
+valid until 2035-06-30
+```
+
+Send us the **full chain** if your issuer signs from an intermediate rather than
+straight off that root — the root alone cannot complete the path.
+
 The reason the sender side matters at all: a credential offer is a **bearer
 token**. Whoever redeems the pre-authorized code gets the credential, so a
 genuine offer replayed at a different organization would produce a correctly

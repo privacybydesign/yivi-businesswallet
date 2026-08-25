@@ -88,12 +88,16 @@ type Engine struct {
 // received credentials against irmago's built-in production trust anchors only
 // and requires HTTPS issuer endpoints.
 type RedeemConfig struct {
-	// TrustChainPEM, when set, is the trusted-issuer CA chain received credentials
-	// are verified against — the holder analogue of the verifier's
-	// EUDI_ISSUER_CHAIN. When empty, irmago's built-in trust model is used.
+	// TrustChainPEM, when set, holds extra trusted-issuer CAs received credentials
+	// may chain to — the holder analogue of the verifier's EUDI_ISSUER_CHAIN, used
+	// to trust a partner issuer such as ver.iD. It is *added* to irmago's built-in
+	// trust model rather than replacing it, so the anchors below keep working
+	// alongside it. Concatenate to trust several partners; each self-signed
+	// certificate is taken as a root and everything else as an intermediate, so
+	// order does not matter (see mergeTrustChain).
 	TrustChainPEM []byte
 	// StagingTrustAnchors adds irmago's staging trust anchors, for dev/staging
-	// issuers (e.g. the Yivi staging Veramo issuer). Ignored when TrustChainPEM set.
+	// issuers (e.g. the Yivi staging Veramo issuer).
 	StagingTrustAnchors bool
 	// AllowInsecureHTTP permits http:// issuer endpoints; tests / local dev only.
 	AllowInsecureHTTP bool
