@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  VER.ID's gateway PMode for the two-gateway QERDS bench (`verid` compose
+  profile). This models the access point ver.id operates, so it is also the
+  reference for what they configure on their own gateway — see
+  partners/verid/README.md.
+
+  Note the party attribute: this gateway IS verid_gw. Its private signing key is
+  the verid_gw alias in verid_keystore.jks, and its truststore holds our
+  blue_gw/red_gw certificates.
+
+  SEND-ONLY from ver.id's own side too: verid_gw is the only initiator and
+  blue_gw the only responder, so this gateway can push to us and nothing else.
+  Combined with our PMode (pmode-ours-with-verid.xml) omitting verid_gw from
+  responderParties, the channel is one-way at BOTH ends.
+
+  Everything under <businessProcesses> that is not party-specific — the service,
+  action, leg, security policy and property set — is byte-identical to our PMode.
+  It has to be: AS4 legs only match when both gateways agree.
+
+  Uploaded by the `domibus-verid-provision` compose service.
+-->
+<db:configuration xmlns:db="http://domibus.eu/configuration" party="verid_gw">
+    <mpcs>
+        <mpc name="defaultMpc"
+             qualifiedName="http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/defaultMPC"
+             enabled="true"
+             default="true"
+             retention_downloaded="0"
+             retention_undownloaded="14400"/>
+    </mpcs>
+    <businessProcesses>
+        <roles>
+            <role name="defaultInitiatorRole"
+                  value="http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/initiator"/>
+            <role name="defaultResponderRole"
+                  value="http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/responder"/>
+        </roles>
+        <parties>
+            <partyIdTypes>
+                <partyIdType name="partyTypeUrn"
+                             value="urn:oasis:names:tc:ebcore:partyid-type:unregistered"/>
+            </partyIdTypes>
+            <!-- This gateway. Its own endpoint is never dereferenced by itself,
+                 and because we never push to ver.id nobody else dereferences it
+                 either — a send-only party needs no reachable MSH. -->
+            <party name="verid_gw"
+                   endpoint="http://domibus-verid:8080/domibus/services/msh"
+                   allowChunking="false">
+                <identifier partyId="verid" partyIdType="partyTypeUrn"/>
+            </party>
+            <!-- The business wallet's gateway: the real destination. Resolved over
+                 the shared `as4` compose network by service name. In a real
+                 deployment this is the wallet operator's public MSH URL. -->
+            <party name="blue_gw"
+                   endpoint="http://domibus:8080/domibus/services/msh"
+                   allowChunking="false">
+                <identifier partyId="domibus-blue" partyIdType="partyTypeUrn"/>
+            </party>
+        </parties>
+        <meps>
+            <mep name="oneway"
+                 value="http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/oneWay"/>
+            <mep name="twoway"
+                 value="http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/twoWay"/>
+            <binding name="push"
+                     value="http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/push"/>
+            <binding name="pushAndPush"
+                     value="http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/push-and-push"/>
+        </meps>
+        <properties>
+            <property name="originalSenderProperty" key="originalSender" datatype="string" required="true"/>
+            <property name="finalRecipientProperty" key="finalRecipient" datatype="string" required="true"/>
+            <property name="subjectProperty" key="subject" datatype="string" required="false"/>
+            <propertySet name="ecodexPropertySet">
+                <propertyRef property="finalRecipientProperty"/>
+                <propertyRef property="originalSenderProperty"/>
+                <propertyRef property="subjectProperty"/>
+            </propertySet>
+        </properties>
+        <payloadProfiles>
+            <payload name="businessContentPayload" cid="cid:message" required="true" mimeType="text/xml"/>
+            <payload name="businessContentAttachment" cid="cid:attachment" required="false" mimeType="application/octet-stream"/>
+            <payloadProfile name="MessageProfile" maxSize="40894464">
+                <attachment name="businessContentPayload"/>
+                <attachment name="businessContentAttachment"/>
+            </payloadProfile>
+        </payloadProfiles>
+        <securities>
+            <security name="eDeliveryAS4Policy" policy="eDeliveryAS4Policy.xml" signatureMethod="RSA_SHA256"/>
+        </securities>
+        <errorHandlings>
+            <errorHandling name="demoErrorHandling"
+                           errorAsResponse="true"
+                           businessErrorNotifyProducer="false"
+                           businessErrorNotifyConsumer="false"
+                           deliveryFailureNotifyProducer="false"/>
+        </errorHandlings>
+        <agreements>
+            <agreement name="agreement1" value="A1" type=""/>
+        </agreements>
+        <services>
+            <service name="testService1" value="bdx:noprocess" type="tc1"/>
+        </services>
+        <actions>
+            <action name="tc1Action" value="TC1Leg1"/>
+        </actions>
+        <as4>
+            <receptionAwareness name="receptionAwareness" retry="12;4;CONSTANT" duplicateDetection="true"/>
+            <!-- replyPattern="response" is why a send-only party needs no inbound
+                 endpoint: the AS4 receipt (non-repudiation of receipt) comes back
+                 on the HTTP response to ver.id's own outbound POST. -->
+            <reliability name="AS4Reliability" nonRepudiation="true" replyPattern="response"/>
+        </as4>
+        <legConfigurations>
+            <legConfiguration name="pushTestcase1tc1Action"
+                              service="testService1"
+                              action="tc1Action"
+                              defaultMpc="defaultMpc"
+                              reliability="AS4Reliability"
+                              security="eDeliveryAS4Policy"
+                              receptionAwareness="receptionAwareness"
+                              propertySet="ecodexPropertySet"
+                              errorHandling="demoErrorHandling"
+                              compressPayloads="true"/>
+        </legConfigurations>
+        <process name="tc1Process"
+                 agreement=""
+                 mep="oneway"
+                 binding="push"
+                 initiatorRole="defaultInitiatorRole"
+                 responderRole="defaultResponderRole">
+            <initiatorParties>
+                <initiatorParty name="verid_gw"/>
+            </initiatorParties>
+            <responderParties>
+                <responderParty name="blue_gw"/>
+            </responderParties>
+            <legs>
+                <leg name="pushTestcase1tc1Action"/>
+            </legs>
+        </process>
+    </businessProcesses>
+</db:configuration>
