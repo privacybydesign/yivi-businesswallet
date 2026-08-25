@@ -193,7 +193,10 @@ If the provider call fails after the DB commit, the message sits in a retryable 
 
 - **Webhook push (preferred):** provider POSTs to `webhook.go`, authenticated out-of-band
   (HMAC/mTLS). Records the inbound message + delivery evidence (that evidence itself has legal
-  effect — it proves *we* received it). Idempotent on `provider_ref`.
+  effect — it proves *we* received it). Idempotent on `provider_ref`. A provider that pushes
+  credential offers should send `fromParty` (the ebMS3 `From` PartyId it authenticated); without
+  it a configured `QERDS_TRUSTED_OFFER_PARTIES` cannot be satisfied, so pushed offers are stored
+  but not auto-redeemed.
 - **Polling fallback:** a background worker pulls new messages by address (a `cmd/` binary or a
   ticker, consistent with the migrate/seed-as-separate-service pattern). Simpler, no inbound
   network exposure, higher latency.
@@ -238,6 +241,9 @@ Env-driven like everything else (`internal/config`):
 | `QERDS_AUTH_TOKEN` | bearer / creds material | when the driver needs it |
 | `QERDS_WEBHOOK_SECRET` | HMAC secret for inbound webhook auth | when webhook enabled |
 | `QERDS_DEFAULT_ADDRESS_DOMAIN` | domain for minted digital addresses | no (has default) |
+| `QERDS_TRUSTED_OFFER_PARTIES` | AS4 parties whose credential offers are auto-redeemed | when peering with an external AS4 party |
+| `QERDS_TRUSTED_OFFER_SENDERS` | sender addresses whose credential offers are auto-redeemed | when peering with an external AS4 party |
+| `QERDS_INBOUND_POLL_INTERVAL` | background inbound sweep interval (`0` disables) | no (default `30s`) |
 
 Boot `Ping` is **fatal** (matches the Yivi readiness gate). `/readyz` stays DB-only.
 
@@ -313,6 +319,129 @@ mounted over the image's expired ones. With those, the loopback completes end to
 `ACKNOWLEDGED`, receiving side `RECEIVED`. This proves AS4 transport plumbing, **not** qualified
 compliance — the certs are self-signed and real qualified delivery keeps cert validation on.
 
+### Two-gateway bench: a remote party sending in (`verid` profile)
+
+The `domibus` profile above is a **loopback**: one gateway sending to itself. It
+proves the transport, but it structurally cannot prove the case that matters for
+onboarding an external issuer like ver.id — a message arriving from a party that
+is not us. A loopback signs with our own key, and Domibus will not let a WS-plugin
+submission claim a `From` party that is not the submitting gateway's own, so it
+cannot be faked either.
+
+The `verid` profile therefore adds a **second, independent access point** with its
+own key, PMode and database, standing in for ver.id:
+
+```
+ver.id's side (simulated)                     our side
+domibus-verid  (party verid_gw) ──AS4──▶ domibus (party blue_gw) ──▶ backend
+  key alias verid_gw                       key alias blue_gw
+domibus-verid-mysql                        domibus-mysql
+```
+
+```sh
+docker compose --profile domibus --profile verid up -d
+```
+
+Both profiles are required: `verid` adds ver.id's side only; it
+does not bring up our gateway. ver.id's console is on
+`http://localhost:8091/domibus` (`admin` / `123456`).
+
+**Send-only is structural, not conventional.** `verid_gw` appears under
+`<initiatorParties>` and never under `<responderParties>`, in *both* PModes, so
+neither gateway will push toward ver.id. `replyPattern="response"` means the AS4
+receipt travels back on the HTTP response to ver.id's own POST — which is why a
+send-only partner needs no inbound endpoint, no MSH TLS certificate and no
+firewall hole. Do not "tidy" that party-list asymmetry away.
+
+Three things make the second gateway a genuinely separate party rather than a
+copy of ours:
+
+- **Its own signing key.** `verid_keystore.jks` holds alias `verid_gw`, and
+  `-Ddomibus.security.key.private.alias=verid_gw` selects it. Without that
+  override the image would sign as `blue_gw`.
+- **Mutual truststores.** Our `gateway_truststore.jks` gained `verid_gw`;
+  `verid_truststore.jks` holds our `blue_gw`/`red_gw`. This is the certificate
+  exchange a real onboarding performs out of band.
+- **A dedicated network per gateway/database pair.** The Domibus Tomcat image
+  resolves its datasource host as `mysql`, and two services cannot share that
+  alias on one network. `domibus-verid` is therefore deliberately **not** attached
+  to `default` — it sits on `verid-internal` (its own database) plus `as4` (the
+  gateway-to-gateway leg). Attaching it to `default` as well would make `mysql`
+  ambiguous and is the single easiest way to break this bench.
+
+**Our gateway runs exactly one PMode.** `testdata/pmode.xml` carries the loopback
+*and* ver.id as an initiator-only party; `pmode-verid.xml` is ver.id's side. That
+merge is deliberate. The two used to be separate files with their own
+provisioners, which meant two PModes competed for one gateway: `go test
+-tags=integration ./...` parallelises across packages, so
+`domibus_integration_test.go`'s `provisionDomibus` could strip `verid_gw` while
+the two-gateway test in `internal/qerds` was mid-flight — that test then failed on
+a 180s timeout with no usable diagnostic. Carrying the party in the shared fixture
+costs the loopback nothing: it is initiator-only, so its endpoint is never
+dereferenced, and its certificate is already in the `gateway_truststore.jks` that
+CI mounts. Verified on a single gateway with `domibus-verid` unresolvable.
+
+Drive it with `cmd/as4offer`, which submits a real credential-offer envelope
+through ver.id's gateway:
+
+```sh
+cd backend
+go run ./cmd/as4offer -recipient <org-slug>@qerds.localhost   -name 'Bewijs van inschrijving' -offer 'openid-credential-offer://?credential_offer=%7B...%7D'
+```
+
+What to check, in order — each row fails differently, so the first failing row
+tells you where to look:
+
+| Check | Where |
+|---|---|
+| ver.id's gateway accepted the submission | `as4offer` prints a message id |
+| The AS4 leg completed | ver.id's console: message `SENT`/`ACKNOWLEDGED`; ours: `RECEIVED` from party `verid` |
+| The WS plugin routed a foreign sender | ours: `listPendingMessages(finalRecipient=<org address>)` returns it (the message filter must be persisted) |
+| The right org was resolved | `qerds_messages` row, `direction=inbound`, expected `organization_id`, `sender_address=verid@...` |
+| The trust gate let it through | backend log: redeemed, not "offer from untrusted sender not redeemed" |
+| The credential landed | `held_attestations` row, `source=qerds`, `sourceMessageId` set |
+| No operator was needed | all of the above with no browser session open (the background poller) |
+
+Two backend behaviours exist specifically for this path.
+
+The first is the offer trust gate, which decides whose offers are **auto-redeemed**
+rather than merely stored. It is two allowlists, ANDed, because the two sender
+identities on an inbound message are not equally trustworthy:
+
+| Env | Matched against | Who controls it |
+|---|---|---|
+| `QERDS_TRUSTED_OFFER_PARTIES` | ebMS3 `From` PartyId (e.g. `verid`) | the receiving gateway: it only accepts a message whose party is in its PMode and whose signature chains to that party's certificate |
+| `QERDS_TRUSTED_OFFER_SENDERS` | the `originalSender` property (`addr@domain`, `*@domain`, `*`) | the **sending** side — any party the PMode admits can claim any address |
+
+So `QERDS_TRUSTED_OFFER_PARTIES` is the one that bounds who may hand us redeemable
+offers; `QERDS_TRUSTED_OFFER_SENDERS` refines the decision within a party but
+cannot make it. Each is **empty-trusts-everyone**, safe only while every sender is
+an org on this deployment, and the backend warns at boot for each one that is
+unset. A deployment peering with an external AS4 party must set both.
+
+The second is `QERDS_INBOUND_POLL_INTERVAL` (default `30s`), which drains inbound
+for every provisioned address on a ticker; without it inbound only arrives when an
+org console polls, i.e. when a human has a tab open, and a pushed offer's
+pre-authorized code can expire first.
+
+The wallet-side half is covered by
+`internal/qerds/verid_inbound_integration_test.go` (`//go:build integration`,
+skipped unless **both** `QERDS_TEST_DOMIBUS_URL` and
+`QERDS_TEST_VERID_DOMIBUS_URL` are set): ver.id submits through its own gateway,
+`PollAll` drains ours, and the offer is attributed, gated and redeemed. It asserts
+the gate sees the *verified* `From` party a real Domibus put on the message — the
+one thing an offline test cannot check — and covers the negative branch: an offer
+from a sender outside `QERDS_TRUSTED_OFFER_SENDERS` is stored but **not** redeemed.
+The party half of the gate is unit-tested in
+`internal/attestation/offer_sender_policy_test.go`, including the case that
+motivates it: an unlisted party claiming an allowlisted `originalSender`.
+
+**Still not qualified.** Self-signed certs, no QTSP, no qualified timestamps. This
+bench proves two-party AS4 plumbing and the wallet-side receive path — nothing more.
+Note also that `compose.override.yaml` disables Domibus's certificate-validation
+checks; an environment that actually peers with an external party must turn those
+back on, or it accepts messages signed by anything.
+
 The `payload`/`value` `elementFormDefault`-unqualified reset (WS-plugin `submitRequest`) that the
 offline marshalling tests pin was a real bug shaken out here. Coverage: `domibus_test.go` unit-tests
 envelope construction + response parsing offline (runs in the default `go test`), and
@@ -363,4 +492,6 @@ UI must not imply EU-wide coverage that doesn't exist yet.
 - European Digital Directory (SMP/SML) integration for cross-border address resolution (replaces the
   interim contacts address book as the primary resolver).
 - Multi-replica inbound: webhook idempotency store vs the daemon-style single-replica assumption.
+  `qerds.Service` serialises its own inbound drains, so the console `Poll` and the background
+  `PollAll` cannot both consume one message id within a process; nothing serialises two replicas.
 - Frontend evidence-verification UX (validate qualified timestamps client-side vs server-side).

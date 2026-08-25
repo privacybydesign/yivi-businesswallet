@@ -14,12 +14,14 @@ const (
 	envLogFormat   = "LOG_FORMAT"
 	envLogSource   = "LOG_SOURCE"
 
-	envEudiVerifierURL     = "EUDI_VERIFIER_URL"
-	envEudiIssuerChain     = "EUDI_ISSUER_CHAIN"
-	envSessionCookieSecure = "SESSION_COOKIE_SECURE"
-	envSessionTTL          = "SESSION_TTL"
-	envSessionPruneEvery   = "SESSION_PRUNE_INTERVAL"
-	envPresentationTTL     = "PRESENTATION_SESSION_TTL"
+	envEudiVerifierURL             = "EUDI_VERIFIER_URL"
+	envEudiIssuerChain             = "EUDI_ISSUER_CHAIN"
+	envEudiIntendedUseID           = "EUDI_INTENDED_USE_ID"
+	envEudiRegistrationCertificate = "EUDI_REGISTRATION_CERTIFICATE"
+	envSessionCookieSecure         = "SESSION_COOKIE_SECURE"
+	envSessionTTL                  = "SESSION_TTL"
+	envSessionPruneEvery           = "SESSION_PRUNE_INTERVAL"
+	envPresentationTTL             = "PRESENTATION_SESSION_TTL"
 
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
@@ -28,6 +30,15 @@ const (
 	envQerdsAuthToken            = "QERDS_AUTH_TOKEN"
 	envQerdsWebhookSecret        = "QERDS_WEBHOOK_SECRET"
 	envQerdsDefaultAddressDomain = "QERDS_DEFAULT_ADDRESS_DOMAIN"
+	// QerdsInboundPollInterval drives the background inbound poller. Zero
+	// disables it (inbound then only arrives when an org console polls).
+	envQerdsInboundPollInterval = "QERDS_INBOUND_POLL_INTERVAL"
+	// QerdsTrustedOfferSenders allowlists which QERDS senders may have their
+	// credential offers auto-redeemed. Empty trusts every sender.
+	envQerdsTrustedOfferSenders = "QERDS_TRUSTED_OFFER_SENDERS"
+	// QerdsTrustedOfferParties allowlists which AS4 parties may deliver a
+	// redeemable credential offer. Empty trusts every party the PMode admits.
+	envQerdsTrustedOfferParties = "QERDS_TRUSTED_OFFER_PARTIES"
 
 	envWalletRegistryProvider = "WALLET_REGISTRY_PROVIDER"
 
@@ -154,6 +165,7 @@ const (
 	// The hosted EUDI reference Verifier Endpoint (Yivi staging). Overridable so a
 	// deployment can point at its own verifier.
 	defaultEudiVerifierURL     = "https://verifierapi.openid4vc.staging.yivi.app"
+	defaultEudiIntendedUseID   = "1"
 	defaultSessionCookieSecure = "false"
 	defaultSessionTTL          = "24h"
 	defaultSessionPruneEvery   = "1h"
@@ -182,6 +194,10 @@ const (
 
 	defaultQerdsProvider             = ProviderStub
 	defaultQerdsDefaultAddressDomain = "qerds.localhost"
+	// Frequent enough that a pre-authorized code has not expired by the time an
+	// offer is redeemed, cheap enough to leave on: one listPendingMessages call
+	// per provisioned address.
+	defaultQerdsInboundPollInterval = "30s"
 
 	// The wallet-bootstrap registry (KVK) provider. Reuses ProviderStub ("stub").
 	defaultWalletRegistryProvider = ProviderStub
@@ -200,18 +216,38 @@ type Config struct {
 	LogFormat   string
 	LogSource   bool
 
-	EudiVerifierURL     string
-	EudiIssuerChain     string
-	SessionCookieSecure bool
-	SessionTTL          time.Duration
-	SessionPruneEvery   time.Duration
-	PresentationTTL     time.Duration
+	EudiVerifierURL             string
+	EudiIssuerChain             string
+	EudiIntendedUseID           string
+	EudiRegistrationCertificate string
+	SessionCookieSecure         bool
+	SessionTTL                  time.Duration
+	SessionPruneEvery           time.Duration
+	PresentationTTL             time.Duration
 
 	QerdsProvider             string
 	QerdsProviderURL          string
 	QerdsAuthToken            string
 	QerdsWebhookSecret        string
 	QerdsDefaultAddressDomain string
+	// QerdsInboundPollInterval is how often the background poller drains inbound
+	// messages for every provisioned address. Zero disables it.
+	QerdsInboundPollInterval time.Duration
+	// QerdsTrustedOfferSenders allowlists senders whose inbound credential offers
+	// are auto-redeemed ("addr@domain", "*@domain" or "*"). Empty trusts every
+	// sender, which is safe only while every sender is an org on this deployment
+	// — a deployment peering with an external AS4 party must set it.
+	//
+	// It is matched against the originalSender message property, which the
+	// SENDING side populates. It refines the decision; it cannot bound it.
+	QerdsTrustedOfferSenders []string
+	// QerdsTrustedOfferParties allowlists the AS4 parties (ebMS3 From PartyId,
+	// e.g. "verid") that may deliver a redeemable credential offer, or "*" for
+	// any. Unlike QerdsTrustedOfferSenders this is the identity the receiving
+	// gateway verified against its PMode and the party's signing certificate, so
+	// it is the allowlist a remote sender cannot claim its way past. Empty trusts
+	// every party the PMode admits.
+	QerdsTrustedOfferParties []string
 
 	QerdsDomibusFromParty   string
 	QerdsDomibusToParty     string
@@ -231,9 +267,11 @@ type Config struct {
 	AttestationHolder           string
 	AttestationHolderStorageDir string
 	AttestationHolderMasterKey  string
-	// AttestationHolderTrustChain is the trusted-issuer CA PEM the holder verifies
-	// received credentials against (holder analogue of EudiIssuerChain). Empty uses
-	// irmago's built-in trust model.
+	// AttestationHolderTrustChain is extra trusted-issuer CA PEM the holder
+	// verifies received credentials against (holder analogue of EudiIssuerChain).
+	// It is *added* to irmago's built-in trust model, not a replacement for it, so
+	// setting it keeps every issuer that already verified working; concatenate to
+	// trust several partners. Empty uses the built-in trust model alone.
 	AttestationHolderTrustChain string
 	// AttestationHolderStagingAnchors adds irmago's staging trust anchors (for the
 	// Yivi staging Veramo issuer in dev/staging).
@@ -313,6 +351,15 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: %s must be set when %s is true", envEudiVerifierURL, envSessionCookieSecure)
 	}
 
+	intendedUseID := os.Getenv(envEudiIntendedUseID)
+	registrationCertificate := os.Getenv(envEudiRegistrationCertificate)
+	if intendedUseID != "" && registrationCertificate != "" {
+		return Config{}, fmt.Errorf("config: %s and %s are mutually exclusive", envEudiIntendedUseID, envEudiRegistrationCertificate)
+	}
+	if intendedUseID == "" && registrationCertificate == "" && verifierURL == defaultEudiVerifierURL {
+		intendedUseID = defaultEudiIntendedUseID
+	}
+
 	sessionTTL, err := parseDuration(envSessionTTL, defaultSessionTTL)
 	if err != nil {
 		return Config{}, err
@@ -324,6 +371,12 @@ func Load() (Config, error) {
 	}
 
 	presentationTTL, err := parseDuration(envPresentationTTL, defaultPresentationTTL)
+	if err != nil {
+		return Config{}, err
+	}
+
+	// "0" (or "0s") disables the background inbound poller.
+	qerdsInboundPollInterval, err := parseDuration(envQerdsInboundPollInterval, defaultQerdsInboundPollInterval)
 	if err != nil {
 		return Config{}, err
 	}
@@ -389,18 +442,23 @@ func Load() (Config, error) {
 		LogFormat:   envOrDefault(envLogFormat, defaultLogFormat),
 		LogSource:   strings.EqualFold(envOrDefault(envLogSource, defaultLogSource), "true"),
 
-		EudiVerifierURL:     verifierURL,
-		EudiIssuerChain:     os.Getenv(envEudiIssuerChain),
-		SessionCookieSecure: cookieSecure,
-		SessionTTL:          sessionTTL,
-		SessionPruneEvery:   sessionPruneEvery,
-		PresentationTTL:     presentationTTL,
+		EudiVerifierURL:             verifierURL,
+		EudiIssuerChain:             os.Getenv(envEudiIssuerChain),
+		EudiIntendedUseID:           intendedUseID,
+		EudiRegistrationCertificate: registrationCertificate,
+		SessionCookieSecure:         cookieSecure,
+		SessionTTL:                  sessionTTL,
+		SessionPruneEvery:           sessionPruneEvery,
+		PresentationTTL:             presentationTTL,
 
 		QerdsProvider:             qerdsProvider,
 		QerdsProviderURL:          qerdsProviderURL,
 		QerdsAuthToken:            os.Getenv(envQerdsAuthToken),
 		QerdsWebhookSecret:        os.Getenv(envQerdsWebhookSecret),
 		QerdsDefaultAddressDomain: envOrDefault(envQerdsDefaultAddressDomain, defaultQerdsDefaultAddressDomain),
+		QerdsInboundPollInterval:  qerdsInboundPollInterval,
+		QerdsTrustedOfferSenders:  parseList(os.Getenv(envQerdsTrustedOfferSenders)),
+		QerdsTrustedOfferParties:  parseList(os.Getenv(envQerdsTrustedOfferParties)),
 
 		QerdsDomibusFromParty:   envOrDefault(envQerdsDomibusFromParty, defaultQerdsDomibusFromParty),
 		QerdsDomibusToParty:     envOrDefault(envQerdsDomibusToParty, defaultQerdsDomibusToParty),

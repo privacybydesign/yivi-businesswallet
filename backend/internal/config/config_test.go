@@ -187,3 +187,63 @@ func TestLoadAcceptsPostGuardURLsWithTrailingSlashAndPort(t *testing.T) {
 		t.Errorf("website URL = %q, want the value as configured", cfg.PostGuardWebsiteURL)
 	}
 }
+
+func TestLoadDefaultsIntendedUseIDOnTheDefaultVerifier(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.EudiIntendedUseID != defaultEudiIntendedUseID {
+		t.Errorf("intended use id = %q, want %q", cfg.EudiIntendedUseID, defaultEudiIntendedUseID)
+	}
+	if cfg.EudiRegistrationCertificate != "" {
+		t.Errorf("registration certificate = %q, want empty", cfg.EudiRegistrationCertificate)
+	}
+}
+
+// An intent id means nothing on a verifier that never configured it.
+func TestLoadLeavesIntendedUseIDEmptyOnAnotherVerifier(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{envEudiVerifierURL: "https://verifier.example.org"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.EudiIntendedUseID != "" {
+		t.Errorf("intended use id = %q, want empty against a non-default verifier", cfg.EudiIntendedUseID)
+	}
+}
+
+func TestLoadKeepsConfiguredIntendedUseID(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{envEudiIntendedUseID: "yivi-business-wallet"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.EudiIntendedUseID != "yivi-business-wallet" {
+		t.Errorf("intended use id = %q, want the configured value", cfg.EudiIntendedUseID)
+	}
+}
+
+func TestLoadKeepsConfiguredRegistrationCertificate(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{envEudiRegistrationCertificate: "header.payload.signature"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.EudiRegistrationCertificate != "header.payload.signature" {
+		t.Errorf("registration certificate = %q, want the configured value", cfg.EudiRegistrationCertificate)
+	}
+	if cfg.EudiIntendedUseID != "" {
+		t.Errorf("intended use id = %q, want empty when a certificate is configured", cfg.EudiIntendedUseID)
+	}
+}
+
+func TestLoadRejectsBothEudiCredentials(t *testing.T) {
+	_, err := loadWith(t, map[string]string{
+		envEudiIntendedUseID:           "1",
+		envEudiRegistrationCertificate: "header.payload.signature",
+	})
+	if err == nil {
+		t.Fatal("Load accepted both an intended use id and a registration certificate")
+	}
+	if !strings.Contains(err.Error(), envEudiIntendedUseID) || !strings.Contains(err.Error(), envEudiRegistrationCertificate) {
+		t.Errorf("error %q does not name both variables", err)
+	}
+}

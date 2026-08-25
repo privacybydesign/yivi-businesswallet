@@ -121,6 +121,13 @@ hold. If they name no parent, their own active org-wide full mandate is used.
 Tier and scope are errors rather than silent rewrites on purpose: someone who asked for a full
 mandate should not be told they got one.
 
+**A test cannot build an already-expired *delegation* under a parent that starts now.**
+`clampToParent` lifts the child's `valid_from` up to the parent's, so a window like `[-2h, -1h)`
+becomes `[now, -1h)` and is rejected as `ErrOverDelegation` before the insert — the store is right
+and the test is wrong. Back-date the parent (`ValidFrom: now-3h`) and the child's closed window
+survives the clamp. Needed for anything covering the revocation cascade's treatment of mandates
+that ended on their own.
+
 ## 5. Revocation
 
 `POST /orgs/{slug}/mandates/{id}/revoke`, by a legal representative (any mandate) or the mandate's
@@ -166,8 +173,8 @@ as one that is still active until that date.
   register-backed representations is the existing precedent to follow.
 - **`RequirePermission(resource, action)`** — the finer permission matrix of
   [#115](https://github.com/privacybydesign/yivi-businesswallet/issues/115) is not in `main` (see the
-  note in `AGENTS.md`), so this slice extends `RequireOrgAdmin` instead. Nothing here has to change
-  when it lands: the gates read `Authority` out of context, not a role string.
+  note in `.ai/conventions/BACKEND.md`), so this slice extends `RequireOrgAdmin` instead. Nothing
+  here has to change when it lands: the gates read `Authority` out of context, not a role string.
 - **Resource-domain scope.** Scope is org-wide or department; narrowing to one resource domain
   belongs with `RequirePermission`.
 - **External legal persons as grantees** (Art 3(18) allows one). The grantee is a user; an

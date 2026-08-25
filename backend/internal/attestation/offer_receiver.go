@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 )
 
 // offerRedeemer runs the holder OpenID4VCI flow to receive a credential from an
@@ -35,19 +36,38 @@ type heldRecorder interface {
 type OfferReceiver struct {
 	redeemer offerRedeemer
 	store    heldRecorder
+	// trusted bounds whose offers are redeemed. See TrustedOfferSenders for why
+	// the holder's issuer-trust validation does not make this redundant.
+	trusted TrustedOfferSenders
 }
 
-func NewOfferReceiver(redeemer offerRedeemer, store heldRecorder) *OfferReceiver {
-	return &OfferReceiver{redeemer: redeemer, store: store}
+func NewOfferReceiver(redeemer offerRedeemer, store heldRecorder, trusted TrustedOfferSenders) *OfferReceiver {
+	return &OfferReceiver{redeemer: redeemer, store: store, trusted: trusted}
 }
 
 // OnInboundMessage implements qerds.InboundConsumer. It is idempotent: a message
 // whose offer has already been redeemed (an active held row links it) is skipped,
 // so a re-delivered offer is never redeemed twice.
-func (r *OfferReceiver) OnInboundMessage(ctx context.Context, orgID, messageID uuid.UUID, _ string, body string) error {
-	env, ok := ParseCredentialOfferEnvelope(body)
+func (r *OfferReceiver) OnInboundMessage(ctx context.Context, in qerds.Inbound) error {
+	orgID, messageID := in.OrgID, in.MessageID
+	env, ok := ParseCredentialOfferEnvelope(in.Body)
 	if !ok {
 		return nil // not a credential offer — an ordinary QERDS message
+	}
+
+	// Both identities, not just the address: in.Sender is a property the sending
+	// side wrote, in.FromParty is the AS4 party the gateway authenticated. See
+	// TrustedOfferSenders.
+	if !r.trusted.Trusts(in.FromParty, in.Sender) {
+		// Not an error: the message is legitimately stored and stays in the org's
+		// inbox for an operator to look at. Only automatic redemption is withheld,
+		// so an untrusted sender can never silently write into a wallet.
+		slog.WarnContext(ctx, "attestation: credential offer from untrusted sender not redeemed",
+			slog.String("orgId", orgID.String()),
+			slog.String("fromParty", in.FromParty),
+			slog.String("sender", in.Sender),
+			slog.String("messageId", messageID.String()))
+		return nil
 	}
 
 	already, err := r.store.HeldForMessage(ctx, orgID, messageID)
@@ -76,6 +96,8 @@ func (r *OfferReceiver) OnInboundMessage(ctx context.Context, orgID, messageID u
 
 	slog.InfoContext(ctx, "attestation: redeemed QERDS credential offer",
 		slog.String("orgId", orgID.String()),
+		slog.String("fromParty", in.FromParty),
+		slog.String("sender", in.Sender),
 		slog.String("vct", redeemed.VCT),
 		slog.String("messageId", messageID.String()))
 	return nil

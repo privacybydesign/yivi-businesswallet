@@ -64,6 +64,10 @@ services:
       POSTGUARD_WEBSITE_URL: ${POSTGUARD_WEBSITE_URL:-}
       POSTGUARD_PKG_URL: ${POSTGUARD_PKG_URL:-}
       POSTGUARD_CRYPTIFY_URL: ${POSTGUARD_CRYPTIFY_URL:-}
+      EUDI_VERIFIER_URL: ${EUDI_VERIFIER_URL:-}
+      EUDI_ISSUER_CHAIN: ${EUDI_ISSUER_CHAIN:-}
+      EUDI_INTENDED_USE_ID: ${EUDI_INTENDED_USE_ID:-}
+      EUDI_REGISTRATION_CERTIFICATE: ${EUDI_REGISTRATION_CERTIFICATE:-}
       # Public base URL of the frontend, used to build claim links in outbound
       # e-mail / QERDS credential-offer messages.
       APP_BASE_URL: ${APP_BASE_URL:-}

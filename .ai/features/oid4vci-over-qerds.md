@@ -275,9 +275,16 @@ part, not an attachment, so no inbound-attachment plumbing was needed.
   anything as soon as the org holds a second credential of the type (issue #170).
 
 **Holder trust posture** (`eudiholder.RedeemConfig`, config `ATTESTATION_HOLDER_*`):
-a configured trusted-issuer CA chain (`ATTESTATION_HOLDER_TRUST_CHAIN`, the
-holder analogue of `EUDI_ISSUER_CHAIN`), else irmago's built-in trust model, plus
-`…_STAGING_ANCHORS` for staging issuers and `…_ALLOW_INSECURE_HTTP` for local dev.
+irmago's built-in trust model, plus `…_STAGING_ANCHORS` for staging issuers, plus
+any CAs in `ATTESTATION_HOLDER_TRUST_CHAIN` (the holder analogue of
+`EUDI_ISSUER_CHAIN`); `…_ALLOW_INSECURE_HTTP` for local dev. The configured chain
+is **additive** — `mergeTrustChain` (`trustchain.go`) copies the trust model's
+pools and adds to them, because a deployment receives from a partner issuer *and*
+from the Yivi issuers, so pinning to one anchor would break the others. Certs are
+sorted by signature (self-signed → root, otherwise → intermediate) rather than by
+position, so one PEM can carry several partners' anchors in any order; irmago's
+own `CreateX509VerifyOptionsFromCertChain` takes `certs[0]` as the only root and
+would misfile the rest.
 
 **Known limitations**
 - A failed redemption is **logged, not auto-retried**: `CreateInbound` dedupes
