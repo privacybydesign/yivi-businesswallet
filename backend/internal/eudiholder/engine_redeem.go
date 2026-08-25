@@ -19,7 +19,6 @@ import (
 	"github.com/privacybydesign/irmago/eudi/services"
 	"github.com/privacybydesign/irmago/eudi/storage/db"
 	"github.com/privacybydesign/irmago/eudi/storage/db/models"
-	"github.com/privacybydesign/irmago/eudi/utils"
 )
 
 // redirectURI is unused by the pre-authorized-code grant (no browser redirect),
@@ -144,26 +143,24 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	}
 }
 
-// verificationContext builds the SD-JWT VC trust context: a configured
-// trusted-issuer CA chain when set (the holder analogue of EUDI_ISSUER_CHAIN),
-// otherwise irmago's built-in trust model loaded into conf.Issuers. statusChecker
+// verificationContext builds the SD-JWT VC trust context: irmago's built-in
+// trust model loaded into conf.Issuers (plus its staging anchors when enabled),
+// with any configured trusted-issuer CA chain merged on top. The chain adds
+// anchors, it does not replace the built-in model — a partner issuer has to be
+// trusted alongside the ones already there, not instead of them. statusChecker
 // is set so a received credential that references a Token Status List is rejected
 // unless its bit reads valid (a no-op for credentials that carry no reference).
 func (e *Engine) verificationContext(conf *eudi.Configuration, statusChecker *statuslist.Checker) (sdjwtvc.SdJwtVcVerificationContext, error) {
+	var x509Context eudijwt.X509VerificationContext = &conf.Issuers
 	if len(e.redeem.TrustChainPEM) > 0 {
-		opts, err := utils.CreateX509VerifyOptionsFromCertChain(e.redeem.TrustChainPEM)
+		merged, err := mergeTrustChain(x509Context, e.redeem.TrustChainPEM)
 		if err != nil {
-			return sdjwtvc.SdJwtVcVerificationContext{}, fmt.Errorf("eudiholder: parse holder trust chain: %w", err)
+			return sdjwtvc.SdJwtVcVerificationContext{}, fmt.Errorf("eudiholder: holder trust chain: %w", err)
 		}
-		return sdjwtvc.SdJwtVcVerificationContext{
-			X509VerificationContext: &eudijwt.StaticVerificationContext{VerifyOpts: *opts},
-			Clock:                   eudijwt.NewSystemClock(),
-			JwtVerifier:             sdjwt.NewJwxJwtVerifier(),
-			StatusChecker:           statusChecker,
-		}, nil
+		x509Context = merged
 	}
 	return sdjwtvc.SdJwtVcVerificationContext{
-		X509VerificationContext: &conf.Issuers,
+		X509VerificationContext: x509Context,
 		Clock:                   eudijwt.NewSystemClock(),
 		JwtVerifier:             sdjwt.NewJwxJwtVerifier(),
 		StatusChecker:           statusChecker,

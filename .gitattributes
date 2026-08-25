@@ -7,3 +7,8 @@
 # Keystores are binary: never let line-ending normalisation touch them, or the
 # JKS files silently corrupt on a Windows checkout.
 *.jks binary
+
+# PEM trust anchors are pasted verbatim into env vars and Terraform `file()`
+# reads, and are checked against a published fingerprint. Keep them LF so a
+# Windows checkout cannot change their bytes.
+*.crt text eol=lf
