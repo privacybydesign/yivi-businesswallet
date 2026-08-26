@@ -453,7 +453,7 @@ func run() error {
 	// secret is configured (a secretless deployment 404s it). Say so at boot:
 	// a disabled push path must be a visible choice, not a silent 404 (#105).
 	if cfg.QerdsWebhookSecret == "" {
-		slog.WarnContext(ctx, "qerds inbound webhook push disabled; POST /qerds/webhook returns 404 "+
+		slog.WarnContext(ctx, "qerds inbound webhook push disabled; POST /api/v1/qerds/webhook returns 404 "+
 			"and inbound delivery relies on the background poller alone. Set "+
 			"QERDS_WEBHOOK_SECRET when the provider should push.")
 	} else {
