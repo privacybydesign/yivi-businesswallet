@@ -102,8 +102,14 @@ B-LT/B-LTA (validation data, archival timestamp) need a separate DSS augmentatio
 
 - **CSC base URL** must be the container name `qtsp-signer:8085`, not `localhost` (backend calls
   it server-side).
-- **`VERIFIER-DOMAIN` / `WALLET-SCHEME`** are passed to `qtsp-authz` as **Spring command-line
-  args**, not `environment:` — Docker Compose silently drops env var names containing hyphens.
+- **`VERIFIER-DOMAIN` / `WALLET-SCHEME` / `INTENDED-USE-ID`** are passed to `qtsp-authz` as
+  **Spring command-line args**, not `environment:` — Docker Compose silently drops env var
+  names containing hyphens.
+- **`INTENDED-USE-ID` is mandatory** (`TEST-01` on the public verifier): the EUDI verifier
+  rejects an `InitTransaction` naming no registration certificate with `400
+  MissingRegistrationCertificate`, which the AS surfaces only as `[Error 400] ... Invalid
+  error message content` (its sanitiser drops the JSON body) and the user sees as "Unable to
+  reach the authentication service". Needs the authz image built from upstream `4f9b14d`+.
 - **OAuth issuer host split**: the browser reaches the AS at `localhost:8084` (the authorize
   URL) but the backend reaches it at `qtsp-authz:8084` (the server-side token exchange), so
   `SIGNING_OAUTH_ISSUER_INTERNAL` overrides only the backend's token-exchange host. Empty in

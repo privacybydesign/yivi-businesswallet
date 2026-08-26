@@ -378,14 +378,23 @@ services:
     ports:
       - "8084:8084"
     # Load the OAuth2 client registrations (our SCA client) at startup.
-    # The reference app reads the property names VERIFIER-DOMAIN / WALLET-SCHEME
-    # verbatim (hyphens). Docker Compose CANNOT pass hyphenated *env var* names
-    # (invalid POSIX names — they are silently dropped), so they are supplied as
-    # Spring command-line property overrides here instead.
+    # The reference app reads the property names VERIFIER-DOMAIN / WALLET-SCHEME /
+    # INTENDED-USE-ID verbatim (hyphens). Docker Compose CANNOT pass hyphenated
+    # *env var* names (invalid POSIX names — they are silently dropped), so they
+    # are supplied as Spring command-line property overrides here instead.
+    #
+    # INTENDED-USE-ID names a Wallet-Relying-Party intended use (and with it a
+    # registration certificate) configured at the verifier. The EUDI verifier
+    # rejects an InitTransaction carrying neither it nor a
+    # REGISTRATION-CERTIFICATE-JWT with 400 MissingRegistrationCertificate, and
+    # the authz server refuses to boot when both are blank. TEST-01 is the test
+    # intended use verifier-backend.eudiw.dev publishes; a self-hosted verifier
+    # needs its own entry configured (ids are not portable between verifiers).
     command:
       - "--spring.config.additional-location=file:/opt/app/config/clients/application-secret.yml"
       - "--VERIFIER-DOMAIN=verifier-backend.eudiw.dev"
       - "--WALLET-SCHEME=eudi-openid4vp://"
+      - "--INTENDED-USE-ID=TEST-01"
     volumes:
       - ./docker/development/qtsp-signer/config/application-secret.yml:/opt/app/config/clients/application-secret.yml:ro
     environment:
@@ -402,10 +411,11 @@ services:
       # AUTHORIZATION_SERVER_ISSUER_URI, and be reachable by the browser/wallet.
       SERVICE_URL_OAUTH2_ISSUER: http://localhost:8084
       SERVICE_URL: http://localhost:8084
-      # OID4VP verifier (VERIFIER-DOMAIN) + wallet scheme (WALLET-SCHEME) are passed
-      # as Spring command-line args above, NOT here — their hyphenated names are not
-      # valid env var names and Docker would drop them. Public EUDI verifier:
-      # requesting an mso_mdoc PID needs an EUDI reference wallet with a dev PID.
+      # OID4VP verifier (VERIFIER-DOMAIN), wallet scheme (WALLET-SCHEME) and
+      # intended use (INTENDED-USE-ID) are passed as Spring command-line args
+      # above, NOT here — their hyphenated names are not valid env var names and
+      # Docker would drop them. Public EUDI verifier: requesting an mso_mdoc PID
+      # needs an EUDI reference wallet with a dev PID.
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8084/oauth2/jwks"]
       interval: 10s
