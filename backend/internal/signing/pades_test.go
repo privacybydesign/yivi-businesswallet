@@ -3,7 +3,9 @@ package signing
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"encoding/base64"
+	"errors"
 	"os"
 	"testing"
 
@@ -96,5 +98,28 @@ func TestPAdESAbandonUnblocks(t *testing.T) {
 	sess.abandon(ErrSessionExpired)
 	if _, err := sess.finish(nil); err == nil {
 		t.Fatal("expected finish to report the abandoned pass failed")
+	}
+}
+
+// TestPAdESAbandonBeatsQueuedSignature pins the precedence a plain select cannot
+// give. Both channels are buffered, so a signature delivered before the signing
+// goroutine is scheduled leaves Sign facing two ready cases — and a select over
+// those picks at random, which would let an abandoned session sign anyway. Loading
+// both by hand reproduces that ordering without depending on the scheduler, and the
+// loop is what a coin flip could not survive.
+func TestPAdESAbandonBeatsQueuedSignature(t *testing.T) {
+	for i := range 100 {
+		signer := &padesSigner{
+			digestCh: make(chan []byte, 1),
+			sigCh:    make(chan []byte, 1),
+			errCh:    make(chan error, 1),
+		}
+		signer.errCh <- ErrSessionExpired
+		signer.sigCh <- []byte("signature delivered after the abandon")
+
+		sig, err := signer.Sign(nil, []byte("digest"), crypto.SHA256)
+		if !errors.Is(err, ErrSessionExpired) {
+			t.Fatalf("iteration %d: abandoned pass signed anyway: sig %q, err %v", i, sig, err)
+		}
 	}
 }
