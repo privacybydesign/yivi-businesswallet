@@ -239,11 +239,11 @@ Env-driven like everything else (`internal/config`):
 | `QERDS_PROVIDER` | `stub` (dev) or the provider driver name | no (default `stub`) |
 | `QERDS_PROVIDER_URL` | provider base URL | when not `stub` |
 | `QERDS_AUTH_TOKEN` | bearer / creds material | when the driver needs it |
-| `QERDS_WEBHOOK_SECRET` | HMAC secret for inbound webhook auth | when webhook enabled |
+| `QERDS_WEBHOOK_SECRET` | HMAC secret for inbound webhook auth; unset disables the push endpoint (404), which the API says out loud at boot | when webhook enabled, and when the poll interval is `0` |
 | `QERDS_DEFAULT_ADDRESS_DOMAIN` | domain for minted digital addresses | no (has default) |
 | `QERDS_TRUSTED_OFFER_PARTIES` | AS4 parties whose credential offers are auto-redeemed | when peering with an external AS4 party |
 | `QERDS_TRUSTED_OFFER_SENDERS` | sender addresses whose credential offers are auto-redeemed | when peering with an external AS4 party |
-| `QERDS_INBOUND_POLL_INTERVAL` | background inbound sweep interval (`0` disables) | no (default `30s`) |
+| `QERDS_INBOUND_POLL_INTERVAL` | background inbound sweep interval (`0` disables; boot fails if the webhook is off too, so inbound delivery is never manual-only) | no (default `30s`) |
 
 Boot `Ping` is **fatal** (matches the Yivi readiness gate). `/readyz` stays DB-only.
 

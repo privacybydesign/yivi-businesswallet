@@ -449,6 +449,17 @@ func run() error {
 	}
 	qerdsService.SetInboundConsumer(attestation.NewOfferReceiver(attHolder, attestationStore, trustedSenders))
 
+	// The other inbound path is the push webhook, which serves only when a
+	// secret is configured (a secretless deployment 404s it). Say so at boot:
+	// a disabled push path must be a visible choice, not a silent 404 (#105).
+	if cfg.QerdsWebhookSecret == "" {
+		slog.WarnContext(ctx, "qerds inbound webhook push disabled; POST /qerds/webhook returns 404 "+
+			"and inbound delivery relies on the background poller alone. Set "+
+			"QERDS_WEBHOOK_SECRET when the provider should push.")
+	} else {
+		slog.InfoContext(ctx, "qerds inbound webhook push enabled")
+	}
+
 	// Drain inbound for every provisioned address on a ticker, so a remote party's
 	// credential offer is received without an operator being logged in.
 	startQerdsInboundPoller(ctx, qerdsService, cfg.QerdsInboundPollInterval)
