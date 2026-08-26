@@ -53,6 +53,16 @@ func (s *padesSigner) Public() crypto.PublicKey { return s.pub }
 
 func (s *padesSigner) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]byte, error) {
 	s.once.Do(func() { s.digestCh <- append([]byte(nil), digest...) })
+	// An already-abandoned pass must never sign, even when a signature is delivered
+	// before this goroutine gets scheduled: a select over two ready channels picks at
+	// random, which would let an expired or cancelled session produce a signed PDF
+	// half the time. Drain the abandon first, so only a genuinely concurrent delivery
+	// races the abandon.
+	select {
+	case err := <-s.errCh:
+		return nil, err
+	default:
+	}
 	select {
 	case sig := <-s.sigCh:
 		return sig, nil
