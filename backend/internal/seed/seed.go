@@ -128,6 +128,7 @@ var partnerOrganizations = []partnerOrganization{
 			{email: "sten@ver.id", givenNames: "Sten", lastName: "Reijers"},
 			{email: "roger@ver.id", givenNames: "Roger", lastName: "Olivieira"},
 			{email: "tj@ver.id", givenNames: "Thomas Jan", lastName: "Geelen"},
+			{email: "kuldeep@ver.id", givenNames: "Kuldeep", lastName: "Kansal"},
 		},
 	},
 	{
