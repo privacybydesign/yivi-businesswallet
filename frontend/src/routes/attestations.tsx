@@ -593,17 +593,22 @@ function OffersSection({
     return null;
   }
 
+  // The list is member-readable but only an admin can decide, so a member is
+  // told whose decision it is waiting on rather than asked for their own.
+  const title = isAdmin
+    ? t("attestations.offers.title")
+    : t("attestations.offers.memberTitle");
+  const description = isAdmin
+    ? t("attestations.offers.description")
+    : t("attestations.offers.memberDescription");
+
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <h2 className="text-ink text-[14px] font-semibold">
-          {t("attestations.offers.title")}
-        </h2>
+        <h2 className="text-ink text-[14px] font-semibold">{title}</h2>
         <span className="text-muted text-[12.5px]">{offers.length}</span>
       </div>
-      <p className="text-ink-soft text-[13px]">
-        {t("attestations.offers.description")}
-      </p>
+      <p className="text-ink-soft text-[13px]">{description}</p>
       <div className="flex flex-col gap-3">
         {offers.map((offer) => (
           <Card key={offer.id} className="flex flex-col gap-3 p-4">

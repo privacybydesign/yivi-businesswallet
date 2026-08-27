@@ -1521,6 +1521,9 @@ export const en = {
       title: "Waiting for your decision",
       description:
         "These credentials were offered to your organization. Accepting adds one to the wallet; declining leaves it out.",
+      memberTitle: "Waiting for an administrator's decision",
+      memberDescription:
+        "These credentials were offered to your organization. An organization admin decides whether each one is added to the wallet.",
       from: "Offered by {{sender}}",
       pending: "Awaiting decision",
       accept: "Accept",

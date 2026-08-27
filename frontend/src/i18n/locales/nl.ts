@@ -1567,6 +1567,9 @@ export const nl: Translation<typeof en> = {
       title: "Wacht op je beslissing",
       description:
         "Deze credentials zijn aan je organisatie aangeboden. Accepteren zet er een in de wallet; weigeren laat hem erbuiten.",
+      memberTitle: "Wacht op de beslissing van een beheerder",
+      memberDescription:
+        "Deze credentials zijn aan je organisatie aangeboden. Een organisatiebeheerder beslist of ze aan de wallet worden toegevoegd.",
       from: "Aangeboden door {{sender}}",
       pending: "Wacht op beslissing",
       accept: "Accepteren",
