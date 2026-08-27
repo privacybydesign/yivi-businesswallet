@@ -5,6 +5,7 @@ package attestation_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -94,6 +95,28 @@ func TestAcceptOfferRecordsHeldAndClosesTheOffer(t *testing.T) {
 		t.Fatalf("RecordOffer: %v", err)
 	}
 
+	claimed, err := e.store.ClaimOffer(ctx, e.orgID, offer.ID)
+	if err != nil {
+		t.Fatalf("ClaimOffer: %v", err)
+	}
+	if claimed.Status != attestation.OfferAccepting {
+		t.Errorf("claimed status = %q, want %q", claimed.Status, attestation.OfferAccepting)
+	}
+	if claimed.Offer != offerInput(messageID).Offer {
+		t.Errorf("the claim did not return the deeplink to redeem: %q", claimed.Offer)
+	}
+	if claimed.DecidedAt != nil {
+		t.Errorf("a claimed offer is not settled yet, got decidedAt %v", claimed.DecidedAt)
+	}
+	// A claimed offer is out of the queue, so a second admin has nothing to accept.
+	pendingWhileClaimed, err := e.store.ListPendingOffers(ctx, e.orgID)
+	if err != nil {
+		t.Fatalf("ListPendingOffers: %v", err)
+	}
+	if len(pendingWhileClaimed) != 0 {
+		t.Fatalf("a claimed offer is still listed as pending (%d)", len(pendingWhileClaimed))
+	}
+
 	held, err := e.store.AcceptOffer(ctx, e.orgID, offer.ID, attestation.HeldInput{
 		CredentialRef:   "ref-1",
 		VCT:             "nl.kvk.registration",
@@ -119,7 +142,11 @@ func TestAcceptOfferRecordsHeldAndClosesTheOffer(t *testing.T) {
 		t.Fatalf("accepted offer still pending (%d)", len(pending))
 	}
 
-	// The status guard is what makes a double accept safe.
+	// The status guard is what makes a double accept safe: an accepted offer can
+	// be neither re-claimed nor settled again.
+	if _, err := e.store.ClaimOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
+		t.Fatalf("ClaimOffer on an accepted offer = %v, want ErrOfferNotFound", err)
+	}
 	if _, err := e.store.AcceptOffer(ctx, e.orgID, offer.ID, attestation.HeldInput{
 		CredentialRef: "ref-2", VCT: "nl.kvk.registration", Issuer: "https://issuer.ver.id",
 		Source: attestation.HeldSourceQERDS, SourceMessageID: &messageID,
@@ -155,8 +182,8 @@ func TestDeclineOfferHoldsNothing(t *testing.T) {
 	if len(held) != 0 {
 		t.Fatalf("declining recorded %d held credentials", len(held))
 	}
-	if _, err := e.store.GetPendingOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
-		t.Fatalf("GetPendingOffer after decline = %v, want ErrOfferNotFound", err)
+	if _, err := e.store.ClaimOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
+		t.Fatalf("ClaimOffer after decline = %v, want ErrOfferNotFound", err)
 	}
 	if err := e.store.DeclineOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
 		t.Fatalf("second DeclineOffer = %v, want ErrOfferNotFound", err)
@@ -184,8 +211,8 @@ func TestOfferQueueIsOrgScoped(t *testing.T) {
 	}
 
 	other := uuid.New()
-	if _, err := e.store.GetPendingOffer(ctx, other, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
-		t.Fatalf("GetPendingOffer for another org = %v, want ErrOfferNotFound", err)
+	if _, err := e.store.ClaimOffer(ctx, other, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
+		t.Fatalf("ClaimOffer for another org = %v, want ErrOfferNotFound", err)
 	}
 	if err := e.store.DeclineOffer(ctx, other, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
 		t.Fatalf("DeclineOffer for another org = %v, want ErrOfferNotFound", err)
@@ -196,5 +223,106 @@ func TestOfferQueueIsOrgScoped(t *testing.T) {
 	}
 	if len(pending) != 0 {
 		t.Fatalf("another org sees %d of this org's offers", len(pending))
+	}
+}
+
+// TestClaimOfferIsTakenOnce is the SQL half of the guard the service relies on:
+// however many accepts race for one offer, Postgres hands the claim to exactly
+// one of them. The service calls the issuer on the strength of that, so a claim
+// two callers could both win would put two credentials in the org's engine and
+// index only one.
+func TestClaimOfferIsTakenOnce(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	messageID := inboundMessage(t, ctx, e, "ref-claim-race")
+
+	offer, _, err := e.store.RecordOffer(ctx, e.orgID, offerInput(messageID))
+	if err != nil {
+		t.Fatalf("RecordOffer: %v", err)
+	}
+
+	const claimers = 8
+	var (
+		start sync.WaitGroup
+		done  sync.WaitGroup
+		mu    sync.Mutex
+		won   int
+		errs  []error
+	)
+	start.Add(1)
+	for range claimers {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			start.Wait()
+			_, err := e.store.ClaimOffer(ctx, e.orgID, offer.ID)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs = append(errs, err)
+				return
+			}
+			won++
+		}()
+	}
+	start.Done()
+	done.Wait()
+
+	if won != 1 {
+		t.Fatalf("%d of %d concurrent claims succeeded, want exactly 1", won, claimers)
+	}
+	for _, err := range errs {
+		if !errors.Is(err, attestation.ErrOfferNotFound) {
+			t.Fatalf("losing claim = %v, want ErrOfferNotFound", err)
+		}
+	}
+}
+
+// Releasing is what keeps a failed redemption retriable: the offer goes back in
+// the queue, and only from a claim — a settled decision cannot be reopened.
+func TestReleaseOfferReturnsTheOfferToTheQueue(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	messageID := inboundMessage(t, ctx, e, "ref-release")
+
+	offer, _, err := e.store.RecordOffer(ctx, e.orgID, offerInput(messageID))
+	if err != nil {
+		t.Fatalf("RecordOffer: %v", err)
+	}
+	// Nothing to release while the offer is still waiting for a decision.
+	if err := e.store.ReleaseOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
+		t.Fatalf("ReleaseOffer on a pending offer = %v, want ErrOfferNotFound", err)
+	}
+
+	if _, err := e.store.ClaimOffer(ctx, e.orgID, offer.ID); err != nil {
+		t.Fatalf("ClaimOffer: %v", err)
+	}
+	if err := e.store.ReleaseOffer(ctx, e.orgID, offer.ID); err != nil {
+		t.Fatalf("ReleaseOffer: %v", err)
+	}
+
+	pending, err := e.store.ListPendingOffers(ctx, e.orgID)
+	if err != nil {
+		t.Fatalf("ListPendingOffers: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending offers after release = %d, want 1", len(pending))
+	}
+	if pending[0].ID != offer.ID {
+		t.Fatalf("released offer %s, want %s", pending[0].ID, offer.ID)
+	}
+
+	// Released means claimable again, and settling still works from that claim.
+	if _, err := e.store.ClaimOffer(ctx, e.orgID, offer.ID); err != nil {
+		t.Fatalf("ClaimOffer after release: %v", err)
+	}
+	if _, err := e.store.AcceptOffer(ctx, e.orgID, offer.ID, attestation.HeldInput{
+		CredentialRef: "ref-retry", VCT: "nl.kvk.registration", Issuer: "https://issuer.ver.id",
+		Source: attestation.HeldSourceQERDS, SourceMessageID: &messageID,
+	}); err != nil {
+		t.Fatalf("AcceptOffer after release: %v", err)
+	}
+	if err := e.store.ReleaseOffer(ctx, e.orgID, offer.ID); !errors.Is(err, attestation.ErrOfferNotFound) {
+		t.Fatalf("ReleaseOffer on an accepted offer = %v, want ErrOfferNotFound", err)
 	}
 }

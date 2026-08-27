@@ -18,6 +18,12 @@ import (
 
 const claimTokenBytes = 24
 
+// releaseClaimTimeout bounds reopening an offer whose redemption failed. It is a
+// single row on a context of its own, so it needs no more than this; the point of
+// the bound is that a detached context cannot be cancelled by the acceptance that
+// just failed (see Service.releaseClaim).
+const releaseClaimTimeout = 5 * time.Second
+
 // issuer is the hosted-issuer seam the service orchestrates (see
 // internal/openid4vciissuer). Accept the interface; the concrete client/stub is
 // injected at boot.
@@ -63,7 +69,8 @@ type heldMutator interface {
 // accept/decline flow. Backed by the attestation store.
 type offerStore interface {
 	ListPendingOffers(ctx context.Context, orgID uuid.UUID) ([]CredentialOffer, error)
-	GetPendingOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
+	ClaimOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
+	ReleaseOffer(ctx context.Context, orgID, id uuid.UUID) error
 	AcceptOffer(ctx context.Context, orgID, id uuid.UUID, in HeldInput) (HeldAttestation, error)
 	DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error
 }
@@ -352,19 +359,27 @@ func (s *Service) ListOffers(ctx context.Context, orgID uuid.UUID) ([]Credential
 // carried the offer). This is the only path that puts a QERDS-delivered
 // credential in the wallet: receiving the offer merely queues it.
 //
+// Claim, redeem, settle. The claim (ClaimOffer, pending → accepting) comes first
+// because redeeming is a call to the issuer with a side effect no later guard can
+// undo: were the offer merely read here, two admins pressing Accept at the same
+// moment would both redeem, and the one that lost the settle would leave a
+// credential in the org's holder engine that the wallet can neither show nor
+// delete. One caller wins the claim; the rest get ErrOfferNotFound.
+//
 // Engine first, index second — the same fail-safe ordering as DeleteHeld. A
-// redemption that fails leaves the offer pending, so the admin can accept again
-// once the cause is gone (the issuer was down, the org's wallet was not yet
-// activated) rather than losing the offer to a terminal state. The store's status
-// guard makes the commit the point of no return: a second accept of the same
-// offer finds nothing pending and returns ErrOfferNotFound.
+// redemption that fails releases the claim, so the offer is pending again and the
+// admin can accept once the cause is gone (the issuer was down, the org's wallet
+// was not yet activated) rather than losing the offer to a terminal state.
+// Settling is the point of no return: a second accept finds nothing pending and
+// returns ErrOfferNotFound.
 func (s *Service) AcceptOffer(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error) {
-	offer, err := s.offers.GetPendingOffer(ctx, orgID, id)
+	offer, err := s.offers.ClaimOffer(ctx, orgID, id)
 	if err != nil {
 		return HeldAttestation{}, err
 	}
 	redeemed, err := s.holder.Redeem(ctx, orgID, offer.Offer)
 	if err != nil {
+		s.releaseClaim(ctx, orgID, id)
 		return HeldAttestation{}, fmt.Errorf("attestation: redeem accepted offer %s org %s: %w", id, orgID, err)
 	}
 	messageID := offer.SourceMessageID
@@ -384,6 +399,28 @@ func (s *Service) AcceptOffer(ctx context.Context, orgID, id uuid.UUID) (HeldAtt
 		slog.String("vct", redeemed.VCT),
 		slog.String("messageId", messageID.String()))
 	return held, nil
+}
+
+// releaseClaim reopens an offer whose redemption produced no credential. It is
+// called on that path only: after a redemption that did succeed, releasing would
+// invite a retry that redeems a second credential, so an offer whose indexing
+// failed stays claimed and out of the queue.
+//
+// The release runs on a context detached from the request's. The redemption most
+// likely to fail is the one whose context was cancelled or timed out, and on that
+// context the write that reopens the offer would fail too — stranding the offer
+// as accepting: gone from the Wallet tab and undecidable for good. A release that
+// fails anyway is logged rather than returned, because the redemption error is
+// what the admin needs to see.
+func (s *Service) releaseClaim(ctx context.Context, orgID, id uuid.UUID) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseClaimTimeout)
+	defer cancel()
+	if err := s.offers.ReleaseOffer(ctx, orgID, id); err != nil {
+		slog.ErrorContext(ctx, "attestation: reopening a credential offer after a failed redemption",
+			slog.String("orgId", orgID.String()),
+			slog.String("offerId", id.String()),
+			slog.String("error", err.Error()))
+	}
 }
 
 // DeclineOffer refuses a pending credential offer. Nothing is redeemed, so the

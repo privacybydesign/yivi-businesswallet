@@ -845,8 +845,10 @@ paths:
       description: >-
         Redeems the offer through the organisation's holder wallet and indexes
         the received credential as held. Requires an administrator role. Returns
-        404 when the offer is absent or already decided; a redemption that fails
-        leaves the offer pending so it can be accepted again.
+        404 when the offer is absent, already decided, or being accepted by
+        another request: the offer is claimed before the issuer is called, so of
+        several simultaneous accepts exactly one redeems. A redemption that fails
+        returns the offer to the queue so it can be accepted again.
       responses:
         '2XX':
           description: Successful response.

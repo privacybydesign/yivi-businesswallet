@@ -21,6 +21,11 @@ type fakeOfferQueue struct {
 	offers    []attestation.CredentialOffer
 	held      []attestation.HeldInput
 	recordErr error
+	// claimed, when set before any accept runs, is called after every ClaimOffer
+	// attempt, win or lose. A concurrency test uses it to hold the winner's
+	// redemption open until every rival has been through the claim, so the test
+	// proves the claim is what serialises the accepts and not the timing of the run.
+	claimed func()
 }
 
 func newFakeOfferQueue() *fakeOfferQueue { return &fakeOfferQueue{} }
@@ -65,22 +70,42 @@ func (q *fakeOfferQueue) ListPendingOffers(_ context.Context, orgID uuid.UUID) (
 	return pending, nil
 }
 
-func (q *fakeOfferQueue) GetPendingOffer(_ context.Context, orgID, id uuid.UUID) (attestation.CredentialOffer, error) {
+// ClaimOffer mirrors the real store's guarded UPDATE: the read of the status and
+// the move to accepting happen under one lock, the way Postgres does them in one
+// statement. Anything looser here would let a concurrency test pass against a
+// service that races in production.
+func (q *fakeOfferQueue) ClaimOffer(_ context.Context, orgID, id uuid.UUID) (attestation.CredentialOffer, error) {
+	if q.claimed != nil {
+		defer q.claimed()
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for _, o := range q.offers {
+	for i, o := range q.offers {
 		if o.ID == id && o.OrganizationID == orgID && o.Status == attestation.OfferPending {
-			return o, nil
+			q.offers[i].Status = attestation.OfferAccepting
+			return q.offers[i], nil
 		}
 	}
 	return attestation.CredentialOffer{}, attestation.ErrOfferNotFound
+}
+
+func (q *fakeOfferQueue) ReleaseOffer(_ context.Context, orgID, id uuid.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i, o := range q.offers {
+		if o.ID == id && o.OrganizationID == orgID && o.Status == attestation.OfferAccepting {
+			q.offers[i].Status = attestation.OfferPending
+			return nil
+		}
+	}
+	return attestation.ErrOfferNotFound
 }
 
 func (q *fakeOfferQueue) AcceptOffer(_ context.Context, orgID, id uuid.UUID, in attestation.HeldInput) (attestation.HeldAttestation, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for i, o := range q.offers {
-		if o.ID == id && o.OrganizationID == orgID && o.Status == attestation.OfferPending {
+		if o.ID == id && o.OrganizationID == orgID && o.Status == attestation.OfferAccepting {
 			q.offers[i].Status = attestation.OfferAccepted
 			q.held = append(q.held, in)
 			return attestation.HeldAttestation{ID: uuid.New(), OrganizationID: orgID, VCT: in.VCT}, nil

@@ -602,12 +602,13 @@ is the queue between "the message arrived" and "the wallet holds it": one row pe
 inbound message (unique, so a re-delivery neither asks twice nor reopens a
 decision), `pending` until an admin accepts or declines from the Wallet tab.
 
-- **Accept** redeems the offer through the holder engine and writes the
-  `held_attestations` row in the same transaction as the status flip, so an
-  accepted offer and the credential it produced cannot disagree. A redemption that
-  fails leaves the offer pending, so it can be accepted again once the issuer is
-  reachable or the org's wallet is activated — the offer is never spent on a
-  failed attempt.
+- **Accept** claims the offer (`pending` → `accepting`, one guarded `UPDATE`, so
+  concurrent accepts cannot both reach the issuer), redeems it through the holder
+  engine, then writes the `held_attestations` row in the same transaction as the
+  status flip, so an accepted offer and the credential it produced cannot
+  disagree. A redemption that fails releases the claim, so the offer can be
+  accepted again once the issuer is reachable or the org's wallet is activated —
+  the offer is never spent on a failed attempt.
 - **Decline** is terminal and redeems nothing; the QERDS message and its evidence
   stay in the inbox.
 - The offer deeplink is a **bearer token** and is never served to the console

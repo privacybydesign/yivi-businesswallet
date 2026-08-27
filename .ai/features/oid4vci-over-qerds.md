@@ -266,12 +266,25 @@ part, not an attachment, so no inbound-attachment plumbing was needed.
   `(organization_id, source_message_id)`, so a re-delivery neither asks the org
   twice nor reopens a decision it already made.
 - `Service.AcceptOffer` (`service.go`) is the only path that puts a
-  QERDS-delivered credential in the wallet: `eudiholder.Holder.Redeem` →
-  `Store.AcceptOffer`, which flips the offer to `accepted` and writes the
-  `held_attestations` row (`source=qerds`, `sourceMessageId=…`) in one
-  transaction. Engine first, index second — a failed redemption leaves the offer
-  pending so an admin can accept again. `Service.DeclineOffer` closes it without
-  redeeming.
+  QERDS-delivered credential in the wallet, in three steps: `Store.ClaimOffer`
+  (`pending` → `accepting`) → `eudiholder.Holder.Redeem` → `Store.AcceptOffer`,
+  which settles the claim as `accepted` and writes the `held_attestations` row
+  (`source=qerds`, `sourceMessageId=…`) in one transaction.
+- **The claim comes before the redemption, not after.** Redeeming has a side
+  effect at the issuer that no later status guard can undo: read the offer instead
+  of claiming it and two admins pressing Accept at the same moment both redeem,
+  with only the winner of the settle getting a `held_attestations` row — the
+  loser's credential sits in the org's holder engine, invisible to the Wallet tab
+  and impossible to delete. `ClaimOffer` is one guarded `UPDATE`, so Postgres
+  picks the single winner and every rival gets `ErrOfferNotFound`.
+- Engine first, index second — a failed redemption releases the claim
+  (`Store.ReleaseOffer`, back to `pending`) so an admin can accept again. The
+  release runs on a **detached context** (`Service.releaseClaim`): the redemption
+  most likely to fail is the one whose context was cancelled, and on that context
+  the write reopening the offer would fail too. Releasing happens only when the
+  redemption produced *no* credential — after one that succeeded, a retry would
+  redeem a second, so an offer whose indexing failed stays claimed and out of the
+  queue. `Service.DeclineOffer` closes it without redeeming.
 - The offer deeplink never leaves the backend (`CredentialOffer.Offer` is
   `json:"-"`): it is a bearer token, so accepting replays it server-side.
 - `eudiholder.Holder.Redeem` runs irmago's `eudi/openid4vci` holder flow
@@ -301,8 +314,13 @@ would misfile the rest.
 
 **Known limitations**
 - A failed redemption is surfaced to the admin who pressed Accept (the request
-  errors) and the offer stays pending for a retry. Nothing retries it in the
+  errors) and the offer returns to pending for a retry. Nothing retries it in the
   background, which is the right default while a human owns the decision.
+- An offer stays `accepting` when the process dies between claiming and settling,
+  or when the redemption succeeded but indexing it did not. Both are out of the
+  Wallet tab until an operator looks, which is the deliberate trade: a stranded
+  offer holds nothing, while reopening one automatically would redeem the
+  credential twice.
 - **Live validation pending**: the irmago `Engine.Redeem` path compiles and is
   wired, but end-to-end redemption against the hosted Veramo issuer (trust
   anchors, endpoint reachability) has not been exercised headlessly — validate

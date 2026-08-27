@@ -17,10 +17,15 @@ import (
 // admin accepts it (redeemed into the org's holder engine) or declines it. Both
 // decisions are terminal — a declined offer is not re-queued when the message is
 // re-delivered, because the org already said no.
+//
+// Accepting passes through accepting: redeeming is a call to the issuer, and the
+// offer has to be claimed before it, not after, or two admins pressing Accept at
+// the same moment both redeem. See ClaimOffer.
 const (
-	OfferPending  = "pending"
-	OfferAccepted = "accepted"
-	OfferDeclined = "declined"
+	OfferPending   = "pending"
+	OfferAccepting = "accepting"
+	OfferAccepted  = "accepted"
+	OfferDeclined  = "declined"
 )
 
 // CredentialOffer is an OpenID4VCI credential offer that arrived over QERDS and
@@ -129,33 +134,61 @@ func (s *Store) ListPendingOffers(ctx context.Context, orgID uuid.UUID) ([]Crede
 	return offers, nil
 }
 
-// GetPendingOffer returns one offer still awaiting a decision. An offer that is
-// absent or already decided is ErrOfferNotFound: to the console both mean "there
-// is nothing here to act on".
-func (s *Store) GetPendingOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error) {
-	const query = `SELECT ` + offerColumns + ` FROM credential_offers
-		WHERE id = $1 AND organization_id = $2 AND status = $3`
-	o, err := scanOffer(s.db.QueryRow(ctx, query, id, orgID, OfferPending))
+// ClaimOffer takes a pending offer for redemption, returning it (deeplink
+// included) as it moves to accepting. The transition is one guarded UPDATE, so
+// Postgres decides the winner: of any number of concurrent accepts exactly one
+// gets the row, and every other one — like an accept of an offer that is absent,
+// already claimed or already decided — gets ErrOfferNotFound, which to the
+// console reads as "there is nothing here to act on".
+//
+// Claiming before redeeming rather than after is the whole point. A plain read
+// would let both callers reach the issuer, and only the one that won the later
+// status guard would get a held_attestations row — leaving the loser's credential
+// in the org's holder engine with nothing in the wallet to show or delete it.
+func (s *Store) ClaimOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error) {
+	const claim = `UPDATE credential_offers SET status = $3, updated_at = now()
+		WHERE id = $1 AND organization_id = $2 AND status = $4
+		RETURNING ` + offerColumns
+	o, err := scanOffer(s.db.QueryRow(ctx, claim, id, orgID, OfferAccepting, OfferPending))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CredentialOffer{}, ErrOfferNotFound
 	}
 	if err != nil {
-		return CredentialOffer{}, fmt.Errorf("attestation: get offer %s org %s: %w", id, orgID, err)
+		return CredentialOffer{}, fmt.Errorf("attestation: claim offer %s org %s: %w", id, orgID, err)
 	}
 	return o, nil
 }
 
-// AcceptOffer marks a pending offer accepted and indexes the credential the
+// ReleaseOffer puts a claimed offer back in the queue, for a redemption that
+// ended without a credential: nothing was held, so the offer is pending again and
+// the admin can accept once the issuer is reachable. Only a claim is releasable —
+// an offer already accepted or declined is ErrOfferNotFound, so a late release
+// cannot reopen a settled decision.
+func (s *Store) ReleaseOffer(ctx context.Context, orgID, id uuid.UUID) error {
+	const release = `UPDATE credential_offers SET status = $3, updated_at = now()
+		WHERE id = $1 AND organization_id = $2 AND status = $4`
+	tag, err := s.db.Exec(ctx, release, id, orgID, OfferPending, OfferAccepting)
+	if err != nil {
+		return fmt.Errorf("attestation: release offer %s org %s: %w", id, orgID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrOfferNotFound
+	}
+	return nil
+}
+
+// AcceptOffer settles a claimed offer as accepted and indexes the credential the
 // caller redeemed from it, in one tx — so an accepted offer and the held row it
-// produced can never disagree. The status guard is what makes a double accept
-// safe: the second one finds no pending row and returns ErrOfferNotFound.
+// produced can never disagree. It guards on accepting, not pending: only the
+// caller that won ClaimOffer holds the claim, and releasing it is the only way
+// back to pending.
 func (s *Store) AcceptOffer(ctx context.Context, orgID, id uuid.UUID, in HeldInput) (HeldAttestation, error) {
 	var out HeldAttestation
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE credential_offers SET status = $3, decided_at = now(), updated_at = now()
 			WHERE id = $1 AND organization_id = $2 AND status = $4
 			RETURNING ` + offerColumns
-		offer, err := scanOffer(q.QueryRow(ctx, update, id, orgID, OfferAccepted, OfferPending))
+		offer, err := scanOffer(q.QueryRow(ctx, update, id, orgID, OfferAccepted, OfferAccepting))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrOfferNotFound
 		}

@@ -113,6 +113,33 @@ func (h *flakyHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI stri
 	return h.StubHolder.Redeem(ctx, orgID, offerURI)
 }
 
+// barrierHolder counts redemptions and lets none of them start until every
+// concurrent accept has been through the offer queue's claim. That ordering is
+// what makes the concurrency test below deterministic rather than a race the run
+// might happen to win: whichever accepts are going to reach the issuer have all
+// reached it by the time the first redemption returns.
+type barrierHolder struct {
+	*eudiholder.StubHolder
+	claimsDone *sync.WaitGroup
+
+	mu    sync.Mutex
+	calls int
+}
+
+func (h *barrierHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (eudiholder.Redeemed, error) {
+	h.claimsDone.Wait()
+	h.mu.Lock()
+	h.calls++
+	h.mu.Unlock()
+	return h.StubHolder.Redeem(ctx, orgID, offerURI)
+}
+
+func (h *barrierHolder) redeemCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.calls
+}
+
 const (
 	yiviAddress = "yivi@qerds.localhost"
 	ruAddress   = "ru@qerds.localhost"
@@ -319,4 +346,125 @@ func TestDeclineOfferNeverLoadsTheCredential(t *testing.T) {
 	if _, err := service.AcceptOffer(ctx, ruOrg, offerID); !errors.Is(err, attestation.ErrOfferNotFound) {
 		t.Fatalf("accepting a declined offer = %v, want ErrOfferNotFound", err)
 	}
+}
+
+// TestConcurrentAcceptsRedeemTheOfferOnce pins the claim that guards the
+// redemption. Two admins pressing Accept on the same offer — or one admin whose
+// double-click reaches two API replicas — must produce one credential, not two:
+// the offer is claimed before the issuer is called, so the accepts that lose the
+// claim never redeem at all.
+//
+// Without the claim every caller reads the same pending offer and redeems from
+// it, and only the one that wins the later status guard gets a held_attestations
+// row. The rest leave credentials in the org's holder engine that the Wallet tab
+// can neither show nor delete, which is exactly what this asserts against.
+func TestConcurrentAcceptsRedeemTheOfferOnce(t *testing.T) {
+	ctx := context.Background()
+	ruOrg := uuid.New()
+
+	const accepts = 4
+	var claimsDone sync.WaitGroup
+	claimsDone.Add(accepts)
+
+	queue := newFakeOfferQueue()
+	queue.claimed = claimsDone.Done
+	rec := attestation.NewOfferReceiver(queue, attestation.NewTrustedOfferSenders(nil, nil))
+	body, err := attestation.MarshalCredentialOfferEnvelope("Yivi", "Approved supplier", "openid-credential-offer://?x=1")
+	if err != nil {
+		t.Fatalf("marshal offer: %v", err)
+	}
+	if err := rec.OnInboundMessage(ctx, inbound(ruOrg, uuid.New(), "blue_gw", yiviAddress, body)); err != nil {
+		t.Fatalf("OnInboundMessage: %v", err)
+	}
+	offerID := queue.queued()[0].ID
+
+	holder := &barrierHolder{StubHolder: eudiholder.NewStubHolder(), claimsDone: &claimsDone}
+	service := attestation.NewService(nil, nil, nil, nil, nil, nil, queue, holder, "http://app.test")
+
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		accepted int
+		errs     []error
+	)
+	for range accepts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := service.AcceptOffer(ctx, ruOrg, offerID)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs = append(errs, err)
+				return
+			}
+			accepted++
+		}()
+	}
+	wg.Wait()
+
+	if accepted != 1 {
+		t.Fatalf("%d of %d concurrent accepts succeeded, want exactly 1", accepted, accepts)
+	}
+	for _, err := range errs {
+		if !errors.Is(err, attestation.ErrOfferNotFound) {
+			t.Fatalf("losing accept = %v, want ErrOfferNotFound", err)
+		}
+	}
+	if got := holder.redeemCount(); got != 1 {
+		t.Fatalf("the offer was redeemed %d times, want 1: every redemption past the first leaves a credential in the engine that the wallet cannot show or delete", got)
+	}
+	if queue.heldCount() != 1 {
+		t.Fatalf("%d held credentials recorded, want 1", queue.heldCount())
+	}
+	if got := queue.queued()[0].Status; got != attestation.OfferAccepted {
+		t.Fatalf("offer status = %q, want %q", got, attestation.OfferAccepted)
+	}
+}
+
+// A redemption that fails on a cancelled request context must still reopen the
+// offer. The release runs on a detached context for exactly this case: on the
+// request's own context the write that puts the offer back would be cancelled
+// too, stranding it as accepting — out of the Wallet tab and undecidable for good.
+func TestAcceptOfferReopensTheOfferWhenTheRequestIsCancelled(t *testing.T) {
+	ruOrg := uuid.New()
+
+	queue := newFakeOfferQueue()
+	rec := attestation.NewOfferReceiver(queue, attestation.NewTrustedOfferSenders(nil, nil))
+	body, err := attestation.MarshalCredentialOfferEnvelope("Yivi", "Approved supplier", "openid-credential-offer://?x=1")
+	if err != nil {
+		t.Fatalf("marshal offer: %v", err)
+	}
+	if err := rec.OnInboundMessage(context.Background(), inbound(ruOrg, uuid.New(), "blue_gw", yiviAddress, body)); err != nil {
+		t.Fatalf("OnInboundMessage: %v", err)
+	}
+	offerID := queue.queued()[0].ID
+
+	// The admin closed the tab mid-redemption: the context the accept runs on is
+	// cancelled by the time the holder engine gives up.
+	ctx, cancel := context.WithCancel(context.Background())
+	holder := &cancellingHolder{StubHolder: eudiholder.NewStubHolder(), cancel: cancel}
+	service := attestation.NewService(nil, nil, nil, nil, nil, nil, queue, holder, "http://app.test")
+
+	if _, err := service.AcceptOffer(ctx, ruOrg, offerID); err == nil {
+		t.Fatal("expected the accept to fail once its context was cancelled")
+	}
+	if queue.heldCount() != 0 {
+		t.Fatalf("a cancelled accept recorded %d held credentials", queue.heldCount())
+	}
+	if got := queue.queued()[0].Status; got != attestation.OfferPending {
+		t.Fatalf("offer status = %q, want %q: a cancelled accept must leave the offer decidable", got, attestation.OfferPending)
+	}
+}
+
+// cancellingHolder cancels the accept's own context and then fails, standing in
+// for the client that disconnects while the issuer is being called.
+type cancellingHolder struct {
+	*eudiholder.StubHolder
+	cancel context.CancelFunc
+}
+
+func (h *cancellingHolder) Redeem(ctx context.Context, _ uuid.UUID, _ string) (eudiholder.Redeemed, error) {
+	h.cancel()
+	return eudiholder.Redeemed{}, ctx.Err()
 }

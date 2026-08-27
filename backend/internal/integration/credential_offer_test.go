@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -206,5 +207,99 @@ func TestCredentialOfferMemberCannotDecide(t *testing.T) {
 	resp = env.do(http.MethodGet, "/api/v1/orgs/acme/attestations/held", nil)
 	if held := decodeJSON[[]heldResp](t, resp); len(held) != 0 {
 		t.Fatalf("a member's rejected decision still put %d credentials in the wallet", len(held))
+	}
+}
+
+// Two admins pressing Accept on the same offer at the same moment — or one admin
+// whose double-click reaches two API replicas — get one 200 and the rest 404, and
+// the organization ends up holding one credential.
+//
+// This pins the contract through the assembled router; it is not where the race
+// itself is caught. The damage a missing claim does is a redemption whose
+// credential never reaches held_attestations, and an orphan in the holder engine
+// is invisible from here — /held lists the index, so it reads as 1 either way.
+// The redeem count is asserted where the engine is observable:
+// TestConcurrentAcceptsRedeemTheOfferOnce (service) and TestClaimOfferIsTakenOnce
+// (store) are the regression tests, and both fail without the claim.
+func TestConcurrentOfferAcceptsHoldOneCredential(t *testing.T) {
+	env := setup(t)
+	admin := env.login("admin@acme.test")
+	orgID := env.createOrg("Acme", "acme")
+	env.addMembership(admin.ID, orgID, organization.RoleAdmin)
+
+	deliverOffer(t, env, orgID, "ref-concurrent", "Bewijs van inschrijving")
+
+	resp := env.do(http.MethodGet, "/api/v1/orgs/acme/attestations/offers", nil)
+	offers := decodeJSON[[]offerResp](t, resp)
+	if len(offers) != 1 {
+		t.Fatalf("offers awaiting a decision = %d, want 1", len(offers))
+	}
+	accept := env.server.URL + "/api/v1/orgs/acme/attestations/offers/" + offers[0].ID + "/accept"
+
+	// The requests are fired from goroutines, so they collect their outcome
+	// instead of failing there: t.Fatalf off the test goroutine is not allowed.
+	const requests = 4
+	var (
+		start  sync.WaitGroup
+		done   sync.WaitGroup
+		mu     sync.Mutex
+		status []int
+		errs   []error
+	)
+	start.Add(1)
+	for range requests {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			req, err := http.NewRequest(http.MethodPost, accept, nil)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+				return
+			}
+			start.Wait()
+			resp, err := env.client.Do(req)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs = append(errs, err)
+				return
+			}
+			_ = resp.Body.Close()
+			status = append(status, resp.StatusCode)
+		}()
+	}
+	start.Done()
+	done.Wait()
+
+	for _, err := range errs {
+		t.Fatalf("accept request: %v", err)
+	}
+	var ok, notFound int
+	for _, code := range status {
+		switch code {
+		case http.StatusOK:
+			ok++
+		case http.StatusNotFound:
+			notFound++
+		default:
+			t.Fatalf("concurrent accept = %d, want 200 or 404", code)
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d of %d concurrent accepts returned 200, want exactly 1", ok, requests)
+	}
+	if notFound != requests-1 {
+		t.Fatalf("%d accepts returned 404, want %d", notFound, requests-1)
+	}
+
+	resp = env.do(http.MethodGet, "/api/v1/orgs/acme/attestations/held", nil)
+	if held := decodeJSON[[]heldResp](t, resp); len(held) != 1 {
+		t.Fatalf("wallet holds %d credentials after %d concurrent accepts, want 1", len(held), requests)
+	}
+	resp = env.do(http.MethodGet, "/api/v1/orgs/acme/attestations/offers", nil)
+	if remaining := decodeJSON[[]offerResp](t, resp); len(remaining) != 0 {
+		t.Fatalf("the offer is still awaiting a decision (%d)", len(remaining))
 	}
 }

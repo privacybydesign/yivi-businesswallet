@@ -24,9 +24,15 @@ CREATE TABLE credential_offers
     from_party        TEXT        NOT NULL,
     credential_name   TEXT        NOT NULL,
     credential_offer  TEXT        NOT NULL,
-    status            TEXT        NOT NULL CHECK (status IN ('pending', 'accepted', 'declined')),
-    -- when the offer left 'pending'; NULL while it waits. The acting admin is in
-    -- the audit trail (attestation.offer_accepted / offer_declined), not here.
+    -- 'accepting' is the claim an admin's accept takes before the redemption runs:
+    -- the pending -> accepting transition is a single guarded UPDATE, so of two
+    -- concurrent accepts only one reaches the issuer and the loser sees no
+    -- pending offer. It settles as 'accepted', or back to 'pending' when the
+    -- redemption produced nothing (see Service.AcceptOffer).
+    status            TEXT        NOT NULL CHECK (status IN ('pending', 'accepting', 'accepted', 'declined')),
+    -- when the offer was settled for good; NULL while it waits and while an
+    -- acceptance is in flight. The acting admin is in the audit trail
+    -- (attestation.offer_accepted / offer_declined), not here.
     decided_at        TIMESTAMPTZ,
     received_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
