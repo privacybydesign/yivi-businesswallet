@@ -2870,7 +2870,10 @@ paths:
                 document:
                   type: string
                   format: binary
-                  description: The PDF to sign.
+                  description: >-
+                    The PDF to sign, at most 25 MB — the documented per-file cap on
+                    a QERDS attachment, the channel a signed document is delivered
+                    over. A larger one is refused with 413.
                 signers:
                   type: array
                   items:
@@ -2909,6 +2912,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           description: No CSC provider configured.
+        '413':
+          description: The uploaded document is larger than the accepted maximum.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/signing/requests/pending:
     parameters:
       - name: slug

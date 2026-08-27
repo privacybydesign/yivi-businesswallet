@@ -710,6 +710,7 @@ export const nl: Translation<typeof en> = {
     documentReplace: "Bestand vervangen",
     documentRemove: "Verwijderen",
     documentNone: "Geen bestand gekozen",
+    documentTooLarge: "Het document is groter dan {{size}}.",
     signersLabel: "Ondertekenaars",
     signersHint:
       "Voeg iedereen toe die moet ondertekenen, in de volgorde waarin ze tekenen. Een lid tekent vanuit zijn eigen account; een externe ondertekenaar krijgt een link per e-mail en tekent met zijn eigen wallet.",

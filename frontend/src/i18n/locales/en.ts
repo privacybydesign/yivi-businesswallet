@@ -690,6 +690,7 @@ export const en = {
     documentReplace: "Replace file",
     documentRemove: "Remove",
     documentNone: "No file chosen",
+    documentTooLarge: "The document is larger than {{size}}.",
     signersLabel: "Signers",
     signersHint:
       "Add everyone who must sign, in the order you want them to sign. A member signs from their own account; an external signee gets a link by email and signs with their own wallet.",

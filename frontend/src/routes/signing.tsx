@@ -41,6 +41,11 @@ import {
   signerStatusLabel,
 } from "../lib/signing-labels";
 import { alreadyChosen, isEmailish, signerKey } from "../lib/signer-selection";
+import { formatBytes } from "../lib/format-bytes";
+import {
+  MAX_DOCUMENT_BYTES,
+  documentIsTooLarge,
+} from "../lib/signing-document";
 import { placementsIncomplete, signerAccent } from "../lib/placement";
 import { toast } from "../lib/toast";
 import { Button, Card, Input, Tag, TopBar } from "../ui";
@@ -54,6 +59,7 @@ const PlacementEditor = React.lazy(async () => ({
 }));
 
 const CONFLICT_STATUS = 409;
+const TOO_LARGE_STATUS = 413;
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const CONTROL =
   "border-line bg-surface text-ink w-full rounded-md border px-3 py-2 text-[13px]";
@@ -93,14 +99,22 @@ function startError(error: Error, t: TFunction): string {
     if (code === "not_your_turn") return t("signing.notYourTurn");
     if (code === "sign_in_progress") return t("signing.signInProgress");
   }
+  if (error instanceof ApiError && error.status === TOO_LARGE_STATUS) {
+    return t("signing.documentTooLarge", {
+      size: formatBytes(MAX_DOCUMENT_BYTES),
+    });
+  }
+  // The backend renders an APIError as `{error, code}`, so the human-readable part
+  // is `error`; reading `message` here always missed and fell through to the
+  // client's own "failed with status …" string.
   if (
     error instanceof ApiError &&
     error.body &&
     typeof error.body === "object" &&
-    "message" in error.body &&
-    typeof error.body.message === "string"
+    "error" in error.body &&
+    typeof error.body.error === "string"
   ) {
-    return t("signing.startError", { message: error.body.message });
+    return t("signing.startError", { message: error.body.error });
   }
   return t("signing.startError", { message: error.message });
 }
@@ -452,6 +466,7 @@ function NewRequestTab({
   const create = useCreateSigningRequestMutation(slug);
 
   const [file, setFile] = useState<File | null>(null);
+  const [fileTooLarge, setFileTooLarge] = useState(false);
   const [signers, setSigners] = useState<SignerSelection[]>([]);
   const [signerKind, setSignerKind] = useState<SignerKind>(
     SIGNER_KIND.internal,
@@ -595,12 +610,18 @@ function NewRequestTab({
                   accept="application/pdf"
                   className="sr-only"
                   onChange={(e) => {
-                    setFile(e.target.files?.[0] ?? null);
-                    // Placements are rectangles on the pages of one document, so they
-                    // mean nothing once a different document is chosen.
-                    setSigners((prev) =>
-                      prev.map((signer) => ({ ...signer, placements: [] })),
-                    );
+                    const chosen = e.target.files?.[0] ?? null;
+                    const tooLarge =
+                      chosen !== null && documentIsTooLarge(chosen);
+                    setFileTooLarge(tooLarge);
+                    if (!tooLarge) {
+                      setFile(chosen);
+                      // Placements are rectangles on the pages of one document, so
+                      // they mean nothing once a different document is chosen.
+                      setSigners((prev) =>
+                        prev.map((signer) => ({ ...signer, placements: [] })),
+                      );
+                    }
                     // Reset so picking the same file after removing it fires onChange again.
                     e.target.value = "";
                   }}
@@ -618,6 +639,13 @@ function NewRequestTab({
             <span className="text-ink-soft truncate text-[12px]">
               {file ? file.name : t("signing.documentNone")}
             </span>
+            {fileTooLarge && (
+              <p role="alert" className="text-error text-[12px]">
+                {t("signing.documentTooLarge", {
+                  size: formatBytes(MAX_DOCUMENT_BYTES),
+                })}
+              </p>
+            )}
           </div>
         </div>
 
