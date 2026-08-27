@@ -21,7 +21,9 @@ type inboundPoller interface {
 // credential offer whose pre-authorized code is short-lived, so an offer that
 // waits for someone to log in can expire before it is ever redeemed.
 //
-// Interval 0 disables it, restoring the console-only behaviour.
+// Interval 0 disables it — which config.Load accepts only when the push
+// webhook is configured, so a deployment cannot silently fall back to
+// console-only intake.
 //
 // Within one process this sweep and the console's org-scoped Poll cannot overlap:
 // qerds.Service serialises inbound drains. They read the same access-point queue,

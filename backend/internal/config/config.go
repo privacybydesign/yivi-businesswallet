@@ -31,7 +31,9 @@ const (
 	envQerdsWebhookSecret        = "QERDS_WEBHOOK_SECRET"
 	envQerdsDefaultAddressDomain = "QERDS_DEFAULT_ADDRESS_DOMAIN"
 	// QerdsInboundPollInterval drives the background inbound poller. Zero
-	// disables it (inbound then only arrives when an org console polls).
+	// disables it, which Load accepts only when the webhook secret keeps push
+	// delivery available — otherwise inbound would arrive solely when an org
+	// console polls, the silent no-delivery state of issue #105.
 	envQerdsInboundPollInterval = "QERDS_INBOUND_POLL_INTERVAL"
 	// QerdsTrustedOfferSenders allowlists which QERDS senders may have their
 	// credential offers auto-redeemed. Empty trusts every sender.
@@ -375,10 +377,17 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	// "0" (or "0s") disables the background inbound poller.
+	// "0" (or "0s") disables the background inbound poller. With the webhook
+	// also unconfigured no mechanism delivers inbound messages automatically,
+	// so that combination fails the boot rather than degrading to manual-only
+	// console polls.
 	qerdsInboundPollInterval, err := parseDuration(envQerdsInboundPollInterval, defaultQerdsInboundPollInterval)
 	if err != nil {
 		return Config{}, err
+	}
+	qerdsWebhookSecret := os.Getenv(envQerdsWebhookSecret)
+	if qerdsInboundPollInterval <= 0 && qerdsWebhookSecret == "" {
+		return Config{}, fmt.Errorf("config: %s must be set when %s disables the background poller, or no inbound QERDS message is delivered automatically", envQerdsWebhookSecret, envQerdsInboundPollInterval)
 	}
 
 	qerdsProvider := envOrDefault(envQerdsProvider, defaultQerdsProvider)
@@ -454,7 +463,7 @@ func Load() (Config, error) {
 		QerdsProvider:             qerdsProvider,
 		QerdsProviderURL:          qerdsProviderURL,
 		QerdsAuthToken:            os.Getenv(envQerdsAuthToken),
-		QerdsWebhookSecret:        os.Getenv(envQerdsWebhookSecret),
+		QerdsWebhookSecret:        qerdsWebhookSecret,
 		QerdsDefaultAddressDomain: envOrDefault(envQerdsDefaultAddressDomain, defaultQerdsDefaultAddressDomain),
 		QerdsInboundPollInterval:  qerdsInboundPollInterval,
 		QerdsTrustedOfferSenders:  parseList(os.Getenv(envQerdsTrustedOfferSenders)),
