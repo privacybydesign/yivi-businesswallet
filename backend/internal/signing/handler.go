@@ -19,10 +19,11 @@ import (
 
 const (
 	// maxUploadMiB is the accepted size of an uploaded PDF, in MiB. It matches the
-	// per-file cap on a QERDS attachment (qerds.maxAttachmentBytes), the channel the
-	// signed document is delivered over, so a document accepted here is still
-	// deliverable once it has been signed. The error message names this number and
-	// the frontend refuses a larger file before uploading it.
+	// documented per-file cap on a QERDS attachment (qerds.maxAttachmentBytes), the
+	// channel a signed document is delivered over. Signing only grows a document, so
+	// that is where the number comes from rather than a guarantee the signed result
+	// still fits. The error message names it and the frontend refuses a larger file
+	// before uploading it.
 	maxUploadMiB = 25
 	// maxUploadBytes bounds the document part of the upload.
 	maxUploadBytes = maxUploadMiB << 20

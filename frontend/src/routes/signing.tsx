@@ -41,7 +41,11 @@ import {
   signerStatusLabel,
 } from "../lib/signing-labels";
 import { alreadyChosen, isEmailish, signerKey } from "../lib/signer-selection";
-import { documentIsTooLarge } from "../lib/signing-document";
+import { formatBytes } from "../lib/format-bytes";
+import {
+  MAX_DOCUMENT_BYTES,
+  documentIsTooLarge,
+} from "../lib/signing-document";
 import { placementsIncomplete, signerAccent } from "../lib/placement";
 import { toast } from "../lib/toast";
 import { Button, Card, Input, Tag, TopBar } from "../ui";
@@ -96,7 +100,9 @@ function startError(error: Error, t: TFunction): string {
     if (code === "sign_in_progress") return t("signing.signInProgress");
   }
   if (error instanceof ApiError && error.status === TOO_LARGE_STATUS) {
-    return t("signing.documentTooLarge");
+    return t("signing.documentTooLarge", {
+      size: formatBytes(MAX_DOCUMENT_BYTES),
+    });
   }
   // The backend renders an APIError as `{error, code}`, so the human-readable part
   // is `error`; reading `message` here always missed and fell through to the
@@ -608,12 +614,14 @@ function NewRequestTab({
                     const tooLarge =
                       chosen !== null && documentIsTooLarge(chosen);
                     setFileTooLarge(tooLarge);
-                    setFile(tooLarge ? null : chosen);
-                    // Placements are rectangles on the pages of one document, so they
-                    // mean nothing once a different document is chosen.
-                    setSigners((prev) =>
-                      prev.map((signer) => ({ ...signer, placements: [] })),
-                    );
+                    if (!tooLarge) {
+                      setFile(chosen);
+                      // Placements are rectangles on the pages of one document, so
+                      // they mean nothing once a different document is chosen.
+                      setSigners((prev) =>
+                        prev.map((signer) => ({ ...signer, placements: [] })),
+                      );
+                    }
                     // Reset so picking the same file after removing it fires onChange again.
                     e.target.value = "";
                   }}
@@ -633,7 +641,9 @@ function NewRequestTab({
             </span>
             {fileTooLarge && (
               <p role="alert" className="text-error text-[12px]">
-                {t("signing.documentTooLarge")}
+                {t("signing.documentTooLarge", {
+                  size: formatBytes(MAX_DOCUMENT_BYTES),
+                })}
               </p>
             )}
           </div>

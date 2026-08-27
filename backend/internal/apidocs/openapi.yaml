@@ -2871,9 +2871,9 @@ paths:
                   type: string
                   format: binary
                   description: >-
-                    The PDF to sign, at most 25 MB — the per-file cap on a QERDS
-                    attachment, so a document accepted here is still deliverable
-                    once it has been signed. A larger one is refused with 413.
+                    The PDF to sign, at most 25 MB — the documented per-file cap on
+                    a QERDS attachment, the channel a signed document is delivered
+                    over. A larger one is refused with 413.
                 signers:
                   type: array
                   items:
