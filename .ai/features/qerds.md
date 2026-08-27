@@ -196,7 +196,7 @@ If the provider call fails after the DB commit, the message sits in a retryable 
   effect — it proves *we* received it). Idempotent on `provider_ref`. A provider that pushes
   credential offers should send `fromParty` (the ebMS3 `From` PartyId it authenticated); without
   it a configured `QERDS_TRUSTED_OFFER_PARTIES` cannot be satisfied, so pushed offers are stored
-  but not auto-redeemed.
+  but never queued for the org to accept.
 - **Polling fallback:** a background worker pulls new messages by address (a `cmd/` binary or a
   ticker, consistent with the migrate/seed-as-separate-service pattern). Simpler, no inbound
   network exposure, higher latency.
@@ -241,8 +241,8 @@ Env-driven like everything else (`internal/config`):
 | `QERDS_AUTH_TOKEN` | bearer / creds material | when the driver needs it |
 | `QERDS_WEBHOOK_SECRET` | HMAC secret for inbound webhook auth; unset disables the push endpoint (404), which the API says out loud at boot | when webhook enabled, and when the poll interval is `0` |
 | `QERDS_DEFAULT_ADDRESS_DOMAIN` | domain for minted digital addresses | no (has default) |
-| `QERDS_TRUSTED_OFFER_PARTIES` | AS4 parties whose credential offers are auto-redeemed | when peering with an external AS4 party |
-| `QERDS_TRUSTED_OFFER_SENDERS` | sender addresses whose credential offers are auto-redeemed | when peering with an external AS4 party |
+| `QERDS_TRUSTED_OFFER_PARTIES` | AS4 parties whose credential offers are queued for the org to accept | when peering with an external AS4 party |
+| `QERDS_TRUSTED_OFFER_SENDERS` | sender addresses whose credential offers are queued for the org to accept | when peering with an external AS4 party |
 | `QERDS_INBOUND_POLL_INTERVAL` | background inbound sweep interval (`0` disables; boot fails if the webhook is off too, so inbound delivery is never manual-only) | no (default `30s`) |
 
 Boot `Ping` is **fatal** (matches the Yivi readiness gate). `/readyz` stays DB-only.
@@ -398,14 +398,15 @@ tells you where to look:
 | The AS4 leg completed | ver.id's console: message `SENT`/`ACKNOWLEDGED`; ours: `RECEIVED` from party `verid-qerds` |
 | The WS plugin routed a foreign sender | ours: `listPendingMessages(finalRecipient=<org address>)` returns it (the message filter must be persisted) |
 | The right org was resolved | `qerds_messages` row, `direction=inbound`, expected `organization_id`, `sender_address=verid@ver.id` |
-| The trust gate let it through | backend log: redeemed, not "offer from untrusted sender not redeemed" |
-| The credential landed | `held_attestations` row, `source=qerds`, `sourceMessageId` set |
-| No operator was needed | all of the above with no browser session open (the background poller) |
+| The trust gate let it through | backend log: queued, not "offer from untrusted sender not queued" |
+| The offer reached the org | `credential_offers` row, `status=pending`, `source_message_id` set |
+| The credential landed | after an admin accepts: `held_attestations` row, `source=qerds`, `sourceMessageId` set |
+| No operator was needed to *receive* it | everything up to the queued offer with no browser session open (the background poller). Holding it is deliberately a human decision — see `.ai/features/attestations.md` §9.6 |
 
 Two backend behaviours exist specifically for this path.
 
-The first is the offer trust gate, which decides whose offers are **auto-redeemed**
-rather than merely stored. It is two allowlists, ANDed, because the two sender
+The first is the offer trust gate, which decides whose offers are **put in front of
+an org admin to accept** rather than merely stored. It is two allowlists, ANDed, because the two sender
 identities on an inbound message are not equally trustworthy:
 
 | Env | Matched against | Who controls it |
@@ -413,8 +414,8 @@ identities on an inbound message are not equally trustworthy:
 | `QERDS_TRUSTED_OFFER_PARTIES` | ebMS3 `From` PartyId (e.g. `verid-qerds`) | the receiving gateway: it only accepts a message whose party is in its PMode and whose signature chains to that party's certificate |
 | `QERDS_TRUSTED_OFFER_SENDERS` | the `originalSender` property (`addr@domain`, `*@domain`, `*`) | the **sending** side — any party the PMode admits can claim any address |
 
-So `QERDS_TRUSTED_OFFER_PARTIES` is the one that bounds who may hand us redeemable
-offers; `QERDS_TRUSTED_OFFER_SENDERS` refines the decision within a party but
+So `QERDS_TRUSTED_OFFER_PARTIES` is the one that bounds who may put an acceptable
+offer in front of an org admin; `QERDS_TRUSTED_OFFER_SENDERS` refines the decision within a party but
 cannot make it. Each is **empty-trusts-everyone**, safe only while every sender is
 an org on this deployment, and the backend warns at boot for each one that is
 unset. A deployment peering with an external AS4 party must set both.

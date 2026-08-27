@@ -38,8 +38,8 @@ type inboundPayload struct {
 	// the extent the webhook secret is — the same basis as every other field.
 	//
 	// A provider that omits it cannot satisfy a configured
-	// QERDS_TRUSTED_OFFER_PARTIES allowlist, so offers it pushes are stored and
-	// left for an operator rather than auto-redeemed (see
+	// QERDS_TRUSTED_OFFER_PARTIES allowlist, so offers it pushes are stored in the
+	// inbox but never queued for the org to accept (see
 	// attestation.TrustedOfferSenders).
 	FromParty string            `json:"fromParty"`
 	Sender    string            `json:"sender"`

@@ -4,11 +4,14 @@ import (
 	"strings"
 )
 
-// TrustedOfferSenders decides whose inbound QERDS credential offers may be
-// redeemed automatically. It is separate from issuer trust because a credential
-// offer is a BEARER TOKEN: an offer minted for org A and replayed with
+// TrustedOfferSenders decides whose inbound QERDS credential offers are queued
+// for an organization to accept. It is separate from issuer trust because a
+// credential offer is a BEARER TOKEN: an offer minted for org A and replayed with
 // finalRecipient=orgB yields a genuinely-signed, unrevoked credential in org B's
-// wallet, so every content check the holder runs still passes.
+// wallet, so every content check the holder runs still passes. Explicit
+// acceptance means nobody's wallet changes without them agreeing, but an
+// unbounded queue would still let any admitted party spam an org's console with
+// offers to decide on, so the gate stays.
 //
 // The two identities it gates on are ANDed and trustworthy to different degrees:
 // the AS4 party (ebMS3 From PartyId) is verified by the receiving gateway against

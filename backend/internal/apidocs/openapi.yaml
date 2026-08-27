@@ -795,6 +795,110 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/offers:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [attestation]
+      summary: List inbound credential offers awaiting a decision
+      description: >-
+        Credential offers delivered to the organisation over QERDS that have not
+        been accepted or declined yet. Receiving an offer does not add the
+        credential to the wallet; accepting it does. The offer deeplink itself is
+        not returned, since anyone holding it could redeem the credential.
+        Requires membership of the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/offers/{id}/accept:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [attestation]
+      summary: Accept an inbound credential offer
+      description: >-
+        Redeems the offer through the organisation's holder wallet and indexes
+        the received credential as held. Requires an administrator role. Returns
+        404 when the offer is absent or already decided; a redemption that fails
+        leaves the offer pending so it can be accepted again.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/offers/{id}/decline:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [attestation]
+      summary: Decline an inbound credential offer
+      description: >-
+        Refuses the offer. Nothing is redeemed, so the credential never reaches
+        the wallet; the QERDS message and its evidence stay in the inbox.
+        Requires an administrator role. Returns 404 when the offer is absent or
+        already decided.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/attestations/issuer-bundle:
     parameters:
       - name: slug

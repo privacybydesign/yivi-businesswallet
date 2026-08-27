@@ -59,12 +59,22 @@ type heldMutator interface {
 	SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
 }
 
+// offerStore is the pending-offer queue the service coordinates for the
+// accept/decline flow. Backed by the attestation store.
+type offerStore interface {
+	ListPendingOffers(ctx context.Context, orgID uuid.UUID) ([]CredentialOffer, error)
+	GetPendingOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
+	AcceptOffer(ctx context.Context, orgID, id uuid.UUID, in HeldInput) (HeldAttestation, error)
+	DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error
+}
+
 // holderEngine is the organization's holder-wallet engine seam the service
-// coordinates: removing a credential (the delete flow) and reading a held
-// credential's disclosed attributes (the detail view). Backed by
-// internal/eudiholder; accept the interface so the service stays decoupled from
-// the concrete engine (stub or irmago).
+// coordinates: redeeming an accepted credential offer, removing a credential
+// (the delete flow) and reading a held credential's disclosed attributes (the
+// detail view). Backed by internal/eudiholder; accept the interface so the
+// service stays decoupled from the concrete engine (stub or irmago).
 type holderEngine interface {
+	Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (eudiholder.Redeemed, error)
 	Delete(ctx context.Context, orgID uuid.UUID, ref string) error
 	Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (eudiholder.HeldCredential, error)
 	Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]eudiholder.HeldDisplay, error)
@@ -93,12 +103,13 @@ type Service struct {
 	email      emailNotifier
 	qerds      qerdsNotifier
 	held       heldMutator
+	offers     offerStore
 	holder     holderEngine
 	appBaseURL string
 	now        func() time.Time
 }
 
-func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, holder holderEngine, appBaseURL string) *Service {
+func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver, email emailNotifier, qerds qerdsNotifier, held heldMutator, offers offerStore, holder holderEngine, appBaseURL string) *Service {
 	return &Service{
 		store:      store,
 		issuer:     iss,
@@ -106,6 +117,7 @@ func NewService(store issuedStore, iss issuer, instances issuerInstanceResolver,
 		email:      email,
 		qerds:      qerds,
 		held:       held,
+		offers:     offers,
 		holder:     holder,
 		appBaseURL: strings.TrimRight(appBaseURL, "/"),
 		now:        time.Now,
@@ -172,9 +184,9 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 		Claims:             toClaims(in.Attributes),
 		ExpirationSeconds:  expirationSeconds,
 		// tx_code is a second factor only for the external-email path (a person
-		// keys the PIN in). Members redeem while authenticated; organizations
-		// auto-redeem over the authenticated QERDS channel — a tx_code there has
-		// no one to enter it and would block automated issuance (see
+		// keys the PIN in). Members redeem while authenticated; an organization
+		// redeems from its console over the authenticated QERDS channel — a
+		// tx_code there has no one to enter it and would block the accept (see
 		// .ai/features/oid4vci-over-qerds.md §4).
 		UseTxCode: in.Recipient.Kind == RecipientExternal,
 	})
@@ -327,6 +339,58 @@ func (s *Service) DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error {
 		return fmt.Errorf("attestation: delete held %s from engine: %w", id, err)
 	}
 	return s.held.SoftDeleteHeld(ctx, orgID, id)
+}
+
+// ListOffers returns the inbound credential offers the organization still has to
+// decide on. The offer deeplinks stay server-side (see CredentialOffer).
+func (s *Service) ListOffers(ctx context.Context, orgID uuid.UUID) ([]CredentialOffer, error) {
+	return s.offers.ListPendingOffers(ctx, orgID)
+}
+
+// AcceptOffer redeems a pending credential offer into the organization's holder
+// engine and indexes it as held (source=qerds, linked to the QERDS message that
+// carried the offer). This is the only path that puts a QERDS-delivered
+// credential in the wallet: receiving the offer merely queues it.
+//
+// Engine first, index second — the same fail-safe ordering as DeleteHeld. A
+// redemption that fails leaves the offer pending, so the admin can accept again
+// once the cause is gone (the issuer was down, the org's wallet was not yet
+// activated) rather than losing the offer to a terminal state. The store's status
+// guard makes the commit the point of no return: a second accept of the same
+// offer finds nothing pending and returns ErrOfferNotFound.
+func (s *Service) AcceptOffer(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error) {
+	offer, err := s.offers.GetPendingOffer(ctx, orgID, id)
+	if err != nil {
+		return HeldAttestation{}, err
+	}
+	redeemed, err := s.holder.Redeem(ctx, orgID, offer.Offer)
+	if err != nil {
+		return HeldAttestation{}, fmt.Errorf("attestation: redeem accepted offer %s org %s: %w", id, orgID, err)
+	}
+	messageID := offer.SourceMessageID
+	held, err := s.offers.AcceptOffer(ctx, orgID, id, HeldInput{
+		CredentialRef:   redeemed.Ref,
+		VCT:             redeemed.VCT,
+		Issuer:          redeemed.Issuer,
+		Source:          HeldSourceQERDS,
+		SourceMessageID: &messageID,
+	})
+	if err != nil {
+		return HeldAttestation{}, err
+	}
+	slog.InfoContext(ctx, "attestation: accepted QERDS credential offer",
+		slog.String("orgId", orgID.String()),
+		slog.String("offerId", id.String()),
+		slog.String("vct", redeemed.VCT),
+		slog.String("messageId", messageID.String()))
+	return held, nil
+}
+
+// DeclineOffer refuses a pending credential offer. Nothing is redeemed, so the
+// credential never reaches the wallet; the QERDS message and its evidence stay in
+// the inbox. Returns ErrOfferNotFound when the offer is absent or already decided.
+func (s *Service) DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error {
+	return s.offers.DeclineOffer(ctx, orgID, id)
 }
 
 // HeldClaimsView is a held credential's index metadata plus its disclosed

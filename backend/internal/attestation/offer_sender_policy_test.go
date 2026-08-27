@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 )
 
 func TestTrustedOfferSendersMatching(t *testing.T) {
@@ -100,23 +99,19 @@ func TestTrustedOfferSendersConfigured(t *testing.T) {
 // an organization it was never meant for — content validation cannot, because
 // the credential is authentic.
 func TestOfferReceiverRejectsUntrustedSender(t *testing.T) {
-	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "r", VCT: "v", Issuer: "i"}}
-	store := &fakeHeldStore{}
-	rec := attestation.NewOfferReceiver(redeemer, store,
+	queue := newFakeOfferQueue()
+	rec := attestation.NewOfferReceiver(queue,
 		attestation.NewTrustedOfferSenders([]string{"verid@partners.test"}, nil))
 
 	// Not an error: the message stays in the inbox for an operator. Only the
-	// automatic redemption is withheld.
+	// acceptance prompt is withheld.
 	err := rec.OnInboundMessage(context.Background(),
 		inbound(uuid.New(), uuid.New(), "verid-qerds", "attacker@evil.test", offerBody(t)))
 	if err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
-	if redeemer.calls != 0 {
-		t.Errorf("untrusted sender's offer was redeemed (%d calls)", redeemer.calls)
-	}
-	if len(store.recorded) != 0 {
-		t.Errorf("untrusted sender's offer was recorded as held (%d records)", len(store.recorded))
+	if len(queue.queued()) != 0 {
+		t.Errorf("untrusted sender's offer was queued for acceptance (%d queued)", len(queue.queued()))
 	}
 }
 
@@ -126,9 +121,8 @@ func TestOfferReceiverRejectsUntrustedSender(t *testing.T) {
 // bounds it, and it must reject the delivery even though every address on the
 // message is one we trust.
 func TestOfferReceiverRejectsSpoofedSenderFromUntrustedParty(t *testing.T) {
-	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "r", VCT: "v", Issuer: "i"}}
-	store := &fakeHeldStore{}
-	rec := attestation.NewOfferReceiver(redeemer, store,
+	queue := newFakeOfferQueue()
+	rec := attestation.NewOfferReceiver(queue,
 		attestation.NewTrustedOfferSenders([]string{"verid@partners.test"}, []string{"verid-qerds"}))
 
 	err := rec.OnInboundMessage(context.Background(),
@@ -136,11 +130,8 @@ func TestOfferReceiverRejectsSpoofedSenderFromUntrustedParty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
-	if redeemer.calls != 0 {
-		t.Errorf("an unlisted AS4 party claiming a trusted originalSender got its offer redeemed (%d calls)", redeemer.calls)
-	}
-	if len(store.recorded) != 0 {
-		t.Errorf("spoofed sender's offer was recorded as held (%d records)", len(store.recorded))
+	if len(queue.queued()) != 0 {
+		t.Errorf("an unlisted AS4 party claiming a trusted originalSender got its offer queued (%d queued)", len(queue.queued()))
 	}
 }
 
@@ -148,34 +139,29 @@ func TestOfferReceiverRejectsSpoofedSenderFromUntrustedParty(t *testing.T) {
 // that is deliberately in force — falling back to the sender-written property
 // would defeat the point of configuring it.
 func TestOfferReceiverRejectsMissingPartyWhenPartiesConfigured(t *testing.T) {
-	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "r", VCT: "v", Issuer: "i"}}
-	store := &fakeHeldStore{}
-	rec := attestation.NewOfferReceiver(redeemer, store,
+	queue := newFakeOfferQueue()
+	rec := attestation.NewOfferReceiver(queue,
 		attestation.NewTrustedOfferSenders(nil, []string{"verid-qerds"}))
 
 	if err := rec.OnInboundMessage(context.Background(),
 		inbound(uuid.New(), uuid.New(), "", "verid@partners.test", offerBody(t))); err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
-	if redeemer.calls != 0 {
-		t.Errorf("offer with no transport party was redeemed (%d calls)", redeemer.calls)
+	if len(queue.queued()) != 0 {
+		t.Errorf("offer with no transport party was queued (%d queued)", len(queue.queued()))
 	}
 }
 
-func TestOfferReceiverRedeemsTrustedSender(t *testing.T) {
-	redeemer := &fakeRedeemer{result: eudiholder.Redeemed{Ref: "r", VCT: "v", Issuer: "i"}}
-	store := &fakeHeldStore{}
-	rec := attestation.NewOfferReceiver(redeemer, store,
+func TestOfferReceiverQueuesTrustedSender(t *testing.T) {
+	queue := newFakeOfferQueue()
+	rec := attestation.NewOfferReceiver(queue,
 		attestation.NewTrustedOfferSenders([]string{"*@partners.test"}, []string{"verid-qerds"}))
 
 	if err := rec.OnInboundMessage(context.Background(),
 		inbound(uuid.New(), uuid.New(), "verid-qerds", "verid@partners.test", offerBody(t))); err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
-	if redeemer.calls != 1 {
-		t.Fatalf("trusted sender's offer was not redeemed (%d calls)", redeemer.calls)
-	}
-	if len(store.recorded) != 1 {
-		t.Fatalf("trusted sender's offer was not recorded (%d records)", len(store.recorded))
+	if len(queue.queued()) != 1 {
+		t.Fatalf("trusted sender's offer was not queued (%d queued)", len(queue.queued()))
 	}
 }
