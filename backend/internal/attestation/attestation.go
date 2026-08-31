@@ -25,6 +25,7 @@ var (
 	ErrNotOfferable          = errors.New("attestation: attestation is not in an offerable state")
 	ErrClaimNotFound         = errors.New("attestation: claim not found")
 	ErrHeldNotFound          = errors.New("attestation: held attestation not found")
+	ErrOfferNotFound         = errors.New("attestation: credential offer not found")
 	ErrRecipientKindMismatch = errors.New("attestation: recipient kind does not match the schema subject type")
 
 	// ErrUnknownAttribute and ErrMissingAttribute enforce data minimisation

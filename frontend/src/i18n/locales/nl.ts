@@ -392,6 +392,8 @@ export const nl: Translation<typeof en> = {
     attestationIssued: "Attestatie uitgegeven",
     attestationRevoked: "Attestatie ingetrokken",
     attestationOfferCancelled: "Aanbod geannuleerd",
+    credentialOfferAccepted: "Credential toegevoegd aan de wallet",
+    credentialOfferDeclined: "Aanbod geweigerd",
     emailSettingsSaved: "E-mailinstellingen opgeslagen",
     emailTestSent: "Test-e-mail verstuurd",
     slackSettingsSaved: "Slack-instellingen opgeslagen",
@@ -490,6 +492,7 @@ export const nl: Translation<typeof en> = {
       issuedAttestation: "Uitgegeven attestatie",
       attestationKey: "Attestatiesleutel",
       heldAttestation: "Ontvangen credential",
+      credentialOffer: "Binnengekomen credentialaanbod",
       orgEmailSettings: "E-mailinstellingen",
       orgEmailTemplate: "E-mailtekst",
       orgIssuerSettings: "Uitgever-instellingen",
@@ -562,6 +565,8 @@ export const nl: Translation<typeof en> = {
       attestationKeySuspended: "Attestatiesleutel opgeschort",
       attestationKeyRevoked: "Attestatiesleutel ingetrokken",
       attestationHeldDeleted: "Ontvangen credential verwijderd",
+      attestationOfferAccepted: "Binnengekomen credentialaanbod geaccepteerd",
+      attestationOfferDeclined: "Binnengekomen credentialaanbod geweigerd",
       emailSettingsUpdated: "E-mailinstellingen bijgewerkt",
       emailTemplateUpdated: "E-mailtekst bijgewerkt",
       emailTemplateReset: "E-mailtekst teruggezet naar de standaard",
@@ -1561,6 +1566,22 @@ export const nl: Translation<typeof en> = {
         issued: "Uitgegeven",
         actions: "Acties",
       },
+    },
+    offers: {
+      title: "Wacht op je beslissing",
+      description:
+        "Deze credentials zijn aan je organisatie aangeboden. Accepteren zet er een in de wallet; weigeren laat hem erbuiten.",
+      memberTitle: "Wacht op de beslissing van een beheerder",
+      memberDescription:
+        "Deze credentials zijn aan je organisatie aangeboden. Een organisatiebeheerder beslist of ze aan de wallet worden toegevoegd.",
+      from: "Aangeboden door {{sender}}",
+      pending: "Wacht op beslissing",
+      accept: "Accepteren",
+      decline: "Weigeren",
+      confirmDecline:
+        "“{{name}}” van {{sender}} weigeren? De credential wordt niet aan de wallet toegevoegd.",
+      unnamedCredential: "Credential",
+      loadError: "Kan de aanbiedingen niet laden: {{message}}",
     },
     held: {
       empty: "Nog geen credentials ontvangen.",

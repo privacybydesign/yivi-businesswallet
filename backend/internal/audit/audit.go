@@ -83,6 +83,8 @@ const (
 	AttestationKeySuspended    = "attestation.key_suspended"
 	AttestationKeyRevoked      = "attestation.key_revoked"
 	AttestationHeldDeleted     = "attestation.held_deleted"
+	AttestationOfferAccepted   = "attestation.offer_accepted"
+	AttestationOfferDeclined   = "attestation.offer_declined"
 
 	EmailSettingsUpdated = "email.settings_updated"
 	EmailTemplateUpdated = "email.template_updated"
@@ -138,6 +140,7 @@ const (
 	TargetIssuedAttestation   = "issued_attestation"
 	TargetAttestationKey      = "attestation_key"
 	TargetHeldAttestation     = "held_attestation"
+	TargetCredentialOffer     = "credential_offer"
 
 	TargetEmailSettings = "org_email_settings"
 	TargetEmailTemplate = "org_email_template"

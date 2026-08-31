@@ -75,7 +75,7 @@ func setup(t *testing.T) env {
 	store := attestation.NewStore(pool, audit.NewDBRecorder())
 	mail := &recEmail{}
 	qerds := &recQerds{}
-	service := attestation.NewService(store, openid4vciissuer.NewStubIssuer(), stubInstances{}, mail, qerds, store, eudiholder.NewStubHolder(), "http://app.test")
+	service := attestation.NewService(store, openid4vciissuer.NewStubIssuer(), stubInstances{}, mail, qerds, store, store, eudiholder.NewStubHolder(), "http://app.test")
 	return env{pool, store, service, org.ID, actorID, mail, qerds}
 }
 

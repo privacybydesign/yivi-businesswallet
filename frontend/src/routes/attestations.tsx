@@ -5,15 +5,19 @@ import * as React from "react";
 import type {
   AttestationSchema,
   AttestationTemplate,
+  CredentialOffer,
   HeldAttestation,
   IssuedAttestation,
 } from "../api/attestations";
 import { HELD_SOURCES } from "../api/attestations";
 import {
+  useAcceptCredentialOfferMutation,
   useAttestationKeysQuery,
   useAttestationSchemasQuery,
   useAttestationTemplatesQuery,
   useCancelIssuedAttestationMutation,
+  useCredentialOffersQuery,
+  useDeclineCredentialOfferMutation,
   useDeleteAttestationSchemaMutation,
   useDeleteAttestationTemplateMutation,
   useDeleteHeldAttestationMutation,
@@ -106,6 +110,7 @@ export default function Attestations(): React.JSX.Element {
   const enabled = !org.isError;
   const issued = useIssuedAttestationsQuery(slug, enabled);
   const held = useHeldAttestationsQuery(slug, enabled);
+  const offers = useCredentialOffersQuery(slug, enabled);
   const templates = useAttestationTemplatesQuery(slug, enabled && isAdmin);
   const schemas = useAttestationSchemasQuery(slug, enabled && isAdmin);
   const keys = useAttestationKeysQuery(slug, enabled && isAdmin);
@@ -210,14 +215,25 @@ export default function Attestations(): React.JSX.Element {
             )}
 
             {tab === "held" && (
-              <HeldTab
-                slug={slug}
-                rows={held.data ?? []}
-                pending={held.isPending}
-                error={held.error}
-                isAdmin={isAdmin}
-                formatWhen={formatWhen}
-              />
+              <>
+                {/* Above the wallet, and outside HeldTab: an offer must still be
+                    visible to an org that holds nothing yet. */}
+                <OffersSection
+                  slug={slug}
+                  offers={offers.data ?? []}
+                  error={offers.error}
+                  isAdmin={isAdmin}
+                  formatWhen={formatWhen}
+                />
+                <HeldTab
+                  slug={slug}
+                  rows={held.data ?? []}
+                  pending={held.isPending}
+                  error={held.error}
+                  isAdmin={isAdmin}
+                  formatWhen={formatWhen}
+                />
+              </>
             )}
 
             {tab === "schemas" && (
@@ -538,6 +554,134 @@ function IssuedTab({
 // Toolbar controls: the two filter dropdowns share the app's form-control styling.
 const FILTER_SELECT_CLASS =
   "rounded-yivi border-line-strong bg-surface text-ink h-9 border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
+
+// The credential offers waiting on the organization. An offer that arrived over
+// QERDS is not in the wallet yet — accepting is what redeems it, declining leaves
+// it unredeemed for good. Renders nothing when there is nothing to decide, so the
+// Wallet tab is unchanged for an org with no inbound offers.
+function OffersSection({
+  slug,
+  offers,
+  error,
+  isAdmin,
+  formatWhen,
+}: {
+  slug: string;
+  offers: CredentialOffer[];
+  error: Error | null;
+  isAdmin: boolean;
+  formatWhen: (iso: string) => string;
+}): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const accept = useAcceptCredentialOfferMutation(slug);
+  const decline = useDeclineCredentialOfferMutation(slug);
+  const [pendingDecline, setPendingDecline] = useState<CredentialOffer | null>(
+    null,
+  );
+  // A decision in flight blocks the others: only one offer is being decided at a
+  // time, and the spinner belongs to the offer whose accept is actually running.
+  const busy = accept.isPending || decline.isPending;
+
+  if (error) {
+    return (
+      <ErrorCard
+        message={t("attestations.offers.loadError", { message: error.message })}
+      />
+    );
+  }
+  if (offers.length === 0) {
+    return null;
+  }
+
+  // The list is member-readable but only an admin can decide, so a member is
+  // told whose decision it is waiting on rather than asked for their own.
+  const title = isAdmin
+    ? t("attestations.offers.title")
+    : t("attestations.offers.memberTitle");
+  const description = isAdmin
+    ? t("attestations.offers.description")
+    : t("attestations.offers.memberDescription");
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <h2 className="text-ink text-[14px] font-semibold">{title}</h2>
+        <span className="text-muted text-[12.5px]">{offers.length}</span>
+      </div>
+      <p className="text-ink-soft text-[13px]">{description}</p>
+      <div className="flex flex-col gap-3">
+        {offers.map((offer) => (
+          <Card key={offer.id} className="flex flex-col gap-3 p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-ink truncate font-semibold">
+                  {offer.credentialName ||
+                    t("attestations.offers.unnamedCredential")}
+                </div>
+                <div className="text-ink-soft truncate text-[12.5px]">
+                  {t("attestations.offers.from", {
+                    sender: offer.senderOrgName || offer.senderAddress,
+                  })}
+                </div>
+              </div>
+              <Tag tone="amber" dot>
+                {t("attestations.offers.pending")}
+              </Tag>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-ink-soft text-[12.5px]">
+                {formatWhen(offer.receivedAt)}
+              </span>
+              {isAdmin && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => setPendingDecline(offer)}
+                  >
+                    {t("attestations.offers.decline")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    loading={
+                      accept.isPending && accept.variables?.offerId === offer.id
+                    }
+                    disabled={busy}
+                    onClick={() => accept.mutate({ offerId: offer.id })}
+                  >
+                    {t("attestations.offers.accept")}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {pendingDecline && (
+        <ConfirmDialog
+          title={t("attestations.offers.decline")}
+          message={t("attestations.offers.confirmDecline", {
+            name:
+              pendingDecline.credentialName ||
+              t("attestations.offers.unnamedCredential"),
+            sender:
+              pendingDecline.senderOrgName || pendingDecline.senderAddress,
+          })}
+          confirmLabel={t("attestations.offers.decline")}
+          busy={decline.isPending}
+          onConfirm={() => {
+            decline.mutate({ offerId: pendingDecline.id });
+            setPendingDecline(null);
+          }}
+          onClose={() => setPendingDecline(null)}
+        />
+      )}
+    </section>
+  );
+}
 
 function readHeldStatusFilter(params: URLSearchParams): HeldStatusFilter {
   const raw = params.get("status") as HeldStatusFilter | null;

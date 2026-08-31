@@ -25,7 +25,7 @@ type CredentialOfferEnvelope struct {
 	// pre-authorized_code, so the receiver needs nothing else to redeem it.
 	CredentialOffer string `json:"credentialOffer"`
 	// Message is a human-readable fallback for QERDS inboxes that surface the
-	// body to an operator instead of auto-redeeming.
+	// body to an operator rather than parsing the envelope.
 	Message string `json:"message,omitempty"`
 }
 
@@ -37,7 +37,7 @@ func MarshalCredentialOfferEnvelope(senderOrgName, credentialName, offerURI stri
 		CredentialName:  credentialName,
 		CredentialOffer: offerURI,
 		Message: fmt.Sprintf(
-			"%s has offered your organization a credential (%s). Your business wallet adds it automatically.",
+			"%s has offered your organization a credential (%s). Accept the offer in your business wallet to add it.",
 			senderOrgName, credentialName),
 	}
 	b, err := json.Marshal(env)

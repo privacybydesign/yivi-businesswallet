@@ -591,9 +591,33 @@ covers both issued and held.
 The `source=qerds` path — delivering a real OpenID4VCI Credential Offer over the
 secure channel (not a claim link) and redeeming it via the holder's OpenID4VCI
 flow — is designed in [`oid4vci-over-qerds.md`](./oid4vci-over-qerds.md) (pre-auth
-vs. authorization-code grants for business wallets).
+vs. authorization-code grants for business wallets). Receiving such an offer does
+**not** hold the credential: it queues a `credential_offers` row for the org, and
+an admin accepting it is what redeems and indexes it (§9.6).
 
-### 9.6 Auto-issue on onboarding (member accept)
+### 9.6 Accept / decline an inbound offer (Art 5(1)(a))
+
+A credential offer that arrives over QERDS waits for a human. `credential_offers`
+is the queue between "the message arrived" and "the wallet holds it": one row per
+inbound message (unique, so a re-delivery neither asks twice nor reopens a
+decision), `pending` until an admin accepts or declines from the Wallet tab.
+
+- **Accept** claims the offer (`pending` → `accepting`, one guarded `UPDATE`, so
+  concurrent accepts cannot both reach the issuer), redeems it through the holder
+  engine, then writes the `held_attestations` row in the same transaction as the
+  status flip, so an accepted offer and the credential it produced cannot
+  disagree. A redemption that fails releases the claim, so the offer can be
+  accepted again once the issuer is reachable or the org's wallet is activated —
+  the offer is never spent on a failed attempt.
+- **Decline** is terminal and redeems nothing; the QERDS message and its evidence
+  stay in the inbox.
+- The offer deeplink is a **bearer token** and is never served to the console
+  (`json:"-"`): accepting replays it server-side.
+- The trusted-sender allowlist (`QERDS_TRUSTED_OFFER_SENDERS` /
+  `…_PARTIES`) still gates what is queued at all, so an untrusted party cannot put
+  an offer in front of an admin.
+
+### 9.7 Auto-issue on onboarding (member accept)
 
 An org admin configures the onboarding auto-issue set (§6.6) from the member-invite
 screen. When a member **accepts** an invitation and their identity is disclosed
@@ -648,6 +672,8 @@ All org-scoped (`auth.RequireUser` → `organization.Handler.Authorize`, org via
 - `POST .../attestations/{id}/revoke` — admin, revoke a claimed credential (§9.4)
 **Key material** (admin): `GET|POST .../attestations/keys`, `POST .../attestations/keys/{id}/suspend|revoke`
 **Held** (member read; admin delete): `GET .../attestations/held`, `DELETE .../attestations/held/{id}`
+**Inbound offers** (member read; admin decides, §9.6): `GET .../attestations/offers`,
+`POST .../attestations/offers/{id}/accept` → `200` the held row, `POST .../attestations/offers/{id}/decline` → `204`
 **Export** (Art 5(1)(l)): `GET .../attestations/export` — structured, machine-readable
 (issued + held), admin. The bundle contract (manifest schema, format profile,
 container, versioning) is [`export.md`](./export.md); the unified org-scoped endpoint

@@ -89,7 +89,7 @@ type fakeInstances struct{ name string }
 func (f fakeInstances) InstanceFor(context.Context, uuid.UUID) (string, error) { return f.name, nil }
 
 func newRevokeService(store *fakeStore, iss *fakeIssuer) *Service {
-	return NewService(store, iss, fakeInstances{name: "org-yivi"}, nil, nil, nil, nil, "http://app.test")
+	return NewService(store, iss, fakeInstances{name: "org-yivi"}, nil, nil, nil, nil, nil, "http://app.test")
 }
 
 // TestRevokePropagatesToIssuer asserts a claimed credential's revocation is

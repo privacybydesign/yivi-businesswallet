@@ -2,18 +2,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
+  acceptCredentialOffer,
   cancelIssuedAttestation,
   createAttestationKey,
   createAttestationSchema,
   createAttestationTemplate,
   deleteAttestationSchema,
   deleteAttestationTemplate,
+  declineCredentialOffer,
   deleteHeldAttestation,
   getAttestationClaim,
   getAttestationKeys,
   getAttestationSchemaIssuerConfig,
   getAttestationSchemas,
   getAttestationTemplates,
+  getCredentialOffers,
   getHeldAttestations,
   getHeldAttestationClaims,
   getIssuedAttestation,
@@ -40,6 +43,7 @@ import type {
   AttestationTemplate,
   AttestationTemplateInput,
   AttestationTemplateUpdate,
+  CredentialOffer,
   HeldAttestation,
   HeldAttestationClaims,
   IssuedAttestation,
@@ -107,6 +111,10 @@ export function heldAttestationsQueryKey(
   lang: string,
 ): readonly string[] {
   return ["organizations", "detail", slug, "attestations", "held", lang];
+}
+
+export function credentialOffersQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "offers"];
 }
 
 export function heldAttestationClaimsQueryKey(
@@ -547,6 +555,58 @@ export function useDeleteHeldAttestationMutation(
       // language, not just the active one.
       void queryClient.invalidateQueries({
         queryKey: ["organizations", "detail", slug, "attestations", "held"],
+      });
+    },
+  });
+}
+
+// The offers awaiting a decision. Deciding one changes the wallet, so both this
+// list and the held list are invalidated after an accept.
+export function useCredentialOffersQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<CredentialOffer[], Error> {
+  return useQuery({
+    queryKey: credentialOffersQueryKey(slug),
+    queryFn: ({ signal }) => getCredentialOffers(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+export function useAcceptCredentialOfferMutation(
+  slug: string,
+): UseMutationResult<void, Error, { offerId: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: async ({ offerId }) => {
+      await acceptCredentialOffer(slug, offerId);
+    },
+    onSuccess: () => {
+      toast.success(t("toasts.credentialOfferAccepted"));
+      void queryClient.invalidateQueries({
+        queryKey: credentialOffersQueryKey(slug),
+      });
+      // Prefix match (no language) invalidates the held list across every cached
+      // language, not just the active one.
+      void queryClient.invalidateQueries({
+        queryKey: ["organizations", "detail", slug, "attestations", "held"],
+      });
+    },
+  });
+}
+
+export function useDeclineCredentialOfferMutation(
+  slug: string,
+): UseMutationResult<void, Error, { offerId: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ offerId }) => declineCredentialOffer(slug, offerId),
+    onSuccess: () => {
+      toast.success(t("toasts.credentialOfferDeclined"));
+      void queryClient.invalidateQueries({
+        queryKey: credentialOffersQueryKey(slug),
       });
     },
   });

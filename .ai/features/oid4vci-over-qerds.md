@@ -9,8 +9,9 @@ Credential Offer.
 ## 1. Purpose & scope
 
 An organization (the **sender**) wants to issue an attestation (EAA) to another
-organization (the **receiver**) so it lands in the receiver's business wallet
-automatically, without a human copy-pasting a claim link. Both parties are
+organization (the **receiver**) so it reaches the receiver's business wallet over
+the wire, without a human copy-pasting a claim link — the receiver's admin still
+accepts it before it is held (§7). Both parties are
 **backend services**, not phones, and they already share an authenticated,
 non-repudiable channel: **QERDS** (qualified electronic registered delivery,
 AS4/eDelivery).
@@ -253,18 +254,43 @@ part, not an attachment, so no inbound-attachment plumbing was needed.
   to the `qerdsNotifier`; `qerdsOfferSender.SendCredentialOffer`
   (`cmd/api/main.go`) serialises the envelope into the QERDS body.
 - Org offers are minted **without** a tx_code (`UseTxCode` scoped to the
-  external-email path), so the receiver can auto-redeem.
+  external-email path): the receiver redeems from its console, where there is
+  nobody to key a PIN a separate leg never delivered.
 
-**Receive**
+**Receive — queue, then a human decides**
 - `qerds.Service` gained an optional `InboundConsumer` seam, invoked on each
   newly-received message (`service.go`).
 - `attestation.OfferReceiver` (`offer_receiver.go`) implements it: parse the
-  envelope → `eudiholder.Holder.Redeem` → `RecordHeld(source=qerds,
-  sourceMessageId=…)`. Idempotent via `Store.HeldForMessage`.
+  envelope → `Store.RecordOffer`, which queues a **pending** `credential_offers`
+  row. It redeems nothing. Idempotent via the unique
+  `(organization_id, source_message_id)`, so a re-delivery neither asks the org
+  twice nor reopens a decision it already made.
+- `Service.AcceptOffer` (`service.go`) is the only path that puts a
+  QERDS-delivered credential in the wallet, in three steps: `Store.ClaimOffer`
+  (`pending` → `accepting`) → `eudiholder.Holder.Redeem` → `Store.AcceptOffer`,
+  which settles the claim as `accepted` and writes the `held_attestations` row
+  (`source=qerds`, `sourceMessageId=…`) in one transaction.
+- **The claim comes before the redemption, not after.** Redeeming has a side
+  effect at the issuer that no later status guard can undo: read the offer instead
+  of claiming it and two admins pressing Accept at the same moment both redeem,
+  with only the winner of the settle getting a `held_attestations` row — the
+  loser's credential sits in the org's holder engine, invisible to the Wallet tab
+  and impossible to delete. `ClaimOffer` is one guarded `UPDATE`, so Postgres
+  picks the single winner and every rival gets `ErrOfferNotFound`.
+- Engine first, index second — a failed redemption releases the claim
+  (`Store.ReleaseOffer`, back to `pending`) so an admin can accept again. The
+  release runs on a **detached context** (`Service.releaseClaim`): the redemption
+  most likely to fail is the one whose context was cancelled, and on that context
+  the write reopening the offer would fail too. Releasing happens only when the
+  redemption produced *no* credential — after one that succeeded, a retry would
+  redeem a second, so an offer whose indexing failed stays claimed and out of the
+  queue. `Service.DeclineOffer` closes it without redeeming.
+- The offer deeplink never leaves the backend (`CredentialOffer.Offer` is
+  `json:"-"`): it is a bearer token, so accepting replays it server-side.
 - `eudiholder.Holder.Redeem` runs irmago's `eudi/openid4vci` holder flow
   (`engine_redeem.go`, pre-auth grant, auto-consent, auth-code declined),
   writing straight into the org's per-org storage. `StubHolder.Redeem`
-  synthesises a held credential so the receive loop runs offline (default).
+  synthesises a held credential so the accept loop runs offline (default).
 - **`Redeemed.Ref` is captured at the store, not read off the session result.**
   irmago reports success with the *offered* credential
   (`session.buildOfferedCredentials`), which carries neither an instance id nor a
@@ -287,10 +313,14 @@ own `CreateX509VerifyOptionsFromCertChain` takes `certs[0]` as the only root and
 would misfile the rest.
 
 **Known limitations**
-- A failed redemption is **logged, not auto-retried**: `CreateInbound` dedupes
-  on re-delivery and returns no message, so the consumer only fires on first
-  receipt. The QERDS message stays in the inbox for follow-up. A durable retry
-  (return the deduped message, or a redemption-state column) is future work.
+- A failed redemption is surfaced to the admin who pressed Accept (the request
+  errors) and the offer returns to pending for a retry. Nothing retries it in the
+  background, which is the right default while a human owns the decision.
+- An offer stays `accepting` when the process dies between claiming and settling,
+  or when the redemption succeeded but indexing it did not. Both are out of the
+  Wallet tab until an operator looks, which is the deliberate trade: a stranded
+  offer holds nothing, while reopening one automatically would redeem the
+  credential twice.
 - **Live validation pending**: the irmago `Engine.Redeem` path compiles and is
   wired, but end-to-end redemption against the hosted Veramo issuer (trust
   anchors, endpoint reachability) has not been exercised headlessly — validate
@@ -305,9 +335,12 @@ would misfile the rest.
    plumbing fix.) → leaning: the `offerUri` / offer JSON in a structured body
    part with a content-type marker so the receiver can distinguish it from a
    human message.
-2. **Auto-accept vs. operator approval** on receive: does an inbound Offer
-   redeem automatically, or land in an approval queue in the org console?
-   (Policy + `held` state machine implication.)
+2. ~~**Auto-accept vs. operator approval** on receive~~ — **settled: operator
+   approval.** An inbound Offer lands in the `credential_offers` queue and is
+   redeemed only when an org admin accepts it in the console (§7, issue #229).
+   Auto-accept was the first implementation; it meant any sender the allowlist
+   admitted could write into an org's wallet without anyone in that org agreeing,
+   which is not a decision a transport allowlist should be making.
 3. **Issuer reachability**: the receiver must reach the sender's issuer HTTPS
    endpoints directly. Is that always true, or must the *credential* sometimes be
    delivered over QERDS too (deferred/relayed fetch)? If endpoints are not

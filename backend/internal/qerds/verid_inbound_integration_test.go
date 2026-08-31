@@ -12,7 +12,6 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
@@ -22,7 +21,8 @@ import (
 // This is the wallet-side half of the two-gateway QERDS bench: a credential
 // offer submitted by a FOREIGN AS4 party (ver.id's own access point, signing with
 // its own key) is polled off our access point, attributed to the right
-// organization, gated by the trusted-sender allowlist, and redeemed.
+// organization, gated by the trusted-sender allowlist, and queued for the
+// receiving organization to accept.
 //
 // The single-gateway loopback cannot cover this. It signs with our own key, and
 // Domibus refuses a submission whose From party is not the submitting gateway's
@@ -97,7 +97,7 @@ func (c *countingConsumer) OnInboundMessage(ctx context.Context, in qerds.Inboun
 	return c.inner.OnInboundMessage(ctx, in)
 }
 
-func TestVeridInboundOfferIsPolledAndRedeemed(t *testing.T) {
+func TestVeridInboundOfferIsPolledAndQueued(t *testing.T) {
 	ourURL, veridURL := veridBenchURLs(t)
 	pool, _ := testdb.Fresh(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
@@ -125,13 +125,9 @@ func TestVeridInboundOfferIsPolledAndRedeemed(t *testing.T) {
 	svc := qerds.NewService(store, store, ourProvider)
 
 	attStore := attestation.NewStore(pool, audit.NopRecorder{})
-	// eudiholder.StubHolder stands in for the irmago holder: this test is about
-	// the QERDS receive path and the allowlist, not irmago's OpenID4VCI client.
-	holder := attestation.NewOfferReceiver(
-		eudiholder.NewStubHolder(), attStore,
-		attestation.NewTrustedOfferSenders([]string{veridSenderAddress}, []string{veridPartyID}),
-	)
-	consumer := &countingConsumer{inner: holder}
+	receiver := attestation.NewOfferReceiver(attStore,
+		attestation.NewTrustedOfferSenders([]string{veridSenderAddress}, []string{veridPartyID}))
+	consumer := &countingConsumer{inner: receiver}
 	svc.SetInboundConsumer(consumer)
 
 	// ver.id's side: submit through THEIR gateway, From=verid-qerds.
@@ -210,29 +206,40 @@ func TestVeridInboundOfferIsPolledAndRedeemed(t *testing.T) {
 		t.Errorf("consumer fromParty = %q, want %q", consumer.parties[0], veridPartyID)
 	}
 
-	// The offer was redeemed into the held index, linked to this message.
+	// The offer is queued for a decision, linked to this message — and nothing is
+	// in the wallet yet, because nobody has accepted it.
+	offers, err := attStore.ListPendingOffers(ctx, org.ID)
+	if err != nil {
+		t.Fatalf("list offers: %v", err)
+	}
+	if len(offers) != 1 {
+		t.Fatalf("pending offers = %d, want 1", len(offers))
+	}
+	if offers[0].SourceMessageID != inbound.ID {
+		t.Errorf("offer source message = %s, want %s", offers[0].SourceMessageID, inbound.ID)
+	}
+	if offers[0].FromParty != veridPartyID {
+		t.Errorf("offer fromParty = %q, want %q", offers[0].FromParty, veridPartyID)
+	}
 	held, err := attStore.ListHeld(ctx, org.ID)
 	if err != nil {
 		t.Fatalf("list held: %v", err)
 	}
-	if len(held) != 1 {
-		t.Fatalf("held credentials = %d, want 1", len(held))
+	if len(held) != 0 {
+		t.Fatalf("held credentials = %d, want 0 — the offer was loaded without anyone accepting it", len(held))
 	}
-	if held[0].Source != attestation.HeldSourceQERDS {
-		t.Errorf("held source = %q, want %q", held[0].Source, attestation.HeldSourceQERDS)
-	}
-	t.Logf("redeemed: vct=%q source=%q", held[0].VCT, held[0].Source)
+	t.Logf("queued: sender=%q credential=%q", offers[0].SenderOrgName, offers[0].CredentialName)
 }
 
 // The allowlist's whole point: an offer that arrives over a perfectly valid AS4
-// leg, from a party our gateway trusts cryptographically, must still NOT be
-// redeemed if that sender is not on the allowlist. The message is stored (it was
-// legitimately delivered) but nothing is written into the wallet.
+// leg, from a party our gateway trusts cryptographically, must still NOT be put
+// in front of an org admin if that sender is not on the allowlist. The message is
+// stored (it was legitimately delivered) but no decision is asked for.
 //
 // This is the case content validation cannot catch: replay an offer at the wrong
 // organization and the credential is authentic, correctly chained and unrevoked —
 // it is simply in the wrong wallet. Only transport identity distinguishes it.
-func TestVeridInboundOfferFromUntrustedSenderIsNotRedeemed(t *testing.T) {
+func TestVeridInboundOfferFromUntrustedSenderIsNotQueued(t *testing.T) {
 	ourURL, veridURL := veridBenchURLs(t)
 	pool, _ := testdb.Fresh(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
@@ -260,8 +267,7 @@ func TestVeridInboundOfferFromUntrustedSenderIsNotRedeemed(t *testing.T) {
 	// satisfied on purpose, so what rejects this delivery is unambiguously the
 	// address check. (The party half rejecting is unit-tested in
 	// internal/attestation/offer_sender_policy_test.go — it needs no live gateway.)
-	svc.SetInboundConsumer(attestation.NewOfferReceiver(
-		eudiholder.NewStubHolder(), attStore,
+	svc.SetInboundConsumer(attestation.NewOfferReceiver(attStore,
 		attestation.NewTrustedOfferSenders([]string{"someone-else@partners.qerds.localhost"}, []string{veridPartyID}),
 	))
 
@@ -295,7 +301,7 @@ func TestVeridInboundOfferFromUntrustedSenderIsNotRedeemed(t *testing.T) {
 		t.Fatal("PollAll never received the message")
 	}
 
-	// Delivered and stored: withholding redemption must not lose the message.
+	// Delivered and stored: withholding the offer must not lose the message.
 	messages, err := store.List(ctx, org.ID)
 	if err != nil {
 		t.Fatalf("list messages: %v", err)
@@ -310,7 +316,14 @@ func TestVeridInboundOfferFromUntrustedSenderIsNotRedeemed(t *testing.T) {
 		t.Error("the message must still be stored in the inbox for an operator")
 	}
 
-	// But nothing entered the wallet.
+	// But no decision was asked for, so nothing can enter the wallet.
+	offers, err := attStore.ListPendingOffers(ctx, org.ID)
+	if err != nil {
+		t.Fatalf("list offers: %v", err)
+	}
+	if len(offers) != 0 {
+		t.Fatalf("pending offers = %d, want 0 — an untrusted sender's offer was queued", len(offers))
+	}
 	held, err := attStore.ListHeld(ctx, org.ID)
 	if err != nil {
 		t.Fatalf("list held: %v", err)
