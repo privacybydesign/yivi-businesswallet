@@ -21,6 +21,7 @@ function org(overrides: Partial<Organization>): Organization {
     digitalAddress: "",
     status: "active",
     bootstrappedAt: "",
+    dataInstruction: "transfer",
     ...overrides,
   };
 }

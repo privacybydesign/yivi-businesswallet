@@ -45,6 +45,8 @@ tags:
     description: Per-organisation CSC API v2 signing-provider (remote QTSP) connection settings.
   - name: signing
     description: Qualified document signing — the RP-centric signing ceremony against a CSC provider.
+  - name: export
+    description: Data portability — the organisation's export bundle (Art 5(1)(l)).
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -1613,6 +1615,75 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/export/download/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: One-time download token.
+    get:
+      tags: [export]
+      summary: Download an export bundle by token
+      description: >-
+        No session required: the token is the credential, because a
+        termination-triggered export has to reach an owner who can no longer sign
+        in. Single-use — a completed download spends it. An unknown, spent or
+        expired token is one indistinguishable 404, so a caller cannot confirm a
+        token exists.
+      responses:
+        '2XX':
+          description: The bundle.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/data-instruction:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    put:
+      tags: [organizations]
+      summary: Set what happens to the organisation's data on termination
+      description: >-
+        Requires organisation admin. `transfer` hands the export bundle over;
+        `delete` hands it over and records that erasure is owed. Captured in
+        advance because termination is exactly the moment nobody can be asked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dataInstruction:
+                  type: string
+                  enum: [transfer, delete]
+      responses:
+        '2XX':
+          description: The updated organisation.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/departments:
     parameters:
       - name: slug
@@ -1973,6 +2044,176 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/export:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [export]
+      summary: Download the organisation's data-portability bundle
+      description: >-
+        Requires organisation admin. Returns a ZIP whose first entry is
+        `manifest.json`: a versioned index naming the organisation, what each
+        section carries, and a SHA-256 over every file. The four sections mirror
+        the data points of COM(2025) 838 Art 5(1)(l) — owner identification data,
+        electronic attestations of attributes, QERDS communication logs and
+        evidence, and interaction/audit records. Signed credentials and qualified
+        evidence are copied byte for byte, never re-encoded, so they still verify
+        outside this deployment. A section appears in the manifest only when the
+        export produced it. Access tokens, claim tokens, SMTP passwords and
+        private key material are excluded. The download is audited.
+      parameters:
+        - name: sections
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >-
+            Comma-separated subset of `ownerIdentification`, `attestations`,
+            `qerds`, `auditRecords`. Omit for the whole bundle. Only the sections
+            the export produced appear in the manifest, so zero counts always mean
+            the organisation holds none of that data. An unknown key, or one this
+            deployment cannot write yet, is rejected rather than returned empty.
+      responses:
+        '2XX':
+          description: The bundle.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/export/jobs:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [export]
+      summary: List the organisation's background exports
+      description: Requires organisation admin. Newest first.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [export]
+      summary: Queue a background export
+      description: >-
+        Requires organisation admin. Queues the bundle for assembly by a
+        background worker and returns the job immediately, for an organisation
+        whose evidence and attachments outgrow a single request. The section
+        filter is validated here, so a typo is refused rather than producing a
+        job that fails later.
+      parameters:
+        - name: sections
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated subset of the export sections; omit for all.
+      responses:
+        '202':
+          description: The queued job.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/export/jobs/{id}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    get:
+      tags: [export]
+      summary: Read one background export
+      description: >-
+        Requires organisation admin. Reports queued / running / ready / failed,
+        and carries `downloadPath` while the bundle is actually fetchable.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/export/jobs/{id}/download:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    get:
+      tags: [export]
+      summary: Download a finished background export
+      description: >-
+        Requires organisation admin. Serves the assembled ZIP. Spends no one-time
+        token — that token exists for a caller who cannot authenticate — so the
+        bundle stays fetchable until it expires.
+      responses:
+        '2XX':
+          description: The bundle.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/orgs/{slug}/invitations/{id}:
     parameters:
       - name: slug
@@ -4382,6 +4623,40 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/organizations/{id}/terminate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [organizations]
+      summary: Terminate service for an organisation (platform admin)
+      description: >-
+        Requires the platform administrator role — this is the provider acting,
+        not the owner. Revokes the organisation and queues, in the same
+        transaction, the data-portability export Art 7(6)(f) owes it; the finished
+        bundle is mailed to the organisation's admins with a one-time link. A
+        `delete` data instruction is *marked* as erasure-pending, never carried
+        out here: destruction is irreversible and would destroy the trail proving
+        the handover, so it stays a deliberate operator step.
+      responses:
+        '2XX':
+          description: The terminated organisation.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/qerds/webhook:
     post:
       tags: [qerds]
@@ -4507,6 +4782,12 @@ components:
             $ref: '#/components/schemas/Error'
     NotFound:
       description: The referenced resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: The resource is not in a state that allows this request.
       content:
         application/json:
           schema:

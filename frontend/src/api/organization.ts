@@ -22,6 +22,14 @@ export const organizationSchema = z.object({
   digitalAddress: z.string(),
   status: z.string(),
   bootstrappedAt: z.string(),
+  // What happens to the owner's data when the provider stops serving them
+  // (Art 7(6)(f)); captured in advance because termination is exactly the moment
+  // nobody can be asked.
+  dataInstruction: z.string(),
+  terminatedAt: z.string().optional(),
+  // Set when a termination honoured a delete instruction: the bundle went out
+  // and erasure is owed.
+  erasurePendingAt: z.string().optional(),
   // Only the list endpoints carry the org's theme logo path (absent when the org
   // has no logo, or on single-org endpoints), so the org switcher can show it.
   logoUri: z.string().optional(),

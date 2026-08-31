@@ -38,7 +38,15 @@ func (f fakeRepo) GetBySlug(context.Context, string) (Organization, error) {
 func (f fakeRepo) Update(context.Context, uuid.UUID, string) (Organization, error) {
 	return Organization{}, nil
 }
-func (f fakeRepo) Delete(context.Context, uuid.UUID) error                        { return nil }
+func (f fakeRepo) Delete(context.Context, uuid.UUID) error { return nil }
+
+func (f fakeRepo) SetDataInstruction(context.Context, uuid.UUID, string) (Organization, error) {
+	return Organization{}, nil
+}
+
+func (f fakeRepo) Terminate(context.Context, uuid.UUID, exportQueuer) (Organization, error) {
+	return Organization{}, nil
+}
 func (f fakeRepo) ListForUser(context.Context, uuid.UUID) ([]Organization, error) { return nil, nil }
 func (f fakeRepo) GetMembership(context.Context, uuid.UUID, uuid.UUID) (Membership, error) {
 	return f.membership, f.membershipErr

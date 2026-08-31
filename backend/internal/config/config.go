@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -120,6 +121,8 @@ const (
 	// a hosted deployment sets it to its own public /api/v1/signing/callback so the
 	// redirect_uri the backend sends matches what the QTSP has registered.
 	envSigningRedirectURI = "SIGNING_REDIRECT_URI"
+
+	envExportMaxBundleBytes = "EXPORT_MAX_BUNDLE_BYTES"
 	// STATIC_DIR points at the built frontend; when set the API also serves it as
 	// an SPA on "/". Unset in dev (Vite serves the frontend).
 	envStaticDir = "STATIC_DIR"
@@ -159,6 +162,12 @@ const (
 	envQerdsDomibusService     = "QERDS_DOMIBUS_SERVICE"
 	envQerdsDomibusServiceType = "QERDS_DOMIBUS_SERVICE_TYPE"
 	envQerdsDomibusAction      = "QERDS_DOMIBUS_ACTION"
+
+	// defaultExportMaxBundleBytes caps a bundle at 1 GiB. It is a ceiling on the
+	// pathological case, not a target: the bundle is held whole in memory while a
+	// background job stores it, so an org past this is telling us the export needs
+	// to stream rather than that the cap is wrong.
+	defaultExportMaxBundleBytes int64 = 1 << 30
 
 	defaultLogLevel  = "info"
 	defaultLogFormat = "text"
@@ -316,6 +325,12 @@ type Config struct {
 	// signing. Empty means the built-in localhost default; a hosted deployment sets
 	// its own public /api/v1/signing/callback.
 	SigningRedirectURI string
+	// ExportMaxBundleBytes caps a data-portability bundle. A payload that would
+	// push it past the cap is recorded in the manifest as an omission with its
+	// size and hash, never silently dropped — a bundle that quietly lost an
+	// attachment reads as "everything was exported" when it was not. Zero means
+	// no cap.
+	ExportMaxBundleBytes int64
 	// MailDefaultLocale is the fallback language for outbound transactional mail.
 	MailDefaultLocale string
 
@@ -446,6 +461,11 @@ func Load() (Config, error) {
 		}
 	}
 
+	exportMaxBundleBytes, err := byteSizeOrDefault(envExportMaxBundleBytes, defaultExportMaxBundleBytes)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		DatabaseDSN: dsn,
 		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
@@ -507,6 +527,7 @@ func Load() (Config, error) {
 		CSCEncryptionKey:           os.Getenv(envCSCEncryptionKey),
 		SigningOAuthIssuerInternal: os.Getenv(envSigningOAuthIssuerInternal),
 		SigningRedirectURI:         signingRedirectURI,
+		ExportMaxBundleBytes:       exportMaxBundleBytes,
 		MailDefaultLocale:          envOrDefault(envMailDefaultLocale, defaultMailLocale),
 		StaticDir:                  os.Getenv(envStaticDir),
 
@@ -625,4 +646,19 @@ func parseDuration(key, fallback string) (time.Duration, error) {
 		return 0, fmt.Errorf("config: %s %q: %w", key, raw, err)
 	}
 	return d, nil
+}
+
+// byteSizeOrDefault reads a byte count from the environment. It is a plain
+// integer of bytes: a unit suffix would be one more thing to get wrong in a
+// deployment, and the value is set once.
+func byteSizeOrDefault(key string, fallback int64) (int64, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative number of bytes, got %q", key, raw)
+	}
+	return value, nil
 }

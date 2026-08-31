@@ -19,6 +19,12 @@ const (
 	StatusSuspended = "suspended"
 	StatusRevoked   = "revoked"
 
+	// The owner's standing instruction for their data when the provider stops
+	// serving them (Art 7(6)(f)). InstructionTransfer hands the bundle over;
+	// InstructionDelete hands it over and then owes erasure.
+	InstructionTransfer = "transfer"
+	InstructionDelete   = "delete"
+
 	DefaultMemberListLimit = 25
 	MaxMemberListLimit     = 100
 )
@@ -54,6 +60,14 @@ type Organization struct {
 	DigitalAddress string    `json:"digitalAddress"`
 	Status         string    `json:"status"`
 	BootstrappedAt time.Time `json:"bootstrappedAt"`
+	// DataInstruction is what to do with the owner's data on termination.
+	DataInstruction string `json:"dataInstruction"`
+	// TerminatedAt is when the provider ended service, nil while it has not.
+	TerminatedAt *time.Time `json:"terminatedAt,omitempty"`
+	// ErasurePendingAt is set when a termination honoured a delete instruction:
+	// the bundle went out and erasure is owed. Destruction stays a deliberate
+	// operator step, so this marks the debt rather than settling it.
+	ErasurePendingAt *time.Time `json:"erasurePendingAt,omitempty"`
 	// LogoURI is the API path serving the org's theme logo, or "" when none is
 	// set. Only the list endpoints (List/ListForUser) populate it, so the org
 	// switcher can show each org's logo without a per-org theme fetch; the

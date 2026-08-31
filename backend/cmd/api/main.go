@@ -24,6 +24,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/emailchannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/export"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
@@ -77,6 +78,11 @@ const (
 	// One token request to the identity platform, on the path of a send.
 	mailOAuthHTTPTimeout = 15 * time.Second
 
+	// How often spent and expired export bundles have their stored bytes dropped.
+	// The rows stay — a job is part of the org's export history — so this only
+	// reclaims the payload.
+	exportPruneInterval = 1 * time.Hour
+
 	serverAddr = ":8080"
 
 	// Server-level ingest bounds. ReadHeaderTimeout caps the slowloris header
@@ -88,6 +94,18 @@ const (
 	serverIdleTimeout       = 120 * time.Second
 	serverMaxHeaderBytes    = 1 << 20 // 1 MiB
 )
+
+// exportOrgs adapts the organization store to the identity the export manifest
+// denormalises, so the export worker does not import the whole org surface.
+type exportOrgs struct{ store *organization.Store }
+
+func (a exportOrgs) Resolve(ctx context.Context, orgID uuid.UUID) (export.Organization, error) {
+	org, err := a.store.GetByID(ctx, orgID)
+	if err != nil {
+		return export.Organization{}, err
+	}
+	return export.OwnerOf(org), nil
+}
 
 // qerdsProvider is the boot-time provider surface: the readiness probe plus the
 // operations the qerds service uses. The concrete provider is chosen by config.
@@ -331,7 +349,11 @@ func run() error {
 		mailoauth.NewMicrosoft(&http.Client{Timeout: mailOAuthHTTPTimeout}),
 		mailBranding{theme: themeSettingsStore}, mailLocale)
 
-	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins)
+	// The export store is built here rather than beside the rest of the export
+	// wiring: terminating an organisation queues the bundle it owes in the same
+	// transaction, so the org handler needs it.
+	exportStore := export.NewStore(pool, recorder)
+	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins, exportStore)
 
 	qerdsProv, err := newQerdsProvider(cfg)
 	if err != nil {
@@ -569,6 +591,28 @@ func run() error {
 		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingOrgs{store: orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
 		requireUser, orgHandler.Authorize)
 
+	// Data portability (Art 5(1)(l)): one admin-gated download carrying the org's
+	// identification data, attestations, QERDS logs and audit trail. A section is
+	// registered only once it can be written; an unregistered one is refused by
+	// name rather than exported empty.
+	exportService := export.NewService(exportStore, []export.SectionWriter{
+		export.NewOwnerIdentificationWriter(orgStore),
+		export.NewAttestationsWriter(attestationStore, attHolder),
+		export.NewQerdsWriter(qerdsStore),
+		export.NewAuditRecordsWriter(audit.NewReader(pool)),
+	}).WithBudget(cfg.ExportMaxBundleBytes)
+	exportHandler := export.NewHandler(exportService, exportStore, requireUser, orgHandler.Authorize)
+
+	// An organisation whose evidence and attachments outgrow one request builds
+	// its bundle in the background instead; the pruner drops the stored bytes once
+	// a bundle is spent or expired.
+	exportWorker := export.NewWorker(exportStore, exportOrgs{store: orgStore}, exportService)
+	exportWorker.OnReady(exportDelivery{
+		orgs: orgStore, email: emailService, appBaseURL: cfg.AppBaseURL, ttl: export.DefaultBundleTTL,
+	}.notify)
+	go exportWorker.Run(ctx)
+	startPruner(ctx, "export_jobs", exportPruneInterval, exportStore.PruneExpired)
+
 	handler := server.New(
 		pool,
 		cfg.StaticDir,
@@ -588,6 +632,7 @@ func run() error {
 		provisioningHandler,
 		cscHandler,
 		signingHandler,
+		exportHandler,
 	)
 
 	httpServer := &http.Server{

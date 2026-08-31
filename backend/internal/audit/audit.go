@@ -114,6 +114,14 @@ const (
 	SigningCompleted        = "signing.completed"
 	SigningDelivered        = "signing.delivered"
 	SigningFailed           = "signing.failed"
+
+	ExportRequested = "organization.export_requested"
+	// OrganizationTerminated records the provider ending service for an
+	// organisation (Art 7(6)(f)), which is what fires the export it owes.
+	OrganizationTerminated = "organization.terminated"
+	// DataInstructionUpdated records the owner's standing instruction for their
+	// data on termination: transfer, or transfer then erase.
+	DataInstructionUpdated = "organization.data_instruction_updated"
 )
 
 const (
@@ -163,6 +171,8 @@ const (
 
 	TargetSigningCredential = "signing_credentials"
 	TargetSigningRequest    = "signing_requests"
+
+	TargetExport = "export"
 )
 
 type Actor struct {
