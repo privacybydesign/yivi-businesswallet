@@ -619,7 +619,9 @@ export function PlacementEditor({
                         >
                           {t("signing.placement.placeOnPage")}
                         </Button>
-                        {selected && (
+                        {/* A signature removes from here; a paraph's per-page and
+                            all-pages removal live in the initials box below. */}
+                        {selected && kind === PLACEMENT_KIND.signature && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -689,6 +691,23 @@ export function PlacementEditor({
                                 count: pageCount,
                               })}
                             </Button>
+                            {selected && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  update(
+                                    withoutPlacement(
+                                      activePlacements,
+                                      PLACEMENT_KIND.paraph,
+                                      page,
+                                    ),
+                                  )
+                                }
+                              >
+                                {t("signing.placement.removeMark")}
+                              </Button>
+                            )}
                             {paraphs > 0 && (
                               <Button
                                 variant="ghost"
