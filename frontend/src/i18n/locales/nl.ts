@@ -366,6 +366,12 @@ export const nl: Translation<typeof en> = {
     departmentAdded: "Afdeling toegevoegd",
     departmentRenamed: "Afdeling hernoemd",
     departmentDeleted: "Afdeling verwijderd",
+    mandateGranted: "Mandaat verleend",
+    mandateRevoked_one: "Mandaat ingetrokken",
+    mandateRevoked_other: "{{count}} mandaten ingetrokken",
+    mandateRevocationScheduled_one: "Intrekking ingepland",
+    mandateRevocationScheduled_other:
+      "Intrekking ingepland, {{count}} mandaten geraakt",
     qerdsMessageSent: "Bericht verstuurd",
     qerdsInboxChecked_one: "{{count}} nieuw bericht ontvangen",
     qerdsInboxChecked_other: "{{count}} nieuwe berichten ontvangen",
@@ -861,6 +867,7 @@ export const nl: Translation<typeof en> = {
     title: "Instellingen",
     subtitle: "Profiel en voorkeuren van de organisatie",
     tabOrg: "Organisatie",
+    tabMandates: "Mandaten",
     tabBranding: "Branding",
     tabCommunication: "Communicatie",
     tabEmail: "E-mail",
@@ -1362,6 +1369,99 @@ export const nl: Translation<typeof en> = {
     nameTaken: "Er bestaat al een afdeling met die naam.",
     inUse: "Deze afdeling heeft nog leden. Wijs ze eerst opnieuw toe.",
     error: "Er is iets misgegaan: {{message}}",
+  },
+  mandates: {
+    heading: "Mandaatregister",
+    description:
+      "Wie namens deze organisatie mag handelen, en binnen welke grenzen. Ingetrokken en verlopen mandaten blijven in de lijst staan, zodat het register de hele geschiedenis houdt.",
+    grant: "Mandaat verlenen",
+    grantTitle: "Een mandaat verlenen",
+    revoke: "Intrekken",
+    revokeTitle: "Een mandaat intrekken",
+    empty: "Er zijn nog geen mandaten verleend.",
+    loadError: "Mandaatregister laden mislukt: {{message}}",
+    delegatedFrom: "Gedelegeerd uit het mandaat van {{holder}}",
+    grantorGone: "Account verwijderd",
+    validityFrom: "Vanaf {{from}}, zonder einddatum",
+    validityRange: "{{from}} tot {{until}}",
+    revokeIntro:
+      "Hiermee eindigt het mandaat van {{holder}} ({{type}}). Het register houdt de regel, gemarkeerd als ingetrokken.",
+    cascadeWarning_one: "Eén mandaat dat hieruit is gedelegeerd eindigt mee:",
+    cascadeWarning_other:
+      "{{count}} mandaten die hieruit zijn gedelegeerd eindigen mee:",
+    cascadeSeparator: ", ",
+    jointAuthorityNote:
+      "Het register vermeldt je als bestuurder die alleen samen met een ander kan handelen, dus je kunt niet zelfstandig een mandaat verlenen. Samen verlenen is nog niet gebouwd. Tot die tijd laat dit scherm je alleen het register zien.",
+    noAuthorityNote:
+      "Verlenen en intrekken is voor een wettelijk vertegenwoordiger uit het handelsregister, of voor de houder van een actief organisatiebreed volledig mandaat. Beheerder zijn is daarvoor geen grondslag.",
+    columns: {
+      holder: "Houder",
+      grantedBy: "Verleend door",
+      type: "Soort",
+      scope: "Bereik",
+      validity: "Geldigheid",
+      status: "Status",
+      actions: "Acties",
+    },
+    types: {
+      full: "Volledig",
+      administrative: "Administratief",
+    },
+    typeHints: {
+      full: "Namens de organisatie handelen in het algemeen.",
+      administrative:
+        "Rollen en verantwoordelijkheden toewijzen binnen het bereik.",
+    },
+    scopes: {
+      organization: "Hele organisatie",
+      department: "Eén afdeling",
+    },
+    statuses: {
+      pending: "Nog niet begonnen",
+      active: "Actief",
+      revoked: "Ingetrokken",
+      expired: "Verlopen",
+    },
+    form: {
+      grantee: "Houder",
+      granteeHint: "De houder moet lid zijn van deze organisatie.",
+      granteeRequired: "Kies wie het mandaat houdt.",
+      selectGrantee: "Kies een lid",
+      type: "Soort",
+      scope: "Bereik",
+      scopeHint:
+        "Een mandaat geldt voor de hele organisatie of voor één afdeling. Beperken tot één resourcedomein kan nog niet.",
+      selectDepartment: "Kies een afdeling",
+      departmentRequired: "Kies de afdeling waartoe het mandaat beperkt is.",
+      validFrom: "Geldig vanaf",
+      validFromHint: "Laat leeg om nu te beginnen.",
+      validUntil: "Geldig tot",
+      validUntilHint: "Laat leeg voor geen einddatum.",
+      emptyWindow: "Het einde moet na het begin liggen.",
+      when: "Wanneer het ingaat",
+      immediately: "Direct",
+      onADate: "Op een datum",
+      effectiveAt: "Ingaand op",
+      effectiveAtHint:
+        "Het mandaat blijft tot dan actief en verloopt vanzelf. Moet in de toekomst liggen.",
+      effectiveAtRequired: "Kies wanneer de intrekking ingaat.",
+      effectiveAtPast:
+        "Dat moment is al voorbij. Kies een later moment, of kies Direct.",
+      reason: "Reden (optioneel)",
+      reasonHint: "Wordt met de intrekking in het auditlog vastgelegd.",
+    },
+    errors: {
+      granteeNotMember: "Die persoon is geen lid van deze organisatie.",
+      departmentNotFound: "Die afdeling bestaat niet meer.",
+      overDelegation:
+        "Een gedelegeerd mandaat kan niet verder gaan dan het mandaat waaruit het is gesneden. Kies een lagere soort, houd dezelfde afdeling aan, of maak de geldigheid korter.",
+      authorityRequired: "Je mag dit mandaat niet beheren.",
+      inactive: "Dit mandaat is al geëindigd en kan niet worden ingetrokken.",
+      notFound: "Dit mandaat bestaat niet meer.",
+      withdrawn:
+        "Je eigen mandaat voor deze organisatie is niet meer actief, dus het register is voor jou gesloten. Een wettelijk vertegenwoordiger kan je een nieuw mandaat verlenen.",
+      other: "Er is iets misgegaan: {{message}}",
+    },
   },
   adminDashboard: {
     title: "Platformbeheer",

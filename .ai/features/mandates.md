@@ -1,10 +1,12 @@
 # Mandates: granted authority, real-time enforcement, revocation
 
-**Status:** first version. The mandate object, its enforcement in `Authorize` / `RequireOrgAdmin`, and the
-grant → active → revoked/expired lifecycle exist; there is no UI yet and no cryptographic proof binding.
+**Status:** first version. The mandate object, its enforcement in `Authorize` / `RequireOrgAdmin`, the
+grant → active → revoked/expired lifecycle, and the register screen exist; there is no cryptographic
+proof binding.
 **Code:** `backend/internal/organization/mandate.go` (model + the pure decisions),
 `mandate_store.go` (the store), `mandates.go` (HTTP), `middleware.go` (enforcement),
-migration `20260811150000_create_mandates.sql`.
+migration `20260811150000_create_mandates.sql`, `frontend/src/routes/mandate-settings.tsx` +
+`frontend/src/lib/mandate.ts` (the screen and its pure logic).
 **Design of record:** `.ai/plans/rbac-model.md`. Issues [#27](https://github.com/privacybydesign/yivi-businesswallet/issues/27),
 [#210](https://github.com/privacybydesign/yivi-businesswallet/issues/210).
 
@@ -162,12 +164,41 @@ as one that is still active until that date.
 | route | gate |
 |---|---|
 | `GET /orgs/{slug}/mandates` | `RequireOrgAdmin` — the whole register, ended mandates included; dropping them would hide the revocations |
+| `GET /orgs/{slug}/mandates/authority` | `RequireOrgAdmin` — the caller's own basis, for the screen to offer only the actions they can use |
 | `POST /orgs/{slug}/mandates` | `RequireMandateAuthority` |
 | `POST /orgs/{slug}/mandates/{id}/revoke` | `RequireMandateAuthority` |
 
+`Authority` itself never reaches the client. The authority route serves a flattened read of it —
+`mayGrant` (the `RequireMandateAuthority` gate verbatim), plus `legalRepresentative`, `fullMandate`
+and `jointAuthority` so the screen can say *why* it is withholding an action. `jointAuthority` is the
+one field not derived from `Authority`: it reads `wallet_representations.authority` for the caller,
+which `ResolveAuthority` deliberately ignores (§7).
+
+## 6a. The register screen
+
+`Mandates` under org settings (`?tab=mandates`). It reads the register and the authority route, and
+otherwise holds no state the backend does not.
+
+- **Status is not recomputed.** `Mandate.Status` is derived server-side on every read, so the screen
+  renders the field. There is no second copy of the predicate to drift.
+- **Lineage** (`mandateLineage`) nests each mandate under the one it was cut from, depth-first. Every
+  mandate comes out exactly once: a row whose `parentMandateId` is absent from the list is shown as a
+  root rather than dropped, because the register is the audit surface and a vanished row would hide a
+  grant.
+- **The cascade warning** (`mandateCascade`) names the descendants a revocation would reach. It walks
+  the whole subtree and then drops the revoked and expired ones, which is exactly what the recursive
+  CTE + `WHERE revoked_at IS NULL AND (valid_until IS NULL OR valid_until > now())` does — so it
+  descends *past* an ended descendant to the live ones under it.
+- **The grant flow is withheld from a jointly registered director** unless they also hold a full
+  mandate (`mandateGrantAvailability`). The backend would accept their grant, because it does not read
+  the column yet; offering the flow would record a grant no single director could make. A mandate of
+  their own is a basis that does not depend on the registration, so it lifts the hold.
+- **An admin whose own mandate lapsed** fails `RequireOrgAdmin` and the register 403s with
+  `mandate_withdrawn`. The screen names that specifically: `accessMessage`'s "you are not a member of
+  this organization" is wrong for someone who is a member and whose authority ran out.
+
 ## 7. Deliberately not here
 
-- **No UI.** The register and the grant/revoke flows are API-only for now.
 - **Cryptographic proof binding of audit events** (Annex §12(2)(c)) — the events are written and
   timestamped, but not yet bound to a verifiable proof of authorisation. `source_message_id` on
   register-backed representations is the existing precedent to follow.
@@ -176,7 +207,8 @@ as one that is still active until that date.
   note in `.ai/conventions/BACKEND.md`), so this slice extends `RequireOrgAdmin` instead. Nothing
   here has to change when it lands: the gates read `Authority` out of context, not a role string.
 - **Resource-domain scope.** Scope is org-wide or department; narrowing to one resource domain
-  belongs with `RequirePermission`.
+  belongs with `RequirePermission`. The grant form says so under its scope field rather than offering
+  a control that does nothing.
 - **External legal persons as grantees** (Art 3(18) allows one). The grantee is a user; an
   `accounting firm holds a mandate` needs onboarding that does not exist yet.
 - **Joint authority.** `legalRepresentativeExists` reads `kind = 'bestuurder'` and ignores
@@ -186,6 +218,8 @@ as one that is still active until that date.
   grant waiting for the second. That is a slice of its own. Refusing them outright instead would
   leave a jointly-managed company with no way to grant a mandate at all, which is worse than the
   gap. This is the first code in the repo to decide anything from that row, so nothing regresses —
-  but it must be closed before the layer carries a legal claim.
+  but it must be closed before the layer carries a legal claim. The register screen does not offer
+  such a director a grant flow (§6a), so the gap is no longer reachable from the UI; the API still
+  honours them, and closing it there is the co-signing slice.
 - **Conflict-of-roles detection**, relying-party authorisations (Art 5(1)(k)), and cross-Member-State
   interoperability — separate slices per #27.
