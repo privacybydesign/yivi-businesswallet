@@ -170,13 +170,13 @@ function GrantMandateDialog({
   const [validUntil, setValidUntil] = useState("");
   const [attempted, setAttempted] = useState(false);
 
+  // A dialog can sit open for minutes: an end two minutes out is valid when it
+  // is typed and empty by the time Grant is clicked, so submitting re-measures.
+  const [checkedAt, setCheckedAt] = useState(() => new Date().toISOString());
+
   const from = isoFromLocalInput(validFrom);
   const until = isoFromLocalInput(validUntil);
-  const emptyWindow = mandateWindowIsEmpty(
-    from,
-    until,
-    new Date().toISOString(),
-  );
+  const emptyWindow = mandateWindowIsEmpty(from, until, checkedAt);
 
   const granteeError = attempted && granteeUserId === "";
   const departmentError =
@@ -185,10 +185,12 @@ function GrantMandateDialog({
   function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     setAttempted(true);
+    const submittedAt = new Date().toISOString();
+    setCheckedAt(submittedAt);
     if (
       grant.isPending ||
       granteeUserId === "" ||
-      emptyWindow ||
+      mandateWindowIsEmpty(from, until, submittedAt) ||
       (scope === "department" && departmentId === "")
     ) {
       return;
