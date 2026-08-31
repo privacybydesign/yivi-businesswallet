@@ -890,7 +890,10 @@ function NewRequestTab({
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setFile(null)}
+                      onClick={() => {
+                        setFile(null);
+                        setFileTooLarge(false);
+                      }}
                     >
                       {t("signing.documentRemove")}
                     </Button>
