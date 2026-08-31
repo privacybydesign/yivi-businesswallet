@@ -36,14 +36,20 @@ import {
 } from "../api/organization.queries";
 import type { MemberListEntry } from "../api/organization";
 import {
+  channelLabel,
   modeLabel,
   signerKindLabel,
   signerStatusLabel,
 } from "../lib/signing-labels";
 import { alreadyChosen, isEmailish, signerKey } from "../lib/signer-selection";
-import { placementsIncomplete, signerAccent } from "../lib/placement";
+import { formatBytes } from "../lib/format-bytes";
+import {
+  MAX_DOCUMENT_BYTES,
+  documentIsTooLarge,
+} from "../lib/signing-document";
+import { placementsIncomplete } from "../lib/placement";
 import { toast } from "../lib/toast";
-import { Button, Card, Input, Tag, TopBar } from "../ui";
+import { Avatar, Button, Card, Icon, Input, Tag, TopBar } from "../ui";
 import { SigningHistoryPanel } from "./signing-history";
 
 // The placement editor pulls in pdf.js, which is larger than the rest of the app put
@@ -54,6 +60,7 @@ const PlacementEditor = React.lazy(async () => ({
 }));
 
 const CONFLICT_STATUS = 409;
+const TOO_LARGE_STATUS = 413;
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const CONTROL =
   "border-line bg-surface text-ink w-full rounded-md border px-3 py-2 text-[13px]";
@@ -62,6 +69,10 @@ const CONTROL =
 // pattern the profile, theme and issuer screens use.
 const FILE_BUTTON =
   "rounded-yivi border-line-strong bg-surface text-ink hover:bg-surface-3 focus-within:border-ink focus-within:ring-ink/10 inline-flex h-9 cursor-pointer items-center border px-3 text-[13px] font-medium transition-colors focus-within:ring-3";
+// The house focus treatment for the wizard's custom (non-ui/) controls: the same
+// ring Input and the placement editor use, so every custom target shows focus alike.
+const WIZARD_FOCUS =
+  "outline-none focus-visible:border-ink focus-visible:ring-ink/20 focus-visible:ring-3";
 const MEMBER_PAGE_LIMIT = 200;
 
 type TabKey = "toSign" | "new" | "credential" | "history";
@@ -93,14 +104,22 @@ function startError(error: Error, t: TFunction): string {
     if (code === "not_your_turn") return t("signing.notYourTurn");
     if (code === "sign_in_progress") return t("signing.signInProgress");
   }
+  if (error instanceof ApiError && error.status === TOO_LARGE_STATUS) {
+    return t("signing.documentTooLarge", {
+      size: formatBytes(MAX_DOCUMENT_BYTES),
+    });
+  }
+  // The backend renders an APIError as `{error, code}`, so the human-readable part
+  // is `error`; reading `message` here always missed and fell through to the
+  // client's own "failed with status …" string.
   if (
     error instanceof ApiError &&
     error.body &&
     typeof error.body === "object" &&
-    "message" in error.body &&
-    typeof error.body.message === "string"
+    "error" in error.body &&
+    typeof error.body.error === "string"
   ) {
-    return t("signing.startError", { message: error.body.message });
+    return t("signing.startError", { message: error.body.error });
   }
   return t("signing.startError", { message: error.message });
 }
@@ -219,7 +238,11 @@ export default function Signing(): React.JSX.Element {
         {activeTab === "history" ? (
           <SigningHistoryPanel slug={slug} enabled={isAdmin} />
         ) : (
-          <div className="flex max-w-3xl flex-col gap-6">
+          <div
+            className={`flex flex-col gap-6 ${
+              activeTab === "new" ? "max-w-6xl" : "max-w-3xl"
+            }`}
+          >
             {requestId && (
               <ActiveRequestCard slug={slug} requestId={requestId} />
             )}
@@ -435,7 +458,226 @@ function ToSignTab({
   );
 }
 
-// NewRequestTab is the co-signing request form.
+// The next index for a role="radio" group on the arrow/Home/End keys — the keyboard
+// interaction the role promises. Returns null when the key is not a navigation key.
+function radioNavIndex(
+  key: string,
+  current: number,
+  count: number,
+): number | null {
+  switch (key) {
+    case "ArrowRight":
+    case "ArrowDown":
+      return (current + 1) % count;
+    case "ArrowLeft":
+    case "ArrowUp":
+      return (current - 1 + count) % count;
+    case "Home":
+      return 0;
+    case "End":
+      return count - 1;
+    default:
+      return null;
+  }
+}
+
+// A pill toggle for a small set of mutually exclusive options — the same segmented
+// control the design uses for signing order and, in the placement rail, mark kind.
+// A proper radio group: one tab stop, the arrows move (and commit) the selection.
+function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  ariaLabel: string;
+}): React.JSX.Element {
+  const refs = React.useRef<(HTMLButtonElement | null)[]>([]);
+  const currentIndex = Math.max(
+    options.findIndex((o) => o.value === value),
+    0,
+  );
+  const onKeyDown = (event: React.KeyboardEvent): void => {
+    const next = radioNavIndex(event.key, currentIndex, options.length);
+    if (next == null) return;
+    event.preventDefault();
+    onChange(options[next].value);
+    refs.current[next]?.focus();
+  };
+  return (
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      className="bg-surface-3 rounded-yivi inline-flex gap-0.5 p-0.5"
+    >
+      {options.map((option, index) => {
+        const active = value === option.value;
+        return (
+          <button
+            key={option.value}
+            ref={(el) => {
+              refs.current[index] = el;
+            }}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            tabIndex={active ? 0 : -1}
+            onClick={() => onChange(option.value)}
+            onKeyDown={onKeyDown}
+            className={[
+              "h-[30px] rounded-[6px] px-3.5 text-[12.5px] transition-colors",
+              WIZARD_FOCUS,
+              active
+                ? "bg-surface text-ink shadow-card font-semibold"
+                : "text-ink-soft hover:text-ink font-medium",
+            ].join(" ")}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// The wizard header rail: a numbered pill per step, connected by short lines, with a
+// tick for a completed step and an underline on the current one. A step is clickable
+// — forward or back — whenever every step before it is satisfied (`reachable`), so a
+// green step is never two Continue clicks away.
+function WizardStepRail({
+  steps,
+  current,
+  reachable,
+  onStep,
+}: {
+  steps: string[];
+  current: number;
+  reachable: boolean[];
+  onStep: (index: number) => void;
+}): React.JSX.Element {
+  return (
+    <ol className="flex items-center overflow-x-auto">
+      {steps.map((label, index) => {
+        const done = index < current;
+        const active = index === current;
+        const canGo = reachable[index];
+        return (
+          <li key={label} className="flex items-center">
+            {index > 0 && (
+              // mb mirrors the button's pb-3.5 so the connector lines up with the
+              // circles' centres, not the centre of the underline-padded button.
+              <span
+                className="bg-line-strong mx-1 mb-3.5 h-px w-6 shrink-0 md:w-7"
+                aria-hidden="true"
+              />
+            )}
+            <button
+              type="button"
+              disabled={!canGo}
+              aria-current={active ? "step" : undefined}
+              onClick={() => onStep(index)}
+              className={[
+                "flex items-center gap-2.5 pb-3.5 whitespace-nowrap",
+                WIZARD_FOCUS,
+                canGo ? "cursor-pointer" : "cursor-default",
+                active ? "shadow-[inset_0_-2px_0_var(--yb-ink)]" : "",
+              ].join(" ")}
+            >
+              <span
+                className={[
+                  "flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
+                  done
+                    ? "bg-success text-white"
+                    : active
+                      ? "bg-ink text-white"
+                      : "border-line-strong text-muted border",
+                ].join(" ")}
+              >
+                {done ? <Icon name="valid" size={12} /> : index + 1}
+              </span>
+              <span
+                className={[
+                  "font-display text-[13.5px]",
+                  active
+                    ? "text-ink font-semibold"
+                    : done
+                      ? "text-ink-soft font-medium"
+                      : "text-muted font-medium",
+                ].join(" ")}
+              >
+                {label}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+// A radio card in the delivery step: a target the whole row selects, with a title
+// and a short description. One tab stop per group; the arrows move the selection.
+function ChannelCard({
+  selected,
+  title,
+  description,
+  onSelect,
+  tabIndex,
+  onKeyDown,
+  innerRef,
+}: {
+  selected: boolean;
+  title: string;
+  description: string;
+  onSelect: () => void;
+  tabIndex: number;
+  onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
+  innerRef: (el: HTMLButtonElement | null) => void;
+}): React.JSX.Element {
+  return (
+    <button
+      ref={innerRef}
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      tabIndex={tabIndex}
+      onClick={onSelect}
+      onKeyDown={onKeyDown}
+      className={[
+        "rounded-yivi bg-surface flex items-start gap-3 px-3.5 py-3 text-left transition-colors",
+        WIZARD_FOCUS,
+        selected
+          ? "border-ink shadow-card border-2"
+          : "border-line-strong hover:bg-surface-3 border",
+      ].join(" ")}
+    >
+      <span
+        className={[
+          "mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full",
+          selected ? "border-ink border-4" : "border-line-strong border",
+        ].join(" ")}
+        aria-hidden="true"
+      />
+      <span className="min-w-0">
+        <span className="font-display text-ink block text-[13px] font-semibold">
+          {title}
+        </span>
+        <span className="text-ink-soft mt-0.5 block text-[12px]">
+          {description}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+const WIZARD_STEP_COUNT = 4;
+
+// NewRequestTab is the co-signing request wizard: a document is uploaded, its signees
+// are chosen and ordered, their visible marks are placed on the pages, and a delivery
+// channel is picked — one decision per step, reviewed before the request is sent.
 function NewRequestTab({
   slug,
   onCreated,
@@ -451,7 +693,9 @@ function NewRequestTab({
   );
   const create = useCreateSigningRequestMutation(slug);
 
+  const [step, setStep] = useState(0);
   const [file, setFile] = useState<File | null>(null);
+  const [fileTooLarge, setFileTooLarge] = useState(false);
   const [signers, setSigners] = useState<SignerSelection[]>([]);
   const [signerKind, setSignerKind] = useState<SignerKind>(
     SIGNER_KIND.internal,
@@ -538,8 +782,7 @@ function NewRequestTab({
       ),
     );
 
-  const onSubmit = (event: React.FormEvent): void => {
-    event.preventDefault();
+  const submit = (): void => {
     if (!file) return;
     create.mutate(
       {
@@ -574,205 +817,117 @@ function NewRequestTab({
       ? (nameById.get(signer.userId) ?? signer.userId)
       : signer.name || signer.email;
 
+  const onFile = (chosen: File | null): void => {
+    const tooLarge = chosen !== null && documentIsTooLarge(chosen);
+    setFileTooLarge(tooLarge);
+    if (!tooLarge) {
+      setFile(chosen);
+      // Placements are rectangles on the pages of one document, so they mean
+      // nothing once a different document is chosen.
+      setSigners((prev) =>
+        prev.map((signer) => ({ ...signer, placements: [] })),
+      );
+    }
+  };
+
+  // What each step needs before the wizard will advance past it. Placement is
+  // optional, so its only gate is that no signature is left half-placed (incomplete).
+  const stepReady = [
+    file != null && !fileTooLarge,
+    signers.length > 0,
+    incomplete.length === 0,
+    canSubmit,
+  ];
+  // A step is reachable once every step before it is satisfied, so the rail can jump
+  // forward to any still-valid step and not only step back one at a time.
+  const reachable = stepReady.map((_, i) =>
+    stepReady.slice(0, i).every(Boolean),
+  );
+  const isLastStep = step === WIZARD_STEP_COUNT - 1;
+  const isSequential = mode === SIGNING_MODE.sequential;
+
+  // Someone with no visible mark still signs — but if others do have marks, that is
+  // worth flagging before sending, the way the design surfaces it on the review card.
+  const anyPlaced = signers.some((s) => s.placements.length > 0);
+  const noMarkSigners = anyPlaced
+    ? signers.filter((s) => s.placements.length === 0)
+    : [];
+  const totalMarks = signers.reduce((n, s) => n + s.placements.length, 0);
+
+  // The delivery channels as a roving radio group: one tab stop, arrows move (and
+  // commit) the selection across the three cards.
+  const channelRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
+  const channelOptions = [
+    {
+      value: RECIPIENT_CHANNEL.none,
+      title: channelLabel(t, RECIPIENT_CHANNEL.none),
+      description: t("signing.deliveryNoneDesc"),
+    },
+    {
+      value: RECIPIENT_CHANNEL.email,
+      title: channelLabel(t, RECIPIENT_CHANNEL.email),
+      description: t("signing.deliveryEmailDesc"),
+    },
+    {
+      value: RECIPIENT_CHANNEL.qerds,
+      title: channelLabel(t, RECIPIENT_CHANNEL.qerds),
+      description: t("signing.deliveryQerdsDesc"),
+    },
+  ];
+  const onChannelKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ): void => {
+    const current = Math.max(
+      channelOptions.findIndex((c) => c.value === channel),
+      0,
+    );
+    const next = radioNavIndex(event.key, current, channelOptions.length);
+    if (next == null) return;
+    event.preventDefault();
+    setChannel(channelOptions[next].value);
+    channelRefs.current[next]?.focus();
+  };
+
+  const steps = [
+    t("signing.steps.document"),
+    t("signing.steps.signees"),
+    t("signing.steps.placement"),
+    t("signing.steps.delivery"),
+  ];
+
+  const headerMeta =
+    file != null
+      ? `${file.name} · ${t("signing.documentMeta", { count: signers.length })}`
+      : t("signing.newDescription");
+
   return (
-    <Card className="p-7">
-      <h2 className="text-ink text-[15px] font-semibold">
-        {t("signing.newTitle")}
-      </h2>
-      <p className="text-ink-soft mt-1 text-[13px]">
-        {t("signing.newDescription")}
-      </p>
-
-      <form className="mt-5 flex flex-col gap-5" onSubmit={onSubmit}>
-        {/* Document */}
-        <div>
-          <span className={LABEL}>{t("signing.documentLabel")}</span>
-          <div className="mt-2 flex flex-col gap-1.5">
-            <div className="flex items-center gap-2">
-              <label className={FILE_BUTTON}>
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  className="sr-only"
-                  onChange={(e) => {
-                    setFile(e.target.files?.[0] ?? null);
-                    // Placements are rectangles on the pages of one document, so they
-                    // mean nothing once a different document is chosen.
-                    setSigners((prev) =>
-                      prev.map((signer) => ({ ...signer, placements: [] })),
-                    );
-                    // Reset so picking the same file after removing it fires onChange again.
-                    e.target.value = "";
-                  }}
-                />
-                {file
-                  ? t("signing.documentReplace")
-                  : t("signing.documentChoose")}
-              </label>
-              {file && (
-                <Button variant="ghost" size="sm" onClick={() => setFile(null)}>
-                  {t("signing.documentRemove")}
-                </Button>
-              )}
-            </div>
-            <span className="text-ink-soft truncate text-[12px]">
-              {file ? file.name : t("signing.documentNone")}
-            </span>
-          </div>
+    <Card className="overflow-hidden p-0">
+      {/* Header — title, live document meta, and the step rail */}
+      <div className="border-line bg-surface border-b px-6 pt-5">
+        <h2 className="font-display text-ink text-[20px] font-semibold">
+          {t("signing.newTitle")}
+        </h2>
+        <p className="text-ink-soft mt-0.5 truncate text-[13px]">
+          {headerMeta}
+        </p>
+        <div className="mt-4">
+          <WizardStepRail
+            steps={steps}
+            current={step}
+            reachable={reachable}
+            onStep={setStep}
+          />
         </div>
+      </div>
 
-        {/* Signers */}
+      {/* Body — the placement step is a full-bleed two-pane canvas, the rest are
+          padded single columns. */}
+      {step === 2 ? (
         <div>
-          <span className={LABEL}>{t("signing.signersLabel")}</span>
-          <p className="text-ink-soft mt-1 text-[12px]">
-            {t("signing.signersHint")}
-          </p>
-          {signers.length === 0 ? (
-            <p className="text-ink-soft mt-2 text-[13px]">
-              {t("signing.signersEmpty")}
-            </p>
-          ) : (
-            <ul className="mt-2 flex flex-col gap-1.5">
-              {signers.map((signer, index) => (
-                <li
-                  key={signerKey(signer)}
-                  className="border-line bg-surface-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5"
-                >
-                  {mode === SIGNING_MODE.sequential && (
-                    <span className="text-ink-soft shrink-0 text-[12px]">
-                      {index + 1}.
-                    </span>
-                  )}
-                  {/* The same accent the signer's marks carry in the placement
-                      editor, so the two lists can be read against each other. */}
-                  <span
-                    className={`h-2.5 w-2.5 shrink-0 rounded-full ${signerAccent(index).chip}`}
-                    aria-hidden="true"
-                  />
-                  <span className="text-ink flex-1 truncate text-[13px]">
-                    {signerLabel(signer)}
-                  </span>
-                  {signer.kind === SIGNER_KIND.external && (
-                    <span className="text-muted shrink-0 text-[11.5px]">
-                      {signer.email} · {t("signing.externalTag")}
-                    </span>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon="close"
-                    iconOnly
-                    onClick={() => removeSigner(index)}
-                    aria-label={t("signing.removeSigner", {
-                      name: signerLabel(signer),
-                    })}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <fieldset className="mt-4 border-0 p-0">
-            <legend className={LABEL}>{t("signing.addSignerLabel")}</legend>
-            <div className="mt-2 flex gap-4">
-              {[SIGNER_KIND.internal, SIGNER_KIND.external].map((kind) => (
-                <label
-                  key={kind}
-                  className="flex items-center gap-2 text-[13px]"
-                >
-                  <input
-                    type="radio"
-                    name="signerKind"
-                    checked={signerKind === kind}
-                    onChange={() => setSignerKind(kind)}
-                  />
-                  <span className="text-ink">{signerKindLabel(t, kind)}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
-          {signerKind === SIGNER_KIND.internal ? (
-            <>
-              <div className="mt-2">
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder={t("signing.searchMembers")}
-                  aria-label={t("signing.searchMembers")}
-                />
-              </div>
-              <div className="border-line mt-2 max-h-56 overflow-y-auto rounded-md border">
-                {members.isPending ? (
-                  <p className="text-ink-soft p-3 text-[13px]">
-                    {t("common.loading")}
-                  </p>
-                ) : candidates.length === 0 ? (
-                  <p className="text-ink-soft p-3 text-[13px]">
-                    {t("signing.noMembers")}
-                  </p>
-                ) : (
-                  candidates.map((m) => (
-                    <div
-                      key={m.userId}
-                      className="hover:bg-surface-2 flex items-center gap-3 px-3 py-2"
-                    >
-                      <span className="text-ink flex-1 truncate text-[13px]">
-                        {memberName(m)}
-                      </span>
-                      <span className="text-ink-soft truncate text-[12px]">
-                        {m.email}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => addMember(m.userId)}
-                      >
-                        {t("signing.addSigner")}
-                      </Button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="mt-2 flex flex-col gap-2">
-              <p className="text-ink-soft text-[12px]">
-                {t("signing.externalHint")}
-              </p>
-              <Input
-                value={externalName}
-                onChange={(e) => setExternalName(e.target.value)}
-                placeholder={t("signing.externalNamePlaceholder")}
-                aria-label={t("signing.externalNamePlaceholder")}
-              />
-              <Input
-                type="email"
-                value={externalEmail}
-                onChange={(e) => setExternalEmail(e.target.value)}
-                placeholder={t("signing.externalEmailPlaceholder")}
-                aria-label={t("signing.externalEmailPlaceholder")}
-              />
-              <div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={addExternal}
-                  disabled={!canAddExternal}
-                >
-                  {t("signing.addSigner")}
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Placement — only once there is a document and someone to place for. */}
-        {file != null && signers.length > 0 && (
-          <div className="border-line border-t pt-5">
+          {file != null && signers.length > 0 ? (
             <React.Suspense
               fallback={
-                <p className="text-ink-soft text-[13px]">
+                <p className="text-ink-soft p-6 text-[13px]">
                   {t("common.loading")}
                 </p>
               }
@@ -789,104 +944,466 @@ function NewRequestTab({
                 onChange={setPlacements}
               />
             </React.Suspense>
-            {incomplete.length > 0 && (
-              <p className="text-error mt-3 text-[13px]">
-                {t("signing.placement.incomplete")}
+          ) : (
+            <p className="text-ink-soft p-6 text-[13px]">
+              {t("signing.signersEmpty")}
+            </p>
+          )}
+          {incomplete.length > 0 && (
+            <p className="text-error border-line border-t px-6 py-3 text-[13px]">
+              {t("signing.placement.incomplete")}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="p-6">
+          {step === 0 && (
+            <div className="max-w-xl">
+              <span className={LABEL}>{t("signing.documentLabel")}</span>
+              <p className="text-ink-soft mt-1 text-[12px]">
+                {t("signing.documentStepHint")}
               </p>
-            )}
-          </div>
-        )}
+              <div className="mt-3 flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <label className={FILE_BUTTON}>
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      className="sr-only"
+                      onChange={(e) => {
+                        onFile(e.target.files?.[0] ?? null);
+                        // Reset so picking the same file after removing it fires
+                        // onChange again.
+                        e.target.value = "";
+                      }}
+                    />
+                    {file
+                      ? t("signing.documentReplace")
+                      : t("signing.documentChoose")}
+                  </label>
+                  {file && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setFile(null);
+                        // Clear any over-size error too, so it does not linger
+                        // above "No file chosen".
+                        setFileTooLarge(false);
+                      }}
+                    >
+                      {t("signing.documentRemove")}
+                    </Button>
+                  )}
+                </div>
+                {file ? (
+                  <div className="border-line bg-surface-2 rounded-yivi flex items-center gap-3 border px-3.5 py-3">
+                    <span className="bg-error-bg text-error font-display inline-flex h-8 w-7 shrink-0 items-center justify-center rounded-[4px] text-[8.5px] font-bold">
+                      PDF
+                    </span>
+                    <span className="text-ink min-w-0 flex-1 truncate text-[13px] font-medium">
+                      {file.name}
+                    </span>
+                    <span className="text-muted shrink-0 font-mono text-[11px]">
+                      {formatBytes(file.size)}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-ink-soft text-[12px]">
+                    {t("signing.documentNone")}
+                  </span>
+                )}
+                {fileTooLarge && (
+                  <p role="alert" className="text-error text-[12px]">
+                    {t("signing.documentTooLarge", {
+                      size: formatBytes(MAX_DOCUMENT_BYTES),
+                    })}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
 
-        {/* Mode */}
-        <fieldset className="border-0 p-0">
-          <legend className={LABEL}>{t("signing.orderLabel")}</legend>
-          <div className="mt-2 flex gap-4">
-            {[SIGNING_MODE.parallel, SIGNING_MODE.sequential].map((m) => (
-              <label key={m} className="flex items-center gap-2 text-[13px]">
-                <input
-                  type="radio"
-                  name="mode"
-                  checked={mode === m}
-                  onChange={() => setMode(m)}
-                />
-                <span className="text-ink">{modeLabel(t, m)}</span>
-              </label>
-            ))}
-          </div>
-          <p className="text-ink-soft mt-1 text-[12px]">
-            {mode === SIGNING_MODE.sequential
-              ? t("signing.sequentialHint")
-              : t("signing.parallelHint")}
-          </p>
-        </fieldset>
+          {step === 1 && (
+            <div className="flex max-w-2xl flex-col gap-6">
+              {/* Order */}
+              <div>
+                <span className={LABEL}>{t("signing.orderLabel")}</span>
+                <div className="mt-2">
+                  <Segmented
+                    ariaLabel={t("signing.orderLabel")}
+                    value={mode}
+                    onChange={setMode}
+                    options={[
+                      {
+                        value: SIGNING_MODE.parallel,
+                        label: modeLabel(t, SIGNING_MODE.parallel),
+                      },
+                      {
+                        value: SIGNING_MODE.sequential,
+                        label: modeLabel(t, SIGNING_MODE.sequential),
+                      },
+                    ]}
+                  />
+                </div>
+                <p className="text-ink-soft mt-2 text-[12px]">
+                  {isSequential
+                    ? t("signing.sequentialHint")
+                    : t("signing.parallelHint")}
+                </p>
+              </div>
 
-        {/* Recipient */}
-        <div>
-          <span className={LABEL}>{t("signing.recipientLabel")}</span>
-          <p className="text-ink-soft mt-1 text-[12px]">
-            {t("signing.recipientHint")}
-          </p>
-          <select
-            className={`${CONTROL} mt-2 h-9`}
-            aria-label={t("signing.recipientLabel")}
-            value={channel}
-            onChange={(e) => setChannel(e.target.value as RecipientChannel)}
-          >
-            <option value={RECIPIENT_CHANNEL.none}>
-              {t("signing.channel.none")}
-            </option>
-            <option value={RECIPIENT_CHANNEL.email}>
-              {t("signing.channel.email")}
-            </option>
-            <option value={RECIPIENT_CHANNEL.qerds}>
-              {t("signing.channel.qerds")}
-            </option>
-          </select>
+              {/* Chosen signees */}
+              <div>
+                <span className={LABEL}>{t("signing.signersLabel")}</span>
+                <p className="text-ink-soft mt-1 text-[12px]">
+                  {t("signing.signersHint")}
+                </p>
+                {signers.length === 0 ? (
+                  <p className="text-ink-soft mt-3 text-[13px]">
+                    {t("signing.signersEmpty")}
+                  </p>
+                ) : (
+                  <ul className="mt-3 flex flex-col gap-2">
+                    {signers.map((signer, index) => (
+                      <li
+                        key={signerKey(signer)}
+                        className="border-line bg-surface rounded-yivi shadow-card flex items-center gap-3 border px-3.5 py-3"
+                      >
+                        {isSequential && (
+                          <span className="bg-ink font-display inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white">
+                            {index + 1}
+                          </span>
+                        )}
+                        <Avatar name={signerLabel(signer)} />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-display text-ink truncate text-[13.5px] font-semibold">
+                            {signerLabel(signer)}
+                          </div>
+                          {/* The kind already shows in the Tag, so the subtitle
+                              is the email — which only an external signee has. */}
+                          {signer.kind === SIGNER_KIND.external && (
+                            <div className="text-ink-soft truncate font-mono text-[11px]">
+                              {signer.email}
+                            </div>
+                          )}
+                        </div>
+                        <Tag
+                          tone={
+                            signer.kind === SIGNER_KIND.external
+                              ? "default"
+                              : "blue"
+                          }
+                        >
+                          {signerKindLabel(t, signer.kind)}
+                        </Tag>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon="close"
+                          iconOnly
+                          onClick={() => removeSigner(index)}
+                          aria-label={t("signing.removeSigner", {
+                            name: signerLabel(signer),
+                          })}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                )}
 
-          {recipientNeedsAddress && (
-            <div className="mt-3 flex flex-col gap-3">
-              <Input
-                value={recipientAddress}
-                onChange={(e) => setRecipientAddress(e.target.value)}
-                placeholder={
-                  channel === RECIPIENT_CHANNEL.email
-                    ? t("signing.recipientEmailPlaceholder")
-                    : t("signing.recipientQerdsPlaceholder")
-                }
-                aria-label={
-                  channel === RECIPIENT_CHANNEL.email
-                    ? t("signing.recipientEmailPlaceholder")
-                    : t("signing.recipientQerdsPlaceholder")
-                }
-              />
-              <Input
-                value={recipientName}
-                onChange={(e) => setRecipientName(e.target.value)}
-                placeholder={t("signing.recipientNamePlaceholder")}
-                aria-label={t("signing.recipientNamePlaceholder")}
-              />
-              <textarea
-                className={CONTROL}
-                rows={3}
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder={t("signing.messagePlaceholder")}
-                aria-label={t("signing.messagePlaceholder")}
-              />
+                {/* Add a signee */}
+                <fieldset className="border-line bg-surface-2 rounded-yivi mt-3 border p-4">
+                  <legend className="sr-only">
+                    {t("signing.addSignerLabel")}
+                  </legend>
+                  <div className="flex gap-4">
+                    {[SIGNER_KIND.internal, SIGNER_KIND.external].map(
+                      (kind) => (
+                        <label
+                          key={kind}
+                          className="flex items-center gap-2 text-[13px]"
+                        >
+                          <input
+                            type="radio"
+                            name="signerKind"
+                            checked={signerKind === kind}
+                            onChange={() => setSignerKind(kind)}
+                          />
+                          <span className="text-ink">
+                            {signerKindLabel(t, kind)}
+                          </span>
+                        </label>
+                      ),
+                    )}
+                  </div>
+
+                  {signerKind === SIGNER_KIND.internal ? (
+                    <>
+                      <div className="mt-3">
+                        <Input
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                          placeholder={t("signing.searchMembers")}
+                          aria-label={t("signing.searchMembers")}
+                        />
+                      </div>
+                      <div className="border-line bg-surface mt-3 max-h-56 overflow-y-auto rounded-md border">
+                        {members.isPending ? (
+                          <p className="text-ink-soft p-3 text-[13px]">
+                            {t("common.loading")}
+                          </p>
+                        ) : candidates.length === 0 ? (
+                          <p className="text-ink-soft p-3 text-[13px]">
+                            {t("signing.noMembers")}
+                          </p>
+                        ) : (
+                          candidates.map((m) => (
+                            <div
+                              key={m.userId}
+                              className="hover:bg-surface-3 flex items-center gap-3 px-3 py-2"
+                            >
+                              <Avatar name={memberName(m)} size="md" />
+                              <span className="text-ink min-w-0 flex-1 truncate text-[13px]">
+                                {memberName(m)}
+                              </span>
+                              <span className="text-ink-soft truncate font-mono text-[11px]">
+                                {m.email}
+                              </span>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon="add"
+                                onClick={() => addMember(m.userId)}
+                              >
+                                {t("signing.addSigner")}
+                              </Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="mt-3 flex flex-col gap-2">
+                      <p className="text-ink-soft text-[12px]">
+                        {t("signing.externalHint")}
+                      </p>
+                      <Input
+                        value={externalName}
+                        onChange={(e) => setExternalName(e.target.value)}
+                        placeholder={t("signing.externalNamePlaceholder")}
+                        aria-label={t("signing.externalNamePlaceholder")}
+                      />
+                      <Input
+                        type="email"
+                        value={externalEmail}
+                        onChange={(e) => setExternalEmail(e.target.value)}
+                        placeholder={t("signing.externalEmailPlaceholder")}
+                        aria-label={t("signing.externalEmailPlaceholder")}
+                      />
+                      <div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          icon="add"
+                          onClick={addExternal}
+                          disabled={!canAddExternal}
+                        >
+                          {t("signing.addSigner")}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </fieldset>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
+              {/* Delivery choices */}
+              <div className="min-w-0 flex-1 lg:max-w-xl">
+                <h3 className="font-display text-ink text-[16px] font-semibold">
+                  {t("signing.deliveryTitle")}
+                </h3>
+                <p className="text-ink-soft mt-2 text-[12.5px] leading-relaxed text-pretty">
+                  {t("signing.deliveryStepHint")}
+                </p>
+
+                <div
+                  role="radiogroup"
+                  aria-label={t("signing.recipientLabel")}
+                  className="mt-4 flex flex-col gap-2"
+                >
+                  {channelOptions.map((option, index) => (
+                    <ChannelCard
+                      key={option.value}
+                      selected={channel === option.value}
+                      onSelect={() => setChannel(option.value)}
+                      title={option.title}
+                      description={option.description}
+                      tabIndex={channel === option.value ? 0 : -1}
+                      onKeyDown={onChannelKeyDown}
+                      innerRef={(el) => {
+                        channelRefs.current[index] = el;
+                      }}
+                    />
+                  ))}
+                </div>
+
+                {recipientNeedsAddress && (
+                  <div className="mt-4 flex flex-col gap-3">
+                    <Input
+                      value={recipientAddress}
+                      onChange={(e) => setRecipientAddress(e.target.value)}
+                      placeholder={
+                        channel === RECIPIENT_CHANNEL.email
+                          ? t("signing.recipientEmailPlaceholder")
+                          : t("signing.recipientQerdsPlaceholder")
+                      }
+                      aria-label={
+                        channel === RECIPIENT_CHANNEL.email
+                          ? t("signing.recipientEmailPlaceholder")
+                          : t("signing.recipientQerdsPlaceholder")
+                      }
+                    />
+                    <Input
+                      value={recipientName}
+                      onChange={(e) => setRecipientName(e.target.value)}
+                      placeholder={t("signing.recipientNamePlaceholder")}
+                      aria-label={t("signing.recipientNamePlaceholder")}
+                    />
+                    <textarea
+                      className={CONTROL}
+                      rows={3}
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      placeholder={t("signing.messagePlaceholder")}
+                      aria-label={t("signing.messagePlaceholder")}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Review summary */}
+              <div className="w-full shrink-0 lg:w-[360px]">
+                <Card className="overflow-hidden p-0">
+                  <div className="border-line border-b px-4 py-3.5">
+                    <div className="text-muted font-mono text-[11px] tracking-wide uppercase">
+                      {t("signing.summaryTitle")}
+                    </div>
+                    <div className="mt-2 flex items-center gap-2.5">
+                      <span className="bg-error-bg text-error font-display inline-flex h-8 w-[26px] shrink-0 items-center justify-center rounded-[4px] text-[8.5px] font-bold">
+                        PDF
+                      </span>
+                      <div className="min-w-0">
+                        <div className="font-display text-ink truncate text-[12.5px] font-semibold">
+                          {file?.name ?? t("signing.documentNone")}
+                        </div>
+                        <div className="text-ink-soft font-mono text-[10.5px]">
+                          {file ? formatBytes(file.size) : ""}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="border-line flex flex-col gap-2.5 border-b px-4 py-3">
+                    {signers.map((signer, index) => (
+                      <div
+                        key={signerKey(signer)}
+                        className="flex items-center gap-2.5"
+                      >
+                        <Avatar name={signerLabel(signer)} size="md" />
+                        <span className="font-display text-ink min-w-0 flex-1 truncate text-[12.5px] font-semibold">
+                          {signerLabel(signer)}
+                        </span>
+                        {isSequential && (
+                          <span className="text-muted shrink-0 font-mono text-[10.5px]">
+                            #{index + 1}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <dl className="flex flex-col gap-1.5 px-4 py-3 text-[12.5px]">
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-ink-soft">
+                        {t("signing.summaryMarksLabel")}
+                      </dt>
+                      <dd className="text-ink font-semibold">
+                        {t("signing.placement.markCount", {
+                          count: totalMarks,
+                        })}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-ink-soft">
+                        {t("signing.summaryOrderLabel")}
+                      </dt>
+                      <dd className="text-ink font-semibold">
+                        {modeLabel(t, mode)}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-ink-soft">
+                        {t("signing.summaryDeliveryLabel")}
+                      </dt>
+                      <dd className="text-ink font-semibold">
+                        {channelLabel(t, channel)}
+                      </dd>
+                    </div>
+                  </dl>
+                </Card>
+
+                {noMarkSigners.map((signer) => (
+                  <div
+                    key={signerKey(signer)}
+                    className="bg-warning-bg rounded-yivi mt-3 flex items-center gap-2 px-3 py-2.5"
+                  >
+                    <Icon
+                      name="warning"
+                      size={14}
+                      className="text-warning-fg shrink-0"
+                    />
+                    <span className="text-warning-fg text-[12px] font-semibold">
+                      {t("signing.noVisibleMarkWarning", {
+                        name: signerLabel(signer),
+                      })}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
+      )}
 
-        <div>
+      {/* Footer — one Back / primary bar shared by every step */}
+      <div className="border-line bg-surface-2 flex items-center gap-3 border-t px-6 py-4">
+        <Button
+          variant="secondary"
+          onClick={() => setStep((s) => Math.max(s - 1, 0))}
+          disabled={step === 0}
+        >
+          {t("signing.wizardBack")}
+        </Button>
+        <div className="flex-1" />
+        {isLastStep ? (
           <Button
-            type="submit"
+            onClick={submit}
             loading={create.isPending}
             disabled={!canSubmit}
           >
-            {t("signing.createButton")}
+            {t("signing.sendRequest")}
           </Button>
-        </div>
-      </form>
+        ) : (
+          <Button
+            onClick={() => setStep((s) => s + 1)}
+            disabled={!stepReady[step]}
+          >
+            {t("signing.wizardNext")}
+          </Button>
+        )}
+      </div>
     </Card>
   );
 }

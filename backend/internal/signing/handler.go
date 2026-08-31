@@ -17,9 +17,24 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
-// maxUploadBytes bounds an uploaded PDF (10 MiB) so a large upload cannot exhaust
-// memory; a QES demo signs ordinary documents.
-const maxUploadBytes = 10 << 20
+const (
+	// maxUploadMiB is the accepted size of an uploaded PDF, in MiB. It matches the
+	// documented per-file cap on a QERDS attachment (qerds.maxAttachmentBytes), the
+	// channel a signed document is delivered over. Signing only grows a document, so
+	// that is where the number comes from rather than a guarantee the signed result
+	// still fits. The error message names it and the frontend refuses a larger file
+	// before uploading it.
+	maxUploadMiB = 25
+	// maxUploadBytes bounds the document part of the upload.
+	maxUploadBytes = maxUploadMiB << 20
+	// multipartMemory is how much of the form is buffered in RAM before spilling to
+	// temp files during parsing. Deliberately below maxUploadBytes: the cap is what a
+	// document may weigh, not what one upload may hold in memory.
+	multipartMemory = 8 << 20
+	// bodySlack allows for the multipart boundaries and the other form fields on top
+	// of the document payload cap.
+	bodySlack = 1 << 20
+)
 
 type signingService interface {
 	StartLink(ctx context.Context, orgID, userID uuid.UUID, slug string) (Start, error)
@@ -130,7 +145,11 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	u := auth.UserFromContext(r.Context())
 
-	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+bodySlack)
+	if err := r.ParseMultipartForm(multipartMemory); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			return documentTooLarge()
+		}
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_upload", Message: "could not read the uploaded document"}
 	}
 	file, header, err := r.FormFile("document")
@@ -143,7 +162,7 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_upload", Message: "could not read the uploaded document"}
 	}
 	if len(pdf) > maxUploadBytes {
-		return &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "document_too_large", Message: "the document is too large"}
+		return documentTooLarge()
 	}
 
 	signers, err := parseSigners(r.Form["signers"])
@@ -170,6 +189,17 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 	}
 	respond.JSON(w, r, http.StatusCreated, map[string]string{"id": id.String()})
 	return nil
+}
+
+// documentTooLarge is the 413 both size gates return: the body cap that stops an
+// oversized upload during parsing, and the payload cap checked after the document
+// part has been read. It names the limit so a caller knows what to send instead.
+func documentTooLarge() error {
+	return &respond.APIError{
+		Status:  http.StatusRequestEntityTooLarge,
+		Code:    "document_too_large",
+		Message: fmt.Sprintf("the document is larger than the %d MB maximum", maxUploadMiB),
+	}
 }
 
 // signRequest starts the acting user's signing ceremony for a request and returns

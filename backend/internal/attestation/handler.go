@@ -60,6 +60,9 @@ type issuanceService interface {
 	DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
 	ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([]HeldListView, error)
 	HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang string) (HeldClaimsView, error)
+	ListOffers(ctx context.Context, orgID uuid.UUID) ([]CredentialOffer, error)
+	AcceptOffer(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error)
+	DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error
 }
 
 // issuerSettingsReader resolves an org's issuer instance name (defaulted to the
@@ -159,6 +162,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/attestations/held/{id}/claims", member(respond.HandlerFunc(h.heldClaims)))
 	mux.Handle("DELETE /orgs/{slug}/attestations/held/{id}", admin(respond.HandlerFunc(h.deleteHeld)))
 
+	// Inbound credential offers awaiting a decision (member read; admin decides).
+	// Accepting is what puts the credential in the wallet — receiving the offer
+	// does not (see .ai/features/oid4vci-over-qerds.md §7).
+	mux.Handle("GET /orgs/{slug}/attestations/offers", member(respond.HandlerFunc(h.listOffers)))
+	mux.Handle("POST /orgs/{slug}/attestations/offers/{id}/accept", admin(respond.HandlerFunc(h.acceptOffer)))
+	mux.Handle("POST /orgs/{slug}/attestations/offers/{id}/decline", admin(respond.HandlerFunc(h.declineOffer)))
+
 	// Public, unauthenticated claim view (keyed on an opaque claim token, never the
 	// row id). The offer link e-mailed / QERDS-delivered to a recipient points here.
 	mux.Handle("GET /attestations/claim/{token}", respond.HandlerFunc(h.claim))
@@ -237,6 +247,51 @@ func (h *Handler) deleteHeld(w http.ResponseWriter, r *http.Request) error {
 		return notFound("held_not_found", "held attestation not found")
 	case err != nil:
 		return fmt.Errorf("deleting held attestation: %w", err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// --- Inbound credential offers ---
+
+func (h *Handler) listOffers(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	offers, err := h.service.ListOffers(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("listing credential offers: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, offers)
+	return nil
+}
+
+func (h *Handler) acceptOffer(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid credential offer id")
+	}
+	org := organization.OrgFromContext(r.Context())
+	held, err := h.service.AcceptOffer(r.Context(), org.ID, id)
+	switch {
+	case errors.Is(err, ErrOfferNotFound):
+		return notFound("offer_not_found", "credential offer not found")
+	case err != nil:
+		return fmt.Errorf("accepting credential offer: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, held)
+	return nil
+}
+
+func (h *Handler) declineOffer(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid credential offer id")
+	}
+	org := organization.OrgFromContext(r.Context())
+	switch err := h.service.DeclineOffer(r.Context(), org.ID, id); {
+	case errors.Is(err, ErrOfferNotFound):
+		return notFound("offer_not_found", "credential offer not found")
+	case err != nil:
+		return fmt.Errorf("declining credential offer: %w", err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil

@@ -16,6 +16,8 @@ import {
   MIN_PLACEMENT_SIZE,
   NUDGE_STEP,
   NUDGE_STEP_LARGE,
+  alignParaphs,
+  countParaphs,
   defaultSize,
   findPlacement,
   moveBy,
@@ -29,7 +31,7 @@ import {
   withoutPlacement,
 } from "../lib/placement";
 import type { PageBox } from "../lib/placement";
-import { Button, Input } from "../ui";
+import { Button, Icon, Input } from "../ui";
 
 // pdf.js runs its parser in a worker; Vite resolves the shipped module to a URL.
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -237,6 +239,16 @@ export function PlacementEditor({
 
   const update = (next: Placement[]): void => onChange(activeSigner, next);
 
+  // Committing a moved or resized mark. A signature stands alone, but a paraph is one
+  // of the signer's initials, which sit in the same spot on every page — so moving or
+  // resizing one carries the rest with it instead of leaving them behind page by page.
+  const commitMark = (mark: Placement): void =>
+    update(
+      mark.kind === PLACEMENT_KIND.paraph
+        ? alignParaphs(activePlacements, mark, boxes)
+        : withPlacement(activePlacements, mark),
+    );
+
   const placeCentre = (centre: { x: number; y: number }): void => {
     if (box == null) return;
     const existing = findPlacement(activePlacements, kind, page);
@@ -271,12 +283,7 @@ export function PlacementEditor({
       if (!moved && Math.abs(dx) + Math.abs(dy) < 2) return;
       moved = true;
       const delta = pdfDelta(dx, dy);
-      update(
-        withPlacement(
-          activePlacements,
-          moveBy(origin, delta.dx, delta.dy, box),
-        ),
-      );
+      commitMark(moveBy(origin, delta.dx, delta.dy, box));
     };
     const onUp = (): void => {
       target.removeEventListener("pointermove", onMove);
@@ -303,96 +310,39 @@ export function PlacementEditor({
     if (move == null || box == null) return;
     event.preventDefault();
     const delta = pdfDelta(move[0], move[1]);
-    update(
-      withPlacement(
-        activePlacements,
-        moveBy(placement, delta.dx, delta.dy, box),
-      ),
-    );
+    commitMark(moveBy(placement, delta.dx, delta.dy, box));
   };
 
   const selected = findPlacement(activePlacements, kind, page);
   const pageCount = boxes.length;
+  const activeName = signers[activeSigner]?.name ?? "";
+  const marksOnActivePage = signers.reduce(
+    (total, _signer, index) =>
+      total + placementsOnPage(placements[index] ?? [], page).length,
+    0,
+  );
 
   if (status === "error") {
     return (
-      <p className="text-error text-[13px]">
+      <p className="text-error p-6 text-[13px]">
         {t("signing.placement.loadError")}
       </p>
     );
   }
 
+  // A signee's marks in the rail: whether they have a signature block, and how many
+  // paraphs — the two facts a requester scans for while placing.
+  const hasSignature = (index: number): boolean =>
+    findPlacement(placements[index] ?? [], PLACEMENT_KIND.signature, 1) !==
+    undefined;
+  const paraphCount = (index: number): number =>
+    countParaphs(placements[index] ?? []);
+
   return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <span className={LABEL}>{t("signing.placement.title")}</span>
-        <p className="text-ink-soft mt-1 text-[12px]">
-          {t("signing.placement.hint")}
-        </p>
-      </div>
-
-      {/* Whose marks are being placed */}
-      <fieldset className="border-0 p-0">
-        <legend className={LABEL}>{t("signing.placement.signerLegend")}</legend>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {signers.map((signer, index) => {
-            const tone = signerAccent(index);
-            const active = index === activeSigner;
-            return (
-              <button
-                key={`${signer.name}-${index}`}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setSignerIndex(index)}
-                className={[
-                  "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[13px] transition-colors",
-                  FOCUS_RING,
-                  active
-                    ? "border-ink bg-surface-3 text-ink font-semibold"
-                    : "border-line text-ink-soft hover:bg-surface-2",
-                ].join(" ")}
-              >
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${tone.chip}`}
-                  aria-hidden="true"
-                />
-                <span className="max-w-[16ch] truncate">{signer.name}</span>
-                <span className="text-muted text-[11.5px]">
-                  {t("signing.placement.markCount", {
-                    count: (placements[index] ?? []).length,
-                  })}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </fieldset>
-
-      {/* What to place */}
-      <fieldset className="border-0 p-0">
-        <legend className={LABEL}>{t("signing.placement.kindLegend")}</legend>
-        <div className="mt-2 flex gap-4">
-          {[PLACEMENT_KIND.signature, PLACEMENT_KIND.paraph].map((option) => (
-            <label key={option} className="flex items-center gap-2 text-[13px]">
-              <input
-                type="radio"
-                name="placementKind"
-                checked={kind === option}
-                onChange={() => setKind(option)}
-              />
-              <span className="text-ink">
-                {option === PLACEMENT_KIND.signature
-                  ? t("signing.placement.kindSignature")
-                  : t("signing.placement.kindParaph")}
-              </span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
-
-      {/* Page + the mark's own controls */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex items-center gap-1.5">
+    <div className="border-line flex min-h-0 flex-col md:h-[640px] md:flex-row">
+      {/* Left — the document */}
+      <div className="bg-surface-2 flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="border-line bg-surface flex items-center gap-2 border-b px-5 py-2.5">
           <Button
             variant="secondary"
             size="sm"
@@ -406,22 +356,24 @@ export function PlacementEditor({
           <Button
             variant="secondary"
             size="sm"
+            iconOnly
+            icon="chevron_left"
             onClick={() => setPage((p) => Math.max(p - 1, 1))}
             disabled={page <= 1}
-          >
-            {t("signing.placement.previousPage")}
-          </Button>
-          <span className="text-ink-soft min-w-[7rem] text-center text-[12.5px]">
+            aria-label={t("signing.placement.previousPage")}
+          />
+          <span className="text-ink-soft font-mono text-[11.5px]">
             {t("signing.placement.pageOf", { page, count: pageCount })}
           </span>
           <Button
             variant="secondary"
             size="sm"
+            iconOnly
+            icon="chevron_right"
             onClick={() => setPage((p) => Math.min(p + 1, pageCount))}
             disabled={page >= pageCount}
-          >
-            {t("signing.placement.nextPage")}
-          </Button>
+            aria-label={t("signing.placement.nextPage")}
+          />
           <Button
             variant="secondary"
             size="sm"
@@ -432,201 +384,410 @@ export function PlacementEditor({
           >
             »
           </Button>
+          <div className="flex-1" />
+          <span className="text-muted font-mono text-[11px]">
+            {t("signing.placement.onThisPage", { count: marksOnActivePage })}
+          </span>
         </div>
 
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            if (box == null) return;
-            placeCentre({
-              x: (box.minX + box.maxX) / 2,
-              y: (box.minY + box.maxY) / 2,
-            });
-          }}
-          disabled={signers.length === 0 || box == null}
-        >
-          {t("signing.placement.placeOnPage")}
-        </Button>
-
-        {selected && (
-          <>
-            <label className="flex flex-col gap-1">
-              <span className={LABEL}>{t("signing.placement.widthLabel")}</span>
-              <Input
-                type="number"
-                className="w-20"
-                min={MIN_PLACEMENT_SIZE}
-                value={Math.round(selected.width)}
-                onChange={(e) => {
-                  if (box == null) return;
-                  update(
-                    withPlacement(
-                      activePlacements,
-                      resizeTo(
-                        selected,
-                        {
-                          width: Number(e.target.value),
-                          height: selected.height,
-                        },
-                        box,
-                      ),
-                    ),
-                  );
-                }}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className={LABEL}>
-                {t("signing.placement.heightLabel")}
+        {/* The page and its marks. The canvas is always mounted — the draw effect
+            needs canvasRef to exist to produce the viewport, and the viewport is
+            what mounts the marks overlay, so gating the canvas on the viewport
+            would deadlock the two (the page would load forever). The loading text
+            is an overlay shown until the first page is drawn. */}
+        <div className="relative flex min-h-0 flex-1 justify-center overflow-auto p-6">
+          {/* Whose marks are being placed — a floating cue over the page. */}
+          {activeName !== "" && (
+            <div className="border-line-strong bg-surface shadow-card pointer-events-none absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border py-1 pr-1 pl-3 whitespace-nowrap">
+              <span className="text-ink-soft font-mono text-[11px]">
+                {t("signing.placement.signerLegend")}
               </span>
-              <Input
-                type="number"
-                className="w-20"
-                min={MIN_PLACEMENT_SIZE}
-                value={Math.round(selected.height)}
-                onChange={(e) => {
-                  if (box == null) return;
-                  update(
-                    withPlacement(
-                      activePlacements,
-                      resizeTo(
-                        selected,
-                        {
-                          width: selected.width,
-                          height: Number(e.target.value),
-                        },
-                        box,
-                      ),
-                    ),
-                  );
-                }}
-              />
-            </label>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                update(withoutPlacement(activePlacements, kind, page))
-              }
-            >
-              {t("signing.placement.removeMark")}
-            </Button>
-          </>
-        )}
-      </div>
-
-      {kind === PLACEMENT_KIND.paraph && (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              if (selected == null) return;
-              update(paraphOnEveryPage(activePlacements, selected, boxes));
-            }}
-            disabled={selected == null || pageCount < 2}
-          >
-            {t("signing.placement.paraphEveryPage")}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => update(withoutParaphs(activePlacements))}
-          >
-            {t("signing.placement.removeParaphs")}
-          </Button>
-        </div>
-      )}
-
-      {/* The page and its marks. The canvas is always mounted — the draw effect
-          needs canvasRef to exist to produce the viewport, and the viewport is
-          what mounts the marks overlay, so gating the canvas on the viewport
-          would deadlock the two (the page would load forever). The loading text
-          is an overlay shown until the first page is drawn. */}
-      <div className="bg-surface-2 border-line relative flex justify-center rounded-md border p-4">
-        <div className="relative">
-          <canvas
-            ref={canvasRef}
-            className="border-line block border bg-white"
-            role="img"
-            aria-label={t("signing.placement.pageOf", {
-              page,
-              count: pageCount,
-            })}
-          />
-          {(status === "loading" || viewport == null) && (
-            <p className="text-ink-soft absolute inset-0 flex items-center justify-center text-[13px]">
-              {t("common.loading")}
-            </p>
-          )}
-          {status === "ready" && viewport != null && (
-            <>
-              {/* The click surface. Placing without a pointer goes through "place on
-                  this page" above, and moving through the arrow keys on a mark. */}
-              <div
-                className="absolute inset-0 cursor-crosshair"
-                onClick={onOverlayClick}
-                role="presentation"
-              />
-              {signers.map((signer, index) =>
-                placementsOnPage(placements[index] ?? [], page).map(
-                  (placement) => {
-                    const tone = signerAccent(index);
-                    const css = toCss(placement);
-                    const isActive = index === activeSigner;
-                    return (
-                      <button
-                        key={`${index}-${placement.kind}-${placement.page}`}
-                        type="button"
-                        onPointerDown={(event) => {
-                          setSignerIndex(index);
-                          setKind(placement.kind);
-                          if (isActive) onPointerDown(event, placement);
-                        }}
-                        onKeyDown={(event) =>
-                          isActive && onBoxKeyDown(event, placement)
-                        }
-                        aria-label={t("signing.placement.markLabel", {
-                          name: signer.name,
-                          kind:
-                            placement.kind === PLACEMENT_KIND.signature
-                              ? t("signing.placement.kindSignature")
-                              : t("signing.placement.kindParaph"),
-                          page: placement.page,
-                          x: Math.round(placement.x),
-                          y: Math.round(placement.y),
-                        })}
-                        className={[
-                          "absolute flex items-center justify-center overflow-hidden border-2 text-[10px] font-semibold",
-                          FOCUS_RING,
-                          tone.box,
-                          tone.text,
-                          isActive
-                            ? "cursor-move"
-                            : "cursor-pointer opacity-70",
-                        ].join(" ")}
-                        style={{
-                          left: css.left,
-                          top: css.top,
-                          width: css.width,
-                          height: css.height,
-                        }}
-                      >
-                        <span className="truncate px-1">{signer.name}</span>
-                      </button>
-                    );
-                  },
+              <span className="text-link bg-highlight inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${signerAccent(activeSigner).chip}`}
+                  aria-hidden="true"
+                />
+                <span className="max-w-[16ch] truncate">{activeName}</span>
+              </span>
+              <span className="bg-line h-4 w-px" aria-hidden="true" />
+              {[PLACEMENT_KIND.signature, PLACEMENT_KIND.paraph].map(
+                (option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    aria-pressed={kind === option}
+                    onClick={() => setKind(option)}
+                    className={[
+                      "pointer-events-auto rounded-full px-2.5 py-1 text-[12px] transition-colors",
+                      FOCUS_RING,
+                      kind === option
+                        ? "bg-ink font-semibold text-white"
+                        : "text-ink-soft hover:bg-surface-3 font-medium",
+                    ].join(" ")}
+                  >
+                    {option === PLACEMENT_KIND.signature
+                      ? t("signing.placement.kindSignature")
+                      : t("signing.placement.kindParaph")}
+                  </button>
                 ),
               )}
-            </>
+            </div>
           )}
+
+          <div className="relative h-fit">
+            <canvas
+              ref={canvasRef}
+              className="border-line shadow-card block border bg-white"
+              role="img"
+              aria-label={t("signing.placement.pageOf", {
+                page,
+                count: pageCount,
+              })}
+            />
+            {(status === "loading" || viewport == null) && (
+              <p className="text-ink-soft absolute inset-0 flex items-center justify-center text-[13px]">
+                {t("common.loading")}
+              </p>
+            )}
+            {status === "ready" && viewport != null && (
+              <>
+                {/* The click surface. Placing without a pointer goes through "place
+                    in the middle" in the rail, and moving through the arrow keys. */}
+                <div
+                  className="absolute inset-0 cursor-crosshair"
+                  onClick={onOverlayClick}
+                  role="presentation"
+                />
+                {signers.map((signer, index) =>
+                  placementsOnPage(placements[index] ?? [], page).map(
+                    (placement) => {
+                      const tone = signerAccent(index);
+                      const css = toCss(placement);
+                      const isActive = index === activeSigner;
+                      return (
+                        <button
+                          key={`${index}-${placement.kind}-${placement.page}`}
+                          type="button"
+                          onPointerDown={(event) => {
+                            setSignerIndex(index);
+                            setKind(placement.kind);
+                            if (isActive) onPointerDown(event, placement);
+                          }}
+                          onKeyDown={(event) =>
+                            isActive && onBoxKeyDown(event, placement)
+                          }
+                          aria-label={t("signing.placement.markLabel", {
+                            name: signer.name,
+                            kind:
+                              placement.kind === PLACEMENT_KIND.signature
+                                ? t("signing.placement.kindSignature")
+                                : t("signing.placement.kindParaph"),
+                            page: placement.page,
+                            x: Math.round(placement.x),
+                            y: Math.round(placement.y),
+                          })}
+                          className={[
+                            "absolute flex items-center justify-center overflow-hidden border-2 text-[10px] font-semibold",
+                            FOCUS_RING,
+                            tone.box,
+                            tone.text,
+                            isActive
+                              ? "cursor-move"
+                              : "cursor-pointer opacity-70",
+                          ].join(" ")}
+                          style={{
+                            left: css.left,
+                            top: css.top,
+                            width: css.width,
+                            height: css.height,
+                          }}
+                        >
+                          <span className="truncate px-1">{signer.name}</span>
+                        </button>
+                      );
+                    },
+                  ),
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="border-line bg-surface border-t px-5 py-2.5">
+          <span className="text-ink-soft text-[12px]">
+            {activeName !== ""
+              ? t("signing.placement.clickToPlace", { name: activeName })
+              : t("signing.placement.keyboardHint")}
+          </span>
         </div>
       </div>
 
-      <p className="text-ink-soft text-[12px]">
-        {t("signing.placement.keyboardHint")}
-      </p>
+      {/* Right — the signee rail */}
+      <div className="border-line bg-surface flex min-h-0 w-full flex-col border-t md:w-[380px] md:shrink-0 md:border-t-0 md:border-l">
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <h3 className="font-display text-ink text-[16px] font-semibold">
+            {t("signing.placement.railTitle")}
+          </h3>
+          <p className="text-ink-soft mt-2 text-[12.5px] leading-relaxed text-pretty">
+            {t("signing.placement.railHint")}
+          </p>
+
+          <div className="mt-4 flex flex-col gap-2">
+            {signers.map((signer, index) => {
+              const tone = signerAccent(index);
+              const active = index === activeSigner;
+              const paraphs = paraphCount(index);
+              const marks = (placements[index] ?? []).length;
+              return (
+                <div
+                  key={`${signer.name}-${index}`}
+                  className={[
+                    "rounded-yivi border",
+                    active ? "border-ink shadow-card border-2" : "border-line",
+                  ].join(" ")}
+                >
+                  <button
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setSignerIndex(index)}
+                    className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left ${FOCUS_RING} rounded-yivi`}
+                  >
+                    <span
+                      className={`h-2.5 w-2.5 shrink-0 rounded-full ${tone.chip}`}
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="font-display text-ink block truncate text-[13px] font-semibold">
+                        {signer.name}
+                      </span>
+                      <span className="text-ink-soft block font-mono text-[10.5px]">
+                        {t("signing.placement.markCount", { count: marks })}
+                      </span>
+                    </span>
+                    {marks === 0 ? (
+                      <span className="bg-warning-bg text-warning-fg inline-flex h-[19px] items-center rounded-full px-2 text-[10.5px] font-semibold">
+                        {t("signing.placement.noMark")}
+                      </span>
+                    ) : hasSignature(index) ? (
+                      <Icon
+                        name="valid"
+                        size={14}
+                        className="text-success opacity-70"
+                      />
+                    ) : null}
+                  </button>
+
+                  {active && (
+                    <div className="border-line border-t p-3">
+                      {/* Signature / initials segmented control */}
+                      <div className="bg-surface-3 rounded-yivi flex gap-0.5 p-0.5">
+                        {[PLACEMENT_KIND.signature, PLACEMENT_KIND.paraph].map(
+                          (option) => (
+                            <button
+                              key={option}
+                              type="button"
+                              aria-pressed={kind === option}
+                              onClick={() => setKind(option)}
+                              className={[
+                                "h-[30px] flex-1 rounded-[6px] text-[12.5px] transition-colors",
+                                FOCUS_RING,
+                                kind === option
+                                  ? "bg-surface text-ink shadow-card font-semibold"
+                                  : "text-ink-soft font-medium",
+                              ].join(" ")}
+                            >
+                              {option === PLACEMENT_KIND.signature
+                                ? t("signing.placement.kindSignature")
+                                : t("signing.placement.kindParaph")}
+                            </button>
+                          ),
+                        )}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            if (box == null) return;
+                            placeCentre({
+                              x: (box.minX + box.maxX) / 2,
+                              y: (box.minY + box.maxY) / 2,
+                            });
+                          }}
+                          disabled={box == null}
+                        >
+                          {t("signing.placement.placeOnPage")}
+                        </Button>
+                        {/* A signature removes from here; a paraph's per-page and
+                            all-pages removal live in the initials box below. */}
+                        {selected && kind === PLACEMENT_KIND.signature && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              update(
+                                withoutPlacement(activePlacements, kind, page),
+                              )
+                            }
+                          >
+                            {t("signing.placement.removeMark")}
+                          </Button>
+                        )}
+                      </div>
+
+                      {/* Initials scope */}
+                      {kind === PLACEMENT_KIND.paraph && (
+                        <div className="border-highlight-border bg-highlight rounded-yivi mt-3 border p-3">
+                          <div className="text-ink text-[12.5px] font-semibold">
+                            {t("signing.placement.applyInitials")}
+                          </div>
+                          <div className="mt-2 flex flex-col gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                if (selected == null) return;
+                                // Collapse an every-page paraph back to just the
+                                // page in view, keeping the one that is selected.
+                                update(
+                                  withPlacement(
+                                    withoutParaphs(activePlacements),
+                                    selected,
+                                  ),
+                                );
+                              }}
+                              disabled={selected == null}
+                            >
+                              {t("signing.placement.thisPageOnly")}
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                if (box == null) return;
+                                // Expand the current paraph across every page, or
+                                // seed one in the page centre when none is placed
+                                // yet, so "every page" always does something.
+                                const size = defaultSize(PLACEMENT_KIND.paraph);
+                                const rect = selected ?? {
+                                  width: size.width,
+                                  height: size.height,
+                                  x: (box.minX + box.maxX) / 2 - size.width / 2,
+                                  y:
+                                    (box.minY + box.maxY) / 2 - size.height / 2,
+                                };
+                                update(
+                                  paraphOnEveryPage(
+                                    activePlacements,
+                                    rect,
+                                    boxes,
+                                  ),
+                                );
+                              }}
+                              disabled={box == null || pageCount < 2}
+                            >
+                              {t("signing.placement.everyPageCount", {
+                                count: pageCount,
+                              })}
+                            </Button>
+                            {selected && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  update(
+                                    withoutPlacement(
+                                      activePlacements,
+                                      PLACEMENT_KIND.paraph,
+                                      page,
+                                    ),
+                                  )
+                                }
+                              >
+                                {t("signing.placement.removeMark")}
+                              </Button>
+                            )}
+                            {paraphs > 0 && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  update(withoutParaphs(activePlacements))
+                                }
+                              >
+                                {t("signing.placement.removeParaphs")}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Size of the selected mark */}
+                      {selected && (
+                        <div className="mt-3 flex items-end gap-3">
+                          <label className="flex flex-col gap-1">
+                            <span className={LABEL}>
+                              {t("signing.placement.widthLabel")}
+                            </span>
+                            <Input
+                              type="number"
+                              className="w-20"
+                              min={MIN_PLACEMENT_SIZE}
+                              value={Math.round(selected.width)}
+                              onChange={(e) => {
+                                if (box == null) return;
+                                commitMark(
+                                  resizeTo(
+                                    selected,
+                                    {
+                                      width: Number(e.target.value),
+                                      height: selected.height,
+                                    },
+                                    box,
+                                  ),
+                                );
+                              }}
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className={LABEL}>
+                              {t("signing.placement.heightLabel")}
+                            </span>
+                            <Input
+                              type="number"
+                              className="w-20"
+                              min={MIN_PLACEMENT_SIZE}
+                              value={Math.round(selected.height)}
+                              onChange={(e) => {
+                                if (box == null) return;
+                                commitMark(
+                                  resizeTo(
+                                    selected,
+                                    {
+                                      width: selected.width,
+                                      height: Number(e.target.value),
+                                    },
+                                    box,
+                                  ),
+                                );
+                              }}
+                            />
+                          </label>
+                        </div>
+                      )}
+
+                      <p className="text-muted mt-3 text-[11px]">
+                        {t("signing.placement.keyboardHint")}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -26,6 +26,8 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "membership.revoked": { icon: "close", tone: "red" },
   "membership.role_changed": { icon: "settings", tone: "blue" },
   "membership.expired": { icon: "time", tone: "slate" },
+  "mandate.granted": { icon: "valid", tone: "violet" },
+  "mandate.revoked": { icon: "close", tone: "red" },
   "department.created": { icon: "add", tone: "green" },
   "department.updated": { icon: "edit", tone: "blue" },
   "department.deleted": { icon: "delete", tone: "red" },
@@ -47,6 +49,8 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "attestation.key_added": { icon: "add", tone: "green" },
   "attestation.key_suspended": { icon: "warning", tone: "amber" },
   "attestation.key_revoked": { icon: "close", tone: "red" },
+  "attestation.offer_accepted": { icon: "valid", tone: "green" },
+  "attestation.offer_declined": { icon: "close", tone: "slate" },
   "email.settings_updated": { icon: "settings", tone: "blue" },
   "email.template_updated": { icon: "email", tone: "blue" },
   "email.template_reset": { icon: "email", tone: "amber" },
@@ -108,6 +112,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.roleChanged");
     case "membership.expired":
       return t("auditLog.actions.inviteExpired");
+    case "mandate.granted":
+      return t("auditLog.actions.mandateGranted");
+    case "mandate.revoked":
+      return t("auditLog.actions.mandateRevoked");
     case "department.created":
       return t("auditLog.actions.deptCreated");
     case "department.updated":
@@ -192,6 +200,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.attestationKeyRevoked");
     case "attestation.held_deleted":
       return t("auditLog.actions.attestationHeldDeleted");
+    case "attestation.offer_accepted":
+      return t("auditLog.actions.attestationOfferAccepted");
+    case "attestation.offer_declined":
+      return t("auditLog.actions.attestationOfferDeclined");
     case "email.settings_updated":
       return t("auditLog.actions.emailSettingsUpdated");
     case "email.template_updated":
@@ -249,6 +261,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.member");
     case "department":
       return t("auditLog.targets.department");
+    case "mandate":
+      return t("auditLog.targets.mandate");
     case "user":
       return t("auditLog.targets.user");
     case "qerds_message":
@@ -281,6 +295,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.attestationKey");
     case "held_attestation":
       return t("auditLog.targets.heldAttestation");
+    case "credential_offer":
+      return t("auditLog.targets.credentialOffer");
     case "org_email_settings":
       return t("auditLog.targets.orgEmailSettings");
     case "org_email_template":

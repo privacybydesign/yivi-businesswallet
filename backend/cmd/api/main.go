@@ -443,11 +443,51 @@ func run() error {
 	}()
 
 	attestationStore := attestation.NewStore(pool, recorder)
-	// An inbound QERDS message carrying an OpenID4VCI credential offer is redeemed
-	// into the org's holder engine and indexed (source=qerds).
-	qerdsService.SetInboundConsumer(attestation.NewOfferReceiver(attHolder, attestationStore))
+	// An inbound QERDS message carrying an OpenID4VCI credential offer is queued
+	// for the receiving org to accept or decline; accepting redeems it into the
+	// org's holder engine and indexes it (source=qerds).
+	// Two allowlists decide whose offers are queued at all: the AS4 party that
+	// delivered the message (verified by the gateway) and the originalSender
+	// address it claims (written by the sender). Unset trusts everyone, which is
+	// only safe while every sender is an org on this deployment — warn loudly,
+	// because peering with an external AS4 party (see partners/verid/) makes that
+	// assumption false.
+	trustedSenders := attestation.NewTrustedOfferSenders(cfg.QerdsTrustedOfferSenders, cfg.QerdsTrustedOfferParties)
+	if trustedSenders.PartiesConfigured() {
+		slog.InfoContext(ctx, "qerds credential-offer party allowlist active",
+			slog.Any("trustedParties", trustedSenders.Parties()))
+	} else {
+		slog.WarnContext(ctx, "qerds credential-offer AS4 party allowlist NOT configured; "+
+			"any party the PMode admits can put an offer in front of an org admin, whatever "+
+			"originalSender it claims. Set QERDS_TRUSTED_OFFER_PARTIES before peering "+
+			"with an external AS4 party.")
+	}
+	if trustedSenders.Configured() {
+		slog.InfoContext(ctx, "qerds credential-offer sender allowlist active",
+			slog.Any("trustedSenders", trustedSenders.Patterns()))
+	} else {
+		slog.WarnContext(ctx, "qerds credential-offer sender allowlist NOT configured; "+
+			"offers from ANY sender address will be queued for acceptance. Set "+
+			"QERDS_TRUSTED_OFFER_SENDERS before peering with an external AS4 party.")
+	}
+	qerdsService.SetInboundConsumer(attestation.NewOfferReceiver(attestationStore, trustedSenders))
+
+	// The other inbound path is the push webhook, which serves only when a
+	// secret is configured (a secretless deployment 404s it). Say so at boot:
+	// a disabled push path must be a visible choice, not a silent 404 (#105).
+	if cfg.QerdsWebhookSecret == "" {
+		slog.WarnContext(ctx, "qerds inbound webhook push disabled; POST /api/v1/qerds/webhook returns 404 "+
+			"and inbound delivery relies on the background poller alone. Set "+
+			"QERDS_WEBHOOK_SECRET when the provider should push.")
+	} else {
+		slog.InfoContext(ctx, "qerds inbound webhook push enabled")
+	}
+
+	// Drain inbound for every provisioned address on a ticker, so a remote party's
+	// credential offer is received without an operator being logged in.
+	startQerdsInboundPoller(ctx, qerdsService, cfg.QerdsInboundPollInterval)
 	attestationService := attestation.NewService(
-		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, attestationStore, attHolder, cfg.AppBaseURL,
+		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
 	)
 	// Auto-issue an org's configured onboarding attestations when a member accepts
 	// an invitation. Wired via a setter (like the inbound QERDS consumer) because

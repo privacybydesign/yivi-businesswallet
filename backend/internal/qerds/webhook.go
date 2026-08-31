@@ -31,12 +31,22 @@ type inboundEvidence struct {
 }
 
 type inboundPayload struct {
-	ProviderRef string            `json:"providerRef"`
-	Sender      string            `json:"sender"`
-	Recipient   string            `json:"recipient"`
-	Subject     string            `json:"subject"`
-	Body        string            `json:"body"`
-	Evidence    []inboundEvidence `json:"evidence"`
+	ProviderRef string `json:"providerRef"`
+	// FromParty is the transport-level sender (ebMS3 From PartyId) the provider
+	// authenticated. On the poll path we read it off the message header
+	// ourselves; here the provider asserts it, which is trustworthy exactly to
+	// the extent the webhook secret is — the same basis as every other field.
+	//
+	// A provider that omits it cannot satisfy a configured
+	// QERDS_TRUSTED_OFFER_PARTIES allowlist, so offers it pushes are stored in the
+	// inbox but never queued for the org to accept (see
+	// attestation.TrustedOfferSenders).
+	FromParty string            `json:"fromParty"`
+	Sender    string            `json:"sender"`
+	Recipient string            `json:"recipient"`
+	Subject   string            `json:"subject"`
+	Body      string            `json:"body"`
+	Evidence  []inboundEvidence `json:"evidence"`
 }
 
 func (p inboundPayload) toMessage() qerdsprovider.InboundMessage {
@@ -51,6 +61,7 @@ func (p inboundPayload) toMessage() qerdsprovider.InboundMessage {
 	}
 	return qerdsprovider.InboundMessage{
 		ProviderRef: p.ProviderRef,
+		FromParty:   p.FromParty,
 		Sender:      qerdsprovider.Address(p.Sender),
 		Recipient:   qerdsprovider.Address(p.Recipient),
 		Subject:     p.Subject,

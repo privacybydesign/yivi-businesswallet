@@ -46,6 +46,10 @@ type heldViewHolder struct {
 	validities map[string]eudiholder.HeldValidity
 }
 
+func (*heldViewHolder) Redeem(_ context.Context, _ uuid.UUID, _ string) (eudiholder.Redeemed, error) {
+	return eudiholder.Redeemed{}, nil
+}
+
 func (*heldViewHolder) Delete(_ context.Context, _ uuid.UUID, _ string) error { return nil }
 
 func (*heldViewHolder) Claims(_ context.Context, _ uuid.UUID, _, _, _ string) (eudiholder.HeldCredential, error) {
@@ -81,7 +85,7 @@ func TestListHeldCarriesEachCredentialsValidity(t *testing.T) {
 			"ref-revoked":  {Revoked: true},
 		},
 	}
-	service := attestation.NewService(nil, nil, nil, nil, nil, store, holder, "http://app.test")
+	service := attestation.NewService(nil, nil, nil, nil, nil, store, nil, holder, "http://app.test")
 
 	views, err := service.ListHeld(ctx, org, "en")
 	if err != nil {
@@ -145,7 +149,7 @@ func TestListHeldCarriesIssuerName(t *testing.T) {
 			// unnamed.VCT: no display entry -> empty IssuerName.
 		},
 	}
-	service := attestation.NewService(nil, nil, nil, nil, nil, store, holder, "http://app.test")
+	service := attestation.NewService(nil, nil, nil, nil, nil, store, nil, holder, "http://app.test")
 
 	views, err := service.ListHeld(ctx, org, "en")
 	if err != nil {
@@ -185,7 +189,7 @@ func TestHeldClaimsCarriesValidity(t *testing.T) {
 			"ref-detail": {ExpiresAt: &expires, Revoked: true},
 		},
 	}
-	service := attestation.NewService(nil, nil, nil, nil, nil, store, holder, "http://app.test")
+	service := attestation.NewService(nil, nil, nil, nil, nil, store, nil, holder, "http://app.test")
 
 	view, err := service.HeldClaims(ctx, org, row.ID, "en")
 	if err != nil {

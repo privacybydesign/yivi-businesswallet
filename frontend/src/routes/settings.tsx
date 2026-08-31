@@ -16,6 +16,7 @@ import { EmailSettingsPanel } from "./email-settings";
 import { ExportSettingsPanel } from "./export-settings";
 import { EmailTemplatesPanel } from "./email-templates";
 import { IssuerSettingsPanel } from "./issuer-settings";
+import { MandateSettings } from "./mandate-settings";
 import { NotificationsSettingsPanel } from "./notifications-settings";
 import { CscSettingsPanel } from "./csc-settings";
 import { OrgProfileSettings } from "./org-profile-settings";
@@ -102,6 +103,8 @@ export default function Settings(): React.JSX.Element {
             <OrgProfileSettings org={org.data} />
             <DepartmentSettings slug={slug} />
           </div>
+        ) : tab === "mandates" ? (
+          <MandateSettings slug={slug} />
         ) : tab === "branding" ? (
           <ThemeSettingsPanel slug={slug} />
         ) : tab === COMMUNICATION_TAB ? (

@@ -27,6 +27,12 @@ const (
 	MembershipRoleChanged    = "membership.role_changed"
 	MembershipExpired        = "membership.expired"
 
+	// Mandates granted inside the wallet (Recital 18, Art 5(1)(j)). A delegation is
+	// a grant with a parent, and a cascaded revocation records one event per
+	// mandate it reached, so the chain is readable from the log alone.
+	MandateGranted = "mandate.granted"
+	MandateRevoked = "mandate.revoked"
+
 	DepartmentCreated = "department.created"
 	DepartmentUpdated = "department.updated"
 	DepartmentDeleted = "department.deleted"
@@ -77,6 +83,8 @@ const (
 	AttestationKeySuspended    = "attestation.key_suspended"
 	AttestationKeyRevoked      = "attestation.key_revoked"
 	AttestationHeldDeleted     = "attestation.held_deleted"
+	AttestationOfferAccepted   = "attestation.offer_accepted"
+	AttestationOfferDeclined   = "attestation.offer_declined"
 
 	EmailSettingsUpdated = "email.settings_updated"
 	EmailTemplateUpdated = "email.template_updated"
@@ -120,6 +128,7 @@ const (
 	TargetOrganization = "organization"
 	TargetMembership   = "membership"
 	TargetDepartment   = "department"
+	TargetMandate      = "mandate"
 	TargetUser         = "user"
 	TargetQerdsMessage = "qerds_message"
 	TargetQerdsAddress = "qerds_address"
@@ -139,6 +148,7 @@ const (
 	TargetIssuedAttestation   = "issued_attestation"
 	TargetAttestationKey      = "attestation_key"
 	TargetHeldAttestation     = "held_attestation"
+	TargetCredentialOffer     = "credential_offer"
 
 	TargetEmailSettings = "org_email_settings"
 	TargetEmailTemplate = "org_email_template"

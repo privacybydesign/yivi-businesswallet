@@ -311,6 +311,31 @@ export type HeldAttestation = z.infer<typeof heldAttestationSchema>;
 
 const heldAttestationListSchema = z.array(heldAttestationSchema);
 
+// An inbound credential offer waiting for the organization to accept or decline
+// it (backend/internal/attestation/offer_store.go). Receiving an offer over QERDS
+// does not add the credential to the wallet — accepting it does. The offer
+// deeplink itself is never served: it is a bearer token, so the backend replays
+// it server-side on accept.
+export const credentialOfferSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  sourceMessageId: z.string(),
+  senderOrgName: z.string().default(""),
+  senderAddress: z.string().default(""),
+  fromParty: z.string().default(""),
+  credentialName: z.string().default(""),
+  status: z.string(),
+  // Absent on every offer this list serves: only pending ones are listed, and a
+  // pending offer has no decision yet.
+  decidedAt: z.string().optional(),
+  receivedAt: z.string(),
+  createdAt: z.string(),
+});
+
+export type CredentialOffer = z.infer<typeof credentialOfferSchema>;
+
+const credentialOfferListSchema = z.array(credentialOfferSchema);
+
 // One disclosed attribute of a held credential: its payload key, the issuer
 // metadata display label (empty when the credential carries no label — the UI
 // falls back to the key), and the value (any JSON type, rendered generically).
@@ -455,6 +480,43 @@ export function deleteHeldAttestation(
     method: "DELETE",
     signal,
   });
+}
+
+export function getCredentialOffers(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<CredentialOffer[]> {
+  return request(`${base(slug)}/offers`, {
+    schema: credentialOfferListSchema,
+    signal,
+  });
+}
+
+export function acceptCredentialOffer(
+  slug: string,
+  offerId: string,
+  signal?: AbortSignal,
+): Promise<HeldAttestation> {
+  return request(`${base(slug)}/offers/${encodeURIComponent(offerId)}/accept`, {
+    schema: heldAttestationSchema,
+    method: "POST",
+    signal,
+  });
+}
+
+export function declineCredentialOffer(
+  slug: string,
+  offerId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(
+    `${base(slug)}/offers/${encodeURIComponent(offerId)}/decline`,
+    {
+      schema: z.void(),
+      method: "POST",
+      signal,
+    },
+  );
 }
 
 function base(slug: string): string {

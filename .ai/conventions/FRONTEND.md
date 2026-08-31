@@ -26,6 +26,7 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 - Routes in `src/routes/`, wired through `src/router.tsx` (react-router).
 - All backend calls go through `src/api/` — never `fetch` directly from components.
 - API base URL: `import.meta.env.VITE_API_BASE_URL ?? ""` (empty = Vite proxy). Don't hardcode hosts.
+- **That proxy only resolves inside Docker.** `vite.config.ts` hardcodes `http://backend:8080` as the target for `/healthz` and `/api`, which is a Compose service name — so a bare `npm run dev` in `frontend/` serves the UI but reaches no backend. Use the dev stack (`npm run dev` from the repo root); the static production build has no proxy at all and needs `VITE_API_BASE_URL` set at build time.
 - File names: kebab-case.
 - Organize by feature as the app grows; co-locate route + its API concerns where it reads cleanly.
 
@@ -55,3 +56,14 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 - Presentational `ui/` components stay translation-free — they take already-translated strings as props; `t()` is called at the route/feature level. (`sidebar.tsx` is the exception: it owns its own nav copy.)
 - **Add a language**: copy `locales/en.ts` → `<lng>.ts` (same shape), register it in `index.ts` `resources`, add a switcher. No language detector is wired yet.
 - Backend error prose (raw `error.message`) is **not** localizable from the frontend — only mapped status codes (403/404) are. True localized errors need backend error codes.
+
+## Testing
+
+- Vitest, `node` environment, no jsdom (`vitest.config.ts`). Tests cover extracted pure logic rather than rendered components, and live beside their source. CI runs them in the `frontend-test` job.
+- **The `include` glob is `src/**/*.test.ts`, so a `.test.tsx` is silently skipped** — it is never collected, so the run reports the same file and test counts as if it did not exist and stays green. Extract the logic under test and name the file `.ts`; do not reach for a `.tsx` test.
+- Vitest transpiles without type-checking, so a type error *inside a test* surfaces only in `npm run typecheck`, never in `npm test`. Both are in the verify sequence for that reason.
+- **Cross-boundary guards** live in `src/lib/` and read files outside `frontend/` to pin a mirror the type system cannot see across. They do not all assert the same mirror, so copy the one that matches what you are adding:
+  - `mail-template.test.ts`, `held-credential.test.ts` and `notification-catalog.test.ts` parse the constants out of their Go source and assert each has both its `src/api/` enum member (`MAIL_TEMPLATE_KINDS`, `HELD_SOURCES`, `NOTIFICATION_CHANNELS` and `NOTIFICATION_GROUPS`) and its i18n copy.
+  - `audit-event.test.ts` has **no enum to check against** — `auditEventSchema.action` is a plain `z.string()`. It parses the action and target constants out of `backend/internal/audit/audit.go` and asserts each one resolves to a translation, because `auditActionLabel`/`auditTargetLabel` are `switch`es that fall back to the raw dotted key. A new backend audit action therefore needs a `case` in `audit-event.ts` **and** `auditLog.actions.*` / `auditLog.targets.*` copy; without both the row renders `postguard.file_sent` to the user.
+  - `agents-md.test.ts` bounds the repo-root `AGENTS.md` — a size gate, not a mirror.
+- Mirroring a backend **enum** in the frontend means adding to this pattern, and asserting membership **in both directions** — a length check alone passes on exactly the drift it exists to catch, both lists being short by the same one.

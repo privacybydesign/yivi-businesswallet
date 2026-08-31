@@ -797,6 +797,112 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/offers:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [attestation]
+      summary: List inbound credential offers awaiting a decision
+      description: >-
+        Credential offers delivered to the organisation over QERDS that have not
+        been accepted or declined yet. Receiving an offer does not add the
+        credential to the wallet; accepting it does. The offer deeplink itself is
+        not returned, since anyone holding it could redeem the credential.
+        Requires membership of the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/offers/{id}/accept:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [attestation]
+      summary: Accept an inbound credential offer
+      description: >-
+        Redeems the offer through the organisation's holder wallet and indexes
+        the received credential as held. Requires an administrator role. Returns
+        404 when the offer is absent, already decided, or being accepted by
+        another request: the offer is claimed before the issuer is called, so of
+        several simultaneous accepts exactly one redeems. A redemption that fails
+        returns the offer to the queue so it can be accepted again.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/offers/{id}/decline:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [attestation]
+      summary: Decline an inbound credential offer
+      description: >-
+        Refuses the offer. Nothing is redeemed, so the credential never reaches
+        the wallet; the QERDS message and its evidence stay in the inbox.
+        Requires an administrator role. Returns 404 when the offer is absent or
+        already decided.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/attestations/issuer-bundle:
     parameters:
       - name: slug
@@ -2380,6 +2486,146 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/mandates:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [organizations]
+      summary: List the organisation's mandate register
+      description: >-
+        Every mandate the organisation has granted, active and ended alike, each
+        with its derived lifecycle status (pending, active, revoked, expired).
+        Requires an administrator role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [organizations]
+      summary: Grant a mandate
+      description: >-
+        Grants a full or administrative mandate to a member. Requires a
+        register-backed legal representative or an active full mandate — an
+        administrator role does not reach this endpoint. A grantor who is not a
+        legal representative is delegating, so the grant is cut from the mandate
+        they hold and clamped to its scope and validity window.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The parent mandate is no longer active.
+  /api/v1/orgs/{slug}/mandates/authority:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [organizations]
+      summary: Read the caller's own basis of authority over mandates
+      description: >-
+        Whether the caller may grant and revoke mandates in this organisation, and
+        on what basis: a register-backed legal representative, an active
+        organisation-wide full mandate, or neither. jointAuthority marks a
+        director registered as only able to act together with another one, whom
+        this layer still honours as a sole representative. Requires an
+        administrator role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/mandates/{id}/revoke:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [organizations]
+      summary: Revoke a mandate
+      description: >-
+        Ends a mandate and everything delegated from it. An empty body revokes at
+        once; an effectiveAt in the future closes the validity window on that date
+        instead. Requires a legal representative, or the grantor of the mandate.
+        Returns every mandate the revocation reached, the target first; a mandate
+        that had already ended on its own is left out. Only a pending or active
+        mandate can be revoked — one already revoked or expired is a conflict.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The mandate has already been revoked or has expired.
   /api/v1/orgs/{slug}/members:
     parameters:
       - name: slug
@@ -3111,7 +3357,10 @@ paths:
                 document:
                   type: string
                   format: binary
-                  description: The PDF to sign.
+                  description: >-
+                    The PDF to sign, at most 25 MB — the documented per-file cap on
+                    a QERDS attachment, the channel a signed document is delivered
+                    over. A larger one is refused with 413.
                 signers:
                   type: array
                   items:
@@ -3150,6 +3399,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           description: No CSC provider configured.
+        '413':
+          description: The uploaded document is larger than the accepted maximum.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/signing/requests/pending:
     parameters:
       - name: slug

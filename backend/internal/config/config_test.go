@@ -247,3 +247,37 @@ func TestLoadRejectsBothEudiCredentials(t *testing.T) {
 		t.Errorf("error %q does not name both variables", err)
 	}
 }
+
+// Poll interval 0 with no webhook secret leaves no automatic inbound QERDS
+// delivery at all — the silent state of issue #105, where a message sits
+// unseen until an operator polls the console by hand. That must fail the
+// boot, not degrade quietly.
+func TestLoadRejectsNoAutomaticQerdsInboundDelivery(t *testing.T) {
+	for _, interval := range []string{"0", "0s", "-1s"} {
+		t.Run(interval, func(t *testing.T) {
+			_, err := loadWith(t, map[string]string{envQerdsInboundPollInterval: interval})
+			if err == nil {
+				t.Fatal("Load accepted a disabled poller without a webhook secret")
+			}
+			if !strings.Contains(err.Error(), envQerdsWebhookSecret) || !strings.Contains(err.Error(), envQerdsInboundPollInterval) {
+				t.Errorf("error %q does not name both variables", err)
+			}
+		})
+	}
+}
+
+func TestLoadAcceptsDisabledPollerWithWebhookPush(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{
+		envQerdsInboundPollInterval: "0",
+		envQerdsWebhookSecret:       "shhh",
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.QerdsInboundPollInterval != 0 {
+		t.Errorf("poll interval = %v, want 0", cfg.QerdsInboundPollInterval)
+	}
+	if cfg.QerdsWebhookSecret != "shhh" {
+		t.Errorf("webhook secret = %q, want the configured value", cfg.QerdsWebhookSecret)
+	}
+}

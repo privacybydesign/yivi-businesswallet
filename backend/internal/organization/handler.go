@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -26,6 +27,7 @@ type repository interface {
 	Terminate(ctx context.Context, orgID uuid.UUID, exports exportQueuer) (Organization, error)
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error)
+	ResolveAuthority(ctx context.Context, orgID, userID uuid.UUID) (Authority, error)
 	GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
 	GetMemberAvatar(ctx context.Context, orgID, userID uuid.UUID) (user.Avatar, error)
 	ListMemberEntries(ctx context.Context, orgID uuid.UUID, p MemberListParams) ([]MemberEntry, int, error)
@@ -40,6 +42,10 @@ type repository interface {
 	CreateDepartment(ctx context.Context, orgID uuid.UUID, name string) (Department, error)
 	UpdateDepartment(ctx context.Context, orgID, deptID uuid.UUID, name string) (Department, error)
 	DeleteDepartment(ctx context.Context, orgID, deptID uuid.UUID) error
+	ListMandates(ctx context.Context, orgID uuid.UUID) ([]Mandate, error)
+	HasJointRepresentation(ctx context.Context, orgID, userID uuid.UUID) (bool, error)
+	GrantMandate(ctx context.Context, orgID, grantorUserID uuid.UUID, req MandateGrant) (Mandate, error)
+	RevokeMandate(ctx context.Context, orgID, mandateID, revokedBy uuid.UUID, effectiveAt *time.Time, reason string) ([]Mandate, error)
 }
 
 type inviter interface {
@@ -140,6 +146,14 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/departments", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.createDepartment))))
 	mux.Handle("PATCH /orgs/{slug}/departments/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateDepartment))))
 	mux.Handle("DELETE /orgs/{slug}/departments/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.deleteDepartment))))
+
+	// The mandate register is readable by the administrative surface, but granting
+	// and revoking are gated on Axis A instead of on a role — see
+	// RequireMandateAuthority.
+	mux.Handle("GET /orgs/{slug}/mandates", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.listMandates))))
+	mux.Handle("GET /orgs/{slug}/mandates/authority", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.mandateAuthority))))
+	mux.Handle("POST /orgs/{slug}/mandates", orgScoped(RequireMandateAuthority(respond.HandlerFunc(h.grantMandate))))
+	mux.Handle("POST /orgs/{slug}/mandates/{id}/revoke", orgScoped(RequireMandateAuthority(respond.HandlerFunc(h.revokeMandate))))
 
 	mux.Handle("GET /orgs/{slug}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.auditEvents))))
 }
