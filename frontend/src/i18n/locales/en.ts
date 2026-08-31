@@ -1397,6 +1397,7 @@ export const en = {
       validUntil: "Valid until",
       validUntilHint: "Leave empty for no end date.",
       emptyWindow: "The end has to be after the start.",
+      endInPast: "The end has to be in the future.",
       when: "When it takes effect",
       immediately: "Immediately",
       onADate: "On a date",

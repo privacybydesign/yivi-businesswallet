@@ -17,6 +17,7 @@ import {
   mandateScopeLabel,
   mandateStatusTone,
   mandateTypeHint,
+  mandateWindowError,
   mandateWindowIsEmpty,
 } from "./mandate";
 
@@ -441,6 +442,29 @@ describe("mandateWindowIsEmpty", () => {
     expect(
       mandateWindowIsEmpty(undefined, "2026-07-01T00:00:00.000Z", now),
     ).toBe(false);
+  });
+});
+
+describe("mandateWindowError", () => {
+  const t = ((key: string) => key) as unknown as Parameters<
+    typeof mandateWindowError
+  >[1];
+
+  it("points at the start when the reader can see it", () => {
+    expect(mandateWindowError("2026-07-01T00:00:00.000Z", t)).toBe(
+      "mandates.form.emptyWindow",
+    );
+  });
+
+  it("points at the future when no start is on screen", () => {
+    // "after the start" would send the reader to a field they left blank on
+    // purpose; the start it means is now.
+    expect(mandateWindowError(undefined, t)).toBe("mandates.form.endInPast");
+  });
+
+  it("has copy for both messages", () => {
+    expect(en.mandates.form.emptyWindow).toBeTruthy();
+    expect(en.mandates.form.endInPast).toBeTruthy();
   });
 });
 

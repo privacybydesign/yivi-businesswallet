@@ -29,6 +29,7 @@ import {
   mandateStatusTone,
   mandateTypeHint,
   mandateTypeLabel,
+  mandateWindowError,
   mandateWindowIsEmpty,
 } from "../lib/mandate";
 import { Button, Card, Icon, Modal, Table, Tag } from "../ui";
@@ -344,7 +345,7 @@ function GrantMandateDialog({
             id="mandate-valid-until"
             label={t("mandates.form.validUntil")}
             hint={t("mandates.form.validUntilHint")}
-            error={emptyWindow ? t("mandates.form.emptyWindow") : undefined}
+            error={emptyWindow ? mandateWindowError(from, t) : undefined}
           >
             <input
               id="mandate-valid-until"

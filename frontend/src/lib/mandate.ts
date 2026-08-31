@@ -256,6 +256,19 @@ export function mandateWindowIsEmpty(
   return until !== undefined && until <= (from ?? now);
 }
 
+// The message for an empty window has to name a start the reader can see. With
+// "Valid from" left blank the start is now, which is nowhere on the screen, so
+// the wording that points at it sends the reader to a field they emptied on
+// purpose.
+export function mandateWindowError(
+  from: string | undefined,
+  t: TFunction,
+): string {
+  return from === undefined
+    ? t("mandates.form.endInPast")
+    : t("mandates.form.emptyWindow");
+}
+
 // isoFromLocalInput turns a datetime-local field's value into the RFC 3339
 // instant the API takes. Empty stays empty: the backend's own defaults (now, and
 // open-ended) are what an unset field means.
