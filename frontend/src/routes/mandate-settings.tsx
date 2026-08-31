@@ -26,6 +26,7 @@ import {
   mandateScopeLabel,
   mandateStatusLabel,
   mandateStatusTone,
+  mandateTypeHint,
   mandateTypeLabel,
 } from "../lib/mandate";
 import { Button, Card, Icon, Modal, Table, Tag } from "../ui";
@@ -256,11 +257,7 @@ function GrantMandateDialog({
         <Field
           id="mandate-type"
           label={t("mandates.form.type")}
-          hint={
-            type === "full"
-              ? t("mandates.typeHints.full")
-              : t("mandates.typeHints.administrative")
-          }
+          hint={mandateTypeHint(type, t)}
         >
           <select
             id="mandate-type"

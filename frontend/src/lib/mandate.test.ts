@@ -15,6 +15,7 @@ import {
   mandateLineage,
   mandateScopeLabel,
   mandateStatusTone,
+  mandateTypeHint,
 } from "./mandate";
 
 function mandate(overrides: Partial<Mandate> & { id: string }): Mandate {
@@ -284,6 +285,23 @@ describe("mandateScopeLabel", () => {
   });
 });
 
+describe("mandateTypeHint", () => {
+  const t = ((key: string) => key) as unknown as Parameters<
+    typeof mandateTypeHint
+  >[1];
+
+  it("explains each tier it knows", () => {
+    expect(mandateTypeHint("full", t)).toBe("mandates.typeHints.full");
+    expect(mandateTypeHint("administrative", t)).toBe(
+      "mandates.typeHints.administrative",
+    );
+  });
+
+  it("has no hint for a tier it does not know", () => {
+    expect(mandateTypeHint("something-new", t)).toBeUndefined();
+  });
+});
+
 describe("isoFromLocalInput", () => {
   it("has no value for an empty field, so the backend default applies", () => {
     expect(isoFromLocalInput("")).toBeUndefined();
@@ -355,6 +373,11 @@ describe("mandate constants backend/frontend parity", () => {
     expect(
       en.mandates.typeHints[type as keyof typeof en.mandates.typeHints],
     ).toBeTruthy();
+    // Naming the hint in en.ts is not enough: the grant form reads it through
+    // TYPE_HINT_KEYS, so a tier missing from that map would go unexplained.
+    expect(mandateTypeHint(type, ((key: string) => key) as never)).toBe(
+      `mandates.typeHints.${type}`,
+    );
   });
 
   it.each([...MANDATE_TYPES])("is served the tier %s", (type) => {

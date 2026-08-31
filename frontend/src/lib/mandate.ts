@@ -42,6 +42,13 @@ const TYPE_KEYS = {
   administrative: "mandates.types.administrative",
 } as const;
 
+// The grant form's per-tier explanation. Kept beside TYPE_KEYS and looked up the
+// same way so a tier the backend gains cannot be described by another tier's hint.
+const TYPE_HINT_KEYS = {
+  full: "mandates.typeHints.full",
+  administrative: "mandates.typeHints.administrative",
+} as const;
+
 const SCOPE_KEYS = {
   organization: "mandates.scopes.organization",
   department: "mandates.scopes.department",
@@ -59,6 +66,16 @@ const STATUS_KEYS = {
 export function mandateTypeLabel(type: string, t: TFunction): string {
   const key = TYPE_KEYS[type as MandateType];
   return key === undefined ? type : t(key);
+}
+
+// No hint at all for a tier this file does not know: an unexplained option beats
+// one explained as something it is not.
+export function mandateTypeHint(
+  type: string,
+  t: TFunction,
+): string | undefined {
+  const key = TYPE_HINT_KEYS[type as MandateType];
+  return key === undefined ? undefined : t(key);
 }
 
 export function mandateScopeLabel(mandate: Mandate, t: TFunction): string {
