@@ -730,13 +730,10 @@ export const nl: Translation<typeof en> = {
     sequentialHint:
       "Ondertekenaars ondertekenen na elkaar, in de gekozen volgorde.",
     recipientLabel: "Bezorgen aan",
-    recipientHint:
-      "Waar het voltooide document naartoe gaat zodra iedereen heeft ondertekend.",
     recipientEmailPlaceholder: "ontvanger@voorbeeld.nl",
     recipientQerdsPlaceholder: "QERDS-adres",
     recipientNamePlaceholder: "Naam ontvanger (optioneel)",
     messagePlaceholder: "Bericht aan de ontvanger (optioneel)",
-    createButton: "Verzoek aanmaken",
     createdToast: "Ondertekenverzoek aangemaakt.",
     documentStepHint: "Upload de PDF die iedereen gaat ondertekenen.",
     documentMeta_one: "{{count}} ondertekenaar",
@@ -762,8 +759,6 @@ export const nl: Translation<typeof en> = {
     summaryDeliveryLabel: "Bezorging",
     noVisibleMarkWarning: "{{name}} ondertekent zonder zichtbaar merkteken.",
     placement: {
-      title: "Plaatsing van handtekening en paraaf",
-      hint: "Kies een ondertekenaar en klik op de pagina om daar het handtekeningveld of de paraaf te zetten. Laat dit leeg om zonder zichtbaar merkteken te ondertekenen.",
       railTitle: "Waar tekent elke ondertekenaar?",
       railHint:
         "Kies een ondertekenaar, kies handtekening of paraaf en klik op de pagina. Een ondertekenaar zonder merkteken tekent nog steeds, alleen zonder zichtbaar veld.",
@@ -778,7 +773,6 @@ export const nl: Translation<typeof en> = {
       signerLegend: "Plaatsen voor",
       markCount_one: "{{count}} merkteken",
       markCount_other: "{{count}} merktekens",
-      kindLegend: "Plaats",
       kindSignature: "Handtekeningveld",
       kindParaph: "Paraaf",
       firstPage: "Eerste pagina",
@@ -790,7 +784,6 @@ export const nl: Translation<typeof en> = {
       widthLabel: "Breedte (pt)",
       heightLabel: "Hoogte (pt)",
       removeMark: "Van deze pagina verwijderen",
-      paraphEveryPage: "Paraaf op elke pagina zetten",
       removeParaphs: "Alle parafen verwijderen",
       markLabel:
         "{{kind}} voor {{name}} op pagina {{page}}, op {{x}} bij {{y}} punten. Gebruik de pijltjestoetsen om het te verplaatsen.",

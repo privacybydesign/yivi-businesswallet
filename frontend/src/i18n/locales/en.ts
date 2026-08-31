@@ -709,13 +709,10 @@ export const en = {
     parallelHint: "Signers may sign in any order.",
     sequentialHint: "Signers sign one after another, in the order selected.",
     recipientLabel: "Deliver to",
-    recipientHint:
-      "Where to send the finished document once everyone has signed.",
     recipientEmailPlaceholder: "recipient@example.org",
     recipientQerdsPlaceholder: "QERDS address",
     recipientNamePlaceholder: "Recipient name (optional)",
     messagePlaceholder: "Message to the recipient (optional)",
-    createButton: "Create request",
     createdToast: "Signing request created.",
     documentStepHint: "Upload the PDF that everyone will sign.",
     documentMeta_one: "{{count}} signee",
@@ -741,8 +738,6 @@ export const en = {
     summaryDeliveryLabel: "Delivery",
     noVisibleMarkWarning: "{{name}} signs without a visible mark.",
     placement: {
-      title: "Signature and paraph placement",
-      hint: "Choose a signee, then click the page to put their signature block or their initials there. Leave this empty to sign without a visible mark.",
       railTitle: "Where does each signee sign?",
       railHint:
         "Pick a signee, choose signature or initials, then click the page. A signee without a mark still signs, just without a visible block.",
@@ -757,7 +752,6 @@ export const en = {
       signerLegend: "Placing for",
       markCount_one: "{{count}} mark",
       markCount_other: "{{count}} marks",
-      kindLegend: "Place",
       kindSignature: "Signature block",
       kindParaph: "Initials",
       firstPage: "First page",
@@ -769,7 +763,6 @@ export const en = {
       widthLabel: "Width (pt)",
       heightLabel: "Height (pt)",
       removeMark: "Remove from this page",
-      paraphEveryPage: "Put initials on every page",
       removeParaphs: "Remove all initials",
       markLabel:
         "{{kind}} for {{name}} on page {{page}}, at {{x}} by {{y}} points. Use the arrow keys to move it.",

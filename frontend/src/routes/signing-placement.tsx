@@ -341,7 +341,17 @@ export function PlacementEditor({
     <div className="border-line flex min-h-0 flex-col md:h-[640px] md:flex-row">
       {/* Left — the document */}
       <div className="bg-surface-2 flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="border-line bg-surface flex items-center gap-3 border-b px-5 py-2.5">
+        <div className="border-line bg-surface flex items-center gap-2 border-b px-5 py-2.5">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setPage(1)}
+            disabled={page <= 1}
+            aria-label={t("signing.placement.firstPage")}
+            title={t("signing.placement.firstPage")}
+          >
+            «
+          </Button>
           <Button
             variant="secondary"
             size="sm"
@@ -363,6 +373,16 @@ export function PlacementEditor({
             disabled={page >= pageCount}
             aria-label={t("signing.placement.nextPage")}
           />
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setPage(pageCount)}
+            disabled={page >= pageCount}
+            aria-label={t("signing.placement.lastPage")}
+            title={t("signing.placement.lastPage")}
+          >
+            »
+          </Button>
           <div className="flex-1" />
           <span className="text-muted font-mono text-[11px]">
             {t("signing.placement.onThisPage", { count: marksOnActivePage })}
@@ -377,7 +397,7 @@ export function PlacementEditor({
         <div className="relative flex min-h-0 flex-1 justify-center overflow-auto p-6">
           {/* Whose marks are being placed — a floating cue over the page. */}
           {activeName !== "" && (
-            <div className="border-line-strong bg-surface shadow-card absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border py-1 pr-1 pl-3 whitespace-nowrap">
+            <div className="border-line-strong bg-surface shadow-card pointer-events-none absolute top-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border py-1 pr-1 pl-3 whitespace-nowrap">
               <span className="text-ink-soft font-mono text-[11px]">
                 {t("signing.placement.signerLegend")}
               </span>
@@ -397,7 +417,7 @@ export function PlacementEditor({
                     aria-pressed={kind === option}
                     onClick={() => setKind(option)}
                     className={[
-                      "rounded-full px-2.5 py-1 text-[12px] transition-colors",
+                      "pointer-events-auto rounded-full px-2.5 py-1 text-[12px] transition-colors",
                       FOCUS_RING,
                       kind === option
                         ? "bg-ink font-semibold text-white"
@@ -625,6 +645,8 @@ export function PlacementEditor({
                               size="sm"
                               onClick={() => {
                                 if (selected == null) return;
+                                // Collapse an every-page paraph back to just the
+                                // page in view, keeping the one that is selected.
                                 update(
                                   withPlacement(
                                     withoutParaphs(activePlacements),

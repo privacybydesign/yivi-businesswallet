@@ -458,8 +458,32 @@ function ToSignTab({
   );
 }
 
+// The next index for a role="radio" group on the arrow/Home/End keys — the keyboard
+// interaction the role promises. Returns null when the key is not a navigation key.
+function radioNavIndex(
+  key: string,
+  current: number,
+  count: number,
+): number | null {
+  switch (key) {
+    case "ArrowRight":
+    case "ArrowDown":
+      return (current + 1) % count;
+    case "ArrowLeft":
+    case "ArrowUp":
+      return (current - 1 + count) % count;
+    case "Home":
+      return 0;
+    case "End":
+      return count - 1;
+    default:
+      return null;
+  }
+}
+
 // A pill toggle for a small set of mutually exclusive options — the same segmented
 // control the design uses for signing order and, in the placement rail, mark kind.
+// A proper radio group: one tab stop, the arrows move (and commit) the selection.
 function Segmented<T extends string>({
   options,
   value,
@@ -471,21 +495,38 @@ function Segmented<T extends string>({
   onChange: (value: T) => void;
   ariaLabel: string;
 }): React.JSX.Element {
+  const refs = React.useRef<(HTMLButtonElement | null)[]>([]);
+  const currentIndex = Math.max(
+    options.findIndex((o) => o.value === value),
+    0,
+  );
+  const onKeyDown = (event: React.KeyboardEvent): void => {
+    const next = radioNavIndex(event.key, currentIndex, options.length);
+    if (next == null) return;
+    event.preventDefault();
+    onChange(options[next].value);
+    refs.current[next]?.focus();
+  };
   return (
     <div
       role="radiogroup"
       aria-label={ariaLabel}
       className="bg-surface-3 rounded-yivi inline-flex gap-0.5 p-0.5"
     >
-      {options.map((option) => {
+      {options.map((option, index) => {
         const active = value === option.value;
         return (
           <button
             key={option.value}
+            ref={(el) => {
+              refs.current[index] = el;
+            }}
             type="button"
             role="radio"
             aria-checked={active}
+            tabIndex={active ? 0 : -1}
             onClick={() => onChange(option.value)}
+            onKeyDown={onKeyDown}
             className={[
               "h-[30px] rounded-[6px] px-3.5 text-[12.5px] transition-colors",
               WIZARD_FOCUS,
@@ -503,15 +544,18 @@ function Segmented<T extends string>({
 }
 
 // The wizard header rail: a numbered pill per step, connected by short lines, with a
-// tick for a completed step and an underline on the current one. A completed step is
-// clickable to step back to it; a step ahead of the current one is not reachable.
+// tick for a completed step and an underline on the current one. A step is clickable
+// — forward or back — whenever every step before it is satisfied (`reachable`), so a
+// green step is never two Continue clicks away.
 function WizardStepRail({
   steps,
   current,
+  reachable,
   onStep,
 }: {
   steps: string[];
   current: number;
+  reachable: boolean[];
   onStep: (index: number) => void;
 }): React.JSX.Element {
   return (
@@ -519,6 +563,7 @@ function WizardStepRail({
       {steps.map((label, index) => {
         const done = index < current;
         const active = index === current;
+        const canGo = reachable[index];
         return (
           <li key={label} className="flex items-center">
             {index > 0 && (
@@ -529,13 +574,13 @@ function WizardStepRail({
             )}
             <button
               type="button"
-              disabled={index > current}
+              disabled={!canGo}
               aria-current={active ? "step" : undefined}
               onClick={() => onStep(index)}
               className={[
                 "flex items-center gap-2.5 pb-3.5 whitespace-nowrap",
                 WIZARD_FOCUS,
-                index > current ? "cursor-default" : "cursor-pointer",
+                canGo ? "cursor-pointer" : "cursor-default",
                 active ? "shadow-[inset_0_-2px_0_var(--yb-ink)]" : "",
               ].join(" ")}
             >
@@ -571,27 +616,34 @@ function WizardStepRail({
   );
 }
 
-// A radio card in the delivery step: a target the whole row selects, with a title,
-// a short description, and optional trailing content (an "Encrypted" tag).
+// A radio card in the delivery step: a target the whole row selects, with a title
+// and a short description. One tab stop per group; the arrows move the selection.
 function ChannelCard({
   selected,
   title,
   description,
   onSelect,
-  trailing,
+  tabIndex,
+  onKeyDown,
+  innerRef,
 }: {
   selected: boolean;
   title: string;
   description: string;
   onSelect: () => void;
-  trailing?: React.ReactNode;
+  tabIndex: number;
+  onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
+  innerRef: (el: HTMLButtonElement | null) => void;
 }): React.JSX.Element {
   return (
     <button
+      ref={innerRef}
       type="button"
       role="radio"
       aria-checked={selected}
+      tabIndex={tabIndex}
       onClick={onSelect}
+      onKeyDown={onKeyDown}
       className={[
         "rounded-yivi bg-surface flex items-start gap-3 px-3.5 py-3 text-left transition-colors",
         WIZARD_FOCUS,
@@ -608,11 +660,8 @@ function ChannelCard({
         aria-hidden="true"
       />
       <span className="min-w-0">
-        <span className="flex items-center gap-2">
-          <span className="font-display text-ink text-[13px] font-semibold">
-            {title}
-          </span>
-          {trailing}
+        <span className="font-display text-ink block text-[13px] font-semibold">
+          {title}
         </span>
         <span className="text-ink-soft mt-0.5 block text-[12px]">
           {description}
@@ -787,6 +836,11 @@ function NewRequestTab({
     incomplete.length === 0,
     canSubmit,
   ];
+  // A step is reachable once every step before it is satisfied, so the rail can jump
+  // forward to any still-valid step and not only step back one at a time.
+  const reachable = stepReady.map((_, i) =>
+    stepReady.slice(0, i).every(Boolean),
+  );
   const isLastStep = step === WIZARD_STEP_COUNT - 1;
   const isSequential = mode === SIGNING_MODE.sequential;
 
@@ -797,6 +851,40 @@ function NewRequestTab({
     ? signers.filter((s) => s.placements.length === 0)
     : [];
   const totalMarks = signers.reduce((n, s) => n + s.placements.length, 0);
+
+  // The delivery channels as a roving radio group: one tab stop, arrows move (and
+  // commit) the selection across the three cards.
+  const channelRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
+  const channelOptions = [
+    {
+      value: RECIPIENT_CHANNEL.none,
+      title: channelLabel(t, RECIPIENT_CHANNEL.none),
+      description: t("signing.deliveryNoneDesc"),
+    },
+    {
+      value: RECIPIENT_CHANNEL.email,
+      title: channelLabel(t, RECIPIENT_CHANNEL.email),
+      description: t("signing.deliveryEmailDesc"),
+    },
+    {
+      value: RECIPIENT_CHANNEL.qerds,
+      title: channelLabel(t, RECIPIENT_CHANNEL.qerds),
+      description: t("signing.deliveryQerdsDesc"),
+    },
+  ];
+  const onChannelKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ): void => {
+    const current = Math.max(
+      channelOptions.findIndex((c) => c.value === channel),
+      0,
+    );
+    const next = radioNavIndex(event.key, current, channelOptions.length);
+    if (next == null) return;
+    event.preventDefault();
+    setChannel(channelOptions[next].value);
+    channelRefs.current[next]?.focus();
+  };
 
   const steps = [
     t("signing.steps.document"),
@@ -821,7 +909,12 @@ function NewRequestTab({
           {headerMeta}
         </p>
         <div className="mt-4">
-          <WizardStepRail steps={steps} current={step} onStep={setStep} />
+          <WizardStepRail
+            steps={steps}
+            current={step}
+            reachable={reachable}
+            onStep={setStep}
+          />
         </div>
       </div>
 
@@ -892,6 +985,8 @@ function NewRequestTab({
                       size="sm"
                       onClick={() => {
                         setFile(null);
+                        // Clear any over-size error too, so it does not linger
+                        // above "No file chosen".
                         setFileTooLarge(false);
                       }}
                     >
@@ -983,6 +1078,8 @@ function NewRequestTab({
                           <div className="font-display text-ink truncate text-[13.5px] font-semibold">
                             {signerLabel(signer)}
                           </div>
+                          {/* The kind already shows in the Tag, so the subtitle
+                              is the email — which only an external signee has. */}
                           {signer.kind === SIGNER_KIND.external && (
                             <div className="text-ink-soft truncate font-mono text-[11px]">
                               {signer.email}
@@ -1136,24 +1233,20 @@ function NewRequestTab({
                   aria-label={t("signing.recipientLabel")}
                   className="mt-4 flex flex-col gap-2"
                 >
-                  <ChannelCard
-                    selected={channel === RECIPIENT_CHANNEL.none}
-                    onSelect={() => setChannel(RECIPIENT_CHANNEL.none)}
-                    title={channelLabel(t, RECIPIENT_CHANNEL.none)}
-                    description={t("signing.deliveryNoneDesc")}
-                  />
-                  <ChannelCard
-                    selected={channel === RECIPIENT_CHANNEL.email}
-                    onSelect={() => setChannel(RECIPIENT_CHANNEL.email)}
-                    title={channelLabel(t, RECIPIENT_CHANNEL.email)}
-                    description={t("signing.deliveryEmailDesc")}
-                  />
-                  <ChannelCard
-                    selected={channel === RECIPIENT_CHANNEL.qerds}
-                    onSelect={() => setChannel(RECIPIENT_CHANNEL.qerds)}
-                    title={channelLabel(t, RECIPIENT_CHANNEL.qerds)}
-                    description={t("signing.deliveryQerdsDesc")}
-                  />
+                  {channelOptions.map((option, index) => (
+                    <ChannelCard
+                      key={option.value}
+                      selected={channel === option.value}
+                      onSelect={() => setChannel(option.value)}
+                      title={option.title}
+                      description={option.description}
+                      tabIndex={channel === option.value ? 0 : -1}
+                      onKeyDown={onChannelKeyDown}
+                      innerRef={(el) => {
+                        channelRefs.current[index] = el;
+                      }}
+                    />
+                  ))}
                 </div>
 
                 {recipientNeedsAddress && (
