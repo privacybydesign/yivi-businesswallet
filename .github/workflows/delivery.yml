@@ -56,6 +56,7 @@ jobs:
           tags: |
             type=semver,pattern={{major}}.{{minor}}.{{patch}}
             type=edge,enable=${{ steps.is-head-main.outcome == 'success' }}
+            type=raw,value=latest,enable=${{ steps.is-head-main.outcome == 'success' }}
             type=ref,event=branch,enable=${{ github.event_name == 'workflow_dispatch' }}
 
       - name: Set up Docker Buildx
@@ -125,7 +126,7 @@ jobs:
     # empty and `docker login --password-stdin` falls back to an interactive
     # prompt, failing with "Cannot perform an interactive login from a non TTY device".
     environment: dev
-    # Only mirror when the edge image was actually pushed (HEAD of main / manual run).
+    # Only mirror when the edge/latest images were actually pushed (HEAD of main / manual run).
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     strategy:
       fail-fast: false
@@ -136,11 +137,13 @@ jobs:
           - component: postguard-sidecar
             target: postguard-sidecar
     env:
-      SOURCE_IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.component }}:edge
-      TARGET_IMAGE: rg.nl-ams.scw.cloud/yivi-containter-registry/${{ matrix.target }}:edge
+      SOURCE_REPO: ghcr.io/${{ github.repository }}/${{ matrix.component }}
+      TARGET_REPO: rg.nl-ams.scw.cloud/yivi-containter-registry/${{ matrix.target }}
+      # Tags to mirror, in sync with the rolling tags published above.
+      MIRROR_TAGS: edge latest
     steps:
-      # The edge image is private on ghcr, and this is a separate job from the
-      # publish job, so it needs its own ghcr login to pull the source image.
+      # The edge/latest images are private on ghcr, and this is a separate job
+      # from the publish job, so it needs its own ghcr login to pull them.
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
@@ -157,6 +160,8 @@ jobs:
 
       - name: Mirror image
         run: |
-          docker pull "$SOURCE_IMAGE"
-          docker tag "$SOURCE_IMAGE" "$TARGET_IMAGE"
-          docker push "$TARGET_IMAGE"
+          for tag in $MIRROR_TAGS; do
+            docker pull "$SOURCE_REPO:$tag"
+            docker tag "$SOURCE_REPO:$tag" "$TARGET_REPO:$tag"
+            docker push "$TARGET_REPO:$tag"
+          done
