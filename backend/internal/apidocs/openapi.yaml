@@ -2200,6 +2200,37 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The parent mandate is no longer active.
+  /api/v1/orgs/{slug}/mandates/authority:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [organizations]
+      summary: Read the caller's own basis of authority over mandates
+      description: >-
+        Whether the caller may grant and revoke mandates in this organisation, and
+        on what basis: a register-backed legal representative, an active
+        organisation-wide full mandate, or neither. jointAuthority marks a
+        director registered as only able to act together with another one, whom
+        this layer still honours as a sole representative. Requires an
+        administrator role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/mandates/{id}/revoke:
     parameters:
       - name: slug

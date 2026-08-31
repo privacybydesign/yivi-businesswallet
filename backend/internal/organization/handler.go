@@ -41,6 +41,7 @@ type repository interface {
 	UpdateDepartment(ctx context.Context, orgID, deptID uuid.UUID, name string) (Department, error)
 	DeleteDepartment(ctx context.Context, orgID, deptID uuid.UUID) error
 	ListMandates(ctx context.Context, orgID uuid.UUID) ([]Mandate, error)
+	HasJointRepresentation(ctx context.Context, orgID, userID uuid.UUID) (bool, error)
 	GrantMandate(ctx context.Context, orgID, grantorUserID uuid.UUID, req MandateGrant) (Mandate, error)
 	RevokeMandate(ctx context.Context, orgID, mandateID, revokedBy uuid.UUID, effectiveAt *time.Time, reason string) ([]Mandate, error)
 }
@@ -142,6 +143,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// and revoking are gated on Axis A instead of on a role — see
 	// RequireMandateAuthority.
 	mux.Handle("GET /orgs/{slug}/mandates", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.listMandates))))
+	mux.Handle("GET /orgs/{slug}/mandates/authority", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.mandateAuthority))))
 	mux.Handle("POST /orgs/{slug}/mandates", orgScoped(RequireMandateAuthority(respond.HandlerFunc(h.grantMandate))))
 	mux.Handle("POST /orgs/{slug}/mandates/{id}/revoke", orgScoped(RequireMandateAuthority(respond.HandlerFunc(h.revokeMandate))))
 

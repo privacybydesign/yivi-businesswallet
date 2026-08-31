@@ -22,16 +22,32 @@ const mandateDepartmentFK = "mandates_department_fkey"
 // (Annex §12(3)(b): expired authorisations are rejected in real time).
 const mandateActive = `revoked_at IS NULL AND valid_from <= now() AND (valid_until IS NULL OR valid_until > now())`
 
-// legalRepresentativeExists is the Axis-A root: a claimed, unrevoked, in-window
-// `bestuurder` row. wallet_representations is written by the wallet slice from the
-// KVK registration attestation and is read-only here — the same direction as the
-// wallet slice writing memberships during bootstrap.
-const legalRepresentativeExists = `
-	EXISTS (SELECT 1 FROM wallet_representations r
-	        WHERE r.organization_id = $1 AND r.claimed_by_user_id = $2
-	          AND r.kind = 'bestuurder' AND r.revoked_at IS NULL
-	          AND (r.valid_from IS NULL OR r.valid_from <= now())
-	          AND (r.valid_until IS NULL OR r.valid_until > now()))`
+// representationAuthorityJointly is the wallet_representations.authority value
+// for a director registered as only able to bind the company together with
+// another one.
+const representationAuthorityJointly = "jointly"
+
+// claimedBestuurder selects the caller's register-backed representation rows: a
+// claimed, unrevoked, in-window `bestuurder`. wallet_representations is written by
+// the wallet slice from the KVK registration attestation and is read-only here —
+// the same direction as the wallet slice writing memberships during bootstrap.
+const claimedBestuurder = `
+	FROM wallet_representations r
+	WHERE r.organization_id = $1 AND r.claimed_by_user_id = $2
+	  AND r.kind = 'bestuurder' AND r.revoked_at IS NULL
+	  AND (r.valid_from IS NULL OR r.valid_from <= now())
+	  AND (r.valid_until IS NULL OR r.valid_until > now())`
+
+// legalRepresentativeExists is the Axis-A root.
+const legalRepresentativeExists = `EXISTS (SELECT 1` + claimedBestuurder + `)`
+
+// jointRepresentativeExists narrows the same root to a director registered
+// `jointly`. legalRepresentativeExists ignores the column on purpose, so such a
+// director is honoured here as if they could act alone (.ai/features/mandates.md
+// §7); this predicate is what lets the register screen say so instead of offering
+// a grant flow the layer cannot yet get right.
+const jointRepresentativeExists = `EXISTS (SELECT 1` + claimedBestuurder +
+	` AND r.authority = '` + representationAuthorityJointly + `')`
 
 // ResolveAuthority reads the caller's basis of authority in one org. Authorize
 // runs it on every org-scoped request, so it is one round trip: the
@@ -57,6 +73,21 @@ func (s *Store) ResolveAuthority(ctx context.Context, orgID, userID uuid.UUID) (
 	a.Mandated = orgWide > 0
 	a.FullMandate = full > 0
 	return a, nil
+}
+
+// HasJointRepresentation reports that the caller's register-backed authority is a
+// joint one: a `bestuurder` who under Dutch law may only bind the company
+// together with another director. ResolveAuthority deliberately ignores the
+// column, so the grant path would honour them as a sole representative; the
+// register screen reads this to withhold the grant flow rather than record a
+// grant no single director could make. Closing the gap properly means co-signing
+// (.ai/features/mandates.md §7).
+func (s *Store) HasJointRepresentation(ctx context.Context, orgID, userID uuid.UUID) (bool, error) {
+	var joint bool
+	if err := s.db.QueryRow(ctx, `SELECT `+jointRepresentativeExists, orgID, userID).Scan(&joint); err != nil {
+		return false, fmt.Errorf("organization: check joint representation %s org %s: %w", userID, orgID, err)
+	}
+	return joint, nil
 }
 
 const mandateColumns = `
