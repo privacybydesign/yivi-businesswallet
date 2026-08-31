@@ -16,6 +16,7 @@ import {
   mandateScopeLabel,
   mandateStatusTone,
   mandateTypeHint,
+  mandateWindowIsEmpty,
 } from "./mandate";
 
 function mandate(overrides: Partial<Mandate> & { id: string }): Mandate {
@@ -282,6 +283,50 @@ describe("mandateScopeLabel", () => {
     expect(mandateScopeLabel(mandate({ id: "a" }), t)).toBe(
       "mandates.scopes.organization",
     );
+  });
+});
+
+describe("mandateWindowIsEmpty", () => {
+  const now = "2026-06-01T12:00:00.000Z";
+
+  it("accepts an open-ended window", () => {
+    expect(mandateWindowIsEmpty(undefined, undefined, now)).toBe(false);
+    expect(
+      mandateWindowIsEmpty("2026-07-01T00:00:00.000Z", undefined, now),
+    ).toBe(false);
+  });
+
+  it("rejects an end at or before the start named", () => {
+    expect(
+      mandateWindowIsEmpty(
+        "2026-07-01T00:00:00.000Z",
+        "2026-06-15T00:00:00.000Z",
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      mandateWindowIsEmpty(
+        "2026-07-01T00:00:00.000Z",
+        "2026-07-01T00:00:00.000Z",
+        now,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects an end in the past when no start is named", () => {
+    // validateGrant fills valid_from with now, so this is the empty window the
+    // backend answers 400 for; leaving it to the round trip shows its
+    // untranslated prose.
+    expect(
+      mandateWindowIsEmpty(undefined, "2026-05-01T00:00:00.000Z", now),
+    ).toBe(true);
+    expect(mandateWindowIsEmpty(undefined, now, now)).toBe(true);
+  });
+
+  it("accepts an end in the future when no start is named", () => {
+    expect(
+      mandateWindowIsEmpty(undefined, "2026-07-01T00:00:00.000Z", now),
+    ).toBe(false);
   });
 });
 

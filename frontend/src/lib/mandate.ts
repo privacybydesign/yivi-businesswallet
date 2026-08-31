@@ -221,6 +221,19 @@ export function mandateGrantAvailability(
   return "available";
 }
 
+// mandateWindowIsEmpty reports a validity window with nothing left in it, which
+// the backend answers 400 for. An unset start means now, because validateGrant
+// fills valid_from in — so an end in the past closes the window even with no
+// start named, and checking only the both-set case round-trips into prose this
+// screen cannot translate.
+export function mandateWindowIsEmpty(
+  from: string | undefined,
+  until: string | undefined,
+  now: string,
+): boolean {
+  return until !== undefined && until <= (from ?? now);
+}
+
 // isoFromLocalInput turns a datetime-local field's value into the RFC 3339
 // instant the API takes. Empty stays empty: the backend's own defaults (now, and
 // open-ended) are what an unset field means.

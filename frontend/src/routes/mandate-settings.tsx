@@ -28,6 +28,7 @@ import {
   mandateStatusTone,
   mandateTypeHint,
   mandateTypeLabel,
+  mandateWindowIsEmpty,
 } from "../lib/mandate";
 import { Button, Card, Icon, Modal, Table, Tag } from "../ui";
 import * as React from "react";
@@ -170,8 +171,11 @@ function GrantMandateDialog({
 
   const from = isoFromLocalInput(validFrom);
   const until = isoFromLocalInput(validUntil);
-  const emptyWindow =
-    from !== undefined && until !== undefined && until <= from;
+  const emptyWindow = mandateWindowIsEmpty(
+    from,
+    until,
+    new Date().toISOString(),
+  );
 
   const granteeError = attempted && granteeUserId === "";
   const departmentError =
