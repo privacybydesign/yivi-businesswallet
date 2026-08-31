@@ -620,9 +620,22 @@ export function PlacementEditor({
                             {t("signing.placement.applyInitials")}
                           </div>
                           <div className="mt-2 flex flex-col gap-2">
-                            <span className="text-ink-soft text-[12px]">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                if (selected == null) return;
+                                update(
+                                  withPlacement(
+                                    withoutParaphs(activePlacements),
+                                    selected,
+                                  ),
+                                );
+                              }}
+                              disabled={selected == null}
+                            >
                               {t("signing.placement.thisPageOnly")}
-                            </span>
+                            </Button>
                             <Button
                               variant="secondary"
                               size="sm"
