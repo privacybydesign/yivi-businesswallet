@@ -980,11 +980,11 @@ function NewRequestTab({
                           <div className="font-display text-ink truncate text-[13.5px] font-semibold">
                             {signerLabel(signer)}
                           </div>
-                          <div className="text-ink-soft truncate font-mono text-[11px]">
-                            {signer.kind === SIGNER_KIND.external
-                              ? signer.email
-                              : signerKindLabel(t, signer.kind)}
-                          </div>
+                          {signer.kind === SIGNER_KIND.external && (
+                            <div className="text-ink-soft truncate font-mono text-[11px]">
+                              {signer.email}
+                            </div>
+                          )}
                         </div>
                         <Tag
                           tone={
