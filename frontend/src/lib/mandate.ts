@@ -42,6 +42,13 @@ const TYPE_KEYS = {
   administrative: "mandates.types.administrative",
 } as const;
 
+// The grant form's per-tier explanation. Kept beside TYPE_KEYS and looked up the
+// same way so a tier the backend gains cannot be described by another tier's hint.
+const TYPE_HINT_KEYS = {
+  full: "mandates.typeHints.full",
+  administrative: "mandates.typeHints.administrative",
+} as const;
+
 const SCOPE_KEYS = {
   organization: "mandates.scopes.organization",
   department: "mandates.scopes.department",
@@ -59,6 +66,16 @@ const STATUS_KEYS = {
 export function mandateTypeLabel(type: string, t: TFunction): string {
   const key = TYPE_KEYS[type as MandateType];
   return key === undefined ? type : t(key);
+}
+
+// No hint at all for a tier this file does not know: an unexplained option beats
+// one explained as something it is not.
+export function mandateTypeHint(
+  type: string,
+  t: TFunction,
+): string | undefined {
+  const key = TYPE_HINT_KEYS[type as MandateType];
+  return key === undefined ? undefined : t(key);
 }
 
 export function mandateScopeLabel(mandate: Mandate, t: TFunction): string {
@@ -202,6 +219,54 @@ export function mandateGrantAvailability(
     return "jointAuthority";
   }
   return "available";
+}
+
+// mandateMayRevoke follows the backend's own check in RevokeMandate: the
+// register-backed representative acts for the owner and may revoke anything,
+// anyone else may only take back what they gave. Without the grantor test a
+// full-mandate holder who is not a legal representative is offered Revoke on
+// every row and the API answers 403 on the ones they did not grant.
+export function mandateMayRevoke(
+  mandate: Mandate,
+  authority: MandateAuthority | undefined,
+  callerUserId: string | undefined,
+): boolean {
+  if (authority === undefined || !mandateIsRevocable(mandate)) {
+    return false;
+  }
+  if (mandateGrantAvailability(authority) !== "available") {
+    return false;
+  }
+  return (
+    authority.legalRepresentative ||
+    (callerUserId !== undefined && mandate.grantorUserId === callerUserId)
+  );
+}
+
+// mandateWindowIsEmpty reports a validity window with nothing left in it, which
+// the backend answers 400 for. An unset start means now, because validateGrant
+// fills valid_from in — so an end in the past closes the window even with no
+// start named, and checking only the both-set case round-trips into prose this
+// screen cannot translate.
+export function mandateWindowIsEmpty(
+  from: string | undefined,
+  until: string | undefined,
+  now: string,
+): boolean {
+  return until !== undefined && until <= (from ?? now);
+}
+
+// The message for an empty window has to name a start the reader can see. With
+// "Valid from" left blank the start is now, which is nowhere on the screen, so
+// the wording that points at it sends the reader to a field they emptied on
+// purpose.
+export function mandateWindowError(
+  from: string | undefined,
+  t: TFunction,
+): string {
+  return from === undefined
+    ? t("mandates.form.endInPast")
+    : t("mandates.form.emptyWindow");
 }
 
 // isoFromLocalInput turns a datetime-local field's value into the RFC 3339

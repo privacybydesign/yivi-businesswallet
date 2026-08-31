@@ -12,6 +12,7 @@ import {
   useOrganizationDepartmentsQuery,
   useOrganizationMembersQuery,
 } from "../api/organization.queries";
+import { useMeQuery } from "../api/auth.queries";
 import { ApiError } from "../api/http";
 import { useDateFormatter } from "../lib/format-when";
 import { fullName } from "../lib/name";
@@ -21,12 +22,15 @@ import {
   isoFromLocalInput,
   mandateCascade,
   mandateGrantAvailability,
-  mandateIsRevocable,
   mandateLineage,
+  mandateMayRevoke,
   mandateScopeLabel,
   mandateStatusLabel,
   mandateStatusTone,
+  mandateTypeHint,
   mandateTypeLabel,
+  mandateWindowError,
+  mandateWindowIsEmpty,
 } from "../lib/mandate";
 import { Button, Card, Icon, Modal, Table, Tag } from "../ui";
 import * as React from "react";
@@ -167,10 +171,13 @@ function GrantMandateDialog({
   const [validUntil, setValidUntil] = useState("");
   const [attempted, setAttempted] = useState(false);
 
+  // A dialog can sit open for minutes: an end two minutes out is valid when it
+  // is typed and empty by the time Grant is clicked, so submitting re-measures.
+  const [checkedAt, setCheckedAt] = useState(() => new Date().toISOString());
+
   const from = isoFromLocalInput(validFrom);
   const until = isoFromLocalInput(validUntil);
-  const emptyWindow =
-    from !== undefined && until !== undefined && until <= from;
+  const emptyWindow = mandateWindowIsEmpty(from, until, checkedAt);
 
   const granteeError = attempted && granteeUserId === "";
   const departmentError =
@@ -179,10 +186,12 @@ function GrantMandateDialog({
   function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     setAttempted(true);
+    const submittedAt = new Date().toISOString();
+    setCheckedAt(submittedAt);
     if (
       grant.isPending ||
       granteeUserId === "" ||
-      emptyWindow ||
+      mandateWindowIsEmpty(from, until, submittedAt) ||
       (scope === "department" && departmentId === "")
     ) {
       return;
@@ -256,11 +265,7 @@ function GrantMandateDialog({
         <Field
           id="mandate-type"
           label={t("mandates.form.type")}
-          hint={
-            type === "full"
-              ? t("mandates.typeHints.full")
-              : t("mandates.typeHints.administrative")
-          }
+          hint={mandateTypeHint(type, t)}
         >
           <select
             id="mandate-type"
@@ -340,7 +345,7 @@ function GrantMandateDialog({
             id="mandate-valid-until"
             label={t("mandates.form.validUntil")}
             hint={t("mandates.form.validUntilHint")}
-            error={emptyWindow ? t("mandates.form.emptyWindow") : undefined}
+            error={emptyWindow ? mandateWindowError(from, t) : undefined}
           >
             <input
               id="mandate-valid-until"
@@ -544,6 +549,7 @@ export function MandateSettings({ slug }: { slug: string }): React.JSX.Element {
   const { t } = useTranslation();
   const mandates = useMandatesQuery(slug);
   const authority = useMandateAuthorityQuery(slug);
+  const me = useMeQuery();
   const formatDate = useDateFormatter();
 
   const [granting, setGranting] = useState(false);
@@ -673,16 +679,15 @@ export function MandateSettings({ slug }: { slug: string }): React.JSX.Element {
                     </Tag>
                   </Table.Cell>
                   <Table.Cell className="text-right">
-                    {availability === "available" &&
-                      mandateIsRevocable(mandate) && (
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() => setRevoking(mandate.id)}
-                        >
-                          {t("mandates.revoke")}
-                        </Button>
-                      )}
+                    {mandateMayRevoke(mandate, authority.data, me.data?.id) && (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => setRevoking(mandate.id)}
+                      >
+                        {t("mandates.revoke")}
+                      </Button>
+                    )}
                   </Table.Cell>
                 </Table.Row>
               );

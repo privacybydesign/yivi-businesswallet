@@ -1443,6 +1443,7 @@ export const nl: Translation<typeof en> = {
       validUntil: "Geldig tot",
       validUntilHint: "Laat leeg voor geen einddatum.",
       emptyWindow: "Het einde moet na het begin liggen.",
+      endInPast: "Het einde moet in de toekomst liggen.",
       when: "Wanneer het ingaat",
       immediately: "Direct",
       onADate: "Op een datum",

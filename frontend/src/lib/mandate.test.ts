@@ -13,8 +13,12 @@ import {
   mandateGrantAvailability,
   mandateIsRevocable,
   mandateLineage,
+  mandateMayRevoke,
   mandateScopeLabel,
   mandateStatusTone,
+  mandateTypeHint,
+  mandateWindowError,
+  mandateWindowIsEmpty,
 } from "./mandate";
 
 function mandate(overrides: Partial<Mandate> & { id: string }): Mandate {
@@ -284,6 +288,203 @@ describe("mandateScopeLabel", () => {
   });
 });
 
+describe("mandateMayRevoke", () => {
+  const authority = (
+    overrides: Partial<MandateAuthority> = {},
+  ): MandateAuthority => ({
+    mayGrant: false,
+    legalRepresentative: false,
+    fullMandate: false,
+    jointAuthority: false,
+    ...overrides,
+  });
+
+  const legalRep = authority({ mayGrant: true, legalRepresentative: true });
+  const fullHolder = authority({ mayGrant: true, fullMandate: true });
+
+  it("lets a legal representative revoke a mandate somebody else granted", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-boss" }),
+        legalRep,
+        "user-me",
+      ),
+    ).toBe(true);
+  });
+
+  it("withholds revoke from a full-mandate holder who did not grant it", () => {
+    // RevokeMandate lets anyone who is not a legal representative take back only
+    // what they gave, so offering the button here fails with a 403 on click.
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-boss" }),
+        fullHolder,
+        "user-me",
+      ),
+    ).toBe(false);
+  });
+
+  it("offers it to a full-mandate holder on a mandate they granted", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-me" }),
+        fullHolder,
+        "user-me",
+      ),
+    ).toBe(true);
+  });
+
+  it("withholds it on a mandate whose grantor account is gone", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: null }),
+        fullHolder,
+        "user-me",
+      ),
+    ).toBe(false);
+  });
+
+  it("withholds it while the caller is unknown", () => {
+    // The `me` query can still be in flight; a null grantor must not read as a
+    // match for an absent caller.
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: null }),
+        fullHolder,
+        undefined,
+      ),
+    ).toBe(false);
+  });
+
+  it("withholds it while the authority is still loading", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-me" }),
+        undefined,
+        "user-me",
+      ),
+    ).toBe(false);
+  });
+
+  it("withholds it from a caller the backend gate would refuse", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-me" }),
+        authority(),
+        "user-me",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps the hold on a jointly registered director", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-me" }),
+        authority({
+          mayGrant: true,
+          legalRepresentative: true,
+          jointAuthority: true,
+        }),
+        "user-me",
+      ),
+    ).toBe(false);
+  });
+
+  it("withholds it on a mandate that already ended", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", status: "revoked", grantorUserId: "user-me" }),
+        legalRep,
+        "user-me",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("mandateWindowIsEmpty", () => {
+  const now = "2026-06-01T12:00:00.000Z";
+
+  it("accepts an open-ended window", () => {
+    expect(mandateWindowIsEmpty(undefined, undefined, now)).toBe(false);
+    expect(
+      mandateWindowIsEmpty("2026-07-01T00:00:00.000Z", undefined, now),
+    ).toBe(false);
+  });
+
+  it("rejects an end at or before the start named", () => {
+    expect(
+      mandateWindowIsEmpty(
+        "2026-07-01T00:00:00.000Z",
+        "2026-06-15T00:00:00.000Z",
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      mandateWindowIsEmpty(
+        "2026-07-01T00:00:00.000Z",
+        "2026-07-01T00:00:00.000Z",
+        now,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects an end in the past when no start is named", () => {
+    // validateGrant fills valid_from with now, so this is the empty window the
+    // backend answers 400 for; leaving it to the round trip shows its
+    // untranslated prose.
+    expect(
+      mandateWindowIsEmpty(undefined, "2026-05-01T00:00:00.000Z", now),
+    ).toBe(true);
+    expect(mandateWindowIsEmpty(undefined, now, now)).toBe(true);
+  });
+
+  it("accepts an end in the future when no start is named", () => {
+    expect(
+      mandateWindowIsEmpty(undefined, "2026-07-01T00:00:00.000Z", now),
+    ).toBe(false);
+  });
+});
+
+describe("mandateWindowError", () => {
+  const t = ((key: string) => key) as unknown as Parameters<
+    typeof mandateWindowError
+  >[1];
+
+  it("points at the start when the reader can see it", () => {
+    expect(mandateWindowError("2026-07-01T00:00:00.000Z", t)).toBe(
+      "mandates.form.emptyWindow",
+    );
+  });
+
+  it("points at the future when no start is on screen", () => {
+    // "after the start" would send the reader to a field they left blank on
+    // purpose; the start it means is now.
+    expect(mandateWindowError(undefined, t)).toBe("mandates.form.endInPast");
+  });
+
+  it("has copy for both messages", () => {
+    expect(en.mandates.form.emptyWindow).toBeTruthy();
+    expect(en.mandates.form.endInPast).toBeTruthy();
+  });
+});
+
+describe("mandateTypeHint", () => {
+  const t = ((key: string) => key) as unknown as Parameters<
+    typeof mandateTypeHint
+  >[1];
+
+  it("explains each tier it knows", () => {
+    expect(mandateTypeHint("full", t)).toBe("mandates.typeHints.full");
+    expect(mandateTypeHint("administrative", t)).toBe(
+      "mandates.typeHints.administrative",
+    );
+  });
+
+  it("has no hint for a tier it does not know", () => {
+    expect(mandateTypeHint("something-new", t)).toBeUndefined();
+  });
+});
+
 describe("isoFromLocalInput", () => {
   it("has no value for an empty field, so the backend default applies", () => {
     expect(isoFromLocalInput("")).toBeUndefined();
@@ -355,6 +556,11 @@ describe("mandate constants backend/frontend parity", () => {
     expect(
       en.mandates.typeHints[type as keyof typeof en.mandates.typeHints],
     ).toBeTruthy();
+    // Naming the hint in en.ts is not enough: the grant form reads it through
+    // TYPE_HINT_KEYS, so a tier missing from that map would go unexplained.
+    expect(mandateTypeHint(type, ((key: string) => key) as never)).toBe(
+      `mandates.typeHints.${type}`,
+    );
   });
 
   it.each([...MANDATE_TYPES])("is served the tier %s", (type) => {
