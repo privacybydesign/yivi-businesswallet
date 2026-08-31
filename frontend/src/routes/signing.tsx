@@ -1150,9 +1150,6 @@ function NewRequestTab({
                     onSelect={() => setChannel(RECIPIENT_CHANNEL.qerds)}
                     title={channelLabel(t, RECIPIENT_CHANNEL.qerds)}
                     description={t("signing.deliveryQerdsDesc")}
-                    trailing={
-                      <Tag tone="green">{t("signing.externalTag")}</Tag>
-                    }
                   />
                 </div>
 
