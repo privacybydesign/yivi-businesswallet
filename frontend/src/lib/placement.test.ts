@@ -5,6 +5,7 @@ import {
   DEFAULT_PARAPH_SIZE,
   DEFAULT_SIGNATURE_SIZE,
   MIN_PLACEMENT_SIZE,
+  alignParaphs,
   defaultSize,
   findPlacement,
   moveBy,
@@ -196,6 +197,55 @@ describe("paraphOnEveryPage", () => {
   it("replaces any paraphs that were already there", () => {
     const got = paraphOnEveryPage([paraph(2, 10, 10)], paraph(1), boxes);
     expect(got.filter((p) => p.page === 2)).toHaveLength(1);
+  });
+});
+
+describe("alignParaphs", () => {
+  it("moves every paraph to the same spot, so initials stay aligned across pages", () => {
+    const got = alignParaphs(
+      [paraph(1, 500, 40), paraph(2, 500, 40)],
+      paraph(1, 100, 100),
+      [a4, a4],
+    );
+    expect(got.every((p) => p.x === 100 && p.y === 100)).toBe(true);
+  });
+
+  it("leaves the signature block alone", () => {
+    const block = placeAt(
+      PLACEMENT_KIND.signature,
+      1,
+      { x: 100, y: 100 },
+      defaultSize(PLACEMENT_KIND.signature),
+      a4,
+    );
+    const got = alignParaphs(
+      [block, paraph(1, 500, 40), paraph(2, 500, 40)],
+      paraph(1, 100, 100),
+      [a4, a4],
+    );
+    expect(findPlacement(got, PLACEMENT_KIND.signature, 1)).toEqual(block);
+  });
+
+  it("does not add a paraph to a page that had none", () => {
+    const got = alignParaphs([paraph(1, 500, 40)], paraph(1, 100, 100), [
+      a4,
+      a4,
+      a4,
+    ]);
+    expect(
+      got.filter((p) => p.kind === PLACEMENT_KIND.paraph).map((p) => p.page),
+    ).toEqual([1]);
+  });
+
+  it("fits the moved copy to a page that is smaller than the one dragged", () => {
+    const got = alignParaphs(
+      [paraph(1, 500, 40), paraph(3, 50, 50)],
+      paraph(1, 500, 40),
+      [a4, a4, cropped],
+    );
+    const onCropped = got.find((p) => p.page === 3);
+    expect(onCropped).toBeDefined();
+    expect(onCropped!.x + onCropped!.width).toBeLessThanOrEqual(cropped.maxX);
   });
 });
 

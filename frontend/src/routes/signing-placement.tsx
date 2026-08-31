@@ -16,6 +16,7 @@ import {
   MIN_PLACEMENT_SIZE,
   NUDGE_STEP,
   NUDGE_STEP_LARGE,
+  alignParaphs,
   countParaphs,
   defaultSize,
   findPlacement,
@@ -238,6 +239,16 @@ export function PlacementEditor({
 
   const update = (next: Placement[]): void => onChange(activeSigner, next);
 
+  // Committing a moved or resized mark. A signature stands alone, but a paraph is one
+  // of the signer's initials, which sit in the same spot on every page — so moving or
+  // resizing one carries the rest with it instead of leaving them behind page by page.
+  const commitMark = (mark: Placement): void =>
+    update(
+      mark.kind === PLACEMENT_KIND.paraph
+        ? alignParaphs(activePlacements, mark, boxes)
+        : withPlacement(activePlacements, mark),
+    );
+
   const placeCentre = (centre: { x: number; y: number }): void => {
     if (box == null) return;
     const existing = findPlacement(activePlacements, kind, page);
@@ -272,12 +283,7 @@ export function PlacementEditor({
       if (!moved && Math.abs(dx) + Math.abs(dy) < 2) return;
       moved = true;
       const delta = pdfDelta(dx, dy);
-      update(
-        withPlacement(
-          activePlacements,
-          moveBy(origin, delta.dx, delta.dy, box),
-        ),
-      );
+      commitMark(moveBy(origin, delta.dx, delta.dy, box));
     };
     const onUp = (): void => {
       target.removeEventListener("pointermove", onMove);
@@ -304,12 +310,7 @@ export function PlacementEditor({
     if (move == null || box == null) return;
     event.preventDefault();
     const delta = pdfDelta(move[0], move[1]);
-    update(
-      withPlacement(
-        activePlacements,
-        moveBy(placement, delta.dx, delta.dy, box),
-      ),
-    );
+    commitMark(moveBy(placement, delta.dx, delta.dy, box));
   };
 
   const selected = findPlacement(activePlacements, kind, page);
@@ -717,17 +718,14 @@ export function PlacementEditor({
                               value={Math.round(selected.width)}
                               onChange={(e) => {
                                 if (box == null) return;
-                                update(
-                                  withPlacement(
-                                    activePlacements,
-                                    resizeTo(
-                                      selected,
-                                      {
-                                        width: Number(e.target.value),
-                                        height: selected.height,
-                                      },
-                                      box,
-                                    ),
+                                commitMark(
+                                  resizeTo(
+                                    selected,
+                                    {
+                                      width: Number(e.target.value),
+                                      height: selected.height,
+                                    },
+                                    box,
                                   ),
                                 );
                               }}
@@ -744,17 +742,14 @@ export function PlacementEditor({
                               value={Math.round(selected.height)}
                               onChange={(e) => {
                                 if (box == null) return;
-                                update(
-                                  withPlacement(
-                                    activePlacements,
-                                    resizeTo(
-                                      selected,
-                                      {
-                                        width: selected.width,
-                                        height: Number(e.target.value),
-                                      },
-                                      box,
-                                    ),
+                                commitMark(
+                                  resizeTo(
+                                    selected,
+                                    {
+                                      width: selected.width,
+                                      height: Number(e.target.value),
+                                    },
+                                    box,
                                   ),
                                 );
                               }}

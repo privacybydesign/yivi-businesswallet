@@ -162,6 +162,28 @@ export function paraphOnEveryPage(
   return sortPlacements([...kept, ...paraphs]);
 }
 
+// alignParaphs keeps every one of a signer's paraphs at the same rectangle: initials
+// sit in the same spot on each page they occupy, so moving or resizing one moves them
+// all rather than making the requester reposition page by page. The set of pages a
+// paraph lives on is chosen elsewhere (place / every page); pages without one are left
+// untouched. `rect` is the new geometry of the mark being dragged or resized.
+export function alignParaphs(
+  placements: Placement[],
+  rect: Size & { x: number; y: number },
+  boxes: PageBox[],
+): Placement[] {
+  const centre = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  const size = { width: rect.width, height: rect.height };
+  return sortPlacements(
+    placements.map((p) => {
+      const box = boxes[p.page - 1];
+      return p.kind === PLACEMENT_KIND.paraph && box != null
+        ? placeAt(PLACEMENT_KIND.paraph, p.page, centre, size, box)
+        : p;
+    }),
+  );
+}
+
 export function withoutParaphs(placements: Placement[]): Placement[] {
   return placements.filter((p) => p.kind !== PLACEMENT_KIND.paraph);
 }
