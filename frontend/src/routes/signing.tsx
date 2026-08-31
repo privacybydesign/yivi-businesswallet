@@ -567,8 +567,10 @@ function WizardStepRail({
         return (
           <li key={label} className="flex items-center">
             {index > 0 && (
+              // mb mirrors the button's pb-3.5 so the connector lines up with the
+              // circles' centres, not the centre of the underline-padded button.
               <span
-                className="bg-line-strong mx-1 h-px w-6 shrink-0 md:w-7"
+                className="bg-line-strong mx-1 mb-3.5 h-px w-6 shrink-0 md:w-7"
                 aria-hidden="true"
               />
             )}
