@@ -29,6 +29,38 @@ func (h *Handler) listMandates(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// mandateAuthorityResponse is the caller's own basis of authority in this
+// organization. The register screen needs it to offer the grant and revoke
+// actions to exactly the callers RequireMandateAuthority would let through, and
+// to say why it is withholding them from anyone else.
+type mandateAuthorityResponse struct {
+	MayGrant            bool `json:"mayGrant"`
+	LegalRepresentative bool `json:"legalRepresentative"`
+	FullMandate         bool `json:"fullMandate"`
+	// JointAuthority marks a `jointly` registered director. This layer honours
+	// them as a sole representative, which is the one gap that would let the UI
+	// imply a capability the backend cannot yet get right.
+	JointAuthority bool `json:"jointAuthority"`
+}
+
+func (h *Handler) mandateAuthority(w http.ResponseWriter, r *http.Request) error {
+	org := OrgFromContext(r.Context())
+	caller := auth.UserFromContext(r.Context())
+	joint, err := h.store.HasJointRepresentation(r.Context(), org.ID, caller.ID)
+	if err != nil {
+		return fmt.Errorf("resolving joint representation: %w", err)
+	}
+
+	authority := AuthorityFromContext(r.Context())
+	respond.JSON(w, r, http.StatusOK, mandateAuthorityResponse{
+		MayGrant:            authority.MayGrantMandate(),
+		LegalRepresentative: authority.LegalRepresentative,
+		FullMandate:         authority.FullMandate,
+		JointAuthority:      joint,
+	})
+	return nil
+}
+
 type grantMandateRequest struct {
 	Type            string     `json:"type"`
 	GranteeUserID   string     `json:"granteeUserId"`

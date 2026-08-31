@@ -37,13 +37,109 @@ func (e *testEnv) loginAs(email string) uuid.UUID {
 // the only basis that may grant a mandate nobody delegated to it.
 func (e *testEnv) claimRepresentation(orgID, userID uuid.UUID) {
 	e.t.Helper()
+	e.claimRepresentationAs(orgID, userID, "sole")
+}
+
+// claimRepresentationAs is claimRepresentation with the registered authority
+// spelled out, so a test can set up a `jointly` director.
+func (e *testEnv) claimRepresentationAs(orgID, userID uuid.UUID, authority string) {
+	e.t.Helper()
 	if _, err := e.pool.Exec(context.Background(),
 		`INSERT INTO wallet_representations
-			(organization_id, kind, given_names, family_name, claimed_by_user_id, claimed_at)
-		 VALUES ($1, 'bestuurder', 'Test', 'Boss', $2, now())`,
-		orgID, userID,
+			(organization_id, kind, given_names, family_name, authority, claimed_by_user_id, claimed_at)
+		 VALUES ($1, 'bestuurder', 'Test', 'Boss', $2, $3, now())`,
+		orgID, authority, userID,
 	); err != nil {
 		e.t.Fatalf("claim representation: %v", err)
+	}
+}
+
+// mandateAuthority is the shape GET /orgs/{slug}/mandates/authority serves. The
+// register screen reads it to decide which mandate actions to offer.
+type mandateAuthority struct {
+	MayGrant            bool `json:"mayGrant"`
+	LegalRepresentative bool `json:"legalRepresentative"`
+	FullMandate         bool `json:"fullMandate"`
+	JointAuthority      bool `json:"jointAuthority"`
+}
+
+func (e *testEnv) mandateAuthority(slug string) mandateAuthority {
+	e.t.Helper()
+	resp := e.do(http.MethodGet, "/api/v1/orgs/"+slug+"/mandates/authority", nil)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		e.t.Fatalf("GET mandate authority = %d, want 200", resp.StatusCode)
+	}
+	var got mandateAuthority
+	decode(e.t, resp, &got)
+	return got
+}
+
+func TestMandateAuthorityReportsNoBasisForAPlainAdmin(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("boss@example.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+
+	// The register is readable by an admin, but the role is not a basis of
+	// authority, so the screen must not offer a grant flow.
+	if got := env.mandateAuthority("acme"); got != (mandateAuthority{}) {
+		t.Errorf("authority for a plain admin = %+v, want no basis at all", got)
+	}
+}
+
+func TestMandateAuthorityReportsALegalRepresentative(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("boss@example.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+	env.claimRepresentation(orgID, me.ID)
+
+	got := env.mandateAuthority("acme")
+	want := mandateAuthority{MayGrant: true, LegalRepresentative: true}
+	if got != want {
+		t.Errorf("authority for a sole bestuurder = %+v, want %+v", got, want)
+	}
+}
+
+func TestMandateAuthorityReportsJointRegistration(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("boss@example.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+	env.claimRepresentationAs(orgID, me.ID, "jointly")
+
+	// The layer still honours them as a sole representative (mandates.md §7), so
+	// MayGrant stays true; JointAuthority is what lets the screen say the grant
+	// flow is not there yet rather than record a grant one director cannot make.
+	got := env.mandateAuthority("acme")
+	want := mandateAuthority{MayGrant: true, LegalRepresentative: true, JointAuthority: true}
+	if got != want {
+		t.Errorf("authority for a jointly registered bestuurder = %+v, want %+v", got, want)
+	}
+}
+
+func TestMandateAuthorityReportsAFullMandateHolder(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	boss := env.login("boss@example.test")
+	env.addMembership(boss.ID, orgID, organization.RoleAdmin)
+	env.claimRepresentation(orgID, boss.ID)
+
+	deputy := env.createUser("deputy@example.test")
+	env.addMembership(deputy, orgID, organization.RoleAdmin)
+	resp := env.do(http.MethodPost, "/api/v1/orgs/acme/mandates",
+		jsonBody(`{"type":"full","granteeUserId":"`+deputy.String()+`","scope":"organization"}`))
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST mandate = %d, want 201", resp.StatusCode)
+	}
+
+	env.loginAs("deputy@example.test")
+	got := env.mandateAuthority("acme")
+	want := mandateAuthority{MayGrant: true, FullMandate: true}
+	if got != want {
+		t.Errorf("authority for a full-mandate holder = %+v, want %+v", got, want)
 	}
 }
 

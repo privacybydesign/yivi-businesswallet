@@ -80,6 +80,10 @@ func (f fakeRepo) ResolveAuthority(context.Context, uuid.UUID, uuid.UUID) (Autho
 
 func (f fakeRepo) ListMandates(context.Context, uuid.UUID) ([]Mandate, error) { return nil, nil }
 
+func (f fakeRepo) HasJointRepresentation(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 func (f fakeRepo) GrantMandate(context.Context, uuid.UUID, uuid.UUID, MandateGrant) (Mandate, error) {
 	return Mandate{}, nil
 }
