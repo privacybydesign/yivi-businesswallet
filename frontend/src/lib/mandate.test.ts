@@ -13,6 +13,7 @@ import {
   mandateGrantAvailability,
   mandateIsRevocable,
   mandateLineage,
+  mandateMayRevoke,
   mandateScopeLabel,
   mandateStatusTone,
   mandateTypeHint,
@@ -283,6 +284,119 @@ describe("mandateScopeLabel", () => {
     expect(mandateScopeLabel(mandate({ id: "a" }), t)).toBe(
       "mandates.scopes.organization",
     );
+  });
+});
+
+describe("mandateMayRevoke", () => {
+  const authority = (
+    overrides: Partial<MandateAuthority> = {},
+  ): MandateAuthority => ({
+    mayGrant: false,
+    legalRepresentative: false,
+    fullMandate: false,
+    jointAuthority: false,
+    ...overrides,
+  });
+
+  const legalRep = authority({ mayGrant: true, legalRepresentative: true });
+  const fullHolder = authority({ mayGrant: true, fullMandate: true });
+
+  it("lets a legal representative revoke a mandate somebody else granted", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-boss" }),
+        legalRep,
+        "user-me",
+      ),
+    ).toBe(true);
+  });
+
+  it("withholds revoke from a full-mandate holder who did not grant it", () => {
+    // RevokeMandate lets anyone who is not a legal representative take back only
+    // what they gave, so offering the button here fails with a 403 on click.
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-boss" }),
+        fullHolder,
+        "user-me",
+      ),
+    ).toBe(false);
+  });
+
+  it("offers it to a full-mandate holder on a mandate they granted", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-me" }),
+        fullHolder,
+        "user-me",
+      ),
+    ).toBe(true);
+  });
+
+  it("withholds it on a mandate whose grantor account is gone", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: null }),
+        fullHolder,
+        "user-me",
+      ),
+    ).toBe(false);
+  });
+
+  it("withholds it while the caller is unknown", () => {
+    // The `me` query can still be in flight; a null grantor must not read as a
+    // match for an absent caller.
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: null }),
+        fullHolder,
+        undefined,
+      ),
+    ).toBe(false);
+  });
+
+  it("withholds it while the authority is still loading", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-me" }),
+        undefined,
+        "user-me",
+      ),
+    ).toBe(false);
+  });
+
+  it("withholds it from a caller the backend gate would refuse", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-me" }),
+        authority(),
+        "user-me",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps the hold on a jointly registered director", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", grantorUserId: "user-me" }),
+        authority({
+          mayGrant: true,
+          legalRepresentative: true,
+          jointAuthority: true,
+        }),
+        "user-me",
+      ),
+    ).toBe(false);
+  });
+
+  it("withholds it on a mandate that already ended", () => {
+    expect(
+      mandateMayRevoke(
+        mandate({ id: "a", status: "revoked", grantorUserId: "user-me" }),
+        legalRep,
+        "user-me",
+      ),
+    ).toBe(false);
   });
 });
 

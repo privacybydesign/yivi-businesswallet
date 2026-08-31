@@ -221,6 +221,28 @@ export function mandateGrantAvailability(
   return "available";
 }
 
+// mandateMayRevoke follows the backend's own check in RevokeMandate: the
+// register-backed representative acts for the owner and may revoke anything,
+// anyone else may only take back what they gave. Without the grantor test a
+// full-mandate holder who is not a legal representative is offered Revoke on
+// every row and the API answers 403 on the ones they did not grant.
+export function mandateMayRevoke(
+  mandate: Mandate,
+  authority: MandateAuthority | undefined,
+  callerUserId: string | undefined,
+): boolean {
+  if (authority === undefined || !mandateIsRevocable(mandate)) {
+    return false;
+  }
+  if (mandateGrantAvailability(authority) !== "available") {
+    return false;
+  }
+  return (
+    authority.legalRepresentative ||
+    (callerUserId !== undefined && mandate.grantorUserId === callerUserId)
+  );
+}
+
 // mandateWindowIsEmpty reports a validity window with nothing left in it, which
 // the backend answers 400 for. An unset start means now, because validateGrant
 // fills valid_from in — so an end in the past closes the window even with no

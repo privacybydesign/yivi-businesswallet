@@ -12,6 +12,7 @@ import {
   useOrganizationDepartmentsQuery,
   useOrganizationMembersQuery,
 } from "../api/organization.queries";
+import { useMeQuery } from "../api/auth.queries";
 import { ApiError } from "../api/http";
 import { useDateFormatter } from "../lib/format-when";
 import { fullName } from "../lib/name";
@@ -21,8 +22,8 @@ import {
   isoFromLocalInput,
   mandateCascade,
   mandateGrantAvailability,
-  mandateIsRevocable,
   mandateLineage,
+  mandateMayRevoke,
   mandateScopeLabel,
   mandateStatusLabel,
   mandateStatusTone,
@@ -545,6 +546,7 @@ export function MandateSettings({ slug }: { slug: string }): React.JSX.Element {
   const { t } = useTranslation();
   const mandates = useMandatesQuery(slug);
   const authority = useMandateAuthorityQuery(slug);
+  const me = useMeQuery();
   const formatDate = useDateFormatter();
 
   const [granting, setGranting] = useState(false);
@@ -674,16 +676,15 @@ export function MandateSettings({ slug }: { slug: string }): React.JSX.Element {
                     </Tag>
                   </Table.Cell>
                   <Table.Cell className="text-right">
-                    {availability === "available" &&
-                      mandateIsRevocable(mandate) && (
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() => setRevoking(mandate.id)}
-                        >
-                          {t("mandates.revoke")}
-                        </Button>
-                      )}
+                    {mandateMayRevoke(mandate, authority.data, me.data?.id) && (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => setRevoking(mandate.id)}
+                      >
+                        {t("mandates.revoke")}
+                      </Button>
+                    )}
                   </Table.Cell>
                 </Table.Row>
               );
