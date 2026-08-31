@@ -3,8 +3,9 @@ package organization
 import "context"
 
 type (
-	orgCtxKey  struct{}
-	roleCtxKey struct{}
+	orgCtxKey       struct{}
+	roleCtxKey      struct{}
+	authorityCtxKey struct{}
 )
 
 func contextWithOrg(ctx context.Context, org Organization) context.Context {
@@ -50,4 +51,26 @@ func RoleFromContext(ctx context.Context) string {
 // IsAdmin reports whether the caller's effective role in the resolved org is admin.
 func IsAdmin(ctx context.Context) bool {
 	return roleFromContext(ctx) == RoleAdmin
+}
+
+func contextWithAuthority(ctx context.Context, a Authority) context.Context {
+	return context.WithValue(ctx, authorityCtxKey{}, a)
+}
+
+// ContextWithAuthority returns ctx carrying the caller's basis of authority, the
+// third companion of ContextWithOrg and ContextWithRole: a handler test in another
+// package that composes RequireOrgAdmin needs it too, since the middleware that
+// normally sets it is this package's.
+func ContextWithAuthority(ctx context.Context, a Authority) context.Context {
+	return contextWithAuthority(ctx, a)
+}
+
+// AuthorityFromContext returns the caller's basis of authority in the resolved
+// org, as set by the Authorize middleware. The zero Authority — no mandates
+// granted, so nothing withdrawn and no mandate authority — is what a caller
+// outside the org-scoped chain sees, which is why every field is false-or-zero
+// safe.
+func AuthorityFromContext(ctx context.Context) Authority {
+	a, _ := ctx.Value(authorityCtxKey{}).(Authority)
+	return a
 }

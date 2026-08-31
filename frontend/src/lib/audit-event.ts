@@ -26,6 +26,8 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "membership.revoked": { icon: "close", tone: "red" },
   "membership.role_changed": { icon: "settings", tone: "blue" },
   "membership.expired": { icon: "time", tone: "slate" },
+  "mandate.granted": { icon: "valid", tone: "violet" },
+  "mandate.revoked": { icon: "close", tone: "red" },
   "department.created": { icon: "add", tone: "green" },
   "department.updated": { icon: "edit", tone: "blue" },
   "department.deleted": { icon: "delete", tone: "red" },
@@ -105,6 +107,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.roleChanged");
     case "membership.expired":
       return t("auditLog.actions.inviteExpired");
+    case "mandate.granted":
+      return t("auditLog.actions.mandateGranted");
+    case "mandate.revoked":
+      return t("auditLog.actions.mandateRevoked");
     case "department.created":
       return t("auditLog.actions.deptCreated");
     case "department.updated":
@@ -240,6 +246,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.member");
     case "department":
       return t("auditLog.targets.department");
+    case "mandate":
+      return t("auditLog.targets.mandate");
     case "user":
       return t("auditLog.targets.user");
     case "qerds_message":
