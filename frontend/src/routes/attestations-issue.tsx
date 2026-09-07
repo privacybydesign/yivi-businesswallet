@@ -179,7 +179,7 @@ export function AttestationIssueWizard({
   const claimed = issued.data?.status === CLAIMED_STATUS;
 
   // Render the offer link as a QR once issued (natural-person recipients only;
-  // the organization path shows a status stepper instead of a scannable code).
+  // the organization path shows a success outcome instead of a scannable code).
   useEffect(() => {
     if (!result || result.recipientKind === RECIPIENT_ORGANIZATION) {
       return;
