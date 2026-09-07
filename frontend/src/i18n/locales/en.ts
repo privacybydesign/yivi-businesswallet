@@ -1859,16 +1859,12 @@ export const en = {
         "Scan the QR with the recipient's wallet to claim the attestation.",
       offerEmailedHint:
         "A claim link was e-mailed to {{recipient}}. They can also scan this QR to claim it now.",
+      offerSentTitle: "Offer sent",
       offerOrgHint:
-        "The offer was delivered to the organization over QERDS. Its wallet redeems it automatically.",
-      offerSteps: {
-        sent: "Offer sent",
-        claimed: "Received",
-      },
+        "The offer was delivered to the organization over QERDS. An admin there must accept it from their Wallet tab before it enters the organization's wallet.",
       openWallet: "Open wallet",
       txCode: "Transaction code: {{code}}",
       waiting: "Waiting for the recipient to claim…",
-      waitingOrg: "Waiting for the organization's wallet to redeem the offer…",
       claimedTitle: "Attestation claimed",
       claimedHint: "The recipient has added the attestation to their wallet.",
       done: "Done",

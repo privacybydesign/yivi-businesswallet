@@ -1906,17 +1906,12 @@ export const nl: Translation<typeof en> = {
         "Scan de QR-code met de wallet van de ontvanger om de attestatie te claimen.",
       offerEmailedHint:
         "Er is een claimlink gemaild naar {{recipient}}. Ze kunnen deze QR-code ook scannen om nu te claimen.",
+      offerSentTitle: "Offer verstuurd",
       offerOrgHint:
-        "De offer is via QERDS aan de organisatie bezorgd. Haar wallet verzilvert deze automatisch.",
-      offerSteps: {
-        sent: "Offer verstuurd",
-        claimed: "Ontvangen",
-      },
+        "De offer is via QERDS aan de organisatie bezorgd. Een beheerder daar moet deze accepteren via het Wallet-tabblad voordat de offer in de wallet van de organisatie terechtkomt.",
       openWallet: "Open wallet",
       txCode: "Transactiecode: {{code}}",
       waiting: "Wachten tot de ontvanger claimt…",
-      waitingOrg:
-        "Wachten tot de wallet van de organisatie de offer verzilvert…",
       claimedTitle: "Attestatie geclaimd",
       claimedHint:
         "De ontvanger heeft de attestatie aan zijn wallet toegevoegd.",
