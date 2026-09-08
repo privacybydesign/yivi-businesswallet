@@ -290,6 +290,14 @@ export default function MemberDetail(): React.JSX.Element {
               value={member.departmentName ?? "—"}
             />
             <DetailRow label={t("common.phone")} value={member.phone ?? "—"} />
+            <DetailRow
+              label={t("memberDetail.identifiedOn")}
+              value={
+                member.identityVerifiedAt
+                  ? dateFormatter.format(new Date(member.identityVerifiedAt))
+                  : t("memberDetail.never")
+              }
+            />
           </div>
           <div className="border-line flex flex-col gap-2 border-t p-4">
             <Button

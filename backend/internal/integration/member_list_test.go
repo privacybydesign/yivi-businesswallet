@@ -14,19 +14,21 @@ import (
 )
 
 type memberEntry struct {
-	Status         string     `json:"status"`
-	UserID         *uuid.UUID `json:"userId"`
-	InvitationID   *uuid.UUID `json:"invitationId"`
-	Email          string     `json:"email"`
-	PreferredName  *string    `json:"preferredName"`
-	GivenNames     string     `json:"givenNames"`
-	LastName       string     `json:"lastName"`
-	Role           string     `json:"role"`
-	JobTitle       *string    `json:"jobTitle"`
-	DepartmentID   *uuid.UUID `json:"departmentId"`
-	DepartmentName *string    `json:"departmentName"`
-	ExpiresAt      *time.Time `json:"expiresAt"`
-	InvitedBy      *uuid.UUID `json:"invitedBy"`
+	Status             string     `json:"status"`
+	UserID             *uuid.UUID `json:"userId"`
+	InvitationID       *uuid.UUID `json:"invitationId"`
+	Email              string     `json:"email"`
+	PreferredName      *string    `json:"preferredName"`
+	GivenNames         string     `json:"givenNames"`
+	LastName           string     `json:"lastName"`
+	Role               string     `json:"role"`
+	JobTitle           *string    `json:"jobTitle"`
+	DepartmentID       *uuid.UUID `json:"departmentId"`
+	DepartmentName     *string    `json:"departmentName"`
+	ExpiresAt          *time.Time `json:"expiresAt"`
+	InvitedBy          *uuid.UUID `json:"invitedBy"`
+	Verified           bool       `json:"verified"`
+	IdentityVerifiedAt *time.Time `json:"identityVerifiedAt"`
 }
 
 func (e *testEnv) listMembers(slug, status string) []memberEntry {

@@ -438,6 +438,7 @@ export const nl: Translation<typeof en> = {
     active: "Actief",
     pending: "In afwachting",
     verified: "Geverifieerd",
+    verifiedOn: "Geverifieerd op {{date}}",
     resend: "Opnieuw versturen",
     revoke: "Intrekken",
     search: "Zoek op naam, e-mail, rol, afdeling…",
@@ -657,6 +658,8 @@ export const nl: Translation<typeof en> = {
     },
     active: "Actief lid",
     verified: "Geverifieerd",
+    identifiedOn: "Geïdentificeerd op",
+    never: "Nooit",
     sendMessage: "Bericht versturen",
     offboard: "Lid off-boarden",
     offboardConfirm: {

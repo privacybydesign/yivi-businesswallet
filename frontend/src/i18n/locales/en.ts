@@ -423,6 +423,7 @@ export const en = {
     active: "Active",
     pending: "Pending",
     verified: "Verified",
+    verifiedOn: "Verified on {{date}}",
     resend: "Resend",
     revoke: "Revoke",
     search: "Search by name, email, role, department…",
@@ -640,6 +641,8 @@ export const en = {
     },
     active: "Active member",
     verified: "Verified",
+    identifiedOn: "Identified on",
+    never: "Never",
     sendMessage: "Send message",
     offboard: "Off-board member",
     offboardConfirm: {

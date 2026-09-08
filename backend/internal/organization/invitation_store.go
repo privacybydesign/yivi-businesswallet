@@ -24,7 +24,25 @@ const (
 	inviteTTL              = 7 * 24 * time.Hour
 	inviteTokenBytes       = 32
 	invitationDepartmentFK = "invitations_department_fkey"
+
+	// dobLayout is the disclosed date-of-birth claim's format ("2006-01-02").
+	dobLayout = "2006-01-02"
 )
+
+// parseDateOfBirth turns a disclosed date-of-birth claim into a *time.Time for
+// the date_of_birth column, nil when absent or unparseable. Date of birth is
+// best-effort like phone (see extractIdentity), so a bad claim is dropped
+// rather than failing the accept.
+func parseDateOfBirth(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse(dobLayout, s)
+	if err != nil {
+		return nil
+	}
+	return &t
+}
 
 func newInviteToken() (string, [sha256.Size]byte, error) {
 	b := make([]byte, inviteTokenBytes)
@@ -196,14 +214,16 @@ func (s *Store) RecordRejectedAccept(ctx context.Context, orgID uuid.UUID, email
 		audit.Updated(before, after))
 }
 
-func (s *Store) AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name, phone string) error {
+func (s *Store) AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name, phone, dateOfBirth string) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		// identity_verified is true: acceptance always proves a passport/id-card
-		// identity via the disclosure flow. phone is best-effort (empty => NULL).
+		// identity_verified_at is set to now(): acceptance always proves a
+		// passport/id-card identity via the disclosure flow. phone and date of
+		// birth are best-effort (empty/unparseable => NULL).
 		const insert = `
-			INSERT INTO memberships (organization_id, user_id, role, job_title, department_id, phone, identity_verified)
-			VALUES ($1, $2, $3, $4, (SELECT id FROM departments WHERE id = $5 AND organization_id = $1), $6, true)`
-		_, err := q.Exec(ctx, insert, inv.OrganizationID, userID, inv.Role, inv.JobTitle, inv.DepartmentID, nullIfEmpty(phone))
+			INSERT INTO memberships (organization_id, user_id, role, job_title, department_id, phone, date_of_birth, identity_verified_at)
+			VALUES ($1, $2, $3, $4, (SELECT id FROM departments WHERE id = $5 AND organization_id = $1), $6, $7, now())`
+		_, err := q.Exec(ctx, insert, inv.OrganizationID, userID, inv.Role, inv.JobTitle, inv.DepartmentID,
+			nullIfEmpty(phone), parseDateOfBirth(dateOfBirth))
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			return ErrAlreadyMember

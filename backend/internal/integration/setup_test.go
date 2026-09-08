@@ -46,9 +46,10 @@ const disclosureToken = "test-token"
 // email (and optionally name), so a /claim logs in as that user. The claim shape
 // mirrors the one proven against extractEmail in internal/auth/disclosure_test.go.
 type fakeVerifier struct {
-	email      string
-	givenNames string
-	familyName string
+	email       string
+	givenNames  string
+	familyName  string
+	dateOfBirth string
 }
 
 func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.Scope) (openid4vpverifier.Session, error) {
@@ -60,6 +61,9 @@ func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Pr
 	if f.givenNames != "" || f.familyName != "" {
 		claims[openid4vpverifier.ClaimGivenNames] = f.givenNames
 		claims[openid4vpverifier.ClaimFamilyName] = f.familyName
+	}
+	if f.dateOfBirth != "" {
+		claims[openid4vpverifier.ClaimDateOfBirth] = f.dateOfBirth
 	}
 	return openid4vpverifier.Presentation{Claims: claims}, nil
 }

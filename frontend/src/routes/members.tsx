@@ -8,6 +8,7 @@ import {
 } from "../api/organization.queries";
 import type { MemberSort } from "../api/organization";
 import { accessMessage } from "../lib/access-message";
+import { useDateFormatter } from "../lib/format-when";
 import { fullName, personInitials } from "../lib/name";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { Avatar, Button, Card, Icon, Input, Table, Tag, TopBar } from "../ui";
@@ -43,6 +44,7 @@ function readSort(params: URLSearchParams): MemberSort {
 
 export default function Members(): React.JSX.Element {
   const { t } = useTranslation();
+  const formatDate = useDateFormatter();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   // Guaranteed by the ":orgSlug" route segment this component mounts under.
@@ -382,7 +384,20 @@ export default function Members(): React.JSX.Element {
                               </Tag>
                             )}
                             {member.verified && (
-                              <Tag tone="blue">{t("members.verified")}</Tag>
+                              <Tag
+                                tone="blue"
+                                title={
+                                  member.identityVerifiedAt
+                                    ? t("members.verifiedOn", {
+                                        date: formatDate(
+                                          member.identityVerifiedAt,
+                                        ),
+                                      })
+                                    : undefined
+                                }
+                              >
+                                {t("members.verified")}
+                              </Tag>
                             )}
                           </div>
                         </Table.Cell>
