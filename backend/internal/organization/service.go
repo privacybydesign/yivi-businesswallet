@@ -36,7 +36,7 @@ type invitationStore interface {
 
 	ReverifyTokenLookup(ctx context.Context, rawToken string) (ReverifyContext, error)
 	EnsureReverifyToken(ctx context.Context, orgID, userID uuid.UUID) (string, time.Time, error)
-	RecordReverifyRejected(ctx context.Context, orgID, userID uuid.UUID, reason string) error
+	RecordReverifyRejected(ctx context.Context, orgID, userID uuid.UUID, email, reason string) error
 	CompleteReverification(ctx context.Context, orgID, userID uuid.UUID, disclosed identity.Name, phone, dateOfBirth string) error
 	GetIdentitySettings(ctx context.Context, orgID uuid.UUID) (IdentitySettings, error)
 }

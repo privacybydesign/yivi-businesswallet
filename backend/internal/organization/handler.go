@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -233,15 +234,52 @@ func (h *Handler) listForUser(w http.ResponseWriter, r *http.Request) error {
 type orgDetailResponse struct {
 	Organization
 	Role string `json:"role"`
+	// Identity is the caller's own re-identification state in this organisation
+	// (#240), so any member — not just an admin, who alone may read the member
+	// list — can be shown the banner when their identification is due, overdue
+	// or has been requested. Empty for a platform admin who is not a member.
+	Identity *ownIdentityState `json:"identity,omitempty"`
+}
+
+// ownIdentityState is the caller's own identity status and deadline. It carries
+// no other member's data and nothing the caller cannot already see about
+// themselves.
+type ownIdentityState struct {
+	Status string     `json:"status"`
+	DueAt  *time.Time `json:"dueAt"`
 }
 
 func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
+	org := OrgFromContext(ctx)
 	respond.JSON(w, r, http.StatusOK, orgDetailResponse{
-		Organization: OrgFromContext(ctx),
+		Organization: org,
 		Role:         roleFromContext(ctx),
+		Identity:     h.ownIdentity(ctx, org.ID, auth.UserFromContext(ctx).ID),
 	})
 	return nil
+}
+
+// ownIdentity resolves the caller's own identity state, or nil when they have no
+// membership (a platform admin reading someone else's org) or when it cannot be
+// read — the banner is informational, so a failure here logs and disappears
+// rather than failing the whole org detail the app needs to render.
+func (h *Handler) ownIdentity(ctx context.Context, orgID, userID uuid.UUID) *ownIdentityState {
+	member, err := h.store.GetMember(ctx, orgID, userID)
+	if errors.Is(err, ErrNotMember) {
+		return nil
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "resolving own identity state", slog.String("error", err.Error()))
+		return nil
+	}
+	lookahead, err := h.identityLookaheadDays(ctx, orgID)
+	if err != nil {
+		slog.ErrorContext(ctx, "resolving identity lookahead", slog.String("error", err.Error()))
+		return nil
+	}
+	member = member.withIdentityStatus(time.Now(), lookahead)
+	return &ownIdentityState{Status: member.IdentityStatus, DueAt: member.IdentityDueAt}
 }
 
 type updateRequest struct {

@@ -26,6 +26,13 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "membership.revoked": { icon: "close", tone: "red" },
   "membership.role_changed": { icon: "settings", tone: "blue" },
   "membership.expired": { icon: "time", tone: "slate" },
+  "membership.type_changed": { icon: "edit", tone: "blue" },
+  "membership.identity_requested": { icon: "personal", tone: "amber" },
+  "membership.identity_reverified": { icon: "valid", tone: "green" },
+  "membership.identity_reverify_rejected": { icon: "warning", tone: "amber" },
+  "membership.identity_reminder_sent": { icon: "email", tone: "amber" },
+  "membership.identity_overdue": { icon: "warning", tone: "red" },
+  "identity.settings_updated": { icon: "settings", tone: "blue" },
   "mandate.granted": { icon: "valid", tone: "violet" },
   "mandate.revoked": { icon: "close", tone: "red" },
   "department.created": { icon: "add", tone: "green" },
@@ -109,6 +116,20 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.roleChanged");
     case "membership.expired":
       return t("auditLog.actions.inviteExpired");
+    case "membership.type_changed":
+      return t("auditLog.actions.memberTypeChanged");
+    case "membership.identity_requested":
+      return t("auditLog.actions.identityRequested");
+    case "membership.identity_reverified":
+      return t("auditLog.actions.identityReverified");
+    case "membership.identity_reverify_rejected":
+      return t("auditLog.actions.identityReverifyRejected");
+    case "membership.identity_reminder_sent":
+      return t("auditLog.actions.identityReminderSent");
+    case "membership.identity_overdue":
+      return t("auditLog.actions.identityOverdue");
+    case "identity.settings_updated":
+      return t("auditLog.actions.identitySettingsUpdated");
     case "mandate.granted":
       return t("auditLog.actions.mandateGranted");
     case "mandate.revoked":
@@ -300,6 +321,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.orgOnboardingAttestations");
     case "org_notification_settings":
       return t("auditLog.targets.orgNotificationSettings");
+    case "org_identity_settings":
+      return t("auditLog.targets.orgIdentitySettings");
     case "org_slack_settings":
       return t("auditLog.targets.orgSlackSettings");
     case "org_teams_settings":

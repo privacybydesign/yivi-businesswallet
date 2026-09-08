@@ -140,7 +140,7 @@ func (s *IdentityScheduler) remind(ctx context.Context, org Organization, c Remi
 		return false
 	}
 
-	if err := s.store.RecordIdentityReminderSent(ctx, org.ID, c.UserID, c.Overdue); err != nil {
+	if err := s.store.RecordIdentityReminderSent(ctx, org.ID, c.UserID, c.Email, c.Overdue); err != nil {
 		slog.ErrorContext(ctx, "identity: record reminder sent failed",
 			slog.String("organizationId", org.ID.String()), slog.String("userId", c.UserID.String()), slog.String("error", err.Error()))
 		return false

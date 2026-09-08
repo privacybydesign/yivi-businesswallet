@@ -80,7 +80,7 @@ func (s *Store) IdentityReminderCandidates(ctx context.Context, orgID uuid.UUID,
 // membership.identity_reminder_sent for the one due-soon reminder — so a
 // restart of the scheduler never double-sends (the next candidate query no
 // longer selects this member until the next threshold).
-func (s *Store) RecordIdentityReminderSent(ctx context.Context, orgID, userID uuid.UUID, overdue bool) error {
+func (s *Store) RecordIdentityReminderSent(ctx context.Context, orgID, userID uuid.UUID, email string, overdue bool) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE memberships SET identity_last_reminder_at = now(), identity_reminder_count = identity_reminder_count + 1
 			WHERE organization_id = $1 AND user_id = $2`
@@ -93,6 +93,6 @@ func (s *Store) RecordIdentityReminderSent(ctx context.Context, orgID, userID uu
 		}
 		return s.audit.Record(ctx, q, action,
 			audit.Target{Type: audit.TargetMembership, ID: userID.String(), OrgID: &orgID},
-			audit.Updated(nil, map[string]any{"overdue": overdue}))
+			audit.Created(map[string]any{"email": email, "overdue": overdue}))
 	})
 }

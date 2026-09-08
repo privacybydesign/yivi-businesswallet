@@ -54,13 +54,13 @@ func (s *Service) CompleteReverification(ctx context.Context, rawToken, disclosu
 	}
 
 	if !strings.EqualFold(string(disclosed.Email), rc.Email) {
-		_ = s.store.RecordReverifyRejected(ctx, rc.OrganizationID, rc.UserID, "email_mismatch")
+		_ = s.store.RecordReverifyRejected(ctx, rc.OrganizationID, rc.UserID, rc.Email, "email_mismatch")
 		return ReverifyOutcome{}, ErrReverifyEmailMismatch
 	}
 
 	switch identity.Reconcile(disclosed.Name, &rc.StoredName) {
 	case identity.Review:
-		_ = s.store.RecordReverifyRejected(ctx, rc.OrganizationID, rc.UserID, "name_mismatch")
+		_ = s.store.RecordReverifyRejected(ctx, rc.OrganizationID, rc.UserID, rc.Email, "name_mismatch")
 		return ReverifyOutcome{}, ErrReverifyNameMismatch
 	case identity.Upgrade:
 		cleaned := disclosed.Name.Clean()
@@ -76,7 +76,7 @@ func (s *Service) CompleteReverification(ctx context.Context, rawToken, disclosu
 	if settings.CredentialMaxAgeDays != nil && !disclosed.CredentialIssuedAt.IsZero() {
 		maxAge := time.Duration(*settings.CredentialMaxAgeDays) * 24 * time.Hour
 		if time.Since(disclosed.CredentialIssuedAt) > maxAge {
-			_ = s.store.RecordReverifyRejected(ctx, rc.OrganizationID, rc.UserID, "credential_too_old")
+			_ = s.store.RecordReverifyRejected(ctx, rc.OrganizationID, rc.UserID, rc.Email, "credential_too_old")
 			return ReverifyOutcome{}, ErrCredentialTooOld
 		}
 	}

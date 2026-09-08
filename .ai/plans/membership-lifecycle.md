@@ -264,7 +264,21 @@ Current-state counts: active = rows in `memberships`, pending = rows in `invitat
 - **Name:** match/reconcile on a derived key (case-fold + diacritic-fold + whitespace-collapse). Profile stores the best readable form (ID card as-is; passport MRZ cleaned to readable casing at write time — diacritics not recovered); the literal disclosure is kept in the audit log. `preferred_name` is a free-form user-set field (any value), not part of the invite.
 - **Audit backfill:** none — pre-prod, start the trail fresh.
 
+## Since built: re-identification
+
+Part 3 gates a *join* on a verified identity, once. The lifecycle after that —
+when the identification lapses, who is reminded, what an admin can ask for, and
+what happens to a member who does not act — is built in
+`.ai/features/member-reidentification.md` (#240). It adds `member_type`
+(employee/external) to both tables, a per-org policy with per-type intervals, a
+derived status (`never` · `verified` · `due_soon` · `overdue` · `requested`), a
+daily reminder sweep, and a member-side flow that re-runs this document's own
+identity disclosure against an existing membership. The dates table above gains
+one stored column, `memberships.identity_due_at`, for the reason given there
+(the sweep selects on it); every other new fact is either a timestamp on the
+membership or derived from it.
+
 ## Open / deferred
 
-- **Extra verified attributes** beyond name (DOB, nationality, document number): persist only if a feature needs them — minimise by default.
+- **Extra verified attributes** beyond name (DOB, nationality, document number): persist only if a feature needs them — minimise by default. *(Date of birth is now persisted, for the screening match in #242; see the re-identification feature doc.)*
 - **GDPR retention exemptions** (Art. 17(3)) — which records purge may *not* erase: a legal/policy call, not a code one.

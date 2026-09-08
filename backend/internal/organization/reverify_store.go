@@ -110,10 +110,10 @@ func (s *Store) ReverifyTokenLookup(ctx context.Context, rawToken string) (Rever
 // (email/name mismatch, or a disclosed credential older than the org's
 // freshness policy) so the rejection leaves a trail, mirroring
 // RecordRejectedAccept. Not a state change, so it writes outside a transaction.
-func (s *Store) RecordReverifyRejected(ctx context.Context, orgID, userID uuid.UUID, reason string) error {
+func (s *Store) RecordReverifyRejected(ctx context.Context, orgID, userID uuid.UUID, email, reason string) error {
 	return s.audit.Record(ctx, s.db, audit.MembershipIdentityReverifyRejected,
 		audit.Target{Type: audit.TargetMembership, ID: userID.String(), OrgID: &orgID},
-		audit.Updated(nil, map[string]any{"reason": reason}))
+		audit.Created(map[string]any{"email": email, "reason": reason}))
 }
 
 // CompleteReverification records a successful re-identification: sets

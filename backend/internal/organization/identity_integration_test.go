@@ -376,7 +376,7 @@ func TestIdentityReminderCandidatesAndRecordSent(t *testing.T) {
 
 	// Recording a send for the due-soon member takes them out of the next pass
 	// (their one pre-due reminder already went out).
-	if err := store.RecordIdentityReminderSent(ctx, org.ID, dueSoonUser, false); err != nil {
+	if err := store.RecordIdentityReminderSent(ctx, org.ID, dueSoonUser, "duesoon@example.test", false); err != nil {
 		t.Fatalf("RecordIdentityReminderSent: %v", err)
 	}
 	again, err := store.IdentityReminderCandidates(ctx, org.ID, settings)
@@ -402,7 +402,7 @@ func TestIdentityReminderCandidatesAndRecordSent(t *testing.T) {
 
 	// Recording an overdue reminder resets the cadence window: they will not be
 	// selected again until OverdueReminderIntervalDays has passed.
-	if err := store.RecordIdentityReminderSent(ctx, org.ID, overdueUser, true); err != nil {
+	if err := store.RecordIdentityReminderSent(ctx, org.ID, overdueUser, "overdue@example.test", true); err != nil {
 		t.Fatalf("RecordIdentityReminderSent (overdue): %v", err)
 	}
 	third, err := store.IdentityReminderCandidates(ctx, org.ID, settings)

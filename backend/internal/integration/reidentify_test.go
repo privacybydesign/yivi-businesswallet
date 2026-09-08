@@ -437,3 +437,59 @@ func TestIdentitySettingsAreAdminOnly(t *testing.T) {
 		t.Errorf("PUT identity-settings as a member = %d, want 403", put.StatusCode)
 	}
 }
+
+// A plain member cannot read the member list, so their own re-identification
+// state rides on the org detail they already fetch — that is what the in-app
+// banner is driven from.
+func TestOrgDetailCarriesTheCallersOwnIdentityState(t *testing.T) {
+	env := setup(t)
+	orgID := env.adminOf("acme", "Acme", "boss@example.test")
+	env.namedMember(orgID, "alice@example.test", "Alice", "Anderson", time.Now().AddDate(0, -13, 0))
+
+	months := 12
+	env.putIdentitySettings("acme", identitySettingsBody{
+		EmployeeIntervalMonths:      &months,
+		OverdueReminderIntervalDays: 7,
+		OverdueReminderMaxCount:     4,
+		OverdueConsequence:          organization.OverdueConsequenceFlag,
+	})
+
+	env.loginAs("alice@example.test")
+	detail := decodeJSON[struct {
+		Slug     string `json:"slug"`
+		Role     string `json:"role"`
+		Identity *struct {
+			Status string     `json:"status"`
+			DueAt  *time.Time `json:"dueAt"`
+		} `json:"identity"`
+	}](t, env.do(http.MethodGet, "/api/v1/orgs/acme", nil))
+
+	if detail.Role != organization.RoleMember {
+		t.Errorf("role = %q, want member", detail.Role)
+	}
+	if detail.Identity == nil {
+		t.Fatal("identity is absent for a member of the org")
+	}
+	if detail.Identity.Status != organization.IdentityStatusOverdue {
+		t.Errorf("identity.status = %q, want %q", detail.Identity.Status, organization.IdentityStatusOverdue)
+	}
+	if detail.Identity.DueAt == nil {
+		t.Error("identity.dueAt is nil for a member with a policy in force")
+	}
+
+	// Re-identifying clears it back to verified, which is what makes the banner
+	// disappear without a reload of anything else.
+	env.discloses("alice@example.test", "Alice", "Anderson")
+	if resp := env.completeReidentify(env.mintOwnReidentifyToken("acme")); resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		t.Fatalf("complete reidentify = %d, want 200", resp.StatusCode)
+	}
+	after := decodeJSON[struct {
+		Identity *struct {
+			Status string `json:"status"`
+		} `json:"identity"`
+	}](t, env.do(http.MethodGet, "/api/v1/orgs/acme", nil))
+	if after.Identity == nil || after.Identity.Status != organization.IdentityStatusVerified {
+		t.Errorf("identity after re-identification = %+v, want verified", after.Identity)
+	}
+}

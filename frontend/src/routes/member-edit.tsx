@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import type { Department, Member } from "../api/organization";
+import type { Department, Member, MemberType } from "../api/organization";
 import {
   useOrganizationDepartmentsQuery,
   useOrganizationMemberQuery,
   useOrganizationQuery,
   useUpdateMemberMutation,
+  useUpdateMemberTypeMutation,
 } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { fullName } from "../lib/name";
@@ -32,15 +33,48 @@ function EditForm({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const update = useUpdateMemberMutation(slug);
+  const updateType = useUpdateMemberTypeMutation(slug);
   const [role, setRole] = useState(member.role);
   const [jobTitle, setJobTitle] = useState(member.jobTitle ?? "");
   const [departmentId, setDepartmentId] = useState(member.departmentId ?? "");
+  const [memberType, setMemberType] = useState<MemberType>(
+    member.memberType === "external" ? "external" : "employee",
+  );
+  const [externalOrganisation, setExternalOrganisation] = useState(
+    member.externalOrganisation ?? "",
+  );
 
   const backToMember = (): void =>
     void navigate(`/${slug}/members/${member.userId}`);
 
+  const trimmedExternal = externalOrganisation.trim();
+  const typeChanged =
+    memberType !== member.memberType ||
+    (memberType === "external" &&
+      trimmedExternal !== (member.externalOrganisation ?? ""));
+
+  // The membership fields and the member type are two routes (changing the type
+  // recomputes the re-identification deadline server-side), so a save that
+  // touches both chains them and only navigates once the second lands.
   function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
+    const saveType = (): void => {
+      if (!typeChanged) {
+        backToMember();
+        return;
+      }
+      updateType.mutate(
+        {
+          userId: member.userId,
+          memberType,
+          externalOrganisation:
+            memberType === "external" && trimmedExternal !== ""
+              ? trimmedExternal
+              : null,
+        },
+        { onSuccess: backToMember },
+      );
+    };
     update.mutate(
       {
         userId: member.userId,
@@ -48,14 +82,16 @@ function EditForm({
         jobTitle: jobTitle.trim() === "" ? null : jobTitle.trim(),
         departmentId: departmentId === "" ? null : departmentId,
       },
-      { onSuccess: backToMember },
+      { onSuccess: saveType },
     );
   }
 
+  const saveError = update.error ?? updateType.error;
   const errorText =
     update.error instanceof ApiError && update.error.status === CONFLICT_STATUS
       ? t("memberEdit.lastAdmin")
-      : t("common.saveError", { message: update.error?.message ?? "" });
+      : t("common.saveError", { message: saveError?.message ?? "" });
+  const saving = update.isPending || updateType.isPending;
 
   return (
     <>
@@ -67,8 +103,8 @@ function EditForm({
             <Button variant="secondary" onClick={backToMember}>
               {t("common.cancel")}
             </Button>
-            <Button type="submit" form={FORM_ID} disabled={update.isPending}>
-              {update.isPending ? t("common.saving") : t("common.save")}
+            <Button type="submit" form={FORM_ID} disabled={saving}>
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
@@ -120,7 +156,44 @@ function EditForm({
               </select>
             </label>
 
-            {update.isError && (
+            <label className="flex flex-col gap-1.5">
+              <span className={FIELD_LABEL}>{t("memberEdit.memberType")}</span>
+              <select
+                className={CONTROL}
+                value={memberType}
+                onChange={(event) =>
+                  setMemberType(event.target.value as MemberType)
+                }
+              >
+                <option value="employee">
+                  {t("memberEdit.memberTypeEmployee")}
+                </option>
+                <option value="external">
+                  {t("memberEdit.memberTypeExternal")}
+                </option>
+              </select>
+              <span className="text-ink-soft text-[12px]">
+                {t("memberEdit.memberTypeHint")}
+              </span>
+            </label>
+
+            {memberType === "external" && (
+              <label className="flex flex-col gap-1.5">
+                <span className={FIELD_LABEL}>
+                  {t("memberEdit.externalOrganisation")}
+                </span>
+                <input
+                  className={CONTROL}
+                  value={externalOrganisation}
+                  onChange={(event) =>
+                    setExternalOrganisation(event.target.value)
+                  }
+                  placeholder={t("memberEdit.externalOrganisationPlaceholder")}
+                />
+              </label>
+            )}
+
+            {(update.isError || updateType.isError) && (
               <p
                 role="alert"
                 className="rounded-yivi bg-error-bg text-error px-3 py-2 text-[13px]"

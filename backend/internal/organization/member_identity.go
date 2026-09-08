@@ -113,7 +113,7 @@ func (s *Store) RequestIdentification(ctx context.Context, orgID uuid.UUID, user
 
 			if err := s.audit.Record(ctx, q, audit.MembershipIdentityRequested,
 				audit.Target{Type: audit.TargetMembership, ID: userID.String(), OrgID: &orgID},
-				audit.Updated(map[string]any{"identityRequestedAt": nil}, map[string]any{"identityRequestedAt": now, "reason": nullIfEmpty(reason)})); err != nil {
+				audit.Created(map[string]any{"email": email, "reason": nullIfEmpty(reason)})); err != nil {
 				return err
 			}
 			out = append(out, RequestedMember{UserID: userID, Email: email, ReidentifyToken: token})

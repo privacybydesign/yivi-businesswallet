@@ -37,7 +37,7 @@ func (s *reverifyStub) GetIdentitySettings(context.Context, uuid.UUID) (Identity
 	return s.settings, nil
 }
 
-func (s *reverifyStub) RecordReverifyRejected(_ context.Context, _, _ uuid.UUID, reason string) error {
+func (s *reverifyStub) RecordReverifyRejected(_ context.Context, _, _ uuid.UUID, _, reason string) error {
 	s.rejectionReasons = append(s.rejectionReasons, reason)
 	return nil
 }
