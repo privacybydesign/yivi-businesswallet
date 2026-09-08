@@ -128,7 +128,7 @@ WITH entries AS (
 	       u.email, u.preferred_name, u.given_names, u.last_name,
 	       m.role, m.job_title, m.department_id, d.name AS department_name,
 	       NULL::timestamptz AS expires_at, NULL::uuid AS invited_by,
-	       m.phone, m.identity_verified AS verified,
+	       m.phone, m.identity_verified_at,
 	       u.avatar_bytes IS NOT NULL AS has_avatar, u.avatar_updated_at
 	FROM memberships m
 	JOIN users u ON u.id = m.user_id
@@ -139,7 +139,7 @@ WITH entries AS (
 	       i.email, NULL::text AS preferred_name, i.invited_given_names, i.invited_last_name,
 	       i.role, i.job_title, i.department_id, d.name AS department_name,
 	       i.expires_at, i.invited_by,
-	       NULL::text AS phone, false AS verified,
+	       NULL::text AS phone, NULL::timestamptz AS identity_verified_at,
 	       false AS has_avatar, NULL::timestamptz AS avatar_updated_at
 	FROM invitations i
 	LEFT JOIN departments d ON d.id = i.department_id
@@ -188,7 +188,7 @@ func (s *Store) ListMemberEntries(ctx context.Context, orgID uuid.UUID, p Member
 
 	q := memberEntriesCTE + `
 SELECT status, user_id, invitation_id, email, preferred_name, given_names, last_name,
-       role, job_title, department_id, department_name, expires_at, invited_by, phone, verified,
+       role, job_title, department_id, department_name, expires_at, invited_by, phone, identity_verified_at,
        has_avatar, avatar_updated_at
 FROM entries` + memberSearchWhere + "\nORDER BY " + memberOrderBy(p.Sort, p.Desc) + "\nLIMIT $4 OFFSET $5"
 
@@ -203,9 +203,10 @@ FROM entries` + memberSearchWhere + "\nORDER BY " + memberOrderBy(p.Sort, p.Desc
 		var e MemberEntry
 		if err := rows.Scan(&e.Status, &e.UserID, &e.InvitationID, &e.Email, &e.PreferredName,
 			&e.GivenNames, &e.LastName, &e.Role, &e.JobTitle, &e.DepartmentID, &e.DepartmentName,
-			&e.ExpiresAt, &e.InvitedBy, &e.Phone, &e.Verified, &e.HasAvatar, &e.AvatarUpdatedAt); err != nil {
+			&e.ExpiresAt, &e.InvitedBy, &e.Phone, &e.IdentityVerifiedAt, &e.HasAvatar, &e.AvatarUpdatedAt); err != nil {
 			return nil, 0, fmt.Errorf("organization: list member entries scan: %w", err)
 		}
+		e.Verified = e.IdentityVerifiedAt != nil
 		entries = append(entries, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -227,7 +228,7 @@ FROM entries` + memberSearchWhere + "\nORDER BY " + memberOrderBy(p.Sort, p.Desc
 func (s *Store) MemberEntryByEmail(ctx context.Context, orgID uuid.UUID, email string) (MemberEntry, error) {
 	q := memberEntriesCTE + `
 SELECT status, user_id, invitation_id, email, preferred_name, given_names, last_name,
-       role, job_title, department_id, department_name, expires_at, invited_by, phone, verified,
+       role, job_title, department_id, department_name, expires_at, invited_by, phone, identity_verified_at,
        has_avatar, avatar_updated_at
 FROM entries
 WHERE lower(email) = lower($3)
@@ -237,7 +238,7 @@ LIMIT 1`
 	var e MemberEntry
 	err := s.db.QueryRow(ctx, q, orgID, "", email).Scan(&e.Status, &e.UserID, &e.InvitationID,
 		&e.Email, &e.PreferredName, &e.GivenNames, &e.LastName, &e.Role, &e.JobTitle,
-		&e.DepartmentID, &e.DepartmentName, &e.ExpiresAt, &e.InvitedBy, &e.Phone, &e.Verified,
+		&e.DepartmentID, &e.DepartmentName, &e.ExpiresAt, &e.InvitedBy, &e.Phone, &e.IdentityVerifiedAt,
 		&e.HasAvatar, &e.AvatarUpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return MemberEntry{}, ErrNotMember
@@ -245,13 +246,14 @@ LIMIT 1`
 	if err != nil {
 		return MemberEntry{}, fmt.Errorf("organization: member entry by email org %s: %w", orgID, err)
 	}
+	e.Verified = e.IdentityVerifiedAt != nil
 	return e, nil
 }
 
 func (s *Store) GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error) {
 	const q = `
 		SELECT u.id, u.email, u.preferred_name, u.given_names, u.last_name,
-		       m.role, m.job_title, m.department_id, d.name, m.phone, m.identity_verified,
+		       m.role, m.job_title, m.department_id, d.name, m.phone, m.identity_verified_at,
 		       u.avatar_bytes IS NOT NULL, u.avatar_updated_at
 		FROM memberships m
 		JOIN users u ON u.id = m.user_id
@@ -259,7 +261,7 @@ func (s *Store) GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member,
 		WHERE m.organization_id = $1 AND m.user_id = $2`
 	var m Member
 	err := s.db.QueryRow(ctx, q, orgID, userID).Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.LastName,
-		&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName, &m.Phone, &m.Verified,
+		&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName, &m.Phone, &m.IdentityVerifiedAt,
 		&m.HasAvatar, &m.AvatarUpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Member{}, ErrNotMember
@@ -267,6 +269,7 @@ func (s *Store) GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member,
 	if err != nil {
 		return Member{}, fmt.Errorf("organization: get member user %s org %s: %w", userID, orgID, err)
 	}
+	m.Verified = m.IdentityVerifiedAt != nil
 	return m, nil
 }
 

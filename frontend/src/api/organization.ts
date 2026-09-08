@@ -67,6 +67,7 @@ export const memberSchema = z.object({
   departmentName: z.string().nullable(),
   phone: z.string().nullable(),
   verified: z.boolean(),
+  identityVerifiedAt: z.string().nullable(),
   avatarUri: z.string(),
 });
 
@@ -89,6 +90,7 @@ export const memberListEntrySchema = z.object({
   invitedBy: z.string().nullable(),
   phone: z.string().nullable(),
   verified: z.boolean(),
+  identityVerifiedAt: z.string().nullable(),
   avatarUri: z.string(),
 });
 

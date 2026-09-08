@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -356,5 +357,45 @@ func TestAcceptProfileMismatchNeedsReview(t *testing.T) {
 	}
 	if n := env.reviewCount("pending"); n != 1 {
 		t.Errorf("pending reviews = %d, want 1", n)
+	}
+}
+
+func TestAcceptInvitationSetsIdentityVerifiedAtAndDateOfBirth(t *testing.T) {
+	env := setup(t)
+	orgID := env.adminOf("acme", "Acme", "boss@example.test")
+	token := env.createInvitation(orgID, "newbie@example.test", "Pen", "Ding")
+	env.discloses("newbie@example.test", "Pen", "Ding")
+	env.fake.dateOfBirth = "1990-05-17"
+
+	resp := env.acceptInvite(token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("accept = %d, want 200", resp.StatusCode)
+	}
+
+	// The accept logged the cookie jar in as the new member; switch back to the
+	// admin to read the member list.
+	env.login("boss@example.test")
+	member := byEmail(env.listMembers("acme", organization.StatusActive), "newbie@example.test")
+	if member == nil {
+		t.Fatal("member not found after accept")
+	}
+	if !member.Verified {
+		t.Error("verified = false, want true after accept")
+	}
+	if member.IdentityVerifiedAt == nil {
+		t.Error("identityVerifiedAt is nil, want set after accept")
+	}
+
+	var dob time.Time
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT m.date_of_birth FROM memberships m JOIN users u ON u.id = m.user_id
+		 WHERE m.organization_id = $1 AND u.email = $2`,
+		orgID, "newbie@example.test",
+	).Scan(&dob); err != nil {
+		t.Fatalf("query date_of_birth: %v", err)
+	}
+	if want := time.Date(1990, 5, 17, 0, 0, 0, 0, time.UTC); !dob.Equal(want) {
+		t.Errorf("date_of_birth = %v, want %v", dob, want)
 	}
 }

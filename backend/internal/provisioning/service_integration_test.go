@@ -175,7 +175,7 @@ func TestSyncEndToEndThroughTheRealStores(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := e.orgs.AcceptInvitation(ctx, invitation, userID,
-		identity.Name{GivenNames: "Ada", LastName: "Lovelace"}, "+31600000000"); err != nil {
+		identity.Name{GivenNames: "Ada", LastName: "Lovelace"}, "+31600000000", "1815-12-10"); err != nil {
 		t.Fatalf("AcceptInvitation: %v", err)
 	}
 
