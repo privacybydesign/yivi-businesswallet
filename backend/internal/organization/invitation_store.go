@@ -64,17 +64,22 @@ func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation
 	}
 
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
+		if in.MemberType == "" {
+			in.MemberType = MemberTypeEmployee
+		}
 		const insert = `
 			INSERT INTO invitations
 				(organization_id, email, invited_by, role, job_title, department_id,
-				 invited_given_names, invited_last_name, invite_token_hash, expires_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+				 invited_given_names, invited_last_name, invite_token_hash, expires_at,
+				 member_type, external_organisation)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			RETURNING id, expires_at, created_at,
 			          (SELECT name FROM departments WHERE id = $6 AND organization_id = $1)`
 		var deptName *string
 		err := q.QueryRow(ctx, insert,
 			in.OrganizationID, in.Email, in.InvitedBy, in.Role, in.JobTitle, in.DepartmentID,
 			in.GivenNames, in.LastName, tokenHash[:], time.Now().Add(inviteTTL),
+			in.MemberType, in.ExternalOrganisation,
 		).Scan(&in.ID, &in.ExpiresAt, &in.CreatedAt, &deptName)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
@@ -108,7 +113,8 @@ func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation
 
 const invitationSelect = `
 	SELECT i.id, i.organization_id, o.name, o.slug, i.email, i.invited_by, i.role, i.job_title,
-	       i.department_id, d.name, i.invited_given_names, i.invited_last_name, i.expires_at, i.created_at
+	       i.department_id, d.name, i.invited_given_names, i.invited_last_name, i.expires_at, i.created_at,
+	       i.member_type, i.external_organisation
 	FROM invitations i
 	JOIN organizations o ON o.id = i.organization_id
 	LEFT JOIN departments d ON d.id = i.department_id`
@@ -117,7 +123,8 @@ func scanInvitation(row pgx.Row) (Invitation, error) {
 	var inv Invitation
 	err := row.Scan(&inv.ID, &inv.OrganizationID, &inv.OrganizationName, &inv.OrganizationSlug,
 		&inv.Email, &inv.InvitedBy, &inv.Role, &inv.JobTitle, &inv.DepartmentID, &inv.DepartmentName,
-		&inv.GivenNames, &inv.LastName, &inv.ExpiresAt, &inv.CreatedAt)
+		&inv.GivenNames, &inv.LastName, &inv.ExpiresAt, &inv.CreatedAt,
+		&inv.MemberType, &inv.ExternalOrganisation)
 	return inv, err
 }
 
@@ -175,6 +182,7 @@ func (s *Store) ListInvitationsForEmail(ctx context.Context, email string) ([]In
 	const q = `
 		SELECT i.id, i.organization_id, o.name, o.slug, i.email, i.invited_by, i.role, i.job_title,
 		       i.department_id, d.name, i.invited_given_names, i.invited_last_name, i.expires_at, i.created_at,
+		       i.member_type, i.external_organisation,
 		       coalesce(rev.status, '') AS review_status
 		FROM invitations i
 		JOIN organizations o ON o.id = i.organization_id
@@ -193,7 +201,8 @@ func (s *Store) ListInvitationsForEmail(ctx context.Context, email string) ([]In
 		var inv Invitation
 		if err := rows.Scan(&inv.ID, &inv.OrganizationID, &inv.OrganizationName, &inv.OrganizationSlug,
 			&inv.Email, &inv.InvitedBy, &inv.Role, &inv.JobTitle, &inv.DepartmentID, &inv.DepartmentName,
-			&inv.GivenNames, &inv.LastName, &inv.ExpiresAt, &inv.CreatedAt, &inv.ReviewStatus); err != nil {
+			&inv.GivenNames, &inv.LastName, &inv.ExpiresAt, &inv.CreatedAt,
+			&inv.MemberType, &inv.ExternalOrganisation, &inv.ReviewStatus); err != nil {
 			return nil, fmt.Errorf("organization: list invitations for email scan: %w", err)
 		}
 		invitations = append(invitations, inv)
@@ -218,12 +227,19 @@ func (s *Store) AcceptInvitation(ctx context.Context, inv Invitation, userID uui
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		// identity_verified_at is set to now(): acceptance always proves a
 		// passport/id-card identity via the disclosure flow. phone and date of
-		// birth are best-effort (empty/unparseable => NULL).
+		// birth are best-effort (empty/unparseable => NULL). identity_due_at is
+		// computed from the org's current re-identification policy, if any.
+		settings, err := identitySettingsTx(ctx, q, inv.OrganizationID)
+		if err != nil {
+			return err
+		}
+		verifiedNow := time.Now()
 		const insert = `
-			INSERT INTO memberships (organization_id, user_id, role, job_title, department_id, phone, date_of_birth, identity_verified_at)
-			VALUES ($1, $2, $3, $4, (SELECT id FROM departments WHERE id = $5 AND organization_id = $1), $6, $7, now())`
-		_, err := q.Exec(ctx, insert, inv.OrganizationID, userID, inv.Role, inv.JobTitle, inv.DepartmentID,
-			nullIfEmpty(phone), parseDateOfBirth(dateOfBirth))
+			INSERT INTO memberships (organization_id, user_id, role, job_title, department_id, phone, date_of_birth, identity_verified_at, member_type, external_organisation, identity_due_at)
+			VALUES ($1, $2, $3, $4, (SELECT id FROM departments WHERE id = $5 AND organization_id = $1), $6, $7, $8, $9, $10, $11)`
+		_, err = q.Exec(ctx, insert, inv.OrganizationID, userID, inv.Role, inv.JobTitle, inv.DepartmentID,
+			nullIfEmpty(phone), parseDateOfBirth(dateOfBirth), verifiedNow, inv.MemberType, inv.ExternalOrganisation,
+			dueAtFor(&verifiedNow, inv.MemberType, settings))
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			return ErrAlreadyMember

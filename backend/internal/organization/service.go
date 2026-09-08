@@ -33,6 +33,12 @@ type invitationStore interface {
 	CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name, phone, dateOfBirth string) (ReviewState, error)
 	ListIdentityReviews(ctx context.Context) ([]IdentityReview, error)
 	ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error)
+
+	ReverifyTokenLookup(ctx context.Context, rawToken string) (ReverifyContext, error)
+	EnsureReverifyToken(ctx context.Context, orgID, userID uuid.UUID) (string, time.Time, error)
+	RecordReverifyRejected(ctx context.Context, orgID, userID uuid.UUID, reason string) error
+	CompleteReverification(ctx context.Context, orgID, userID uuid.UUID, disclosed identity.Name, phone, dateOfBirth string) error
+	GetIdentitySettings(ctx context.Context, orgID uuid.UUID) (IdentitySettings, error)
 }
 
 type identityDiscloser interface {
@@ -52,13 +58,15 @@ func NewService(users userStore, store invitationStore, discloser identityDisclo
 }
 
 type Invite struct {
-	Email        user.Email
-	GivenNames   string
-	LastName     string
-	Role         string
-	JobTitle     *string
-	DepartmentID *uuid.UUID
-	InvitedBy    uuid.UUID
+	Email                user.Email
+	GivenNames           string
+	LastName             string
+	Role                 string
+	JobTitle             *string
+	DepartmentID         *uuid.UUID
+	InvitedBy            uuid.UUID
+	MemberType           string
+	ExternalOrganisation *string
 }
 
 func (s *Service) InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) (Invitation, error) {
@@ -76,14 +84,16 @@ func (s *Service) InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) 
 
 	invitedBy := in.InvitedBy
 	return s.store.CreateInvitation(ctx, Invitation{
-		OrganizationID: orgID,
-		Email:          string(in.Email),
-		InvitedBy:      &invitedBy,
-		Role:           in.Role,
-		JobTitle:       in.JobTitle,
-		DepartmentID:   in.DepartmentID,
-		GivenNames:     in.GivenNames,
-		LastName:       in.LastName,
+		OrganizationID:       orgID,
+		Email:                string(in.Email),
+		InvitedBy:            &invitedBy,
+		Role:                 in.Role,
+		JobTitle:             in.JobTitle,
+		DepartmentID:         in.DepartmentID,
+		GivenNames:           in.GivenNames,
+		LastName:             in.LastName,
+		MemberType:           in.MemberType,
+		ExternalOrganisation: in.ExternalOrganisation,
 	})
 }
 

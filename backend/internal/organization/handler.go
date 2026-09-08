@@ -44,6 +44,12 @@ type repository interface {
 	HasJointRepresentation(ctx context.Context, orgID, userID uuid.UUID) (bool, error)
 	GrantMandate(ctx context.Context, orgID, grantorUserID uuid.UUID, req MandateGrant) (Mandate, error)
 	RevokeMandate(ctx context.Context, orgID, mandateID, revokedBy uuid.UUID, effectiveAt *time.Time, reason string) ([]Mandate, error)
+
+	UpdateMemberType(ctx context.Context, orgID, userID uuid.UUID, memberType string, externalOrganisation *string) (Member, error)
+	RequestIdentification(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID, requestedBy uuid.UUID, reason string) ([]RequestedMember, error)
+	GetIdentitySettings(ctx context.Context, orgID uuid.UUID) (IdentitySettings, error)
+	SaveIdentitySettings(ctx context.Context, orgID uuid.UUID, in IdentitySettingsInput) (IdentitySettings, error)
+	ReverifyTokenLookup(ctx context.Context, rawToken string) (ReverifyContext, error)
 }
 
 type inviter interface {
@@ -58,6 +64,10 @@ type inviter interface {
 	DeclineInvitationForUser(ctx context.Context, invitationID uuid.UUID, email user.Email) error
 	ListIdentityReviews(ctx context.Context) ([]IdentityReview, error)
 	ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error)
+
+	StartReverifySession(ctx context.Context, rawToken string) (auth.Session, error)
+	MintOwnReverifyToken(ctx context.Context, orgID, userID uuid.UUID) (string, time.Time, error)
+	CompleteReverification(ctx context.Context, rawToken, disclosureToken string) (ReverifyOutcome, error)
 }
 
 type auditReader interface {
@@ -76,6 +86,7 @@ type sessionIssuer interface {
 // *email.Service (kept as a local interface so this slice does not import it).
 type inviteMailer interface {
 	SendInvitation(ctx context.Context, orgID uuid.UUID, to, orgName, acceptURL string) error
+	SendIdentityRequested(ctx context.Context, orgID uuid.UUID, to, orgName, reidentifyURL, reason string) error
 }
 
 type Handler struct {
@@ -121,6 +132,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /invite/{token}/accept", respond.HandlerFunc(h.acceptInvite))
 	mux.Handle("POST /invite/{token}/decline", respond.HandlerFunc(h.declineInvite))
 
+	// Re-identification (#240): a bearer token, resolved the same way an invite
+	// token is, reached either from a reminder/request e-mail or minted for the
+	// caller by the in-app banner (POST .../me/reidentify-token below).
+	mux.Handle("GET /reidentify/{token}", respond.HandlerFunc(h.reidentifyPreview))
+	mux.Handle("POST /reidentify/{token}/session", respond.HandlerFunc(h.startReidentify))
+	mux.Handle("POST /reidentify/{token}/complete", respond.HandlerFunc(h.completeReidentify))
+
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
 	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))
 	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
@@ -130,6 +148,15 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PATCH /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMember))))
 	mux.Handle("DELETE /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.offboardMember))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberAuditEvents))))
+	mux.Handle("PATCH /orgs/{slug}/members/{userId}/type", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMemberType))))
+	mux.Handle("POST /orgs/{slug}/members/{userId}/request-identification", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentification))))
+	mux.Handle("POST /orgs/{slug}/members/request-identification", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentificationBulk))))
+	// Any member may mint their own re-identification link (the in-app banner);
+	// it is scoped to the caller's own membership, so no admin gate is needed.
+	mux.Handle("POST /orgs/{slug}/me/reidentify-token", orgScoped(respond.HandlerFunc(h.mintOwnReverifyToken)))
+
+	mux.Handle("GET /orgs/{slug}/identity-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.getIdentitySettings))))
+	mux.Handle("PUT /orgs/{slug}/identity-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.putIdentitySettings))))
 
 	mux.Handle("POST /orgs/{slug}/invitations/{id}/resend", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.resendInvitation))))
 	mux.Handle("DELETE /orgs/{slug}/invitations/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.revokeInvitation))))

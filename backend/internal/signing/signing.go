@@ -114,6 +114,10 @@ var (
 	ErrInvalidRequest = errors.New("signing: invalid signing request")
 	// ErrInvalidToken means an external signee's invitation link is unknown or expired.
 	ErrInvalidToken = errors.New("signing: the signing link is not valid or has expired")
+	// ErrSignerIdentityBlocked means a selected internal signer's
+	// re-identification is overdue and the org's policy blocks them from signing
+	// until they re-identify (#240 §3).
+	ErrSignerIdentityBlocked = errors.New("signing: a selected signer's identity re-confirmation is overdue")
 )
 
 // provider is the consumer-defined view of internal/signingprovider that this
@@ -146,6 +150,11 @@ type OrgMember struct {
 	UserID uuid.UUID
 	Name   string
 	Email  string
+	// IdentityBlocked reports that the org's overdue re-identification policy
+	// (#240 §3) currently refuses this member as a signer — their
+	// re-identification is overdue and the org has opted into "block" rather
+	// than "flag only". Checked by validateSigners.
+	IdentityBlocked bool
 }
 
 // memberDirectory lists an org's active members, so a create-request call can

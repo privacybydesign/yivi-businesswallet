@@ -13,6 +13,7 @@ import (
 	"maps"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Presentation status values reported by Status: PENDING until the holder
@@ -50,6 +51,13 @@ type Session struct {
 // requested credentials.
 type Presentation struct {
 	Claims map[string]string
+	// IdentityIssuedAt is the `iat` claim of the identity credential's (passport or
+	// id-card) issuer-signed JWT — the moment the wallet obtained that credential
+	// from its issuer, not the physical document's issue date. Used by a
+	// freshness check on re-identification (see .ai/features/auth-openid4vp.md and
+	// the member-reidentification feature); zero when the presentation carried no
+	// identity credential or its `iat` could not be read.
+	IdentityIssuedAt time.Time
 }
 
 // vpTokenResponse is the verifier's disclosed payload: credential id -> SD-JWT VCs.
@@ -98,6 +106,50 @@ func disclosuresOf(sdjwt string) map[string]string {
 		out[name] = stringify(arr[2])
 	}
 	return out
+}
+
+// identityIssuedAt returns the `iat` of the identity credential (passport or
+// id-card, whichever is present) in vp, zero when neither is present or its
+// `iat` could not be read.
+func identityIssuedAt(vp map[string][]string) time.Time {
+	for _, id := range [...]string{credIDPassport, credIDIDCard} {
+		tokens := vp[id]
+		if len(tokens) == 0 {
+			continue
+		}
+		if t, ok := issuerIssuedAt(tokens[0]); ok {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+// issuerIssuedAt reads the `iat` claim from an SD-JWT VC's issuer-signed JWT (the
+// first `~`-separated segment: header.payload.signature). This is the moment the
+// wallet obtained the credential from its issuer — a registered top-level claim
+// carried on every presentation — not the physical document's own issue date.
+// Decoding the payload here is not signature verification (the hosted verifier
+// already did that; see the package doc); it only reads an already-trusted claim.
+func issuerIssuedAt(sdjwt string) (time.Time, bool) {
+	jwt := sdjwt
+	if i := strings.IndexByte(sdjwt, '~'); i >= 0 {
+		jwt = sdjwt[:i]
+	}
+	segments := strings.Split(jwt, ".")
+	if len(segments) < 2 {
+		return time.Time{}, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(segments[1])
+	if err != nil {
+		return time.Time{}, false
+	}
+	var payload struct {
+		IssuedAt int64 `json:"iat"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.IssuedAt <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(payload.IssuedAt, 0).UTC(), true
 }
 
 func stringify(v any) string {

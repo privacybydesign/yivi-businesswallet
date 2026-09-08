@@ -416,6 +416,8 @@ func (h *Handler) mapStartError(err error) error {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_pdf", Message: "the uploaded file is not a valid PDF"}
 	case errors.Is(err, ErrInvalidRequest):
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_request", Message: "the signing request is invalid"}
+	case errors.Is(err, ErrSignerIdentityBlocked):
+		return &respond.APIError{Status: http.StatusConflict, Code: "signer_identity_blocked", Message: "a selected signer's identity re-confirmation is overdue and must be completed before they can sign"}
 	case errors.Is(err, ErrNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "signing request not found"}
 	case errors.Is(err, ErrNotSigner):
