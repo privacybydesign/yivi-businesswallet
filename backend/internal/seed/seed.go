@@ -276,6 +276,18 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 		return err
 	}
 
+	// Gemeente Nijmegen is the first tenant whose attestation catalogue is a
+	// public-sector permit rather than an HR/supplier credential (issue #245): the
+	// APV standplaatsvergunning it issues to a market-stall holder's business
+	// wallet.
+	nijmegenOrg := orgsBySlug["nijmegen"]
+	if err := seedNijmegenAttestation(ctx, pool, nijmegenOrg.ID); err != nil {
+		return err
+	}
+	if err := seedIssuerSettings(ctx, pool, nijmegenOrg.ID, "nijmegen", "Gemeente Nijmegen"); err != nil {
+		return err
+	}
+
 	demoDeptIDs := []uuid.UUID{
 		deptsByOrgName[demoOrgSlug+"/Engineering"].ID,
 		deptsByOrgName[demoOrgSlug+"/Operations"].ID,
@@ -866,6 +878,90 @@ func seedKVKRegisterAttestation(ctx context.Context, pool *pgxpool.Pool, orgID u
 	}
 
 	slog.Info("seeded KVK registration schema + template")
+	return nil
+}
+
+// nijmegenApvSchema is the APV standplaatsvergunning (market-stall permit)
+// Gemeente Nijmegen issues to another business wallet — an organization-subject
+// credential, the first schema owned by a public-sector tenant rather than Yivi
+// or the KVK register (issue #245). The attribute set mirrors that issue's
+// schema table; the schema/store carry no per-attribute selective-disclosure
+// flag today, so every claim is disclosable, matching every other schema.
+var nijmegenApvSchema = attestation.Schema{
+	VCT:                "nl.nijmegen.apv.standplaatsvergunning",
+	DisplayName:        "APV standplaatsvergunning",
+	CredentialConfigID: "NijmegenApvStandplaatsvergunningSdJwt",
+	SubjectType:        attestation.SubjectOrganization,
+	Display: []attestation.LocalizedName{
+		{Lang: "en", Name: "Market stall permit (APV)"},
+		{Lang: "nl", Name: "APV standplaatsvergunning"},
+	},
+	Attributes: []attestation.AttributeDef{
+		{Key: "vergunningnummer", Label: "Permit number", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Permit number"}, {Lang: "nl", Label: "Vergunningnummer"},
+		}},
+		{Key: "vergunninghouder_kvk", Label: "Permit holder KVK number", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Permit holder KVK number"}, {Lang: "nl", Label: "KVK-nummer vergunninghouder"},
+		}},
+		{Key: "vergunninghouder_naam", Label: "Permit holder name", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Permit holder name"}, {Lang: "nl", Label: "Naam vergunninghouder"},
+		}},
+		{Key: "markt", Label: "Market", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Market"}, {Lang: "nl", Label: "Markt"},
+		}},
+		{Key: "standplaats", Label: "Stall", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Stall"}, {Lang: "nl", Label: "Standplaats"},
+		}},
+		// dagen is a comma-separated day list (e.g. "ma,wo,za"): AttributeDef has no
+		// array type, only the SupportedAttributeTypes scalars.
+		{Key: "dagen", Label: "Days", Type: attestation.AttributeTypeString, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Days"}, {Lang: "nl", Label: "Dagen"},
+		}},
+		{Key: "branche", Label: "Trade", Type: attestation.AttributeTypeString, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Trade"}, {Lang: "nl", Label: "Branche"},
+		}},
+		{Key: "geldig_van", Label: "Valid from", Type: attestation.AttributeTypeDate, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Valid from"}, {Lang: "nl", Label: "Geldig van"},
+		}},
+		{Key: "geldig_tot", Label: "Valid until", Type: attestation.AttributeTypeDate, Required: true, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Valid until"}, {Lang: "nl", Label: "Geldig tot"},
+		}},
+		{Key: "voorschriften_url", Label: "Conditions URL", Type: attestation.AttributeTypeString, Display: []attestation.LocalizedLabel{
+			{Lang: "en", Label: "Conditions URL"}, {Lang: "nl", Label: "Voorschriften"},
+		}},
+	},
+}
+
+// nijmegenApvTemplateName names the template over nijmegenApvSchema, matching
+// the template name issue #245's scenario runs the issue wizard with.
+const nijmegenApvTemplateName = "APV standplaatsvergunning"
+
+// seedNijmegenAttestation gives the Gemeente Nijmegen tenant the APV
+// standplaatsvergunning schema + template (issue #245). Idempotent: skips when
+// the org already has schemas.
+func seedNijmegenAttestation(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+	store := attestation.NewStore(pool, audit.NewDBRecorder())
+
+	existing, err := store.ListSchemas(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("seed: list nijmegen attestation schemas: %w", err)
+	}
+	if len(existing) > 0 {
+		return nil
+	}
+
+	schema, err := store.CreateSchema(ctx, orgID, nijmegenApvSchema)
+	if err != nil {
+		return fmt.Errorf("seed: create nijmegen apv schema: %w", err)
+	}
+	if _, err := store.CreateTemplate(ctx, orgID, attestation.Template{
+		SchemaID: schema.ID,
+		Name:     nijmegenApvTemplateName,
+	}); err != nil {
+		return fmt.Errorf("seed: create nijmegen apv template: %w", err)
+	}
+
+	slog.Info("seeded Nijmegen APV standplaatsvergunning schema + template")
 	return nil
 }
 
