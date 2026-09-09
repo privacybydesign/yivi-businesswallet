@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
@@ -146,5 +147,73 @@ func TestKVKRegisterOrgNotConsultable(t *testing.T) {
 	}
 	if kvkRegisterOrg.repKind != "" {
 		t.Fatalf("kvk register org should have no representative, got kind %q", kvkRegisterOrg.repKind)
+	}
+}
+
+// TestNijmegenApvSchemaIsWellFormed guards the fixture seedNijmegenAttestation
+// writes (issue #245): it is an organization-subject schema, every attribute
+// uses a type the store/editor actually support, attribute keys are unique, and
+// every display entry (schema-level and per-attribute) carries both languages
+// the rest of the seeded catalogue uses.
+func TestNijmegenApvSchemaIsWellFormed(t *testing.T) {
+	if nijmegenApvSchema.VCT == "" || nijmegenApvSchema.CredentialConfigID == "" {
+		t.Fatal("nijmegenApvSchema must have a non-empty VCT and CredentialConfigID")
+	}
+	if nijmegenApvSchema.SubjectType != attestation.SubjectOrganization {
+		t.Fatalf("nijmegenApvSchema subject type = %q, want %q", nijmegenApvSchema.SubjectType, attestation.SubjectOrganization)
+	}
+	if nijmegenApvTemplateName == "" {
+		t.Fatal("nijmegenApvTemplateName must not be empty")
+	}
+	assertLangs(t, "schema display", toLangs(nijmegenApvSchema.Display))
+
+	supported := map[string]bool{}
+	for _, s := range attestation.SupportedAttributeTypes {
+		supported[s] = true
+	}
+
+	seenKeys := map[string]bool{}
+	for _, a := range nijmegenApvSchema.Attributes {
+		if a.Key == "" {
+			t.Fatal("nijmegenApvSchema has an attribute with an empty key")
+		}
+		if seenKeys[a.Key] {
+			t.Errorf("nijmegenApvSchema attribute key %q is duplicated", a.Key)
+		}
+		seenKeys[a.Key] = true
+		if !supported[a.Type] {
+			t.Errorf("nijmegenApvSchema attribute %q has unsupported type %q", a.Key, a.Type)
+		}
+		assertLangs(t, "attribute "+a.Key+" display", toLangsLabel(a.Display))
+	}
+}
+
+func toLangs(names []attestation.LocalizedName) []string {
+	langs := make([]string, len(names))
+	for i, n := range names {
+		langs[i] = n.Lang
+	}
+	return langs
+}
+
+func toLangsLabel(labels []attestation.LocalizedLabel) []string {
+	langs := make([]string, len(labels))
+	for i, l := range labels {
+		langs[i] = l.Lang
+	}
+	return langs
+}
+
+func assertLangs(t *testing.T, what string, langs []string) {
+	t.Helper()
+	want := map[string]bool{"en": true, "nl": true}
+	got := map[string]bool{}
+	for _, l := range langs {
+		got[l] = true
+	}
+	for lang := range want {
+		if !got[lang] {
+			t.Errorf("%s is missing language %q", what, lang)
+		}
 	}
 }
