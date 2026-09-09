@@ -47,9 +47,15 @@ const disclosureToken = "test-token"
 // email (and optionally name), so a /claim logs in as that user. The claim shape
 // mirrors the one proven against extractEmail in internal/auth/disclosure_test.go.
 type fakeVerifier struct {
-	email      string
-	givenNames string
-	familyName string
+	email       string
+	givenNames  string
+	familyName  string
+	dateOfBirth string
+	// identityIssuedAt stands in for the identity credential's issuer `iat` —
+	// when the wallet obtained it — which the re-identification freshness check
+	// compares against the org's policy. Zero means "unknown", as it is for a
+	// presentation that carried no identity credential.
+	identityIssuedAt time.Time
 }
 
 func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.Scope) (openid4vpverifier.Session, error) {
@@ -62,7 +68,10 @@ func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Pr
 		claims[openid4vpverifier.ClaimGivenNames] = f.givenNames
 		claims[openid4vpverifier.ClaimFamilyName] = f.familyName
 	}
-	return openid4vpverifier.Presentation{Claims: claims}, nil
+	if f.dateOfBirth != "" {
+		claims[openid4vpverifier.ClaimDateOfBirth] = f.dateOfBirth
+	}
+	return openid4vpverifier.Presentation{Claims: claims, IdentityIssuedAt: f.identityIssuedAt}, nil
 }
 
 func (f *fakeVerifier) Status(_ context.Context, _ string) (string, error) {
@@ -131,7 +140,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 		stubEmailNotifier{}, stubQerdsNotifier{}, attestationStore, attestationStore, eudiholder.NewStubHolder(), "http://app.test",
 	)
 	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, "", requireUser, orgHandler.Authorize)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, orgStore, "", requireUser, orgHandler.Authorize)
 
 	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler))
 	t.Cleanup(srv.Close)

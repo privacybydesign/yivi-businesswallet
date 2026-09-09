@@ -44,10 +44,11 @@ func extractIdentity(res openid4vpverifier.Presentation) (DisclosedIdentity, err
 	dateOfBirth := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimDateOfBirth])
 	phone := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimPhone])
 	return DisclosedIdentity{
-		Email:       email,
-		Name:        identity.Name{GivenNames: given, LastName: family},
-		DateOfBirth: dateOfBirth,
-		Phone:       phone,
+		Email:              email,
+		Name:               identity.Name{GivenNames: given, LastName: family},
+		DateOfBirth:        dateOfBirth,
+		Phone:              phone,
+		CredentialIssuedAt: res.IdentityIssuedAt,
 	}, nil
 }
 

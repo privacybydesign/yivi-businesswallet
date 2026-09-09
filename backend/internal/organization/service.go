@@ -26,13 +26,19 @@ type invitationStore interface {
 	InvitationByToken(ctx context.Context, rawToken string) (Invitation, error)
 	InvitationByID(ctx context.Context, invitationID uuid.UUID) (Invitation, error)
 	ListInvitationsForEmail(ctx context.Context, email string) ([]Invitation, error)
-	AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name, phone string) error
+	AcceptInvitation(ctx context.Context, inv Invitation, userID uuid.UUID, disclosed identity.Name, phone, dateOfBirth string) error
 	RecordRejectedAccept(ctx context.Context, orgID uuid.UUID, email string, before, after map[string]any) error
 	DeclineInvitation(ctx context.Context, rawToken string) error
 	DeclineInvitationByID(ctx context.Context, invitationID uuid.UUID) error
-	CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name, phone string) (ReviewState, error)
+	CreateIdentityReview(ctx context.Context, inv Invitation, userID uuid.UUID, stored, disclosed identity.Name, phone, dateOfBirth string) (ReviewState, error)
 	ListIdentityReviews(ctx context.Context) ([]IdentityReview, error)
 	ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error)
+
+	ReverifyTokenLookup(ctx context.Context, rawToken string) (ReverifyContext, error)
+	EnsureReverifyToken(ctx context.Context, orgID, userID uuid.UUID) (string, time.Time, error)
+	RecordReverifyRejected(ctx context.Context, orgID, userID uuid.UUID, email, reason string) error
+	CompleteReverification(ctx context.Context, orgID, userID uuid.UUID, disclosed identity.Name, phone, dateOfBirth string) error
+	GetIdentitySettings(ctx context.Context, orgID uuid.UUID) (IdentitySettings, error)
 }
 
 type identityDiscloser interface {
@@ -52,13 +58,15 @@ func NewService(users userStore, store invitationStore, discloser identityDisclo
 }
 
 type Invite struct {
-	Email        user.Email
-	GivenNames   string
-	LastName     string
-	Role         string
-	JobTitle     *string
-	DepartmentID *uuid.UUID
-	InvitedBy    uuid.UUID
+	Email                user.Email
+	GivenNames           string
+	LastName             string
+	Role                 string
+	JobTitle             *string
+	DepartmentID         *uuid.UUID
+	InvitedBy            uuid.UUID
+	MemberType           string
+	ExternalOrganisation *string
 }
 
 func (s *Service) InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) (Invitation, error) {
@@ -76,14 +84,16 @@ func (s *Service) InviteMember(ctx context.Context, orgID uuid.UUID, in Invite) 
 
 	invitedBy := in.InvitedBy
 	return s.store.CreateInvitation(ctx, Invitation{
-		OrganizationID: orgID,
-		Email:          string(in.Email),
-		InvitedBy:      &invitedBy,
-		Role:           in.Role,
-		JobTitle:       in.JobTitle,
-		DepartmentID:   in.DepartmentID,
-		GivenNames:     in.GivenNames,
-		LastName:       in.LastName,
+		OrganizationID:       orgID,
+		Email:                string(in.Email),
+		InvitedBy:            &invitedBy,
+		Role:                 in.Role,
+		JobTitle:             in.JobTitle,
+		DepartmentID:         in.DepartmentID,
+		GivenNames:           in.GivenNames,
+		LastName:             in.LastName,
+		MemberType:           in.MemberType,
+		ExternalOrganisation: in.ExternalOrganisation,
 	})
 }
 
@@ -162,7 +172,7 @@ func (s *Service) acceptResolved(ctx context.Context, inv Invitation, disclosure
 
 	if needsReview {
 		stored := identity.Name{GivenNames: u.GivenNames, LastName: u.LastName}
-		state, err := s.store.CreateIdentityReview(ctx, inv, u.ID, stored, disclosed.Name, disclosed.Phone)
+		state, err := s.store.CreateIdentityReview(ctx, inv, u.ID, stored, disclosed.Name, disclosed.Phone, disclosed.DateOfBirth)
 		if err != nil {
 			return AcceptOutcome{}, err
 		}
@@ -173,7 +183,7 @@ func (s *Service) acceptResolved(ctx context.Context, inv Invitation, disclosure
 		return at, nil
 	}
 
-	if err := s.store.AcceptInvitation(ctx, inv, u.ID, disclosed.Name, disclosed.Phone); err != nil {
+	if err := s.store.AcceptInvitation(ctx, inv, u.ID, disclosed.Name, disclosed.Phone, disclosed.DateOfBirth); err != nil {
 		return AcceptOutcome{}, err
 	}
 	at.Status = AcceptAccepted

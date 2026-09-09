@@ -170,3 +170,53 @@ func TestStartPresentationAsksForAGetRequestURI(t *testing.T) {
 		t.Errorf("request_uri_method = %v, want %q", body["request_uri_method"], requestURIMethodGet)
 	}
 }
+
+// issuerJWT builds an SD-JWT VC issuer-signed JWT whose payload carries iat.
+func issuerJWT(t *testing.T, issuedAt int64) string {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{"vct": vctPassport, "iat": issuedAt})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	return header + "." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+}
+
+// The re-identification freshness check (#240 §5) reads `iat` from the identity
+// credential's issuer-signed JWT — the moment the wallet obtained it — so this
+// pins that it is decoded out of the first '~' segment, per credential id.
+func TestIdentityIssuedAtReadsTheIssuerJWT(t *testing.T) {
+	obtained := int64(1767225600) // 2026-01-01T00:00:00Z
+
+	passport := issuerJWT(t, obtained) + "~" + disclosure(t, ClaimGivenNames, "Alice") + "~"
+	got := identityIssuedAt(map[string][]string{"passport": {passport}})
+	if got.Unix() != obtained {
+		t.Errorf("identityIssuedAt(passport) = %v, want unix %d", got, obtained)
+	}
+
+	// An id-card presentation is the other half of the identity credential set.
+	idcard := issuerJWT(t, obtained) + "~" + disclosure(t, ClaimFamilyName, "Owner") + "~"
+	if got := identityIssuedAt(map[string][]string{"idcard": {idcard}}); got.Unix() != obtained {
+		t.Errorf("identityIssuedAt(idcard) = %v, want unix %d", got, obtained)
+	}
+}
+
+// A presentation with no identity credential, or one whose issuer JWT cannot be
+// decoded, yields the zero time rather than a bogus date — the freshness check
+// then simply does not apply instead of rejecting a valid re-identification.
+func TestIdentityIssuedAtIsZeroWhenUnavailable(t *testing.T) {
+	cases := map[string]map[string][]string{
+		"no identity credential": {"email": {sdjwt(t, disclosure(t, ClaimEmail, "a@b.test"))}},
+		"undecodable issuer jwt": {"passport": {sdjwt(t, disclosure(t, ClaimGivenNames, "Alice"))}},
+		"empty token list":       {"passport": {}},
+		"no iat claim": {"passport": {base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`)) + "." +
+			base64.RawURLEncoding.EncodeToString([]byte(`{"vct":"x"}`)) + ".sig~"}},
+	}
+	for name, vp := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := identityIssuedAt(vp); !got.IsZero() {
+				t.Errorf("identityIssuedAt = %v, want the zero time", got)
+			}
+		})
+	}
+}

@@ -100,6 +100,26 @@ func (f fakeRepo) RevokeMandate(context.Context, uuid.UUID, uuid.UUID, uuid.UUID
 	return nil, nil
 }
 
+func (f fakeRepo) UpdateMemberType(context.Context, uuid.UUID, uuid.UUID, string, *string) (Member, error) {
+	return Member{}, nil
+}
+
+func (f fakeRepo) RequestIdentification(context.Context, uuid.UUID, []uuid.UUID, uuid.UUID, string) ([]RequestedMember, error) {
+	return nil, nil
+}
+
+func (f fakeRepo) GetIdentitySettings(context.Context, uuid.UUID) (IdentitySettings, error) {
+	return IdentitySettings{}, nil
+}
+
+func (f fakeRepo) SaveIdentitySettings(context.Context, uuid.UUID, IdentitySettingsInput) (IdentitySettings, error) {
+	return IdentitySettings{}, nil
+}
+
+func (f fakeRepo) ReverifyTokenLookup(context.Context, string) (ReverifyContext, error) {
+	return ReverifyContext{}, nil
+}
+
 // authorizeWith runs the Authorize middleware and returns the response together
 // with the basis of authority it stashed, which the mandate cases assert on.
 func authorizeWith(repo repository, admins auth.PlatformAdmins, email user.Email) (*httptest.ResponseRecorder, Authority) {

@@ -26,6 +26,17 @@ const (
 	MembershipRevoked        = "membership.revoked"
 	MembershipRoleChanged    = "membership.role_changed"
 	MembershipExpired        = "membership.expired"
+	MembershipTypeChanged    = "membership.type_changed"
+
+	// Re-identification lifecycle (#240): verified-at/overdue status, per-type
+	// intervals, reminder emails and admin on-demand request.
+	MembershipIdentityRequested        = "membership.identity_requested"
+	MembershipIdentityReverified       = "membership.identity_reverified"
+	MembershipIdentityReverifyRejected = "membership.identity_reverify_rejected"
+	MembershipIdentityReminderSent     = "membership.identity_reminder_sent"
+	MembershipIdentityOverdue          = "membership.identity_overdue"
+
+	IdentitySettingsUpdated = "identity.settings_updated"
 
 	// Mandates granted inside the wallet (Recital 18, Art 5(1)(j)). A delegation is
 	// a grant with a parent, and a cascaded revocation records one event per
@@ -160,6 +171,8 @@ const (
 	TargetOnboardingSettings = "org_onboarding_attestations"
 
 	TargetNotificationSettings = "org_notification_settings"
+
+	TargetIdentitySettings = "org_identity_settings"
 
 	TargetSlackSettings = "org_slack_settings"
 

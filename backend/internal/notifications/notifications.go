@@ -115,6 +115,10 @@ var catalog = []CatalogEntry{
 	{audit.MembershipRevoked, GroupMembership},
 	{audit.MembershipRoleChanged, GroupMembership},
 	{audit.MembershipExpired, GroupMembership},
+	{audit.MembershipIdentityRequested, GroupMembership},
+	{audit.MembershipIdentityReverified, GroupMembership},
+	{audit.MembershipIdentityReminderSent, GroupMembership},
+	{audit.MembershipIdentityOverdue, GroupMembership},
 
 	{audit.WalletBootstrapped, GroupWallet},
 	{audit.WalletSuspended, GroupWallet},

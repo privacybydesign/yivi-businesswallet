@@ -198,6 +198,40 @@ func (s *Service) SendSignatureRequested(ctx context.Context, orgID uuid.UUID, t
 	})
 }
 
+// SendIdentityReminder tells a member their re-identification is due soon,
+// linking to the re-identification flow. Returns ErrNotConfigured when the org
+// has no usable SMTP settings.
+func (s *Service) SendIdentityReminder(ctx context.Context, orgID uuid.UUID, to, orgName, reidentifyURL, dueDate string) error {
+	return s.send(ctx, orgID, KindIdentityReminder, []string{to}, map[string]string{
+		varOrgName:       orgName,
+		varReidentifyURL: reidentifyURL,
+		varDueDate:       dueDate,
+	})
+}
+
+// SendIdentityOverdue tells a member their re-identification is overdue, linking
+// to the re-identification flow. Returns ErrNotConfigured when the org has no
+// usable SMTP settings.
+func (s *Service) SendIdentityOverdue(ctx context.Context, orgID uuid.UUID, to, orgName, reidentifyURL, dueDate string) error {
+	return s.send(ctx, orgID, KindIdentityOverdue, []string{to}, map[string]string{
+		varOrgName:       orgName,
+		varReidentifyURL: reidentifyURL,
+		varDueDate:       dueDate,
+	})
+}
+
+// SendIdentityRequested tells a member an admin has requested they re-confirm
+// their identity now, linking to the re-identification flow. reason may be
+// empty, in which case the template's reason paragraph drops out. Returns
+// ErrNotConfigured when the org has no usable SMTP settings.
+func (s *Service) SendIdentityRequested(ctx context.Context, orgID uuid.UUID, to, orgName, reidentifyURL, reason string) error {
+	return s.send(ctx, orgID, KindIdentityRequested, []string{to}, map[string]string{
+		varOrgName:       orgName,
+		varReidentifyURL: reidentifyURL,
+		varReason:        reason,
+	})
+}
+
 // SendSpecimen sends a sample of one kind to a single address, rendered from the
 // org's own template (or the shipped default) with the kind's sample variables, so
 // an admin can check a real, fully branded message of that cause against their own

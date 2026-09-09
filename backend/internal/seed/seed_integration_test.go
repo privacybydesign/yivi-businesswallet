@@ -137,6 +137,48 @@ func TestEnsureYiviOrganizationUsesConfiguredDomain(t *testing.T) {
 	}
 }
 
+// TestEnsurePartnerOrganizationsSeedsNijmegenApvAttestation covers the staging
+// partner seed (`seed -partners`): Gemeente Nijmegen must come out of it with
+// its APV standplaatsvergunning schema/template and issuer settings (issue
+// #245), re-running must not duplicate any of it, and no other partner org
+// picks up an attestation catalogue it never asked for.
+func TestEnsurePartnerOrganizationsSeedsNijmegenApvAttestation(t *testing.T) {
+	pool, dsn := testdb.Fresh(t)
+	ctx := context.Background()
+
+	if err := seed.EnsurePartnerOrganizations(ctx, dsn, localAddressDomain); err != nil {
+		t.Fatalf("first EnsurePartnerOrganizations: %v", err)
+	}
+	// Re-run: the staging deploy runs the seed every time, so this must be safe.
+	if err := seed.EnsurePartnerOrganizations(ctx, dsn, localAddressDomain); err != nil {
+		t.Fatalf("second EnsurePartnerOrganizations: %v", err)
+	}
+
+	var nijmegenID string
+	if err := pool.QueryRow(ctx, "SELECT id FROM organizations WHERE slug = 'nijmegen'").Scan(&nijmegenID); err != nil {
+		t.Fatalf("query nijmegen org: %v", err)
+	}
+
+	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM attestation_schemas WHERE organization_id = $1", nijmegenID)
+	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM attestation_templates WHERE organization_id = $1", nijmegenID)
+	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM org_issuer_settings WHERE organization_id = $1", nijmegenID)
+	var vct string
+	if err := pool.QueryRow(ctx, "SELECT vct FROM attestation_schemas WHERE organization_id = $1", nijmegenID).Scan(&vct); err != nil {
+		t.Fatalf("query nijmegen schema vct: %v", err)
+	}
+	if vct != "nl.nijmegen.apv.standplaatsvergunning" {
+		t.Fatalf("nijmegen schema vct = %q, want %q", vct, "nl.nijmegen.apv.standplaatsvergunning")
+	}
+
+	// Other partner orgs (e.g. Anoigo) get no attestation catalogue of their own.
+	var anoigoID string
+	if err := pool.QueryRow(ctx, "SELECT id FROM organizations WHERE slug = 'anoigo'").Scan(&anoigoID); err != nil {
+		t.Fatalf("query anoigo org: %v", err)
+	}
+	assertCount(t, ctx, pool, 0, "SELECT count(*) FROM attestation_schemas WHERE organization_id = $1", anoigoID)
+	assertCount(t, ctx, pool, 0, "SELECT count(*) FROM org_issuer_settings WHERE organization_id = $1", anoigoID)
+}
+
 func assertCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, want int, query string, args ...any) {
 	t.Helper()
 	var got int

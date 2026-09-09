@@ -300,6 +300,45 @@ export const en = {
       },
     },
   },
+  reidentify: {
+    loading: "Opening your re-identification…",
+    title: "Confirm your identity again",
+    intro:
+      "{{org}} asks its members to prove their identity again from time to time. Scan the code with your wallet to confirm you are still you.",
+    forEmail: "For {{email}}",
+    start: "Confirm my identity",
+    scanPrompt:
+      "Scan this code with your wallet to confirm your identity for {{org}}.",
+    done: "Your identity is confirmed",
+    doneHint:
+      "{{org}} has recorded the confirmation. You can close this page or go to the wallet.",
+    goToApp: "Go to the wallet",
+    retry: "Try again",
+    errors: {
+      linkTitle: "This link no longer works",
+      linkBody:
+        "Re-identification links expire, and a newer one replaces an older one. Ask an admin of the organization for a fresh link, or start it from the wallet.",
+      emailTitle: "That wallet is not this member",
+      emailBody:
+        "The e-mail in the credential you presented is not the address this link was sent to. Use the wallet that holds that address.",
+      nameTitle: "The name does not match",
+      nameBody:
+        "The name on the credential you presented differs from the name this organization has on file. Contact an admin of the organization so they can sort it out.",
+      staleTitle: "This credential is too old",
+      staleBody:
+        "This organization only accepts a recently obtained identity credential. Get a fresh one from its issuer in your wallet, then open this link again.",
+      genericTitle: "Could not confirm your identity",
+      genericBody: "{{message}}",
+    },
+    banner: {
+      requested: "{{org}} has asked you to confirm your identity again.",
+      dueSoon: "Your identity confirmation for {{org}} expires on {{date}}.",
+      overdue: "Your identity confirmation for {{org}} expired on {{date}}.",
+      overdueNoDate: "Your identity confirmation for {{org}} has expired.",
+      action: "Confirm my identity",
+      error: "Could not start re-identification: {{message}}",
+    },
+  },
   dashboard: {
     greeting: {
       morning: "Good morning, {{name}}",
@@ -349,6 +388,10 @@ export const en = {
     invitationRevoked: "Invitation revoked",
     memberUpdated: "Member updated",
     memberRemoved: "Member removed",
+    identitySettingsSaved: "Re-identification settings saved",
+    identificationRequested_one: "Identification requested",
+    identificationRequested_other:
+      "Identification requested from {{count}} members",
     organizationUpdated: "Organization updated",
     organizationDeleted: "Organization deleted",
     departmentAdded: "Department added",
@@ -425,6 +468,28 @@ export const en = {
     active: "Active",
     pending: "Pending",
     verified: "Verified",
+    verifiedOn: "Verified on {{date}}",
+    identity: {
+      never: "Never identified",
+      verified: "Identified",
+      dueSoon: "Due soon",
+      overdue: "Overdue",
+      requested: "Requested",
+      dueOn: "Re-identify before {{date}}",
+      requestedOn: "Requested on {{date}}",
+      neverHint:
+        "This member has not proved their identity since this feature shipped.",
+    },
+    memberType: {
+      employee: "Employee",
+      external: "External",
+    },
+    select: "Select {{name}}",
+    selectAll: "Select all members on this page",
+    selectedCount_one: "{{count}} selected",
+    selectedCount_other: "{{count}} selected",
+    clearSelection: "Clear selection",
+    requestIdentification: "Request identification",
     resend: "Resend",
     revoke: "Revoke",
     search: "Search by name, email, role, department…",
@@ -492,6 +557,7 @@ export const en = {
       orgThemeSettings: "Theme settings",
       orgOnboardingAttestations: "Onboarding attestations",
       orgNotificationSettings: "Notification settings",
+      orgIdentitySettings: "Re-identification settings",
       orgSlackSettings: "Slack settings",
       orgTeamsSettings: "Microsoft Teams settings",
       orgProvisioningSettings: "Provisioning settings",
@@ -514,6 +580,13 @@ export const en = {
       memberRevoked: "Revoked membership",
       roleChanged: "Changed role",
       inviteExpired: "Invitation expired",
+      memberTypeChanged: "Changed member type",
+      identityRequested: "Requested identification",
+      identityReverified: "Re-confirmed identity",
+      identityReverifyRejected: "Rejected re-identification attempt",
+      identityReminderSent: "Sent identity reminder",
+      identityOverdue: "Identity confirmation overdue",
+      identitySettingsUpdated: "Updated re-identification settings",
       mandateGranted: "Granted mandate",
       mandateRevoked: "Revoked mandate",
       deptCreated: "Created department",
@@ -613,6 +686,13 @@ export const en = {
     selectDepartment: "Select department",
     roleMember: "Member",
     roleAdmin: "Admin",
+    memberType: "Member type",
+    memberTypeEmployee: "Employee",
+    memberTypeExternal: "External",
+    memberTypeHint:
+      "Externals (contractors, temp and partner staff) can be held to a shorter re-identification interval than employees.",
+    externalOrganisation: "Works for",
+    externalOrganisationPlaceholder: "e.g. Contractors BV",
     attestations: "Attestations to auto-issue on onboarding",
     attestationsHint:
       "Applies to every new member of this organization, not just this invitation.",
@@ -646,6 +726,15 @@ export const en = {
     },
     active: "Active member",
     verified: "Verified",
+    identifiedOn: "Identified on",
+    never: "Never",
+    identityDueOn: "Re-identify before",
+    memberType: "Member type",
+    externalOrganisation: "Works for",
+    requestIdentification: "Request identification",
+    requestIdentificationHint:
+      "Asks this member to re-confirm their identity now. They get an e-mail with a link.",
+    identityRequested: "Identification requested",
     sendMessage: "Send message",
     offboard: "Off-board member",
     offboardConfirm: {
@@ -661,6 +750,13 @@ export const en = {
     title: "Edit member",
     jobTitlePlaceholder: "e.g. Engineering Lead",
     noDepartment: "No department",
+    memberType: "Member type",
+    memberTypeEmployee: "Employee",
+    memberTypeExternal: "External",
+    memberTypeHint:
+      "Externals can be held to a shorter re-identification interval than employees.",
+    externalOrganisation: "Works for",
+    externalOrganisationPlaceholder: "e.g. Contractors BV",
     lastAdmin:
       "This is the organization's only admin. Promote another member to admin first.",
   },
@@ -879,6 +975,7 @@ export const en = {
     subtitle: "Organization profile and preferences",
     tabOrg: "Organization",
     tabMandates: "Mandates",
+    tabIdentity: "Identity",
     tabBranding: "Branding",
     tabCommunication: "Communication",
     tabEmail: "E-mail",
@@ -975,6 +1072,55 @@ export const en = {
     },
     erasurePending:
       "Service has ended for this organization and erasure of your data has been recorded as owed.",
+  },
+  identitySettings: {
+    heading: "Re-identification",
+    description:
+      "Members prove their identity with a passport or ID card when they join. Set how often they have to prove it again, and what happens when they do not.",
+    intervals: "How often",
+    employeeInterval: "Employees",
+    externalInterval: "Externals",
+    intervalHint:
+      "Counted from the last time the member proved their identity. Externals are usually re-checked more often than employees.",
+    intervalOff: "Never",
+    intervalMonths_one: "Every month",
+    intervalMonths_other: "Every {{count}} months",
+    reminders: "Reminders",
+    reminderDaysBefore: "Remind before the deadline",
+    reminderDaysBeforePlaceholder: "e.g. 30, 14, 7",
+    reminderDaysBeforeHint:
+      "Days before the deadline, separated by commas. The largest value is also when a member starts showing as due soon.",
+    overdueReminderIntervalDays: "Repeat every",
+    overdueReminderIntervalDaysHint:
+      "How many days between reminders once a member is overdue.",
+    overdueReminderMaxCount: "At most",
+    overdueReminderMaxCountHint:
+      "The total number of reminders one deadline may produce, so nobody is mailed forever.",
+    days_one: "{{count}} day",
+    days_other: "{{count}} days",
+    reminders_one: "{{count}} reminder",
+    reminders_other: "{{count}} reminders",
+    credential: "Credential freshness",
+    credentialMaxAgeDays: "Accept a credential obtained at most",
+    credentialMaxAgeOff: "Any age",
+    credentialMaxAgeHint:
+      "Refuses a re-identification whose passport or ID-card credential was obtained from its issuer longer ago than this. The member has to get a fresh one in their wallet first. Off by default.",
+    consequence: "When a member is overdue",
+    consequenceFlag: "Flag only",
+    consequenceFlagHint:
+      "Shows the status in the member list and detail, sends the reminders, and changes nothing else.",
+    consequenceBlock: "Flag and block",
+    consequenceBlockHint:
+      "Also refuses to issue credentials to the member and refuses them as a document signer until they re-identify. Read access and existing sessions are untouched.",
+    save: "Save settings",
+    saveError: "Could not save re-identification settings: {{message}}",
+    loadError: "Could not load re-identification settings: {{message}}",
+    reminderDaysInvalid:
+      "Enter reminder days as whole numbers above zero, separated by commas.",
+    unconfigured:
+      "Re-identification is off for this organization: no deadlines are computed and no reminders are sent until you save an interval.",
+    recomputeNote:
+      "Saving recomputes every member's deadline from when they last proved their identity.",
   },
   provisioningSettings: {
     heading: "Microsoft Entra ID",
@@ -1193,6 +1339,9 @@ export const en = {
       credential_offer: "Credential offer",
       event_notification: "Event notification",
       export_ready: "Data export ready",
+      identity_overdue: "Identity overdue",
+      identity_reminder: "Identity reminder",
+      identity_requested: "Identification requested",
       invitation: "Member invitation",
       postguard_file: "Encrypted file",
       signature_requested: "Signature request",
@@ -1206,6 +1355,12 @@ export const en = {
         "Sent to this organization's admins when something happens that they subscribed to.",
       export_ready:
         "Sent to this organization's admins when service ends, carrying a one-time link to their data-portability bundle.",
+      identity_overdue:
+        "Sent to a member whose re-identification deadline has passed, on the reminder cadence.",
+      identity_reminder:
+        "Sent to a member ahead of their re-identification deadline.",
+      identity_requested:
+        "Sent to a member when an admin asks them to re-confirm their identity now.",
       invitation: "Sent to someone invited to join this organization.",
       postguard_file:
         "Sent to a recipient of an encrypted file, when this organization mails through its own SMTP server.",
@@ -1922,16 +2077,12 @@ export const en = {
         "Scan the QR with the recipient's wallet to claim the attestation.",
       offerEmailedHint:
         "A claim link was e-mailed to {{recipient}}. They can also scan this QR to claim it now.",
+      offerSentTitle: "Offer sent",
       offerOrgHint:
-        "The offer was delivered to the organization over QERDS. Its wallet redeems it automatically.",
-      offerSteps: {
-        sent: "Offer sent",
-        claimed: "Received",
-      },
+        "The offer was delivered to the organization over QERDS. An admin there must accept it from their Wallet tab before it enters the organization's wallet.",
       openWallet: "Open wallet",
       txCode: "Transaction code: {{code}}",
       waiting: "Waiting for the recipient to claim…",
-      waitingOrg: "Waiting for the organization's wallet to redeem the offer…",
       claimedTitle: "Attestation claimed",
       claimedHint: "The recipient has added the attestation to their wallet.",
       done: "Done",

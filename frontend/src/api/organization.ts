@@ -57,11 +57,53 @@ function withAbsoluteAvatar<T extends { avatarUri: string }>(subject: T): T {
     : subject;
 }
 
+// The caller's own re-identification state in this organisation. It rides on
+// the org detail because a plain member cannot read the member list, and it is
+// what the in-app banner is driven from.
+export const ownIdentityStateSchema = z.object({
+  status: z.string(),
+  dueAt: z.string().nullable(),
+});
+
+export type OwnIdentityState = z.infer<typeof ownIdentityStateSchema>;
+
 export const organizationDetailSchema = organizationSchema.extend({
   role: z.string(),
+  // Absent for a platform admin who is not a member of the org.
+  identity: ownIdentityStateSchema.optional(),
 });
 
 export type OrganizationDetail = z.infer<typeof organizationDetailSchema>;
+
+// Member type and re-identification status, mirrored from the backend
+// (internal/organization/organization.go). Status is derived server-side from
+// the identity timestamps, never stored, so it is read-only here.
+export const MEMBER_TYPES = ["employee", "external"] as const;
+
+export type MemberType = (typeof MEMBER_TYPES)[number];
+
+export const IDENTITY_STATUSES = [
+  "never",
+  "verified",
+  "due_soon",
+  "overdue",
+  "requested",
+] as const;
+
+export type IdentityStatus = (typeof IDENTITY_STATUSES)[number];
+
+// A status the backend adds and this list omits must not fail the whole member
+// list, so the schema falls back to the value verbatim and the UI renders it as
+// a neutral badge (see identityStatusTone).
+const identityStatusSchema = z.string();
+
+const memberIdentityFields = {
+  memberType: z.string(),
+  externalOrganisation: z.string().nullable(),
+  identityStatus: identityStatusSchema,
+  identityDueAt: z.string().nullable(),
+  identityRequestedAt: z.string().nullable(),
+};
 
 export const memberSchema = z.object({
   userId: z.string(),
@@ -75,6 +117,9 @@ export const memberSchema = z.object({
   departmentName: z.string().nullable(),
   phone: z.string().nullable(),
   verified: z.boolean(),
+  identityVerifiedAt: z.string().nullable(),
+  identityRequestedBy: z.string().nullable(),
+  ...memberIdentityFields,
   avatarUri: z.string(),
 });
 
@@ -97,6 +142,8 @@ export const memberListEntrySchema = z.object({
   invitedBy: z.string().nullable(),
   phone: z.string().nullable(),
   verified: z.boolean(),
+  identityVerifiedAt: z.string().nullable(),
+  ...memberIdentityFields,
   avatarUri: z.string(),
 });
 
@@ -233,6 +280,8 @@ export function inviteMember(
     role?: string;
     jobTitle?: string;
     departmentId?: string;
+    memberType?: MemberType;
+    externalOrganisation?: string;
   },
   signal?: AbortSignal,
 ): Promise<void> {
@@ -298,6 +347,127 @@ export function revokeInvitation(
     `/api/v1/orgs/${encodeURIComponent(slug)}/invitations/${encodeURIComponent(invitationId)}`,
     { schema: z.void(), method: "DELETE", signal },
   );
+}
+
+// --- Re-identification lifecycle (#240) ---
+
+// An org's re-identification policy. `configured` is false until an admin saves
+// one, in which case the feature is off: no due dates, no reminders.
+export const identitySettingsSchema = z.object({
+  configured: z.boolean(),
+  employeeIntervalMonths: z.number().nullable(),
+  externalIntervalMonths: z.number().nullable(),
+  reminderDaysBefore: z.array(z.number()),
+  overdueReminderIntervalDays: z.number(),
+  overdueReminderMaxCount: z.number(),
+  credentialMaxAgeDays: z.number().nullable(),
+  overdueConsequence: z.string(),
+  updatedAt: z.string().optional(),
+});
+
+export type IdentitySettings = z.infer<typeof identitySettingsSchema>;
+
+export const OVERDUE_CONSEQUENCES = ["flag", "block"] as const;
+
+export type OverdueConsequence = (typeof OVERDUE_CONSEQUENCES)[number];
+
+export interface IdentitySettingsInput {
+  employeeIntervalMonths: number | null;
+  externalIntervalMonths: number | null;
+  reminderDaysBefore: number[];
+  overdueReminderIntervalDays: number;
+  overdueReminderMaxCount: number;
+  credentialMaxAgeDays: number | null;
+  overdueConsequence: OverdueConsequence;
+}
+
+export function getIdentitySettings(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<IdentitySettings> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/identity-settings`, {
+    schema: identitySettingsSchema,
+    signal,
+  });
+}
+
+export function saveIdentitySettings(
+  slug: string,
+  input: IdentitySettingsInput,
+  signal?: AbortSignal,
+): Promise<IdentitySettings> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/identity-settings`, {
+    schema: identitySettingsSchema,
+    method: "PUT",
+    body: input,
+    signal,
+  });
+}
+
+const requestIdentificationResultSchema = z.object({
+  requested: z.number(),
+});
+
+export type RequestIdentificationResult = z.infer<
+  typeof requestIdentificationResultSchema
+>;
+
+// requestIdentification asks one or several members to re-confirm their
+// identity now: it flips their status to `requested` and mails each of them a
+// re-identification link. The bulk route is used for more than one member so a
+// selection is one call and one audited action per member.
+export function requestIdentification(
+  slug: string,
+  userIds: string[],
+  reason?: string,
+  signal?: AbortSignal,
+): Promise<RequestIdentificationResult> {
+  const base = `/api/v1/orgs/${encodeURIComponent(slug)}/members`;
+  const single = userIds.length === 1;
+  return request(
+    single
+      ? `${base}/${encodeURIComponent(userIds[0])}/request-identification`
+      : `${base}/request-identification`,
+    {
+      schema: requestIdentificationResultSchema,
+      method: "POST",
+      body: single ? { reason } : { userIds, reason },
+      signal,
+    },
+  );
+}
+
+export function updateMemberType(
+  slug: string,
+  userId: string,
+  input: { memberType: MemberType; externalOrganisation: string | null },
+  signal?: AbortSignal,
+): Promise<Member> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}/type`,
+    {
+      schema: memberSchema,
+      method: "PATCH",
+      body: input,
+      signal,
+    },
+  );
+}
+
+const reidentifyLinkSchema = z.object({ reidentifyUrl: z.string() });
+
+// mintOwnReidentifyLink is the in-app banner's entry point: the caller mints a
+// re-identification link for their own membership rather than waiting for the
+// e-mail, through the same token mechanism.
+export async function mintOwnReidentifyLink(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const { reidentifyUrl } = await request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/me/reidentify-token`,
+    { schema: reidentifyLinkSchema, method: "POST", signal },
+  );
+  return reidentifyUrl;
 }
 
 export function getOrganizationDepartments(

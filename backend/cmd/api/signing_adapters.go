@@ -24,12 +24,19 @@ func (m signingMembers) ListMembers(ctx context.Context, orgID uuid.UUID) ([]sig
 	if err != nil {
 		return nil, err
 	}
+	// Empty (not an error) whenever the org's overdue consequence is "flag only"
+	// (the default) or unconfigured — see organization.Store.IdentityBlockedSet.
+	blocked, err := m.store.IdentityBlockedSet(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]signing.OrgMember, 0, len(members))
 	for _, mem := range members {
 		out = append(out, signing.OrgMember{
-			UserID: mem.UserID,
-			Name:   memberDisplayName(mem),
-			Email:  mem.Email,
+			UserID:          mem.UserID,
+			Name:            memberDisplayName(mem),
+			Email:           mem.Email,
+			IdentityBlocked: blocked[mem.UserID],
 		})
 	}
 	return out, nil

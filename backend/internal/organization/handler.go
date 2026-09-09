@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -46,6 +47,12 @@ type repository interface {
 	HasJointRepresentation(ctx context.Context, orgID, userID uuid.UUID) (bool, error)
 	GrantMandate(ctx context.Context, orgID, grantorUserID uuid.UUID, req MandateGrant) (Mandate, error)
 	RevokeMandate(ctx context.Context, orgID, mandateID, revokedBy uuid.UUID, effectiveAt *time.Time, reason string) ([]Mandate, error)
+
+	UpdateMemberType(ctx context.Context, orgID, userID uuid.UUID, memberType string, externalOrganisation *string) (Member, error)
+	RequestIdentification(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID, requestedBy uuid.UUID, reason string) ([]RequestedMember, error)
+	GetIdentitySettings(ctx context.Context, orgID uuid.UUID) (IdentitySettings, error)
+	SaveIdentitySettings(ctx context.Context, orgID uuid.UUID, in IdentitySettingsInput) (IdentitySettings, error)
+	ReverifyTokenLookup(ctx context.Context, rawToken string) (ReverifyContext, error)
 }
 
 type inviter interface {
@@ -60,6 +67,10 @@ type inviter interface {
 	DeclineInvitationForUser(ctx context.Context, invitationID uuid.UUID, email user.Email) error
 	ListIdentityReviews(ctx context.Context) ([]IdentityReview, error)
 	ResolveIdentityReview(ctx context.Context, reviewID, reviewerID uuid.UUID, approve bool) (ResolveOutcome, error)
+
+	StartReverifySession(ctx context.Context, rawToken string) (auth.Session, error)
+	MintOwnReverifyToken(ctx context.Context, orgID, userID uuid.UUID) (string, time.Time, error)
+	CompleteReverification(ctx context.Context, rawToken, disclosureToken string) (ReverifyOutcome, error)
 }
 
 type auditReader interface {
@@ -78,6 +89,7 @@ type sessionIssuer interface {
 // *email.Service (kept as a local interface so this slice does not import it).
 type inviteMailer interface {
 	SendInvitation(ctx context.Context, orgID uuid.UUID, to, orgName, acceptURL string) error
+	SendIdentityRequested(ctx context.Context, orgID uuid.UUID, to, orgName, reidentifyURL, reason string) error
 }
 
 // exports queues the bundle a termination owes. Nil disables the route: a
@@ -128,6 +140,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /invite/{token}/accept", respond.HandlerFunc(h.acceptInvite))
 	mux.Handle("POST /invite/{token}/decline", respond.HandlerFunc(h.declineInvite))
 
+	// Re-identification (#240): a bearer token, resolved the same way an invite
+	// token is, reached either from a reminder/request e-mail or minted for the
+	// caller by the in-app banner (POST .../me/reidentify-token below).
+	mux.Handle("GET /reidentify/{token}", respond.HandlerFunc(h.reidentifyPreview))
+	mux.Handle("POST /reidentify/{token}/session", respond.HandlerFunc(h.startReidentify))
+	mux.Handle("POST /reidentify/{token}/complete", respond.HandlerFunc(h.completeReidentify))
+
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
 	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))
 	mux.Handle("PUT /orgs/{slug}/data-instruction", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.setDataInstruction))))
@@ -138,6 +157,15 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PATCH /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMember))))
 	mux.Handle("DELETE /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.offboardMember))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberAuditEvents))))
+	mux.Handle("PATCH /orgs/{slug}/members/{userId}/type", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMemberType))))
+	mux.Handle("POST /orgs/{slug}/members/{userId}/request-identification", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentification))))
+	mux.Handle("POST /orgs/{slug}/members/request-identification", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentificationBulk))))
+	// Any member may mint their own re-identification link (the in-app banner);
+	// it is scoped to the caller's own membership, so no admin gate is needed.
+	mux.Handle("POST /orgs/{slug}/me/reidentify-token", orgScoped(respond.HandlerFunc(h.mintOwnReverifyToken)))
+
+	mux.Handle("GET /orgs/{slug}/identity-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.getIdentitySettings))))
+	mux.Handle("PUT /orgs/{slug}/identity-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.putIdentitySettings))))
 
 	mux.Handle("POST /orgs/{slug}/invitations/{id}/resend", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.resendInvitation))))
 	mux.Handle("DELETE /orgs/{slug}/invitations/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.revokeInvitation))))
@@ -214,15 +242,52 @@ func (h *Handler) listForUser(w http.ResponseWriter, r *http.Request) error {
 type orgDetailResponse struct {
 	Organization
 	Role string `json:"role"`
+	// Identity is the caller's own re-identification state in this organisation
+	// (#240), so any member — not just an admin, who alone may read the member
+	// list — can be shown the banner when their identification is due, overdue
+	// or has been requested. Empty for a platform admin who is not a member.
+	Identity *ownIdentityState `json:"identity,omitempty"`
+}
+
+// ownIdentityState is the caller's own identity status and deadline. It carries
+// no other member's data and nothing the caller cannot already see about
+// themselves.
+type ownIdentityState struct {
+	Status string     `json:"status"`
+	DueAt  *time.Time `json:"dueAt"`
 }
 
 func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
+	org := OrgFromContext(ctx)
 	respond.JSON(w, r, http.StatusOK, orgDetailResponse{
-		Organization: OrgFromContext(ctx),
+		Organization: org,
 		Role:         roleFromContext(ctx),
+		Identity:     h.ownIdentity(ctx, org.ID, auth.UserFromContext(ctx).ID),
 	})
 	return nil
+}
+
+// ownIdentity resolves the caller's own identity state, or nil when they have no
+// membership (a platform admin reading someone else's org) or when it cannot be
+// read — the banner is informational, so a failure here logs and disappears
+// rather than failing the whole org detail the app needs to render.
+func (h *Handler) ownIdentity(ctx context.Context, orgID, userID uuid.UUID) *ownIdentityState {
+	member, err := h.store.GetMember(ctx, orgID, userID)
+	if errors.Is(err, ErrNotMember) {
+		return nil
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "resolving own identity state", slog.String("error", err.Error()))
+		return nil
+	}
+	lookahead, err := h.identityLookaheadDays(ctx, orgID)
+	if err != nil {
+		slog.ErrorContext(ctx, "resolving identity lookahead", slog.String("error", err.Error()))
+		return nil
+	}
+	member = member.withIdentityStatus(time.Now(), lookahead)
+	return &ownIdentityState{Status: member.IdentityStatus, DueAt: member.IdentityDueAt}
 }
 
 type updateRequest struct {

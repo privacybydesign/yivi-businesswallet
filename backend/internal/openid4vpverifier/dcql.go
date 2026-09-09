@@ -8,6 +8,12 @@ const (
 	vctPhone    = "pbdf-staging.sidn-pbdf.mobilenumber"
 
 	formatSDJWT = "dc+sd-jwt"
+
+	// Credential ids used in the identity query (identityQuery below), reused by
+	// verifier.go to pick out the identity credential's issuer `iat` for the
+	// re-identification freshness check.
+	credIDPassport = "passport"
+	credIDIDCard   = "idcard"
 )
 
 // DCQL types (OpenID4VP Digital Credentials Query Language).
@@ -80,13 +86,13 @@ func loginQuery() dcqlQuery {
 func identityQuery() dcqlQuery {
 	return dcqlQuery{
 		Credentials: []dcqlCredential{
-			{ID: "passport", Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPassport}}, Claims: claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality)},
-			{ID: "idcard", Format: formatSDJWT, Meta: dcqlMeta{[]string{vctIDCard}}, Claims: claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality)},
+			{ID: credIDPassport, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPassport}}, Claims: claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality)},
+			{ID: credIDIDCard, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctIDCard}}, Claims: claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality)},
 			{ID: "email", Format: formatSDJWT, Meta: dcqlMeta{[]string{vctEmail}}, Claims: claimPaths(ClaimEmail)},
 			{ID: "phone", Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPhone}}, Claims: claimPaths(ClaimPhone)},
 		},
 		CredentialSets: []dcqlCredentialSet{
-			{Options: [][]string{{"passport"}, {"idcard"}}},
+			{Options: [][]string{{credIDPassport}, {credIDIDCard}}},
 			{Options: [][]string{{"email"}}},
 			{Options: [][]string{{"phone"}}},
 		},

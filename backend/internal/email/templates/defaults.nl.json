@@ -17,7 +17,10 @@
     "documentName": "Contract.pdf",
     "signingUrl": "https://wallet.example.org/acme/signing",
     "exportUrl": "https://wallet.example.org/api/v1/export/download/sample",
-    "exportExpiry": "24 uur"
+    "exportExpiry": "24 uur",
+    "reidentifyUrl": "https://wallet.example.org/reidentify/voorbeeld",
+    "dueDate": "2026-08-01",
+    "reason": "Je laatste identiteitscontrole is verlopen."
   },
   "events": {
     "membership.invited": "Lid uitgenodigd",
@@ -28,6 +31,10 @@
     "membership.revoked": "Lidmaatschap ingetrokken",
     "membership.role_changed": "Rol gewijzigd",
     "membership.expired": "Uitnodiging verlopen",
+    "membership.identity_requested": "Identificatie aangevraagd",
+    "membership.identity_reverified": "Identiteit opnieuw bevestigd",
+    "membership.identity_reminder_sent": "Identiteitsherinnering verstuurd",
+    "membership.identity_overdue": "Identiteitsbevestiging verlopen",
     "wallet.bootstrapped": "Wallet geïnitialiseerd",
     "wallet.suspended": "Wallet opgeschort",
     "wallet.revoked": "Wallet ingetrokken",
@@ -256,6 +263,36 @@
         {
           "type": "footer"
         }
+      ]
+    },
+    "identity_reminder": {
+      "subject": "Bevestig je identiteit opnieuw bij {{orgName}}",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Tijd om je identiteit opnieuw te bevestigen" },
+        { "type": "paragraph", "text": "{{orgName}} vraagt leden om hun identiteit periodiek opnieuw te bevestigen. Dit moet voor jou vóór {{dueDate}}." },
+        { "type": "button", "label": "Identiteit opnieuw bevestigen", "url": "{{reidentifyUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "identity_overdue": {
+      "subject": "Je identiteitsbevestiging bij {{orgName}} is verlopen",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Je identiteitsbevestiging is verlopen" },
+        { "type": "paragraph", "text": "Je identiteitsbevestiging voor {{orgName}} moest vóór {{dueDate}}. Bevestig deze zo snel mogelijk opnieuw." },
+        { "type": "button", "label": "Identiteit opnieuw bevestigen", "url": "{{reidentifyUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "identity_requested": {
+      "subject": "{{orgName}} vraagt je om je identiteit opnieuw te bevestigen",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} vraagt je om je identiteit opnieuw te bevestigen" },
+        { "type": "paragraph", "text": "{{reason}}" },
+        { "type": "button", "label": "Identiteit opnieuw bevestigen", "url": "{{reidentifyUrl}}" },
+        { "type": "footer" }
       ]
     }
   }

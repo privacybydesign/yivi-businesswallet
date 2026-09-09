@@ -44,6 +44,15 @@ const (
 	// admins when the provider terminates service (Art 7(6)(f)). It carries a
 	// one-time link because by then nobody there can necessarily sign in.
 	KindExportReady Kind = "export_ready"
+	// KindIdentityReminder is sent ahead of a member's identity_due_at, per the
+	// org's re-identification reminder schedule.
+	KindIdentityReminder Kind = "identity_reminder"
+	// KindIdentityOverdue is sent once a member's re-identification has gone
+	// overdue, on the org's overdue reminder cadence.
+	KindIdentityOverdue Kind = "identity_overdue"
+	// KindIdentityRequested is sent when an org admin requests a member's
+	// identification on demand (single or bulk).
+	KindIdentityRequested Kind = "identity_requested"
 )
 
 // Variable names. Every placeholder a template may use is one of these, declared
@@ -64,6 +73,9 @@ const (
 	varSigningURL     = "signingUrl"
 	varExportURL      = "exportUrl"
 	varExportExpiry   = "exportExpiry"
+	varReidentifyURL  = "reidentifyUrl"
+	varDueDate        = "dueDate"
+	varReason         = "reason"
 )
 
 // Variable is one substitutable value of a kind. URL variables are additionally
@@ -116,6 +128,21 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varOrgName},
 		{Name: varExportExpiry},
 		{Name: varExportURL, IsURL: true},
+	},
+	KindIdentityReminder: {
+		{Name: varOrgName},
+		{Name: varReidentifyURL, IsURL: true},
+		{Name: varDueDate},
+	},
+	KindIdentityOverdue: {
+		{Name: varOrgName},
+		{Name: varReidentifyURL, IsURL: true},
+		{Name: varDueDate},
+	},
+	KindIdentityRequested: {
+		{Name: varOrgName},
+		{Name: varReidentifyURL, IsURL: true},
+		{Name: varReason},
 	},
 }
 

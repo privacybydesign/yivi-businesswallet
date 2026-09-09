@@ -15,6 +15,7 @@ import AdminRoute from "./routes/admin-route";
 import Login from "./routes/login";
 import Register from "./routes/register";
 import InviteAccept from "./routes/invite-accept";
+import Reidentify from "./routes/reidentify";
 import MyInvitations from "./routes/my-invitations";
 import Profile from "./routes/profile";
 import Enroll from "./routes/enroll";
@@ -120,6 +121,7 @@ export const router = createBrowserRouter([
       { path: "/login", Component: Login },
       { path: "/register", Component: Register },
       { path: "/invite/:token", Component: InviteAccept },
+      { path: "/reidentify/:token", Component: Reidentify },
       { path: "/claim/:token", Component: Claim },
       // An external signee has no account, so their signing page is public and keyed
       // by the one-time token from their invitation mail.

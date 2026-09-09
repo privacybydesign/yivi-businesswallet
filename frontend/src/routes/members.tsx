@@ -3,11 +3,19 @@ import { useTranslation } from "react-i18next";
 import {
   useOrganizationMembersQuery,
   useOrganizationQuery,
+  useRequestIdentificationMutation,
   useResendInvitationMutation,
   useRevokeInvitationMutation,
 } from "../api/organization.queries";
-import type { MemberSort } from "../api/organization";
+import type { MemberListEntry, MemberSort } from "../api/organization";
 import { accessMessage } from "../lib/access-message";
+import { useDateFormatter } from "../lib/format-when";
+import {
+  identityStatusHint,
+  identityStatusLabel,
+  identityStatusTone,
+  requestableIdentity,
+} from "../lib/identity-status";
 import { fullName, personInitials } from "../lib/name";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { Avatar, Button, Card, Icon, Input, Table, Tag, TopBar } from "../ui";
@@ -16,7 +24,7 @@ import * as React from "react";
 
 const PAGE_SIZE = 25;
 const SEARCH_DEBOUNCE_MS = 300;
-const COLUMN_COUNT = 6;
+const COLUMN_COUNT = 7;
 
 type StatusFilter = "" | "active" | "invited";
 
@@ -43,6 +51,7 @@ function readSort(params: URLSearchParams): MemberSort {
 
 export default function Members(): React.JSX.Element {
   const { t } = useTranslation();
+  const formatDate = useDateFormatter();
   const navigate = useNavigate();
   const { orgSlug } = useParams();
   // Guaranteed by the ":orgSlug" route segment this component mounts under.
@@ -125,11 +134,51 @@ export default function Members(): React.JSX.Element {
 
   const resend = useResendInvitationMutation(slug);
   const revoke = useRevokeInvitationMutation(slug);
+  const requestIdentification = useRequestIdentificationMutation(slug);
+
+  // The bulk "request identification" selection, by user id. It is deliberately
+  // page-local: it clears when the page, filter or search changes, so a request
+  // never reaches a member the admin can no longer see.
+  const [selected, setSelected] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const entries = members.data?.entries ?? [];
   const total = members.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const filtered = status !== "" || q !== "";
+
+  // Only an active member with no outstanding request can be asked, so the
+  // selection is built from exactly those rows.
+  const selectableIds = entries
+    .filter((entry) => entry.userId !== null && requestableIdentity(entry))
+    .map((entry) => entry.userId!);
+  const selectedIds = selectableIds.filter((id) => selected.has(id));
+  const allSelected =
+    selectableIds.length > 0 && selectedIds.length === selectableIds.length;
+
+  const clearSelection = (): void => setSelected(new Set());
+
+  const toggleSelected = (userId: string): void => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  };
+
+  const toggleAllSelected = (): void => {
+    setSelected(allSelected ? new Set() : new Set(selectableIds));
+  };
+
+  const requestSelected = (): void => {
+    if (selectedIds.length === 0) return;
+    requestIdentification.mutate(
+      { userIds: selectedIds },
+      { onSuccess: clearSelection },
+    );
+  };
 
   const toggleSort = (column: MemberSort): void => {
     updateParams((params) => {
@@ -149,6 +198,7 @@ export default function Members(): React.JSX.Element {
   };
 
   const setStatus = (value: StatusFilter): void => {
+    clearSelection();
     updateParams((params) => {
       if (value) params.set("status", value);
       else params.delete("status");
@@ -157,6 +207,7 @@ export default function Members(): React.JSX.Element {
   };
 
   const goToPage = (next: number): void => {
+    clearSelection();
     updateParams((params) => params.set("page", String(next)));
   };
 
@@ -259,51 +310,81 @@ export default function Members(): React.JSX.Element {
                   {t("members.reset")}
                 </Button>
               )}
-              {members.data && (
-                <span className="text-muted ml-auto shrink-0 text-[12px] whitespace-nowrap">
-                  {t("members.results", { count: total })}
-                </span>
+              {selectedIds.length > 0 ? (
+                <div className="ml-auto flex shrink-0 items-center gap-2">
+                  <span className="text-ink-soft text-[12px] whitespace-nowrap">
+                    {t("members.selectedCount", { count: selectedIds.length })}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon="personal"
+                    loading={requestIdentification.isPending}
+                    onClick={requestSelected}
+                  >
+                    {t("members.requestIdentification")}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={clearSelection}>
+                    {t("members.clearSelection")}
+                  </Button>
+                </div>
+              ) : (
+                members.data && (
+                  <span className="text-muted ml-auto shrink-0 text-[12px] whitespace-nowrap">
+                    {t("members.results", { count: total })}
+                  </span>
+                )
               )}
             </div>
 
             <Table className="table-fixed">
               <Table.Head>
+                <Table.HeaderCell className="w-[36px]">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    disabled={selectableIds.length === 0}
+                    onChange={toggleAllSelected}
+                    aria-label={t("members.selectAll")}
+                    className="cursor-pointer align-middle disabled:cursor-not-allowed"
+                  />
+                </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[26%]"
+                  className="w-[22%]"
                   sortDir={sortDirOf("name")}
                   onSort={() => toggleSort("name")}
                 >
                   {t("members.columns.member")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[15%]"
+                  className="w-[14%]"
                   sortDir={sortDirOf("jobtitle")}
                   onSort={() => toggleSort("jobtitle")}
                 >
                   {t("common.jobTitle")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[15%]"
+                  className="w-[14%]"
                   sortDir={sortDirOf("department")}
                   onSort={() => toggleSort("department")}
                 >
                   {t("common.department")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[12%]"
+                  className="w-[17%]"
                   sortDir={sortDirOf("status")}
                   onSort={() => toggleSort("status")}
                 >
                   {t("members.columns.status")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[12%]"
+                  className="w-[11%]"
                   sortDir={sortDirOf("role")}
                   onSort={() => toggleSort("role")}
                 >
                   {t("common.role")}
                 </Table.HeaderCell>
-                <Table.HeaderCell className="w-[20%]" srOnly>
+                <Table.HeaderCell className="w-[18%]" srOnly>
                   {t("members.columns.actions")}
                 </Table.HeaderCell>
               </Table.Head>
@@ -338,6 +419,22 @@ export default function Members(): React.JSX.Element {
                             : "hover:bg-surface-3 cursor-pointer transition-colors"
                         }
                       >
+                        <Table.Cell
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {member.userId !== null &&
+                            requestableIdentity(member) && (
+                              <input
+                                type="checkbox"
+                                checked={selected.has(member.userId)}
+                                onChange={() => toggleSelected(member.userId!)}
+                                aria-label={t("members.select", {
+                                  name: fullName(member),
+                                })}
+                                className="cursor-pointer align-middle"
+                              />
+                            )}
+                        </Table.Cell>
                         <Table.Cell>
                           <div className="flex items-center gap-2.5">
                             <Avatar
@@ -381,8 +478,11 @@ export default function Members(): React.JSX.Element {
                                 {t("members.active")}
                               </Tag>
                             )}
-                            {member.verified && (
-                              <Tag tone="blue">{t("members.verified")}</Tag>
+                            {!pending && (
+                              <IdentityTag
+                                member={member}
+                                formatDate={formatDate}
+                              />
                             )}
                           </div>
                         </Table.Cell>
@@ -467,5 +567,26 @@ export default function Members(): React.JSX.Element {
         )}
       </div>
     </>
+  );
+}
+
+// IdentityTag is the member's re-identification status: the badge carries the
+// status and the date behind it as its title, so the list stays one column
+// narrower than a separate "identified on" column would make it.
+function IdentityTag({
+  member,
+  formatDate,
+}: {
+  member: MemberListEntry;
+  formatDate: (iso: string) => string;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <Tag
+      tone={identityStatusTone(member.identityStatus)}
+      title={identityStatusHint(member, t, formatDate) || undefined}
+    >
+      {identityStatusLabel(member.identityStatus, t)}
+    </Tag>
   );
 }

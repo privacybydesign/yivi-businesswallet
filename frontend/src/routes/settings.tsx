@@ -15,6 +15,7 @@ import { DepartmentSettings } from "./department-settings";
 import { EmailSettingsPanel } from "./email-settings";
 import { ExportSettingsPanel } from "./export-settings";
 import { EmailTemplatesPanel } from "./email-templates";
+import { IdentitySettingsPanel } from "./identity-settings";
 import { IssuerSettingsPanel } from "./issuer-settings";
 import { MandateSettings } from "./mandate-settings";
 import { NotificationsSettingsPanel } from "./notifications-settings";
@@ -105,6 +106,8 @@ export default function Settings(): React.JSX.Element {
           </div>
         ) : tab === "mandates" ? (
           <MandateSettings slug={slug} />
+        ) : tab === "identity" ? (
+          <IdentitySettingsPanel slug={slug} />
         ) : tab === "branding" ? (
           <ThemeSettingsPanel slug={slug} />
         ) : tab === COMMUNICATION_TAB ? (

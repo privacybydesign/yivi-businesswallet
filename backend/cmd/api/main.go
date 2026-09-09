@@ -355,6 +355,10 @@ func run() error {
 	exportStore := export.NewStore(pool, recorder)
 	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins, exportStore)
 
+	// Daily re-identification reminder sweep (#240 §6): mails members whose
+	// identity is due soon or overdue, per each org's own policy.
+	organization.NewIdentityScheduler(orgStore, emailService, cfg.AppBaseURL).Start(ctx, organization.DefaultIdentityScheduleInterval)
+
 	qerdsProv, err := newQerdsProvider(cfg)
 	if err != nil {
 		return err
@@ -493,7 +497,7 @@ func run() error {
 	// an invitation. Wired via a setter (like the inbound QERDS consumer) because
 	// the org service is constructed before the attestation service.
 	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
+	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, orgStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
 
 	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
 	// sealed-secret store + keystore layout with the holder redeem path so a wallet

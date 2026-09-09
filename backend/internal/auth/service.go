@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -59,6 +60,11 @@ type DisclosedIdentity struct {
 	// Phone is the disclosed mobile number (identity scope). Best-effort: empty
 	// when the presentation carried no phone claim.
 	Phone string
+	// CredentialIssuedAt is the disclosed identity credential's issuer `iat`
+	// (openid4vpverifier.Presentation.IdentityIssuedAt), zero when unknown. Used
+	// by the re-identification credential-freshness check
+	// (organization.Service.CompleteReverification).
+	CredentialIssuedAt time.Time
 }
 
 // verifier is the slice of openid4vpverifier.Client the service needs, defined in
