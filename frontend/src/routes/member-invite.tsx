@@ -12,6 +12,7 @@ import {
   useOnboardingAttestationsQuery,
   useSetOnboardingAttestationsMutation,
 } from "../api/attestations.queries";
+import type { MemberType } from "../api/organization";
 import { ApiError } from "../api/http";
 import { Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
@@ -265,6 +266,8 @@ export default function MemberInvite(): React.JSX.Element | null {
   const [jobTitle, setJobTitle] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [role, setRole] = useState("member");
+  const [memberType, setMemberType] = useState<MemberType>("employee");
+  const [externalOrganisation, setExternalOrganisation] = useState("");
   const [attempted, setAttempted] = useState(false);
 
   if (org.isPending) {
@@ -303,6 +306,11 @@ export default function MemberInvite(): React.JSX.Element | null {
         role,
         jobTitle: optional(jobTitle),
         departmentId: departmentId === "" ? undefined : departmentId,
+        memberType,
+        externalOrganisation:
+          memberType === "external"
+            ? optional(externalOrganisation)
+            : undefined,
       },
       { onSuccess: backToMembers },
     );
@@ -486,6 +494,49 @@ export default function MemberInvite(): React.JSX.Element | null {
                     />
                   </Field>
                 </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <Field
+                    id="invite-member-type"
+                    label={t("memberInvite.memberType")}
+                  >
+                    <select
+                      id="invite-member-type"
+                      className={control(false)}
+                      value={memberType}
+                      onChange={(e) =>
+                        setMemberType(e.target.value as MemberType)
+                      }
+                    >
+                      <option value="employee">
+                        {t("memberInvite.memberTypeEmployee")}
+                      </option>
+                      <option value="external">
+                        {t("memberInvite.memberTypeExternal")}
+                      </option>
+                    </select>
+                  </Field>
+                  {memberType === "external" && (
+                    <Field
+                      id="invite-external-organisation"
+                      label={t("memberInvite.externalOrganisation")}
+                    >
+                      <input
+                        id="invite-external-organisation"
+                        className={control(false)}
+                        value={externalOrganisation}
+                        placeholder={t(
+                          "memberInvite.externalOrganisationPlaceholder",
+                        )}
+                        onChange={(e) =>
+                          setExternalOrganisation(e.target.value)
+                        }
+                      />
+                    </Field>
+                  )}
+                </div>
+                <p className="text-ink-soft text-[12px]">
+                  {t("memberInvite.memberTypeHint")}
+                </p>
               </div>
             </div>
 

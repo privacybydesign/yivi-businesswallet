@@ -16,6 +16,7 @@ import {
   createDepartment,
   deleteDepartment,
   deleteOrganization,
+  getIdentitySettings,
   getMemberAuditEvents,
   getMyOrganizations,
   getOrganization,
@@ -25,21 +26,29 @@ import {
   getOrganizationMembers,
   getOrganizations,
   inviteMember,
+  mintOwnReidentifyLink,
   removeMember,
+  requestIdentification,
   resendInvitation,
   revokeInvitation,
+  saveIdentitySettings,
   updateDepartment,
+  updateMemberType,
   updateOrganization,
   updateOrganizationMember,
 } from "./organization";
 import type {
   AuditEventsPage,
   Department,
+  IdentitySettings,
+  IdentitySettingsInput,
   Member,
   MemberListPage,
   MemberListParams,
+  MemberType,
   Organization,
   OrganizationDetail,
+  RequestIdentificationResult,
 } from "./organization";
 import { toast } from "../lib/toast";
 
@@ -286,6 +295,8 @@ export function useInviteMemberMutation(slug: string): UseMutationResult<
     role?: string;
     jobTitle?: string;
     departmentId?: string;
+    memberType?: MemberType;
+    externalOrganisation?: string;
   }
 > {
   const queryClient = useQueryClient();
@@ -397,5 +408,117 @@ export function useUpdateMemberMutation(slug: string): UseMutationResult<
         queryKey: memberAuditEventsQueryKey(slug, userId),
       });
     },
+  });
+}
+
+export function identitySettingsQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "identity-settings"];
+}
+
+export function useIdentitySettingsQuery(
+  slug: string,
+  enabled: boolean,
+): UseQueryResult<IdentitySettings, Error> {
+  return useQuery({
+    queryKey: identitySettingsQueryKey(slug),
+    queryFn: ({ signal }) => getIdentitySettings(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+// Saving the policy recomputes every member's due date server-side, so the
+// member list and detail caches are invalidated alongside the settings.
+export function useSaveIdentitySettingsMutation(
+  slug: string,
+): UseMutationResult<IdentitySettings, Error, IdentitySettingsInput> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (input) => saveIdentitySettings(slug, input),
+    meta: { suppressErrorToast: true },
+    onSuccess: (settings) => {
+      toast.success(t("toasts.identitySettingsSaved"));
+      queryClient.setQueryData(identitySettingsQueryKey(slug), settings);
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useRequestIdentificationMutation(
+  slug: string,
+): UseMutationResult<
+  RequestIdentificationResult,
+  Error,
+  { userIds: string[]; reason?: string }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ userIds, reason }) =>
+      requestIdentification(slug, userIds, reason),
+    meta: { suppressErrorToast: true },
+    onSuccess: (result, { userIds }) => {
+      toast.success(
+        t("toasts.identificationRequested", { count: result.requested }),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      for (const userId of userIds) {
+        void queryClient.invalidateQueries({
+          queryKey: organizationMemberQueryKey(slug, userId),
+        });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useUpdateMemberTypeMutation(slug: string): UseMutationResult<
+  Member,
+  Error,
+  {
+    userId: string;
+    memberType: MemberType;
+    externalOrganisation: string | null;
+  }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ userId, memberType, externalOrganisation }) =>
+      updateMemberType(slug, userId, { memberType, externalOrganisation }),
+    meta: { suppressErrorToast: true },
+    onSuccess: (member, { userId }) => {
+      toast.success(t("toasts.memberUpdated"));
+      queryClient.setQueryData(
+        organizationMemberQueryKey(slug, userId),
+        member,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+// The member's own "re-identify now" action: it mints a link and the caller
+// navigates to it, so there is nothing to cache.
+export function useMintOwnReidentifyLinkMutation(
+  slug: string,
+): UseMutationResult<string, Error, void> {
+  return useMutation({
+    mutationFn: () => mintOwnReidentifyLink(slug),
+    meta: { suppressErrorToast: true },
   });
 }

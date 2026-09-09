@@ -2,7 +2,9 @@ import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useMeQuery } from "../api/auth.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
+import { IdentityBanner } from "./identity-banner";
 import { accessMessage } from "../lib/access-message";
+import { needsIdentityBanner } from "../lib/identity-status";
 import { greetingKey } from "../lib/greeting";
 import { displayName } from "../lib/name";
 import { Button, Card, Stat, Tag, TopBar } from "../ui";
@@ -51,6 +53,13 @@ export default function Dashboard(): React.JSX.Element {
       />
 
       <div className="flex flex-col gap-6 p-8">
+        {org.data && needsIdentityBanner(org.data.identity) && (
+          <IdentityBanner
+            slug={slug}
+            orgName={org.data.name}
+            identity={org.data.identity!}
+          />
+        )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Stat
             label={t("dashboard.stats.attestations")}

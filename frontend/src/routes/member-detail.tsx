@@ -7,10 +7,17 @@ import {
   useOrganizationMemberQuery,
   useOrganizationQuery,
   useRemoveMemberMutation,
+  useRequestIdentificationMutation,
 } from "../api/organization.queries";
 import type { AuditEvent } from "../api/organization";
 import { ApiError } from "../api/http";
 import { accessMessage } from "../lib/access-message";
+import {
+  identityStatusLabel,
+  identityStatusTone,
+  memberTypeLabel,
+  requestableIdentity,
+} from "../lib/identity-status";
 import {
   auditActionLabel,
   auditSubject,
@@ -128,6 +135,7 @@ export default function MemberDetail(): React.JSX.Element {
   );
   const formatWhen = useWhenFormatter();
   const removeMember = useRemoveMemberMutation(slug);
+  const requestIdentification = useRequestIdentificationMutation(slug);
   const [confirmingOffboard, setConfirmingOffboard] = React.useState(false);
 
   const shell = (body: React.ReactNode): React.JSX.Element => (
@@ -268,11 +276,9 @@ export default function MemberDetail(): React.JSX.Element {
               <Tag tone="green" dot>
                 {t("memberDetail.active")}
               </Tag>
-              {member.verified && (
-                <Tag tone="blue" dot>
-                  {t("memberDetail.verified")}
-                </Tag>
-              )}
+              <Tag tone={identityStatusTone(member.identityStatus)}>
+                {identityStatusLabel(member.identityStatus, t)}
+              </Tag>
             </div>
           </div>
           <div className="flex flex-col gap-2.5 p-5">
@@ -291,6 +297,16 @@ export default function MemberDetail(): React.JSX.Element {
             />
             <DetailRow label={t("common.phone")} value={member.phone ?? "—"} />
             <DetailRow
+              label={t("memberDetail.memberType")}
+              value={memberTypeLabel(member.memberType, t)}
+            />
+            {member.memberType === "external" && (
+              <DetailRow
+                label={t("memberDetail.externalOrganisation")}
+                value={member.externalOrganisation ?? "—"}
+              />
+            )}
+            <DetailRow
               label={t("memberDetail.identifiedOn")}
               value={
                 member.identityVerifiedAt
@@ -298,8 +314,39 @@ export default function MemberDetail(): React.JSX.Element {
                   : t("memberDetail.never")
               }
             />
+            {member.identityDueAt && (
+              <DetailRow
+                label={t("memberDetail.identityDueOn")}
+                value={dateFormatter.format(new Date(member.identityDueAt))}
+              />
+            )}
           </div>
           <div className="border-line flex flex-col gap-2 border-t p-4">
+            {requestableIdentity({
+              status: "active",
+              identityStatus: member.identityStatus,
+            }) ? (
+              <>
+                <Button
+                  variant="secondary"
+                  icon="personal"
+                  className="w-full"
+                  loading={requestIdentification.isPending}
+                  onClick={() =>
+                    requestIdentification.mutate({ userIds: [id] })
+                  }
+                >
+                  {t("memberDetail.requestIdentification")}
+                </Button>
+                <p className="text-ink-soft text-[12px]">
+                  {t("memberDetail.requestIdentificationHint")}
+                </p>
+              </>
+            ) : (
+              <p className="text-ink-soft text-[12px]">
+                {t("memberDetail.identityRequested")}
+              </p>
+            )}
             <Button
               variant="secondary"
               icon="email"

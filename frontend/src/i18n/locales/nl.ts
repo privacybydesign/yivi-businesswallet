@@ -314,6 +314,47 @@ export const nl: Translation<typeof en> = {
       },
     },
   },
+  reidentify: {
+    loading: "Je heridentificatie wordt geopend…",
+    title: "Bevestig je identiteit opnieuw",
+    intro:
+      "{{org}} vraagt leden om hun identiteit af en toe opnieuw te bewijzen. Scan de code met je wallet om te bevestigen dat jij het nog bent.",
+    forEmail: "Voor {{email}}",
+    start: "Mijn identiteit bevestigen",
+    scanPrompt:
+      "Scan deze code met je wallet om je identiteit voor {{org}} te bevestigen.",
+    done: "Je identiteit is bevestigd",
+    doneHint:
+      "{{org}} heeft de bevestiging vastgelegd. Je kunt deze pagina sluiten of naar de wallet gaan.",
+    goToApp: "Naar de wallet",
+    retry: "Opnieuw proberen",
+    errors: {
+      linkTitle: "Deze link werkt niet meer",
+      linkBody:
+        "Heridentificatielinks verlopen, en een nieuwere link vervangt een oudere. Vraag een beheerder van de organisatie om een nieuwe link, of start het vanuit de wallet.",
+      emailTitle: "Die wallet is niet dit lid",
+      emailBody:
+        "Het e-mailadres in de credential die je hebt gedeeld is niet het adres waarnaar deze link is verstuurd. Gebruik de wallet met dat adres.",
+      nameTitle: "De naam komt niet overeen",
+      nameBody:
+        "De naam op de credential die je hebt gedeeld wijkt af van de naam die deze organisatie heeft vastgelegd. Neem contact op met een beheerder van de organisatie.",
+      staleTitle: "Deze credential is te oud",
+      staleBody:
+        "Deze organisatie accepteert alleen een recent verkregen identiteitscredential. Haal een nieuwe op bij de uitgever in je wallet en open deze link daarna opnieuw.",
+      genericTitle: "Je identiteit bevestigen mislukt",
+      genericBody: "{{message}}",
+    },
+    banner: {
+      requested:
+        "{{org}} heeft je gevraagd je identiteit opnieuw te bevestigen.",
+      dueSoon: "Je identiteitsbevestiging voor {{org}} verloopt op {{date}}.",
+      overdue:
+        "Je identiteitsbevestiging voor {{org}} is verlopen op {{date}}.",
+      overdueNoDate: "Je identiteitsbevestiging voor {{org}} is verlopen.",
+      action: "Mijn identiteit bevestigen",
+      error: "Heridentificatie starten mislukt: {{message}}",
+    },
+  },
   dashboard: {
     greeting: {
       morning: "Goedemorgen, {{name}}",
@@ -361,6 +402,10 @@ export const nl: Translation<typeof en> = {
     invitationRevoked: "Uitnodiging ingetrokken",
     memberUpdated: "Lid bijgewerkt",
     memberRemoved: "Lid verwijderd",
+    identitySettingsSaved: "Instellingen voor heridentificatie opgeslagen",
+    identificationRequested_one: "Identificatie aangevraagd",
+    identificationRequested_other:
+      "Identificatie aangevraagd bij {{count}} leden",
     organizationUpdated: "Organisatie bijgewerkt",
     organizationDeleted: "Organisatie verwijderd",
     departmentAdded: "Afdeling toegevoegd",
@@ -439,6 +484,27 @@ export const nl: Translation<typeof en> = {
     pending: "In afwachting",
     verified: "Geverifieerd",
     verifiedOn: "Geverifieerd op {{date}}",
+    identity: {
+      never: "Nooit geïdentificeerd",
+      verified: "Geïdentificeerd",
+      dueSoon: "Binnenkort verlopen",
+      overdue: "Verlopen",
+      requested: "Aangevraagd",
+      dueOn: "Heridentificeren vóór {{date}}",
+      requestedOn: "Aangevraagd op {{date}}",
+      neverHint:
+        "Dit lid heeft zijn identiteit niet meer bewezen sinds deze functie live is.",
+    },
+    memberType: {
+      employee: "Medewerker",
+      external: "Extern",
+    },
+    select: "{{name}} selecteren",
+    selectAll: "Alle leden op deze pagina selecteren",
+    selectedCount_one: "{{count}} geselecteerd",
+    selectedCount_other: "{{count}} geselecteerd",
+    clearSelection: "Selectie wissen",
+    requestIdentification: "Identificatie aanvragen",
     resend: "Opnieuw versturen",
     revoke: "Intrekken",
     search: "Zoek op naam, e-mail, rol, afdeling…",
@@ -506,6 +572,7 @@ export const nl: Translation<typeof en> = {
       orgThemeSettings: "Thema-instellingen",
       orgOnboardingAttestations: "Onboarding-attestaties",
       orgNotificationSettings: "Notificatie-instellingen",
+      orgIdentitySettings: "Instellingen voor heridentificatie",
       orgSlackSettings: "Slack-instellingen",
       orgTeamsSettings: "Microsoft Teams-instellingen",
       orgProvisioningSettings: "Provisioning-instellingen",
@@ -527,6 +594,13 @@ export const nl: Translation<typeof en> = {
       memberRevoked: "Lidmaatschap ingetrokken",
       roleChanged: "Rol gewijzigd",
       inviteExpired: "Uitnodiging verlopen",
+      memberTypeChanged: "Type lid gewijzigd",
+      identityRequested: "Identificatie aangevraagd",
+      identityReverified: "Identiteit opnieuw bevestigd",
+      identityReverifyRejected: "Heridentificatiepoging afgewezen",
+      identityReminderSent: "Identiteitsherinnering verstuurd",
+      identityOverdue: "Identiteitsbevestiging verlopen",
+      identitySettingsUpdated: "Instellingen voor heridentificatie bijgewerkt",
       mandateGranted: "Mandaat verleend",
       mandateRevoked: "Mandaat ingetrokken",
       deptCreated: "Afdeling aangemaakt",
@@ -623,6 +697,13 @@ export const nl: Translation<typeof en> = {
     selectDepartment: "Selecteer afdeling",
     roleMember: "Lid",
     roleAdmin: "Beheerder",
+    memberType: "Type lid",
+    memberTypeEmployee: "Medewerker",
+    memberTypeExternal: "Extern",
+    memberTypeHint:
+      "Voor externen (zzp'ers, uitzendkrachten en partnermedewerkers) kun je een kortere heridentificatietermijn instellen dan voor medewerkers.",
+    externalOrganisation: "Werkt voor",
+    externalOrganisationPlaceholder: "bijv. Contractors BV",
     attestations:
       "Attestaties die bij onboarding automatisch worden uitgegeven",
     attestationsHint:
@@ -660,6 +741,13 @@ export const nl: Translation<typeof en> = {
     verified: "Geverifieerd",
     identifiedOn: "Geïdentificeerd op",
     never: "Nooit",
+    identityDueOn: "Heridentificeren vóór",
+    memberType: "Type lid",
+    externalOrganisation: "Werkt voor",
+    requestIdentification: "Identificatie aanvragen",
+    requestIdentificationHint:
+      "Vraagt dit lid om nu zijn identiteit opnieuw te bevestigen. Het lid krijgt een e-mail met een link.",
+    identityRequested: "Identificatie aangevraagd",
     sendMessage: "Bericht versturen",
     offboard: "Lid off-boarden",
     offboardConfirm: {
@@ -675,6 +763,13 @@ export const nl: Translation<typeof en> = {
     title: "Lid bewerken",
     jobTitlePlaceholder: "bijv. Engineering Lead",
     noDepartment: "Geen afdeling",
+    memberType: "Type lid",
+    memberTypeEmployee: "Medewerker",
+    memberTypeExternal: "Extern",
+    memberTypeHint:
+      "Voor externen kun je een kortere heridentificatietermijn instellen dan voor medewerkers.",
+    externalOrganisation: "Werkt voor",
+    externalOrganisationPlaceholder: "bijv. Contractors BV",
     lastAdmin:
       "Dit is de enige beheerder van de organisatie. Maak eerst een ander lid beheerder.",
   },
@@ -903,6 +998,7 @@ export const nl: Translation<typeof en> = {
     subtitle: "Profiel en voorkeuren van de organisatie",
     tabOrg: "Organisatie",
     tabMandates: "Mandaten",
+    tabIdentity: "Identiteit",
     tabBranding: "Branding",
     tabCommunication: "Communicatie",
     tabEmail: "E-mail",
@@ -945,6 +1041,56 @@ export const nl: Translation<typeof en> = {
     configureTeams: "Microsoft Teams configureren",
     loadError: "Kon notificatie-instellingen niet laden: {{message}}",
     saveError: "Kon notificatie-instellingen niet opslaan: {{message}}",
+  },
+  identitySettings: {
+    heading: "Heridentificatie",
+    description:
+      "Leden bewijzen hun identiteit met een paspoort of ID-kaart als ze lid worden. Stel in hoe vaak ze dat opnieuw moeten doen, en wat er gebeurt als dat niet gebeurt.",
+    intervals: "Hoe vaak",
+    employeeInterval: "Medewerkers",
+    externalInterval: "Externen",
+    intervalHint:
+      "Gerekend vanaf het moment dat het lid zijn identiteit voor het laatst bewees. Externen worden meestal vaker opnieuw gecontroleerd dan medewerkers.",
+    intervalOff: "Nooit",
+    intervalMonths_one: "Elke maand",
+    intervalMonths_other: "Elke {{count}} maanden",
+    reminders: "Herinneringen",
+    reminderDaysBefore: "Herinneren vóór de termijn",
+    reminderDaysBeforePlaceholder: "bijv. 30, 14, 7",
+    reminderDaysBeforeHint:
+      "Aantal dagen vóór de termijn, gescheiden door komma's. De hoogste waarde bepaalt ook wanneer een lid als binnenkort verlopen wordt weergegeven.",
+    overdueReminderIntervalDays: "Herhalen elke",
+    overdueReminderIntervalDaysHint:
+      "Het aantal dagen tussen herinneringen zodra een lid over de termijn is.",
+    overdueReminderMaxCount: "Maximaal",
+    overdueReminderMaxCountHint:
+      "Het totale aantal herinneringen dat één termijn oplevert, zodat niemand eindeloos wordt gemaild.",
+    days_one: "{{count}} dag",
+    days_other: "{{count}} dagen",
+    reminders_one: "{{count}} herinnering",
+    reminders_other: "{{count}} herinneringen",
+    credential: "Versheid van de credential",
+    credentialMaxAgeDays: "Accepteer een credential van maximaal",
+    credentialMaxAgeOff: "Elke leeftijd",
+    credentialMaxAgeHint:
+      "Weigert een heridentificatie waarvan de paspoort- of ID-kaartcredential langer geleden bij de uitgever is opgehaald dan dit. Het lid moet dan eerst een nieuwe in de wallet ophalen. Staat standaard uit.",
+    consequence: "Als een lid over de termijn is",
+    consequenceFlag: "Alleen markeren",
+    consequenceFlagHint:
+      "Toont de status in de ledenlijst en op de detailpagina, stuurt de herinneringen, en verandert verder niets.",
+    consequenceBlock: "Markeren en blokkeren",
+    consequenceBlockHint:
+      "Weigert daarnaast credentials uit te geven aan het lid en weigert het lid als ondertekenaar tot het zich opnieuw identificeert. Leesrechten en bestaande sessies blijven ongemoeid.",
+    save: "Instellingen opslaan",
+    saveError:
+      "Instellingen voor heridentificatie opslaan mislukt: {{message}}",
+    loadError: "Instellingen voor heridentificatie laden mislukt: {{message}}",
+    reminderDaysInvalid:
+      "Voer herinneringsdagen in als hele getallen boven nul, gescheiden door komma's.",
+    unconfigured:
+      "Heridentificatie staat uit voor deze organisatie: er worden geen termijnen berekend en geen herinneringen verstuurd tot je een interval opslaat.",
+    recomputeNote:
+      "Bij opslaan wordt de termijn van elk lid opnieuw berekend vanaf het moment dat het zijn identiteit voor het laatst bewees.",
   },
   provisioningSettings: {
     heading: "Microsoft Entra ID",
@@ -1172,6 +1318,9 @@ export const nl: Translation<typeof en> = {
     kinds: {
       credential_offer: "Credential uitgegeven",
       event_notification: "Melding van een gebeurtenis",
+      identity_overdue: "Identiteit verlopen",
+      identity_reminder: "Herinnering identiteit",
+      identity_requested: "Identificatie aangevraagd",
       invitation: "Uitnodiging voor lidmaatschap",
       postguard_file: "Versleuteld bestand",
       signature_requested: "Ondertekenverzoek",
@@ -1183,6 +1332,12 @@ export const nl: Translation<typeof en> = {
         "Gaat naar een persoon als deze organisatie een credential aan die persoon uitgeeft.",
       event_notification:
         "Gaat naar de beheerders van deze organisatie als er iets gebeurt waarop zij zich hebben geabonneerd.",
+      identity_overdue:
+        "Gaat naar een lid waarvan de heridentificatietermijn is verstreken, volgens het herinneringsritme.",
+      identity_reminder:
+        "Gaat naar een lid vóór het verstrijken van de heridentificatietermijn.",
+      identity_requested:
+        "Gaat naar een lid als een beheerder vraagt om de identiteit nu opnieuw te bevestigen.",
       invitation:
         "Gaat naar iemand die is uitgenodigd om lid te worden van deze organisatie.",
       postguard_file:

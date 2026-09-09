@@ -256,8 +256,12 @@ func validateSigners(in []SignerInput, members []OrgMember, geometry documentGeo
 		sg.Order = i + 1
 		switch sg.Kind {
 		case KindInternal:
-			if _, ok := memberByID[sg.UserID]; !ok || seenUsers[sg.UserID] {
+			member, ok := memberByID[sg.UserID]
+			if !ok || seenUsers[sg.UserID] {
 				return nil, ErrInvalidRequest
+			}
+			if member.IdentityBlocked {
+				return nil, ErrSignerIdentityBlocked
 			}
 			seenUsers[sg.UserID] = true
 			sg.Email, sg.Name = "", ""

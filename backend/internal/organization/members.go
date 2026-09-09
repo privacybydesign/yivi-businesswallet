@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -82,11 +83,28 @@ func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("listing members: %w", err)
 	}
 
+	lookahead, err := h.identityLookaheadDays(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("resolving identity lookahead: %w", err)
+	}
+	now := time.Now()
 	for i := range entries {
 		entries[i].AvatarURI = entryAvatarURI(org.Slug, entries[i])
+		entries[i] = entries[i].withIdentityStatus(now, lookahead)
 	}
 	respond.JSON(w, r, http.StatusOK, memberListPage{Entries: entries, Total: total})
 	return nil
+}
+
+// identityLookaheadDays resolves the org's "due soon" window (the largest
+// configured reminder threshold, or the default) for decorating a member list or
+// detail response with its derived IdentityStatus.
+func (h *Handler) identityLookaheadDays(ctx context.Context, orgID uuid.UUID) (int, error) {
+	settings, err := h.store.GetIdentitySettings(ctx, orgID)
+	if err != nil {
+		return 0, err
+	}
+	return settings.LookaheadDays(), nil
 }
 
 func (h *Handler) member(w http.ResponseWriter, r *http.Request) error {
@@ -105,6 +123,11 @@ func (h *Handler) member(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	member.AvatarURI = user.AvatarURL(MemberAvatarPath(org.Slug, member.UserID), member.HasAvatar, member.AvatarUpdatedAt)
+	lookahead, err := h.identityLookaheadDays(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("resolving identity lookahead: %w", err)
+	}
+	member = member.withIdentityStatus(time.Now(), lookahead)
 	respond.JSON(w, r, http.StatusOK, member)
 	return nil
 }
@@ -148,12 +171,14 @@ func entryAvatarURI(slug string, e MemberEntry) string {
 }
 
 type inviteRequest struct {
-	Email        string  `json:"email"`
-	GivenNames   string  `json:"givenNames"`
-	LastName     string  `json:"lastName"`
-	Role         string  `json:"role"`
-	JobTitle     *string `json:"jobTitle"`
-	DepartmentID *string `json:"departmentId"`
+	Email                string  `json:"email"`
+	GivenNames           string  `json:"givenNames"`
+	LastName             string  `json:"lastName"`
+	Role                 string  `json:"role"`
+	JobTitle             *string `json:"jobTitle"`
+	DepartmentID         *string `json:"departmentId"`
+	MemberType           string  `json:"memberType"`
+	ExternalOrganisation *string `json:"externalOrganisation"`
 }
 
 func (h *Handler) invite(w http.ResponseWriter, r *http.Request) error {
@@ -180,6 +205,14 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_role", "role must be member or admin")
 	}
 
+	memberType := req.MemberType
+	if memberType == "" {
+		memberType = MemberTypeEmployee
+	}
+	if memberType != MemberTypeEmployee && memberType != MemberTypeExternal {
+		return badRequest("invalid_input", `memberType must be "employee" or "external"`)
+	}
+
 	var deptID *uuid.UUID
 	if req.DepartmentID != nil {
 		id, err := uuid.Parse(*req.DepartmentID)
@@ -191,13 +224,15 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) error {
 
 	org := OrgFromContext(r.Context())
 	inv, err := h.service.InviteMember(r.Context(), org.ID, Invite{
-		Email:        email,
-		GivenNames:   givenNames,
-		LastName:     lastName,
-		Role:         role,
-		JobTitle:     normalize(req.JobTitle),
-		DepartmentID: deptID,
-		InvitedBy:    auth.UserFromContext(r.Context()).ID,
+		Email:                email,
+		GivenNames:           givenNames,
+		LastName:             lastName,
+		Role:                 role,
+		JobTitle:             normalize(req.JobTitle),
+		DepartmentID:         deptID,
+		InvitedBy:            auth.UserFromContext(r.Context()).ID,
+		MemberType:           memberType,
+		ExternalOrganisation: normalize(req.ExternalOrganisation),
 	})
 	switch {
 	case errors.Is(err, ErrAlreadyMember):

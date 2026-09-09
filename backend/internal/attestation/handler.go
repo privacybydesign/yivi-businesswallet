@@ -72,6 +72,14 @@ type issuerSettingsReader interface {
 	BundleConfig(ctx context.Context, orgID uuid.UUID, fallbackInstance string) (instance, displayName, logoURI string, err error)
 }
 
+// identityGate reports whether a member is currently refused credential
+// issuance under their org's overdue re-identification policy (#240 §3).
+// Implemented by internal/organization.Store; false whenever that org's
+// overdue consequence is "flag only" (the default) or unconfigured.
+type identityGate interface {
+	IsIdentityBlocked(ctx context.Context, orgID, userID uuid.UUID) (bool, error)
+}
+
 // Handler serves the org-scoped attestations API (Schemas / Templates / Issued
 // tabs + key material). Org routes compose the injected requireUser + authorize
 // middleware; write/manage routes additionally require org admin.
@@ -87,6 +95,7 @@ type Handler struct {
 	service        issuanceService
 	issuerSettings issuerSettingsReader
 	onboarding     onboardingStore
+	identity       identityGate
 	issuerURL      string
 	requireUser    func(http.Handler) http.Handler
 	authorize      func(http.Handler) http.Handler
@@ -96,8 +105,9 @@ type Handler struct {
 // base URL, emitted into generated VCT documents (see schemaIssuerConfig); it may
 // be empty (the generated config's issuer field is then left for the operator).
 // issuerSettings resolves an org's issuer instance + branding for the per-org
-// bundle generator (see issuerBundle).
-func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, service issuanceService, issuerSettings issuerSettingsReader, onboarding onboardingStore, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+// bundle generator (see issuerBundle). identity gates issuance to a member whose
+// re-identification is overdue under a "block" policy (see identityGate).
+func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, service issuanceService, issuerSettings issuerSettingsReader, onboarding onboardingStore, identity identityGate, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		schemas:        schemas,
 		templates:      templates,
@@ -106,6 +116,7 @@ func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, iss
 		service:        service,
 		issuerSettings: issuerSettings,
 		onboarding:     onboarding,
+		identity:       identity,
 		issuerURL:      issuerURL,
 		requireUser:    requireUser,
 		authorize:      authorize,
@@ -922,6 +933,20 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) error {
 
 	org := organization.OrgFromContext(r.Context())
 	actor := auth.UserFromContext(r.Context())
+
+	if req.Recipient.Kind == RecipientMember && userID != nil {
+		blocked, err := h.identity.IsIdentityBlocked(r.Context(), org.ID, *userID)
+		if err != nil {
+			return fmt.Errorf("checking identity gate: %w", err)
+		}
+		if blocked {
+			return &respond.APIError{
+				Status: http.StatusConflict, Code: "recipient_identity_blocked",
+				Message: "this member's identity re-confirmation is overdue and must be completed before they can receive credentials",
+			}
+		}
+	}
+
 	result, err := h.service.Issue(r.Context(), org.ID, &actor.ID, org.Name, IssueInput{
 		TemplateID:     templateID,
 		Recipient:      Recipient{Kind: req.Recipient.Kind, UserID: userID, Ref: ref},

@@ -152,12 +152,14 @@ func (s *Store) ResolveIdentityReview(ctx context.Context, reviewID, reviewerID 
 
 		var inv Invitation
 		err = q.QueryRow(ctx, `
-			SELECT i.organization_id, o.name, o.slug, i.email, i.role, i.job_title, i.department_id, d.name
+			SELECT i.organization_id, o.name, o.slug, i.email, i.role, i.job_title, i.department_id, d.name,
+			       i.member_type, i.external_organisation
 			FROM invitations i
 			JOIN organizations o ON o.id = i.organization_id
 			LEFT JOIN departments d ON d.id = i.department_id
 			WHERE i.id = $1`, invitationID).
-			Scan(&inv.OrganizationID, &inv.OrganizationName, &inv.OrganizationSlug, &inv.Email, &inv.Role, &inv.JobTitle, &inv.DepartmentID, &inv.DepartmentName)
+			Scan(&inv.OrganizationID, &inv.OrganizationName, &inv.OrganizationSlug, &inv.Email, &inv.Role, &inv.JobTitle, &inv.DepartmentID, &inv.DepartmentName,
+				&inv.MemberType, &inv.ExternalOrganisation)
 		if err != nil {
 			return fmt.Errorf("organization: read held invitation %s: %w", invitationID, err)
 		}
@@ -170,11 +172,18 @@ func (s *Store) ResolveIdentityReview(ctx context.Context, reviewID, reviewerID 
 
 		// identity_verified_at is set to now(): the review only gates a name
 		// mismatch — the person still proved a passport/id-card identity. phone
-		// and date of birth were held on the review.
+		// and date of birth were held on the review. identity_due_at is computed
+		// from the org's current policy, same as a happy accept.
+		settings, err := identitySettingsTx(ctx, q, inv.OrganizationID)
+		if err != nil {
+			return err
+		}
+		verifiedNow := time.Now()
 		const insertMembership = `
-			INSERT INTO memberships (organization_id, user_id, role, job_title, department_id, phone, date_of_birth, identity_verified_at)
-			VALUES ($1, $2, $3, $4, (SELECT id FROM departments WHERE id = $5 AND organization_id = $1), $6, $7, now())`
-		_, err = q.Exec(ctx, insertMembership, inv.OrganizationID, userID, inv.Role, inv.JobTitle, inv.DepartmentID, phone, dateOfBirth)
+			INSERT INTO memberships (organization_id, user_id, role, job_title, department_id, phone, date_of_birth, identity_verified_at, member_type, external_organisation, identity_due_at)
+			VALUES ($1, $2, $3, $4, (SELECT id FROM departments WHERE id = $5 AND organization_id = $1), $6, $7, $8, $9, $10, $11)`
+		_, err = q.Exec(ctx, insertMembership, inv.OrganizationID, userID, inv.Role, inv.JobTitle, inv.DepartmentID, phone, dateOfBirth,
+			verifiedNow, inv.MemberType, inv.ExternalOrganisation, dueAtFor(&verifiedNow, inv.MemberType, settings))
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			return ErrAlreadyMember

@@ -176,6 +176,9 @@ export interface TestEmailInput {
 export const MAIL_TEMPLATE_KINDS = [
   "credential_offer",
   "event_notification",
+  "identity_overdue",
+  "identity_reminder",
+  "identity_requested",
   "invitation",
   "postguard_file",
   "signature_requested",
