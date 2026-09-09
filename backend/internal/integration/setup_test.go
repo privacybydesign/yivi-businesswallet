@@ -25,6 +25,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vppresenter"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
@@ -141,7 +142,26 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
 	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, orgStore, "", requireUser, orgHandler.Authorize)
 
-	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler))
+	// Inbound OpenID4VP under the dev posture the Compose stack runs with: plain
+	// http to the in-process fake verifier, structurally validated (unsigned)
+	// request objects, and auto-present so the stub holder's canned vp_token is
+	// delivered right after organization selection.
+	presenterPolicy := openid4vppresenter.Policy{AllowInsecureHTTP: true}
+	presenterValidator := openid4vppresenter.NewUnverifiedDecoder(presenterPolicy)
+	presenterStore := openid4vppresenter.NewStore(pool, audit.NewDBRecorder(), sessionTTL)
+	presenterService := openid4vppresenter.NewService(
+		presenterStore, orgStore, eudiholder.NewStubHolder(),
+		openid4vppresenter.NewFetcher(presenterPolicy), presenterValidator, openid4vppresenter.NewResponder(presenterPolicy),
+		true,
+	)
+	presenterMetadata, err := openid4vppresenter.NewMetadataHandler(
+		openid4vppresenter.NewMetadata("http://app.test", eudiholder.Formats(), presenterValidator))
+	if err != nil {
+		t.Fatalf("wallet metadata: %v", err)
+	}
+	presenterHandler := openid4vppresenter.NewHandler(presenterService, presenterMetadata, requireUser, orgHandler.Authorize)
+
+	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler))
 	t.Cleanup(srv.Close)
 
 	jar, err := cookiejar.New(nil)

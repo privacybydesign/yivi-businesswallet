@@ -195,6 +195,67 @@ export const en = {
     sharesEmail: "Signing in shares only your email address.",
     registerLink: "Registering a new business? Register here",
   },
+  // Inbound OpenID4VP: an external verifier asking the business wallet, as the
+  // holder, to present an organization's credentials.
+  openid4vp: {
+    title: "Share organization credentials",
+    starting: "Preparing the request…",
+    requestedBy:
+      "{{verifier}} is asking one of your organizations to share credentials.",
+    pickOrg: "Choose the organization that will respond",
+    noOrgs: "You are not a member of any organization that can respond.",
+    selecting: "Sending the response…",
+    minimisationHint:
+      "Only the credentials the verifier asked for are shared, and only after approval.",
+    completedTitle: "Response sent",
+    completedHint:
+      "{{verifier}} has received your organization's presentation.",
+    completedDoneHint: "This request has been answered.",
+    returnToVerifier: "Return to {{verifier}}",
+    awaitingTitle: "Awaiting approval",
+    awaitingHint:
+      "The response will be sent once it has been approved within the organization.",
+    deniedTitle: "Request declined",
+    deniedHint: "This request was not fulfilled.",
+    expiredTitle: "This request has expired",
+    expiredHint: "Ask the verifier to start a new request.",
+    invalidTitle: "This request can't be handled",
+    startErrors: {
+      invalidInvocation:
+        "The link that brought you here is missing the parameters a verifier must supply.",
+      invalidRequest:
+        "The verifier's request is malformed or uses an unsupported form.",
+      invalidRequestUriMethod:
+        "The verifier asked for an unsupported way of fetching its request.",
+      invalidRequestObject: "The verifier's request could not be validated.",
+      requestUriUnreachable: "The verifier's request could not be fetched.",
+      validationUnavailable:
+        "This wallet cannot validate verifier requests yet.",
+      failed: "Something went wrong. Please try again.",
+    },
+    errors: {
+      otherSession: {
+        title: "Request belongs to another session",
+        hint: "This request was started by a different signed-in user.",
+      },
+      alreadyHandled: {
+        title: "Request already handled",
+        hint: "This request has already been answered or has expired.",
+      },
+      notFound: {
+        title: "Request not found",
+        hint: "This link is not valid or the request has expired.",
+      },
+      presentationFailed: {
+        title: "Response could not be sent",
+        hint: "The presentation could not be delivered to the verifier. Ask the verifier to start a new request.",
+      },
+      failed: {
+        title: "Something went wrong",
+        hint: "The request could not be loaded. Please try again.",
+      },
+    },
+  },
   register: {
     title: "Register a business wallet",
     subtitle: "New here? Register your company — no account needed yet.",
@@ -562,6 +623,7 @@ export const en = {
       orgCscSettings: "Signing provider settings",
       signingCredentials: "Signing credential",
       signingRequests: "Signing request",
+      presentationTransaction: "Presentation request",
     },
     actions: {
       orgCreated: "Created organization",
@@ -647,6 +709,11 @@ export const en = {
       signingCompleted: "Completed a document signature",
       signingDelivered: "Delivered a signed document",
       signingFailed: "Document signature failed",
+      presentationRequested: "Received a presentation request",
+      presentationOrgSelected: "Selected the organization for a presentation",
+      presentationCompleted: "Sent a presentation",
+      presentationDenied: "Declined a presentation request",
+      presentationExpired: "Presentation request expired",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
     },

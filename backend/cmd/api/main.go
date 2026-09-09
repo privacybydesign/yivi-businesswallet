@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
@@ -30,6 +31,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailoauth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/notifications"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vppresenter"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/postguard"
@@ -237,6 +239,34 @@ func main() {
 	}
 }
 
+// newOpenID4VPPresenter wires the inbound-presentation slice. The Request Object
+// validator is chosen by config: RefusingValidator (default) fails every inbound
+// request before a row is written; UnverifiedDecoder is the explicit dev / CI
+// opt-in until #112 supplies chain validation.
+func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit.Recorder, orgStore *organization.Store, holder eudiholder.Holder, requireUser, authorize func(http.Handler) http.Handler) (*openid4vppresenter.Handler, error) {
+	policy := openid4vppresenter.Policy{AllowInsecureHTTP: cfg.OpenID4VPPresenterAllowInsecureHTTP}
+	var validator openid4vppresenter.Validator = openid4vppresenter.RefusingValidator{}
+	if cfg.OpenID4VPPresenterAllowUnverifiedRequests {
+		slog.Warn("OpenID4VP request objects are accepted WITHOUT signature verification (dev only)")
+		validator = openid4vppresenter.NewUnverifiedDecoder(policy)
+	}
+	if cfg.OpenID4VPPresenterAutoPresent {
+		slog.Warn("OpenID4VP presentations complete immediately after organization selection (dev only; no consent layer)")
+	}
+	store := openid4vppresenter.NewStore(pool, recorder, cfg.OpenID4VPTransactionTTL)
+	svc := openid4vppresenter.NewService(
+		store, orgStore, holder,
+		openid4vppresenter.NewFetcher(policy), validator, openid4vppresenter.NewResponder(policy),
+		cfg.OpenID4VPPresenterAutoPresent,
+	)
+	metadata, err := openid4vppresenter.NewMetadataHandler(
+		openid4vppresenter.NewMetadata(cfg.AppBaseURL, eudiholder.Formats(), validator))
+	if err != nil {
+		return nil, err
+	}
+	return openid4vppresenter.NewHandler(svc, metadata, requireUser, authorize), nil
+}
+
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -302,6 +332,7 @@ func run() error {
 
 	startPruner(ctx, "sessions", cfg.SessionPruneEvery, sessionStore.DeleteExpired)
 	startPruner(ctx, "presentation_sessions", cfg.SessionPruneEvery, presentationStore.DeleteExpired)
+	startPruner(ctx, "openid4vp_transactions", cfg.SessionPruneEvery, openid4vppresenter.NewStore(pool, recorder, cfg.OpenID4VPTransactionTTL).Prune)
 
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
@@ -573,9 +604,21 @@ func run() error {
 		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingOrgs{store: orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
 		requireUser, orgHandler.Authorize)
 
+	// Inbound OpenID4VP: an external verifier invoking the business wallet as
+	// the holder (#188). Request Objects are refused until a deployment opts into
+	// the structural (unverified) decoder; the signed-request cryptography is
+	// #112's, and completing a presentation right after organization selection is
+	// a dev-only stand-in for the consent layer (#113). See
+	// .ai/features/openid4vp-inbound.md.
+	presenterHandler, err := newOpenID4VPPresenter(cfg, pool, recorder, orgStore, attHolder, requireUser, orgHandler.Authorize)
+	if err != nil {
+		return err
+	}
+
 	handler := server.New(
 		pool,
 		cfg.StaticDir,
+		presenterHandler,
 		authHandler,
 		orgHandler,
 		qerdsHandler,

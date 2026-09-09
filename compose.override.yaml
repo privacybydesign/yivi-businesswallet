@@ -46,6 +46,14 @@ services:
       ATTESTATION_HOLDER_WSCA_KEK: ${ATTESTATION_HOLDER_WSCA_KEK:-}
       ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR: ${ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR:-/tmp/eudiholder-wsca}
       ATTESTATION_HOLDER_WSCA_INSECURE: ${ATTESTATION_HOLDER_WSCA_INSECURE:-}
+      # Inbound OpenID4VP (the business wallet as holder toward an external
+      # verifier). All three are dev-only escape hatches and default closed; the
+      # dev stack opens them so a local verifier can drive the flow end to end
+      # against the stub holder. See .ai/features/openid4vp-inbound.md.
+      OPENID4VP_TRANSACTION_TTL: ${OPENID4VP_TRANSACTION_TTL:-5m}
+      OPENID4VP_PRESENTER_ALLOW_INSECURE_HTTP: ${OPENID4VP_PRESENTER_ALLOW_INSECURE_HTTP:-true}
+      OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS: ${OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS:-true}
+      OPENID4VP_PRESENTER_AUTO_PRESENT: ${OPENID4VP_PRESENTER_AUTO_PRESENT:-true}
       # QERDS transport: stub by default. Set QERDS_PROVIDER=domibus (+ URL) in
       # .env to drive the real Domibus AS4 access point (run with --profile domibus).
       QERDS_PROVIDER: ${QERDS_PROVIDER:-stub}

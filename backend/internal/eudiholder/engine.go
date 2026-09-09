@@ -565,6 +565,14 @@ func pickLocaleIndex(names []localeName, lang string) int {
 }
 
 // Close releases every per-org engine.
+// Present is the seam #112 fills in: DCQL evaluation over the org's held
+// credentials, disclosure selection and KB-JWT signing through the configured
+// holder-key binder (software or WSCA). Until then it fails loudly so a
+// deployment cannot silently answer a verifier with nothing.
+func (e *Engine) Present(context.Context, uuid.UUID, []byte, string, string) (Presentation, error) {
+	return Presentation{}, ErrPresentNotImplemented
+}
+
 func (e *Engine) Close() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()

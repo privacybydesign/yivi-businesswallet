@@ -7,6 +7,7 @@ require (
 	github.com/digitorus/pdf v0.1.2
 	github.com/digitorus/pdfsign v0.9.0
 	github.com/getkin/kin-openapi v0.144.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/pressly/goose/v3 v3.27.1
@@ -23,7 +24,6 @@ require (
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/josharian/intern v1.0.0 // indirect

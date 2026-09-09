@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -14,6 +14,7 @@ import { inviteError } from "../lib/invite-error";
 import type { InviteErrorContent } from "../lib/invite-error";
 import { claimErrorKind } from "../lib/login-error";
 import { usePreAuthOrgTheme } from "../lib/pre-auth-theme";
+import { safeReturnTo } from "../lib/return-to";
 import {
   Avatar,
   Button,
@@ -79,6 +80,10 @@ export default function Login(): React.JSX.Element {
   const { t } = useTranslation();
   usePreAuthOrgTheme();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  // Where a successful sign-in lands. Only the inbound OpenID4VP transaction
+  // route is accepted (see safeReturnTo); everything else is the app root.
+  const returnTo = safeReturnTo(params.get("returnTo"));
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<LoginPhase>("running");
   const [message, setMessage] = useState<string>("");
@@ -98,7 +103,7 @@ export default function Login(): React.JSX.Element {
           return;
         }
         queryClient.setQueryData(meQueryKey, result);
-        void navigate("/");
+        void navigate(returnTo);
       })
       .catch((error: unknown) => {
         handleClaimError(error, setPhase, setMessage, t);
@@ -133,7 +138,7 @@ export default function Login(): React.JSX.Element {
   // protected routes see the authenticated user instead of the stale null.
   const enterApp = async (): Promise<void> => {
     await queryClient.refetchQueries({ queryKey: meQueryKey });
-    void navigate("/");
+    void navigate(returnTo);
   };
 
   const showMessage = phase === "idle" && message !== "";

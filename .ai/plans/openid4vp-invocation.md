@@ -1,6 +1,7 @@
 # OpenID4VP inbound invocation and wallet-provider discovery
 
-Status: **proposed** (design only — not yet implemented). Issue
+Status: **implemented** on this branch — the invocation/routing seam below is built; the
+durable description is `.ai/features/openid4vp-inbound.md`. Issue
 [#188](https://github.com/privacybydesign/yivi-businesswallet/issues/188), the
 invocation/discovery slice of the OpenID4VP-holder epic
 [#112](https://github.com/privacybydesign/yivi-businesswallet/issues/112).
@@ -319,11 +320,11 @@ Written inside the same `database.InTx` as the transaction row's state transitio
 
 ## Harvest
 
-- Convention to add/update in `.ai/conventions/`? **None yet** — no code lands in this PR
-  (`BACKEND.md`'s "Server Lifecycle" external-provider-seam note and "Tenant access seam" note
-  already cover the patterns this design reuses; nothing new to codify until the implementing
-  branch writes the actual seam).
-- Feature doc to write/update in `.ai/features/`? **None yet** — this plan becomes
-  `.ai/features/openid4vp-inbound.md` (or is folded into `auth-openid4vp.md` as its inbound
-  counterpart) when #112's implementing branch lands, per the plans/README Harvest step. Until
-  then it is the design of record for #188, and the seam #112 and #113 build against.
+- Convention to add/update in `.ai/conventions/`? **Yes** — `BACKEND.md` "Routing & HTTP"
+  gains the `server.RootRegisterer` note (a feature that also serves a well-known document
+  outside `/api/v1`, and how to keep the apidocs coverage scan from mistaking it for an API
+  route); `FRONTEND.md` "Structure & Patterns" gains the `returnTo` allowlist rule.
+- Feature doc to write/update in `.ai/features/`? **Yes** — `.ai/features/openid4vp-inbound.md`
+  (this plan's durable form; cross-referenced from `auth-openid4vp.md`'s role as the outbound
+  counterpart). This plan stays the design record for #188; #112 and #113 build against the
+  seams it fixed.

@@ -91,6 +91,15 @@ type Holder interface {
 	// yields an empty (non-nil) map.
 	Validities(ctx context.Context, orgID uuid.UUID) (map[string]HeldValidity, error)
 
+	// Present builds a vp_token satisfying dcqlQuery from orgID's held credentials,
+	// key-bound for audience (the verifier's client_id) and nonce. This is the
+	// "present" side of Art 5(1)(a), the seam the inbound OpenID4VP slice
+	// (internal/openid4vppresenter) calls once an organization has been selected
+	// for an incoming Authorization Request. #112 implements the DCQL match and
+	// SD-JWT VC selective disclosure + KB-JWT signing behind it; until then the
+	// irmago engine returns ErrPresentNotImplemented and the stub a canned token.
+	Present(ctx context.Context, orgID uuid.UUID, dcqlQuery []byte, nonce, audience string) (Presentation, error)
+
 	// Close releases all per-organization engines.
 	Close() error
 }
