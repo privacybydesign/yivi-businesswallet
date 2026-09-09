@@ -212,6 +212,23 @@ path actually signs with (`wsca-holder-binding.md`), not a literal `"ES256"` typ
 
 The issue's list, each pinned to a real mechanism rather than restated as prose:
 
+- **Accept the supported request forms, reject ambiguous combinations** — decision 1's
+  transaction schema only has columns for the pass-by-reference form (`client_id`,
+  `request_uri`, `request_uri_method`); this design supports that form only, not a by-value
+  `request` JAR parameter. The handler behind `POST /api/v1/openid4vp/start` rejects, before
+  persisting a transaction row, a request that supplies `request` instead of `request_uri`,
+  supplies both, or supplies neither — the standard OAuth `invalid_request` error, never a
+  silent guess at which one wins.
+- **`request_uri_method` — supported values or the standard error** — OpenID4VP profiles
+  `get` and `post`. This repo's own outbound requests always send `get`
+  (`openid4vpverifier/client.go:21,74`), and `verifier_test.go:164` documents that irmago's
+  wallet GETs the request object and ignores this field entirely — there is no existing
+  precedent in this repo for driving a `post` fetch. The inbound handler validates
+  `request_uri_method` against the values it can actually execute and returns the profile's
+  standard unsupported-method error for anything else, rather than ignoring it the way the
+  outbound side's counterpart does. Whether `eudiholder`'s irmago-backed engine (decision 3)
+  can itself drive a `post` fetch is a #112 implementation question this seam does not
+  resolve; the seam only fixes that the check exists and what an unsupported value returns.
 - **HTTPS outside dev** — `internal/config` already has this exact shape of escape hatch for
   another provider: `AttestationHolderAllowInsecureHTTP` /
   `ATTESTATION_HOLDER_ALLOW_INSECURE_HTTP` (`config.go:67,282,494-495`), defaulting closed.
