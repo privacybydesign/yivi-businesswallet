@@ -66,6 +66,11 @@ RUN go build -ldflags="-s -w" -o /bin/seed ./cmd/seed
 # ---------- Runtime ----------
 FROM alpine:3.22
 
+# Pull in the security fixes Alpine has published since the base image was
+# built. The Grype scan in delivery.yml gates the image on fixable critical
+# CVEs, and the stock base image lags the distro's patched libssl3/libcrypto3.
+RUN apk upgrade --no-cache
+
 COPY --from=build /bin/backend /backend
 COPY --from=build /bin/migrate /migrate
 COPY --from=build /bin/seed /seed
