@@ -24,7 +24,7 @@ func run() error {
 	orgOnly := flag.Bool("org", false,
 		"provision the anchor organisations — Yivi (with its team as admins + attestation catalogue) and the KVK register (authentic source); no demo members or activity, safe for staging/production")
 	partnersOnly := flag.Bool("partners", false,
-		"provision the staging pilot partner organisations (Anoigo, Gemeente Nijmegen, Ver.iD, PinkRoccade, Stichting Nuts, Secumail) with their teams as admins; no demo data, idempotent — staging only, not for production")
+		"provision the staging pilot partner organisations (Anoigo, Gemeente Nijmegen, Ver.iD, PinkRoccade, Stichting Nuts, Secumail) with their teams as admins — Gemeente Nijmegen also gets its APV standplaatsvergunning attestation catalogue; no other demo data, idempotent — staging only, not for production")
 	flag.Parse()
 
 	cfg, err := config.Load()

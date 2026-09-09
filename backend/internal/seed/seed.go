@@ -450,12 +450,17 @@ func EnsureYiviOrganization(ctx context.Context, dsn, addressDomain string) (org
 }
 
 // EnsurePartnerOrganizations provisions the staging pilot partner organisations
-// (identity + default QERDS address) and their teams as admins — and nothing
-// else: no representative, no demo members, no activity. Like
-// EnsureYiviOrganization every write is ON CONFLICT / existence guarded, so it is
-// idempotent and safe to run on every staging deploy. It is deliberately NOT part
-// of the `-org` seed (which also runs in production): these are pilot orgs that
-// belong in staging only, wired into the staging deploy via `seed -partners`.
+// (identity + default QERDS address) and their teams as admins — no
+// representative, no demo members, no activity. The one exception is Gemeente
+// Nijmegen, which also gets its APV standplaatsvergunning schema + template and
+// issuer settings (issue #245): those are local DB rows only, no call to the
+// hosted issuer at seed time (same reasoning as EnsureKVKRegisterOrganization),
+// so provisioning them here does not risk the staging deploy, and staging is
+// where issue #245's end-to-end demo actually runs. Like EnsureYiviOrganization
+// every write is ON CONFLICT / existence guarded, so it is idempotent and safe
+// to run on every staging deploy. It is deliberately NOT part of the `-org` seed
+// (which also runs in production): these are pilot orgs that belong in staging
+// only, wired into the staging deploy via `seed -partners`.
 func EnsurePartnerOrganizations(ctx context.Context, dsn, addressDomain string) error {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -474,6 +479,14 @@ func EnsurePartnerOrganizations(ctx context.Context, dsn, addressDomain string) 
 		// ensureTeamMember makes each listed member an admin of the org.
 		for _, m := range p.team {
 			if err := ensureTeamMember(ctx, users, orgs, org.ID, m); err != nil {
+				return err
+			}
+		}
+		if p.org.slug == "nijmegen" {
+			if err := seedNijmegenAttestation(ctx, pool, org.ID); err != nil {
+				return err
+			}
+			if err := seedIssuerSettings(ctx, pool, org.ID, "nijmegen", "Gemeente Nijmegen"); err != nil {
 				return err
 			}
 		}
