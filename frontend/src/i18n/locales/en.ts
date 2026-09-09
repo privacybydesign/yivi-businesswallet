@@ -246,6 +246,10 @@ export const en = {
         title: "Request not found",
         hint: "This link is not valid or the request has expired.",
       },
+      noMatchingCredential: {
+        title: "No matching credential",
+        hint: "This organization holds no credential that satisfies the verifier's request.",
+      },
       presentationFailed: {
         title: "Response could not be sent",
         hint: "The presentation could not be delivered to the verifier. Ask the verifier to start a new request.",

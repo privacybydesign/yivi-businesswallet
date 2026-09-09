@@ -240,15 +240,21 @@ func main() {
 }
 
 // newOpenID4VPPresenter wires the inbound-presentation slice. The Request Object
-// validator is chosen by config: RefusingValidator (default) fails every inbound
-// request before a row is written; UnverifiedDecoder is the explicit dev / CI
-// opt-in until #112 supplies chain validation.
+// validator verifies the JAR's signature and x509_san_dns chain against irmago's
+// pinned Yivi relying-party anchors plus OPENID4VP_VERIFIER_TRUST_CHAIN;
+// UnverifiedDecoder (structural checks only) is the explicit dev / CI opt-out.
 func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit.Recorder, orgStore *organization.Store, holder eudiholder.Holder, requireUser, authorize func(http.Handler) http.Handler) (*openid4vppresenter.Handler, error) {
 	policy := openid4vppresenter.Policy{AllowInsecureHTTP: cfg.OpenID4VPPresenterAllowInsecureHTTP}
-	var validator openid4vppresenter.Validator = openid4vppresenter.RefusingValidator{}
+	var validator openid4vppresenter.Validator
 	if cfg.OpenID4VPPresenterAllowUnverifiedRequests {
 		slog.Warn("OpenID4VP request objects are accepted WITHOUT signature verification (dev only)")
 		validator = openid4vppresenter.NewUnverifiedDecoder(policy)
+	} else {
+		trust, err := eudiholder.NewVerifierTrust([]byte(cfg.OpenID4VPVerifierTrustChain), cfg.AttestationHolderStagingAnchors)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", "OPENID4VP_VERIFIER_TRUST_CHAIN", err)
+		}
+		validator = openid4vppresenter.NewVerifyingValidator(trust, policy)
 	}
 	if cfg.OpenID4VPPresenterAutoPresent {
 		slog.Warn("OpenID4VP presentations complete immediately after organization selection (dev only; no consent layer)")

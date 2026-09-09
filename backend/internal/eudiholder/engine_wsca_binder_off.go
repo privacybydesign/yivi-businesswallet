@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/privacybydesign/irmago/eudi/openid4vci"
+	"github.com/privacybydesign/irmago/eudi/sdjwt"
 	"github.com/privacybydesign/irmago/eudi/services"
 	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
 )
@@ -26,4 +27,16 @@ func (e *Engine) holderKeyBinder(_ context.Context, _ uuid.UUID, st irmastorage.
 		return nil, errWSCANotCompiled
 	}
 	return services.NewHolderBindingKeyService(st.Db()), nil
+}
+
+// presentationKeyBinder (default build) signs the key-binding JWT of an OpenID4VP
+// presentation with irmago's storage-backed software binder, over the same
+// holder-key rows holderKeyBinder wrote at issuance. With a WSCAConfig set it
+// errors like holderKeyBinder does: a KB-JWT signed with software keys would not
+// match a WSCA-bound cnf anyway, and must not be produced silently.
+func (e *Engine) presentationKeyBinder(_ context.Context, _ uuid.UUID, st irmastorage.Storage) (sdjwt.KeyBinder, error) {
+	if e.wsca != nil {
+		return nil, errWSCANotCompiled
+	}
+	return sdjwt.NewDefaultKeyBinder(services.NewHolderBindingKeyService(st.Db())), nil
 }

@@ -48,7 +48,7 @@ func NewMetadata(appBaseURL string, formats eudiholder.PresentationFormats, vali
 		Issuer:                    base,
 		AuthorizationEndpoint:     base + AuthorizationPath,
 		ResponseTypesSupported:    []string{string(openid4vp.ResponseType_VpToken)},
-		ResponseModesSupported:    []string{string(openid4vp.ResponseMode_DirectPost)},
+		ResponseModesSupported:    []string{string(openid4vp.ResponseMode_DirectPost), string(openid4vp.ResponseMode_DirectPostJwt)},
 		VPFormatsSupported:        vpFormats,
 		ClientIDPrefixesSupported: validator.ClientIDPrefixes(),
 	}

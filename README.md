@@ -31,6 +31,13 @@ npm run dev:reset     # same, but wipes DB volumes first (clean slate)
 - Frontend: http://localhost:5173
 - Backend: http://localhost:8080
 
+Optional Compose profiles add local counterparts for flows that otherwise need a
+hosted partner (`COMPOSE_PROFILES=<name>` in `.env`, or `docker compose --profile
+<name> up`): `verifier` runs a local OpenID4VP relying party at http://localhost:8090
+that invokes the business wallet as a holder (see
+`.ai/features/openid4vp-inbound.md` §8); `signer`, `domibus` and `verid` are the
+signing and QERDS benches.
+
 On first run `npm run dev` creates a root `.env` from `.env.example` if one does
 not exist. Compose **requires** `POSTGRES_PASSWORD` (there is no weak default), so
 without this file it would abort with `required variable POSTGRES_PASSWORD is

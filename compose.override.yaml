@@ -47,13 +47,30 @@ services:
       ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR: ${ATTESTATION_HOLDER_WSCA_KEYSTORE_DIR:-/tmp/eudiholder-wsca}
       ATTESTATION_HOLDER_WSCA_INSECURE: ${ATTESTATION_HOLDER_WSCA_INSECURE:-}
       # Inbound OpenID4VP (the business wallet as holder toward an external
-      # verifier). All three are dev-only escape hatches and default closed; the
-      # dev stack opens them so a local verifier can drive the flow end to end
-      # against the stub holder. See .ai/features/openid4vp-inbound.md.
+      # verifier). The dev stack trusts the checked-in dev verifier root
+      # (dev-setup/devverifier/, served by the `verifier` profile) so request
+      # objects are verified for real; plain http to it and completing right
+      # after organization selection are dev-only escape hatches that default
+      # closed outside this file. See .ai/features/openid4vp-inbound.md.
       OPENID4VP_TRANSACTION_TTL: ${OPENID4VP_TRANSACTION_TTL:-5m}
       OPENID4VP_PRESENTER_ALLOW_INSECURE_HTTP: ${OPENID4VP_PRESENTER_ALLOW_INSECURE_HTTP:-true}
-      OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS: ${OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS:-true}
+      OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS: ${OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS:-false}
       OPENID4VP_PRESENTER_AUTO_PRESENT: ${OPENID4VP_PRESENTER_AUTO_PRESENT:-true}
+      # The dev verifier's root (dev-setup/devverifier/devverifier-root.pem). A
+      # second relying party is trusted by concatenating its root here.
+      OPENID4VP_VERIFIER_TRUST_CHAIN: |
+        -----BEGIN CERTIFICATE-----
+        MIIBuzCCAWCgAwIBAgIQcoz0CXIFQbEh/YB2nK3R9jAKBggqhkjOPQQDAjA9MSEw
+        HwYDVQQKExhZaXZpIEJ1c2luZXNzIFdhbGxldCBkZXYxGDAWBgNVBAMTD0RldiBW
+        ZXJpZmllciBDQTAeFw0yNjA5MDkxMzE4NTBaFw0zNjA5MDYxMzE5NTBaMD0xITAf
+        BgNVBAoTGFlpdmkgQnVzaW5lc3MgV2FsbGV0IGRldjEYMBYGA1UEAxMPRGV2IFZl
+        cmlmaWVyIENBMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEJ2i4q3mzb8ICvTYd
+        BZKgsM9eLF+AvMGknrwz0d9vAuNvIk/vy36x9k6Jeeo8cqcgOEar8X/eLkcWXhIX
+        18a1SaNCMEAwDgYDVR0PAQH/BAQDAgEGMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0O
+        BBYEFPNasv8icrIiXfPRqQG9rkn3A0uFMAoGCCqGSM49BAMCA0kAMEYCIQDlikQ0
+        07/TFijN8nVPqhQO10JEO/rEIlev7UShm2t++AIhANufg1L0hHTNSbQG8iBf2aM0
+        pgShtDARmjf5Z53cvlWE
+        -----END CERTIFICATE-----
       # QERDS transport: stub by default. Set QERDS_PROVIDER=domibus (+ URL) in
       # .env to drive the real Domibus AS4 access point (run with --profile domibus).
       QERDS_PROVIDER: ${QERDS_PROVIDER:-stub}
@@ -128,6 +145,35 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./backend:/app
+      - backend-go-build:/root/.cache/go-build
+      - backend-go-mod:/go/pkg/mod
+
+  # Local OpenID4VP relying party (--profile verifier): signs a request the
+  # wallet fetches, prints the link that invokes the wallet, receives the
+  # response and shows the verified disclosure. Open http://localhost:8090.
+  # request_uri / response_uri point at this container's name, which is what the
+  # backend container resolves; the browser-facing pages use localhost.
+  devverifier:
+    build:
+      context: backend
+      dockerfile: docker/development/Dockerfile
+    entrypoint: ["go", "run", "./cmd/devverifier"]
+    profiles: ["verifier"]
+    ports:
+      - "8090:8090"
+    environment:
+      GOWORK: "off"
+      DEVVERIFIER_PUBLIC_URL: http://localhost:8090
+      DEVVERIFIER_INTERNAL_URL: http://devverifier:8090
+      DEVVERIFIER_WALLET_URL: ${APP_BASE_URL:-http://localhost:5173}
+      DEVVERIFIER_CHAIN_FILE: /certs/devverifier-chain.pem
+      DEVVERIFIER_KEY_FILE: /certs/devverifier-key.pem
+      # Presented credentials are verified against the Yivi staging + production
+      # issuer anchors; add a partner issuer root here (PEM) to verify theirs.
+      DEVVERIFIER_ISSUER_TRUST_CHAIN: ${ATTESTATION_HOLDER_TRUST_CHAIN:-}
+    volumes:
+      - ./backend:/app
+      - ./dev-setup/devverifier:/certs:ro
       - backend-go-build:/root/.cache/go-build
       - backend-go-mod:/go/pkg/mod
 

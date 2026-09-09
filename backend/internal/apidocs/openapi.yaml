@@ -2135,9 +2135,11 @@ paths:
         GET /openid4vp with. Only pass-by-reference (request_uri) is accepted;
         a by-value `request`, both, or neither is `invalid_request`, and a
         request_uri_method other than get/post is `invalid_request_uri_method`.
-        The backend fetches and validates the Request Object under its SSRF,
-        redirect, size and timeout guards and returns an opaque transaction id —
-        the only state the browser carries from here on, including through login.
+        The backend fetches the Request Object under its SSRF, redirect, size and
+        timeout guards, verifies its signature and x509_san_dns certificate chain
+        against the configured verifier trust (`invalid_request_object` otherwise),
+        and returns an opaque transaction id — the only state the browser carries
+        from here on, including through login.
       security: []
       requestBody:
         required: true
@@ -2169,12 +2171,6 @@ paths:
                     type: string
         '400':
           $ref: '#/components/responses/BadRequest'
-        '501':
-          description: This deployment has no Request Object validator it is allowed to trust.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
         '502':
           description: The request_uri could not be fetched.
           content:
@@ -2275,9 +2271,12 @@ paths:
         Records the caller's choice, resolved through the tenant seam from their
         membership — never from a client-supplied hint. The transaction then
         waits for the consent layer (status org_selected); under the dev-only
-        OPENID4VP_PRESENTER_AUTO_PRESENT flag the presentation is built and
-        delivered at once (status completed, with the verifier's redirectUri if
-        it gave one). One-time use: a second select is a conflict.
+        OPENID4VP_PRESENTER_AUTO_PRESENT flag the presentation is built from the
+        organisation's held credentials (DCQL match, selective disclosure,
+        key-bound) and delivered at once (status completed, with the verifier's
+        redirectUri if it gave one). An organisation holding nothing that
+        satisfies the query is 422 `no_matching_credential`. One-time use: a
+        second select is a conflict.
       responses:
         '2XX':
           description: Successful response.
@@ -2298,6 +2297,12 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The transaction has already been handled or has expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The organisation holds no credential that satisfies the request; the transaction is consumed as denied.
           content:
             application/json:
               schema:

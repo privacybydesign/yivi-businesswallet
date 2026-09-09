@@ -4,7 +4,6 @@ package integration
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,18 +12,21 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/devverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vppresenter"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
 
 // fakeInboundVerifier is the external verifier that invokes the business wallet:
-// it hosts the Request Object at request_uri and receives the direct_post
-// Authorization Response at response_uri.
+// it hosts the Request Object at request_uri — signed with the identity the
+// router trusts — and receives the direct_post Authorization Response at
+// response_uri.
 type fakeInboundVerifier struct {
-	t      *testing.T
-	server *httptest.Server
-	mu     sync.Mutex
-	posted []url.Values
+	t        *testing.T
+	identity devverifier.Identity
+	server   *httptest.Server
+	mu       sync.Mutex
+	posted   []url.Values
 }
 
 const (
@@ -33,9 +35,9 @@ const (
 	inboundState    = "state-123"
 )
 
-func newFakeInboundVerifier(t *testing.T) *fakeInboundVerifier {
+func newFakeInboundVerifier(t *testing.T, identity devverifier.Identity) *fakeInboundVerifier {
 	t.Helper()
-	f := &fakeInboundVerifier{t: t}
+	f := &fakeInboundVerifier{t: t, identity: identity}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /request", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
@@ -57,29 +59,24 @@ func newFakeInboundVerifier(t *testing.T) *fakeInboundVerifier {
 	return f
 }
 
-// requestObject is a structurally valid, unsigned JAR (the integration posture
-// accepts unverified request objects; see setup).
+// requestObject is a JAR signed by the trusted relying-party identity, as the
+// hosted Yivi verifier would sign one.
 func (f *fakeInboundVerifier) requestObject() []byte {
-	enc := func(v any) string {
-		b, err := json.Marshal(v)
-		if err != nil {
-			f.t.Fatalf("marshal: %v", err)
-		}
-		return base64.RawURLEncoding.EncodeToString(b)
+	dcql, err := devverifier.SimpleDCQL("kvk", "nl.kvk.registration", nil)
+	if err != nil {
+		f.t.Fatal(err)
 	}
-	header := map[string]any{"alg": "ES256", "typ": "oauth-authz-req+jwt"}
-	payload := map[string]any{
-		"client_id":     inboundClientID,
-		"response_type": "vp_token",
-		"response_mode": "direct_post",
-		"response_uri":  f.server.URL + "/response",
-		"nonce":         inboundNonce,
-		"state":         inboundState,
-		"dcql_query": map[string]any{
-			"credentials": []map[string]any{{"id": "kvk", "format": "dc+sd-jwt", "meta": map[string]any{"vct_values": []string{"nl.kvk.registration"}}}},
-		},
+	jar, err := devverifier.SignRequestObject(f.identity, devverifier.Request{
+		Nonce:        inboundNonce,
+		State:        inboundState,
+		ResponseURI:  f.server.URL + "/response",
+		ResponseMode: "direct_post",
+		DCQLQuery:    dcql,
+	})
+	if err != nil {
+		f.t.Fatalf("sign request object: %v", err)
 	}
-	return []byte(enc(header) + "." + enc(payload) + ".c2ln")
+	return []byte(jar)
 }
 
 type startResp struct {
@@ -121,7 +118,7 @@ func (e *testEnv) startInbound(t *testing.T, verifier *fakeInboundVerifier) stri
 // consumed (a second select is a conflict) and the org's audit log has the trail.
 func TestOpenID4VPInboundFlow(t *testing.T) {
 	env := setup(t)
-	verifier := newFakeInboundVerifier(t)
+	verifier := newFakeInboundVerifier(t, env.verifier)
 
 	// A fresh browser: no session yet.
 	id := env.startInbound(t, verifier)
@@ -238,7 +235,7 @@ func TestOpenID4VPInboundFlow(t *testing.T) {
 // user with the same opaque id is refused, and cannot pick their own org for it.
 func TestOpenID4VPInboundBoundToFirstUser(t *testing.T) {
 	env := setup(t)
-	verifier := newFakeInboundVerifier(t)
+	verifier := newFakeInboundVerifier(t, env.verifier)
 	id := env.startInbound(t, verifier)
 
 	first := env.loginAs("first@example.test")
@@ -267,7 +264,7 @@ func TestOpenID4VPInboundBoundToFirstUser(t *testing.T) {
 // mux (not under /api/v1, not the SPA).
 func TestOpenID4VPInboundRejectionsAndMetadata(t *testing.T) {
 	env := setup(t)
-	verifier := newFakeInboundVerifier(t)
+	verifier := newFakeInboundVerifier(t, env.verifier)
 
 	cases := []struct {
 		name string

@@ -73,7 +73,7 @@ func TestUnverifiedDecoderRejects(t *testing.T) {
 		{"empty signature", []byte(strings.TrimSuffix(string(jws(t, header, validPayload())), "c2ln"))},
 		{"client_id mismatch", with(func(p map[string]any) { p["client_id"] = "x509_san_dns:other.example.com" })},
 		{"unsupported prefix", with(func(p map[string]any) { p["client_id"] = "pre-registered" })},
-		{"direct_post.jwt", with(func(p map[string]any) { p["response_mode"] = "direct_post.jwt" })},
+		{"direct_post.jwt without keys", with(func(p map[string]any) { p["response_mode"] = "direct_post.jwt" })},
 		{"response_type", with(func(p map[string]any) { p["response_type"] = "code" })},
 		{"http response_uri", with(func(p map[string]any) { p["response_uri"] = "http://verifier.example.com/r" })},
 		{"missing nonce", with(func(p map[string]any) { delete(p, "nonce") })},
@@ -108,14 +108,22 @@ func TestUnverifiedDecoderAllowsHTTPResponseURIOnlyWhenInsecure(t *testing.T) {
 	}
 }
 
-func TestRefusingValidator(t *testing.T) {
-	var refusingValidator RefusingValidator
-	_, err := refusingValidator.Validate(context.Background(), testClientID, jws(t, map[string]any{"alg": "ES256"}, validPayload()))
-	if !errors.Is(err, ErrValidationUnavailable) {
-		t.Fatalf("err = %v, want ErrValidationUnavailable", err)
+// direct_post.jwt is accepted only when the verifier supplied encryption keys;
+// without them the response step could never answer, so the request is refused
+// before it reaches the picker.
+func TestUnverifiedDecoderDirectPostJWTNeedsKeys(t *testing.T) {
+	d := NewUnverifiedDecoder(Policy{})
+	p := validPayload()
+	p["response_mode"] = "direct_post.jwt"
+	if _, err := d.Validate(context.Background(), testClientID, jws(t, map[string]any{"alg": "ES256"}, p)); !errors.Is(err, ErrInvalidRequestObject) {
+		t.Fatalf("direct_post.jwt without jwks: err = %v, want ErrInvalidRequestObject", err)
 	}
-	var refusing RefusingValidator
-	if got := refusing.ClientIDPrefixes(); len(got) != 0 {
-		t.Errorf("ClientIDPrefixes = %v, want none advertised", got)
+	p["client_metadata"] = map[string]any{"jwks": map[string]any{"keys": []map[string]any{{"kty": "EC", "crv": "P-256", "x": "x", "y": "y"}}}}
+	ro, err := d.Validate(context.Background(), testClientID, jws(t, map[string]any{"alg": "ES256"}, p))
+	if err != nil {
+		t.Fatalf("direct_post.jwt with jwks: %v", err)
+	}
+	if ro.ResponseMode != "direct_post.jwt" || ro.Raw == "" {
+		t.Errorf("RequestObject = %+v", ro)
 	}
 }

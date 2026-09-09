@@ -95,9 +95,11 @@ type Holder interface {
 	// key-bound for audience (the verifier's client_id) and nonce. This is the
 	// "present" side of Art 5(1)(a), the seam the inbound OpenID4VP slice
 	// (internal/openid4vppresenter) calls once an organization has been selected
-	// for an incoming Authorization Request. #112 implements the DCQL match and
-	// SD-JWT VC selective disclosure + KB-JWT signing behind it; until then the
-	// irmago engine returns ErrPresentNotImplemented and the stub a canned token.
+	// for an incoming Authorization Request. The irmago engine evaluates the DCQL
+	// query over the org's held credentials, selects the requested disclosures and
+	// signs the key-binding JWT through the configured holder-key binder (software
+	// or WSCA); it returns ErrNoMatchingCredential when a required part of the
+	// query cannot be satisfied. The stub returns a canned token.
 	Present(ctx context.Context, orgID uuid.UUID, dcqlQuery []byte, nonce, audience string) (Presentation, error)
 
 	// Close releases all per-organization engines.

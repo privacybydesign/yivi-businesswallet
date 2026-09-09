@@ -62,6 +62,7 @@ export type TransactionErrorKind =
   | "otherSession"
   | "alreadyHandled"
   | "notFound"
+  | "noMatchingCredential"
   | "presentationFailed"
   | "failed";
 
@@ -69,13 +70,17 @@ const FORBIDDEN_STATUS = 403;
 const NOT_FOUND_STATUS = 404;
 const CONFLICT_STATUS = 409;
 const PRESENTATION_FAILED_CODE = "presentation_failed";
+const NO_MATCHING_CREDENTIAL_CODE = "no_matching_credential";
 
 export function transactionErrorKind(error: unknown): TransactionErrorKind {
   if (!(error instanceof ApiError)) {
     return "failed";
   }
-  if (errorCode(error) === PRESENTATION_FAILED_CODE) {
-    return "presentationFailed";
+  switch (errorCode(error)) {
+    case PRESENTATION_FAILED_CODE:
+      return "presentationFailed";
+    case NO_MATCHING_CREDENTIAL_CODE:
+      return "noMatchingCredential";
   }
   switch (error.status) {
     case FORBIDDEN_STATUS:

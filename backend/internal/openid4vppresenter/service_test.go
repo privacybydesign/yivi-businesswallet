@@ -55,7 +55,7 @@ func (fakeValidator) ClientIDPrefixes() []string { return nil }
 
 type fakeResponder struct{}
 
-func (fakeResponder) DirectPost(context.Context, string, openid4vp.VpToken, string) (string, error) {
+func (fakeResponder) Send(context.Context, Transaction, openid4vp.VpToken) (string, error) {
 	return "", nil
 }
 

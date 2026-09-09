@@ -31,6 +31,10 @@ const (
 	envOpenID4VPPresenterAllowInsecureHTTP       = "OPENID4VP_PRESENTER_ALLOW_INSECURE_HTTP"
 	envOpenID4VPPresenterAllowUnverifiedRequests = "OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS"
 	envOpenID4VPPresenterAutoPresent             = "OPENID4VP_PRESENTER_AUTO_PRESENT"
+	// Extra relying-party CA PEM a signed Authorization Request may chain to,
+	// added to irmago's pinned Yivi verifier anchors (the verifier analogue of
+	// ATTESTATION_HOLDER_TRUST_CHAIN; the value is the PEM, not a path).
+	envOpenID4VPVerifierTrustChain = "OPENID4VP_VERIFIER_TRUST_CHAIN"
 
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
@@ -252,6 +256,12 @@ type Config struct {
 	// Off, an inbound request is refused before anything is persisted; a
 	// deployment must opt in explicitly rather than inherit unverified trust.
 	OpenID4VPPresenterAllowUnverifiedRequests bool
+	// OpenID4VPVerifierTrustChain is extra relying-party CA PEM an inbound
+	// Authorization Request's x5c chain may end in, merged onto irmago's pinned
+	// Yivi verifier anchors (staging ones too when
+	// AttestationHolderStagingAnchors is set — one Yivi PKI switch per
+	// environment). Empty trusts the pinned anchors alone.
+	OpenID4VPVerifierTrustChain string
 	// OpenID4VPPresenterAutoPresent completes a presentation immediately after
 	// organization selection. It stands in for the consent/approval layer (#113)
 	// in dev / CI only; off, a selected transaction waits for that layer.
@@ -502,6 +512,7 @@ func Load() (Config, error) {
 			os.Getenv(envOpenID4VPPresenterAllowUnverifiedRequests), "true"),
 		OpenID4VPPresenterAutoPresent: strings.EqualFold(
 			os.Getenv(envOpenID4VPPresenterAutoPresent), "true"),
+		OpenID4VPVerifierTrustChain: os.Getenv(envOpenID4VPVerifierTrustChain),
 
 		QerdsProvider:             qerdsProvider,
 		QerdsProviderURL:          qerdsProviderURL,

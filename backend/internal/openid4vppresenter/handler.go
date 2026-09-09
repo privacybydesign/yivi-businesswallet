@@ -140,8 +140,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: ErrInvalidRequestObject.Error(), Message: err.Error()}
 	case errors.Is(err, ErrRequestURIUnreachable):
 		return &respond.APIError{Status: http.StatusBadGateway, Code: ErrRequestURIUnreachable.Error(), Message: "the request object could not be fetched"}
-	case errors.Is(err, ErrValidationUnavailable):
-		return &respond.APIError{Status: http.StatusNotImplemented, Code: ErrValidationUnavailable.Error(), Message: "this deployment cannot validate request objects yet"}
+	case errors.Is(err, ErrNoMatchingCredential):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: ErrNoMatchingCredential.Error(), Message: "the organization holds no credential that satisfies this request"}
 	case errors.Is(err, ErrNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "transaction_not_found", Message: "unknown presentation transaction"}
 	case errors.Is(err, ErrNotPending):

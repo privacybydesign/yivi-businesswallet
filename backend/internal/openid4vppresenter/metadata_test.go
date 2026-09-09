@@ -1,6 +1,7 @@
 package openid4vppresenter
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,9 +23,9 @@ func TestMetadataDerivesFromConfigAndCapabilities(t *testing.T) {
 		t.Errorf("vp_formats_supported = %#v", m.VPFormatsSupported)
 	}
 
-	// With no trusted validator the prefixes are omitted, not asserted.
-	refusing := NewMetadata("https://wallet.example.com", eudiholder.Formats(), RefusingValidator{})
-	body, err := json.Marshal(refusing)
+	// A validator that binds no prefix leaves the field out, not asserted.
+	none := NewMetadata("https://wallet.example.com", eudiholder.Formats(), noPrefixValidator{})
+	body, err := json.Marshal(none)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +39,7 @@ func TestMetadataDerivesFromConfigAndCapabilities(t *testing.T) {
 }
 
 func TestMetadataHandlerServesJSONOnRootMux(t *testing.T) {
-	h, err := NewMetadataHandler(NewMetadata("https://wallet.example.com", eudiholder.Formats(), RefusingValidator{}))
+	h, err := NewMetadataHandler(NewMetadata("https://wallet.example.com", eudiholder.Formats(), noPrefixValidator{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,3 +63,11 @@ func TestMetadataHandlerServesJSONOnRootMux(t *testing.T) {
 		t.Fatalf("body is not the metadata document: %v %s", err, rec.Body.String())
 	}
 }
+
+// noPrefixValidator stands in for a validator that can bind no client_id prefix.
+type noPrefixValidator struct{}
+
+func (noPrefixValidator) Validate(context.Context, string, []byte) (RequestObject, error) {
+	return RequestObject{}, ErrInvalidRequestObject
+}
+func (noPrefixValidator) ClientIDPrefixes() []string { return nil }

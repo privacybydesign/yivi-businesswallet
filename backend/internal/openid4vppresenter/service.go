@@ -34,7 +34,7 @@ type (
 		Fetch(ctx context.Context, requestURI string) ([]byte, error)
 	}
 	responseSender interface {
-		DirectPost(ctx context.Context, responseURI string, token openid4vp.VpToken, state string) (string, error)
+		Send(ctx context.Context, t Transaction, token openid4vp.VpToken) (string, error)
 	}
 )
 
@@ -213,13 +213,20 @@ func (s *Service) Select(ctx context.Context, rawID string, userID uuid.UUID, or
 
 // present builds the vp_token for orgID and delivers it. Any failure consumes the
 // transaction as denied — one-time use means no second attempt on the same
-// nonce — and is logged without the query or response material.
+// nonce — and is logged without the query or response material. An organization
+// that holds nothing matching is a denial with its own reason, not a failure.
 func (s *Service) present(ctx context.Context, t Transaction, orgID uuid.UUID) (string, error) {
 	p, err := s.holder.Present(ctx, orgID, t.DCQLQuery, t.Nonce, t.ClientID)
+	if errors.Is(err, eudiholder.ErrNoMatchingCredential) {
+		if err := s.store.Deny(ctx, t.ID, ErrNoMatchingCredential.Error()); err != nil && !errors.Is(err, ErrNotPending) {
+			return "", err
+		}
+		return "", ErrNoMatchingCredential
+	}
 	if err != nil {
 		return "", s.fail(ctx, t.ID, "holder_present", err)
 	}
-	redirect, err := s.responder.DirectPost(ctx, t.ResponseURI, p.VPToken, t.State)
+	redirect, err := s.responder.Send(ctx, t, p.VPToken)
 	if err != nil {
 		return "", s.fail(ctx, t.ID, "direct_post", err)
 	}

@@ -13,38 +13,79 @@ import (
 )
 
 // Validator turns a fetched Request Object into the validated RequestObject the
-// slice persists, or rejects it. It is the seam the signed-request cryptography
-// (x509_san_dns chain validation, #112) plugs into; the service never stores
-// anything a Validator did not return, so nothing unvalidated reaches the
-// org-picker UI.
+// slice persists, or rejects it. The service never stores anything a Validator
+// did not return, so nothing unvalidated reaches the org-picker UI. Two
+// implementations: VerifyingValidator (the default — signature and x509_san_dns
+// chain verification through irmago) and UnverifiedDecoder (structural only,
+// dev / CI).
 type Validator interface {
 	// Validate checks requestObject against clientID — the client_id the verifier
 	// invoked the wallet with, which must be the one the Request Object binds to.
 	Validate(ctx context.Context, clientID string, requestObject []byte) (RequestObject, error)
 	// ClientIDPrefixes lists the client_id prefixes this validator can bind, for
-	// the wallet-metadata document. Empty means none: the metadata then omits the
-	// field rather than advertising a capability the deployment does not have.
+	// the wallet-metadata document.
 	ClientIDPrefixes() []string
 }
 
-// RefusingValidator is the production default until a verifying validator
-// exists: every inbound request fails with ErrValidationUnavailable before a
-// transaction row is written. A deployment opts into UnverifiedDecoder
-// explicitly; it never inherits unverified trust.
-type RefusingValidator struct{}
-
-func (RefusingValidator) Validate(context.Context, string, []byte) (RequestObject, error) {
-	return RequestObject{}, ErrValidationUnavailable
+// requestFields is what both validators check once the JAR is decoded: the
+// protocol constraints this slice can answer, independent of who signed it.
+type requestFields struct {
+	clientID       string
+	responseType   string
+	responseMode   string
+	responseURI    string
+	nonce          string
+	state          string
+	dcqlQuery      json.RawMessage
+	encryptionKeys json.RawMessage
 }
 
-func (RefusingValidator) ClientIDPrefixes() []string { return nil }
+// checkFields applies the protocol constraints and assembles the RequestObject.
+func checkFields(policy Policy, expectedClientID, identity, raw string, f requestFields) (RequestObject, error) {
+	if f.clientID != expectedClientID {
+		return RequestObject{}, fmt.Errorf("%w: client_id does not match the invocation", ErrInvalidRequestObject)
+	}
+	if f.responseType != string(openid4vp.ResponseType_VpToken) {
+		return RequestObject{}, fmt.Errorf("%w: unsupported response_type", ErrInvalidRequestObject)
+	}
+	switch openid4vp.ResponseMode(f.responseMode) {
+	case openid4vp.ResponseMode_DirectPost:
+	case openid4vp.ResponseMode_DirectPostJwt:
+		// The encrypted form needs the verifier's keys; refusing here keeps a
+		// request the response step could never answer out of the picker.
+		if len(f.encryptionKeys) == 0 {
+			return RequestObject{}, fmt.Errorf("%w: direct_post.jwt without client_metadata.jwks", ErrInvalidRequestObject)
+		}
+	default:
+		return RequestObject{}, fmt.Errorf("%w: unsupported response_mode", ErrInvalidRequestObject)
+	}
+	if _, err := policy.checkURL(f.responseURI); err != nil {
+		return RequestObject{}, fmt.Errorf("%w: response_uri: %w", ErrInvalidRequestObject, err)
+	}
+	if !validNonce(f.nonce) {
+		return RequestObject{}, fmt.Errorf("%w: missing or malformed nonce", ErrInvalidRequestObject)
+	}
+	if err := checkDCQL(f.dcqlQuery); err != nil {
+		return RequestObject{}, fmt.Errorf("%w: dcql_query: %w", ErrInvalidRequestObject, err)
+	}
+	return RequestObject{
+		ClientID:         expectedClientID,
+		VerifierIdentity: identity,
+		Nonce:            f.nonce,
+		State:            f.state,
+		ResponseURI:      f.responseURI,
+		ResponseMode:     f.responseMode,
+		DCQLQuery:        f.dcqlQuery,
+		Raw:              raw,
+	}, nil
+}
 
 // UnverifiedDecoder validates a Request Object structurally — a well-formed,
 // non-"none" JWS whose payload binds to the invoking client_id, carries the
-// fields a direct_post response needs, and is not expired — without verifying
-// its signature or the client_id's certificate chain. Dev / CI only, behind
-// OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS; the real x509_san_dns
-// validation is #112's.
+// fields a response needs, and is not expired — without verifying its signature
+// or the client_id's certificate chain. Dev / CI only, behind
+// OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS; VerifyingValidator is
+// the default.
 type UnverifiedDecoder struct {
 	policy Policy
 	now    func() time.Time
@@ -54,27 +95,30 @@ func NewUnverifiedDecoder(policy Policy) *UnverifiedDecoder {
 	return &UnverifiedDecoder{policy: policy, now: time.Now}
 }
 
-// The one client_id prefix this slice resolves an identity for. Verifiers using
-// pre-registered client ids or other prefixes are refused: their identity cannot
-// be shown to the person picking an organization.
-var supportedClientIDPrefixes = []string{
+// The client_id prefix the structural decoder resolves an identity for. Verifiers
+// using pre-registered client ids or other prefixes are refused: their identity
+// cannot be shown to the person picking an organization.
+var unverifiedClientIDPrefixes = []string{
 	strings.TrimSuffix(string(openid4vp.ClientIdentifierPrefix_X509SanDns), ":"),
 }
 
-func (*UnverifiedDecoder) ClientIDPrefixes() []string { return supportedClientIDPrefixes }
+func (*UnverifiedDecoder) ClientIDPrefixes() []string { return unverifiedClientIDPrefixes }
 
-// jarPayload is the subset of the Authorization Request this slice reads. It is
-// deliberately not irmago's AuthorizationRequest: that type models what a wallet
-// *processes*; here only what is persisted and answered is decoded.
+// jarPayload is the subset of the Authorization Request the structural decoder
+// reads. It is deliberately not irmago's AuthorizationRequest: that type models
+// what a wallet *processes*; here only what is persisted and answered is decoded.
 type jarPayload struct {
-	ClientID     string          `json:"client_id"`
-	ResponseType string          `json:"response_type"`
-	ResponseMode string          `json:"response_mode"`
-	ResponseURI  string          `json:"response_uri"`
-	Nonce        string          `json:"nonce"`
-	State        string          `json:"state"`
-	DCQLQuery    json.RawMessage `json:"dcql_query"`
-	Exp          *int64          `json:"exp"`
+	ClientID       string          `json:"client_id"`
+	ResponseType   string          `json:"response_type"`
+	ResponseMode   string          `json:"response_mode"`
+	ResponseURI    string          `json:"response_uri"`
+	Nonce          string          `json:"nonce"`
+	State          string          `json:"state"`
+	DCQLQuery      json.RawMessage `json:"dcql_query"`
+	Exp            *int64          `json:"exp"`
+	ClientMetadata *struct {
+		JWKS json.RawMessage `json:"jwks"`
+	} `json:"client_metadata"`
 }
 
 type jarHeader struct {
@@ -87,7 +131,8 @@ const (
 )
 
 func (d *UnverifiedDecoder) Validate(_ context.Context, clientID string, requestObject []byte) (RequestObject, error) {
-	parts := strings.Split(strings.TrimSpace(string(requestObject)), ".")
+	raw := strings.TrimSpace(string(requestObject))
+	parts := strings.Split(raw, ".")
 	if len(parts) != jwsParts {
 		return RequestObject{}, fmt.Errorf("%w: not a compact JWS", ErrInvalidRequestObject)
 	}
@@ -108,39 +153,23 @@ func (d *UnverifiedDecoder) Validate(_ context.Context, clientID string, request
 	if p.Exp != nil && d.now().After(time.Unix(*p.Exp, 0)) {
 		return RequestObject{}, fmt.Errorf("%w: request object expired", ErrInvalidRequestObject)
 	}
-	if p.ClientID != clientID {
-		return RequestObject{}, fmt.Errorf("%w: client_id does not match the invocation", ErrInvalidRequestObject)
-	}
 	identity, err := verifierIdentity(clientID)
 	if err != nil {
 		return RequestObject{}, err
 	}
-	if p.ResponseType != string(openid4vp.ResponseType_VpToken) {
-		return RequestObject{}, fmt.Errorf("%w: unsupported response_type", ErrInvalidRequestObject)
+	f := requestFields{
+		clientID:     p.ClientID,
+		responseType: p.ResponseType,
+		responseMode: p.ResponseMode,
+		responseURI:  p.ResponseURI,
+		nonce:        p.Nonce,
+		state:        p.State,
+		dcqlQuery:    p.DCQLQuery,
 	}
-	// direct_post.jwt needs an encrypted (JARM) response — presentation crypto,
-	// #112 — so only the plain form is accepted here.
-	if p.ResponseMode != string(openid4vp.ResponseMode_DirectPost) {
-		return RequestObject{}, fmt.Errorf("%w: unsupported response_mode", ErrInvalidRequestObject)
+	if p.ClientMetadata != nil {
+		f.encryptionKeys = p.ClientMetadata.JWKS
 	}
-	if _, err := d.policy.checkURL(p.ResponseURI); err != nil {
-		return RequestObject{}, fmt.Errorf("%w: response_uri: %w", ErrInvalidRequestObject, err)
-	}
-	if !validNonce(p.Nonce) {
-		return RequestObject{}, fmt.Errorf("%w: missing or malformed nonce", ErrInvalidRequestObject)
-	}
-	if err := checkDCQL(p.DCQLQuery); err != nil {
-		return RequestObject{}, fmt.Errorf("%w: dcql_query: %w", ErrInvalidRequestObject, err)
-	}
-	return RequestObject{
-		ClientID:         clientID,
-		VerifierIdentity: identity,
-		Nonce:            p.Nonce,
-		State:            p.State,
-		ResponseURI:      p.ResponseURI,
-		ResponseMode:     p.ResponseMode,
-		DCQLQuery:        p.DCQLQuery,
-	}, nil
+	return checkFields(d.policy, clientID, identity, raw, f)
 }
 
 func decodeSegment(seg string, into any) error {
@@ -151,9 +180,9 @@ func decodeSegment(seg string, into any) error {
 	return json.Unmarshal(raw, into)
 }
 
-// verifierIdentity resolves "who is asking" from the client_id binding. For
+// verifierIdentity resolves "who is asking" from the client_id binding alone. For
 // x509_san_dns the identity is the DNS name the verifier's certificate must carry
-// as a SAN; the cryptographic check that it does is the validator's (#112).
+// as a SAN; whether it does is the verifying validator's check.
 func verifierIdentity(clientID string) (string, error) {
 	prefix := string(openid4vp.ClientIdentifierPrefix_X509SanDns)
 	if !strings.HasPrefix(clientID, prefix) {
@@ -184,7 +213,7 @@ func validNonce(nonce string) bool {
 }
 
 // checkDCQL requires a DCQL query object with at least one credential query; the
-// match itself is the holder's (#112).
+// match itself is the holder's.
 func checkDCQL(raw json.RawMessage) error {
 	if len(raw) == 0 {
 		return errors.New("missing")

@@ -32,14 +32,14 @@ func NewStore(db database.DB, recorder audit.Recorder, ttl time.Duration) *Store
 
 const transactionColumns = `
 	id, client_id, request_uri, request_uri_method, verifier_identity, dcql_query,
-	nonce, state, response_uri, response_mode, status, user_id, organization_id,
+	nonce, state, response_uri, response_mode, request_object, status, user_id, organization_id,
 	expires_at, consumed_at`
 
 func scanTransaction(row pgx.Row) (Transaction, error) {
 	var t Transaction
 	err := row.Scan(
 		&t.ID, &t.ClientID, &t.RequestURI, &t.RequestURIMethod, &t.VerifierIdentity, &t.DCQLQuery,
-		&t.Nonce, &t.State, &t.ResponseURI, &t.ResponseMode, &t.Status, &t.UserID, &t.OrganizationID,
+		&t.Nonce, &t.State, &t.ResponseURI, &t.ResponseMode, &t.RequestObject, &t.Status, &t.UserID, &t.OrganizationID,
 		&t.ExpiresAt, &t.ConsumedAt,
 	)
 	return t, err
@@ -66,15 +66,15 @@ func (s *Store) Create(ctx context.Context, in NewTransaction) (string, error) {
 	const q = `
 		INSERT INTO openid4vp_transactions (
 			id_hash, client_id, request_uri, request_uri_method, verifier_identity, dcql_query,
-			nonce, state, response_uri, response_mode, status, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			nonce, state, response_uri, response_mode, request_object, status, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id`
 	expiresAt := time.Now().Add(s.ttl)
 	err = database.InTx(ctx, s.db, func(tx database.Querier) error {
 		var id uuid.UUID
 		if err := tx.QueryRow(ctx, q,
 			hash[:], in.ClientID, in.RequestURI, in.RequestURIMethod, in.Request.VerifierIdentity, in.Request.DCQLQuery,
-			in.Request.Nonce, in.Request.State, in.Request.ResponseURI, in.Request.ResponseMode, StatusPendingAuth, expiresAt,
+			in.Request.Nonce, in.Request.State, in.Request.ResponseURI, in.Request.ResponseMode, in.Request.Raw, StatusPendingAuth, expiresAt,
 		).Scan(&id); err != nil {
 			return fmt.Errorf("openid4vppresenter: create: %w", err)
 		}

@@ -27,6 +27,9 @@ CREATE TABLE openid4vp_transactions
     state              TEXT        NOT NULL DEFAULT '',
     response_uri       TEXT        NOT NULL,
     response_mode      TEXT        NOT NULL,
+    -- The validated JAR itself (compact JWS): the response step reads the
+    -- verifier's client_metadata (direct_post.jwt encryption keys) from it.
+    request_object     TEXT        NOT NULL,
     -- pending_auth → org_selected → completed | denied | expired (code-defined,
     -- see internal/openid4vppresenter).
     status             TEXT        NOT NULL,

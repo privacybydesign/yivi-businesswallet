@@ -1,7 +1,9 @@
 # OpenID4VP inbound invocation and wallet-provider discovery
 
-Status: **implemented** on this branch — the invocation/routing seam below is built; the
-durable description is `.ai/features/openid4vp-inbound.md`. Issue
+Status: **implemented** on this branch — the invocation/routing seam below is built, and
+so is the holder cryptography this design deferred to #112 (`Engine.Present`, signed
+Request Object verification, `direct_post.jwt`); the durable description is
+`.ai/features/openid4vp-inbound.md`. Issue
 [#188](https://github.com/privacybydesign/yivi-businesswallet/issues/188), the
 invocation/discovery slice of the OpenID4VP-holder epic
 [#112](https://github.com/privacybydesign/yivi-businesswallet/issues/112).

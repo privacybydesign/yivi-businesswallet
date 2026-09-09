@@ -74,6 +74,9 @@ describe("transactionErrorKind", () => {
     expect(transactionErrorKind(apiError(502, "presentation_failed"))).toBe(
       "presentationFailed",
     );
+    expect(transactionErrorKind(apiError(422, "no_matching_credential"))).toBe(
+      "noMatchingCredential",
+    );
     expect(transactionErrorKind(apiError(500))).toBe("failed");
     expect(transactionErrorKind(new Error("x"))).toBe("failed");
   });

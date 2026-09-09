@@ -259,6 +259,10 @@ export const nl: Translation<typeof en> = {
         title: "Verzoek niet gevonden",
         hint: "Deze link is niet geldig of het verzoek is verlopen.",
       },
+      noMatchingCredential: {
+        title: "Geen passend credential",
+        hint: "Deze organisatie heeft geen credential dat aan het verzoek van de verifieerder voldoet.",
+      },
       presentationFailed: {
         title: "Antwoord kon niet worden verstuurd",
         hint: "De presentatie kon niet bij de verifieerder worden afgeleverd. Vraag de verifieerder om een nieuw verzoek te starten.",

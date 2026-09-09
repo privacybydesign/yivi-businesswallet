@@ -9,12 +9,11 @@ import (
 	"github.com/privacybydesign/irmago/eudi/openid4vp"
 )
 
-// ErrPresentNotImplemented is returned by the irmago engine's Present until the
-// DCQL match, selective disclosure and KB-JWT signing land (issue #112). The seam
-// exists so the inbound OpenID4VP slice (internal/openid4vppresenter) is written
-// and tested against a fixed call shape now; the stub returns a canned
-// presentation so that slice runs end to end in dev / CI.
-var ErrPresentNotImplemented = errors.New("eudiholder: Present is not implemented yet (#112)")
+// ErrNoMatchingCredential is returned by Present when the organization holds no
+// credential that satisfies a required part of the DCQL query. The caller
+// (internal/openid4vppresenter) turns it into a denied transaction; it is a
+// business outcome, not a failure of the engine.
+var ErrNoMatchingCredential = errors.New("eudiholder: no held credential satisfies the request")
 
 // Presentation is the outcome of Present: the vp_token an OpenID4VP Authorization
 // Response carries, keyed by DCQL credential-query id (OpenID4VP 1.0 §8.1). Each

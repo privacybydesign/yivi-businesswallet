@@ -66,9 +66,9 @@ var (
 	// ErrRequestURIUnreachable: the request_uri could not be fetched within the
 	// guards (scheme, network, redirect, size, timeout) or answered non-2xx.
 	ErrRequestURIUnreachable = errors.New("request_uri_unreachable")
-	// ErrValidationUnavailable: this deployment has no Request Object validator
-	// it is allowed to trust (see RefusingValidator).
-	ErrValidationUnavailable = errors.New("request_object_validation_unavailable")
+	// ErrNoMatchingCredential: the selected organization holds no credential that
+	// satisfies a required part of the query; the transaction is consumed (denied).
+	ErrNoMatchingCredential = errors.New("no_matching_credential")
 	// ErrPresentationFailed: building or delivering the Authorization Response
 	// failed; the transaction is consumed (denied).
 	ErrPresentationFailed = errors.New("presentation_failed")
@@ -88,11 +88,15 @@ type Transaction struct {
 	State            string
 	ResponseURI      string
 	ResponseMode     string
-	Status           string
-	UserID           *uuid.UUID
-	OrganizationID   *uuid.UUID
-	ExpiresAt        time.Time
-	ConsumedAt       *time.Time
+	// RequestObject is the validated JAR as fetched (compact JWS). The response
+	// step reads the verifier's client_metadata (encryption keys for
+	// direct_post.jwt) from it; it never leaves the backend.
+	RequestObject  string
+	Status         string
+	UserID         *uuid.UUID
+	OrganizationID *uuid.UUID
+	ExpiresAt      time.Time
+	ConsumedAt     *time.Time
 }
 
 // EffectiveStatus is the stored status with expiry applied: an unconsumed row
@@ -117,4 +121,6 @@ type RequestObject struct {
 	ResponseURI      string
 	ResponseMode     string
 	DCQLQuery        json.RawMessage
+	// Raw is the validated JAR itself, persisted for the response step.
+	Raw string
 }
