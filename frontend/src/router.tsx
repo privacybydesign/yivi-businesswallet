@@ -36,6 +36,8 @@ import PostguardSend from "./routes/postguard-send";
 import Attestations from "./routes/attestations";
 import AttestationHeldDetail from "./routes/attestations-held";
 import Claim from "./routes/claim";
+import OpenID4VP from "./routes/openid4vp";
+import OpenID4VPTransaction from "./routes/openid4vp-transaction";
 import Settings from "./routes/settings";
 import Signing from "./routes/signing";
 import SigningExternal from "./routes/signing-external";
@@ -123,6 +125,11 @@ export const router = createBrowserRouter([
       { path: "/invite/:token", Component: InviteAccept },
       { path: "/reidentify/:token", Component: Reidentify },
       { path: "/claim/:token", Component: Claim },
+      // Inbound OpenID4VP: the address an external verifier redirects to, then
+      // the transaction by its opaque id. Not under ProtectedRoute — it handles
+      // the sign-in step itself so the id can ride through /login?returnTo=.
+      { path: "/openid4vp", Component: OpenID4VP },
+      { path: "/openid4vp/:id", Component: OpenID4VPTransaction },
       // An external signee has no account, so their signing page is public and keyed
       // by the one-time token from their invitation mail.
       { path: "/sign/:token", Component: SigningExternal },

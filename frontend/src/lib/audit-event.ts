@@ -74,6 +74,11 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "signing.completed": { icon: "valid", tone: "green" },
   "signing.delivered": { icon: "email", tone: "green" },
   "signing.failed": { icon: "warning", tone: "red" },
+  "presentation.requested": { icon: "scan_qrcode", tone: "amber" },
+  "presentation.org_selected": { icon: "personal", tone: "blue" },
+  "presentation.completed": { icon: "valid", tone: "green" },
+  "presentation.denied": { icon: "close", tone: "red" },
+  "presentation.expired": { icon: "time", tone: "slate" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -260,6 +265,16 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.signingDelivered");
     case "signing.failed":
       return t("auditLog.actions.signingFailed");
+    case "presentation.requested":
+      return t("auditLog.actions.presentationRequested");
+    case "presentation.org_selected":
+      return t("auditLog.actions.presentationOrgSelected");
+    case "presentation.completed":
+      return t("auditLog.actions.presentationCompleted");
+    case "presentation.denied":
+      return t("auditLog.actions.presentationDenied");
+    case "presentation.expired":
+      return t("auditLog.actions.presentationExpired");
     default:
       return action;
   }
@@ -335,6 +350,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.signingCredentials");
     case "signing_requests":
       return t("auditLog.targets.signingRequests");
+    case "presentation_transaction":
+      return t("auditLog.targets.presentationTransaction");
     default:
       return targetType;
   }

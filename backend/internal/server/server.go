@@ -27,6 +27,15 @@ type Registerer interface {
 	Register(*http.ServeMux)
 }
 
+// RootRegisterer is implemented by a feature that also serves something outside
+// /api/v1: a well-known document fetched by software, which has no API version,
+// must return real JSON, and must not fall through to the SPA's index.html.
+// Like the health probes and apidocs, it lands on the root mux, where the more
+// specific pattern wins over the SPA fallback.
+type RootRegisterer interface {
+	RegisterRoot(*http.ServeMux)
+}
+
 // New builds the root handler. When staticDir is non-empty the built frontend
 // is served from it as a single-page application on "/", so one container can
 // serve both the API and the SPA; when empty (e.g. dev, where Vite serves the
@@ -45,6 +54,9 @@ func New(db Pinger, staticDir string, features ...Registerer) http.Handler {
 	v1 := http.NewServeMux()
 	for _, f := range features {
 		f.Register(v1)
+		if rr, ok := f.(RootRegisterer); ok {
+			rr.RegisterRoot(root)
+		}
 	}
 
 	// defaultMiddleware wraps outside StripPrefix so the request logger sees the

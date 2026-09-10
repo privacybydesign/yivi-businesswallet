@@ -28,6 +28,7 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 - API base URL: `import.meta.env.VITE_API_BASE_URL ?? ""` (empty = Vite proxy). Don't hardcode hosts.
 - **That proxy only resolves inside Docker.** `vite.config.ts` hardcodes `http://backend:8080` as the target for `/healthz` and `/api`, which is a Compose service name — so a bare `npm run dev` in `frontend/` serves the UI but reaches no backend. Use the dev stack (`npm run dev` from the repo root); the static production build has no proxy at all and needs `VITE_API_BASE_URL` set at build time.
 - File names: kebab-case.
+- **`returnTo` is allowlisted per route, never sanitized generically.** `Login` reads `?returnTo=` through `src/lib/return-to.ts`'s `safeReturnTo`, which accepts only the exact route shapes that need it (today `^/openid4vp/[A-Za-z0-9_-]+$`) and falls back to `/`. Adding a caller means adding its pattern and a rejection case in `return-to.test.ts`; an absolute URL, a protocol-relative path or a query string must keep falling back — anything looser is an open redirect. `ProtectedRoute` cannot carry a return target; a public route that needs one handles the unauthenticated branch itself with `<Navigate to={loginPathFor(...)}>`.
 - Organize by feature as the app grows; co-locate route + its API concerns where it reads cleanly.
 
 ### API layer (`src/api/`)
