@@ -178,7 +178,7 @@ each dev flag that is on.
    org receive a credential through the existing attestation flow (issue from another org
    over QERDS, accept the offer) — the stub holder cannot present anything real.
 2. `COMPOSE_PROFILES=verifier` in `.env` (or `docker compose --profile verifier up
-   devverifier` beside `npm run dev`). Open http://localhost:8090, enter the held
+   devverifier` beside `npm run dev`). Open http://localhost:8091, enter the held
    credential's vct and the claims to ask for, pick `direct_post` or `direct_post.jwt`.
 3. Follow the "Share with the business wallet" link: it lands on `/openid4vp?…`, redirects
    to login if needed (scan with your Yivi wallet), shows the org picker naming
@@ -186,9 +186,14 @@ each dev flag that is on.
    issuer chain (staging + production Yivi anchors, plus `DEVVERIFIER_ISSUER_TRUST_CHAIN`),
    selective disclosures, KB-JWT signature against `cnf`, nonce and audience.
 
+Bench-verified 2026-09-10 on the Compose stack with `compose.wsca.yaml` layered: the `yivi`
+org received a KVK registration from the Veramo staging issuer over the local Domibus, and
+presented `legalName` alone to the dev verifier in both response modes, KB-JWT signed by the
+staging wallet-provider WSCA. Two things bit on the way and are listed under §9.
+
 The wallet backend fetches `request_uri` and posts the response at
 `http://devverifier:8090` (container DNS, allowed by the insecure-http flag); the browser
-uses `localhost:8090`. The dev chain is checked in under `dev-setup/devverifier/` (SAN
+uses `localhost:8091`. The dev chain is checked in under `dev-setup/devverifier/` (SAN
 `devverifier`, root inlined in `compose.override.yaml`); without files `cmd/devverifier`
 mints an ephemeral identity and prints the root to paste into
 `OPENID4VP_VERIFIER_TRUST_CHAIN`.
@@ -220,5 +225,13 @@ mints an ephemeral identity and prints the root to paste into
   organization credential types; today its certificate lists `pbdf-staging.*` only.
 - A `wallet_nonce`-driven `post` fetch (sending `wallet_metadata`) if a verifier ever
   requires it; today `post` falls back to GET as the spec allows.
-- WSCA-bound presentation is wired (`presentationKeyBinder`, `wsca` tag) but exercised only
-  by the software binder in tests; a wallet-provider bench run is still owed.
+- **wallet-provider bug, worked around here:** `irmabinding.Signer.Reference` matches the
+  cnf key against the WSCA key list by parsing `public_key_hex` as DER, but that field is the
+  raw EC point (`public_key_der_hex` is the DER form), so it never matches. `wscaRowSigner`
+  (`engine_wsca_binder_on.go`) resolves the WSCA key id from the holder-key row the issuance
+  binder wrote (`wsca:<key_id>` in the private-key column, keyed by DID URL or thumbprint) and
+  only falls back to the list. Fix belongs in `wallet-provider`; the workaround can stay, it
+  is one round trip fewer.
+- irmago's verifier-side KB-JWT check accepts only `cnf.jwk`; the Veramo issuer binds via
+  `cnf.kid` = `did:key`. The dev verifier checks the KB-JWT itself for both forms
+  (`devverifier.verifyKeyBinding`); a real verifier built on irmago hits the same TODO.

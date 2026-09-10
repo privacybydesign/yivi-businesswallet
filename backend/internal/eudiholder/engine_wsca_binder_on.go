@@ -4,14 +4,19 @@ package eudiholder
 
 import (
 	"context"
+	"crypto"
+	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/privacybydesign/irmago/eudi/holderkeys"
 	"github.com/privacybydesign/irmago/eudi/openid4vci"
 	"github.com/privacybydesign/irmago/eudi/sdjwt"
 	"github.com/privacybydesign/irmago/eudi/services"
 	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
+	"github.com/privacybydesign/irmago/eudi/storage/db"
 	"github.com/privacybydesign/wallet-provider/mobile/walletmobile"
 	"github.com/privacybydesign/wallet-provider/mobile/walletmobile/irmabinding"
 )
@@ -43,7 +48,59 @@ func (e *Engine) presentationKeyBinder(ctx context.Context, orgID uuid.UUID, st 
 	if err != nil {
 		return nil, err
 	}
-	return holderkeys.NewSignerKeyBinder(signer), nil
+	return holderkeys.NewSignerKeyBinder(&wscaRowSigner{Signer: signer, keys: db.NewHolderBindingKeyStore(st.Db())}), nil
+}
+
+// wscaRefPrefix marks the WSCA key id the issuance binder records in the
+// holder-key row's private-key column (irmabinding.bindingKeyModel): the key
+// itself never leaves the HSM, the row remembers which one backs the credential.
+const wscaRefPrefix = "wsca:"
+
+// wscaRowSigner is the org's WSCA signer with key resolution through irmago's
+// holder-key rows. irmabinding.Signer.Reference matches the credential's cnf key
+// against the WSCA's key list by thumbprint, but that list carries the raw EC
+// point in public_key_hex (the DER form is public_key_der_hex), so the match
+// never succeeds. The issuance binder wrote the WSCA key id into the row it
+// stored under the key's DID URL or thumbprint — the same lookup irmago's
+// software binder uses — so the reference is read from there, and the WSCA list
+// is only the fallback for a row this backend did not write.
+type wscaRowSigner struct {
+	*irmabinding.Signer
+	keys db.HolderBindingKeyStore
+}
+
+func (s *wscaRowSigner) Reference(pub jwk.Key) (string, error) {
+	if kid, ok := pub.KeyID(); ok && kid != "" {
+		if ref, ok := s.refByDID(kid); ok {
+			return ref, nil
+		}
+		if base := strings.SplitN(kid, "#", 2)[0]; base != kid {
+			if ref, ok := s.refByDID(base); ok {
+				return ref, nil
+			}
+		}
+	}
+	if thumb, err := pub.Thumbprint(crypto.SHA256); err == nil {
+		if row, err := s.keys.GetByThumbprint(hex.EncodeToString(thumb)); err == nil {
+			if ref, ok := wscaRef(row.PrivateKey); ok {
+				return ref, nil
+			}
+		}
+	}
+	return s.Signer.Reference(pub)
+}
+
+func (s *wscaRowSigner) refByDID(did string) (string, bool) {
+	row, err := s.keys.GetByDidUrl(did)
+	if err != nil {
+		return "", false
+	}
+	return wscaRef(row.PrivateKey)
+}
+
+func wscaRef(privateKey []byte) (string, bool) {
+	ref, ok := strings.CutPrefix(string(privateKey), wscaRefPrefix)
+	return ref, ok && ref != ""
 }
 
 // wscaSigner opens the org's already-activated walletmobile wallet and wraps it
