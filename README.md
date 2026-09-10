@@ -35,8 +35,9 @@ Optional Compose profiles add local counterparts for flows that otherwise need a
 hosted partner (`COMPOSE_PROFILES=<name>` in `.env`, or `docker compose --profile
 <name> up`): `verifier` runs a local OpenID4VP relying party at http://localhost:8091
 that invokes the business wallet as a holder (see
-`.ai/features/openid4vp-inbound.md` §8); `signer`, `domibus` and `verid` are the
-signing and QERDS benches.
+`.ai/features/openid4vp-inbound.md` §8; the same verifier runs on staging from the
+`devverifier` image the Delivery workflow publishes); `signer`, `domibus` and `verid` are
+the signing and QERDS benches.
 
 On first run `npm run dev` creates a root `.env` from `.env.example` if one does
 not exist. Compose **requires** `POSTGRES_PASSWORD` (there is no weak default), so

@@ -198,6 +198,17 @@ uses `localhost:8091`. The dev chain is checked in under `dev-setup/devverifier/
 mints an ephemeral identity and prints the root to paste into
 `OPENID4VP_VERIFIER_TRUST_CHAIN`.
 
+**On staging.** The Delivery workflow builds and mirrors a `devverifier` image
+(`backend/docker/devverifier/Dockerfile`, context `backend/`, no `wsca` tag, 10 MB, runs as
+`nobody`, `/healthz` for probes) alongside the backend and sidecar. `yivi-businesswallet-ops`
+deploys it under `devverifier_deploy` with an ingress on `devverifier_host`
+(`business-wallet-verifier.staging.yivi.app`); its CA and relying-party certificate are
+minted by Terraform's `tls` provider and the backend trusts that CA through
+`OPENID4VP_VERIFIER_TRUST_CHAIN`, with `OPENID4VP_PRESENTER_AUTO_PRESENT` on for staging.
+The backend reaches the verifier over the public ingress (https, public address), so no
+dev flag is needed there. `cmd/devverifier` loads the identity from
+`DEVVERIFIER_CHAIN_FILE` / `DEVVERIFIER_KEY_FILE` (PKCS#8).
+
 **Automated:**
 
 - Unit (`openid4vppresenter/*_test.go`): verifying validator against a generated chain

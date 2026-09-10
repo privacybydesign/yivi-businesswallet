@@ -72,6 +72,7 @@ func newServer(identity devverifier.Identity, issuerTrust eudijwt.X509Verificati
 
 func (s *server) handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("POST /sessions", s.start)
 	mux.HandleFunc("GET /sessions/{id}", s.show)
