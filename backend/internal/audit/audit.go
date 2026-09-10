@@ -133,6 +133,17 @@ const (
 	// DataInstructionUpdated records the owner's standing instruction for their
 	// data on termination: transfer, or transfer then erase.
 	DataInstructionUpdated = "organization.data_instruction_updated"
+
+	// Inbound OpenID4VP presentations (#188): the business wallet acting as the
+	// holder toward an external verifier. Requested is written pre-auth (no actor,
+	// no org); the rest are org-scoped once an organization has been selected.
+	// The consent decision itself is #113's; completed/denied here record the
+	// transaction outcome, never the disclosed claims or the response URI.
+	PresentationRequested   = "presentation.requested"
+	PresentationOrgSelected = "presentation.org_selected"
+	PresentationCompleted   = "presentation.completed"
+	PresentationDenied      = "presentation.denied"
+	PresentationExpired     = "presentation.expired"
 )
 
 const (
@@ -186,6 +197,8 @@ const (
 	TargetSigningRequest    = "signing_requests"
 
 	TargetExport = "export"
+
+	TargetPresentationTransaction = "presentation_transaction"
 )
 
 type Actor struct {

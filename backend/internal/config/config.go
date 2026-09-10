@@ -24,6 +24,19 @@ const (
 	envSessionPruneEvery           = "SESSION_PRUNE_INTERVAL"
 	envPresentationTTL             = "PRESENTATION_SESSION_TTL"
 
+	// Inbound OpenID4VP (the business wallet as holder/presenter toward an
+	// external verifier, #188). The transaction TTL bounds the interactive
+	// login → org-picker → present flow; the three flags are dev-only escape
+	// hatches that default closed. See .ai/features/openid4vp-inbound.md.
+	envOpenID4VPTransactionTTL                   = "OPENID4VP_TRANSACTION_TTL"
+	envOpenID4VPPresenterAllowInsecureHTTP       = "OPENID4VP_PRESENTER_ALLOW_INSECURE_HTTP"
+	envOpenID4VPPresenterAllowUnverifiedRequests = "OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS"
+	envOpenID4VPPresenterAutoPresent             = "OPENID4VP_PRESENTER_AUTO_PRESENT"
+	// Extra relying-party CA PEM a signed Authorization Request may chain to,
+	// added to irmago's pinned Yivi verifier anchors (the verifier analogue of
+	// ATTESTATION_HOLDER_TRUST_CHAIN; the value is the PEM, not a path).
+	envOpenID4VPVerifierTrustChain = "OPENID4VP_VERIFIER_TRUST_CHAIN"
+
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
 	envQerdsProvider             = "QERDS_PROVIDER"
@@ -183,6 +196,10 @@ const (
 	// A login/disclosure flow (scan QR, present in the wallet, claim) completes in
 	// minutes; the presentation-session mapping only needs to outlive that window.
 	defaultPresentationTTL = "15m"
+	// Shorter than the outbound default: an inbound transaction spans an
+	// interactive multi-step flow (login, org picker) but must not outlive a
+	// plausible browser session, and the verifier's own request is short-lived.
+	defaultOpenID4VPTransactionTTL = "5m"
 
 	// ProviderStub selects the in-process StubProvider (local dev / CI).
 	ProviderStub = "stub"
@@ -235,6 +252,29 @@ type Config struct {
 	SessionTTL                  time.Duration
 	SessionPruneEvery           time.Duration
 	PresentationTTL             time.Duration
+	// OpenID4VPTransactionTTL bounds an inbound presentation transaction from
+	// the verifier's invocation to the org's response.
+	OpenID4VPTransactionTTL time.Duration
+	// OpenID4VPPresenterAllowInsecureHTTP permits http:// and private-network
+	// request_uri / response_uri targets on the inbound presenter (local dev
+	// only; the holder analogue is AttestationHolderAllowInsecureHTTP).
+	OpenID4VPPresenterAllowInsecureHTTP bool
+	// OpenID4VPPresenterAllowUnverifiedRequests accepts Request Objects whose
+	// signature and client_id binding are only structurally checked, not
+	// cryptographically verified (the x509_san_dns chain validation is #112's).
+	// Off, an inbound request is refused before anything is persisted; a
+	// deployment must opt in explicitly rather than inherit unverified trust.
+	OpenID4VPPresenterAllowUnverifiedRequests bool
+	// OpenID4VPVerifierTrustChain is extra relying-party CA PEM an inbound
+	// Authorization Request's x5c chain may end in, merged onto irmago's pinned
+	// Yivi verifier anchors (staging ones too when
+	// AttestationHolderStagingAnchors is set — one Yivi PKI switch per
+	// environment). Empty trusts the pinned anchors alone.
+	OpenID4VPVerifierTrustChain string
+	// OpenID4VPPresenterAutoPresent completes a presentation immediately after
+	// organization selection. It stands in for the consent/approval layer (#113)
+	// in dev / CI only; off, a selected transaction waits for that layer.
+	OpenID4VPPresenterAutoPresent bool
 
 	QerdsProvider             string
 	QerdsProviderURL          string
@@ -393,6 +433,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	openid4vpTransactionTTL, err := parseDuration(envOpenID4VPTransactionTTL, defaultOpenID4VPTransactionTTL)
+	if err != nil {
+		return Config{}, err
+	}
+
 	// "0" (or "0s") disables the background inbound poller. With the webhook
 	// also unconfigured no mechanism delivers inbound messages automatically,
 	// so that combination fails the boot rather than degrading to manual-only
@@ -480,6 +525,14 @@ func Load() (Config, error) {
 		SessionTTL:                  sessionTTL,
 		SessionPruneEvery:           sessionPruneEvery,
 		PresentationTTL:             presentationTTL,
+		OpenID4VPTransactionTTL:     openid4vpTransactionTTL,
+		OpenID4VPPresenterAllowInsecureHTTP: strings.EqualFold(
+			os.Getenv(envOpenID4VPPresenterAllowInsecureHTTP), "true"),
+		OpenID4VPPresenterAllowUnverifiedRequests: strings.EqualFold(
+			os.Getenv(envOpenID4VPPresenterAllowUnverifiedRequests), "true"),
+		OpenID4VPPresenterAutoPresent: strings.EqualFold(
+			os.Getenv(envOpenID4VPPresenterAutoPresent), "true"),
+		OpenID4VPVerifierTrustChain: os.Getenv(envOpenID4VPVerifierTrustChain),
 
 		QerdsProvider:             qerdsProvider,
 		QerdsProviderURL:          qerdsProviderURL,

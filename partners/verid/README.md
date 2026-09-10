@@ -253,13 +253,24 @@ Where each one lands on the wallet side:
 the anchors the wallet already trusts rather than replacing them — so several
 partners can be trusted at once by concatenating their roots. Self-signed
 certificates are taken as roots and everything else as intermediates, so the
-order does not matter. Your current dev root is checked in at
-[`verid-dev-root-ca.crt`](verid-dev-root-ca.crt):
+order does not matter. Both of your current roots are checked in here; a
+deployment names the one matching the ver.iD environment it peers with, and a
+wallet that receives from both concatenates them.
+
+[`verid-dev-root-ca.crt`](verid-dev-root-ca.crt) — the dev/bench issuer:
 
 ```
 CN=Ver.iD Dev Root CA, O=Subst.id B.V., C=NL
 SHA-256 02:4C:01:51:EE:C4:AC:7D:CB:D8:01:0B:15:B7:87:73:74:93:F5:23:9A:64:BE:BF:EE:89:26:9B:39:9A:7D:8B
 valid until 2035-06-30
+```
+
+[`verid-prod-root-ca.crt`](verid-prod-root-ca.crt) — the production issuer:
+
+```
+CN=Ver.iD Root CA, O=Subst.id B.V., C=NL
+SHA-256 E3:72:3E:32:F5:CF:59:DD:5F:09:5B:AE:CD:67:74:AB:DA:46:FD:D0:C1:14:DB:CB:8E:CA:87:5F:A4:EB:55:59
+valid until 2035-11-19
 ```
 
 Send us the **full chain** if your issuer signs from an intermediate rather than

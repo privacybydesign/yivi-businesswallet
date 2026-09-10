@@ -47,6 +47,12 @@ tags:
     description: Qualified document signing — the RP-centric signing ceremony against a CSC provider.
   - name: export
     description: Data portability — the organisation's export bundle (Art 5(1)(l)).
+  - name: openid4vp
+    description: >-
+      Inbound OpenID4VP — an external verifier invoking the business wallet as the
+      holder of an organisation's credentials. The browser-facing entry point
+      GET /openid4vp and the wallet-metadata document
+      /.well-known/oauth-authorization-server live outside /api/v1.
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -2361,6 +2367,193 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/openid4vp/start:
+    post:
+      tags: [openid4vp]
+      summary: Start an inbound presentation transaction
+      description: >-
+        Forwards the query parameters a verifier redirected the browser to
+        GET /openid4vp with. Only pass-by-reference (request_uri) is accepted;
+        a by-value `request`, both, or neither is `invalid_request`, and a
+        request_uri_method other than get/post is `invalid_request_uri_method`.
+        The backend fetches the Request Object under its SSRF, redirect, size and
+        timeout guards, verifies its signature and x509_san_dns certificate chain
+        against the configured verifier trust (`invalid_request_object` otherwise),
+        and returns an opaque transaction id — the only state the browser carries
+        from here on, including through login.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId, requestUri]
+              properties:
+                clientId:
+                  type: string
+                requestUri:
+                  type: string
+                requestUriMethod:
+                  type: string
+                  enum: [get, post]
+                request:
+                  type: string
+                  description: Rejected when present; documented so the rejection is explicit.
+      responses:
+        '201':
+          description: Transaction created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          description: The request_uri could not be fetched.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/openid4vp/{id}/status:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque transaction id.
+    get:
+      tags: [openid4vp]
+      summary: Read a transaction's state
+      description: >-
+        Reports the effective status (pending_auth, org_selected, completed,
+        denied, expired) and the verifier's identity — never the query or the
+        response URI. Public: the id is the bearer, as with the login session status.
+      security: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  verifier:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/openid4vp/{id}/orgs:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque transaction id.
+    get:
+      tags: [openid4vp]
+      summary: List the organisations the caller may present for
+      description: >-
+        Binds the authenticated user to the pending transaction and returns their
+        organisations (the same membership query as GET /orgs). A transaction
+        bound to another user is forbidden; one that is no longer pending is a conflict.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    slug:
+                      type: string
+                    name:
+                      type: string
+                    logoUri:
+                      type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The transaction has already been handled or has expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/openid4vp/{id}/select:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque transaction id.
+    post:
+      tags: [openid4vp]
+      summary: Select the organisation that will present
+      description: >-
+        Records the caller's choice, resolved through the tenant seam from their
+        membership — never from a client-supplied hint. The transaction then
+        waits for the consent layer (status org_selected); under the dev-only
+        OPENID4VP_PRESENTER_AUTO_PRESENT flag the presentation is built from the
+        organisation's held credentials (DCQL match, selective disclosure,
+        key-bound) and delivered at once (status completed, with the verifier's
+        redirectUri if it gave one). An organisation holding nothing that
+        satisfies the query is 422 `no_matching_credential`. One-time use: a
+        second select is a conflict.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  redirectUri:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The transaction has already been handled or has expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The organisation holds no credential that satisfies the request; the transaction is consumed as denied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: The presentation could not be built or delivered; the transaction is consumed as denied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/issuer/settings:
     parameters:
       - name: slug

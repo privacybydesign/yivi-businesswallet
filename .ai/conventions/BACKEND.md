@@ -18,6 +18,7 @@ Layout: entry points in `cmd/api` + `cmd/migrate` + `cmd/seed`, packages under `
 - stdlib `net/http.ServeMux` (Go 1.22+ pattern routing with `{param}` path values). No framework.
 - Router assembled in `internal/server`; each domain exposes `Register(*http.ServeMux)` via the `Registerer` interface.
 - Version under `/api/v1/` prefix via sub-mux + `http.StripPrefix`; health probes `/livez` and `/readyz` sit outside the prefix.
+- **Root-mux documents.** A feature that must also serve something outside `/api/v1` — a well-known document fetched by software, which has no API version, must be real JSON, and must not fall through to the SPA's `index.html` — implements `server.RootRegisterer` (`RegisterRoot(*http.ServeMux)`) next to `Register`; `server.New` mounts it on the root mux, where the more specific pattern beats the SPA fallback. Build that pattern from a path constant (`http.MethodGet+" "+WellKnownPath`), not a string literal: `internal/apidocs`'s coverage test scans every literal `Handle("METHOD /path", …)` and would demand an `/api/v1` spec entry for it. `openid4vppresenter.MetadataHandler` is the instance.
 - Cross-cutting concerns are middleware via plain `func(http.Handler) http.Handler` wrappers, composed in `internal/server/middleware.go`. Order: `requestID` (outermost) → `recoverer` → `requestLogger`.
 - Handlers: set `Content-Type` explicitly; check + log the error from `w.Write`.
 - JSON field names are `camelCase` (`json:"createdAt"`) — explicit tags, not Go's exported-field default.

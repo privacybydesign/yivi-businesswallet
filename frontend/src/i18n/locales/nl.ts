@@ -208,6 +208,71 @@ export const nl: Translation<typeof en> = {
     sharesEmail: "Bij het inloggen deel je alleen je e-mailadres.",
     registerLink: "Nieuw bedrijf registreren? Registreer hier",
   },
+  openid4vp: {
+    title: "Organisatiegegevens delen",
+    starting: "Verzoek voorbereiden…",
+    requestedBy:
+      "{{verifier}} vraagt een van je organisaties om gegevens te delen.",
+    pickOrg: "Kies de organisatie die antwoordt",
+    noOrgs: "Je bent geen lid van een organisatie die kan antwoorden.",
+    selecting: "Antwoord versturen…",
+    minimisationHint:
+      "Alleen de gegevens waar de verifieerder om vraagt worden gedeeld, en pas na goedkeuring.",
+    completedTitle: "Antwoord verstuurd",
+    completedHint:
+      "{{verifier}} heeft de presentatie van je organisatie ontvangen.",
+    completedDoneHint: "Dit verzoek is beantwoord.",
+    returnToVerifier: "Terug naar {{verifier}}",
+    awaitingTitle: "Wacht op goedkeuring",
+    awaitingHint:
+      "Het antwoord wordt verstuurd zodra het binnen de organisatie is goedgekeurd.",
+    deniedTitle: "Verzoek afgewezen",
+    deniedHint: "Dit verzoek is niet ingewilligd.",
+    expiredTitle: "Dit verzoek is verlopen",
+    expiredHint: "Vraag de verifieerder om een nieuw verzoek te starten.",
+    invalidTitle: "Dit verzoek kan niet worden verwerkt",
+    startErrors: {
+      invalidInvocation:
+        "De link waarmee je hier kwam mist de parameters die een verifieerder moet meegeven.",
+      invalidRequest:
+        "Het verzoek van de verifieerder is ongeldig of gebruikt een niet-ondersteunde vorm.",
+      invalidRequestUriMethod:
+        "De verifieerder vraagt om een niet-ondersteunde manier om het verzoek op te halen.",
+      invalidRequestObject:
+        "Het verzoek van de verifieerder kon niet worden gevalideerd.",
+      requestUriUnreachable:
+        "Het verzoek van de verifieerder kon niet worden opgehaald.",
+      validationUnavailable:
+        "Deze wallet kan verzoeken van verifieerders nog niet valideren.",
+      failed: "Er ging iets mis. Probeer het opnieuw.",
+    },
+    errors: {
+      otherSession: {
+        title: "Verzoek hoort bij een andere sessie",
+        hint: "Dit verzoek is gestart door een andere ingelogde gebruiker.",
+      },
+      alreadyHandled: {
+        title: "Verzoek al afgehandeld",
+        hint: "Dit verzoek is al beantwoord of is verlopen.",
+      },
+      notFound: {
+        title: "Verzoek niet gevonden",
+        hint: "Deze link is niet geldig of het verzoek is verlopen.",
+      },
+      noMatchingCredential: {
+        title: "Geen passend credential",
+        hint: "Deze organisatie heeft geen credential dat aan het verzoek van de verifieerder voldoet.",
+      },
+      presentationFailed: {
+        title: "Antwoord kon niet worden verstuurd",
+        hint: "De presentatie kon niet bij de verifieerder worden afgeleverd. Vraag de verifieerder om een nieuw verzoek te starten.",
+      },
+      failed: {
+        title: "Er ging iets mis",
+        hint: "Het verzoek kon niet worden geladen. Probeer het opnieuw.",
+      },
+    },
+  },
   register: {
     title: "Business wallet registreren",
     subtitle: "Nieuw hier? Registreer je bedrijf — nog geen account nodig.",
@@ -582,6 +647,7 @@ export const nl: Translation<typeof en> = {
       signingCredentials: "Ondertekencredential",
       signingRequests: "Ondertekenverzoek",
       export: "Gegevensexport",
+      presentationTransaction: "Presentatieverzoek",
     },
     actions: {
       orgCreated: "Organisatie aangemaakt",
@@ -668,6 +734,11 @@ export const nl: Translation<typeof en> = {
       signingCompleted: "Documenthandtekening voltooid",
       signingDelivered: "Ondertekend document bezorgd",
       signingFailed: "Documenthandtekening mislukt",
+      presentationRequested: "Presentatieverzoek ontvangen",
+      presentationOrgSelected: "Organisatie gekozen voor een presentatie",
+      presentationCompleted: "Presentatie verstuurd",
+      presentationDenied: "Presentatieverzoek afgewezen",
+      presentationExpired: "Presentatieverzoek verlopen",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
       exportRequested: "Organisatiegegevens geëxporteerd",
