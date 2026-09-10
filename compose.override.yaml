@@ -150,7 +150,8 @@ services:
 
   # Local OpenID4VP relying party (--profile verifier): signs a request the
   # wallet fetches, prints the link that invokes the wallet, receives the
-  # response and shows the verified disclosure. Open http://localhost:8090.
+  # response and shows the verified disclosure. Open http://localhost:8091
+  # (8090 is Domibus's).
   # request_uri / response_uri point at this container's name, which is what the
   # backend container resolves; the browser-facing pages use localhost.
   devverifier:
@@ -160,10 +161,10 @@ services:
     entrypoint: ["go", "run", "./cmd/devverifier"]
     profiles: ["verifier"]
     ports:
-      - "8090:8090"
+      - "8091:8090"
     environment:
       GOWORK: "off"
-      DEVVERIFIER_PUBLIC_URL: http://localhost:8090
+      DEVVERIFIER_PUBLIC_URL: http://localhost:8091
       DEVVERIFIER_INTERNAL_URL: http://devverifier:8090
       DEVVERIFIER_WALLET_URL: ${APP_BASE_URL:-http://localhost:5173}
       DEVVERIFIER_CHAIN_FILE: /certs/devverifier-chain.pem

@@ -33,7 +33,7 @@ npm run dev:reset     # same, but wipes DB volumes first (clean slate)
 
 Optional Compose profiles add local counterparts for flows that otherwise need a
 hosted partner (`COMPOSE_PROFILES=<name>` in `.env`, or `docker compose --profile
-<name> up`): `verifier` runs a local OpenID4VP relying party at http://localhost:8090
+<name> up`): `verifier` runs a local OpenID4VP relying party at http://localhost:8091
 that invokes the business wallet as a holder (see
 `.ai/features/openid4vp-inbound.md` §8); `signer`, `domibus` and `verid` are the
 signing and QERDS benches.
