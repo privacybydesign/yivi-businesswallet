@@ -11,6 +11,8 @@ user/session/cookie/invite logic below the seam is unchanged.
 **Enables:** the "PID" seam that `.ai/features/wallet-bootstrap.md` depends on.
 **Reference integration:** `/Users/dibranmulder/code/openid4vp-demo-frontend` (working
 OpenID4VP + EUDI verifier demo).
+**Opposite role:** `.ai/features/openid4vp-inbound.md` — an external verifier invoking the
+business wallet itself as the holder of an organization's credentials.
 
 ---
 

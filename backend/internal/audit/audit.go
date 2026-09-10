@@ -125,6 +125,17 @@ const (
 	SigningCompleted        = "signing.completed"
 	SigningDelivered        = "signing.delivered"
 	SigningFailed           = "signing.failed"
+
+	// Inbound OpenID4VP presentations (#188): the business wallet acting as the
+	// holder toward an external verifier. Requested is written pre-auth (no actor,
+	// no org); the rest are org-scoped once an organization has been selected.
+	// The consent decision itself is #113's; completed/denied here record the
+	// transaction outcome, never the disclosed claims or the response URI.
+	PresentationRequested   = "presentation.requested"
+	PresentationOrgSelected = "presentation.org_selected"
+	PresentationCompleted   = "presentation.completed"
+	PresentationDenied      = "presentation.denied"
+	PresentationExpired     = "presentation.expired"
 )
 
 const (
@@ -176,6 +187,8 @@ const (
 
 	TargetSigningCredential = "signing_credentials"
 	TargetSigningRequest    = "signing_requests"
+
+	TargetPresentationTransaction = "presentation_transaction"
 )
 
 type Actor struct {

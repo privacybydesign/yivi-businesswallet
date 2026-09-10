@@ -22,9 +22,11 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/devverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vppresenter"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
@@ -103,6 +105,9 @@ type testEnv struct {
 	client *http.Client
 	pool   *pgxpool.Pool
 	fake   *fakeVerifier
+	// verifier is the relying-party identity the router's inbound OpenID4VP
+	// validator trusts; the fake inbound verifier signs its request objects with it.
+	verifier devverifier.Identity
 }
 
 // setup assembles the real router exactly as cmd/api does (minus the IRMA boot
@@ -141,7 +146,35 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
 	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, orgStore, "", requireUser, orgHandler.Authorize)
 
-	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler))
+	// Inbound OpenID4VP under the dev posture the Compose stack runs with: plain
+	// http to the in-process fake verifier, request objects signed by a relying
+	// party whose freshly minted root this router trusts (the production
+	// validator, not the structural decoder), and auto-present so the stub
+	// holder's canned vp_token is delivered right after organization selection.
+	verifierIdentity, err := devverifier.NewIdentity("verifier.test")
+	if err != nil {
+		t.Fatalf("verifier identity: %v", err)
+	}
+	verifierTrust, err := eudiholder.NewVerifierTrust(verifierIdentity.RootPEM(), false)
+	if err != nil {
+		t.Fatalf("verifier trust: %v", err)
+	}
+	presenterPolicy := openid4vppresenter.Policy{AllowInsecureHTTP: true}
+	presenterValidator := openid4vppresenter.NewVerifyingValidator(verifierTrust, presenterPolicy)
+	presenterStore := openid4vppresenter.NewStore(pool, audit.NewDBRecorder(), sessionTTL)
+	presenterService := openid4vppresenter.NewService(
+		presenterStore, orgStore, eudiholder.NewStubHolder(),
+		openid4vppresenter.NewFetcher(presenterPolicy), presenterValidator, openid4vppresenter.NewResponder(presenterPolicy),
+		true,
+	)
+	presenterMetadata, err := openid4vppresenter.NewMetadataHandler(
+		openid4vppresenter.NewMetadata("http://app.test", eudiholder.Formats(), presenterValidator))
+	if err != nil {
+		t.Fatalf("wallet metadata: %v", err)
+	}
+	presenterHandler := openid4vppresenter.NewHandler(presenterService, presenterMetadata, requireUser, orgHandler.Authorize)
+
+	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler))
 	t.Cleanup(srv.Close)
 
 	jar, err := cookiejar.New(nil)
@@ -150,11 +183,12 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	}
 
 	return &testEnv{
-		t:      t,
-		server: srv,
-		client: &http.Client{Jar: jar},
-		pool:   pool,
-		fake:   fake,
+		t:        t,
+		server:   srv,
+		client:   &http.Client{Jar: jar},
+		pool:     pool,
+		fake:     fake,
+		verifier: verifierIdentity,
 	}
 }
 

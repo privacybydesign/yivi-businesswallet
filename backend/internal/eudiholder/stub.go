@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/privacybydesign/irmago/eudi/openid4vp"
 )
 
 const stubRefBytes = 16
@@ -153,6 +154,27 @@ func (h *StubHolder) Delete(_ context.Context, orgID uuid.UUID, ref string) erro
 	defer h.mu.Unlock()
 	delete(h.creds[orgID], ref)
 	return nil
+}
+
+// stubPresentationToken is the placeholder the stub returns per requested
+// credential: it runs no DCQL match and signs nothing, so the token only proves
+// the inbound flow reached the holder seam in dev / CI.
+const stubPresentationToken = "stub-presentation"
+
+// Present returns a canned vp_token with one placeholder entry per DCQL
+// credential query, so the inbound OpenID4VP flow completes offline. The real
+// DCQL match, disclosure selection and KB-JWT signing are the engine's (#112);
+// nonce and audience are accepted for interface parity only.
+func (h *StubHolder) Present(_ context.Context, _ uuid.UUID, dcqlQuery []byte, _, _ string) (Presentation, error) {
+	ids, err := dcqlCredentialIDs(dcqlQuery)
+	if err != nil {
+		return Presentation{}, err
+	}
+	token := make(openid4vp.VpToken, len(ids))
+	for _, id := range ids {
+		token[id] = []string{stubPresentationToken}
+	}
+	return Presentation{VPToken: token}, nil
 }
 
 func (h *StubHolder) Close() error {
