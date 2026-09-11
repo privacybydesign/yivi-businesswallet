@@ -23,12 +23,16 @@ COPY . ./
 # the private module nor a Go workspace.
 RUN go build -ldflags="-s -w" -o /bin/devverifier ./cmd/devverifier
 
-FROM alpine:3.22
+# Runtime: distroless static — no shell, no package manager, no OpenSSL. The
+# binary is statically linked (CGO_ENABLED=0) and Go does its own TLS, so an
+# Alpine base only added packages to scan (its libssl/libcrypto carried fixable
+# criticals the binary never called). The image ships the CA bundle the verifier
+# needs to fetch a did:web issuer document over HTTPS, and runs as the
+# non-root user 65532.
+FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=build /bin/devverifier /devverifier
 
 EXPOSE 8090
-
-USER nobody
 
 ENTRYPOINT ["/devverifier"]
