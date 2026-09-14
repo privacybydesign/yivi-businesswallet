@@ -31,7 +31,25 @@ const (
 	ClaimDateOfBirth = "dateOfBirth"
 	ClaimNationality = "nationality"
 	ClaimPhone       = "mobilenumber"
+
+	// pbdf.vog claim keys (#242 §4). Named distinctly from the identity claims
+	// above even where the value happens to coincide (ClaimDateOfBirth), because
+	// they come from a different credential's own attribute names.
+	ClaimVogIssueDate   = "issueDate"
+	ClaimVogSurname     = "surname"
+	ClaimVogPrefix      = "prefix"
+	ClaimVogGivenNames  = "givenNames"
+	ClaimVogDateOfBirth = "dateOfBirth"
+	// vogAspectClaimPrefix names the credential's per-aspect yes/no attributes
+	// (aspect11 .. aspect91). VogAspectClaim builds one from a two-digit code.
+	vogAspectClaimPrefix = "aspect"
 )
+
+// VogAspectClaim returns the pbdf.vog claim name for a function-aspect code
+// (e.g. "11" -> "aspect11"), the credential's own attribute naming.
+func VogAspectClaim(code string) string {
+	return vogAspectClaimPrefix + code
+}
 
 // ErrPending means the holder has not completed the presentation yet. The hosted
 // verifier returns a non-2xx for a pending (or unknown/expired) transaction and

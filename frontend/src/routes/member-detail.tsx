@@ -8,6 +8,9 @@ import {
   useOrganizationQuery,
   useRemoveMemberMutation,
   useRequestIdentificationMutation,
+  useRequestVogMutation,
+  useScreeningHistoryQuery,
+  useUploadVogMutation,
 } from "../api/organization.queries";
 import type { AuditEvent } from "../api/organization";
 import { ApiError } from "../api/http";
@@ -18,6 +21,13 @@ import {
   memberTypeLabel,
   requestableIdentity,
 } from "../lib/identity-status";
+import {
+  requestableVog,
+  screeningResultLabel,
+  screeningResultTone,
+  screeningStatusLabel,
+  screeningStatusTone,
+} from "../lib/screening-status";
 import {
   auditActionLabel,
   auditSubject,
@@ -136,6 +146,10 @@ export default function MemberDetail(): React.JSX.Element {
   const formatWhen = useWhenFormatter();
   const removeMember = useRemoveMemberMutation(slug);
   const requestIdentification = useRequestIdentificationMutation(slug);
+  const requestVog = useRequestVogMutation(slug);
+  const uploadVog = useUploadVogMutation(slug, id);
+  const vogHistory = useScreeningHistoryQuery(slug, id, isAdmin);
+  const vogFileInput = React.useRef<HTMLInputElement>(null);
   const [confirmingOffboard, setConfirmingOffboard] = React.useState(false);
 
   const shell = (body: React.ReactNode): React.JSX.Element => (
@@ -256,6 +270,71 @@ export default function MemberDetail(): React.JSX.Element {
               </>
             )}
           </Card>
+          {member.vogStatus !== "not_required" && (
+            <Card className="p-6">
+              <h2 className="text-[16px] font-semibold">
+                {t("memberDetail.vogHistory.title")}
+              </h2>
+              {vogHistory.isError ? (
+                <p className="text-error mt-2 text-[14px]">
+                  {t("memberDetail.vogHistory.error", {
+                    message: vogHistory.error.message,
+                  })}
+                </p>
+              ) : vogHistory.isPending ? (
+                <p className="text-ink-soft mt-2 text-[14px]">
+                  {t("common.loading")}
+                </p>
+              ) : vogHistory.data.length === 0 ? (
+                <p className="text-ink-soft mt-2 text-[14px]">
+                  {t("memberDetail.vogHistory.empty")}
+                </p>
+              ) : (
+                <table className="mt-4 w-full text-[13px]">
+                  <thead>
+                    <tr className="text-ink-soft text-left text-[11.5px]">
+                      <th className="pb-2 font-medium">
+                        {t("memberDetail.vogHistory.columns.checkedAt")}
+                      </th>
+                      <th className="pb-2 font-medium">
+                        {t("memberDetail.vogHistory.columns.method")}
+                      </th>
+                      <th className="pb-2 font-medium">
+                        {t("memberDetail.vogHistory.columns.result")}
+                      </th>
+                      <th className="pb-2 font-medium">
+                        {t("memberDetail.vogHistory.columns.validUntil")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vogHistory.data.map((record) => (
+                      <tr key={record.id} className="border-line border-t">
+                        <td className="py-2">
+                          {dateFormatter.format(new Date(record.checkedAt))}
+                        </td>
+                        <td className="py-2">
+                          {record.method === "pdf"
+                            ? t("memberDetail.vogHistory.methodPdf")
+                            : t("memberDetail.vogHistory.methodCredential")}
+                        </td>
+                        <td className="py-2">
+                          <Tag tone={screeningResultTone(record.result)}>
+                            {screeningResultLabel(record.result, t)}
+                          </Tag>
+                        </td>
+                        <td className="py-2">
+                          {record.validUntil
+                            ? dateFormatter.format(new Date(record.validUntil))
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Card>
+          )}
         </div>
 
         <Card className="h-fit p-0">
@@ -279,6 +358,11 @@ export default function MemberDetail(): React.JSX.Element {
               <Tag tone={identityStatusTone(member.identityStatus)}>
                 {identityStatusLabel(member.identityStatus, t)}
               </Tag>
+              {member.vogStatus !== "not_required" && (
+                <Tag tone={screeningStatusTone(member.vogStatus)}>
+                  {screeningStatusLabel(member.vogStatus, t)}
+                </Tag>
+              )}
             </div>
           </div>
           <div className="flex flex-col gap-2.5 p-5">
@@ -320,6 +404,16 @@ export default function MemberDetail(): React.JSX.Element {
                 value={dateFormatter.format(new Date(member.identityDueAt))}
               />
             )}
+            {member.vogStatus !== "not_required" && (
+              <DetailRow
+                label={t("memberDetail.vogValidUntil")}
+                value={
+                  member.vogValidUntil
+                    ? dateFormatter.format(new Date(member.vogValidUntil))
+                    : t("memberDetail.vogNone")
+                }
+              />
+            )}
           </div>
           <div className="border-line flex flex-col gap-2 border-t p-4">
             {requestableIdentity({
@@ -345,6 +439,61 @@ export default function MemberDetail(): React.JSX.Element {
             ) : (
               <p className="text-ink-soft text-[12px]">
                 {t("memberDetail.identityRequested")}
+              </p>
+            )}
+            {requestableVog({
+              status: "active",
+              vogStatus: member.vogStatus,
+            }) ? (
+              <>
+                <Button
+                  variant="secondary"
+                  icon="valid"
+                  className="w-full"
+                  loading={requestVog.isPending}
+                  onClick={() => requestVog.mutate({ userIds: [id] })}
+                >
+                  {t("memberDetail.requestVog")}
+                </Button>
+                <p className="text-ink-soft text-[12px]">
+                  {t("memberDetail.requestVogHint")}
+                </p>
+              </>
+            ) : (
+              member.vogStatus !== "not_required" && (
+                <p className="text-ink-soft text-[12px]">
+                  {t("memberDetail.vogRequested")}
+                </p>
+              )
+            )}
+            <input
+              ref={vogFileInput}
+              type="file"
+              accept="application/pdf"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) uploadVog.mutate(file);
+              }}
+            />
+            <Button
+              variant="secondary"
+              icon="add"
+              className="w-full"
+              loading={uploadVog.isPending}
+              onClick={() => vogFileInput.current?.click()}
+            >
+              {t("memberDetail.uploadVog")}
+            </Button>
+            <p className="text-ink-soft text-[12px]">
+              {t("memberDetail.uploadVogHint")}
+            </p>
+            {uploadVog.data && (
+              <p
+                className={`text-[12px] ${uploadVog.data.result === "valid" ? "text-success" : "text-error"}`}
+              >
+                {screeningResultLabel(uploadVog.data.result, t)}
               </p>
             )}
             <Button

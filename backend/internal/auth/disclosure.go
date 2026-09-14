@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
@@ -50,6 +51,58 @@ func extractIdentity(res openid4vpverifier.Presentation) (DisclosedIdentity, err
 		Phone:              phone,
 		CredentialIssuedAt: res.IdentityIssuedAt,
 	}, nil
+}
+
+// DisclosedVog is a completed pbdf.vog credential disclosure (#242 §4): the
+// same fields a parsed PDF carries (internal/vog.Document), read from the
+// credential's own attributes instead. AspectCodes lists only the requested
+// codes the credential disclosed as covered - never the full credential, which
+// is never requested in the first place.
+type DisclosedVog struct {
+	GivenNames  string
+	Surname     string
+	DateOfBirth string
+	IssueDate   time.Time
+	AspectCodes []string
+}
+
+// extractVog reads a pbdf.vog disclosure. requiredAspectCodes is the same list
+// the DCQL request named, so exactly those (and no other) aspect claims are
+// read back.
+func extractVog(res openid4vpverifier.Presentation, requiredAspectCodes []string) (DisclosedVog, error) {
+	given := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimVogGivenNames])
+	surname := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimVogSurname])
+	if prefix := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimVogPrefix]); prefix != "" {
+		surname = prefix + " " + surname
+	}
+	dateOfBirth := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimVogDateOfBirth])
+	if given == "" || surname == "" || dateOfBirth == "" {
+		return DisclosedVog{}, errDisclosureInvalid
+	}
+	issueDate, err := time.Parse("2006-01-02", strings.TrimSpace(res.Claims[openid4vpverifier.ClaimVogIssueDate]))
+	if err != nil {
+		return DisclosedVog{}, errDisclosureInvalid
+	}
+
+	var codes []string
+	for _, code := range requiredAspectCodes {
+		if isAffirmative(res.Claims[openid4vpverifier.VogAspectClaim(code)]) {
+			codes = append(codes, code)
+		}
+	}
+	return DisclosedVog{GivenNames: given, Surname: surname, DateOfBirth: dateOfBirth, IssueDate: issueDate, AspectCodes: codes}, nil
+}
+
+// isAffirmative reads a pbdf.vog aspectNN yes/no claim. Unverified against the
+// real credential schema (not yet issued anywhere reachable from this
+// environment) - see .ai/features/member-screening-vog.md.
+func isAffirmative(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "yes", "true", "1", "ja":
+		return true
+	default:
+		return false
+	}
 }
 
 func mapClaimError(err error) error {

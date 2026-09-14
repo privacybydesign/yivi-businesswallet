@@ -120,6 +120,16 @@ var catalog = []CatalogEntry{
 	{audit.MembershipIdentityReminderSent, GroupMembership},
 	{audit.MembershipIdentityOverdue, GroupMembership},
 
+	// audit.MembershipVogRejected/.MembershipVogMismatch/.MembershipVogInsufficientScope
+	// are left out on purpose, for the same reason
+	// audit.MembershipIdentityReverifyRejected is: each concerns a document the
+	// member submitted, and that record belongs in the audit log behind access
+	// control, not a webhook payload.
+	{audit.MembershipVogRequested, GroupMembership},
+	{audit.MembershipVogChecked, GroupMembership},
+	{audit.MembershipVogReminderSent, GroupMembership},
+	{audit.MembershipVogExpired, GroupMembership},
+
 	{audit.WalletBootstrapped, GroupWallet},
 	{audit.WalletSuspended, GroupWallet},
 	{audit.WalletRevoked, GroupWallet},

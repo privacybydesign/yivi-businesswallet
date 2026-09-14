@@ -184,6 +184,9 @@ export const MAIL_TEMPLATE_KINDS = [
   "signature_requested",
   "signed_document",
   "smtp_test",
+  "vog_expired",
+  "vog_reminder",
+  "vog_requested",
 ] as const;
 
 export type MailTemplateKind = (typeof MAIL_TEMPLATE_KINDS)[number];

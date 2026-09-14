@@ -30,6 +30,7 @@ export const en = {
   nav: {
     dashboard: "Dashboard",
     members: "Members",
+    vog: "VOG screening",
     qerds: "Secure delivery",
     attestations: "Attestations",
     postguard: "PostGuard files",
@@ -404,6 +405,47 @@ export const en = {
       error: "Could not start re-identification: {{message}}",
     },
   },
+  vog: {
+    title: "VOG screening",
+    subtitle:
+      "{{org}} asks its members to hold a valid certificate of conduct (VOG).",
+    noDateOfBirth:
+      "Confirm your identity first - a VOG check matches your date of birth on file.",
+    goToReidentify: "Confirm my identity",
+    upload: {
+      heading: "Upload your VOG",
+      hint: "Checked live against validatie.nl and matched against your identity on file. The PDF itself is never stored - only the outcome is.",
+      chooseFile: "Choose a PDF",
+      submit: "Upload",
+      uploading: "Checking your VOG…",
+    },
+    credential: {
+      heading: "Or disclose it from your wallet",
+      hint: "{{org}} also accepts the pbdf.vog credential. It is issued by Stichting Privacy by Design about a VOG it validated at issuance, not a live statement from Justis.",
+      start: "Disclose from wallet",
+      disclosing: "Waiting for your wallet…",
+    },
+    result: {
+      valid: "Your VOG is valid.",
+      rejected:
+        "This document could not be validated as a genuine, current VOG.",
+      mismatch:
+        "The name or date of birth on this VOG does not match your identity on file.",
+      insufficientScope: "This VOG does not cover everything {{org}} requires.",
+      tooOld: "This VOG is older than {{org}} accepts.",
+    },
+    tryAgain: "Try again",
+    banner: {
+      none: "{{org}} requires a VOG (certificate of conduct) from you.",
+      expiring: "Your VOG for {{org}} expires on {{date}}.",
+      expired: "Your VOG for {{org}} expired on {{date}}.",
+      rejected: "Your last VOG submission for {{org}} was not accepted.",
+      recheckRequired:
+        "{{org}}'s VOG requirements changed; please submit a new VOG.",
+      requested: "{{org}} has asked you to submit a VOG.",
+      action: "Go to VOG screening",
+    },
+  },
   dashboard: {
     greeting: {
       morning: "Good morning, {{name}}",
@@ -455,6 +497,9 @@ export const en = {
     identificationRequested_one: "Identification requested",
     identificationRequested_other:
       "Identification requested from {{count}} members",
+    screeningSettingsSaved: "VOG screening settings saved",
+    vogRequested_one: "VOG requested",
+    vogRequested_other: "VOG requested from {{count}} members",
     organizationUpdated: "Organization updated",
     organizationDeleted: "Organization deleted",
     departmentAdded: "Department added",
@@ -543,6 +588,19 @@ export const en = {
       neverHint:
         "This member has not proved their identity since this feature shipped.",
     },
+    vog: {
+      notRequired: "No VOG required",
+      none: "VOG required",
+      valid: "VOG valid",
+      expiring: "VOG expiring",
+      expired: "VOG expired",
+      rejected: "VOG rejected",
+      recheckRequired: "VOG re-check required",
+      requested: "VOG requested",
+      validUntil: "Valid until {{date}}",
+      expiredOn: "Expired on {{date}}",
+      requestedOn: "Requested on {{date}}",
+    },
     memberType: {
       employee: "Employee",
       external: "External",
@@ -553,6 +611,7 @@ export const en = {
     selectedCount_other: "{{count}} selected",
     clearSelection: "Clear selection",
     requestIdentification: "Request identification",
+    requestVog: "Request VOG",
     resend: "Resend",
     revoke: "Revoke",
     search: "Search by name, email, role, department…",
@@ -621,6 +680,7 @@ export const en = {
       orgOnboardingAttestations: "Onboarding attestations",
       orgNotificationSettings: "Notification settings",
       orgIdentitySettings: "Re-identification settings",
+      orgScreeningSettings: "VOG screening settings",
       orgSlackSettings: "Slack settings",
       orgTeamsSettings: "Microsoft Teams settings",
       orgProvisioningSettings: "Provisioning settings",
@@ -650,6 +710,14 @@ export const en = {
       identityReminderSent: "Sent identity reminder",
       identityOverdue: "Identity confirmation overdue",
       identitySettingsUpdated: "Updated re-identification settings",
+      vogRequested: "Requested VOG",
+      vogChecked: "VOG passed",
+      vogRejected: "VOG rejected",
+      vogMismatch: "VOG identity mismatch",
+      vogInsufficientScope: "VOG missing required codes",
+      vogReminderSent: "Sent VOG reminder",
+      vogExpired: "VOG expired",
+      screeningSettingsUpdated: "Updated VOG screening settings",
       mandateGranted: "Granted mandate",
       mandateRevoked: "Revoked mandate",
       deptCreated: "Created department",
@@ -800,6 +868,30 @@ export const en = {
     requestIdentificationHint:
       "Asks this member to re-confirm their identity now. They get an e-mail with a link.",
     identityRequested: "Identification requested",
+    vogValidUntil: "VOG valid until",
+    vogNone: "No VOG on file",
+    requestVog: "Request VOG",
+    requestVogHint:
+      "Asks this member to submit a VOG now. They get an e-mail with a link into the app.",
+    vogRequested: "VOG requested",
+    uploadVog: "Upload VOG on behalf of member",
+    uploadVogHint:
+      "Uploads and validates a VOG PDF the same way the member's own upload does; matched against their identity on file.",
+    vogHistory: {
+      title: "VOG history",
+      empty: "No VOG has been checked for this member yet.",
+      error: "Could not load VOG history: {{message}}",
+      columns: {
+        checkedAt: "Checked",
+        method: "Method",
+        result: "Result",
+        validUntil: "Valid until",
+      },
+      methodPdf: "PDF upload",
+      methodCredential: "pbdf.vog credential",
+      resultMismatch: "Identity mismatch",
+      resultInsufficientScope: "Missing required codes",
+    },
     sendMessage: "Send message",
     offboard: "Off-board member",
     offboardConfirm: {
@@ -1041,6 +1133,7 @@ export const en = {
     tabOrg: "Organization",
     tabMandates: "Mandates",
     tabIdentity: "Identity",
+    tabScreening: "Screening (VOG)",
     tabBranding: "Branding",
     tabCommunication: "Communication",
     tabEmail: "E-mail",
@@ -1132,6 +1225,71 @@ export const en = {
       "Re-identification is off for this organization: no deadlines are computed and no reminders are sent until you save an interval.",
     recomputeNote:
       "Saving recomputes every member's deadline from when they last proved their identity.",
+  },
+  screeningSettings: {
+    heading: "Member screening (VOG)",
+    description:
+      "Members prove they hold a valid certificate of conduct (VOG) by uploading it, checked live against validatie.nl, or by disclosing the pbdf.vog credential once you opt in. The organization keeps only the outcome, never the document.",
+    requiredFor: "Required for",
+    requiredForNobody: "Nobody",
+    requiredForEmployees: "Employees",
+    requiredForExternals: "Externals",
+    requiredForBoth: "Employees and externals",
+    requiredCodes: "Required function aspects",
+    requiredCodesHint:
+      "A member's VOG must cover every code selected here. Codes are Justis' own numbering; a value your sector requires but that is not listed can be added below.",
+    aspectCode: "Aspect {{code}}",
+    extraCodes: "Other required codes",
+    extraCodesPlaceholder: "e.g. 43, 91",
+    extraCodesHint:
+      "Two-digit specific-profile numbers, separated by commas, in addition to the function aspects above.",
+    extraCodesInvalid: "Enter two-digit codes separated by commas.",
+    maxAge: "Maximum age at upload",
+    maxAgeOff: "Any age",
+    maxAgeHint:
+      "Refuses a VOG whose issue date is older than this. Off by default.",
+    recheck: "Re-check interval",
+    employeeInterval: "Employees",
+    externalInterval: "Externals",
+    intervalOff: "Never",
+    intervalMonths_one: "Every month",
+    intervalMonths_other: "Every {{count}} months",
+    recheckAnchor: "Count the interval from",
+    recheckAnchorIssueDate: "The VOG's issue date",
+    recheckAnchorCheckedAt: "The date it was checked",
+    reminders: "Reminders",
+    reminderDaysBefore: "Remind before expiry",
+    reminderDaysBeforePlaceholder: "e.g. 30, 14, 7",
+    reminderDaysBeforeHint:
+      "Days before expiry, separated by commas. The largest value is also when a member starts showing as expiring.",
+    overdueReminderIntervalDays: "Repeat every",
+    overdueReminderIntervalDaysHint:
+      "How many days between reminders once a member's VOG has expired.",
+    overdueReminderMaxCount: "At most",
+    overdueReminderMaxCountHint:
+      "The total number of reminders one expiry may produce, so nobody is mailed forever.",
+    days_one: "{{count}} day",
+    days_other: "{{count}} days",
+    reminders_one: "{{count}} reminder",
+    reminders_other: "{{count}} reminders",
+    consequence: "When a member's VOG is overdue",
+    consequenceFlag: "Flag only",
+    consequenceFlagHint:
+      "Shows the status in the member list and detail, and sends the reminders.",
+    consequenceBlock: "Flag and block",
+    consequenceBlockHint:
+      "Reserved for a future release; behaves as flag only today.",
+    credential: "pbdf.vog credential",
+    acceptCredential: "Accept the pbdf.vog credential",
+    acceptCredentialHint:
+      "This credential is issued by Stichting Privacy by Design about a VOG it validated at the time of issuance - it is not a live statement from Justis, and Justis cannot revoke it. Accept this trade-off only if that is acceptable for your use case; the always-on PDF upload validates against Justis directly.",
+    save: "Save settings",
+    saveError: "Could not save screening settings: {{message}}",
+    loadError: "Could not load screening settings: {{message}}",
+    unconfigured:
+      "Screening is off for this organization: no member is asked for a VOG until you save a policy.",
+    recomputeNote:
+      "Saving recomputes every member's VOG expiry under the new re-check interval.",
   },
   provisioningSettings: {
     heading: "Microsoft Entra ID",
@@ -1357,6 +1515,9 @@ export const en = {
       signature_requested: "Signature request",
       signed_document: "Signed document",
       smtp_test: "SMTP test",
+      vog_expired: "VOG expired",
+      vog_reminder: "VOG reminder",
+      vog_requested: "VOG requested",
     },
     kindDescriptions: {
       credential_offer:
@@ -1377,6 +1538,10 @@ export const en = {
       signed_document:
         "Sent to a recipient with the completed co-signed document attached as a PDF.",
       smtp_test: "The test an admin sends to check the SMTP settings.",
+      vog_expired: "Sent to a member whose VOG has expired.",
+      vog_reminder: "Sent to a member ahead of their VOG expiring.",
+      vog_requested:
+        "Sent to a member when an admin asks them to submit a VOG now.",
     },
     locales: {
       en: "English",

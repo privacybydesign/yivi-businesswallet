@@ -51,6 +51,19 @@ type repository interface {
 	GetIdentitySettings(ctx context.Context, orgID uuid.UUID) (IdentitySettings, error)
 	SaveIdentitySettings(ctx context.Context, orgID uuid.UUID, in IdentitySettingsInput) (IdentitySettings, error)
 	ReverifyTokenLookup(ctx context.Context, rawToken string) (ReverifyContext, error)
+
+	GetScreeningSettings(ctx context.Context, orgID uuid.UUID) (ScreeningSettings, error)
+	SaveScreeningSettings(ctx context.Context, orgID uuid.UUID, in ScreeningSettingsInput) (ScreeningSettings, error)
+	ListScreeningHistory(ctx context.Context, orgID, userID uuid.UUID) ([]ScreeningRecord, error)
+	RequestVog(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID, requestedBy uuid.UUID, reason string) ([]RequestedVogMember, error)
+}
+
+// screener is the VOG screening seam the handler needs, satisfied by
+// *ScreeningService.
+type screener interface {
+	UploadVog(ctx context.Context, orgID, userID uuid.UUID, checkedBy string, checkedByUserID *uuid.UUID, pdf []byte) (ScreeningOutcome, error)
+	StartVogCredentialSession(ctx context.Context, orgID uuid.UUID) (auth.Session, error)
+	DiscloseVogCredential(ctx context.Context, orgID, userID uuid.UUID, checkedBy string, checkedByUserID *uuid.UUID, disclosureToken string) (ScreeningOutcome, error)
 }
 
 type inviter interface {
@@ -88,11 +101,13 @@ type sessionIssuer interface {
 type inviteMailer interface {
 	SendInvitation(ctx context.Context, orgID uuid.UUID, to, orgName, acceptURL string) error
 	SendIdentityRequested(ctx context.Context, orgID uuid.UUID, to, orgName, reidentifyURL, reason string) error
+	SendVogRequested(ctx context.Context, orgID uuid.UUID, to, orgName, vogURL, reason string) error
 }
 
 type Handler struct {
 	store       repository
 	service     inviter
+	screening   screener
 	reader      auditReader
 	issuer      sessionIssuer
 	mailer      inviteMailer
@@ -101,8 +116,8 @@ type Handler struct {
 	admins      auth.PlatformAdmins
 }
 
-func NewHandler(store repository, service inviter, reader auditReader, issuer sessionIssuer, mailer inviteMailer, appBaseURL string, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
-	return &Handler{store: store, service: service, reader: reader, issuer: issuer, mailer: mailer, appBaseURL: strings.TrimRight(appBaseURL, "/"), requireUser: requireUser, admins: admins}
+func NewHandler(store repository, service inviter, screening screener, reader auditReader, issuer sessionIssuer, mailer inviteMailer, appBaseURL string, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins) *Handler {
+	return &Handler{store: store, service: service, screening: screening, reader: reader, issuer: issuer, mailer: mailer, appBaseURL: strings.TrimRight(appBaseURL, "/"), requireUser: requireUser, admins: admins}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -158,6 +173,21 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.Handle("GET /orgs/{slug}/identity-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.getIdentitySettings))))
 	mux.Handle("PUT /orgs/{slug}/identity-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.putIdentitySettings))))
+
+	// Member screening / VOG (#242): the always-on PDF upload (self and
+	// admin-on-behalf), the admin policy, on-demand request, and history.
+	mux.Handle("GET /orgs/{slug}/screening-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.getScreeningSettings))))
+	mux.Handle("PUT /orgs/{slug}/screening-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.putScreeningSettings))))
+	mux.Handle("POST /orgs/{slug}/me/vog", orgScoped(respond.HandlerFunc(h.uploadSelfVog)))
+	mux.Handle("POST /orgs/{slug}/members/{userId}/vog", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.uploadMemberVog))))
+	mux.Handle("GET /orgs/{slug}/members/{userId}/vog/history", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.screeningHistory))))
+	mux.Handle("POST /orgs/{slug}/members/{userId}/request-vog", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestVog))))
+	mux.Handle("POST /orgs/{slug}/members/request-vog", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestVogBulk))))
+	// The opt-in pbdf.vog credential disclosure (#242 §4), self-service only -
+	// like the PDF upload, no admin-on-behalf path (the disclosure has to come
+	// from the member's own wallet).
+	mux.Handle("POST /orgs/{slug}/me/vog/credential-session", orgScoped(respond.HandlerFunc(h.startVogCredentialSession)))
+	mux.Handle("POST /orgs/{slug}/me/vog/credential-complete", orgScoped(respond.HandlerFunc(h.completeVogCredential)))
 
 	mux.Handle("POST /orgs/{slug}/invitations/{id}/resend", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.resendInvitation))))
 	mux.Handle("DELETE /orgs/{slug}/invitations/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.revokeInvitation))))
@@ -239,6 +269,10 @@ type orgDetailResponse struct {
 	// list — can be shown the banner when their identification is due, overdue
 	// or has been requested. Empty for a platform admin who is not a member.
 	Identity *ownIdentityState `json:"identity,omitempty"`
+	// Vog is the caller's own VOG screening state (#242), the same reasoning as
+	// Identity: a member who isn't an admin still needs to see their own status
+	// to know a VOG is required, expiring or was requested.
+	Vog *ownVogState `json:"vog,omitempty"`
 }
 
 // ownIdentityState is the caller's own identity status and deadline. It carries
@@ -249,6 +283,17 @@ type ownIdentityState struct {
 	DueAt  *time.Time `json:"dueAt"`
 }
 
+// ownVogState is the caller's own VOG screening status and expiry, plus
+// whether the org accepts the pbdf.vog credential - a member needs that to
+// know whether the wallet-disclosure option applies to them, and screening
+// settings are otherwise admin-only. It carries no other member's data and
+// nothing the caller cannot already see about themselves.
+type ownVogState struct {
+	Status           string     `json:"status"`
+	ValidUntil       *time.Time `json:"validUntil"`
+	AcceptCredential bool       `json:"acceptCredential"`
+}
+
 func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	org := OrgFromContext(ctx)
@@ -256,6 +301,7 @@ func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
 		Organization: org,
 		Role:         roleFromContext(ctx),
 		Identity:     h.ownIdentity(ctx, org.ID, auth.UserFromContext(ctx).ID),
+		Vog:          h.ownVog(ctx, org.ID, auth.UserFromContext(ctx).ID),
 	})
 	return nil
 }
@@ -280,6 +326,25 @@ func (h *Handler) ownIdentity(ctx context.Context, orgID, userID uuid.UUID) *own
 	}
 	member = member.withIdentityStatus(time.Now(), lookahead)
 	return &ownIdentityState{Status: member.IdentityStatus, DueAt: member.IdentityDueAt}
+}
+
+// ownVog resolves the caller's own VOG screening state, mirroring ownIdentity.
+func (h *Handler) ownVog(ctx context.Context, orgID, userID uuid.UUID) *ownVogState {
+	member, err := h.store.GetMember(ctx, orgID, userID)
+	if errors.Is(err, ErrNotMember) {
+		return nil
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "resolving own vog state", slog.String("error", err.Error()))
+		return nil
+	}
+	settings, err := h.store.GetScreeningSettings(ctx, orgID)
+	if err != nil {
+		slog.ErrorContext(ctx, "resolving screening settings", slog.String("error", err.Error()))
+		return nil
+	}
+	member = member.withVogStatus(settings, time.Now())
+	return &ownVogState{Status: member.VogStatus, ValidUntil: member.VogValidUntil, AcceptCredential: settings.AcceptYiviCredential}
 }
 
 type updateRequest struct {

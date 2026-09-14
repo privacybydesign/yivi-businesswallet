@@ -42,6 +42,33 @@ const (
 	OverdueConsequenceBlock = "block"
 
 	DefaultReidentifyTokenTTL = 30 * 24 * time.Hour
+
+	// Screening / VOG (#242): who an org requires a VOG for.
+	ScreeningRequiredForNobody    = "nobody"
+	ScreeningRequiredForEmployees = "employees"
+	ScreeningRequiredForExternals = "externals"
+	ScreeningRequiredForBoth      = "both"
+
+	// RecheckAnchor is which date ScreeningSettings' recheck interval counts
+	// from: the VOG's own issue date (default) or the date it was checked.
+	RecheckAnchorIssueDate = "issue_date"
+	RecheckAnchorCheckedAt = "checked_at"
+
+	// Screening status, derived from ScreeningSettings plus the member's latest
+	// screening attempt - never stored independently (see
+	// DeriveScreeningStatus).
+	ScreeningStatusNotRequired     = "not_required"
+	ScreeningStatusNone            = "none"
+	ScreeningStatusRequested       = "requested"
+	ScreeningStatusValid           = "valid"
+	ScreeningStatusExpiring        = "expiring"
+	ScreeningStatusExpired         = "expired"
+	ScreeningStatusRejected        = "rejected"
+	ScreeningStatusRecheckRequired = "recheck_required"
+
+	// Who ran a screening check (member_screenings.checked_by).
+	CheckedBySelf  = "self"
+	CheckedByAdmin = "admin"
 )
 
 var (
@@ -50,6 +77,16 @@ var (
 	ErrReverifyEmailMismatch   = errors.New("disclosed email does not match this member")
 	ErrReverifyNameMismatch    = errors.New("disclosed name does not match this member's identity on file")
 	ErrCredentialTooOld        = errors.New("disclosed credential is older than the organization's freshness policy allows")
+)
+
+var (
+	ErrScreeningSettingsInvalid = errors.New("invalid screening settings")
+	ErrVogTokenNotFound         = errors.New("VOG link not found or expired")
+	ErrVogNoDateOfBirth         = errors.New("member has no date of birth on file; re-identification is required first")
+	ErrVogNotAVOG               = errors.New("uploaded document is not a recognisable VOG")
+	ErrVogUnparseable           = errors.New("a required field on the VOG could not be read")
+	ErrVogTooOld                = errors.New("the VOG's issue date is older than the organization allows")
+	ErrVogCredentialNotAccepted = errors.New("this organization does not accept the pbdf.vog credential")
 )
 
 var (
@@ -162,6 +199,16 @@ type Member struct {
 	// ExternalOrganisation is optional free text naming who an external works
 	// for; meaningful only when MemberType is external.
 	ExternalOrganisation *string `json:"externalOrganisation"`
+	// VogLastResult / VogValidUntil / VogCoveredCodes mirror the member's latest
+	// screening attempt (nil/empty when never checked). VogStatus is derived from
+	// them plus the org's requirement (see DeriveScreeningStatus); set by the
+	// handler, which knows the org's screening settings.
+	VogLastResult   *string    `json:"-"`
+	VogValidUntil   *time.Time `json:"vogValidUntil"`
+	VogCoveredCodes []string   `json:"-"`
+	VogRequestedAt  *time.Time `json:"vogRequestedAt"`
+	VogRequestedBy  *uuid.UUID `json:"vogRequestedBy"`
+	VogStatus       string     `json:"vogStatus"`
 	// AvatarURI is the API path serving this member's portrait photo, "" when they
 	// have not set one. Set by the handler from HasAvatar / AvatarUpdatedAt, which
 	// are the store's answer and never reach the client on their own.
@@ -200,6 +247,15 @@ type MemberEntry struct {
 	// a pending entry, applied to the membership on accept.
 	MemberType           string  `json:"memberType"`
 	ExternalOrganisation *string `json:"externalOrganisation"`
+	// VogLastResult / VogValidUntil / VogCoveredCodes / VogRequestedAt / VogStatus
+	// are always nil/empty/"not_required" for an invited entry (no membership row
+	// yet); see the Member fields of the same name.
+	VogLastResult   *string    `json:"-"`
+	VogValidUntil   *time.Time `json:"vogValidUntil"`
+	VogCoveredCodes []string   `json:"-"`
+	VogRequestedAt  *time.Time `json:"vogRequestedAt"`
+	VogRequestedBy  *uuid.UUID `json:"vogRequestedBy"`
+	VogStatus       string     `json:"vogStatus"`
 	// AvatarURI is the API path serving this member's portrait photo, "" when they
 	// have not set one — always "" for an invited entry, which has no user row yet.
 	AvatarURI       string     `json:"avatarUri"`
@@ -281,4 +337,110 @@ func (s IdentitySettings) IntervalFor(memberType string) *int {
 		return s.ExternalIntervalMonths
 	}
 	return s.EmployeeIntervalMonths
+}
+
+// ScreeningSettings is an org's VOG policy (#242 §3). Configured is false when
+// the org has never saved any, in which case RequiredFor is
+// ScreeningRequiredForNobody and the feature is off: no member is ever asked
+// for a VOG.
+type ScreeningSettings struct {
+	Configured bool `json:"configured"`
+	// RequiredFor is one of ScreeningRequiredForNobody/Employees/Externals/Both.
+	RequiredFor string `json:"requiredFor"`
+	// RequiredCodes are the function-aspect (internal/vog.FunctionAspects) and/or
+	// specific-profile codes a member's VOG must cover.
+	RequiredCodes []string `json:"requiredCodes"`
+	// MaxAgeAtUploadDays: nil = off. When set, a VOG whose issue date is older
+	// than this at upload/disclosure is rejected.
+	MaxAgeAtUploadDays *int `json:"maxAgeAtUploadDays"`
+	// EmployeeRecheckIntervalMonths / ExternalRecheckIntervalMonths: nil = off for
+	// that member type.
+	EmployeeRecheckIntervalMonths *int `json:"employeeRecheckIntervalMonths"`
+	ExternalRecheckIntervalMonths *int `json:"externalRecheckIntervalMonths"`
+	// RecheckAnchor is RecheckAnchorIssueDate (default) or RecheckAnchorCheckedAt.
+	RecheckAnchor string `json:"recheckAnchor"`
+	// ReminderDaysBefore / OverdueReminderIntervalDays / OverdueReminderMaxCount /
+	// OverdueConsequence mirror IdentitySettings' fields of the same name.
+	ReminderDaysBefore          []int32 `json:"reminderDaysBefore"`
+	OverdueReminderIntervalDays int     `json:"overdueReminderIntervalDays"`
+	OverdueReminderMaxCount     int     `json:"overdueReminderMaxCount"`
+	OverdueConsequence          string  `json:"overdueConsequence"`
+	// AcceptYiviCredential opts in to the pbdf.vog credential disclosure path
+	// alongside the always-on PDF upload.
+	AcceptYiviCredential bool       `json:"acceptYiviCredential"`
+	UpdatedAt            *time.Time `json:"updatedAt,omitempty"`
+}
+
+// ScreeningSettingsInput is a full replacement of an org's screening settings.
+type ScreeningSettingsInput struct {
+	RequiredFor                   string
+	RequiredCodes                 []string
+	MaxAgeAtUploadDays            *int
+	EmployeeRecheckIntervalMonths *int
+	ExternalRecheckIntervalMonths *int
+	RecheckAnchor                 string
+	ReminderDaysBefore            []int32
+	OverdueReminderIntervalDays   int
+	OverdueReminderMaxCount       int
+	OverdueConsequence            string
+	AcceptYiviCredential          bool
+}
+
+// screeningLookaheadDays is the "expiring soon" window DeriveScreeningStatus
+// uses when an org has not configured a reminder schedule, mirroring
+// reminderLookaheadDays.
+const screeningLookaheadDays = 30
+
+// LookaheadDays is the "expiring soon" window: the largest configured reminder
+// threshold, or the default when none is configured.
+func (s ScreeningSettings) LookaheadDays() int {
+	max := int32(0)
+	for _, d := range s.ReminderDaysBefore {
+		if d > max {
+			max = d
+		}
+	}
+	if max == 0 {
+		return screeningLookaheadDays
+	}
+	return int(max)
+}
+
+// RecheckIntervalFor returns the configured re-check interval for a member
+// type, nil when off.
+func (s ScreeningSettings) RecheckIntervalFor(memberType string) *int {
+	if memberType == MemberTypeExternal {
+		return s.ExternalRecheckIntervalMonths
+	}
+	return s.EmployeeRecheckIntervalMonths
+}
+
+// RequiredForMember reports whether the policy requires a VOG for a member of
+// memberType.
+func (s ScreeningSettings) RequiredForMember(memberType string) bool {
+	switch s.RequiredFor {
+	case ScreeningRequiredForBoth:
+		return true
+	case ScreeningRequiredForEmployees:
+		return memberType != MemberTypeExternal
+	case ScreeningRequiredForExternals:
+		return memberType == MemberTypeExternal
+	default:
+		return false
+	}
+}
+
+// ScreeningRecord is one row of a member's VOG screening history
+// (member_screenings).
+type ScreeningRecord struct {
+	ID              uuid.UUID  `json:"id"`
+	Method          string     `json:"method"`
+	Result          string     `json:"result"`
+	CheckedAt       time.Time  `json:"checkedAt"`
+	VogIssueDate    *time.Time `json:"vogIssueDate"`
+	ValidUntil      *time.Time `json:"validUntil"`
+	CoveredCodes    []string   `json:"coveredCodes"`
+	MissingCodes    []string   `json:"missingCodes"`
+	CheckedBy       string     `json:"checkedBy"`
+	CheckedByUserID *uuid.UUID `json:"checkedByUserId"`
 }

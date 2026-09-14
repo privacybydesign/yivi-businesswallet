@@ -71,7 +71,7 @@ type DisclosedIdentity struct {
 // the consumer so the service is testable without a live verifier. Its id
 // argument is the verifier's transaction_id, never the client-facing session id.
 type verifier interface {
-	StartPresentation(ctx context.Context, scope openid4vpverifier.Scope) (openid4vpverifier.Session, error)
+	StartPresentation(ctx context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error)
 	Result(ctx context.Context, transactionID string) (openid4vpverifier.Presentation, error)
 	Status(ctx context.Context, transactionID string) (string, error)
 }
@@ -119,8 +119,24 @@ func (s *Service) StartIdentitySession(ctx context.Context) (Session, error) {
 	return s.startPresentation(ctx, openid4vpverifier.ScopeIdentity)
 }
 
-func (s *Service) startPresentation(ctx context.Context, scope openid4vpverifier.Scope) (Session, error) {
-	sess, err := s.verifier.StartPresentation(ctx, scope)
+// StartVogSession begins the opt-in pbdf.vog credential disclosure (#242 §4),
+// requesting only the org's required function-aspect flags alongside the
+// credential's core identity fields - never every aspectNN flag, never
+// profileCodes as a blob.
+func (s *Service) StartVogSession(ctx context.Context, requiredAspectCodes []string) (Session, error) {
+	return s.startPresentation(ctx, openid4vpverifier.ScopeVog, vogAspectClaims(requiredAspectCodes)...)
+}
+
+func vogAspectClaims(codes []string) []string {
+	claims := make([]string, len(codes))
+	for i, c := range codes {
+		claims[i] = openid4vpverifier.VogAspectClaim(c)
+	}
+	return claims
+}
+
+func (s *Service) startPresentation(ctx context.Context, scope openid4vpverifier.Scope, claims ...string) (Session, error) {
+	sess, err := s.verifier.StartPresentation(ctx, scope, claims...)
 	if err != nil {
 		return Session{}, fmt.Errorf("auth: start session: %w", err)
 	}
@@ -139,6 +155,17 @@ func (s *Service) DiscloseIdentity(ctx context.Context, id string) (DisclosedIde
 		return DisclosedIdentity{}, err
 	}
 	return extractIdentity(res)
+}
+
+// DiscloseVog reads a completed pbdf.vog disclosure (#242 §4). requiredAspectCodes
+// must be the same list StartVogSession was called with, so the aspect claims
+// read back are exactly the ones that were requested.
+func (s *Service) DiscloseVog(ctx context.Context, id string, requiredAspectCodes []string) (DisclosedVog, error) {
+	res, err := s.result(ctx, id)
+	if err != nil {
+		return DisclosedVog{}, err
+	}
+	return extractVog(res, requiredAspectCodes)
 }
 
 func (s *Service) Status(ctx context.Context, id string) (string, error) {

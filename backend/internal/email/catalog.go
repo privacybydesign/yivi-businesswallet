@@ -49,6 +49,15 @@ const (
 	// KindIdentityRequested is sent when an org admin requests a member's
 	// identification on demand (single or bulk).
 	KindIdentityRequested Kind = "identity_requested"
+	// KindVogRequested is sent when an org admin requests a member's VOG
+	// screening on demand (single or bulk, #242).
+	KindVogRequested Kind = "vog_requested"
+	// KindVogReminder is sent ahead of a member's VOG expiring, per the org's
+	// screening reminder schedule.
+	KindVogReminder Kind = "vog_reminder"
+	// KindVogExpired is sent once a member's VOG has expired, on the org's
+	// overdue reminder cadence.
+	KindVogExpired Kind = "vog_expired"
 )
 
 // Variable names. Every placeholder a template may use is one of these, declared
@@ -70,6 +79,7 @@ const (
 	varReidentifyURL  = "reidentifyUrl"
 	varDueDate        = "dueDate"
 	varReason         = "reason"
+	varVogURL         = "vogUrl"
 )
 
 // Variable is one substitutable value of a kind. URL variables are additionally
@@ -132,6 +142,21 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varOrgName},
 		{Name: varReidentifyURL, IsURL: true},
 		{Name: varReason},
+	},
+	KindVogRequested: {
+		{Name: varOrgName},
+		{Name: varVogURL, IsURL: true},
+		{Name: varReason},
+	},
+	KindVogReminder: {
+		{Name: varOrgName},
+		{Name: varVogURL, IsURL: true},
+		{Name: varDueDate},
+	},
+	KindVogExpired: {
+		{Name: varOrgName},
+		{Name: varVogURL, IsURL: true},
+		{Name: varDueDate},
 	},
 }
 

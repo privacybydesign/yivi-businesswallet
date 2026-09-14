@@ -133,6 +133,7 @@ WITH entries AS (
 	       NULL::timestamptz AS expires_at, NULL::uuid AS invited_by,
 	       m.phone, m.identity_verified_at, m.member_type, m.external_organisation,
 	       m.identity_due_at, m.identity_requested_at,
+	       m.vog_last_result, m.vog_valid_until, m.vog_covered_codes, m.vog_requested_at, m.vog_requested_by,
 	       u.avatar_bytes IS NOT NULL AS has_avatar, u.avatar_updated_at
 	FROM memberships m
 	JOIN users u ON u.id = m.user_id
@@ -145,6 +146,8 @@ WITH entries AS (
 	       i.expires_at, i.invited_by,
 	       NULL::text AS phone, NULL::timestamptz AS identity_verified_at, i.member_type, i.external_organisation,
 	       NULL::timestamptz AS identity_due_at, NULL::timestamptz AS identity_requested_at,
+	       NULL::text AS vog_last_result, NULL::timestamptz AS vog_valid_until, NULL::text[] AS vog_covered_codes,
+	       NULL::timestamptz AS vog_requested_at, NULL::uuid AS vog_requested_by,
 	       false AS has_avatar, NULL::timestamptz AS avatar_updated_at
 	FROM invitations i
 	LEFT JOIN departments d ON d.id = i.department_id
@@ -195,6 +198,7 @@ func (s *Store) ListMemberEntries(ctx context.Context, orgID uuid.UUID, p Member
 SELECT status, user_id, invitation_id, email, preferred_name, given_names, last_name,
        role, job_title, department_id, department_name, expires_at, invited_by, phone, identity_verified_at,
        member_type, external_organisation, identity_due_at, identity_requested_at,
+       vog_last_result, vog_valid_until, vog_covered_codes, vog_requested_at, vog_requested_by,
        has_avatar, avatar_updated_at
 FROM entries` + memberSearchWhere + "\nORDER BY " + memberOrderBy(p.Sort, p.Desc) + "\nLIMIT $4 OFFSET $5"
 
@@ -211,6 +215,7 @@ FROM entries` + memberSearchWhere + "\nORDER BY " + memberOrderBy(p.Sort, p.Desc
 			&e.GivenNames, &e.LastName, &e.Role, &e.JobTitle, &e.DepartmentID, &e.DepartmentName,
 			&e.ExpiresAt, &e.InvitedBy, &e.Phone, &e.IdentityVerifiedAt,
 			&e.MemberType, &e.ExternalOrganisation, &e.IdentityDueAt, &e.IdentityRequestedAt,
+			&e.VogLastResult, &e.VogValidUntil, &e.VogCoveredCodes, &e.VogRequestedAt, &e.VogRequestedBy,
 			&e.HasAvatar, &e.AvatarUpdatedAt); err != nil {
 			return nil, 0, fmt.Errorf("organization: list member entries scan: %w", err)
 		}
@@ -238,6 +243,7 @@ func (s *Store) MemberEntryByEmail(ctx context.Context, orgID uuid.UUID, email s
 SELECT status, user_id, invitation_id, email, preferred_name, given_names, last_name,
        role, job_title, department_id, department_name, expires_at, invited_by, phone, identity_verified_at,
        member_type, external_organisation, identity_due_at, identity_requested_at,
+       vog_last_result, vog_valid_until, vog_covered_codes, vog_requested_at, vog_requested_by,
        has_avatar, avatar_updated_at
 FROM entries
 WHERE lower(email) = lower($3)
@@ -249,6 +255,7 @@ LIMIT 1`
 		&e.Email, &e.PreferredName, &e.GivenNames, &e.LastName, &e.Role, &e.JobTitle,
 		&e.DepartmentID, &e.DepartmentName, &e.ExpiresAt, &e.InvitedBy, &e.Phone, &e.IdentityVerifiedAt,
 		&e.MemberType, &e.ExternalOrganisation, &e.IdentityDueAt, &e.IdentityRequestedAt,
+		&e.VogLastResult, &e.VogValidUntil, &e.VogCoveredCodes, &e.VogRequestedAt, &e.VogRequestedBy,
 		&e.HasAvatar, &e.AvatarUpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return MemberEntry{}, ErrNotMember
@@ -265,6 +272,7 @@ func (s *Store) GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member,
 		SELECT u.id, u.email, u.preferred_name, u.given_names, u.last_name,
 		       m.role, m.job_title, m.department_id, d.name, m.phone, m.identity_verified_at,
 		       m.member_type, m.external_organisation, m.identity_due_at, m.identity_requested_at, m.identity_requested_by,
+		       m.vog_last_result, m.vog_valid_until, m.vog_covered_codes, m.vog_requested_at, m.vog_requested_by,
 		       u.avatar_bytes IS NOT NULL, u.avatar_updated_at
 		FROM memberships m
 		JOIN users u ON u.id = m.user_id
@@ -274,6 +282,7 @@ func (s *Store) GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member,
 	err := s.db.QueryRow(ctx, q, orgID, userID).Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.LastName,
 		&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName, &m.Phone, &m.IdentityVerifiedAt,
 		&m.MemberType, &m.ExternalOrganisation, &m.IdentityDueAt, &m.IdentityRequestedAt, &m.IdentityRequestedBy,
+		&m.VogLastResult, &m.VogValidUntil, &m.VogCoveredCodes, &m.VogRequestedAt, &m.VogRequestedBy,
 		&m.HasAvatar, &m.AvatarUpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Member{}, ErrNotMember

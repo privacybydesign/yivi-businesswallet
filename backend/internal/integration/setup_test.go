@@ -34,6 +34,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/vog"
 )
 
 const sessionTTL = time.Hour
@@ -59,7 +60,7 @@ type fakeVerifier struct {
 	identityIssuedAt time.Time
 }
 
-func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.Scope) (openid4vpverifier.Session, error) {
+func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.Scope, _ ...string) (openid4vpverifier.Session, error) {
 	return openid4vpverifier.Session{TransactionID: "verifier-tx", WalletLink: "openid4vp://?request_uri=https%3A%2F%2Fverifier.test"}, nil
 }
 
@@ -134,8 +135,9 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
 	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)
+	screeningService := organization.NewScreeningService(orgStore, vog.StubValidator{Code: vog.ResponseAuthentic}, authService, nil)
 	// nil mailer: invitation e-mail delivery is best-effort and not exercised here.
-	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins)
+	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins)
 
 	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
 	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())

@@ -20,6 +20,7 @@ export const SETTINGS_TABS = [
   { key: "org", labelKey: "settings.tabOrg" },
   { key: "mandates", labelKey: "settings.tabMandates" },
   { key: "identity", labelKey: "settings.tabIdentity" },
+  { key: "screening", labelKey: "settings.tabScreening" },
   { key: "branding", labelKey: "settings.tabBranding" },
   { key: "communication", labelKey: "settings.tabCommunication" },
   { key: "issuer", labelKey: "settings.tabIssuer" },
