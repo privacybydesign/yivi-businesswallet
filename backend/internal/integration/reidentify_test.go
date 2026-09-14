@@ -416,6 +416,31 @@ func TestIdentitySettingsRejectAnUnknownConsequence(t *testing.T) {
 	}
 }
 
+// Before an admin saves a policy the response still has the documented shape:
+// the frontend schema requires reminderDaysBefore to be an array, and a nil Go
+// slice would marshal as null and fail it (the settings page then cannot load).
+func TestIdentitySettingsUnconfiguredCarryAnEmptyReminderList(t *testing.T) {
+	env := setup(t)
+	env.adminOf("acme", "Acme", "boss@example.test")
+
+	resp := env.do(http.MethodGet, "/api/v1/orgs/acme/identity-settings", nil)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET identity-settings = %d, want 200", resp.StatusCode)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := string(body["configured"]); got != "false" {
+		t.Errorf("configured = %s, want false", got)
+	}
+	if got := string(body["reminderDaysBefore"]); got != "[]" {
+		t.Errorf("reminderDaysBefore = %s, want [] (never null)", got)
+	}
+}
+
 // Identity settings are org-admin only: a plain member can neither read nor
 // change their organisation's policy.
 func TestIdentitySettingsAreAdminOnly(t *testing.T) {
