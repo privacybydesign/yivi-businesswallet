@@ -120,6 +120,22 @@ func (f fakeRepo) ReverifyTokenLookup(context.Context, string) (ReverifyContext,
 	return ReverifyContext{}, nil
 }
 
+func (f fakeRepo) GetScreeningSettings(context.Context, uuid.UUID) (ScreeningSettings, error) {
+	return ScreeningSettings{}, nil
+}
+
+func (f fakeRepo) SaveScreeningSettings(context.Context, uuid.UUID, ScreeningSettingsInput) (ScreeningSettings, error) {
+	return ScreeningSettings{}, nil
+}
+
+func (f fakeRepo) ListScreeningHistory(context.Context, uuid.UUID, uuid.UUID) ([]ScreeningRecord, error) {
+	return nil, nil
+}
+
+func (f fakeRepo) RequestVog(context.Context, uuid.UUID, []uuid.UUID, uuid.UUID, string) ([]RequestedVogMember, error) {
+	return nil, nil
+}
+
 // authorizeWith runs the Authorize middleware and returns the response together
 // with the basis of authority it stashed, which the mandate cases assert on.
 func authorizeWith(repo repository, admins auth.PlatformAdmins, email user.Email) (*httptest.ResponseRecorder, Authority) {

@@ -278,6 +278,16 @@ one stored column, `memberships.identity_due_at`, for the reason given there
 (the sweep selects on it); every other new fact is either a timestamp on the
 membership or derived from it.
 
+## Since built: member screening (VOG)
+
+Independent of re-identification but built on the same membership: whether a
+member holds a valid certificate of conduct (VOG), checked live against
+Justis' validatie.nl or, opt-in, disclosed as the `pbdf.vog` credential. Built
+in `.ai/features/member-screening-vog.md` (#242). Reuses `date_of_birth`
+(persisted above) and `member_type` for its own per-type policy; adds no
+columns to `users` or `invitations`, only to `memberships` (denormalised
+latest-screening-attempt state) and its own `member_screenings` history table.
+
 ## Open / deferred
 
 - **Extra verified attributes** beyond name (DOB, nationality, document number): persist only if a feature needs them — minimise by default. *(Date of birth is now persisted, for the screening match in #242; see the re-identification feature doc.)*

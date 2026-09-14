@@ -94,11 +94,14 @@ func TestIdentityQueryOffersPassportOrIDCard(t *testing.T) {
 }
 
 func TestQueryForScope(t *testing.T) {
-	if got := len(queryFor(ScopeLogin).Credentials); got != 1 {
+	if got := len(queryFor(ScopeLogin, nil).Credentials); got != 1 {
 		t.Errorf("ScopeLogin credentials = %d, want 1", got)
 	}
-	if got := len(queryFor(ScopeIdentity).Credentials); got != 4 {
+	if got := len(queryFor(ScopeIdentity, nil).Credentials); got != 4 {
 		t.Errorf("ScopeIdentity credentials = %d, want 4", got)
+	}
+	if got := len(queryFor(ScopeVog, []string{"aspect11", "aspect43"}).Credentials[0].Claims); got != 7 {
+		t.Errorf("ScopeVog claims = %d, want 7 (5 core fields + 2 requested aspects)", got)
 	}
 }
 

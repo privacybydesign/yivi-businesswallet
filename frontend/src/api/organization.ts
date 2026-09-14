@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { absoluteApiUrl, request } from "./http";
+import { absoluteApiUrl, ApiError, request } from "./http";
 
 export const departmentSchema = z.object({
   id: z.string(),
@@ -67,10 +67,22 @@ export const ownIdentityStateSchema = z.object({
 
 export type OwnIdentityState = z.infer<typeof ownIdentityStateSchema>;
 
+// The caller's own VOG screening state in this organisation, mirroring
+// ownIdentityStateSchema for the same reason: it rides on the org detail
+// because a plain member cannot read the member list.
+export const ownVogStateSchema = z.object({
+  status: z.string(),
+  validUntil: z.string().nullable(),
+  acceptCredential: z.boolean(),
+});
+
+export type OwnVogState = z.infer<typeof ownVogStateSchema>;
+
 export const organizationDetailSchema = organizationSchema.extend({
   role: z.string(),
   // Absent for a platform admin who is not a member of the org.
   identity: ownIdentityStateSchema.optional(),
+  vog: ownVogStateSchema.optional(),
 });
 
 export type OrganizationDetail = z.infer<typeof organizationDetailSchema>;
@@ -105,6 +117,16 @@ const memberIdentityFields = {
   identityRequestedAt: z.string().nullable(),
 };
 
+// A status the backend adds and this list omits must not fail the whole member
+// list, same reasoning as identityStatusSchema.
+const vogStatusSchema = z.string();
+
+const memberVogFields = {
+  vogStatus: vogStatusSchema,
+  vogValidUntil: z.string().nullable(),
+  vogRequestedAt: z.string().nullable(),
+};
+
 export const memberSchema = z.object({
   userId: z.string(),
   email: z.string(),
@@ -120,6 +142,8 @@ export const memberSchema = z.object({
   identityVerifiedAt: z.string().nullable(),
   identityRequestedBy: z.string().nullable(),
   ...memberIdentityFields,
+  ...memberVogFields,
+  vogRequestedBy: z.string().nullable(),
   avatarUri: z.string(),
 });
 
@@ -144,6 +168,7 @@ export const memberListEntrySchema = z.object({
   verified: z.boolean(),
   identityVerifiedAt: z.string().nullable(),
   ...memberIdentityFields,
+  ...memberVogFields,
   avatarUri: z.string(),
 });
 
@@ -468,6 +493,229 @@ export async function mintOwnReidentifyLink(
     { schema: reidentifyLinkSchema, method: "POST", signal },
   );
   return reidentifyUrl;
+}
+
+// --- Member screening / VOG (#242) ---
+
+export const SCREENING_REQUIRED_FOR = [
+  "nobody",
+  "employees",
+  "externals",
+  "both",
+] as const;
+
+export type ScreeningRequiredFor = (typeof SCREENING_REQUIRED_FOR)[number];
+
+export const RECHECK_ANCHORS = ["issue_date", "checked_at"] as const;
+
+export type RecheckAnchor = (typeof RECHECK_ANCHORS)[number];
+
+// An org's VOG screening policy. `configured` is false until an admin saves
+// one, in which case requiredFor is "nobody" - off, not defaulting to a
+// requirement no admin chose.
+export const screeningSettingsSchema = z.object({
+  configured: z.boolean(),
+  requiredFor: z.string(),
+  requiredCodes: z.array(z.string()),
+  maxAgeAtUploadDays: z.number().nullable(),
+  employeeRecheckIntervalMonths: z.number().nullable(),
+  externalRecheckIntervalMonths: z.number().nullable(),
+  recheckAnchor: z.string(),
+  reminderDaysBefore: z.array(z.number()),
+  overdueReminderIntervalDays: z.number(),
+  overdueReminderMaxCount: z.number(),
+  overdueConsequence: z.string(),
+  acceptYiviCredential: z.boolean(),
+  updatedAt: z.string().optional(),
+});
+
+export type ScreeningSettings = z.infer<typeof screeningSettingsSchema>;
+
+export interface ScreeningSettingsInput {
+  requiredFor: ScreeningRequiredFor;
+  requiredCodes: string[];
+  maxAgeAtUploadDays: number | null;
+  employeeRecheckIntervalMonths: number | null;
+  externalRecheckIntervalMonths: number | null;
+  recheckAnchor: RecheckAnchor;
+  reminderDaysBefore: number[];
+  overdueReminderIntervalDays: number;
+  overdueReminderMaxCount: number;
+  overdueConsequence: OverdueConsequence;
+  acceptYiviCredential: boolean;
+}
+
+export function getScreeningSettings(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ScreeningSettings> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/screening-settings`,
+    {
+      schema: screeningSettingsSchema,
+      signal,
+    },
+  );
+}
+
+export function saveScreeningSettings(
+  slug: string,
+  input: ScreeningSettingsInput,
+  signal?: AbortSignal,
+): Promise<ScreeningSettings> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/screening-settings`,
+    {
+      schema: screeningSettingsSchema,
+      method: "PUT",
+      body: input,
+      signal,
+    },
+  );
+}
+
+const requestVogResultSchema = z.object({ requested: z.number() });
+
+export type RequestVogResult = z.infer<typeof requestVogResultSchema>;
+
+// requestVog asks one or several members to submit a VOG now: it flips their
+// status to `requested` and mails each of them a link into the app. The bulk
+// route is used for more than one member, mirroring requestIdentification.
+export function requestVog(
+  slug: string,
+  userIds: string[],
+  reason?: string,
+  signal?: AbortSignal,
+): Promise<RequestVogResult> {
+  const base = `/api/v1/orgs/${encodeURIComponent(slug)}/members`;
+  const single = userIds.length === 1;
+  return request(
+    single
+      ? `${base}/${encodeURIComponent(userIds[0])}/request-vog`
+      : `${base}/request-vog`,
+    {
+      schema: requestVogResultSchema,
+      method: "POST",
+      body: single ? { reason } : { userIds, reason },
+      signal,
+    },
+  );
+}
+
+const uploadVogResultSchema = z.object({
+  result: z.string(),
+  missingCodes: z.array(z.string()).optional(),
+  rejectionReason: z.string().optional(),
+});
+
+export type UploadVogResult = z.infer<typeof uploadVogResultSchema>;
+
+// The backend answers a rejected check with 422 and the same body shape a
+// passing one returns 200 with (organization/screening_upload_handler.go's
+// vogUploadStatus) - a completed check, not a failed request. `request` throws
+// on any non-2xx, so vogOutcomeFromError recovers that one expected shape;
+// anything else (network failure, 500, an unparseable body) stays a genuine
+// error for the caller to handle.
+const VOG_REJECTED_STATUS = 422;
+
+export function vogOutcomeFromError(error: unknown): UploadVogResult | null {
+  if (!(error instanceof ApiError) || error.status !== VOG_REJECTED_STATUS) {
+    return null;
+  }
+  const parsed = uploadVogResultSchema.safeParse(error.body);
+  return parsed.success ? parsed.data : null;
+}
+
+async function resolveVogOutcome(
+  run: () => Promise<UploadVogResult>,
+): Promise<UploadVogResult> {
+  try {
+    return await run();
+  } catch (error) {
+    const outcome = vogOutcomeFromError(error);
+    if (outcome) return outcome;
+    throw error;
+  }
+}
+
+// uploadVog submits a VOG PDF for validation (the caller's own membership, or,
+// with userId, an admin uploading on a member's behalf). `result` says
+// whether it passed; a rejection is a completed check, not a thrown error.
+export function uploadVog(
+  slug: string,
+  file: File,
+  userId?: string,
+  signal?: AbortSignal,
+): Promise<UploadVogResult> {
+  const base = `/api/v1/orgs/${encodeURIComponent(slug)}`;
+  const path = userId
+    ? `${base}/members/${encodeURIComponent(userId)}/vog`
+    : `${base}/me/vog`;
+  return resolveVogOutcome(() => {
+    const body = new FormData();
+    body.append("file", file);
+    return request(path, {
+      schema: uploadVogResultSchema,
+      method: "POST",
+      body,
+      signal,
+    });
+  });
+}
+
+export const screeningRecordSchema = z.object({
+  id: z.string(),
+  method: z.string(),
+  result: z.string(),
+  checkedAt: z.string(),
+  vogIssueDate: z.string().nullable(),
+  validUntil: z.string().nullable(),
+  coveredCodes: z.array(z.string()),
+  missingCodes: z.array(z.string()),
+  checkedBy: z.string(),
+  checkedByUserId: z.string().nullable(),
+});
+
+export type ScreeningRecord = z.infer<typeof screeningRecordSchema>;
+
+const screeningHistorySchema = z.object({
+  history: z.array(screeningRecordSchema),
+});
+
+export function getScreeningHistory(
+  slug: string,
+  userId: string,
+  signal?: AbortSignal,
+): Promise<ScreeningRecord[]> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}/vog/history`,
+    { schema: screeningHistorySchema, signal },
+  ).then((r) => r.history);
+}
+
+// vogCredentialSessionUrl is a URL builder, not a request call: it feeds
+// IdentityDisclosure's sessionUrl prop, which starts and polls the session
+// itself.
+export function vogCredentialSessionUrl(slug: string): string {
+  return `/api/v1/orgs/${encodeURIComponent(slug)}/me/vog/credential-session`;
+}
+
+export function completeVogCredential(
+  slug: string,
+  disclosureToken: string,
+  signal?: AbortSignal,
+): Promise<UploadVogResult> {
+  return resolveVogOutcome(() =>
+    request(
+      `/api/v1/orgs/${encodeURIComponent(slug)}/me/vog/credential-complete`,
+      {
+        schema: uploadVogResultSchema,
+        method: "POST",
+        body: { disclosureToken },
+        signal,
+      },
+    ),
+  );
 }
 
 export function getOrganizationDepartments(

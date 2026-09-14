@@ -15,6 +15,7 @@ import * as React from "react";
 type NavLabelKey =
   | "nav.dashboard"
   | "nav.members"
+  | "nav.vog"
   | "nav.qerds"
   | "nav.attestations"
   | "nav.postguard"
@@ -34,10 +35,21 @@ interface NavItem {
 
 // showSigning gates the "Sign documents" item on the org having a CSC signing
 // provider configured (see the sidebar body); it is a plugin, absent otherwise.
-function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
+// showVog gates "VOG screening" on the caller's own screening applying to them
+// at all - absent for an org that has never turned screening on.
+function orgNavItems(
+  slug: string,
+  showSigning: boolean,
+  showVog: boolean,
+): NavItem[] {
   const items: NavItem[] = [
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
+  ];
+  if (showVog) {
+    items.push({ to: `/${slug}/vog`, labelKey: "nav.vog", icon: "valid" });
+  }
+  items.push(
     { to: `/${slug}/qerds`, labelKey: "nav.qerds", icon: "email" },
     {
       to: `/${slug}/attestations`,
@@ -45,7 +57,7 @@ function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
       icon: "valid",
     },
     { to: `/${slug}/postguard`, labelKey: "nav.postguard", icon: "lock" },
-  ];
+  );
   if (showSigning) {
     items.push({
       to: `/${slug}/signing`,
@@ -119,15 +131,21 @@ export function Sidebar({
     activeSlug !== undefined,
   );
   const showSigning = Boolean(signing.data?.available);
-  const navItems = activeSlug
-    ? orgNavItems(activeSlug, showSigning)
-    : me.isPlatformAdmin
-      ? ADMIN_NAV_ITEMS
-      : [];
 
   // Platform admins outrank any single org; otherwise show the membership role
   // for the org currently in the URL.
   const activeOrg = useOrganizationQuery(activeSlug ?? "");
+  // "VOG screening" appears only once the org's policy actually applies to the
+  // caller - absent for an org that has never turned screening on for anyone.
+  const showVog = Boolean(
+    activeOrg.data?.vog && activeOrg.data.vog.status !== "not_required",
+  );
+  const navItems = activeSlug
+    ? orgNavItems(activeSlug, showSigning, showVog)
+    : me.isPlatformAdmin
+      ? ADMIN_NAV_ITEMS
+      : [];
+
   const roleLabel = me.isPlatformAdmin
     ? t("nav.platformAdmin")
     : activeOrg.data?.role;

@@ -59,7 +59,9 @@ func NewEncryptionKey() (*ecdsa.PrivateKey, error) {
 }
 
 // SimpleDCQL builds a single-credential DCQL query for vct asking for the given
-// top-level claims (all of them when claims is empty).
+// top-level claims. With no claims the "claims" member is omitted, which per
+// OpenID4VP 1.0 §6.4.1 requests no selectively disclosable claims at all: the
+// wallet then presents only the credential's signed envelope and key binding.
 func SimpleDCQL(queryID, vct string, claims []string) (json.RawMessage, error) {
 	cred := map[string]any{
 		"id":     queryID,

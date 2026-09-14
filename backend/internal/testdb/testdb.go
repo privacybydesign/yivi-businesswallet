@@ -43,6 +43,30 @@ var dbCounter atomic.Int64
 func Fresh(t *testing.T) (*pgxpool.Pool, string) {
 	t.Helper()
 
+	ctx := context.Background()
+	dsn := Bare(t)
+
+	if err := migrate.Up(ctx, dsn); err != nil {
+		t.Fatalf("testdb: migrate %q: %v", dsn, err)
+	}
+
+	pool, err := database.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("testdb: pool %q: %v", dsn, err)
+	}
+
+	t.Cleanup(pool.Close)
+
+	return pool, dsn
+}
+
+// Bare creates a uniquely-named, empty database on the server pointed at by
+// TEST_DATABASE_URL and returns its DSN without applying any migration, for
+// tests that exercise the migration history itself. The database is dropped via
+// t.Cleanup. When TEST_DATABASE_URL is unset the test is skipped.
+func Bare(t *testing.T) string {
+	t.Helper()
+
 	adminDSN := os.Getenv(envTestDatabaseURL)
 	if adminDSN == "" {
 		t.Skipf("set %s to run integration tests", envTestDatabaseURL)
@@ -52,27 +76,13 @@ func Fresh(t *testing.T) (*pgxpool.Pool, string) {
 	ctx := context.Background()
 
 	createDatabase(t, ctx, adminDSN, name)
+	t.Cleanup(func() { dropDatabase(t, adminDSN, name) })
 
 	dsn, err := withDatabase(adminDSN, name)
 	if err != nil {
 		t.Fatalf("testdb: build dsn: %v", err)
 	}
-
-	if err := migrate.Up(ctx, dsn); err != nil {
-		t.Fatalf("testdb: migrate %q: %v", name, err)
-	}
-
-	pool, err := database.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("testdb: pool %q: %v", name, err)
-	}
-
-	t.Cleanup(func() {
-		pool.Close()
-		dropDatabase(t, adminDSN, name)
-	})
-
-	return pool, dsn
+	return dsn
 }
 
 func createDatabase(t *testing.T, ctx context.Context, adminDSN, name string) {

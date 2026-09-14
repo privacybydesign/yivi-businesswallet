@@ -42,8 +42,8 @@ function lookup(locale: unknown, key: string): unknown {
 }
 
 describe("settings tab layout", () => {
-  it("has eleven top-level tabs", () => {
-    expect(SETTINGS_TABS).toHaveLength(11);
+  it("has twelve top-level tabs", () => {
+    expect(SETTINGS_TABS).toHaveLength(12);
   });
 
   it("keeps the communication panels out of the top-level row", () => {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -50,6 +51,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/teamschannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/vog"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wscawallet"
@@ -64,6 +66,11 @@ const (
 
 	qerdsProbeTimeout = 10 * time.Second
 	qerdsHTTPTimeout  = 30 * time.Second
+
+	vogProbeTimeout = 10 * time.Second
+	// validatie.nl retries internally up to three times with backoff (#242); the
+	// client timeout has to outlast that whole sequence, not one attempt.
+	vogHTTPTimeout = 2 * time.Minute
 
 	issuerProbeTimeout = 10 * time.Second
 	issuerHTTPTimeout  = 15 * time.Second
@@ -131,6 +138,24 @@ func newRegistryProvider(cfg config.Config, db database.DB, recorder audit.Recor
 		return registryprovider.NewSeededRegistry(db, recorder), nil
 	default:
 		return nil, fmt.Errorf("wallet registry provider %q is not implemented", cfg.WalletRegistryProvider)
+	}
+}
+
+// vogValidatorProvider is the boot-time VOG-validator surface: the readiness
+// probe plus the operation the screening service uses. Chosen by config.
+type vogValidatorProvider interface {
+	Ping(context.Context) error
+	Validate(ctx context.Context, pdf []byte) (vog.ResponseCode, error)
+}
+
+func newVogValidatorProvider(cfg config.Config) (vogValidatorProvider, error) {
+	switch cfg.VogValidatorProvider {
+	case config.ProviderStub:
+		return vog.StubValidator{Code: vog.ResponseAuthentic}, nil
+	case config.ProviderValidatieNL:
+		return vog.NewHTTPClient(cfg.VogValidatorURL, &http.Client{Timeout: vogHTTPTimeout}), nil
+	default:
+		return nil, fmt.Errorf("vog validator provider %q is not implemented", cfg.VogValidatorProvider)
 	}
 }
 
@@ -386,15 +411,40 @@ func run() error {
 		mailoauth.NewMicrosoft(&http.Client{Timeout: mailOAuthHTTPTimeout}),
 		mailBranding{theme: themeSettingsStore}, mailLocale)
 
+	// Member screening / VOG (#242): validatie.nl real-time PDF check.
+	vogValidator, err := newVogValidatorProvider(cfg)
+	if err != nil {
+		return err
+	}
+	// Fatal readiness gate, mirroring every other provider: fail at boot if the
+	// configured VOG validator will not accept our requests.
+	vogProbeCtx, vogProbeCancel := context.WithTimeout(ctx, vogProbeTimeout)
+	defer vogProbeCancel()
+	if err := vogValidator.Ping(vogProbeCtx); err != nil {
+		return fmt.Errorf("vog validator ping: %w", err)
+	}
+	var vogReferenceHashKey []byte
+	if cfg.VogReferenceHashKey != "" {
+		vogReferenceHashKey, err = hex.DecodeString(cfg.VogReferenceHashKey)
+		if err != nil {
+			return fmt.Errorf("VOG_REFERENCE_HASH_KEY must be hex-encoded: %w", err)
+		}
+	}
+	screeningService := organization.NewScreeningService(orgStore, vogValidator, authService, vogReferenceHashKey)
+
 	// The export store is built here rather than beside the rest of the export
 	// wiring: terminating an organisation queues the bundle it owes in the same
 	// transaction, so the org handler needs it.
 	exportStore := export.NewStore(pool, recorder)
-	orgHandler := organization.NewHandler(orgStore, orgService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins, exportStore)
+	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins, exportStore)
 
 	// Daily re-identification reminder sweep (#240 §6): mails members whose
 	// identity is due soon or overdue, per each org's own policy.
 	organization.NewIdentityScheduler(orgStore, emailService, cfg.AppBaseURL).Start(ctx, organization.DefaultIdentityScheduleInterval)
+
+	// Daily VOG reminder sweep (#242 §6): mails members whose VOG is expiring
+	// soon or has expired, per each org's own screening policy.
+	organization.NewScreeningScheduler(orgStore, emailService, cfg.AppBaseURL).Start(ctx, organization.DefaultScreeningScheduleInterval)
 
 	qerdsProv, err := newQerdsProvider(cfg)
 	if err != nil {

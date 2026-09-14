@@ -20,7 +20,8 @@
     "exportExpiry": "24 hours",
     "reidentifyUrl": "https://wallet.example.org/reidentify/sample",
     "dueDate": "2026-08-01",
-    "reason": "Your last identity check has expired."
+    "reason": "Your last identity check has expired.",
+    "vogUrl": "https://wallet.example.org/acme/vog"
   },
   "events": {
     "membership.invited": "Invited member",
@@ -35,6 +36,10 @@
     "membership.identity_reverified": "Re-confirmed identity",
     "membership.identity_reminder_sent": "Sent identity reminder",
     "membership.identity_overdue": "Identity confirmation overdue",
+    "membership.vog_requested": "Requested VOG screening",
+    "membership.vog_checked": "VOG screening passed",
+    "membership.vog_reminder_sent": "Sent VOG reminder",
+    "membership.vog_expired": "VOG expired",
     "wallet.bootstrapped": "Bootstrapped wallet",
     "wallet.suspended": "Suspended wallet",
     "wallet.revoked": "Revoked wallet",
@@ -292,6 +297,36 @@
         { "type": "heading", "text": "{{orgName}} asks you to re-confirm your identity" },
         { "type": "paragraph", "text": "{{reason}}" },
         { "type": "button", "label": "Re-confirm my identity", "url": "{{reidentifyUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "vog_requested": {
+      "subject": "{{orgName}} asks for your certificate of conduct (VOG)",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} asks for your certificate of conduct (VOG)" },
+        { "type": "paragraph", "text": "{{reason}}" },
+        { "type": "button", "label": "Upload my VOG", "url": "{{vogUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "vog_reminder": {
+      "subject": "Your VOG at {{orgName}} is expiring soon",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Your VOG is expiring soon" },
+        { "type": "paragraph", "text": "Your certificate of conduct for {{orgName}} is valid until {{dueDate}}. Upload a new one before then." },
+        { "type": "button", "label": "Upload my VOG", "url": "{{vogUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "vog_expired": {
+      "subject": "Your VOG at {{orgName}} has expired",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Your VOG has expired" },
+        { "type": "paragraph", "text": "Your certificate of conduct for {{orgName}} expired on {{dueDate}}. Please upload a new one." },
+        { "type": "button", "label": "Upload my VOG", "url": "{{vogUrl}}" },
         { "type": "footer" }
       ]
     }

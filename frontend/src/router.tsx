@@ -22,6 +22,7 @@ import Enroll from "./routes/enroll";
 import IdentityReviews from "./routes/identity-reviews";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
+import Vog from "./routes/vog";
 import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
 import MemberEdit from "./routes/member-edit";
@@ -58,6 +59,7 @@ const orgCrumb: RouteHandle = {
   },
 };
 const membersCrumb: RouteHandle = { crumb: ({ t }) => t("members.title") };
+const vogCrumb: RouteHandle = { crumb: ({ t }) => t("vog.title") };
 const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
 const memberCrumb: RouteHandle = {
   crumb: ({ params, queryClient, t }: CrumbContext) => {
@@ -161,6 +163,11 @@ export const router = createBrowserRouter([
                 handle: orgCrumb,
                 children: [
                   { index: true, Component: Dashboard },
+                  {
+                    path: "vog",
+                    Component: Vog,
+                    handle: vogCrumb,
+                  },
                   {
                     path: "members",
                     handle: membersCrumb,

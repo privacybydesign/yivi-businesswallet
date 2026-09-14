@@ -58,6 +58,18 @@ const (
 
 	envWalletRegistryProvider = "WALLET_REGISTRY_PROVIDER"
 
+	// VOG screening (#242): validatie.nl real-time document check. The URL
+	// defaults to the production GAAV endpoint - there is no staging instance to
+	// point at instead, so a deployment that wants the real check opts in
+	// explicitly via VogValidatorProvider rather than by an environment default.
+	envVogValidatorProvider = "VOG_VALIDATOR_PROVIDER"
+	envVogValidatorURL      = "VOG_VALIDATOR_URL"
+	// VogReferenceHashKey keys the HMAC that turns a VOG's kenmerk into a
+	// reuse-detection hash before it is stored (#242's data-minimisation design).
+	// Optional: empty means a screening record is written with no reference hash
+	// at all, never an unkeyed one.
+	envVogReferenceHashKey = "VOG_REFERENCE_HASH_KEY"
+
 	// Attestation issuance (OpenID4VCI). The hosted Veramo issuer is addressed per
 	// instance and authenticated with a Bearer admin token; the ping credential is
 	// offered by the boot probe to validate URL + token + a configured credential.
@@ -230,6 +242,13 @@ const (
 	// The wallet-bootstrap registry (KVK) provider. Reuses ProviderStub ("stub").
 	defaultWalletRegistryProvider = ProviderStub
 
+	// ProviderValidatieNL selects the real validatie.nl HTTP client for VOG
+	// screening; ProviderStub (shared with every other provider) is the
+	// dev/CI default.
+	ProviderValidatieNL         = "validatie_nl"
+	defaultVogValidatorProvider = ProviderStub
+	defaultVogValidatorURL      = "https://validatie.nl/api/valideer/"
+
 	defaultQerdsDomibusFromParty   = "domibus-blue"
 	defaultQerdsDomibusToParty     = "domibus-red"
 	defaultQerdsDomibusPartyType   = "urn:oasis:names:tc:ebcore:partyid-type:unregistered"
@@ -309,6 +328,10 @@ type Config struct {
 	QerdsDomibusAction      string
 
 	WalletRegistryProvider string
+
+	VogValidatorProvider string
+	VogValidatorURL      string
+	VogReferenceHashKey  string
 
 	AttestationIssuer         string
 	AttestationIssuerURL      string
@@ -457,6 +480,12 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envQerdsProviderURL, envQerdsProvider, ProviderStub)
 	}
 
+	vogValidatorProvider := envOrDefault(envVogValidatorProvider, defaultVogValidatorProvider)
+	if vogValidatorProvider != ProviderStub && vogValidatorProvider != ProviderValidatieNL {
+		return Config{}, fmt.Errorf("config: %s must be %q or %q", envVogValidatorProvider, ProviderStub, ProviderValidatieNL)
+	}
+	vogValidatorURL := envOrDefault(envVogValidatorURL, defaultVogValidatorURL)
+
 	attestationIssuer := envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
 	attestationIssuerURL := os.Getenv(envAttestationIssuerURL)
 	attestationIssuerInstance := os.Getenv(envAttestationIssuerInstance)
@@ -551,6 +580,10 @@ func Load() (Config, error) {
 		QerdsDomibusAction:      envOrDefault(envQerdsDomibusAction, defaultQerdsDomibusAction),
 
 		WalletRegistryProvider: envOrDefault(envWalletRegistryProvider, defaultWalletRegistryProvider),
+
+		VogValidatorProvider: vogValidatorProvider,
+		VogValidatorURL:      vogValidatorURL,
+		VogReferenceHashKey:  os.Getenv(envVogReferenceHashKey),
 
 		AttestationIssuer:         attestationIssuer,
 		AttestationIssuerURL:      attestationIssuerURL,

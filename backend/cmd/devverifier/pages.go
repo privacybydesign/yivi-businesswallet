@@ -19,8 +19,8 @@ for, open the link on the next page, sign in to the wallet and choose the organi
 <form method="post" action="/sessions">
 <label for="vct">Credential type (vct)</label>
 <input id="vct" name="vct" value="{{.DefaultVCT}}" required>
-<label for="claims">Claims to disclose (comma-separated, empty = all)</label>
-<input id="claims" name="claims" placeholder="company_name, kvk_number">
+<label for="claims">Claims to disclose (comma-separated, empty = none: the wallet only proves it holds the credential)</label>
+<input id="claims" name="claims" placeholder="legalName, kvkNumber">
 <label for="response_mode">Response mode</label>
 <select id="response_mode" name="response_mode">
 <option value="direct_post">direct_post</option>

@@ -16,6 +16,7 @@ import { EmailSettingsPanel } from "./email-settings";
 import { ExportSettingsPanel } from "./export-settings";
 import { EmailTemplatesPanel } from "./email-templates";
 import { IdentitySettingsPanel } from "./identity-settings";
+import { ScreeningSettingsPanel } from "./screening-settings";
 import { IssuerSettingsPanel } from "./issuer-settings";
 import { MandateSettings } from "./mandate-settings";
 import { NotificationsSettingsPanel } from "./notifications-settings";
@@ -108,6 +109,8 @@ export default function Settings(): React.JSX.Element {
           <MandateSettings slug={slug} />
         ) : tab === "identity" ? (
           <IdentitySettingsPanel slug={slug} />
+        ) : tab === "screening" ? (
+          <ScreeningSettingsPanel slug={slug} />
         ) : tab === "branding" ? (
           <ThemeSettingsPanel slug={slug} />
         ) : tab === COMMUNICATION_TAB ? (

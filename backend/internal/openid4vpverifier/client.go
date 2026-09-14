@@ -60,15 +60,18 @@ type startRequest struct {
 
 // StartPresentation creates a presentation request at the verifier for the given
 // scope and returns the wallet deeplink plus the transaction id to poll. The
-// nonce is random per request (never a fixed value).
-func (c *Client) StartPresentation(ctx context.Context, scope Scope) (Session, error) {
+// nonce is random per request (never a fixed value). claims is extra,
+// scope-specific claim names (currently only meaningful for ScopeVog, whose
+// aspect-flag claims are chosen per org - see queryFor); every other scope
+// ignores it.
+func (c *Client) StartPresentation(ctx context.Context, scope Scope, claims ...string) (Session, error) {
 	nonce, err := randomNonce()
 	if err != nil {
 		return Session{}, err
 	}
 	body, err := json.Marshal(startRequest{
 		Type:                    "vp_token",
-		DCQLQuery:               queryFor(scope),
+		DCQLQuery:               queryFor(scope, claims),
 		Nonce:                   nonce,
 		JARMode:                 "by_reference",
 		RequestURIMethod:        requestURIMethodGet,

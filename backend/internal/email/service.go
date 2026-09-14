@@ -232,6 +232,39 @@ func (s *Service) SendIdentityRequested(ctx context.Context, orgID uuid.UUID, to
 	})
 }
 
+// SendVogRequested tells a member an admin has requested their VOG screening,
+// linking into the app (a member being screened already has an account, unlike
+// an invitee, so this is not a bearer-token link). reason may be empty, in
+// which case the template's reason paragraph drops out. Returns
+// ErrNotConfigured when the org has no usable SMTP settings.
+func (s *Service) SendVogRequested(ctx context.Context, orgID uuid.UUID, to, orgName, vogURL, reason string) error {
+	return s.send(ctx, orgID, KindVogRequested, []string{to}, map[string]string{
+		varOrgName: orgName,
+		varVogURL:  vogURL,
+		varReason:  reason,
+	})
+}
+
+// SendVogReminder tells a member their VOG is expiring soon, linking into the
+// app. Returns ErrNotConfigured when the org has no usable SMTP settings.
+func (s *Service) SendVogReminder(ctx context.Context, orgID uuid.UUID, to, orgName, vogURL, dueDate string) error {
+	return s.send(ctx, orgID, KindVogReminder, []string{to}, map[string]string{
+		varOrgName: orgName,
+		varVogURL:  vogURL,
+		varDueDate: dueDate,
+	})
+}
+
+// SendVogExpired tells a member their VOG has expired, linking into the app.
+// Returns ErrNotConfigured when the org has no usable SMTP settings.
+func (s *Service) SendVogExpired(ctx context.Context, orgID uuid.UUID, to, orgName, vogURL, dueDate string) error {
+	return s.send(ctx, orgID, KindVogExpired, []string{to}, map[string]string{
+		varOrgName: orgName,
+		varVogURL:  vogURL,
+		varDueDate: dueDate,
+	})
+}
+
 // SendSpecimen sends a sample of one kind to a single address, rendered from the
 // org's own template (or the shipped default) with the kind's sample variables, so
 // an admin can check a real, fully branded message of that cause against their own

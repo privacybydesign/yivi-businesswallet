@@ -13,6 +13,7 @@ import type {
 } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
+  completeVogCredential,
   createDepartment,
   deleteDepartment,
   deleteOrganization,
@@ -25,17 +26,22 @@ import {
   getOrganizationMember,
   getOrganizationMembers,
   getOrganizations,
+  getScreeningHistory,
+  getScreeningSettings,
   inviteMember,
   mintOwnReidentifyLink,
   removeMember,
   requestIdentification,
+  requestVog,
   resendInvitation,
   revokeInvitation,
   saveIdentitySettings,
+  saveScreeningSettings,
   updateDepartment,
   updateMemberType,
   updateOrganization,
   updateOrganizationMember,
+  uploadVog,
 } from "./organization";
 import type {
   AuditEventsPage,
@@ -49,6 +55,11 @@ import type {
   Organization,
   OrganizationDetail,
   RequestIdentificationResult,
+  RequestVogResult,
+  ScreeningRecord,
+  ScreeningSettings,
+  ScreeningSettingsInput,
+  UploadVogResult,
 } from "./organization";
 import { toast } from "../lib/toast";
 
@@ -520,5 +531,154 @@ export function useMintOwnReidentifyLinkMutation(
   return useMutation({
     mutationFn: () => mintOwnReidentifyLink(slug),
     meta: { suppressErrorToast: true },
+  });
+}
+
+// --- Member screening / VOG (#242) ---
+
+export function screeningSettingsQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "screening-settings"];
+}
+
+export function useScreeningSettingsQuery(
+  slug: string,
+  enabled: boolean,
+): UseQueryResult<ScreeningSettings, Error> {
+  return useQuery({
+    queryKey: screeningSettingsQueryKey(slug),
+    queryFn: ({ signal }) => getScreeningSettings(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+// Saving the policy recomputes every member's VOG expiry server-side, so the
+// member list and detail caches are invalidated alongside the settings.
+export function useSaveScreeningSettingsMutation(
+  slug: string,
+): UseMutationResult<ScreeningSettings, Error, ScreeningSettingsInput> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (input) => saveScreeningSettings(slug, input),
+    meta: { suppressErrorToast: true },
+    onSuccess: (settings) => {
+      toast.success(t("toasts.screeningSettingsSaved"));
+      queryClient.setQueryData(screeningSettingsQueryKey(slug), settings);
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useRequestVogMutation(
+  slug: string,
+): UseMutationResult<
+  RequestVogResult,
+  Error,
+  { userIds: string[]; reason?: string }
+> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ userIds, reason }) => requestVog(slug, userIds, reason),
+    meta: { suppressErrorToast: true },
+    onSuccess: (result, { userIds }) => {
+      toast.success(t("toasts.vogRequested", { count: result.requested }));
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      for (const userId of userIds) {
+        void queryClient.invalidateQueries({
+          queryKey: organizationMemberQueryKey(slug, userId),
+        });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+// useUploadVogMutation backs both the member's own upload and an admin's
+// upload on a member's behalf (userId set). A rejection is a successful
+// response (result !== "valid"), not a thrown error, so onSuccess always
+// invalidates - the point of uploading is exactly that the status may have
+// changed.
+export function useUploadVogMutation(
+  slug: string,
+  userId?: string,
+): UseMutationResult<UploadVogResult, Error, File> {
+  const queryClient = useQueryClient();
+  const invalidate = (id?: string): void => {
+    void queryClient.invalidateQueries({
+      queryKey: organizationMembersQueryKey(slug),
+    });
+    if (id) {
+      void queryClient.invalidateQueries({
+        queryKey: organizationMemberQueryKey(slug, id),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: screeningHistoryQueryKey(slug, id),
+      });
+    }
+    void queryClient.invalidateQueries({
+      queryKey: organizationQueryKey(slug),
+    });
+    void queryClient.invalidateQueries({
+      queryKey: organizationAuditEventsQueryKey(slug),
+    });
+  };
+  return useMutation({
+    mutationFn: (file) => uploadVog(slug, file, userId),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => invalidate(userId),
+  });
+}
+
+export function screeningHistoryQueryKey(
+  slug: string,
+  userId: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "members", userId, "vog-history"];
+}
+
+export function useScreeningHistoryQuery(
+  slug: string,
+  userId: string,
+  enabled: boolean,
+): UseQueryResult<ScreeningRecord[], Error> {
+  return useQuery({
+    queryKey: screeningHistoryQueryKey(slug, userId),
+    queryFn: ({ signal }) => getScreeningHistory(slug, userId, signal),
+    enabled: enabled && slug !== "" && userId !== "",
+  });
+}
+
+// The member's own pbdf.vog credential disclosure completion. Starting the
+// session is handled by IdentityDisclosure itself (vogCredentialSessionUrl);
+// this only finishes it once the wallet has disclosed.
+export function useCompleteVogCredentialMutation(
+  slug: string,
+): UseMutationResult<UploadVogResult, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (disclosureToken) =>
+      completeVogCredential(slug, disclosureToken),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
   });
 }
