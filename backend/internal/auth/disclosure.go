@@ -71,12 +71,13 @@ type DisclosedVog struct {
 // read back.
 func extractVog(res openid4vpverifier.Presentation, requiredAspectCodes []string) (DisclosedVog, error) {
 	given := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimVogGivenNames])
-	surname := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimVogSurname])
+	rawSurname := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimVogSurname])
+	surname := rawSurname
 	if prefix := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimVogPrefix]); prefix != "" {
 		surname = prefix + " " + surname
 	}
 	dateOfBirth := strings.TrimSpace(res.Claims[openid4vpverifier.ClaimVogDateOfBirth])
-	if given == "" || surname == "" || dateOfBirth == "" {
+	if given == "" || rawSurname == "" || dateOfBirth == "" {
 		return DisclosedVog{}, errDisclosureInvalid
 	}
 	issueDate, err := time.Parse("2006-01-02", strings.TrimSpace(res.Claims[openid4vpverifier.ClaimVogIssueDate]))
