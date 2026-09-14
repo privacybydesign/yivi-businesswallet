@@ -103,6 +103,54 @@ func TestQueryForScope(t *testing.T) {
 	if got := len(queryFor(ScopeVog, []string{"aspect11", "aspect43"}).Credentials[0].Claims); got != 7 {
 		t.Errorf("ScopeVog claims = %d, want 7 (5 core fields + 2 requested aspects)", got)
 	}
+	combined := queryFor(ScopeIdentityVog, []string{"aspect11", "aspect43"})
+	if got := len(combined.Credentials); got != 5 {
+		t.Errorf("ScopeIdentityVog credentials = %d, want 5 (identity's 4 + vog)", got)
+	}
+	// Four independent sets: passport-or-idcard, email, phone, vog - the VOG is
+	// required, not optional, in the combined presentation.
+	if got := len(combined.CredentialSets); got != 4 {
+		t.Errorf("ScopeIdentityVog credential sets = %d, want 4", got)
+	}
+	last := combined.Credentials[len(combined.Credentials)-1]
+	if last.ID != credIDVog || len(last.Claims) != 7 {
+		t.Errorf("ScopeIdentityVog's last credential = %+v, want vog with 7 claims", last)
+	}
+}
+
+// A combined presentation carries a dateOfBirth from the identity credential
+// and one from pbdf.vog; the per-credential views keep them apart where the
+// flattened map cannot.
+func TestPresentationKeepsCredentialClaimsApart(t *testing.T) {
+	p := Presentation{
+		Claims: map[string]string{ClaimDateOfBirth: "1980-01-02"},
+		ByCredential: map[string]map[string]string{
+			credIDPassport: {ClaimGivenNames: "Anna", ClaimDateOfBirth: "1980-01-02"},
+			credIDEmail:    {ClaimEmail: "anna@example.test"},
+			credIDVog:      {ClaimVogGivenNames: "Anna", ClaimVogDateOfBirth: "1999-12-31"},
+		},
+	}
+	if got := p.IdentityClaims()[ClaimDateOfBirth]; got != "1980-01-02" {
+		t.Errorf("IdentityClaims dateOfBirth = %q, want the passport's", got)
+	}
+	if got := p.IdentityClaims()[ClaimEmail]; got != "anna@example.test" {
+		t.Errorf("IdentityClaims email = %q, want the email credential's", got)
+	}
+	if got := p.VogClaims()[ClaimVogDateOfBirth]; got != "1999-12-31" {
+		t.Errorf("VogClaims dateOfBirth = %q, want the vog credential's", got)
+	}
+	if _, leaked := p.VogClaims()[ClaimGivenNames]; leaked {
+		t.Error("VogClaims carries an identity-credential claim")
+	}
+
+	// Without per-credential detail both views fall back to the flat map.
+	flat := Presentation{Claims: map[string]string{ClaimDateOfBirth: "1980-01-02"}}
+	if got := flat.IdentityClaims()[ClaimDateOfBirth]; got != "1980-01-02" {
+		t.Errorf("flat IdentityClaims dateOfBirth = %q", got)
+	}
+	if got := flat.VogClaims()[ClaimDateOfBirth]; got != "1980-01-02" {
+		t.Errorf("flat VogClaims dateOfBirth = %q", got)
+	}
 }
 
 // startBody runs one StartPresentation against a stub verifier and returns the

@@ -412,7 +412,18 @@ func run() error {
 			return fmt.Errorf("VOG_REFERENCE_HASH_KEY must be hex-encoded: %w", err)
 		}
 	}
-	screeningService := organization.NewScreeningService(orgStore, vogValidator, authService, vogReferenceHashKey)
+	// The VOG PDF parser is a PDFium WebAssembly pool; compiling the module
+	// takes seconds, so it is built once here rather than per upload.
+	vogParser, err := vog.NewPDFiumParser()
+	if err != nil {
+		return fmt.Errorf("vog parser: %w", err)
+	}
+	defer func() {
+		if err := vogParser.Close(); err != nil {
+			slog.Error("close vog parser", slog.String("error", err.Error()))
+		}
+	}()
+	screeningService := organization.NewScreeningService(orgStore, vogValidator, vogParser, authService, orgService, vogReferenceHashKey)
 
 	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins)
 

@@ -409,9 +409,17 @@ export const en = {
     title: "VOG screening",
     subtitle:
       "{{org}} asks its members to hold a valid certificate of conduct (VOG).",
-    noDateOfBirth:
-      "Confirm your identity first - a VOG check matches your date of birth on file.",
-    goToReidentify: "Confirm my identity",
+    identity: {
+      heading: "Confirm your identity first",
+      hint: "A VOG check matches the name and date of birth on the document against your identity, and {{org}} has no verified identity for you yet. Scan the code with your wallet to confirm who you are; you can upload your VOG right after.",
+      start: "Confirm my identity",
+      completing: "Recording your identity…",
+      combinedHeading: "Or do both in one go",
+      combinedHint:
+        "{{org}} also accepts the pbdf.vog credential. Disclose your identity and your VOG from your wallet in a single scan.",
+      combinedStart: "Confirm identity and share VOG",
+      combinedDone: "Your identity is confirmed and your VOG has been checked",
+    },
     upload: {
       heading: "Upload your VOG",
       hint: "Checked live against validatie.nl and matched against your identity on file. The PDF itself is never stored - only the outcome is.",
@@ -458,6 +466,19 @@ export const en = {
     stats: {
       attestations: "Attestations issued",
       documents: "Documents to sign",
+    },
+    insights: {
+      title: "Members",
+      members: "Members",
+      notIdentified: "Not identified",
+      notIdentifiedHint: "Never identified, overdue or asked to identify",
+      vogAttention: "VOG needs attention",
+      vogAttentionHint: "Missing, requested, rejected, expired or to be redone",
+      vogNotRequired: "No VOG required by your policy",
+      identityBar: "Identity status",
+      screeningBar: "VOG status",
+      empty: "No members yet.",
+      error: "Could not load member insights: {{message}}",
     },
     details: "Details",
     id: "ID",

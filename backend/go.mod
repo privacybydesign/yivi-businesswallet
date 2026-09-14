@@ -10,6 +10,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/klippa-app/go-pdfium v1.19.8
 	github.com/lestrrat-go/jwx/v3 v3.1.1
 	github.com/pressly/goose/v3 v3.27.1
 	golang.org/x/image v0.45.0
