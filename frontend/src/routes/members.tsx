@@ -4,6 +4,7 @@ import {
   useOrganizationMembersQuery,
   useOrganizationQuery,
   useRequestIdentificationMutation,
+  useRequestVogMutation,
   useResendInvitationMutation,
   useRevokeInvitationMutation,
 } from "../api/organization.queries";
@@ -16,6 +17,12 @@ import {
   identityStatusTone,
   requestableIdentity,
 } from "../lib/identity-status";
+import {
+  requestableVog,
+  screeningStatusHint,
+  screeningStatusLabel,
+  screeningStatusTone,
+} from "../lib/screening-status";
 import { fullName, personInitials } from "../lib/name";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { Avatar, Button, Card, Icon, Input, Table, Tag, TopBar } from "../ui";
@@ -135,10 +142,11 @@ export default function Members(): React.JSX.Element {
   const resend = useResendInvitationMutation(slug);
   const revoke = useRevokeInvitationMutation(slug);
   const requestIdentification = useRequestIdentificationMutation(slug);
+  const requestVog = useRequestVogMutation(slug);
 
-  // The bulk "request identification" selection, by user id. It is deliberately
-  // page-local: it clears when the page, filter or search changes, so a request
-  // never reaches a member the admin can no longer see.
+  // The bulk selection, by user id. It is deliberately page-local: it clears
+  // when the page, filter or search changes, so a request never reaches a
+  // member the admin can no longer see.
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -148,12 +156,24 @@ export default function Members(): React.JSX.Element {
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const filtered = status !== "" || q !== "";
 
-  // Only an active member with no outstanding request can be asked, so the
-  // selection is built from exactly those rows.
-  const selectableIds = entries
+  // A row is selectable if either bulk action applies to it; each action then
+  // narrows the selection down to its own applicable subset when it runs, so a
+  // mixed selection does not send "request VOG" to a member for whom VOG is
+  // not required.
+  const identitySelectableIds = entries
     .filter((entry) => entry.userId !== null && requestableIdentity(entry))
     .map((entry) => entry.userId!);
+  const vogSelectableIds = entries
+    .filter((entry) => entry.userId !== null && requestableVog(entry))
+    .map((entry) => entry.userId!);
+  const selectableIds = [
+    ...new Set([...identitySelectableIds, ...vogSelectableIds]),
+  ];
   const selectedIds = selectableIds.filter((id) => selected.has(id));
+  const identitySelectedIds = identitySelectableIds.filter((id) =>
+    selected.has(id),
+  );
+  const vogSelectedIds = vogSelectableIds.filter((id) => selected.has(id));
   const allSelected =
     selectableIds.length > 0 && selectedIds.length === selectableIds.length;
 
@@ -172,10 +192,18 @@ export default function Members(): React.JSX.Element {
     setSelected(allSelected ? new Set() : new Set(selectableIds));
   };
 
-  const requestSelected = (): void => {
-    if (selectedIds.length === 0) return;
+  const requestIdentificationSelected = (): void => {
+    if (identitySelectedIds.length === 0) return;
     requestIdentification.mutate(
-      { userIds: selectedIds },
+      { userIds: identitySelectedIds },
+      { onSuccess: clearSelection },
+    );
+  };
+
+  const requestVogSelected = (): void => {
+    if (vogSelectedIds.length === 0) return;
+    requestVog.mutate(
+      { userIds: vogSelectedIds },
       { onSuccess: clearSelection },
     );
   };
@@ -315,15 +343,28 @@ export default function Members(): React.JSX.Element {
                   <span className="text-ink-soft text-[12px] whitespace-nowrap">
                     {t("members.selectedCount", { count: selectedIds.length })}
                   </span>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    icon="personal"
-                    loading={requestIdentification.isPending}
-                    onClick={requestSelected}
-                  >
-                    {t("members.requestIdentification")}
-                  </Button>
+                  {identitySelectedIds.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon="personal"
+                      loading={requestIdentification.isPending}
+                      onClick={requestIdentificationSelected}
+                    >
+                      {t("members.requestIdentification")}
+                    </Button>
+                  )}
+                  {vogSelectedIds.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon="valid"
+                      loading={requestVog.isPending}
+                      onClick={requestVogSelected}
+                    >
+                      {t("members.requestVog")}
+                    </Button>
+                  )}
                   <Button variant="ghost" size="sm" onClick={clearSelection}>
                     {t("members.clearSelection")}
                   </Button>
@@ -423,7 +464,8 @@ export default function Members(): React.JSX.Element {
                           onClick={(event) => event.stopPropagation()}
                         >
                           {member.userId !== null &&
-                            requestableIdentity(member) && (
+                            (requestableIdentity(member) ||
+                              requestableVog(member)) && (
                               <input
                                 type="checkbox"
                                 checked={selected.has(member.userId)}
@@ -484,6 +526,13 @@ export default function Members(): React.JSX.Element {
                                 formatDate={formatDate}
                               />
                             )}
+                            {!pending &&
+                              member.vogStatus !== "not_required" && (
+                                <VogTag
+                                  member={member}
+                                  formatDate={formatDate}
+                                />
+                              )}
                           </div>
                         </Table.Cell>
                         <Table.Cell>
@@ -587,6 +636,26 @@ function IdentityTag({
       title={identityStatusHint(member, t, formatDate) || undefined}
     >
       {identityStatusLabel(member.identityStatus, t)}
+    </Tag>
+  );
+}
+
+// VogTag mirrors IdentityTag for the member's VOG screening status; shown only
+// when the org's policy requires one from this member (see the call site).
+function VogTag({
+  member,
+  formatDate,
+}: {
+  member: MemberListEntry;
+  formatDate: (iso: string) => string;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <Tag
+      tone={screeningStatusTone(member.vogStatus)}
+      title={screeningStatusHint(member, t, formatDate) || undefined}
+    >
+      {screeningStatusLabel(member.vogStatus, t)}
     </Tag>
   );
 }

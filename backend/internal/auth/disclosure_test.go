@@ -3,7 +3,9 @@ package auth
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
@@ -145,6 +147,85 @@ func TestExtractIdentity(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("identity = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractVog(t *testing.T) {
+	tests := []struct {
+		name    string
+		claims  map[string]string
+		want    DisclosedVog
+		wantErr error
+	}{
+		{
+			name: "full disclosure yields identity and requested aspects",
+			claims: map[string]string{
+				openid4vpverifier.ClaimVogGivenNames:   "José",
+				openid4vpverifier.ClaimVogSurname:      "Berg",
+				openid4vpverifier.ClaimVogPrefix:       "van der",
+				openid4vpverifier.ClaimVogDateOfBirth:  "1980-01-02",
+				openid4vpverifier.ClaimVogIssueDate:    "2024-05-01",
+				openid4vpverifier.VogAspectClaim("11"): "yes",
+				openid4vpverifier.VogAspectClaim("22"): "no",
+			},
+			want: DisclosedVog{
+				GivenNames:  "José",
+				Surname:     "van der Berg",
+				DateOfBirth: "1980-01-02",
+				IssueDate:   time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC),
+				AspectCodes: []string{"11"},
+			},
+		},
+		{
+			name: "empty surname with non-empty prefix -> invalid, not a garbled name",
+			claims: map[string]string{
+				openid4vpverifier.ClaimVogGivenNames:  "José",
+				openid4vpverifier.ClaimVogSurname:     "",
+				openid4vpverifier.ClaimVogPrefix:      "van der",
+				openid4vpverifier.ClaimVogDateOfBirth: "1980-01-02",
+				openid4vpverifier.ClaimVogIssueDate:   "2024-05-01",
+			},
+			wantErr: errDisclosureInvalid,
+		},
+		{
+			name: "missing given names -> invalid",
+			claims: map[string]string{
+				openid4vpverifier.ClaimVogSurname:     "Berg",
+				openid4vpverifier.ClaimVogDateOfBirth: "1980-01-02",
+				openid4vpverifier.ClaimVogIssueDate:   "2024-05-01",
+			},
+			wantErr: errDisclosureInvalid,
+		},
+		{
+			name: "malformed issue date -> invalid",
+			claims: map[string]string{
+				openid4vpverifier.ClaimVogGivenNames:  "José",
+				openid4vpverifier.ClaimVogSurname:     "Berg",
+				openid4vpverifier.ClaimVogDateOfBirth: "1980-01-02",
+				openid4vpverifier.ClaimVogIssueDate:   "not-a-date",
+			},
+			wantErr: errDisclosureInvalid,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := extractVog(presentation(tt.claims), []string{"11", "22"})
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if got.GivenNames != tt.want.GivenNames || got.Surname != tt.want.Surname ||
+				got.DateOfBirth != tt.want.DateOfBirth || !got.IssueDate.Equal(tt.want.IssueDate) ||
+				!slices.Equal(got.AspectCodes, tt.want.AspectCodes) {
+				t.Fatalf("vog = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

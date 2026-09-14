@@ -38,6 +38,19 @@ const (
 
 	IdentitySettingsUpdated = "identity.settings_updated"
 
+	// Member screening / VOG (#242): validatie.nl real-time PDF check, the
+	// pbdf.vog credential disclosure, org screening policy, reminders and admin
+	// on-demand request.
+	MembershipVogRequested         = "membership.vog_requested"
+	MembershipVogChecked           = "membership.vog_checked"
+	MembershipVogRejected          = "membership.vog_rejected"
+	MembershipVogMismatch          = "membership.vog_mismatch"
+	MembershipVogInsufficientScope = "membership.vog_insufficient_scope"
+	MembershipVogReminderSent      = "membership.vog_reminder_sent"
+	MembershipVogExpired           = "membership.vog_expired"
+
+	ScreeningSettingsUpdated = "screening.settings_updated"
+
 	// Mandates granted inside the wallet (Recital 18, Art 5(1)(j)). A delegation is
 	// a grant with a parent, and a cascaded revocation records one event per
 	// mandate it reached, so the chain is readable from the log alone.
@@ -176,6 +189,8 @@ const (
 	TargetNotificationSettings = "org_notification_settings"
 
 	TargetIdentitySettings = "org_identity_settings"
+
+	TargetScreeningSettings = "org_screening_settings"
 
 	TargetSlackSettings = "org_slack_settings"
 

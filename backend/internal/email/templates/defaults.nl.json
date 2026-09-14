@@ -18,7 +18,8 @@
     "signingUrl": "https://wallet.example.org/acme/signing",
     "reidentifyUrl": "https://wallet.example.org/reidentify/voorbeeld",
     "dueDate": "2026-08-01",
-    "reason": "Je laatste identiteitscontrole is verlopen."
+    "reason": "Je laatste identiteitscontrole is verlopen.",
+    "vogUrl": "https://wallet.example.org/acme/vog"
   },
   "events": {
     "membership.invited": "Lid uitgenodigd",
@@ -33,6 +34,10 @@
     "membership.identity_reverified": "Identiteit opnieuw bevestigd",
     "membership.identity_reminder_sent": "Identiteitsherinnering verstuurd",
     "membership.identity_overdue": "Identiteitsbevestiging verlopen",
+    "membership.vog_requested": "VOG-screening aangevraagd",
+    "membership.vog_checked": "VOG-screening geslaagd",
+    "membership.vog_reminder_sent": "VOG-herinnering verstuurd",
+    "membership.vog_expired": "VOG verlopen",
 
     "wallet.bootstrapped": "Wallet geïnitialiseerd",
     "wallet.suspended": "Wallet opgeschort",
@@ -165,6 +170,36 @@
         { "type": "heading", "text": "{{orgName}} vraagt je om je identiteit opnieuw te bevestigen" },
         { "type": "paragraph", "text": "{{reason}}" },
         { "type": "button", "label": "Identiteit opnieuw bevestigen", "url": "{{reidentifyUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "vog_requested": {
+      "subject": "{{orgName}} vraagt om je Verklaring Omtrent het Gedrag (VOG)",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} vraagt om je Verklaring Omtrent het Gedrag (VOG)" },
+        { "type": "paragraph", "text": "{{reason}}" },
+        { "type": "button", "label": "Mijn VOG uploaden", "url": "{{vogUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "vog_reminder": {
+      "subject": "Je VOG bij {{orgName}} verloopt binnenkort",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Je VOG verloopt binnenkort" },
+        { "type": "paragraph", "text": "Je Verklaring Omtrent het Gedrag voor {{orgName}} is geldig tot {{dueDate}}. Upload op tijd een nieuwe." },
+        { "type": "button", "label": "Mijn VOG uploaden", "url": "{{vogUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "vog_expired": {
+      "subject": "Je VOG bij {{orgName}} is verlopen",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "Je VOG is verlopen" },
+        { "type": "paragraph", "text": "Je Verklaring Omtrent het Gedrag voor {{orgName}} is verlopen op {{dueDate}}. Upload een nieuwe." },
+        { "type": "button", "label": "Mijn VOG uploaden", "url": "{{vogUrl}}" },
         { "type": "footer" }
       ]
     }

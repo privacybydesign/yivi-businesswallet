@@ -3,8 +3,10 @@ import { useTranslation } from "react-i18next";
 import { useMeQuery } from "../api/auth.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { IdentityBanner } from "./identity-banner";
+import { VogBanner } from "./vog-banner";
 import { accessMessage } from "../lib/access-message";
 import { needsIdentityBanner } from "../lib/identity-status";
+import { needsVogBanner } from "../lib/screening-status";
 import { greetingKey } from "../lib/greeting";
 import { displayName } from "../lib/name";
 import { Button, Card, Stat, Tag, TopBar } from "../ui";
@@ -59,6 +61,9 @@ export default function Dashboard(): React.JSX.Element {
             orgName={org.data.name}
             identity={org.data.identity!}
           />
+        )}
+        {org.data && needsVogBanner(org.data.vog) && (
+          <VogBanner slug={slug} orgName={org.data.name} vog={org.data.vog!} />
         )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Stat

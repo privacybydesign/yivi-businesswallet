@@ -41,6 +41,7 @@ export const nl: Translation<typeof en> = {
   nav: {
     dashboard: "Dashboard",
     members: "Leden",
+    vog: "VOG-screening",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
     postguard: "PostGuard-bestanden",
@@ -420,6 +421,49 @@ export const nl: Translation<typeof en> = {
       error: "Heridentificatie starten mislukt: {{message}}",
     },
   },
+  vog: {
+    title: "VOG-screening",
+    subtitle:
+      "{{org}} vraagt leden om een geldige Verklaring Omtrent het Gedrag (VOG).",
+    noDateOfBirth:
+      "Bevestig eerst je identiteit - een VOG-controle vergelijkt met je vastgelegde geboortedatum.",
+    goToReidentify: "Mijn identiteit bevestigen",
+    upload: {
+      heading: "Upload je VOG",
+      hint: "Live gecontroleerd bij validatie.nl en vergeleken met je vastgelegde identiteit. De PDF zelf wordt nooit opgeslagen - alleen de uitkomst.",
+      chooseFile: "Kies een PDF",
+      submit: "Uploaden",
+      uploading: "Je VOG wordt gecontroleerd…",
+      error: "Kon je VOG niet controleren: {{message}}",
+    },
+    credential: {
+      heading: "Of deel hem vanuit je wallet",
+      hint: "{{org}} accepteert ook de pbdf.vog-credential. Deze wordt uitgegeven door Stichting Privacy by Design over een VOG die zij bij uitgifte hebben gevalideerd, geen actuele verklaring van Justis.",
+      start: "Delen vanuit wallet",
+      disclosing: "Wachten op je wallet…",
+      error: "Kon je VOG niet controleren: {{message}}",
+    },
+    result: {
+      valid: "Je VOG is geldig.",
+      rejected:
+        "Dit document kon niet worden gevalideerd als geldige, actuele VOG.",
+      mismatch:
+        "De naam of geboortedatum op deze VOG komt niet overeen met je vastgelegde identiteit.",
+      insufficientScope: "Deze VOG dekt niet alles wat {{org}} vereist.",
+      tooOld: "Deze VOG is ouder dan {{org}} accepteert.",
+    },
+    tryAgain: "Opnieuw proberen",
+    banner: {
+      none: "{{org}} vraagt een VOG (Verklaring Omtrent het Gedrag) van je.",
+      expiring: "Je VOG voor {{org}} verloopt op {{date}}.",
+      expired: "Je VOG voor {{org}} is verlopen op {{date}}.",
+      rejected: "Je laatste VOG-inzending voor {{org}} is niet geaccepteerd.",
+      recheckRequired:
+        "De VOG-vereisten van {{org}} zijn gewijzigd; dien een nieuwe VOG in.",
+      requested: "{{org}} heeft je gevraagd een VOG in te dienen.",
+      action: "Naar VOG-screening",
+    },
+  },
   dashboard: {
     greeting: {
       morning: "Goedemorgen, {{name}}",
@@ -471,6 +515,9 @@ export const nl: Translation<typeof en> = {
     identificationRequested_one: "Identificatie aangevraagd",
     identificationRequested_other:
       "Identificatie aangevraagd bij {{count}} leden",
+    screeningSettingsSaved: "VOG-screeninginstellingen opgeslagen",
+    vogRequested_one: "VOG aangevraagd",
+    vogRequested_other: "VOG aangevraagd bij {{count}} leden",
     organizationUpdated: "Organisatie bijgewerkt",
     organizationDeleted: "Organisatie verwijderd",
     departmentAdded: "Afdeling toegevoegd",
@@ -560,6 +607,19 @@ export const nl: Translation<typeof en> = {
       neverHint:
         "Dit lid heeft zijn identiteit niet meer bewezen sinds deze functie live is.",
     },
+    vog: {
+      notRequired: "Geen VOG vereist",
+      none: "VOG vereist",
+      valid: "VOG geldig",
+      expiring: "VOG verloopt binnenkort",
+      expired: "VOG verlopen",
+      rejected: "VOG afgewezen",
+      recheckRequired: "VOG-hercontrole vereist",
+      requested: "VOG aangevraagd",
+      validUntil: "Geldig tot {{date}}",
+      expiredOn: "Verlopen op {{date}}",
+      requestedOn: "Aangevraagd op {{date}}",
+    },
     memberType: {
       employee: "Medewerker",
       external: "Extern",
@@ -570,6 +630,7 @@ export const nl: Translation<typeof en> = {
     selectedCount_other: "{{count}} geselecteerd",
     clearSelection: "Selectie wissen",
     requestIdentification: "Identificatie aanvragen",
+    requestVog: "VOG aanvragen",
     resend: "Opnieuw versturen",
     revoke: "Intrekken",
     search: "Zoek op naam, e-mail, rol, afdeling…",
@@ -638,6 +699,7 @@ export const nl: Translation<typeof en> = {
       orgOnboardingAttestations: "Onboarding-attestaties",
       orgNotificationSettings: "Notificatie-instellingen",
       orgIdentitySettings: "Instellingen voor heridentificatie",
+      orgScreeningSettings: "VOG-screeninginstellingen",
       orgSlackSettings: "Slack-instellingen",
       orgTeamsSettings: "Microsoft Teams-instellingen",
       orgProvisioningSettings: "Provisioning-instellingen",
@@ -667,6 +729,14 @@ export const nl: Translation<typeof en> = {
       identityReminderSent: "Identiteitsherinnering verstuurd",
       identityOverdue: "Identiteitsbevestiging verlopen",
       identitySettingsUpdated: "Instellingen voor heridentificatie bijgewerkt",
+      vogRequested: "VOG aangevraagd",
+      vogChecked: "VOG geslaagd",
+      vogRejected: "VOG afgewezen",
+      vogMismatch: "VOG identiteit komt niet overeen",
+      vogInsufficientScope: "VOG mist vereiste codes",
+      vogReminderSent: "VOG-herinnering verstuurd",
+      vogExpired: "VOG verlopen",
+      screeningSettingsUpdated: "VOG-screeninginstellingen bijgewerkt",
       mandateGranted: "Mandaat verleend",
       mandateRevoked: "Mandaat ingetrokken",
       deptCreated: "Afdeling aangemaakt",
@@ -819,6 +889,31 @@ export const nl: Translation<typeof en> = {
     requestIdentificationHint:
       "Vraagt dit lid om nu zijn identiteit opnieuw te bevestigen. Het lid krijgt een e-mail met een link.",
     identityRequested: "Identificatie aangevraagd",
+    vogValidUntil: "VOG geldig tot",
+    vogNone: "Geen VOG bekend",
+    requestVog: "VOG aanvragen",
+    requestVogHint:
+      "Vraagt dit lid om nu een VOG in te dienen. Het lid krijgt een e-mail met een link naar de app.",
+    vogRequested: "VOG aangevraagd",
+    uploadVog: "VOG uploaden namens lid",
+    uploadVogHint:
+      "Uploadt en valideert een VOG-PDF op dezelfde manier als de eigen upload van het lid; vergeleken met de vastgelegde identiteit.",
+    uploadVogError: "Kon deze VOG niet controleren: {{message}}",
+    vogHistory: {
+      title: "VOG-geschiedenis",
+      empty: "Er is nog geen VOG gecontroleerd voor dit lid.",
+      error: "VOG-geschiedenis laden mislukt: {{message}}",
+      columns: {
+        checkedAt: "Gecontroleerd",
+        method: "Methode",
+        result: "Resultaat",
+        validUntil: "Geldig tot",
+      },
+      methodPdf: "PDF-upload",
+      methodCredential: "pbdf.vog-credential",
+      resultMismatch: "Identiteit komt niet overeen",
+      resultInsufficientScope: "Vereiste codes ontbreken",
+    },
     sendMessage: "Bericht versturen",
     offboard: "Lid off-boarden",
     offboardConfirm: {
@@ -1070,6 +1165,7 @@ export const nl: Translation<typeof en> = {
     tabOrg: "Organisatie",
     tabMandates: "Mandaten",
     tabIdentity: "Identiteit",
+    tabScreening: "Screening (VOG)",
     tabBranding: "Branding",
     tabCommunication: "Communicatie",
     tabEmail: "E-mail",
@@ -1162,6 +1258,71 @@ export const nl: Translation<typeof en> = {
       "Heridentificatie staat uit voor deze organisatie: er worden geen termijnen berekend en geen herinneringen verstuurd tot je een interval opslaat.",
     recomputeNote:
       "Bij opslaan wordt de termijn van elk lid opnieuw berekend vanaf het moment dat het zijn identiteit voor het laatst bewees.",
+  },
+  screeningSettings: {
+    heading: "Ledenscreening (VOG)",
+    description:
+      "Leden bewijzen dat zij een geldige Verklaring Omtrent het Gedrag (VOG) hebben door deze te uploaden, live gecontroleerd bij validatie.nl, of door de pbdf.vog-credential te delen zodra je dat toestaat. De organisatie bewaart alleen de uitkomst, nooit het document.",
+    requiredFor: "Vereist voor",
+    requiredForNobody: "Niemand",
+    requiredForEmployees: "Medewerkers",
+    requiredForExternals: "Externen",
+    requiredForBoth: "Medewerkers en externen",
+    requiredCodes: "Vereiste functieaspecten",
+    requiredCodesHint:
+      "De VOG van een lid moet elke hier geselecteerde code dekken. Codes zijn Justis' eigen nummering; een waarde die je sector vereist maar die hier niet staat, kun je hieronder toevoegen.",
+    aspectCode: "Aspect {{code}}",
+    extraCodes: "Overige vereiste codes",
+    extraCodesPlaceholder: "bijv. 43, 91",
+    extraCodesHint:
+      "Tweecijferige specifieke-screeningsprofielnummers, gescheiden door komma's, naast de functieaspecten hierboven.",
+    extraCodesInvalid: "Voer tweecijferige codes in, gescheiden door komma's.",
+    maxAge: "Maximale leeftijd bij upload",
+    maxAgeOff: "Elke leeftijd",
+    maxAgeHint:
+      "Weigert een VOG waarvan de afgiftedatum ouder is dan dit. Staat standaard uit.",
+    recheck: "Hercontrole-interval",
+    employeeInterval: "Medewerkers",
+    externalInterval: "Externen",
+    intervalOff: "Nooit",
+    intervalMonths_one: "Elke maand",
+    intervalMonths_other: "Elke {{count}} maanden",
+    recheckAnchor: "Reken het interval vanaf",
+    recheckAnchorIssueDate: "De afgiftedatum van de VOG",
+    recheckAnchorCheckedAt: "De controledatum",
+    reminders: "Herinneringen",
+    reminderDaysBefore: "Herinneren vóór verlopen",
+    reminderDaysBeforePlaceholder: "bijv. 30, 14, 7",
+    reminderDaysBeforeHint:
+      "Aantal dagen vóór verlopen, gescheiden door komma's. De hoogste waarde bepaalt ook wanneer een lid als binnenkort verlopen wordt weergegeven.",
+    overdueReminderIntervalDays: "Herhalen elke",
+    overdueReminderIntervalDaysHint:
+      "Het aantal dagen tussen herinneringen zodra de VOG van een lid is verlopen.",
+    overdueReminderMaxCount: "Maximaal",
+    overdueReminderMaxCountHint:
+      "Het totale aantal herinneringen dat één verlooptermijn oplevert, zodat niemand eindeloos wordt gemaild.",
+    days_one: "{{count}} dag",
+    days_other: "{{count}} dagen",
+    reminders_one: "{{count}} herinnering",
+    reminders_other: "{{count}} herinneringen",
+    consequence: "Als de VOG van een lid over de termijn is",
+    consequenceFlag: "Alleen markeren",
+    consequenceFlagHint:
+      "Toont de status in de ledenlijst en op de detailpagina, en stuurt de herinneringen.",
+    consequenceBlock: "Markeren en blokkeren",
+    consequenceBlockHint:
+      "Gereserveerd voor een volgende release; gedraagt zich vandaag als alleen markeren.",
+    credential: "pbdf.vog-credential",
+    acceptCredential: "De pbdf.vog-credential accepteren",
+    acceptCredentialHint:
+      "Deze credential wordt uitgegeven door Stichting Privacy by Design over een VOG die zij op het moment van uitgifte hebben gevalideerd - het is geen actuele verklaring van Justis, en Justis kan deze niet intrekken. Accepteer deze afweging alleen als dat past bij uw toepassing; de altijd actieve PDF-upload valideert rechtstreeks bij Justis.",
+    save: "Instellingen opslaan",
+    saveError: "Screeninginstellingen opslaan mislukt: {{message}}",
+    loadError: "Screeninginstellingen laden mislukt: {{message}}",
+    unconfigured:
+      "Screening staat uit voor deze organisatie: er wordt geen lid om een VOG gevraagd tot je een beleid opslaat.",
+    recomputeNote:
+      "Bij opslaan wordt de VOG-vervaldatum van elk lid herberekend onder het nieuwe hercontrole-interval.",
   },
   provisioningSettings: {
     heading: "Microsoft Entra ID",
@@ -1397,6 +1558,9 @@ export const nl: Translation<typeof en> = {
       signature_requested: "Ondertekenverzoek",
       signed_document: "Ondertekend document",
       smtp_test: "SMTP-test",
+      vog_expired: "VOG verlopen",
+      vog_reminder: "Herinnering VOG",
+      vog_requested: "VOG aangevraagd",
     },
     kindDescriptions: {
       credential_offer:
@@ -1419,6 +1583,10 @@ export const nl: Translation<typeof en> = {
         "Gaat naar een ontvanger met het voltooide, mede-ondertekende document als PDF-bijlage.",
       smtp_test:
         "De test die een beheerder verstuurt om de SMTP-instellingen te controleren.",
+      vog_expired: "Gaat naar een lid van wie de VOG is verlopen.",
+      vog_reminder: "Gaat naar een lid vóór het verlopen van de VOG.",
+      vog_requested:
+        "Gaat naar een lid als een beheerder vraagt nu een VOG in te dienen.",
     },
     locales: {
       en: "Engels",

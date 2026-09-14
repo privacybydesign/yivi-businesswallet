@@ -33,6 +33,14 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "membership.identity_reminder_sent": { icon: "email", tone: "amber" },
   "membership.identity_overdue": { icon: "warning", tone: "red" },
   "identity.settings_updated": { icon: "settings", tone: "blue" },
+  "membership.vog_requested": { icon: "personal", tone: "amber" },
+  "membership.vog_checked": { icon: "valid", tone: "green" },
+  "membership.vog_rejected": { icon: "warning", tone: "amber" },
+  "membership.vog_mismatch": { icon: "warning", tone: "amber" },
+  "membership.vog_insufficient_scope": { icon: "warning", tone: "amber" },
+  "membership.vog_reminder_sent": { icon: "email", tone: "amber" },
+  "membership.vog_expired": { icon: "warning", tone: "red" },
+  "screening.settings_updated": { icon: "settings", tone: "blue" },
   "mandate.granted": { icon: "valid", tone: "violet" },
   "mandate.revoked": { icon: "close", tone: "red" },
   "department.created": { icon: "add", tone: "green" },
@@ -135,6 +143,22 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityOverdue");
     case "identity.settings_updated":
       return t("auditLog.actions.identitySettingsUpdated");
+    case "membership.vog_requested":
+      return t("auditLog.actions.vogRequested");
+    case "membership.vog_checked":
+      return t("auditLog.actions.vogChecked");
+    case "membership.vog_rejected":
+      return t("auditLog.actions.vogRejected");
+    case "membership.vog_mismatch":
+      return t("auditLog.actions.vogMismatch");
+    case "membership.vog_insufficient_scope":
+      return t("auditLog.actions.vogInsufficientScope");
+    case "membership.vog_reminder_sent":
+      return t("auditLog.actions.vogReminderSent");
+    case "membership.vog_expired":
+      return t("auditLog.actions.vogExpired");
+    case "screening.settings_updated":
+      return t("auditLog.actions.screeningSettingsUpdated");
     case "mandate.granted":
       return t("auditLog.actions.mandateGranted");
     case "mandate.revoked":
@@ -338,6 +362,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.orgNotificationSettings");
     case "org_identity_settings":
       return t("auditLog.targets.orgIdentitySettings");
+    case "org_screening_settings":
+      return t("auditLog.targets.orgScreeningSettings");
     case "org_slack_settings":
       return t("auditLog.targets.orgSlackSettings");
     case "org_teams_settings":

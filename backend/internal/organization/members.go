@@ -87,10 +87,15 @@ func (h *Handler) members(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("resolving identity lookahead: %w", err)
 	}
+	screeningSettings, err := h.store.GetScreeningSettings(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("resolving screening settings: %w", err)
+	}
 	now := time.Now()
 	for i := range entries {
 		entries[i].AvatarURI = entryAvatarURI(org.Slug, entries[i])
 		entries[i] = entries[i].withIdentityStatus(now, lookahead)
+		entries[i] = entries[i].withVogStatus(screeningSettings, now)
 	}
 	respond.JSON(w, r, http.StatusOK, memberListPage{Entries: entries, Total: total})
 	return nil
@@ -127,7 +132,13 @@ func (h *Handler) member(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("resolving identity lookahead: %w", err)
 	}
-	member = member.withIdentityStatus(time.Now(), lookahead)
+	screeningSettings, err := h.store.GetScreeningSettings(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("resolving screening settings: %w", err)
+	}
+	now := time.Now()
+	member = member.withIdentityStatus(now, lookahead)
+	member = member.withVogStatus(screeningSettings, now)
 	respond.JSON(w, r, http.StatusOK, member)
 	return nil
 }
