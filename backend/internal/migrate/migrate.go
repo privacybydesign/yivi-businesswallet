@@ -77,6 +77,16 @@ func Up(ctx context.Context, dns string) error {
 	})
 }
 
+// UpTo applies every pending migration with a version at or below version.
+// Integration tests use it to reproduce a database as it stood at an earlier
+// point in the history before applying the rest.
+func UpTo(ctx context.Context, dsn string, version int64) error {
+	return withProvider(dsn, func(p *goose.Provider) error {
+		_, err := p.UpTo(ctx, version)
+		return err
+	})
+}
+
 func Down(ctx context.Context, dsn string) error {
 	return withProvider(dsn, func(p *goose.Provider) error {
 		_, err := p.Down(ctx)
