@@ -27,13 +27,16 @@ func scanIdentitySettings(row pgx.Row) (IdentitySettings, error) {
 // inside a transaction (accept, recompute) sees a consistent snapshot rather than
 // a second round trip on the pool. Configured is false and every field its
 // documented default when no row exists — the feature is off, not defaulted to
-// some interval no admin chose.
+// some interval no admin chose. ReminderDaysBefore is an empty, non-nil slice so
+// the JSON carries `[]` like a saved row does, never `null`: the frontend schema
+// requires an array.
 func identitySettingsTx(ctx context.Context, q database.Querier, orgID uuid.UUID) (IdentitySettings, error) {
 	row := q.QueryRow(ctx, `SELECT `+identitySettingsColumns+` FROM org_identity_settings WHERE organization_id = $1`, orgID)
 	s, err := scanIdentitySettings(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return IdentitySettings{
 			Configured:                  false,
+			ReminderDaysBefore:          []int32{},
 			OverdueReminderIntervalDays: 7,
 			OverdueReminderMaxCount:     4,
 			OverdueConsequence:          OverdueConsequenceFlag,
