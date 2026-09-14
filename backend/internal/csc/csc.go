@@ -37,17 +37,16 @@ var ErrNoEncryptionKey = errors.New("csc: no encryption key configured; cannot s
 type ProviderKind string
 
 const (
-	// ProviderKindSample is the self-hosted reference QTSP shipped behind
-	// `docker compose --profile signer` (issue #194). Its default base URL is the
-	// dev port that profile publishes.
+	// ProviderKindSample is the hosted demo QTSP we offer (issue #194). Its default
+	// base URL is that demo environment; request credentials at support@yivi.app.
 	ProviderKindSample ProviderKind = "sample"
 	// ProviderKindCustom is any other CSC API v2 endpoint (a real QTSP).
 	ProviderKindCustom ProviderKind = "custom"
 )
 
-// SampleBaseURL is the dev base URL of the self-hosted reference QTSP. Running it
-// needs `docker compose --profile signer up` (see docker/development/qtsp-signer).
-const SampleBaseURL = "http://localhost:8085"
+// SampleBaseURL is the base URL of the hosted demo QTSP we offer. Request
+// credentials for it at support@yivi.app.
+const SampleBaseURL = "https://csc-signer.staging.yivi.app"
 
 // ProviderKindInfo is one selectable provider kind plus the base URL to pre-fill
 // when it is chosen, so the settings screen renders the choices from one response
