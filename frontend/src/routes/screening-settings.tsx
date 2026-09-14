@@ -6,6 +6,7 @@ import {
   useScreeningSettingsQuery,
 } from "../api/organization.queries";
 import type {
+  OverdueConsequence,
   RecheckAnchor,
   ScreeningRequiredFor,
   ScreeningSettings,
@@ -152,6 +153,9 @@ function ScreeningForm({
   const [acceptCredential, setAcceptCredential] = useState(
     settings.acceptYiviCredential,
   );
+  const [consequence, setConsequence] = useState<OverdueConsequence>(
+    settings.overdueConsequence === "block" ? "block" : "flag",
+  );
 
   const parsedReminderDays = parseDays(reminderDays);
   const parsedExtraCodes = parseExtraCodes(extraCodes);
@@ -202,7 +206,7 @@ function ScreeningForm({
       reminderDaysBefore: parsedReminderDays,
       overdueReminderIntervalDays: overdueEveryDays,
       overdueReminderMaxCount: overdueMaxCount,
-      overdueConsequence: "flag",
+      overdueConsequence: consequence,
       acceptYiviCredential: acceptCredential,
     };
     save.mutate(input);
@@ -431,6 +435,48 @@ function ScreeningForm({
               </p>
             </div>
           </div>
+        </fieldset>
+
+        <fieldset className="flex flex-col gap-2">
+          <legend className={SECTION}>
+            {t("screeningSettings.consequence")}
+          </legend>
+          <label className="flex items-start gap-2 text-[13.5px]">
+            <input
+              type="radio"
+              name="screening-consequence"
+              value="flag"
+              checked={consequence === "flag"}
+              onChange={() => setConsequence("flag")}
+              className="mt-1"
+            />
+            <span>
+              <span className="text-ink font-medium">
+                {t("screeningSettings.consequenceFlag")}
+              </span>
+              <span className={`block ${HINT}`}>
+                {t("screeningSettings.consequenceFlagHint")}
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 text-[13.5px]">
+            <input
+              type="radio"
+              name="screening-consequence"
+              value="block"
+              checked={consequence === "block"}
+              onChange={() => setConsequence("block")}
+              className="mt-1"
+            />
+            <span>
+              <span className="text-ink font-medium">
+                {t("screeningSettings.consequenceBlock")}
+              </span>
+              <span className={`block ${HINT}`}>
+                {t("screeningSettings.consequenceBlockHint")}
+              </span>
+            </span>
+          </label>
         </fieldset>
 
         <fieldset className="flex flex-col gap-2">
