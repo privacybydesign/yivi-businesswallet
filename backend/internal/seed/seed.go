@@ -190,6 +190,108 @@ var demoMemberships = []demoMembership{
 	{email: "user@yivi.app", slug: "firsty", role: "member", jobTitle: "Account Manager", department: "Sales"},
 }
 
+// communityOrganization is a dev-demo organisation whose point is its internal
+// structure rather than its people: an association or church that holds a
+// business wallet and models its sections (congregations, teams) as departments.
+// Like the KVK register org it carries no representative (repKind is empty) and
+// is absent from the register dataset — it is provisioned directly, so its KVK
+// number is a demo placeholder (same 900000xx range as the other demo orgs) and
+// must not collide with a register entry, or TestRegisterOnlyCompanyIsOpenable's
+// openable count would silently shrink. No members are seeded for it.
+type communityOrganization struct {
+	org         demoOrganization
+	departments []string
+}
+
+// sdvbTeamGroup is one age or senior bracket of SDV Barneveld with the number of
+// teams it fields; expandTeams turns it into "<section> <code>-1" … "-<count>"
+// department names.
+type sdvbTeamGroup struct {
+	section string // "Jeugd" or "Senioren"
+	code    string // team code prefix as the KNVB writes it: JO19, MO17, Mannen, …
+	count   int
+}
+
+const (
+	sdvbSectionYouth   = "Jeugd"
+	sdvbSectionSeniors = "Senioren"
+)
+
+// sdvbTeamGroups is the 2026-2027 team layout of SDV Barneveld (sdvb.nl): the
+// boys' (JO) and girls' (MO) youth brackets and the men's and women's senior
+// squads. Only the club structure is copied — no player, trainer or staff names.
+var sdvbTeamGroups = []sdvbTeamGroup{
+	{section: sdvbSectionYouth, code: "JO19", count: 3},
+	{section: sdvbSectionYouth, code: "JO17", count: 2},
+	{section: sdvbSectionYouth, code: "JO16", count: 3},
+	{section: sdvbSectionYouth, code: "JO15", count: 4},
+	{section: sdvbSectionYouth, code: "JO14", count: 4},
+	{section: sdvbSectionYouth, code: "JO13", count: 5},
+	{section: sdvbSectionYouth, code: "JO12", count: 6},
+	{section: sdvbSectionYouth, code: "JO11", count: 6},
+	{section: sdvbSectionYouth, code: "JO10", count: 8},
+	{section: sdvbSectionYouth, code: "JO9", count: 6},
+	{section: sdvbSectionYouth, code: "JO8", count: 4},
+	{section: sdvbSectionYouth, code: "MO17", count: 2},
+	{section: sdvbSectionYouth, code: "MO15", count: 2},
+	{section: sdvbSectionYouth, code: "MO13", count: 2},
+	{section: sdvbSectionYouth, code: "MO11", count: 3},
+	{section: sdvbSectionYouth, code: "MO8", count: 1},
+	{section: sdvbSectionSeniors, code: "Mannen", count: 13},
+	{section: sdvbSectionSeniors, code: "Vrouwen", count: 1},
+	{section: sdvbSectionSeniors, code: "MO20", count: 1},
+}
+
+// sdvbExtraTeams are the squads that don't follow the "<code>-<n>" numbering: the
+// mini's (the youngest bracket, played as T-teams) and the recreational 35+/30+
+// senior teams.
+var sdvbExtraTeams = []string{
+	sdvbSectionYouth + " Mini's",
+	sdvbSectionSeniors + " Mannen 35+",
+	sdvbSectionSeniors + " Vrouwen 30+",
+}
+
+// expandTeams lists every team of every group as a department name, e.g.
+// "Jeugd JO19-1", followed by the irregular extras. The order is the order the
+// club presents its teams in (oldest youth bracket first, then seniors).
+func expandTeams(groups []sdvbTeamGroup, extras []string) []string {
+	var names []string
+	for _, g := range groups {
+		for i := 1; i <= g.count; i++ {
+			names = append(names, fmt.Sprintf("%s %s-%d", g.section, g.code, i))
+		}
+	}
+	return append(names, extras...)
+}
+
+// communityOrganizations are the dev-demo associations. Hervormde Gemeente
+// Barneveld is one church split into four wijkgemeenten (district congregations,
+// hervormdbarneveld.nl/wijkgemeenten), each covering its own neighbourhoods and
+// run by its own kerkenraad; the wijkgemeente is the unit a member belongs to, so
+// each is a department. SDV Barneveld is the local football club with every youth
+// and senior team as a department (see sdvbTeamGroups).
+var communityOrganizations = []communityOrganization{
+	{
+		org: demoOrganization{
+			name: "Hervormde Gemeente Barneveld", slug: "hervormd-barneveld",
+			kvkNumber: "90000050", euid: "NL.KVK.90000050", addressLocal: "hervormd-barneveld",
+		},
+		departments: []string{
+			"Wijkgemeente 1",
+			"Wijkgemeente 2",
+			"Wijkgemeente 3",
+			"Wijkgemeente 4",
+		},
+	},
+	{
+		org: demoOrganization{
+			name: "SDV Barneveld", slug: "sdvb",
+			kvkNumber: "90000060", euid: "NL.KVK.90000060", addressLocal: "sdvb",
+		},
+		departments: expandTeams(sdvbTeamGroups, sdvbExtraTeams),
+	},
+}
+
 func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) error {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -259,6 +361,19 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 		}
 		if err := ensureMembership(ctx, orgs, orgsBySlug[m.slug].ID, usersByEmail[m.email].ID, m.role, m.jobTitle, deptID); err != nil {
 			return err
+		}
+	}
+
+	// Community organisations: an org plus its departments, nobody in them.
+	for _, c := range communityOrganizations {
+		org, err := ensureOrg(ctx, pool, c.org, addressDomain)
+		if err != nil {
+			return err
+		}
+		for _, name := range c.departments {
+			if _, err := ensureDepartment(ctx, orgs, org.ID, name); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -345,8 +460,9 @@ func ensureOrg(ctx context.Context, pool *pgxpool.Pool, o demoOrganization, addr
 		ON CONFLICT (address) DO NOTHING`, org.ID, address); err != nil {
 		return organization.Organization{}, fmt.Errorf("seed: qerds address %q: %w", o.slug, err)
 	}
-	// The KVK register org (repKind == "") is the authentic source, not a
-	// consultable company, so it has no representative of its own.
+	// Orgs without a register identity (repKind == "") get no representative:
+	// the KVK register org is the authentic source, not a consultable company,
+	// and the community organisations are provisioned directly.
 	if o.repKind != "" {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO wallet_representations (organization_id, kind, given_names, family_name, date_of_birth, authority)
