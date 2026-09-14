@@ -434,12 +434,14 @@ export const nl: Translation<typeof en> = {
       chooseFile: "Kies een PDF",
       submit: "Uploaden",
       uploading: "Je VOG wordt gecontroleerd…",
+      error: "Kon je VOG niet controleren: {{message}}",
     },
     credential: {
       heading: "Of deel hem vanuit je wallet",
       hint: "{{org}} accepteert ook de pbdf.vog-credential. Deze wordt uitgegeven door Stichting Privacy by Design over een VOG die zij bij uitgifte hebben gevalideerd, geen actuele verklaring van Justis.",
       start: "Delen vanuit wallet",
       disclosing: "Wachten op je wallet…",
+      error: "Kon je VOG niet controleren: {{message}}",
     },
     result: {
       valid: "Je VOG is geldig.",
@@ -896,6 +898,7 @@ export const nl: Translation<typeof en> = {
     uploadVog: "VOG uploaden namens lid",
     uploadVogHint:
       "Uploadt en valideert een VOG-PDF op dezelfde manier als de eigen upload van het lid; vergeleken met de vastgelegde identiteit.",
+    uploadVogError: "Kon deze VOG niet controleren: {{message}}",
     vogHistory: {
       title: "VOG-geschiedenis",
       empty: "Er is nog geen VOG gecontroleerd voor dit lid.",

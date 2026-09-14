@@ -106,6 +106,31 @@ export function screeningResultLabel(result: string, t: TFunction): string {
   }
 }
 
+// vogResultMessage is the member-facing message for one just-completed check
+// (an upload or a credential disclosure), using the API's rejectionReason
+// (screening_service.go: gaav_rejected/not_a_vog/unparseable/
+// identity_mismatch/too_old/insufficient_scope) to say what was specifically
+// wrong - unlike screeningResultLabel, which labels the coarse result column
+// of the history table, where no rejectionReason travels.
+export function vogResultMessage(
+  result: string,
+  rejectionReason: string | undefined,
+  org: string,
+  t: TFunction,
+): string {
+  if (result === "valid") return t("vog.result.valid");
+  switch (rejectionReason) {
+    case "identity_mismatch":
+      return t("vog.result.mismatch");
+    case "insufficient_scope":
+      return t("vog.result.insufficientScope", { org });
+    case "too_old":
+      return t("vog.result.tooOld", { org });
+    default:
+      return t("vog.result.rejected");
+  }
+}
+
 // requestableVog reports whether asking this member to submit a VOG makes
 // sense: an active member for whom screening is required, who is not already
 // being asked.

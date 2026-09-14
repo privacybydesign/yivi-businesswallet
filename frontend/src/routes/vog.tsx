@@ -10,7 +10,7 @@ import {
 import { vogCredentialSessionUrl } from "../api/organization";
 import { accessMessage } from "../lib/access-message";
 import { errorCode } from "../lib/api-error";
-import { screeningResultLabel } from "../lib/screening-status";
+import { vogResultMessage } from "../lib/screening-status";
 import { Button, Card, IdentityDisclosure, TopBar } from "../ui";
 
 type CredentialPhase = "idle" | "disclosing" | "completing";
@@ -60,7 +60,9 @@ export default function Vog(): React.JSX.Element {
   }
 
   const vog = org.data.vog;
-  const noDateOfBirth = errorCode(uploadVog.error) === "no_date_of_birth";
+  const noDateOfBirth =
+    errorCode(uploadVog.error) === "no_date_of_birth" ||
+    errorCode(completeCredential.error) === "no_date_of_birth";
 
   const onToken = (disclosureToken: string): void => {
     setCredentialPhase("completing");
@@ -122,7 +124,17 @@ export default function Vog(): React.JSX.Element {
                   role="status"
                   className={`mt-3 text-[13.5px] ${uploadVog.data.result === "valid" ? "text-success" : "text-error"}`}
                 >
-                  {screeningResultLabel(uploadVog.data.result, t)}
+                  {vogResultMessage(
+                    uploadVog.data.result,
+                    uploadVog.data.rejectionReason,
+                    org.data.name,
+                    t,
+                  )}
+                </p>
+              )}
+              {uploadVog.isError && (
+                <p role="alert" className="text-error mt-3 text-[13.5px]">
+                  {t("vog.upload.error", { message: uploadVog.error.message })}
                 </p>
               )}
             </Card>
@@ -157,7 +169,19 @@ export default function Vog(): React.JSX.Element {
                     role="status"
                     className={`mt-3 text-[13.5px] ${completeCredential.data.result === "valid" ? "text-success" : "text-error"}`}
                   >
-                    {screeningResultLabel(completeCredential.data.result, t)}
+                    {vogResultMessage(
+                      completeCredential.data.result,
+                      completeCredential.data.rejectionReason,
+                      org.data.name,
+                      t,
+                    )}
+                  </p>
+                )}
+                {completeCredential.isError && (
+                  <p role="alert" className="text-error mt-3 text-[13.5px]">
+                    {t("vog.credential.error", {
+                      message: completeCredential.error.message,
+                    })}
                   </p>
                 )}
               </Card>

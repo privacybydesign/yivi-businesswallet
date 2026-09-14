@@ -418,12 +418,14 @@ export const en = {
       chooseFile: "Choose a PDF",
       submit: "Upload",
       uploading: "Checking your VOG…",
+      error: "Could not check your VOG: {{message}}",
     },
     credential: {
       heading: "Or disclose it from your wallet",
       hint: "{{org}} also accepts the pbdf.vog credential. It is issued by Stichting Privacy by Design about a VOG it validated at issuance, not a live statement from Justis.",
       start: "Disclose from wallet",
       disclosing: "Waiting for your wallet…",
+      error: "Could not check your VOG: {{message}}",
     },
     result: {
       valid: "Your VOG is valid.",
@@ -877,6 +879,7 @@ export const en = {
     uploadVog: "Upload VOG on behalf of member",
     uploadVogHint:
       "Uploads and validates a VOG PDF the same way the member's own upload does; matched against their identity on file.",
+    uploadVogError: "Could not check this VOG: {{message}}",
     vogHistory: {
       title: "VOG history",
       empty: "No VOG has been checked for this member yet.",

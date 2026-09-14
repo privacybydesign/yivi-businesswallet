@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { absoluteApiUrl, request } from "./http";
+import { absoluteApiUrl, ApiError, request } from "./http";
 
 export const departmentSchema = z.object({
   id: z.string(),
@@ -602,10 +602,37 @@ const uploadVogResultSchema = z.object({
 
 export type UploadVogResult = z.infer<typeof uploadVogResultSchema>;
 
+// The backend answers a rejected check with 422 and the same body shape a
+// passing one returns 200 with (organization/screening_upload_handler.go's
+// vogUploadStatus) - a completed check, not a failed request. `request` throws
+// on any non-2xx, so vogOutcomeFromError recovers that one expected shape;
+// anything else (network failure, 500, an unparseable body) stays a genuine
+// error for the caller to handle.
+const VOG_REJECTED_STATUS = 422;
+
+export function vogOutcomeFromError(error: unknown): UploadVogResult | null {
+  if (!(error instanceof ApiError) || error.status !== VOG_REJECTED_STATUS) {
+    return null;
+  }
+  const parsed = uploadVogResultSchema.safeParse(error.body);
+  return parsed.success ? parsed.data : null;
+}
+
+async function resolveVogOutcome(
+  run: () => Promise<UploadVogResult>,
+): Promise<UploadVogResult> {
+  try {
+    return await run();
+  } catch (error) {
+    const outcome = vogOutcomeFromError(error);
+    if (outcome) return outcome;
+    throw error;
+  }
+}
+
 // uploadVog submits a VOG PDF for validation (the caller's own membership, or,
-// with userId, an admin uploading on a member's behalf). The request always
-// succeeds at the HTTP level (2xx) once the check ran; `result` says whether it
-// passed.
+// with userId, an admin uploading on a member's behalf). `result` says
+// whether it passed; a rejection is a completed check, not a thrown error.
 export function uploadVog(
   slug: string,
   file: File,
@@ -616,13 +643,15 @@ export function uploadVog(
   const path = userId
     ? `${base}/members/${encodeURIComponent(userId)}/vog`
     : `${base}/me/vog`;
-  const body = new FormData();
-  body.append("file", file);
-  return request(path, {
-    schema: uploadVogResultSchema,
-    method: "POST",
-    body,
-    signal,
+  return resolveVogOutcome(() => {
+    const body = new FormData();
+    body.append("file", file);
+    return request(path, {
+      schema: uploadVogResultSchema,
+      method: "POST",
+      body,
+      signal,
+    });
   });
 }
 
@@ -668,14 +697,16 @@ export function completeVogCredential(
   disclosureToken: string,
   signal?: AbortSignal,
 ): Promise<UploadVogResult> {
-  return request(
-    `/api/v1/orgs/${encodeURIComponent(slug)}/me/vog/credential-complete`,
-    {
-      schema: uploadVogResultSchema,
-      method: "POST",
-      body: { disclosureToken },
-      signal,
-    },
+  return resolveVogOutcome(() =>
+    request(
+      `/api/v1/orgs/${encodeURIComponent(slug)}/me/vog/credential-complete`,
+      {
+        schema: uploadVogResultSchema,
+        method: "POST",
+        body: { disclosureToken },
+        signal,
+      },
+    ),
   );
 }
 

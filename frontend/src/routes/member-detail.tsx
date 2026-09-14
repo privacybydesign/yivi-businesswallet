@@ -27,6 +27,7 @@ import {
   screeningResultTone,
   screeningStatusLabel,
   screeningStatusTone,
+  vogResultMessage,
 } from "../lib/screening-status";
 import {
   auditActionLabel,
@@ -493,7 +494,19 @@ export default function MemberDetail(): React.JSX.Element {
               <p
                 className={`text-[12px] ${uploadVog.data.result === "valid" ? "text-success" : "text-error"}`}
               >
-                {screeningResultLabel(uploadVog.data.result, t)}
+                {vogResultMessage(
+                  uploadVog.data.result,
+                  uploadVog.data.rejectionReason,
+                  org.data.name,
+                  t,
+                )}
+              </p>
+            )}
+            {uploadVog.isError && (
+              <p role="alert" className="text-error text-[12px]">
+                {t("memberDetail.uploadVogError", {
+                  message: uploadVog.error.message,
+                })}
               </p>
             )}
             <Button
