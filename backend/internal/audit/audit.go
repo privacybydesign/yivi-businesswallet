@@ -139,6 +139,14 @@ const (
 	SigningDelivered        = "signing.delivered"
 	SigningFailed           = "signing.failed"
 
+	ExportRequested = "organization.export_requested"
+	// OrganizationTerminated records the provider ending service for an
+	// organisation (Art 7(6)(f)), which is what fires the export it owes.
+	OrganizationTerminated = "organization.terminated"
+	// DataInstructionUpdated records the owner's standing instruction for their
+	// data on termination: transfer, or transfer then erase.
+	DataInstructionUpdated = "organization.data_instruction_updated"
+
 	// Inbound OpenID4VP presentations (#188): the business wallet acting as the
 	// holder toward an external verifier. Requested is written pre-auth (no actor,
 	// no org); the rest are org-scoped once an organization has been selected.
@@ -202,6 +210,8 @@ const (
 
 	TargetSigningCredential = "signing_credentials"
 	TargetSigningRequest    = "signing_requests"
+
+	TargetExport = "export"
 
 	TargetPresentationTransaction = "presentation_transaction"
 )

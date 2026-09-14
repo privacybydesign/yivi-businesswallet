@@ -209,6 +209,32 @@ func (e *Engine) Delete(ctx context.Context, orgID uuid.UUID, ref string) error 
 // instance ref when that parses and matches, else falls back to the vct — but only
 // when the vct identifies exactly one held credential (see claimsBatch). A ref+vct
 // that resolves to no batch yields an empty slice (the held index owns existence).
+// Raw reads the instance's stored SD-JWT VC. It resolves by instance id only:
+// the bytes are what the issuer signed, so a sibling of the same type is not an
+// acceptable substitute the way it is for a display view.
+func (e *Engine) Raw(ctx context.Context, orgID uuid.UUID, ref string) ([]byte, error) {
+	id, err := uuid.Parse(ref)
+	if err != nil {
+		return nil, ErrCredentialNotFound
+	}
+	eng, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	var instance models.IssuedCredentialInstance
+	err = eng.Db().WithContext(ctx).Where("id = ?", id).First(&instance).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrCredentialNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("eudiholder: raw credential %s org %s: %w", ref, orgID, err)
+	}
+	if len(instance.RawCredential) == 0 {
+		return nil, ErrCredentialNotFound
+	}
+	return instance.RawCredential, nil
+}
+
 func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (HeldCredential, error) {
 	batch, ok, err := e.claimsBatch(ctx, orgID, ref, vct)
 	if err != nil {
