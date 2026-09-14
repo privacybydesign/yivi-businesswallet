@@ -127,6 +127,14 @@ func (s *Service) StartVogSession(ctx context.Context, requiredAspectCodes []str
 	return s.startPresentation(ctx, openid4vpverifier.ScopeVog, vogAspectClaims(requiredAspectCodes)...)
 }
 
+// StartIdentityVogSession begins a combined disclosure: a verified identity (as
+// StartIdentitySession) and the pbdf.vog credential in one presentation, for a
+// member who has never identified and is asked for a VOG - one scan instead of
+// being turned away to identify first.
+func (s *Service) StartIdentityVogSession(ctx context.Context, requiredAspectCodes []string) (Session, error) {
+	return s.startPresentation(ctx, openid4vpverifier.ScopeIdentityVog, vogAspectClaims(requiredAspectCodes)...)
+}
+
 func vogAspectClaims(codes []string) []string {
 	claims := make([]string, len(codes))
 	for i, c := range codes {
@@ -166,6 +174,25 @@ func (s *Service) DiscloseVog(ctx context.Context, id string, requiredAspectCode
 		return DisclosedVog{}, err
 	}
 	return extractVog(res, requiredAspectCodes)
+}
+
+// DiscloseIdentityAndVog reads a completed combined disclosure
+// (StartIdentityVogSession): the identity part and the pbdf.vog part, each
+// read from its own credential so the two dateOfBirth claims stay apart.
+func (s *Service) DiscloseIdentityAndVog(ctx context.Context, id string, requiredAspectCodes []string) (DisclosedIdentity, DisclosedVog, error) {
+	res, err := s.result(ctx, id)
+	if err != nil {
+		return DisclosedIdentity{}, DisclosedVog{}, err
+	}
+	ident, err := extractIdentity(res)
+	if err != nil {
+		return DisclosedIdentity{}, DisclosedVog{}, err
+	}
+	disclosedVog, err := extractVog(res, requiredAspectCodes)
+	if err != nil {
+		return DisclosedIdentity{}, DisclosedVog{}, err
+	}
+	return ident, disclosedVog, nil
 }
 
 func (s *Service) Status(ctx context.Context, id string) (string, error) {

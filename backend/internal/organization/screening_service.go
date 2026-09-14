@@ -20,11 +20,27 @@ type vogValidator interface {
 	Validate(ctx context.Context, pdf []byte) (vog.ResponseCode, error)
 }
 
+// vogParser is the PDF-reading seam, satisfied by *vog.PDFiumParser (a
+// WebAssembly PDFium pool built once at boot) and by a fake in tests.
+type vogParser interface {
+	Parse(pdf []byte) (vog.Document, error)
+}
+
 // vogDiscloser is the pbdf.vog credential-disclosure seam (#242 §4), satisfied
 // by *auth.Service - the same split identityDiscloser uses in service.go.
 type vogDiscloser interface {
 	StartVogSession(ctx context.Context, requiredAspectCodes []string) (auth.Session, error)
 	DiscloseVog(ctx context.Context, id string, requiredAspectCodes []string) (auth.DisclosedVog, error)
+	StartIdentityVogSession(ctx context.Context, requiredAspectCodes []string) (auth.Session, error)
+	DiscloseIdentityAndVog(ctx context.Context, id string, requiredAspectCodes []string) (auth.DisclosedIdentity, auth.DisclosedVog, error)
+}
+
+// identityRecorder is the re-identification rule set the combined identity+VOG
+// disclosure applies its identity half with (Service.ApplyDisclosedIdentity),
+// so an identity established that way is matched, audited and written exactly
+// like one from the re-identification link.
+type identityRecorder interface {
+	ApplyDisclosedIdentity(ctx context.Context, orgID, userID uuid.UUID, email string, storedName identity.Name, disclosed auth.DisclosedIdentity) (identity.Name, error)
 }
 
 // screeningStore is the store surface ScreeningService needs, so a test can
@@ -58,14 +74,16 @@ type ScreeningOutcome struct {
 // rules" bar): it drives an external validator client plus cross-domain
 // matching rules against the member's identity.
 type ScreeningService struct {
-	store     screeningStore
-	validator vogValidator
-	discloser vogDiscloser
-	hashKey   []byte
+	store      screeningStore
+	validator  vogValidator
+	parser     vogParser
+	discloser  vogDiscloser
+	identities identityRecorder
+	hashKey    []byte
 }
 
-func NewScreeningService(store *Store, validator vogValidator, discloser vogDiscloser, hashKey []byte) *ScreeningService {
-	return &ScreeningService{store: store, validator: validator, discloser: discloser, hashKey: hashKey}
+func NewScreeningService(store *Store, validator vogValidator, parser vogParser, discloser vogDiscloser, identities identityRecorder, hashKey []byte) *ScreeningService {
+	return &ScreeningService{store: store, validator: validator, parser: parser, discloser: discloser, identities: identities, hashKey: hashKey}
 }
 
 // UploadVog runs the primary PDF path (#242 §2): validate pdf live against
@@ -101,12 +119,20 @@ func (s *ScreeningService) UploadVog(ctx context.Context, orgID, userID uuid.UUI
 		}, "gaav_rejected")
 	}
 
-	doc, err := vog.Parse(pdf)
+	doc, err := s.parser.Parse(pdf)
 	gaavCode := int(code)
 	if err != nil {
-		reason := "unparseable"
-		if errors.Is(err, vog.ErrNotAVOG) {
+		// Only a verdict about the document is recorded against the member; a
+		// parser infrastructure failure (no free PDFium instance, an extraction
+		// call failing) is ours and surfaces as an error instead.
+		var reason string
+		switch {
+		case errors.Is(err, vog.ErrNotAVOG):
 			reason = "not_a_vog"
+		case errors.Is(err, vog.ErrUnparseable):
+			reason = "unparseable"
+		default:
+			return ScreeningOutcome{}, fmt.Errorf("organization: parse vog: %w", err)
 		}
 		return s.finish(ctx, orgID, userID, matchCtx, settings, ScreeningInput{
 			Method: vog.MethodPDF, Result: vog.ResultRejected, CheckedBy: checkedBy, CheckedByUserID: checkedByUserID,
@@ -174,6 +200,71 @@ func (s *ScreeningService) DiscloseVogCredential(ctx context.Context, orgID, use
 	if err != nil {
 		return ScreeningOutcome{}, fmt.Errorf("organization: disclose vog: %w", err)
 	}
+
+	doc := vog.Document{
+		GivenNames:  disclosed.GivenNames,
+		Surname:     disclosed.Surname,
+		DateOfBirth: disclosed.DateOfBirth,
+		IssueDate:   disclosed.IssueDate,
+		AspectCodes: disclosed.AspectCodes,
+	}
+	return s.evaluateAndFinish(ctx, orgID, userID, vog.MethodYiviCredential, checkedBy, checkedByUserID, nil, doc, matchCtx, settings)
+}
+
+// StartIdentityVogCredentialSession begins the combined identity + pbdf.vog
+// disclosure for a member who has never identified: one wallet session
+// discloses both, instead of turning the member away with ErrVogNoDateOfBirth
+// to identify first. Gated on the org's credential opt-in like
+// StartVogCredentialSession.
+func (s *ScreeningService) StartIdentityVogCredentialSession(ctx context.Context, orgID uuid.UUID) (auth.Session, error) {
+	settings, err := s.store.GetScreeningSettings(ctx, orgID)
+	if err != nil {
+		return auth.Session{}, err
+	}
+	if !settings.AcceptYiviCredential {
+		return auth.Session{}, ErrVogCredentialNotAccepted
+	}
+	return s.discloser.StartIdentityVogSession(ctx, requiredAspectCodes(settings.RequiredCodes))
+}
+
+// DiscloseIdentityAndVogCredential completes the combined disclosure. The
+// identity half is applied first, under the re-identification rules
+// (identityRecorder: email match, name reconciliation, credential freshness)
+// and written to the membership; the VOG half is then evaluated against the
+// identity just established, so the match is against a verified credential
+// and never against the VOG's own say-so. A rejected identity half records no
+// screening at all - there is nothing trustworthy to match the VOG against.
+func (s *ScreeningService) DiscloseIdentityAndVogCredential(ctx context.Context, orgID, userID uuid.UUID, checkedBy string, checkedByUserID *uuid.UUID, disclosureToken string) (ScreeningOutcome, error) {
+	matchCtx, err := s.store.ScreeningMatchContext(ctx, orgID, userID)
+	if err != nil {
+		return ScreeningOutcome{}, err
+	}
+
+	settings, err := s.store.GetScreeningSettings(ctx, orgID)
+	if err != nil {
+		return ScreeningOutcome{}, err
+	}
+	if !settings.AcceptYiviCredential {
+		return ScreeningOutcome{}, ErrVogCredentialNotAccepted
+	}
+
+	aspectCodes := requiredAspectCodes(settings.RequiredCodes)
+	disclosedIdentity, disclosed, err := s.discloser.DiscloseIdentityAndVog(ctx, disclosureToken, aspectCodes)
+	if err != nil {
+		return ScreeningOutcome{}, fmt.Errorf("organization: disclose identity and vog: %w", err)
+	}
+
+	name, err := s.identities.ApplyDisclosedIdentity(ctx, orgID, userID, matchCtx.Email, matchCtx.Name, disclosedIdentity)
+	if err != nil {
+		return ScreeningOutcome{}, err
+	}
+	dob := parseDateOfBirth(disclosedIdentity.DateOfBirth)
+	if dob == nil {
+		// The identity credential carried no birth date: the identity is on
+		// file now, but a VOG still has nothing to be matched against.
+		return ScreeningOutcome{}, ErrVogNoDateOfBirth
+	}
+	matchCtx.Name, matchCtx.DateOfBirth = name, dob
 
 	doc := vog.Document{
 		GivenNames:  disclosed.GivenNames,

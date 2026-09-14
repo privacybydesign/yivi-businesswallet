@@ -39,6 +39,10 @@ type invitationStore interface {
 	RecordReverifyRejected(ctx context.Context, orgID, userID uuid.UUID, email, reason string) error
 	CompleteReverification(ctx context.Context, orgID, userID uuid.UUID, disclosed identity.Name, phone, dateOfBirth string) error
 	GetIdentitySettings(ctx context.Context, orgID uuid.UUID) (IdentitySettings, error)
+	// ScreeningMatchContext is the member's stored identity (name, email, date
+	// of birth) - what an in-app identification without a bearer token is
+	// matched against (CompleteOwnIdentification).
+	ScreeningMatchContext(ctx context.Context, orgID, userID uuid.UUID) (ScreeningMatchContext, error)
 }
 
 type identityDiscloser interface {

@@ -21,6 +21,7 @@ type reverifyStub struct {
 	ctx       ReverifyContext
 	lookupErr error
 	settings  IdentitySettings
+	match     ScreeningMatchContext
 
 	completed        bool
 	completedName    identity.Name
@@ -35,6 +36,10 @@ func (s *reverifyStub) ReverifyTokenLookup(context.Context, string) (ReverifyCon
 
 func (s *reverifyStub) GetIdentitySettings(context.Context, uuid.UUID) (IdentitySettings, error) {
 	return s.settings, nil
+}
+
+func (s *reverifyStub) ScreeningMatchContext(context.Context, uuid.UUID, uuid.UUID) (ScreeningMatchContext, error) {
+	return s.match, nil
 }
 
 func (s *reverifyStub) RecordReverifyRejected(_ context.Context, _, _ uuid.UUID, _, reason string) error {
@@ -253,5 +258,49 @@ func TestStartReverifySessionRefusesAnUnknownToken(t *testing.T) {
 
 	if _, err := svc.StartReverifySession(context.Background(), "nope"); !errors.Is(err, ErrReverifyTokenNotFound) {
 		t.Errorf("StartReverifySession = %v, want ErrReverifyTokenNotFound", err)
+	}
+}
+
+// An in-app identification by a member who never identified: the stored name is
+// empty, so the disclosed one populates it rather than being reviewed against
+// nothing, and the identification is recorded with the disclosed date of birth.
+func TestCompleteOwnIdentificationPopulatesAnUnnamedMember(t *testing.T) {
+	store := &reverifyStub{match: ScreeningMatchContext{Email: "alice@example.test"}}
+	users := &nameUpgradeStub{}
+	svc := NewService(users, store, disclosureStub{disclosed: auth.DisclosedIdentity{
+		Email:       "alice@example.test",
+		Name:        identity.Name{GivenNames: "Alice", LastName: "Anderson"},
+		DateOfBirth: "1990-01-02",
+	}})
+
+	if err := svc.CompleteOwnIdentification(context.Background(), uuid.New(), uuid.New(), "disclosure"); err != nil {
+		t.Fatalf("CompleteOwnIdentification: %v", err)
+	}
+	if !store.completed || store.completedBirth != "1990-01-02" {
+		t.Errorf("completed = %v birth = %q, want the identification recorded with 1990-01-02", store.completed, store.completedBirth)
+	}
+	if users.upgradedTo != (identity.Name{GivenNames: "Alice", LastName: "Anderson"}) {
+		t.Errorf("name written = %+v, want the disclosed name populated", users.upgradedTo)
+	}
+}
+
+// The same rules as a re-identification apply: a disclosure for another
+// e-mail address is rejected and audited, and nothing is recorded.
+func TestCompleteOwnIdentificationRejectsAnotherEmail(t *testing.T) {
+	store := &reverifyStub{match: ScreeningMatchContext{Email: "alice@example.test", Name: identity.Name{GivenNames: "Alice", LastName: "Anderson"}}}
+	svc := NewService(&nameUpgradeStub{}, store, disclosureStub{disclosed: auth.DisclosedIdentity{
+		Email: "bob@example.test",
+		Name:  identity.Name{GivenNames: "Alice", LastName: "Anderson"},
+	}})
+
+	err := svc.CompleteOwnIdentification(context.Background(), uuid.New(), uuid.New(), "disclosure")
+	if !errors.Is(err, ErrReverifyEmailMismatch) {
+		t.Fatalf("err = %v, want ErrReverifyEmailMismatch", err)
+	}
+	if store.completed {
+		t.Error("identification recorded despite the e-mail mismatch")
+	}
+	if len(store.rejectionReasons) != 1 || store.rejectionReasons[0] != "email_mismatch" {
+		t.Errorf("rejections = %v, want [email_mismatch]", store.rejectionReasons)
 	}
 }

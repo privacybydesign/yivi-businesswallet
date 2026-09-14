@@ -13,12 +13,15 @@ import type {
 } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
+  completeIdentityVogCredential,
+  completeOwnIdentity,
   completeVogCredential,
   createDepartment,
   deleteDepartment,
   deleteOrganization,
   getIdentitySettings,
   getMemberAuditEvents,
+  getMemberInsights,
   getMyOrganizations,
   getOrganization,
   getOrganizationAuditEvents,
@@ -49,6 +52,7 @@ import type {
   IdentitySettings,
   IdentitySettingsInput,
   Member,
+  MemberInsights,
   MemberListPage,
   MemberListParams,
   MemberType,
@@ -72,6 +76,24 @@ export function organizationQueryKey(slug: string): readonly string[] {
 
 export function organizationMembersQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "members"];
+}
+
+// Nested under organizationQueryKey(slug) on purpose: every mutation that can
+// move a member's identity or VOG status already invalidates that prefix, so
+// the insights refresh with the rest of the org detail.
+export function memberInsightsQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "member-insights"];
+}
+
+export function useMemberInsightsQuery(
+  slug: string,
+  enabled: boolean,
+): UseQueryResult<MemberInsights, Error> {
+  return useQuery({
+    queryKey: memberInsightsQueryKey(slug),
+    queryFn: ({ signal }) => getMemberInsights(slug, signal),
+    enabled: enabled && slug !== "",
+  });
 }
 
 export function organizationDepartmentsQueryKey(
@@ -680,5 +702,50 @@ export function useCompleteVogCredentialMutation(
         queryKey: organizationAuditEventsQueryKey(slug),
       });
     },
+  });
+}
+
+// invalidateOwnScreeningState refreshes everything a member's own identity or
+// VOG change can alter: the org detail (own identity/vog state and banners),
+// the member list and the audit log.
+function invalidateOwnScreeningState(
+  queryClient: ReturnType<typeof useQueryClient>,
+  slug: string,
+): void {
+  void queryClient.invalidateQueries({
+    queryKey: organizationMembersQueryKey(slug),
+  });
+  void queryClient.invalidateQueries({
+    queryKey: organizationQueryKey(slug),
+  });
+  void queryClient.invalidateQueries({
+    queryKey: organizationAuditEventsQueryKey(slug),
+  });
+}
+
+// The member's own in-app identification (identitySessionUrl): once recorded,
+// the org detail's own vog state stops asking for identity first.
+export function useCompleteOwnIdentityMutation(
+  slug: string,
+): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (disclosureToken) => completeOwnIdentity(slug, disclosureToken),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => invalidateOwnScreeningState(queryClient, slug),
+  });
+}
+
+// The combined identity + pbdf.vog disclosure's completion, for a member who
+// never identified (identityVogCredentialSessionUrl starts it).
+export function useCompleteIdentityVogCredentialMutation(
+  slug: string,
+): UseMutationResult<UploadVogResult, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (disclosureToken) =>
+      completeIdentityVogCredential(slug, disclosureToken),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => invalidateOwnScreeningState(queryClient, slug),
   });
 }

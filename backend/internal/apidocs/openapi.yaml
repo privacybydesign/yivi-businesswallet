@@ -2654,6 +2654,36 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The mandate has already been revoked or has expired.
+  /api/v1/orgs/{slug}/member-insights:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [organizations]
+      summary: Count members by identity and VOG screening status
+      description: >-
+        Requires an administrator role in the organisation. Counts every active
+        membership by its derived identity status (never, verified, due_soon,
+        overdue, requested) and screening status (not_required, none, requested,
+        valid, expiring, expired, rejected, recheck_required) under the
+        organisation's current policy; every status is present, 0 when empty.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/members:
     parameters:
       - name: slug
@@ -2949,6 +2979,75 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/me/identity-session:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [organizations]
+      summary: Start the caller's in-app identity disclosure
+      description: >-
+        Any member of the organisation may call this for their own membership: an
+        identity disclosure without a bearer-token link, for a member who has
+        never identified (no date of birth on file) and is asked for a VOG.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/me/identity-complete:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [organizations]
+      summary: Complete the caller's in-app identity disclosure
+      description: >-
+        Records the disclosed identity on the caller's membership under the
+        re-identification rules (e-mail must match, name is reconciled,
+        credential freshness is enforced). Responds 204 on success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The disclosed e-mail or name does not match this member, or the credential is too old (`email_mismatch`, `name_mismatch`, `credential_too_old`).
+        '422':
+          description: The identity disclosure could not be read (`disclosure_failed`).
   /api/v1/orgs/{slug}/identity-settings:
     parameters:
       - name: slug
@@ -3313,6 +3412,76 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The organisation does not accept the pbdf.vog credential.
+  /api/v1/orgs/{slug}/me/vog/identity-credential-session:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [organizations]
+      summary: Start the caller's combined identity + pbdf.vog credential disclosure
+      description: >-
+        Any member of the organisation may call this for their own membership: one
+        wallet session discloses a verified identity and the pbdf.vog credential,
+        for a member who has never identified. Requires the organisation to have
+        opted in to accepting the pbdf.vog credential.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The organisation does not accept the pbdf.vog credential.
+  /api/v1/orgs/{slug}/me/vog/identity-credential-complete:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [organizations]
+      summary: Complete the caller's combined identity + pbdf.vog credential disclosure
+      description: >-
+        Applies the identity half under the re-identification rules first, then
+        evaluates the VOG half against it; the response is the same shape as a
+        VOG upload's (200 for a passing check, 422 for a recorded rejection).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The organisation does not accept the pbdf.vog credential, or the identity half was rejected (`email_mismatch`, `name_mismatch`, `credential_too_old`).
   /api/v1/orgs/{slug}/members/{userId}/avatar:
     parameters:
       - name: slug
