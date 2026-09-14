@@ -66,6 +66,9 @@ func TestQerdsAddressUsesConfiguredDomain(t *testing.T) {
 // and would also pin the domain back to a literal, defeating the fix.
 func TestDemoOrgAddressLocalPartsHaveNoDomain(t *testing.T) {
 	orgs := append([]demoOrganization{kvkRegisterOrg}, demoOrganizations...)
+	for _, c := range communityOrganizations {
+		orgs = append(orgs, c.org)
+	}
 	for _, o := range orgs {
 		if o.addressLocal == "" {
 			t.Errorf("demo org %q has an empty addressLocal", o.slug)
@@ -120,6 +123,9 @@ func TestRegisterOnlyCompanyIsOpenable(t *testing.T) {
 	for _, o := range demoOrganizations {
 		seededKVK[o.kvkNumber] = true
 	}
+	for _, c := range communityOrganizations {
+		seededKVK[c.org.kvkNumber] = true
+	}
 
 	if seededKVK[registryprovider.OpenableKVKNumber] {
 		t.Fatalf("register-only company %s must not be seeded as an org", registryprovider.OpenableKVKNumber)
@@ -136,6 +142,88 @@ func TestRegisterOnlyCompanyIsOpenable(t *testing.T) {
 	}
 	if openable == 0 {
 		t.Fatal("no validatable KVK number is openable: every register entry is already seeded as an org, so OpenWallet's positive path is unreachable")
+	}
+}
+
+// TestCommunityOrgFixturesAreWellFormed guards the dev-demo community
+// organisations (the church and the football club): they must not collide with
+// any other seeded org on slug or KVK number (ON CONFLICT (slug) would silently
+// return the other org and the departments would land on it), must stay out of
+// the register dataset (they are provisioned directly, not opened through the
+// register flow), carry no representative and no members, and every department
+// name must be unique within its org (UNIQUE (organization_id, name)).
+func TestCommunityOrgFixturesAreWellFormed(t *testing.T) {
+	seenSlug := map[string]bool{kvkRegisterOrg.slug: true}
+	seenKVK := map[string]bool{kvkRegisterOrg.kvkNumber: true}
+	for _, o := range demoOrganizations {
+		seenSlug[o.slug] = true
+		seenKVK[o.kvkNumber] = true
+	}
+	register := registryprovider.DefaultDataset()
+
+	for _, c := range communityOrganizations {
+		o := c.org
+		if o.slug == "" || o.name == "" {
+			t.Errorf("community org %+v has an empty slug or name", o)
+		}
+		if seenSlug[o.slug] {
+			t.Errorf("community org slug %q collides with another seeded org", o.slug)
+		}
+		seenSlug[o.slug] = true
+		if seenKVK[o.kvkNumber] {
+			t.Errorf("community org %q KVK number %q collides with another seeded org", o.slug, o.kvkNumber)
+		}
+		seenKVK[o.kvkNumber] = true
+		if _, ok := register[o.kvkNumber]; ok {
+			t.Errorf("community org %q KVK number %q must not be a register entry", o.slug, o.kvkNumber)
+		}
+		if o.repKind != "" {
+			t.Errorf("community org %q should carry no representative, got repKind %q", o.slug, o.repKind)
+		}
+		if len(c.departments) == 0 {
+			t.Errorf("community org %q has no departments; its structure is the point of seeding it", o.slug)
+		}
+		seenDept := map[string]bool{}
+		for _, d := range c.departments {
+			if d == "" {
+				t.Errorf("community org %q has an empty department name", o.slug)
+			}
+			if seenDept[d] {
+				t.Errorf("community org %q department %q is duplicated", o.slug, d)
+			}
+			seenDept[d] = true
+		}
+	}
+
+	for _, m := range demoMemberships {
+		for _, c := range communityOrganizations {
+			if m.slug == c.org.slug {
+				t.Errorf("community org %q must have no seeded members, got %q", c.org.slug, m.email)
+			}
+		}
+	}
+}
+
+// TestExpandTeamsNumbersEveryTeam pins the team expansion: one department per
+// team in every group, numbered from 1, followed by the irregular extras in
+// order — so a change to sdvbTeamGroups shows up as a count, not a silent gap.
+func TestExpandTeamsNumbersEveryTeam(t *testing.T) {
+	groups := []sdvbTeamGroup{
+		{section: "Jeugd", code: "JO19", count: 2},
+		{section: "Senioren", code: "Mannen", count: 1},
+	}
+	got := expandTeams(groups, []string{"Jeugd Mini's"})
+	want := []string{"Jeugd JO19-1", "Jeugd JO19-2", "Senioren Mannen-1", "Jeugd Mini's"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("expandTeams = %q, want %q", got, want)
+	}
+
+	total := len(sdvbExtraTeams)
+	for _, g := range sdvbTeamGroups {
+		total += g.count
+	}
+	if n := len(expandTeams(sdvbTeamGroups, sdvbExtraTeams)); n != total {
+		t.Fatalf("SDVB expands to %d departments, want %d", n, total)
 	}
 }
 
