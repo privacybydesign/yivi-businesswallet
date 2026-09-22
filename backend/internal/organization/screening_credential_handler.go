@@ -86,7 +86,7 @@ func mapVogCredentialError(err error) error {
 		return nil
 	case errors.Is(err, ErrVogCredentialNotAccepted):
 		return &respond.APIError{Status: http.StatusConflict, Code: "vog_credential_not_accepted", Message: "this organization does not accept the pbdf.vog credential"}
-	case errors.Is(err, ErrReverifyEmailMismatch), errors.Is(err, ErrReverifyNameMismatch), errors.Is(err, ErrCredentialTooOld):
+	case errors.Is(err, ErrDisclosureFailed), errors.Is(err, ErrReverifyEmailMismatch), errors.Is(err, ErrReverifyNameMismatch), errors.Is(err, ErrCredentialTooOld):
 		// The identity half of a combined disclosure fails the way a
 		// re-identification does, with the same codes the frontend already knows.
 		return mapReverifyError(err)
