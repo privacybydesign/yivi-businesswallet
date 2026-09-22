@@ -10,6 +10,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/klippa-app/go-pdfium v1.19.8
 	github.com/lestrrat-go/jwx/v3 v3.1.1
 	github.com/pressly/goose/v3 v3.27.1
 	golang.org/x/image v0.45.0
@@ -27,6 +28,7 @@ require (
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
+	github.com/jolestar/go-commons-pool/v2 v2.1.2 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
 	github.com/lestrrat-go/dsig v1.2.1 // indirect
@@ -44,6 +46,7 @@ require (
 	github.com/privacybydesign/gabi v0.0.0-20221212095008-68a086907750 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/valyala/fastjson v1.6.10 // indirect
 	github.com/woodsbury/decimal128 v1.3.0 // indirect
 	gorm.io/driver/mysql v1.6.0 // indirect

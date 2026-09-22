@@ -19,6 +19,8 @@ const (
 	// re-identification freshness check.
 	credIDPassport = "passport"
 	credIDIDCard   = "idcard"
+	credIDEmail    = "email"
+	credIDPhone    = "phone"
 	credIDVog      = "vog"
 )
 
@@ -69,6 +71,11 @@ const (
 	// credential-disclosure screening path. Its claim list is dynamic (only the
 	// org's required aspect flags), so callers pass it via claims.
 	ScopeVog
+	// ScopeIdentityVog discloses everything ScopeIdentity does plus the pbdf.vog
+	// credential, in one presentation: for a member who has never identified
+	// and is asked for a VOG, one scan establishes the identity the VOG is then
+	// matched against. Its vog claim list is dynamic like ScopeVog's.
+	ScopeIdentityVog
 )
 
 func queryFor(scope Scope, claims []string) dcqlQuery {
@@ -77,6 +84,8 @@ func queryFor(scope Scope, claims []string) dcqlQuery {
 		return identityQuery()
 	case ScopeVog:
 		return vogQuery(claims)
+	case ScopeIdentityVog:
+		return identityVogQuery(claims)
 	default:
 		return loginQuery()
 	}
@@ -87,10 +96,10 @@ func queryFor(scope Scope, claims []string) dcqlQuery {
 func loginQuery() dcqlQuery {
 	return dcqlQuery{
 		Credentials: []dcqlCredential{
-			{ID: "email", Format: formatSDJWT, Meta: dcqlMeta{[]string{vctEmail}}, Claims: claimPaths(ClaimEmail)},
+			{ID: credIDEmail, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctEmail}}, Claims: claimPaths(ClaimEmail)},
 		},
 		CredentialSets: []dcqlCredentialSet{
-			{Options: [][]string{{"email"}}},
+			{Options: [][]string{{credIDEmail}}},
 		},
 	}
 }
@@ -102,13 +111,13 @@ func identityQuery() dcqlQuery {
 		Credentials: []dcqlCredential{
 			{ID: credIDPassport, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPassport}}, Claims: claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality)},
 			{ID: credIDIDCard, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctIDCard}}, Claims: claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality)},
-			{ID: "email", Format: formatSDJWT, Meta: dcqlMeta{[]string{vctEmail}}, Claims: claimPaths(ClaimEmail)},
-			{ID: "phone", Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPhone}}, Claims: claimPaths(ClaimPhone)},
+			{ID: credIDEmail, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctEmail}}, Claims: claimPaths(ClaimEmail)},
+			{ID: credIDPhone, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPhone}}, Claims: claimPaths(ClaimPhone)},
 		},
 		CredentialSets: []dcqlCredentialSet{
 			{Options: [][]string{{credIDPassport}, {credIDIDCard}}},
-			{Options: [][]string{{"email"}}},
-			{Options: [][]string{{"phone"}}},
+			{Options: [][]string{{credIDEmail}}},
+			{Options: [][]string{{credIDPhone}}},
 		},
 	}
 }
@@ -119,13 +128,25 @@ func identityQuery() dcqlQuery {
 // (#242 §4's data-minimisation design). aspectClaims are claim names, already
 // resolved by the caller (organization.AspectClaimName).
 func vogQuery(aspectClaims []string) dcqlQuery {
-	claims := append([]string{ClaimVogIssueDate, ClaimVogSurname, ClaimVogPrefix, ClaimVogGivenNames, ClaimVogDateOfBirth}, aspectClaims...)
 	return dcqlQuery{
-		Credentials: []dcqlCredential{
-			{ID: credIDVog, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctVog}}, Claims: claimPaths(claims...)},
-		},
-		CredentialSets: []dcqlCredentialSet{
-			{Options: [][]string{{credIDVog}}},
-		},
+		Credentials:    []dcqlCredential{vogCredential(aspectClaims)},
+		CredentialSets: []dcqlCredentialSet{{Options: [][]string{{credIDVog}}}},
 	}
+}
+
+// vogCredential is the pbdf.vog credential entry shared by vogQuery and
+// identityVogQuery.
+func vogCredential(aspectClaims []string) dcqlCredential {
+	claims := append([]string{ClaimVogIssueDate, ClaimVogSurname, ClaimVogPrefix, ClaimVogGivenNames, ClaimVogDateOfBirth}, aspectClaims...)
+	return dcqlCredential{ID: credIDVog, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctVog}}, Claims: claimPaths(claims...)}
+}
+
+// identityVogQuery is identityQuery plus the pbdf.vog credential as a fourth,
+// independently required credential set - so the presentation is only
+// complete when the wallet disclosed both the identity and the VOG.
+func identityVogQuery(aspectClaims []string) dcqlQuery {
+	q := identityQuery()
+	q.Credentials = append(q.Credentials, vogCredential(aspectClaims))
+	q.CredentialSets = append(q.CredentialSets, dcqlCredentialSet{Options: [][]string{{credIDVog}}})
+	return q
 }

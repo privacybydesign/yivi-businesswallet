@@ -36,12 +36,7 @@ type ReverifyOutcome struct {
 }
 
 // CompleteReverification finishes a re-identification: it resolves the token,
-// disclosure-matches the member (email must match; name is reconciled against
-// the stored identity the same way invite-accept reconciles a disclosure —
-// Populate never applies here since a verified name already exists), optionally
-// enforces the org's credential-freshness policy, and on success records the new
-// identification. A rejection at any step is audited and returns without
-// changing the membership.
+// reads the disclosure, and applies it under ApplyDisclosedIdentity's rules.
 func (s *Service) CompleteReverification(ctx context.Context, rawToken, disclosureToken string) (ReverifyOutcome, error) {
 	rc, err := s.store.ReverifyTokenLookup(ctx, rawToken)
 	if err != nil {
@@ -53,36 +48,78 @@ func (s *Service) CompleteReverification(ctx context.Context, rawToken, disclosu
 		return ReverifyOutcome{}, ErrDisclosureFailed
 	}
 
-	if !strings.EqualFold(string(disclosed.Email), rc.Email) {
-		_ = s.store.RecordReverifyRejected(ctx, rc.OrganizationID, rc.UserID, rc.Email, "email_mismatch")
-		return ReverifyOutcome{}, ErrReverifyEmailMismatch
-	}
-
-	switch identity.Reconcile(disclosed.Name, &rc.StoredName) {
-	case identity.Review:
-		_ = s.store.RecordReverifyRejected(ctx, rc.OrganizationID, rc.UserID, rc.Email, "name_mismatch")
-		return ReverifyOutcome{}, ErrReverifyNameMismatch
-	case identity.Upgrade:
-		cleaned := disclosed.Name.Clean()
-		if err := s.users.UpdateName(ctx, rc.UserID, cleaned.GivenNames, cleaned.LastName); err != nil {
-			return ReverifyOutcome{}, err
-		}
-	}
-
-	settings, err := s.store.GetIdentitySettings(ctx, rc.OrganizationID)
-	if err != nil {
+	if _, err := s.ApplyDisclosedIdentity(ctx, rc.OrganizationID, rc.UserID, rc.Email, rc.StoredName, disclosed); err != nil {
 		return ReverifyOutcome{}, err
+	}
+	return ReverifyOutcome{OrganizationName: rc.OrganizationName, OrganizationSlug: rc.OrganizationSlug}, nil
+}
+
+// CompleteOwnIdentification records an identity disclosure the signed-in member
+// made from inside the app - no bearer token, the session identifies them. It
+// is the entry point for a member who has never identified (no date of birth
+// on file) and is asked for a VOG: the PDF path needs a stored identity to
+// match against, and until now such a member was turned away to a link flow
+// the dashboard did not always offer. Same rules as a re-identification.
+func (s *Service) CompleteOwnIdentification(ctx context.Context, orgID, userID uuid.UUID, disclosureToken string) error {
+	mc, err := s.store.ScreeningMatchContext(ctx, orgID, userID)
+	if err != nil {
+		return err
+	}
+	disclosed, err := s.discloser.DiscloseIdentity(ctx, disclosureToken)
+	if err != nil {
+		return ErrDisclosureFailed
+	}
+	_, err = s.ApplyDisclosedIdentity(ctx, orgID, userID, mc.Email, mc.Name, disclosed)
+	return err
+}
+
+// ApplyDisclosedIdentity is the one place a completed identity disclosure is
+// matched against a member and written to their membership, shared by the
+// token-based re-identification, the in-app identification and the combined
+// identity+VOG disclosure (ScreeningService): the email must match; the name
+// is reconciled against the stored one the same way invite-accept reconciles a
+// disclosure (Review rejects, Upgrade and Populate - a member with no name on
+// file yet - write the disclosed name); the org's credential-freshness policy
+// is enforced; then the identification is recorded (Store.CompleteReverification).
+// It returns the name now on file. A rejection at any step is audited and
+// returns without changing the membership.
+func (s *Service) ApplyDisclosedIdentity(ctx context.Context, orgID, userID uuid.UUID, email string, storedName identity.Name, disclosed auth.DisclosedIdentity) (identity.Name, error) {
+	if !strings.EqualFold(string(disclosed.Email), email) {
+		_ = s.store.RecordReverifyRejected(ctx, orgID, userID, email, "email_mismatch")
+		return identity.Name{}, ErrReverifyEmailMismatch
+	}
+
+	name := storedName
+	var stored *identity.Name
+	if storedName != (identity.Name{}) {
+		stored = &storedName
+	}
+	switch identity.Reconcile(disclosed.Name, stored) {
+	case identity.Review:
+		_ = s.store.RecordReverifyRejected(ctx, orgID, userID, email, "name_mismatch")
+		return identity.Name{}, ErrReverifyNameMismatch
+	case identity.Upgrade, identity.Populate:
+		name = disclosed.Name.Clean()
+		if err := s.users.UpdateName(ctx, userID, name.GivenNames, name.LastName); err != nil {
+			return identity.Name{}, err
+		}
+	case identity.Proceed:
+	}
+
+	settings, err := s.store.GetIdentitySettings(ctx, orgID)
+	if err != nil {
+		return identity.Name{}, err
 	}
 	if settings.CredentialMaxAgeDays != nil && !disclosed.CredentialIssuedAt.IsZero() {
 		maxAge := time.Duration(*settings.CredentialMaxAgeDays) * 24 * time.Hour
 		if time.Since(disclosed.CredentialIssuedAt) > maxAge {
-			_ = s.store.RecordReverifyRejected(ctx, rc.OrganizationID, rc.UserID, rc.Email, "credential_too_old")
-			return ReverifyOutcome{}, ErrCredentialTooOld
+			_ = s.store.RecordReverifyRejected(ctx, orgID, userID, email, "credential_too_old")
+			return identity.Name{}, ErrCredentialTooOld
 		}
 	}
 
-	if err := s.store.CompleteReverification(ctx, rc.OrganizationID, rc.UserID, disclosed.Name, disclosed.Phone, disclosed.DateOfBirth); err != nil {
-		return ReverifyOutcome{}, err
+	if err := s.store.CompleteReverification(ctx, orgID, userID, disclosed.Name, disclosed.Phone, disclosed.DateOfBirth); err != nil {
+		return identity.Name{}, err
 	}
-	return ReverifyOutcome{OrganizationName: rc.OrganizationName, OrganizationSlug: rc.OrganizationSlug}, nil
+	return name, nil
 }

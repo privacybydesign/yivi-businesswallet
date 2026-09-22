@@ -56,6 +56,8 @@ type repository interface {
 	SaveScreeningSettings(ctx context.Context, orgID uuid.UUID, in ScreeningSettingsInput) (ScreeningSettings, error)
 	ListScreeningHistory(ctx context.Context, orgID, userID uuid.UUID) ([]ScreeningRecord, error)
 	RequestVog(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID, requestedBy uuid.UUID, reason string) ([]RequestedVogMember, error)
+	ScreeningMatchContext(ctx context.Context, orgID, userID uuid.UUID) (ScreeningMatchContext, error)
+	MemberStatusSnapshots(ctx context.Context, orgID uuid.UUID) ([]MemberStatusSnapshot, error)
 }
 
 // screener is the VOG screening seam the handler needs, satisfied by
@@ -64,6 +66,8 @@ type screener interface {
 	UploadVog(ctx context.Context, orgID, userID uuid.UUID, checkedBy string, checkedByUserID *uuid.UUID, pdf []byte) (ScreeningOutcome, error)
 	StartVogCredentialSession(ctx context.Context, orgID uuid.UUID) (auth.Session, error)
 	DiscloseVogCredential(ctx context.Context, orgID, userID uuid.UUID, checkedBy string, checkedByUserID *uuid.UUID, disclosureToken string) (ScreeningOutcome, error)
+	StartIdentityVogCredentialSession(ctx context.Context, orgID uuid.UUID) (auth.Session, error)
+	DiscloseIdentityAndVogCredential(ctx context.Context, orgID, userID uuid.UUID, checkedBy string, checkedByUserID *uuid.UUID, disclosureToken string) (ScreeningOutcome, error)
 }
 
 type inviter interface {
@@ -82,6 +86,7 @@ type inviter interface {
 	StartReverifySession(ctx context.Context, rawToken string) (auth.Session, error)
 	MintOwnReverifyToken(ctx context.Context, orgID, userID uuid.UUID) (string, time.Time, error)
 	CompleteReverification(ctx context.Context, rawToken, disclosureToken string) (ReverifyOutcome, error)
+	CompleteOwnIdentification(ctx context.Context, orgID, userID uuid.UUID, disclosureToken string) error
 }
 
 type auditReader interface {
@@ -158,6 +163,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
 	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))
 	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
+	mux.Handle("GET /orgs/{slug}/member-insights", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberInsights))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.member))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}/avatar", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberAvatar))))
 	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.invite))))
@@ -170,6 +176,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// Any member may mint their own re-identification link (the in-app banner);
 	// it is scoped to the caller's own membership, so no admin gate is needed.
 	mux.Handle("POST /orgs/{slug}/me/reidentify-token", orgScoped(respond.HandlerFunc(h.mintOwnReverifyToken)))
+	// A member may also identify from inside the app without a bearer token -
+	// the session identifies them - which is how a member who never identified
+	// gets a stored identity for a VOG to be matched against.
+	mux.Handle("POST /orgs/{slug}/me/identity-session", orgScoped(respond.HandlerFunc(h.startOwnIdentitySession)))
+	mux.Handle("POST /orgs/{slug}/me/identity-complete", orgScoped(respond.HandlerFunc(h.completeOwnIdentification)))
 
 	mux.Handle("GET /orgs/{slug}/identity-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.getIdentitySettings))))
 	mux.Handle("PUT /orgs/{slug}/identity-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.putIdentitySettings))))
@@ -188,6 +199,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// from the member's own wallet).
 	mux.Handle("POST /orgs/{slug}/me/vog/credential-session", orgScoped(respond.HandlerFunc(h.startVogCredentialSession)))
 	mux.Handle("POST /orgs/{slug}/me/vog/credential-complete", orgScoped(respond.HandlerFunc(h.completeVogCredential)))
+	// The same, combined with an identity disclosure in one wallet session, for
+	// a member who has never identified.
+	mux.Handle("POST /orgs/{slug}/me/vog/identity-credential-session", orgScoped(respond.HandlerFunc(h.startIdentityVogCredentialSession)))
+	mux.Handle("POST /orgs/{slug}/me/vog/identity-credential-complete", orgScoped(respond.HandlerFunc(h.completeIdentityVogCredential)))
 
 	mux.Handle("POST /orgs/{slug}/invitations/{id}/resend", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.resendInvitation))))
 	mux.Handle("DELETE /orgs/{slug}/invitations/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.revokeInvitation))))
@@ -292,6 +307,10 @@ type ownVogState struct {
 	Status           string     `json:"status"`
 	ValidUntil       *time.Time `json:"validUntil"`
 	AcceptCredential bool       `json:"acceptCredential"`
+	// NeedsIdentity is true when the caller has no date of birth on file, so a
+	// VOG cannot be matched yet: the page offers identification first (or the
+	// combined identity+VOG disclosure) instead of an upload that would fail.
+	NeedsIdentity bool `json:"needsIdentity"`
 }
 
 func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
@@ -343,8 +362,18 @@ func (h *Handler) ownVog(ctx context.Context, orgID, userID uuid.UUID) *ownVogSt
 		slog.ErrorContext(ctx, "resolving screening settings", slog.String("error", err.Error()))
 		return nil
 	}
+	matchCtx, err := h.store.ScreeningMatchContext(ctx, orgID, userID)
+	if err != nil {
+		slog.ErrorContext(ctx, "resolving own screening match context", slog.String("error", err.Error()))
+		return nil
+	}
 	member = member.withVogStatus(settings, time.Now())
-	return &ownVogState{Status: member.VogStatus, ValidUntil: member.VogValidUntil, AcceptCredential: settings.AcceptYiviCredential}
+	return &ownVogState{
+		Status:           member.VogStatus,
+		ValidUntil:       member.VogValidUntil,
+		AcceptCredential: settings.AcceptYiviCredential,
+		NeedsIdentity:    matchCtx.DateOfBirth == nil,
+	}
 }
 
 type updateRequest struct {

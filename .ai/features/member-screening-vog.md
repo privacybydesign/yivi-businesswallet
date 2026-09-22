@@ -137,19 +137,39 @@ about Justis' document, not about members or orgs.
   makes GAAV answer code 2 (unknown document) for a genuine VOG.
   `Ping` GETs the same URL and accepts a `405` as healthy (the service has no
   health endpoint; a `405` on `GET` proves the route exists and answered).
-- **`parser.go`** reconstructs text from the PDF's positioned glyphs
-  (`digitorus/pdf`, already a dependency via `internal/signing`'s PAdES code -
-  reached for instead of adding a WASM PDFium runtime) and matches Dutch field
-  labels (`kenmerk`, `Datum`, `Geslachtsnaam`, `Tussenvoegsels`, `Voornamen`,
-  `Geboortedatum`, `profiel:`), tolerating both a "label: value" line and a
-  label-only line followed by its value.
+- **`parser.go`** is a port of go-vog-issuer's parser, the one confirmed
+  against real Justis documents: PDFium in a WebAssembly sandbox
+  (`klippa-app/go-pdfium` + wazero, pure Go, no cgo) opens the PDF and yields
+  every positioned text run; `ExtractDocument` then reads the labelled fields
+  from the value column right of the Dutch label (`kenmerk`, `Datum`,
+  `Geslachtsnaam`, `Tussenvoegsels`, `Voorna(a)m(en)`, `Geboortedatum`) and
+  the two-digit codes on the line(s) after `profiel:`. Dates are written out
+  in Dutch (`25 maart 2026`, `ParseDutchDate`). `PDFiumParser` is built once
+  in `cmd/api/main.go` (compiling the module takes seconds) and injected into
+  `ScreeningService` through the `vogParser` seam; tests use a fake.
+  `ErrNotAVOG` (unreadable, or no "Verklaring Omtrent het Gedrag" title) and
+  `ErrUnparseable` (a VOG whose required field could not be read) are the two
+  recorded verdicts; any other parser error is an infrastructure failure and
+  surfaces as a 500 without recording anything against the member.
 
-**Unverified against a real Justis VOG.** No sample document is available in
-this environment (or reachable without a live `pbdf-staging.*` wallet and an
-actual VOG to validate). The parser's label-matching is deliberately
-tolerant for exactly this reason. Verifying it against a real document -
-and, if the layout differs, adjusting `parser.go` - is a gap this change
-flags rather than closes.
+**Why not `digitorus/pdf`.** The first version reached for it (already a
+dependency via PAdES signing) and failed every real VOG as "unparseable":
+Justis PDFs are AES-encrypted (V=4 / AESV2, empty user password) with the
+crypt-filter `/Length` written in bits (128), and `digitorus/pdf`'s V4 check
+accepts only the byte form (16) - in v0.1.2 and still in v0.2.0. Its string
+decryption for AES is also a `panic("AES not implemented")` in v0.1.2. The
+layout was wrong too: the fields are columns (English label, Dutch label,
+value), not `label: value` lines, and the given-names label is
+`Voorna(a)m(en)`, not `Voornamen`.
+
+**Verified against real documents.** `internal/vog/vogtest` embeds two genuine
+VOGs (issued to a project member, contributed as fixtures; go-vog-issuer's
+suite uses the same two) with the values printed on them.
+`internal/vog`'s `TestParseRealVOG` and `internal/integration`'s VOG flows run
+through the actual encrypted PDFs, so a parser regression against a real
+Justis document fails CI. PDFium compiles in `TestMain` once per test binary
+(~5s; ~25s under `-race`), and lazily in the integration package so a run
+without `TEST_DATABASE_URL` never pays for it.
 
 ## 6. Function-aspect codes: intentionally code-only
 
@@ -174,8 +194,47 @@ member's **stored** identity (`ScreeningMatchContext`, read from
 `identity.Name.Key()` - the same case/diacritic-folding key every other
 identity comparison in this backend uses. `ErrVogNoDateOfBirth` is returned,
 before any validatie.nl call, when the membership has no date of birth yet
-(a legacy member who predates #240's persistence of it); the frontend
-(`vog.tsx`) sends them to re-identify first.
+(a legacy member who predates #240's persistence of it). The frontend
+(`vog.tsx`) then does not send them away: see §7a.
+
+## 7a. A member who never identified: identify first, or both in one scan
+
+The org detail's own VOG state carries `needsIdentity` (no date of birth on
+file). When it is set - or a check just came back `no_date_of_birth` - the
+VOG page offers two ways in instead of a dead end (the old "go re-identify"
+button landed on a dashboard whose identity banner deliberately hides the
+`never` status):
+
+- **In-app identification** (`POST /orgs/{slug}/me/identity-session` +
+  `/identity-complete`): an identity disclosure without the bearer-token
+  `/reidentify/{token}` page, because a signed-in member's session already
+  identifies them. On success the page switches to the ordinary upload and
+  credential cards. `Service.CompleteOwnIdentification` backs it.
+- **Identity + VOG in one wallet session** (when the org accepts the
+  credential): `POST /orgs/{slug}/me/vog/identity-credential-session` +
+  `/identity-credential-complete`, `openid4vpverifier.ScopeIdentityVog` - the
+  identity query plus the `pbdf.vog` credential as a fourth, independently
+  required credential set. `ScreeningService.DiscloseIdentityAndVogCredential`
+  applies the identity half first and evaluates the VOG half against the date
+  of birth it just disclosed - never against the VOG's own say-so. A rejected
+  identity half records no screening.
+
+Both, and the token-based re-identification, share one rule set:
+`Service.ApplyDisclosedIdentity` (e-mail must match, name reconciled with
+`identity.Reconcile` - `Populate` writes the name for a member with none on
+file, `Review` rejects - credential freshness enforced, then
+`Store.CompleteReverification`). `ScreeningService` reaches it through the
+`identityRecorder` seam. Rejections surface with the re-identification codes
+the frontend already has copy for (`email_mismatch`, `name_mismatch`,
+`credential_too_old`).
+
+**Per-credential claims.** Both the identity credential and `pbdf.vog` carry
+a `dateOfBirth`; `openid4vpverifier.Presentation.Claims` flattens across
+credentials in map order, so in a combined presentation one would overwrite
+the other at random. `Presentation.ByCredential` keeps them apart and
+`IdentityClaims()` / `VogClaims()` are what `extractIdentity` / `extractVog`
+read; a hand-built `Presentation` without `ByCredential` falls back to the
+flat map, so every existing test and fake keeps working.
 
 ## 8. The opt-in `pbdf.vog` credential
 
@@ -264,9 +323,9 @@ where that copy should come from once one does.
   `flag` does anything.
 - **Member export columns** - `internal/export` still does not exist
   (`.ai/features/export.md`), same gap #240 left for VOG's fields too.
-- **Verification against a real VOG PDF and a real issued `pbdf.vog`
-  credential** (§5, §8) - no sample document, no wallet holding the
-  credential, in this environment.
+- **Verification against a real issued `pbdf.vog` credential** (§8) - no
+  wallet holding the credential in this environment. The PDF parser *is*
+  verified against real documents (§5).
 
 ## 13. Files
 
@@ -274,15 +333,18 @@ where that copy should come from once one does.
 |---|---|
 | `internal/migrate/migrations/20260914090000_add_member_screening_columns.sql` | the membership columns |
 | `…090100_create_org_screening_settings.sql`, `…090200_create_member_screenings.sql` | the policy and history table |
-| `internal/vog/vog.go`, `validator.go`, `parser.go` | the Justis-specific validator/parser, independent of `organization` |
-| `internal/vog/vogtest/pdf.go` | a minimal-PDF test builder shared by `internal/vog` and `internal/organization`'s tests |
+| `internal/vog/vog.go`, `validator.go`, `parser.go` | the Justis-specific validator/parser (PDFium via WebAssembly), independent of `organization` |
+| `internal/vog/vogtest/samples.go` + `testdata/*.pdf` | two real Justis VOGs with their printed values, for `internal/vog`'s and `internal/integration`'s tests |
 | `internal/organization/screening_status.go` | the derived status (pure) |
 | `internal/organization/screening_settings_store.go` | policy read/save, recompute |
 | `internal/organization/screening_store.go` | `RecordScreening`, history, admin request |
 | `internal/organization/screening_service.go` | the shared PDF/credential decision logic |
-| `internal/organization/screening_upload_handler.go`, `screening_credential_handler.go`, `members_screening.go` | the HTTP routes |
+| `internal/organization/screening_upload_handler.go`, `screening_credential_handler.go`, `members_screening.go` | the HTTP routes, incl. the combined identity+VOG session (§7a) |
+| `internal/organization/reverify_service.go` (`ApplyDisclosedIdentity`, `CompleteOwnIdentification`), `members_identity.go` (`startOwnIdentitySession`, `completeOwnIdentification`) | the shared identity rule set and the in-app identification (§7a) |
+| `internal/organization/member_insights.go` | the admin's org-wide count of members by identity/screening status (`.ai/features/member-insights.md`) |
 | `internal/organization/screening_reminders.go`, `screening_scheduler.go` | candidate selection and the daily sweep |
 | `internal/openid4vpverifier/dcql.go`, `verifier.go`; `internal/auth/service.go`, `disclosure.go` | the `pbdf.vog` DCQL query and disclosure read |
 | `internal/email/catalog.go` + `templates/defaults.{en,nl}.json` | `vog_requested`, `vog_reminder`, `vog_expired` |
 | `frontend/src/lib/screening-status.ts`, `vog-codes.ts` | status label/tone/hint, the 19 aspect codes |
-| `frontend/src/routes/screening-settings.tsx`, `vog.tsx`, `vog-banner.tsx` | the settings panel, the member's own page, the dashboard banner |
+| `frontend/src/routes/screening-settings.tsx`, `vog.tsx`, `vog-banner.tsx` | the settings panel, the member's own page (identify-first flows, §7a), the dashboard banner |
+| `frontend/src/lib/vog-page.ts` | when the page asks for identity first, which error codes are identity rejections |

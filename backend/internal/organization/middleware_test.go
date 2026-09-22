@@ -322,3 +322,11 @@ func TestRequireMandateAuthority(t *testing.T) {
 		})
 	}
 }
+
+func (f fakeRepo) ScreeningMatchContext(context.Context, uuid.UUID, uuid.UUID) (ScreeningMatchContext, error) {
+	return ScreeningMatchContext{}, nil
+}
+
+func (f fakeRepo) MemberStatusSnapshots(context.Context, uuid.UUID) ([]MemberStatusSnapshot, error) {
+	return nil, nil
+}

@@ -425,9 +425,17 @@ export const nl: Translation<typeof en> = {
     title: "VOG-screening",
     subtitle:
       "{{org}} vraagt leden om een geldige Verklaring Omtrent het Gedrag (VOG).",
-    noDateOfBirth:
-      "Bevestig eerst je identiteit - een VOG-controle vergelijkt met je vastgelegde geboortedatum.",
-    goToReidentify: "Mijn identiteit bevestigen",
+    identity: {
+      heading: "Bevestig eerst je identiteit",
+      hint: "Een VOG-controle vergelijkt de naam en geboortedatum op het document met je identiteit, en {{org}} heeft nog geen geverifieerde identiteit van je. Scan de code met je wallet om te bevestigen wie je bent; daarna kun je direct je VOG uploaden.",
+      start: "Mijn identiteit bevestigen",
+      completing: "Je identiteit wordt vastgelegd…",
+      combinedHeading: "Of doe beide in één keer",
+      combinedHint:
+        "{{org}} accepteert ook de pbdf.vog-credential. Deel je identiteit en je VOG vanuit je wallet in één scan.",
+      combinedStart: "Identiteit bevestigen en VOG delen",
+      combinedDone: "Je identiteit is bevestigd en je VOG is gecontroleerd",
+    },
     upload: {
       heading: "Upload je VOG",
       hint: "Live gecontroleerd bij validatie.nl en vergeleken met je vastgelegde identiteit. De PDF zelf wordt nooit opgeslagen - alleen de uitkomst.",
@@ -474,6 +482,20 @@ export const nl: Translation<typeof en> = {
     stats: {
       attestations: "Uitgegeven attestaties",
       documents: "Te ondertekenen documenten",
+    },
+    insights: {
+      title: "Ledenoverzicht",
+      members: "Leden",
+      notIdentified: "Niet geïdentificeerd",
+      notIdentifiedHint: "Nooit geïdentificeerd, verlopen of gevraagd",
+      vogAttention: "VOG vraagt aandacht",
+      vogAttentionHint:
+        "Ontbreekt, gevraagd, afgewezen, verlopen of opnieuw nodig",
+      vogNotRequired: "Je beleid vereist geen VOG",
+      identityBar: "Identiteitsstatus",
+      screeningBar: "VOG-status",
+      empty: "Nog geen leden.",
+      error: "Kon ledeninzichten niet laden: {{message}}",
     },
     details: "Details",
     id: "ID",

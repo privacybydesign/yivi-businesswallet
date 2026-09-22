@@ -66,6 +66,9 @@ export const ownVogStateSchema = z.object({
   status: z.string(),
   validUntil: z.string().nullable(),
   acceptCredential: z.boolean(),
+  // No date of birth on file yet: a VOG cannot be matched until the member
+  // identifies (in-app, or combined with the credential disclosure).
+  needsIdentity: z.boolean(),
 });
 
 export type OwnVogState = z.infer<typeof ownVogStateSchema>;
@@ -487,6 +490,31 @@ export async function mintOwnReidentifyLink(
   return reidentifyUrl;
 }
 
+// identitySessionUrl feeds IdentityDisclosure for the in-app identification of
+// a member who never identified (no bearer-token link): the session is the
+// caller's own, so the backend needs nothing but the disclosure.
+export function identitySessionUrl(slug: string): string {
+  return `/api/v1/orgs/${encodeURIComponent(slug)}/me/identity-session`;
+}
+
+// completeOwnIdentity records the disclosure identitySessionUrl started; the
+// backend answers 204, so there is nothing to parse.
+export async function completeOwnIdentity(
+  slug: string,
+  disclosureToken: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/me/identity-complete`,
+    {
+      schema: z.unknown(),
+      method: "POST",
+      body: { disclosureToken },
+      signal,
+    },
+  );
+}
+
 // --- Member screening / VOG (#242) ---
 
 export const SCREENING_REQUIRED_FOR = [
@@ -708,6 +736,56 @@ export function completeVogCredential(
       },
     ),
   );
+}
+
+// identityVogCredentialSessionUrl / completeIdentityVogCredential are the
+// combined identity + pbdf.vog disclosure for a member who never identified:
+// one wallet session, after which the identity is on file and the VOG has
+// been matched against it. Same outcome shape as a plain credential check.
+export function identityVogCredentialSessionUrl(slug: string): string {
+  return `/api/v1/orgs/${encodeURIComponent(slug)}/me/vog/identity-credential-session`;
+}
+
+export function completeIdentityVogCredential(
+  slug: string,
+  disclosureToken: string,
+  signal?: AbortSignal,
+): Promise<UploadVogResult> {
+  return resolveVogOutcome(() =>
+    request(
+      `/api/v1/orgs/${encodeURIComponent(slug)}/me/vog/identity-credential-complete`,
+      {
+        schema: uploadVogResultSchema,
+        method: "POST",
+        body: { disclosureToken },
+        signal,
+      },
+    ),
+  );
+}
+
+// memberInsightsSchema mirrors organization.MemberInsights: the org-wide count
+// of active members per derived identity and screening status. Keys are the
+// backend's status strings; the record shape lets a status the backend adds
+// later flow through untouched.
+export const memberInsightsSchema = z.object({
+  members: z.number(),
+  identity: z.record(z.string(), z.number()),
+  screening: z.record(z.string(), z.number()),
+});
+
+export type MemberInsights = z.infer<typeof memberInsightsSchema>;
+
+// getMemberInsights is admin-only and counts server-side: the member list is
+// paged, so tallying it in the client would undercount any org past one page.
+export function getMemberInsights(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<MemberInsights> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/member-insights`, {
+    schema: memberInsightsSchema,
+    signal,
+  });
 }
 
 export function getOrganizationDepartments(

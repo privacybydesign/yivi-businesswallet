@@ -231,6 +231,47 @@ func TestExtractVog(t *testing.T) {
 	}
 }
 
+// In a combined identity+VOG presentation each half is read from its own
+// credential, so the identity's date of birth and the VOG's never overwrite
+// each other - the whole point of matching one against the other.
+func TestExtractIdentityAndVogReadTheirOwnCredential(t *testing.T) {
+	res := openid4vpverifier.Presentation{
+		Claims: map[string]string{
+			openid4vpverifier.ClaimEmail:       "anna@example.test",
+			openid4vpverifier.ClaimDateOfBirth: "1999-12-31", // whichever won the flattening
+		},
+		ByCredential: map[string]map[string]string{
+			"passport": {
+				openid4vpverifier.ClaimGivenNames:  "Anna",
+				openid4vpverifier.ClaimFamilyName:  "Berg",
+				openid4vpverifier.ClaimDateOfBirth: "1980-01-02",
+			},
+			"email": {openid4vpverifier.ClaimEmail: "anna@example.test"},
+			"vog": {
+				openid4vpverifier.ClaimVogGivenNames:   "Anna",
+				openid4vpverifier.ClaimVogSurname:      "Berg",
+				openid4vpverifier.ClaimVogDateOfBirth:  "1999-12-31",
+				openid4vpverifier.ClaimVogIssueDate:    "2024-05-01",
+				openid4vpverifier.VogAspectClaim("11"): "yes",
+			},
+		},
+	}
+	ident, err := extractIdentity(res)
+	if err != nil {
+		t.Fatalf("extractIdentity: %v", err)
+	}
+	if ident.DateOfBirth != "1980-01-02" || ident.Name.LastName != "Berg" {
+		t.Errorf("identity = %+v, want the passport's date of birth", ident)
+	}
+	disclosedVog, err := extractVog(res, []string{"11"})
+	if err != nil {
+		t.Fatalf("extractVog: %v", err)
+	}
+	if disclosedVog.DateOfBirth != "1999-12-31" || !slices.Equal(disclosedVog.AspectCodes, []string{"11"}) {
+		t.Errorf("vog = %+v, want the vog credential's date of birth and aspect 11", disclosedVog)
+	}
+}
+
 func TestMapClaimError(t *testing.T) {
 	tests := []struct {
 		name       string
