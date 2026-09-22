@@ -25,7 +25,7 @@ type Tone = "default" | "green" | "amber" | "red" | "blue";
 
 // The bar segment colours, matching Tag's tones so the bar and its legend agree.
 const SEGMENT_CLASSES: Record<Tone, string> = {
-  default: "bg-surface-3",
+  default: "bg-ink-soft",
   green: "bg-success",
   amber: "bg-warning-fg",
   red: "bg-error",
