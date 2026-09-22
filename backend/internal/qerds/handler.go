@@ -104,10 +104,13 @@ func (h *Handler) SetOfferLookup(l offerLookup) { h.offers = l }
 
 // annotateOffer enriches msg with its parsed credential-offer summary when the
 // handler is wired with a lookup and the body carries one, replacing Body with
-// the redacted stand-in in that case. A nil offers or a body that is not a
-// recognised offer returns msg unchanged.
+// the redacted stand-in in that case. A nil offers, an outbound message (the
+// envelope shape is only ever meaningful to the recipient — the org's own copy
+// of an offer it sent is an ordinary message, and redacting its body would
+// throw away the only place the console shows what was sent), or a body that
+// is not a recognised offer returns msg unchanged.
 func (h *Handler) annotateOffer(ctx context.Context, orgID uuid.UUID, msg Message) Message {
-	if h.offers == nil {
+	if h.offers == nil || msg.Direction != DirectionInbound {
 		return msg
 	}
 	ann, redactedBody, ok := h.offers.LookupOffer(ctx, orgID, msg.ID, msg.Body)
