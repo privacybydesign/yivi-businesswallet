@@ -251,7 +251,7 @@ func (s *ScreeningService) DiscloseIdentityAndVogCredential(ctx context.Context,
 	aspectCodes := requiredAspectCodes(settings.RequiredCodes)
 	disclosedIdentity, disclosed, err := s.discloser.DiscloseIdentityAndVog(ctx, disclosureToken, aspectCodes)
 	if err != nil {
-		return ScreeningOutcome{}, ErrDisclosureFailed
+		return ScreeningOutcome{}, fmt.Errorf("organization: disclose identity and vog: %w: %w", ErrDisclosureFailed, err)
 	}
 
 	name, err := s.identities.ApplyDisclosedIdentity(ctx, orgID, userID, matchCtx.Email, matchCtx.Name, disclosedIdentity)

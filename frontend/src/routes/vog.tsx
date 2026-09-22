@@ -79,20 +79,26 @@ export default function Vog(): React.JSX.Element {
   ]);
 
   const onVogToken = (disclosureToken: string): void => {
-    completeCredential.mutate(disclosureToken, {
-      onSettled: () => setDisclosing("none"),
-    });
+    setDisclosing("none");
+    completeCredential.mutate(disclosureToken);
   };
   const onIdentityToken = (disclosureToken: string): void => {
-    completeIdentity.mutate(disclosureToken, {
-      onSettled: () => setDisclosing("none"),
-    });
+    setDisclosing("none");
+    completeIdentity.mutate(disclosureToken);
   };
   const onIdentityVogToken = (disclosureToken: string): void => {
-    completeIdentityVog.mutate(disclosureToken, {
-      onSettled: () => setDisclosing("none"),
-    });
+    setDisclosing("none");
+    completeIdentityVog.mutate(disclosureToken);
   };
+
+  // The QR closes as soon as the wallet hands over its token, so the button
+  // it replaced is back on screen - showing its loading state - while the
+  // disclosure completes. Starting another session meanwhile is blocked.
+  const busy =
+    disclosing !== "none" ||
+    completeCredential.isPending ||
+    completeIdentity.isPending ||
+    completeIdentityVog.isPending;
 
   const outcomeLine = (outcome: UploadVogResult): React.JSX.Element => (
     <p
@@ -160,7 +166,7 @@ export default function Vog(): React.JSX.Element {
                   variant="primary"
                   className="mt-4"
                   loading={completeIdentity.isPending}
-                  disabled={disclosing !== "none"}
+                  disabled={busy}
                   onClick={() => setDisclosing("identity")}
                 >
                   {completeIdentity.isPending
@@ -199,7 +205,7 @@ export default function Vog(): React.JSX.Element {
                     variant="secondary"
                     className="mt-4"
                     loading={completeIdentityVog.isPending}
-                    disabled={disclosing !== "none"}
+                    disabled={busy}
                     onClick={() => setDisclosing("identityVog")}
                   >
                     {completeIdentityVog.isPending
@@ -273,7 +279,7 @@ export default function Vog(): React.JSX.Element {
                     variant="secondary"
                     className="mt-4"
                     loading={completeCredential.isPending}
-                    disabled={disclosing !== "none"}
+                    disabled={busy}
                     onClick={() => setDisclosing("vog")}
                   >
                     {t("vog.credential.start")}

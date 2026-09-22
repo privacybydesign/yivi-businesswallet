@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useMemberInsightsQuery } from "../api/organization.queries";
+import { accessMessage } from "../lib/access-message";
 import {
   identityStatusLabel,
   identityStatusTone,
@@ -105,7 +106,9 @@ export function MemberInsights({ slug }: Props): React.JSX.Element | null {
           {t("dashboard.insights.title")}
         </h2>
         <p role="alert" className="text-error mt-2 text-[13.5px]">
-          {t("dashboard.insights.error", { message: insights.error.message })}
+          {t("dashboard.insights.error", {
+            message: accessMessage(insights.error, t),
+          })}
         </p>
       </Card>
     );

@@ -468,7 +468,7 @@ export const en = {
       documents: "Documents to sign",
     },
     insights: {
-      title: "Members",
+      title: "Member overview",
       members: "Members",
       notIdentified: "Not identified",
       notIdentifiedHint: "Never identified, overdue or asked to identify",

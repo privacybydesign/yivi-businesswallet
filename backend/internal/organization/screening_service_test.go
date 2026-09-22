@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/identity"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/vog"
 )
 
@@ -418,4 +420,20 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// A failed wallet disclosure answers with the same 422 disclosure_failed a
+// failed re-identification does, not a generic 500.
+func TestDiscloseIdentityAndVogCredentialDisclosureFailed(t *testing.T) {
+	store := &screeningStoreFake{matchCtx: fakeMatchContext(), settings: acceptingSettings()}
+	s := &ScreeningService{store: store, discloser: discloserFake{err: errors.New("session expired")}, identities: &identityRecorderFake{}}
+
+	_, err := s.DiscloseIdentityAndVogCredential(context.Background(), uuid.New(), uuid.New(), CheckedBySelf, nil, "token")
+	if !errors.Is(err, ErrDisclosureFailed) {
+		t.Fatalf("err = %v, want ErrDisclosureFailed", err)
+	}
+	var apiErr *respond.APIError
+	if !errors.As(mapVogCredentialError(err), &apiErr) || apiErr.Status != http.StatusUnprocessableEntity || apiErr.Code != "disclosure_failed" {
+		t.Errorf("mapped = %v, want 422 disclosure_failed", mapVogCredentialError(err))
+	}
 }

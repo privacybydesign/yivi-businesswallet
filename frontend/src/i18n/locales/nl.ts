@@ -484,7 +484,7 @@ export const nl: Translation<typeof en> = {
       documents: "Te ondertekenen documenten",
     },
     insights: {
-      title: "Leden",
+      title: "Ledenoverzicht",
       members: "Leden",
       notIdentified: "Niet geïdentificeerd",
       notIdentifiedHint: "Nooit geïdentificeerd, verlopen of gevraagd",
