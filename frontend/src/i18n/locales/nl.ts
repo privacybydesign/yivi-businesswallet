@@ -1983,6 +1983,16 @@ export const nl: Translation<typeof en> = {
       sentAt: "Verzonden",
       deliveredAt: "Bezorgd",
     },
+    offer: {
+      title: "Credentialaanbod",
+      status: {
+        accepting: "Bezig met accepteren…",
+        accepted: "Toegevoegd aan de wallet",
+        declined: "Geweigerd",
+      },
+      review: "Bekijk bij Attestaties",
+      rawEnvelope: "Ruwe envelop",
+    },
     evidence: {
       title: "Bezorgbewijs",
       description:

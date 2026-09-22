@@ -117,6 +117,57 @@ func TestParseAttachmentsRejectsTooMany(t *testing.T) {
 	}
 }
 
+// fakeOfferLookup stands in for the attestation-package annotator wired via
+// Handler.SetOfferLookup, so annotateOffer can be tested without depending on
+// internal/attestation (qerds cannot import it — see offerLookup).
+type fakeOfferLookup struct {
+	ann      CredentialOfferAnnotation
+	redacted string
+	ok       bool
+}
+
+func (f fakeOfferLookup) LookupOffer(_ context.Context, _, _ uuid.UUID, _ string) (CredentialOfferAnnotation, string, bool) {
+	return f.ann, f.redacted, f.ok
+}
+
+func TestAnnotateOfferAttachesSummaryAndRedactsBody(t *testing.T) {
+	offerID := uuid.New()
+	ann := CredentialOfferAnnotation{
+		SenderOrgName: "Acme", CredentialName: "Registration", Message: "hi",
+		OfferID: &offerID, Status: "pending",
+	}
+	h := &Handler{offers: fakeOfferLookup{ann: ann, redacted: "[redacted]", ok: true}}
+
+	got := h.annotateOffer(context.Background(), uuid.New(), Message{ID: uuid.New(), Body: "raw json with a live deeplink"})
+
+	if got.Body != "[redacted]" {
+		t.Errorf("Body = %q, want the redacted stand-in", got.Body)
+	}
+	if got.Offer == nil || *got.Offer != ann {
+		t.Errorf("Offer = %+v, want %+v", got.Offer, ann)
+	}
+}
+
+func TestAnnotateOfferLeavesOrdinaryMessageUnchanged(t *testing.T) {
+	h := &Handler{offers: fakeOfferLookup{ok: false}}
+
+	got := h.annotateOffer(context.Background(), uuid.New(), Message{ID: uuid.New(), Body: "just a message"})
+
+	if got.Body != "just a message" || got.Offer != nil {
+		t.Errorf("annotateOffer changed a non-offer message: %+v", got)
+	}
+}
+
+func TestAnnotateOfferWithNoLookupWiredIsNoop(t *testing.T) {
+	h := &Handler{}
+
+	got := h.annotateOffer(context.Background(), uuid.New(), Message{ID: uuid.New(), Body: "just a message"})
+
+	if got.Body != "just a message" || got.Offer != nil {
+		t.Errorf("annotateOffer with no offer lookup wired changed the message: %+v", got)
+	}
+}
+
 func TestNamespacedLocalPart(t *testing.T) {
 	const slug = "acme"
 	cases := []struct {

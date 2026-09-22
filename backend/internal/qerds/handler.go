@@ -56,6 +56,17 @@ type contactManager interface {
 	DeleteContact(ctx context.Context, orgID, id uuid.UUID) error
 }
 
+// offerLookup resolves a message body against the credential-offer envelope
+// internal/attestation understands, so the API can name the offer and link
+// through to its decision without qerds knowing the envelope's shape. It also
+// redacts the offer's one-time deeplink out of the body it hands back — the
+// deeplink is a bearer token, so raw is never served, in the response or behind
+// the "view raw" toggle. ok is false for a body that is not a recognised offer
+// envelope, in which case redactedBody equals body unchanged.
+type offerLookup interface {
+	LookupOffer(ctx context.Context, orgID, messageID uuid.UUID, body string) (ann CredentialOfferAnnotation, redactedBody string, ok bool)
+}
+
 // Handler serves the org-scoped QERDS API plus the machine-to-machine inbound
 // webhook. Org routes compose the injected requireUser + authorize middleware
 // (auth.RequireUser -> organization.Authorize); the webhook sits outside that
@@ -65,6 +76,7 @@ type Handler struct {
 	messages      reader
 	addresses     addressManager
 	contacts      contactManager
+	offers        offerLookup
 	requireUser   func(http.Handler) http.Handler
 	authorize     func(http.Handler) http.Handler
 	webhookSecret string
@@ -82,6 +94,29 @@ func NewHandler(service sender, messages reader, addresses addressManager, conta
 		webhookSecret: webhookSecret,
 		addressDomain: addressDomain,
 	}
+}
+
+// SetOfferLookup registers the (optional) credential-offer annotator, wired at
+// boot once the attestation store exists — qerds.Handler is constructed first
+// (mirrors Service.SetInboundConsumer). Nil leaves every message body as
+// stored, unannotated.
+func (h *Handler) SetOfferLookup(l offerLookup) { h.offers = l }
+
+// annotateOffer enriches msg with its parsed credential-offer summary when the
+// handler is wired with a lookup and the body carries one, replacing Body with
+// the redacted stand-in in that case. A nil offers or a body that is not a
+// recognised offer returns msg unchanged.
+func (h *Handler) annotateOffer(ctx context.Context, orgID uuid.UUID, msg Message) Message {
+	if h.offers == nil {
+		return msg
+	}
+	ann, redactedBody, ok := h.offers.LookupOffer(ctx, orgID, msg.ID, msg.Body)
+	if !ok {
+		return msg
+	}
+	msg.Body = redactedBody
+	msg.Offer = &ann
+	return msg
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -112,6 +147,9 @@ func (h *Handler) listMessages(w http.ResponseWriter, r *http.Request) error {
 	messages, err := h.messages.List(r.Context(), org.ID)
 	if err != nil {
 		return fmt.Errorf("listing qerds messages: %w", err)
+	}
+	for i, msg := range messages {
+		messages[i] = h.annotateOffer(r.Context(), org.ID, msg)
 	}
 	respond.JSON(w, r, http.StatusOK, messages)
 	return nil
@@ -272,6 +310,7 @@ func (h *Handler) getMessage(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("getting qerds message: %w", err)
 	}
+	msg.Message = h.annotateOffer(r.Context(), org.ID, msg.Message)
 
 	respond.JSON(w, r, http.StatusOK, msg)
 	return nil

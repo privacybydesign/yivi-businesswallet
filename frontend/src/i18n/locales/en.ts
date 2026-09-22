@@ -1933,6 +1933,16 @@ export const en = {
       sentAt: "Sent",
       deliveredAt: "Delivered",
     },
+    offer: {
+      title: "Credential offer",
+      status: {
+        accepting: "Accepting…",
+        accepted: "Added to the wallet",
+        declined: "Declined",
+      },
+      review: "Review in Attestations",
+      rawEnvelope: "Raw envelope",
+    },
     evidence: {
       title: "Delivery evidence",
       description:

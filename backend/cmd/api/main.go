@@ -523,6 +523,11 @@ func run() error {
 	}()
 
 	attestationStore := attestation.NewStore(pool, recorder)
+	// The QERDS message screen renders a credential-offer body as a parsed
+	// attestation summary instead of raw envelope JSON; wired via a setter (like
+	// the inbound consumer below) because qerds.Handler is constructed before
+	// the attestation store exists.
+	qerdsHandler.SetOfferLookup(attestation.NewOfferAnnotator(attestationStore))
 	// An inbound QERDS message carrying an OpenID4VCI credential offer is queued
 	// for the receiving org to accept or decline; accepting redeems it into the
 	// org's holder engine and indexes it (source=qerds).

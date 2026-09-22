@@ -199,6 +199,47 @@ func TestDeclineOfferHoldsNothing(t *testing.T) {
 	}
 }
 
+// GetOfferBySourceMessage backs the QERDS message screen's offer annotation, so
+// unlike ListPendingOffers it must still find a decided offer — the screen has
+// to say "declined" rather than pretend there is nothing to report.
+func TestGetOfferBySourceMessageSeesDecidedOffersToo(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	messageID := inboundMessage(t, ctx, e, "ref-get-by-message")
+
+	if _, err := e.store.GetOfferBySourceMessage(ctx, e.orgID, messageID); !errors.Is(err, attestation.ErrOfferNotFound) {
+		t.Fatalf("before any offer is queued: err = %v, want ErrOfferNotFound", err)
+	}
+
+	offer, _, err := e.store.RecordOffer(ctx, e.orgID, offerInput(messageID))
+	if err != nil {
+		t.Fatalf("RecordOffer: %v", err)
+	}
+	got, err := e.store.GetOfferBySourceMessage(ctx, e.orgID, messageID)
+	if err != nil {
+		t.Fatalf("GetOfferBySourceMessage: %v", err)
+	}
+	if got.ID != offer.ID || got.Status != attestation.OfferPending {
+		t.Errorf("got = %+v, want the pending offer %s", got, offer.ID)
+	}
+
+	if err := e.store.DeclineOffer(ctx, e.orgID, offer.ID); err != nil {
+		t.Fatalf("DeclineOffer: %v", err)
+	}
+	decided, err := e.store.GetOfferBySourceMessage(ctx, e.orgID, messageID)
+	if err != nil {
+		t.Fatalf("GetOfferBySourceMessage after decline: %v", err)
+	}
+	if decided.Status != attestation.OfferDeclined {
+		t.Errorf("status after decline = %q, want %q", decided.Status, attestation.OfferDeclined)
+	}
+
+	other := uuid.New()
+	if _, err := e.store.GetOfferBySourceMessage(ctx, other, messageID); !errors.Is(err, attestation.ErrOfferNotFound) {
+		t.Fatalf("another org: err = %v, want ErrOfferNotFound", err)
+	}
+}
+
 // An offer belongs to one organization: another tenant must not see or decide it.
 func TestOfferQueueIsOrgScoped(t *testing.T) {
 	e := setup(t)
