@@ -107,14 +107,20 @@ func (s *ScreeningScheduler) sweepOne(ctx context.Context, org Organization) {
 	}
 }
 
-// remind sends the expiring-soon or expired mail, then records the send. It
-// reports whether the mail was sent - a delivery failure is logged, not
-// retried, since the cadence tracking is only updated on success.
+// remind mints a fresh VOG link and sends the expiring-soon or expired mail,
+// then records the send. It reports whether the mail was sent - a delivery
+// failure is logged, not retried, since the cadence tracking is only updated
+// on success.
 func (s *ScreeningScheduler) remind(ctx context.Context, org Organization, c VogReminderCandidate) bool {
-	url := s.appBaseURL + "/" + org.Slug + "/vog"
+	token, _, err := s.store.EnsureVogToken(ctx, org.ID, c.UserID)
+	if err != nil {
+		slog.ErrorContext(ctx, "screening: mint vog token failed",
+			slog.String("organizationId", org.ID.String()), slog.String("userId", c.UserID.String()), slog.String("error", err.Error()))
+		return false
+	}
+	url := s.appBaseURL + "/vog/" + token
 	dueDate := c.DueAt.Format("2006-01-02")
 
-	var err error
 	if c.Overdue {
 		err = s.mailer.SendVogExpired(ctx, org.ID, c.Email, org.Name, url, dueDate)
 	} else {

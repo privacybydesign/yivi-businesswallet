@@ -42,6 +42,9 @@ const (
 	OverdueConsequenceBlock = "block"
 
 	DefaultReidentifyTokenTTL = 30 * 24 * time.Hour
+	// DefaultVogTokenTTL matches the re-identification link: long enough for a
+	// member to apply for a VOG at Justis and receive it before the link lapses.
+	DefaultVogTokenTTL = 30 * 24 * time.Hour
 
 	// Screening / VOG (#242): who an org requires a VOG for.
 	ScreeningRequiredForNobody    = "nobody"

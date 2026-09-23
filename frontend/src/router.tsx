@@ -22,7 +22,7 @@ import Enroll from "./routes/enroll";
 import IdentityReviews from "./routes/identity-reviews";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
-import Vog from "./routes/vog";
+import VogSubmit from "./routes/vog-submit";
 import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
 import MemberEdit from "./routes/member-edit";
@@ -59,7 +59,6 @@ const orgCrumb: RouteHandle = {
   },
 };
 const membersCrumb: RouteHandle = { crumb: ({ t }) => t("members.title") };
-const vogCrumb: RouteHandle = { crumb: ({ t }) => t("vog.title") };
 const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
 const memberCrumb: RouteHandle = {
   crumb: ({ params, queryClient, t }: CrumbContext) => {
@@ -127,6 +126,9 @@ export const router = createBrowserRouter([
       { path: "/invite/:token", Component: InviteAccept },
       { path: "/reidentify/:token", Component: Reidentify },
       { path: "/claim/:token", Component: Claim },
+      // A member's VOG submission, keyed by the token from a request/reminder
+      // mail or the dashboard banner - public like /claim, no sign-in needed.
+      { path: "/vog/:token", Component: VogSubmit },
       // Inbound OpenID4VP: the address an external verifier redirects to, then
       // the transaction by its opaque id. Not under ProtectedRoute — it handles
       // the sign-in step itself so the id can ride through /login?returnTo=.
@@ -163,11 +165,6 @@ export const router = createBrowserRouter([
                 handle: orgCrumb,
                 children: [
                   { index: true, Component: Dashboard },
-                  {
-                    path: "vog",
-                    Component: Vog,
-                    handle: vogCrumb,
-                  },
                   {
                     path: "members",
                     handle: membersCrumb,

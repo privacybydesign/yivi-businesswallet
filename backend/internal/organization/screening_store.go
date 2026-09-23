@@ -74,7 +74,8 @@ type ScreeningInput struct {
 // RecordScreening writes one member_screenings row, updates the membership's
 // denormalised vog_last_result / vog_valid_until / vog_covered_codes (see the
 // migration's comment for why), clears any outstanding admin request and the
-// reminder cadence, and audits the outcome - all in one transaction. valid_until
+// reminder cadence, retires the submission link on a valid result, and audits
+// the outcome - all in one transaction. valid_until
 // is computed from in.VogIssueDate or now (per settings.RecheckAnchor) and is
 // only ever non-NULL when in.Result is vog.ResultValid.
 func (s *Store) RecordScreening(ctx context.Context, orgID, userID uuid.UUID, memberType string, settings ScreeningSettings, in ScreeningInput, hashKey []byte) error {
@@ -127,6 +128,15 @@ func (s *Store) RecordScreening(ctx context.Context, orgID, userID uuid.UUID, me
 			WHERE organization_id = $1 AND user_id = $2`
 		if _, err := q.Exec(ctx, update, orgID, userID, string(in.Result), validUntil, screeningCovered); err != nil {
 			return fmt.Errorf("organization: update membership screening state user %s org %s: %w", userID, orgID, err)
+		}
+
+		// A valid screening retires the submission link, so it cannot be used
+		// to overwrite that result; a rejected one keeps it, so the member can
+		// try again from the same e-mail.
+		if in.Result == vog.ResultValid {
+			if _, err := q.Exec(ctx, `DELETE FROM vog_submit_tokens WHERE organization_id = $1 AND user_id = $2`, orgID, userID); err != nil {
+				return fmt.Errorf("organization: retire vog token user %s org %s: %w", userID, orgID, err)
+			}
 		}
 
 		return s.audit.Record(ctx, q, screeningAuditAction(in.Result),
@@ -185,12 +195,16 @@ func (s *Store) ListScreeningHistory(ctx context.Context, orgID, userID uuid.UUI
 type RequestedVogMember struct {
 	UserID uuid.UUID
 	Email  string
+	// VogToken is the freshly minted submission link token, for the request
+	// e-mail (see EnsureVogToken).
+	VogToken string
 }
 
 // RequestVog sets vog_requested_at/by for one or more members (single or bulk,
-// mirroring RequestIdentification) and audits one event per member, all in one
-// transaction. A user id that is not a member of orgID is silently skipped, the
-// same guard RequestIdentification uses.
+// mirroring RequestIdentification), mints each a fresh submission link, and
+// audits one event per member, all in one transaction. A user id that is not
+// a member of orgID is silently skipped, the same guard RequestIdentification
+// uses.
 func (s *Store) RequestVog(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID, requestedBy uuid.UUID, reason string) ([]RequestedVogMember, error) {
 	var out []RequestedVogMember
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
@@ -214,7 +228,11 @@ func (s *Store) RequestVog(ctx context.Context, orgID uuid.UUID, userIDs []uuid.
 				audit.Created(map[string]any{"email": email, "reason": nullIfEmpty(reason)})); err != nil {
 				return err
 			}
-			out = append(out, RequestedVogMember{UserID: userID, Email: email})
+			token, _, err := ensureVogTokenTx(ctx, q, orgID, userID)
+			if err != nil {
+				return err
+			}
+			out = append(out, RequestedVogMember{UserID: userID, Email: email, VogToken: token})
 		}
 		return nil
 	})

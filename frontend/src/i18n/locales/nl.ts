@@ -41,7 +41,6 @@ export const nl: Translation<typeof en> = {
   nav: {
     dashboard: "Dashboard",
     members: "Leden",
-    vog: "VOG-screening",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
     postguard: "PostGuard-bestanden",
@@ -422,14 +421,25 @@ export const nl: Translation<typeof en> = {
     },
   },
   vog: {
-    title: "VOG-screening",
+    title: "Dien je VOG in",
     subtitle:
       "{{org}} vraagt leden om een geldige Verklaring Omtrent het Gedrag (VOG).",
+    loading: "Je VOG-inzending wordt geopend…",
+    forEmail: "Voor {{email}}",
+    completing: "Wordt vastgelegd…",
+    submitError: "Kon je VOG niet controleren: {{message}}",
+    linkNotFoundTitle: "Deze link werkt niet meer",
+    linkNotFoundBody:
+      "VOG-links verlopen, een nieuwere link vervangt een oudere, en een link werkt niet meer zodra er een geldige VOG is vastgelegd. Vraag een beheerder van de organisatie om een nieuwe link, of start hem vanuit de wallet.",
+    errorTitle: "Kon deze link niet openen",
+    errorBody: "{{message}}",
+    doneHint:
+      "{{org}} heeft de uitkomst vastgelegd. Je kunt deze pagina sluiten of naar de wallet gaan.",
+    goToApp: "Naar de wallet",
     identity: {
       heading: "Bevestig eerst je identiteit",
       hint: "Een VOG-controle vergelijkt de naam en geboortedatum op het document met je identiteit, en {{org}} heeft nog geen geverifieerde identiteit van je. Scan de code met je wallet om te bevestigen wie je bent; daarna kun je direct je VOG uploaden.",
       start: "Mijn identiteit bevestigen",
-      completing: "Je identiteit wordt vastgelegd…",
       combinedHeading: "Of doe beide in één keer",
       combinedHint:
         "{{org}} accepteert ook de pbdf.vog-credential. Deel je identiteit en je VOG vanuit je wallet in één scan.",
@@ -440,16 +450,12 @@ export const nl: Translation<typeof en> = {
       heading: "Upload je VOG",
       hint: "Live gecontroleerd bij validatie.nl en vergeleken met je vastgelegde identiteit. De PDF zelf wordt nooit opgeslagen - alleen de uitkomst.",
       chooseFile: "Kies een PDF",
-      submit: "Uploaden",
       uploading: "Je VOG wordt gecontroleerd…",
-      error: "Kon je VOG niet controleren: {{message}}",
     },
     credential: {
       heading: "Of deel hem vanuit je wallet",
       hint: "{{org}} accepteert ook de pbdf.vog-credential. Deze wordt uitgegeven door Stichting Privacy by Design over een VOG die zij bij uitgifte hebben gevalideerd, geen actuele verklaring van Justis.",
       start: "Delen vanuit wallet",
-      disclosing: "Wachten op je wallet…",
-      error: "Kon je VOG niet controleren: {{message}}",
     },
     result: {
       valid: "Je VOG is geldig.",
@@ -460,7 +466,6 @@ export const nl: Translation<typeof en> = {
       insufficientScope: "Deze VOG dekt niet alles wat {{org}} vereist.",
       tooOld: "Deze VOG is ouder dan {{org}} accepteert.",
     },
-    tryAgain: "Opnieuw proberen",
     banner: {
       none: "{{org}} vraagt een VOG (Verklaring Omtrent het Gedrag) van je.",
       expiring: "Je VOG voor {{org}} verloopt op {{date}}.",
@@ -469,7 +474,8 @@ export const nl: Translation<typeof en> = {
       recheckRequired:
         "De VOG-vereisten van {{org}} zijn gewijzigd; dien een nieuwe VOG in.",
       requested: "{{org}} heeft je gevraagd een VOG in te dienen.",
-      action: "Naar VOG-screening",
+      action: "VOG indienen",
+      error: "Kon je VOG-link niet openen: {{message}}",
     },
   },
   dashboard: {
@@ -611,6 +617,7 @@ export const nl: Translation<typeof en> = {
     columns: {
       member: "Lid",
       status: "Status",
+      vog: "VOG",
       actions: "Acties",
     },
     unassigned: "—",
@@ -915,7 +922,7 @@ export const nl: Translation<typeof en> = {
     vogNone: "Geen VOG bekend",
     requestVog: "VOG aanvragen",
     requestVogHint:
-      "Vraagt dit lid om nu een VOG in te dienen. Het lid krijgt een e-mail met een link naar de app.",
+      "Vraagt dit lid om nu een VOG in te dienen. Het lid krijgt een e-mail met een link om hem in te dienen, zonder in te loggen.",
     vogRequested: "VOG aangevraagd",
     uploadVog: "VOG uploaden namens lid",
     uploadVogHint:

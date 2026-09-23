@@ -195,23 +195,35 @@ member's **stored** identity (`ScreeningMatchContext`, read from
 identity comparison in this backend uses. `ErrVogNoDateOfBirth` is returned,
 before any validatie.nl call, when the membership has no date of birth yet
 (a legacy member who predates #240's persistence of it). The frontend
-(`vog.tsx`) then does not send them away: see §7a.
+(`vog-submit.tsx`) then does not send them away: see §7a.
 
-## 7a. A member who never identified: identify first, or both in one scan
+## 7a. The submission link, and a member who never identified
 
-The org detail's own VOG state carries `needsIdentity` (no date of birth on
-file). When it is set - or a check just came back `no_date_of_birth` - the
-VOG page offers two ways in instead of a dead end (the old "go re-identify"
-button landed on a dashboard whose identity banner deliberately hides the
-`never` status):
+A member submits on a **public page keyed by a bearer token**
+(`/vog/:token`, `vog-submit.tsx`), the same shape as a credential claim
+(`/claim/:token`) or re-identification (`/reidentify/:token`): no sign-in.
+`vog_submit_tokens` holds one live token per membership, hashed like the
+re-identification token (`screening_token_store.go`). An admin's request
+(minted inside `RequestVog`'s transaction), the reminder sweep and the
+dashboard banner (`POST /orgs/{slug}/me/vog-token`) all mint or **rotate** it,
+so an older link stops working. A **valid** screening retires it in
+`RecordScreening`'s transaction; a rejected one keeps it so the member can
+retry from the same mail. A leaked link cannot plant a VOG: every path still
+matches the member's stored name and date of birth against a
+Justis-validated PDF or a wallet credential. The frontend reads success from
+the mutation, not a refetched preview, because the refetch would 404.
 
-- **In-app identification** (`POST /orgs/{slug}/me/identity-session` +
-  `/identity-complete`): an identity disclosure without the bearer-token
-  `/reidentify/{token}` page, because a signed-in member's session already
-  identifies them. On success the page switches to the ordinary upload and
-  credential cards. `Service.CompleteOwnIdentification` backs it.
+`GET /vog/{token}` answers with the member's state (`needsIdentity`: no date
+of birth on file; `acceptCredential`). When `needsIdentity` is set, or a check
+just came back `no_date_of_birth`, the page offers two ways in instead of a
+dead end:
+
+- **Identify first** (`POST /vog/{token}/identity-session` +
+  `/identity-complete`): an identity disclosure for the membership the token
+  names. `Service.CompleteOwnIdentification` backs it. On success the page
+  switches to the ordinary upload and credential sections.
 - **Identity + VOG in one wallet session** (when the org accepts the
-  credential): `POST /orgs/{slug}/me/vog/identity-credential-session` +
+  credential): `POST /vog/{token}/identity-credential-session` +
   `/identity-credential-complete`, `openid4vpverifier.ScopeIdentityVog` - the
   identity query plus the `pbdf.vog` credential as a fourth, independently
   required credential set. `ScreeningService.DiscloseIdentityAndVogCredential`
@@ -275,12 +287,11 @@ reminder) or is past it (repeating, capped, cadence), `RecordVogReminderSent`
 bumps the counters and audits. New mail kinds `vog_requested`, `vog_reminder`,
 `vog_expired` (`internal/email`).
 
-**No token, unlike re-identification.** A member being screened already has
-an account and a session; the reminder/request emails link straight into the
-authenticated app (`/{slug}/vog`), not a bearer-token page. This removed an
-entire subsystem re-identification needed (token table, public preview/
-session/complete routes) - a member here is never in the "no session yet"
-state a fresh invitee or a mail-only re-identification link has to handle.
+**Every mail carries a fresh link.** The reminder sweep mints (rotates) the
+member's VOG token per mail, exactly as `IdentityScheduler` does for
+re-identification, and links to `/vog/<token>` (§7a). An earlier design linked
+into the authenticated app instead; it was replaced so a member can submit
+from the mail on any device without signing in, like a credential claim.
 
 ## 10. Audit and notifications
 
@@ -332,6 +343,7 @@ where that copy should come from once one does.
 | file | holds |
 |---|---|
 | `internal/migrate/migrations/20260914090000_add_member_screening_columns.sql` | the membership columns |
+| `…20260923090000_create_vog_submit_tokens.sql`, `internal/organization/screening_token_store.go`, `screening_token_handler.go` | the submission link (§7a): token table, mint/lookup, public preview, identify-first, the banner's mint route |
 | `…090100_create_org_screening_settings.sql`, `…090200_create_member_screenings.sql` | the policy and history table |
 | `internal/vog/vog.go`, `validator.go`, `parser.go` | the Justis-specific validator/parser (PDFium via WebAssembly), independent of `organization` |
 | `internal/vog/vogtest/samples.go` + `testdata/*.pdf` | two real Justis VOGs with their printed values, for `internal/vog`'s and `internal/integration`'s tests |
@@ -339,12 +351,13 @@ where that copy should come from once one does.
 | `internal/organization/screening_settings_store.go` | policy read/save, recompute |
 | `internal/organization/screening_store.go` | `RecordScreening`, history, admin request |
 | `internal/organization/screening_service.go` | the shared PDF/credential decision logic |
-| `internal/organization/screening_upload_handler.go`, `screening_credential_handler.go`, `members_screening.go` | the HTTP routes, incl. the combined identity+VOG session (§7a) |
-| `internal/organization/reverify_service.go` (`ApplyDisclosedIdentity`, `CompleteOwnIdentification`), `members_identity.go` (`startOwnIdentitySession`, `completeOwnIdentification`) | the shared identity rule set and the in-app identification (§7a) |
+| `internal/organization/screening_upload_handler.go`, `screening_credential_handler.go`, `members_screening.go` | the HTTP routes: token-keyed upload and credential paths incl. the combined identity+VOG session (§7a), admin upload/request/history |
+| `internal/organization/reverify_service.go` (`ApplyDisclosedIdentity`, `CompleteOwnIdentification`) | the shared identity rule set and the identify-first path (§7a) |
 | `internal/organization/member_insights.go` | the admin's org-wide count of members by identity/screening status (`.ai/features/member-insights.md`) |
 | `internal/organization/screening_reminders.go`, `screening_scheduler.go` | candidate selection and the daily sweep |
 | `internal/openid4vpverifier/dcql.go`, `verifier.go`; `internal/auth/service.go`, `disclosure.go` | the `pbdf.vog` DCQL query and disclosure read |
 | `internal/email/catalog.go` + `templates/defaults.{en,nl}.json` | `vog_requested`, `vog_reminder`, `vog_expired` |
 | `frontend/src/lib/screening-status.ts`, `vog-codes.ts` | status label/tone/hint, the 19 aspect codes |
-| `frontend/src/routes/screening-settings.tsx`, `vog.tsx`, `vog-banner.tsx` | the settings panel, the member's own page (identify-first flows, §7a), the dashboard banner |
+| `frontend/src/routes/screening-settings.tsx`, `vog-submit.tsx`, `vog-banner.tsx`, `members.tsx` | the settings panel, the public submission page (§7a), the dashboard banner (mints a link), the member list's VOG column (shown only when the policy requires a VOG from anyone, `screeningConfigured`) |
+| `frontend/src/api/vog-link.ts`, `vog-link.queries.ts` | the token-keyed API the submission page uses |
 | `frontend/src/lib/vog-page.ts` | when the page asks for identity first, which error codes are identity rejections |

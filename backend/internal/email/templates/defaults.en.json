@@ -19,7 +19,7 @@
     "reidentifyUrl": "https://wallet.example.org/reidentify/sample",
     "dueDate": "2026-08-01",
     "reason": "Your last identity check has expired.",
-    "vogUrl": "https://wallet.example.org/acme/vog"
+    "vogUrl": "https://wallet.example.org/vog/sample"
   },
   "events": {
     "membership.invited": "Invited member",

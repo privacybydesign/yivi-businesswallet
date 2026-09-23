@@ -1,13 +1,13 @@
 import * as React from "react";
-import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
+import { useMintOwnVogLinkMutation } from "../api/organization.queries";
 import type { OwnVogState } from "../api/organization";
 import { useDateFormatter } from "../lib/format-when";
 import { Button, Card, Icon } from "../ui";
 
-// VogBanner is the member's own prompt to submit a VOG: it points at the VOG
-// screening page (an ordinary in-app page, unlike re-identification's
-// bearer-token link - a member being screened already has an account).
+// VogBanner is the member's own prompt to submit a VOG: it mints a fresh VOG
+// link for their membership and opens it, the same mechanism the request and
+// reminder e-mails use (mirroring IdentityBanner).
 export function VogBanner({
   slug,
   orgName,
@@ -18,7 +18,7 @@ export function VogBanner({
   vog: OwnVogState;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const navigate = useNavigate();
+  const mint = useMintOwnVogLinkMutation(slug);
   const formatDate = useDateFormatter();
 
   const message = (): string => {
@@ -57,10 +57,23 @@ export function VogBanner({
       <p className="text-ink flex-1 text-[13.5px]">{message()}</p>
       <Button
         variant={urgent ? "primary" : "secondary"}
-        onClick={() => void navigate(`/${slug}/vog`)}
+        loading={mint.isPending}
+        onClick={() =>
+          mint.mutate(undefined, {
+            // The link is a full URL from the backend, and the page it opens is
+            // outside the app shell, so it is a document navigation rather than
+            // a router push.
+            onSuccess: (url) => window.location.assign(url),
+          })
+        }
       >
         {t("vog.banner.action")}
       </Button>
+      {mint.isError && (
+        <p role="alert" className="text-error text-[12.5px]">
+          {t("vog.banner.error", { message: mint.error.message })}
+        </p>
+      )}
     </Card>
   );
 }

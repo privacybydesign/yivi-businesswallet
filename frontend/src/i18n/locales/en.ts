@@ -30,7 +30,6 @@ export const en = {
   nav: {
     dashboard: "Dashboard",
     members: "Members",
-    vog: "VOG screening",
     qerds: "Secure delivery",
     attestations: "Attestations",
     postguard: "PostGuard files",
@@ -406,14 +405,25 @@ export const en = {
     },
   },
   vog: {
-    title: "VOG screening",
+    title: "Submit your VOG",
     subtitle:
       "{{org}} asks its members to hold a valid certificate of conduct (VOG).",
+    loading: "Opening your VOG submission…",
+    forEmail: "For {{email}}",
+    completing: "Recording…",
+    submitError: "Could not check your VOG: {{message}}",
+    linkNotFoundTitle: "This link no longer works",
+    linkNotFoundBody:
+      "VOG links expire, a newer one replaces an older one, and a link stops working once a valid VOG is on file. Ask an admin of the organization for a fresh link, or start it from the wallet.",
+    errorTitle: "Could not open this link",
+    errorBody: "{{message}}",
+    doneHint:
+      "{{org}} has recorded the outcome. You can close this page or go to the wallet.",
+    goToApp: "Go to the wallet",
     identity: {
       heading: "Confirm your identity first",
       hint: "A VOG check matches the name and date of birth on the document against your identity, and {{org}} has no verified identity for you yet. Scan the code with your wallet to confirm who you are; you can upload your VOG right after.",
       start: "Confirm my identity",
-      completing: "Recording your identity…",
       combinedHeading: "Or do both in one go",
       combinedHint:
         "{{org}} also accepts the pbdf.vog credential. Disclose your identity and your VOG from your wallet in a single scan.",
@@ -424,16 +434,12 @@ export const en = {
       heading: "Upload your VOG",
       hint: "Checked live against validatie.nl and matched against your identity on file. The PDF itself is never stored - only the outcome is.",
       chooseFile: "Choose a PDF",
-      submit: "Upload",
       uploading: "Checking your VOG…",
-      error: "Could not check your VOG: {{message}}",
     },
     credential: {
       heading: "Or disclose it from your wallet",
       hint: "{{org}} also accepts the pbdf.vog credential. It is issued by Stichting Privacy by Design about a VOG it validated at issuance, not a live statement from Justis.",
       start: "Disclose from wallet",
-      disclosing: "Waiting for your wallet…",
-      error: "Could not check your VOG: {{message}}",
     },
     result: {
       valid: "Your VOG is valid.",
@@ -444,7 +450,6 @@ export const en = {
       insufficientScope: "This VOG does not cover everything {{org}} requires.",
       tooOld: "This VOG is older than {{org}} accepts.",
     },
-    tryAgain: "Try again",
     banner: {
       none: "{{org}} requires a VOG (certificate of conduct) from you.",
       expiring: "Your VOG for {{org}} expires on {{date}}.",
@@ -453,7 +458,8 @@ export const en = {
       recheckRequired:
         "{{org}}'s VOG requirements changed; please submit a new VOG.",
       requested: "{{org}} has asked you to submit a VOG.",
-      action: "Go to VOG screening",
+      action: "Submit VOG",
+      error: "Could not open your VOG link: {{message}}",
     },
   },
   dashboard: {
@@ -593,6 +599,7 @@ export const en = {
     columns: {
       member: "Member",
       status: "Status",
+      vog: "VOG",
       actions: "Actions",
     },
     unassigned: "—",
@@ -895,7 +902,7 @@ export const en = {
     vogNone: "No VOG on file",
     requestVog: "Request VOG",
     requestVogHint:
-      "Asks this member to submit a VOG now. They get an e-mail with a link into the app.",
+      "Asks this member to submit a VOG now. They get an e-mail with a link to submit it, no sign-in needed.",
     vogRequested: "VOG requested",
     uploadVog: "Upload VOG on behalf of member",
     uploadVogHint:

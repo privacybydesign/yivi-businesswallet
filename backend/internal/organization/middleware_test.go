@@ -128,6 +128,14 @@ func (f fakeRepo) RequestVog(context.Context, uuid.UUID, []uuid.UUID, uuid.UUID,
 	return nil, nil
 }
 
+func (f fakeRepo) EnsureVogToken(context.Context, uuid.UUID, uuid.UUID) (string, time.Time, error) {
+	return "", time.Time{}, nil
+}
+
+func (f fakeRepo) VogTokenLookup(context.Context, string) (VogTokenContext, error) {
+	return VogTokenContext{}, nil
+}
+
 // authorizeWith runs the Authorize middleware and returns the response together
 // with the basis of authority it stashed, which the mandate cases assert on.
 func authorizeWith(repo repository, admins auth.PlatformAdmins, email user.Email) (*httptest.ResponseRecorder, Authority) {

@@ -54,12 +54,11 @@ func (s *Service) CompleteReverification(ctx context.Context, rawToken, disclosu
 	return ReverifyOutcome{OrganizationName: rc.OrganizationName, OrganizationSlug: rc.OrganizationSlug}, nil
 }
 
-// CompleteOwnIdentification records an identity disclosure the signed-in member
-// made from inside the app - no bearer token, the session identifies them. It
-// is the entry point for a member who has never identified (no date of birth
-// on file) and is asked for a VOG: the PDF path needs a stored identity to
-// match against, and until now such a member was turned away to a link flow
-// the dashboard did not always offer. Same rules as a re-identification.
+// CompleteOwnIdentification records an identity disclosure for a member
+// resolved from a VOG link rather than a re-identification token. It is the
+// entry point for a member who has never identified (no date of birth on
+// file) and is asked for a VOG: the PDF path needs a stored identity to match
+// against. Same rules as a re-identification.
 func (s *Service) CompleteOwnIdentification(ctx context.Context, orgID, userID uuid.UUID, disclosureToken string) error {
 	mc, err := s.store.ScreeningMatchContext(ctx, orgID, userID)
 	if err != nil {

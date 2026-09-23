@@ -58,13 +58,13 @@ func sampleVars(kind Kind) map[string]string {
 	case KindVogReminder, KindVogExpired:
 		return map[string]string{
 			varOrgName: "Acme BV",
-			varVogURL:  "https://wallet.example.org/acme/vog",
+			varVogURL:  "https://wallet.example.org/vog/abc",
 			varDueDate: "2026-08-01",
 		}
 	case KindVogRequested:
 		return map[string]string{
 			varOrgName: "Acme BV",
-			varVogURL:  "https://wallet.example.org/acme/vog",
+			varVogURL:  "https://wallet.example.org/vog/abc",
 			varReason:  "Your VOG has expired.",
 		}
 	default:
@@ -324,7 +324,7 @@ func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
 		varReidentifyURL:  "https://wallet.example.org/reidentify/sample",
 		varDueDate:        "2026-08-01",
 		varReason:         "Your last identity check has expired.",
-		varVogURL:         "https://wallet.example.org/acme/vog",
+		varVogURL:         "https://wallet.example.org/vog/abc",
 	}
 	if err := validateSamples(complete); err != nil {
 		t.Fatalf("validateSamples on the complete set = %v, want nil", err)
