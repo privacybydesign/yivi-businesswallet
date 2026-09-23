@@ -3,7 +3,7 @@
 // bind-mounted wallet-provider clone (/wallet-provider) so a `-tags wsca` build
 // resolves the private `secdsa` module locally — no git, no deploy key.
 // Container paths, so it is inert on the host (GOWORK is unset there).
-go 1.26.4
+go 1.26.8
 
 use /app
 
