@@ -117,6 +117,82 @@ func TestParseAttachmentsRejectsTooMany(t *testing.T) {
 	}
 }
 
+// fakeOfferLookup stands in for the attestation-package annotator wired via
+// Handler.SetOfferLookup, so annotateOffer can be tested without depending on
+// internal/attestation (qerds cannot import it — see offerLookup).
+type fakeOfferLookup struct {
+	ann      CredentialOfferAnnotation
+	redacted string
+	ok       bool
+}
+
+func (f fakeOfferLookup) LookupOffer(_ context.Context, _, _ uuid.UUID, _ string) (CredentialOfferAnnotation, string, bool) {
+	return f.ann, f.redacted, f.ok
+}
+
+func TestAnnotateOfferAttachesSummaryAndRedactsBody(t *testing.T) {
+	offerID := uuid.New()
+	ann := CredentialOfferAnnotation{
+		SenderOrgName: "Acme", CredentialName: "Registration", Message: "hi",
+		OfferID: &offerID, Status: "pending",
+	}
+	h := &Handler{offers: fakeOfferLookup{ann: ann, redacted: "[redacted]", ok: true}}
+
+	got := h.annotateOffer(context.Background(), uuid.New(), Message{ID: uuid.New(), Direction: DirectionInbound, Body: "raw json with a live deeplink"})
+
+	if got.Body != "[redacted]" {
+		t.Errorf("Body = %q, want the redacted stand-in", got.Body)
+	}
+	if got.Offer == nil || *got.Offer != ann {
+		t.Errorf("Offer = %+v, want %+v", got.Offer, ann)
+	}
+}
+
+func TestAnnotateOfferLeavesOrdinaryMessageUnchanged(t *testing.T) {
+	h := &Handler{offers: fakeOfferLookup{ok: false}}
+
+	got := h.annotateOffer(context.Background(), uuid.New(), Message{ID: uuid.New(), Direction: DirectionInbound, Body: "just a message"})
+
+	if got.Body != "just a message" || got.Offer != nil {
+		t.Errorf("annotateOffer changed a non-offer message: %+v", got)
+	}
+}
+
+func TestAnnotateOfferWithNoLookupWiredIsNoop(t *testing.T) {
+	h := &Handler{}
+
+	got := h.annotateOffer(context.Background(), uuid.New(), Message{ID: uuid.New(), Direction: DirectionInbound, Body: "just a message"})
+
+	if got.Body != "just a message" || got.Offer != nil {
+		t.Errorf("annotateOffer with no offer lookup wired changed the message: %+v", got)
+	}
+}
+
+// TestAnnotateOfferLeavesOutboundMessageUnchanged guards against misrendering
+// an org's own sent offer: the org's outbound copy of a credential-offer
+// envelope carries the same recognisable body as the recipient's inbound copy,
+// but annotating it would misrepresent a message the org sent as one it
+// received, and irrecoverably redact the only place the console shows what was
+// sent (see the offerLookup and annotateOffer doc comments).
+func TestAnnotateOfferLeavesOutboundMessageUnchanged(t *testing.T) {
+	offerID := uuid.New()
+	ann := CredentialOfferAnnotation{
+		SenderOrgName: "Acme", CredentialName: "Registration", Message: "hi",
+		OfferID: &offerID, Status: "pending",
+	}
+	h := &Handler{offers: fakeOfferLookup{ann: ann, redacted: "[redacted]", ok: true}}
+
+	body := "raw json with a live deeplink"
+	got := h.annotateOffer(context.Background(), uuid.New(), Message{ID: uuid.New(), Direction: DirectionOutbound, Body: body})
+
+	if got.Body != body {
+		t.Errorf("Body = %q, want the outbound message left unredacted at %q", got.Body, body)
+	}
+	if got.Offer != nil {
+		t.Errorf("Offer = %+v, want nil for an outbound message", got.Offer)
+	}
+}
+
 func TestNamespacedLocalPart(t *testing.T) {
 	const slug = "acme"
 	cases := []struct {

@@ -134,6 +134,24 @@ func (s *Store) ListPendingOffers(ctx context.Context, orgID uuid.UUID) ([]Crede
 	return offers, nil
 }
 
+// GetOfferBySourceMessage returns the offer queued from a QERDS message,
+// whatever its status — pending, accepting, accepted or declined. Unlike
+// ListPendingOffers, this is not filtered to pending: it backs the QERDS message
+// screen's "what became of this offer" annotation (see qerds.Handler.offers),
+// which has to say so for a decided offer too, not just link a pending one.
+func (s *Store) GetOfferBySourceMessage(ctx context.Context, orgID, messageID uuid.UUID) (CredentialOffer, error) {
+	const query = `SELECT ` + offerColumns + ` FROM credential_offers
+		WHERE organization_id = $1 AND source_message_id = $2`
+	o, err := scanOffer(s.db.QueryRow(ctx, query, orgID, messageID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CredentialOffer{}, ErrOfferNotFound
+	}
+	if err != nil {
+		return CredentialOffer{}, fmt.Errorf("attestation: get offer for message %s org %s: %w", messageID, orgID, err)
+	}
+	return o, nil
+}
+
 // ClaimOffer takes a pending offer for redemption, returning it (deeplink
 // included) as it moves to accepting. The transition is one guarded UPDATE, so
 // Postgres decides the winner: of any number of concurrent accepts exactly one
