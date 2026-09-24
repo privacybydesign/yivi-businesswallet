@@ -146,40 +146,6 @@ func (h *Handler) mintOwnReverifyToken(w http.ResponseWriter, r *http.Request) e
 	return nil
 }
 
-// startOwnIdentitySession / completeOwnIdentification let a signed-in member
-// identify from inside the app, without the bearer-token page: the entry point
-// for a member who has never identified and is asked for a VOG
-// (Service.CompleteOwnIdentification).
-func (h *Handler) startOwnIdentitySession(w http.ResponseWriter, r *http.Request) error {
-	sess, err := h.service.StartIdentitySession(r.Context())
-	if err != nil {
-		return fmt.Errorf("starting own identity session: %w", err)
-	}
-	respond.JSON(w, r, http.StatusOK, sess)
-	return nil
-}
-
-type completeOwnIdentificationRequest struct {
-	DisclosureToken string `json:"disclosureToken"`
-}
-
-func (h *Handler) completeOwnIdentification(w http.ResponseWriter, r *http.Request) error {
-	var req completeOwnIdentificationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return badRequest("invalid_body", "invalid request body")
-	}
-	if req.DisclosureToken == "" {
-		return badRequest("invalid_input", "disclosureToken is required")
-	}
-	org := OrgFromContext(r.Context())
-	actor := auth.UserFromContext(r.Context())
-	if err := mapReverifyError(h.service.CompleteOwnIdentification(r.Context(), org.ID, actor.ID, req.DisclosureToken)); err != nil {
-		return err
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
 func (h *Handler) getIdentitySettings(w http.ResponseWriter, r *http.Request) error {
 	org := OrgFromContext(r.Context())
 	settings, err := h.store.GetIdentitySettings(r.Context(), org.ID)

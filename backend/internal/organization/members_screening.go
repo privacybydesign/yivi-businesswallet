@@ -116,9 +116,8 @@ func (h *Handler) requestVogBulk(w http.ResponseWriter, r *http.Request) error {
 }
 
 // requestVogFor is the admin on-demand "request VOG" (#242 §5), single or
-// bulk: it marks each member requested and e-mails them best-effort, linking
-// into the app rather than a bearer-token page - unlike re-identification, a
-// member being screened already has an account and can simply sign in.
+// bulk: it marks each member requested and e-mails them best-effort a VOG
+// link (/vog/<token>) they can submit from without signing in.
 func (h *Handler) requestVogFor(w http.ResponseWriter, r *http.Request, userIDs []uuid.UUID, reason string) error {
 	org := OrgFromContext(r.Context())
 	actor := auth.UserFromContext(r.Context())
@@ -141,7 +140,7 @@ func (h *Handler) sendVogRequestedEmail(ctx context.Context, org Organization, m
 	if h.mailer == nil {
 		return
 	}
-	url := h.appBaseURL + "/" + org.Slug + "/vog"
+	url := h.vogURL(m.VogToken)
 	if err := h.mailer.SendVogRequested(ctx, org.ID, m.Email, org.Name, url, strings.TrimSpace(reason)); err != nil {
 		slog.WarnContext(ctx, "vog-requested e-mail not sent",
 			slog.String("email", m.Email), slog.Any("error", err))
@@ -156,6 +155,7 @@ func (h *Handler) uploadMemberVog(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return badRequest("invalid_id", "invalid user id")
 	}
+	org := OrgFromContext(r.Context())
 	actor := auth.UserFromContext(r.Context())
-	return h.uploadVogFor(w, r, userID, CheckedByAdmin, &actor.ID)
+	return h.uploadVogFor(w, r, org.ID, userID, CheckedByAdmin, &actor.ID)
 }

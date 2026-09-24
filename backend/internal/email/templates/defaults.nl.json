@@ -19,7 +19,7 @@
     "reidentifyUrl": "https://wallet.example.org/reidentify/voorbeeld",
     "dueDate": "2026-08-01",
     "reason": "Je laatste identiteitscontrole is verlopen.",
-    "vogUrl": "https://wallet.example.org/acme/vog"
+    "vogUrl": "https://wallet.example.org/vog/sample"
   },
   "events": {
     "membership.invited": "Lid uitgenodigd",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import i18n from "../i18n";
-import { vogResultMessage } from "./screening-status";
+import { screeningConfigured, vogResultMessage } from "./screening-status";
 
 const t = i18n.getFixedT("en");
 
@@ -37,5 +37,21 @@ describe("vogResultMessage", () => {
       generic,
     );
     expect(vogResultMessage("rejected", undefined, "Acme", t)).toBe(generic);
+  });
+});
+
+describe("screeningConfigured", () => {
+  it("is off until the settings are known", () => {
+    expect(screeningConfigured(undefined)).toBe(false);
+  });
+
+  it("is off for a policy that requires a VOG from nobody", () => {
+    expect(screeningConfigured({ requiredFor: "nobody" })).toBe(false);
+  });
+
+  it("is on once the policy requires a VOG from anyone", () => {
+    expect(screeningConfigured({ requiredFor: "employees" })).toBe(true);
+    expect(screeningConfigured({ requiredFor: "externals" })).toBe(true);
+    expect(screeningConfigured({ requiredFor: "both" })).toBe(true);
   });
 });
