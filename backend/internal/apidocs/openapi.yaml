@@ -4230,7 +4230,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Already signed, the request is no longer awaiting signatures, or a signature is in progress.
+          description: Already signed, or a signature is in progress.
   /api/v1/orgs/{slug}/signing/requests/{id}:
     parameters:
       - name: slug
