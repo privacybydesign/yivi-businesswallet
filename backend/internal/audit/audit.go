@@ -71,6 +71,7 @@ const (
 	QerdsMessageReceived       = "qerds.message_received"
 	QerdsAddressProvisioned    = "qerds.address_provisioned"
 	QerdsAddressDefaultChanged = "qerds.address_default_changed"
+	QerdsAddressDeleted        = "qerds.address_deleted"
 	QerdsContactAdded          = "qerds.contact_added"
 	QerdsContactDeleted        = "qerds.contact_deleted"
 

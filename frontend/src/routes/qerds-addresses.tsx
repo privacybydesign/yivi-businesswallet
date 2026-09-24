@@ -4,13 +4,15 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
   useCreateQerdsAddressMutation,
+  useDeleteQerdsAddressMutation,
   useQerdsAddressesQuery,
   useSetDefaultQerdsAddressMutation,
 } from "../api/qerds.queries";
+import type { QerdsAddress } from "../api/qerds";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { ApiError } from "../api/http";
 import { accessMessage } from "../lib/access-message";
-import { Button, Card, Input, Tag, TopBar } from "../ui";
+import { Button, Card, ConfirmDialog, Input, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const CONFLICT_STATUS = 409;
@@ -40,6 +42,20 @@ function addressError(error: Error, t: TFunction): string {
   ) {
     return t("qerds.addresses.outsideNamespace");
   }
+  if (
+    error instanceof ApiError &&
+    error.status === CONFLICT_STATUS &&
+    errorCode(error) === "address_is_default"
+  ) {
+    return t("qerds.addresses.isDefault");
+  }
+  if (
+    error instanceof ApiError &&
+    error.status === CONFLICT_STATUS &&
+    errorCode(error) === "address_last_remaining"
+  ) {
+    return t("qerds.addresses.lastRemaining");
+  }
   return t("qerds.addresses.error", { message: error.message });
 }
 
@@ -54,8 +70,10 @@ export default function QerdsAddresses(): React.JSX.Element {
   const addresses = useQerdsAddressesQuery(slug, !org.isError);
   const create = useCreateQerdsAddressMutation(slug);
   const setDefault = useSetDefaultQerdsAddressMutation(slug);
+  const remove = useDeleteQerdsAddressMutation(slug);
 
   const [localPart, setLocalPart] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<QerdsAddress | null>(null);
 
   function handleCreate(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -141,15 +159,26 @@ export default function QerdsAddresses(): React.JSX.Element {
                     <Tag tone="green">{t("qerds.addresses.default")}</Tag>
                   ) : (
                     isAdmin && (
-                      <Button
-                        variant="secondary"
-                        onClick={() =>
-                          setDefault.mutate({ addressId: address.id })
-                        }
-                        disabled={setDefault.isPending}
-                      >
-                        {t("qerds.addresses.setDefault")}
-                      </Button>
+                      <>
+                        <Button
+                          variant="secondary"
+                          onClick={() =>
+                            setDefault.mutate({ addressId: address.id })
+                          }
+                          disabled={setDefault.isPending}
+                        >
+                          {t("qerds.addresses.setDefault")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          icon="delete"
+                          onClick={() => setPendingDelete(address)}
+                          disabled={remove.isPending}
+                        >
+                          {t("qerds.addresses.delete")}
+                        </Button>
+                      </>
                     )
                   )}
                 </li>
@@ -159,6 +188,11 @@ export default function QerdsAddresses(): React.JSX.Element {
           {setDefault.isError && (
             <p role="alert" className="text-error mt-2 text-[13px]">
               {addressError(setDefault.error, t)}
+            </p>
+          )}
+          {remove.isError && (
+            <p role="alert" className="text-error mt-2 text-[13px]">
+              {addressError(remove.error, t)}
             </p>
           )}
         </div>
@@ -173,6 +207,21 @@ export default function QerdsAddresses(): React.JSX.Element {
         subtitle={t("qerds.addresses.subtitle")}
       />
       <div className="p-8">{body()}</div>
+      {pendingDelete && (
+        <ConfirmDialog
+          title={t("qerds.addresses.deleteTitle")}
+          message={t("qerds.addresses.deleteConfirm", {
+            address: pendingDelete.address,
+          })}
+          confirmLabel={t("qerds.addresses.delete")}
+          busy={remove.isPending}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={() => {
+            remove.mutate({ addressId: pendingDelete.id });
+            setPendingDelete(null);
+          }}
+        />
+      )}
     </>
   );
 }
