@@ -327,7 +327,7 @@ The subject sees consent, then picks a method (or gets the flow's fixed one), th
 
 - **Consent screen.** It shows the customer's name, the purpose (`processing_purpose`), the data requested, the retention period and a privacy-statement link. Declining cancels the session.
 - **Device handover.** When the page is opened on desktop, Yivi and Idem both continue on the phone through a QR code, and the desktop page follows the phone by polling. This builds on the `Session-Flow` branch's device binding and handover.
-- **Accessibility.** The page must meet WCAG 2.1 AA, which public-sector customers in NL require.
+- **Accessibility.** The page must meet WCAG 2.2 AA, which public-sector customers in NL require.
 
 ## Proofing methods
 
