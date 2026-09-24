@@ -37,6 +37,8 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/postguard"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/provisioner"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/provisioning"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
@@ -70,6 +72,11 @@ const (
 	// validatie.nl retries internally up to three times with backoff (#242); the
 	// client timeout has to outlast that whole sequence, not one attempt.
 	vogHTTPTimeout = 2 * time.Minute
+
+	proofingProbeTimeout = 10 * time.Second
+	// One IPS call per request; a session result embeds the document images,
+	// which is what the headroom is for.
+	proofingHTTPTimeout = 30 * time.Second
 
 	issuerProbeTimeout = 10 * time.Second
 	issuerHTTPTimeout  = 15 * time.Second
@@ -138,6 +145,34 @@ func newVogValidatorProvider(cfg config.Config) (vogValidatorProvider, error) {
 		return vog.NewHTTPClient(cfg.VogValidatorURL, &http.Client{Timeout: vogHTTPTimeout}), nil
 	default:
 		return nil, fmt.Errorf("vog validator provider %q is not implemented", cfg.VogValidatorProvider)
+	}
+}
+
+// proofingProvider is the boot-time identity-proofing-service surface: the
+// readiness probe plus what the proofing service drives. Chosen by config.
+type proofingProvider interface {
+	Ping(context.Context) error
+	CreateTenant(ctx context.Context, name string) (proofingprovider.Tenant, error)
+	CreateAPIKey(ctx context.Context, tenantID string, scopes []string) (string, error)
+	ListFlows(ctx context.Context, apiKey string) ([]proofingprovider.Flow, error)
+	CreateFlow(ctx context.Context, apiKey string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error)
+	CreateFlowVersion(ctx context.Context, apiKey, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error)
+	ListFlowVersions(ctx context.Context, apiKey, id string) ([]proofingprovider.Flow, error)
+	ActivateFlowVersion(ctx context.Context, apiKey, id string, version int) (proofingprovider.Flow, error)
+	CreateSession(ctx context.Context, apiKey string, in proofingprovider.SessionInput) (proofingprovider.Session, error)
+	MintClaim(ctx context.Context, apiKey, sessionID, sessionToken string) (*proofingprovider.Claim, error)
+	SessionResult(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Result, error)
+}
+
+func newProofingProvider(cfg config.Config) (proofingProvider, error) {
+	switch cfg.IdentityProofingProvider {
+	case config.ProviderStub:
+		return proofingprovider.NewStub(), nil
+	case config.ProviderIPS:
+		return proofingprovider.NewClient(cfg.IdentityProofingURL, cfg.IdentityProofingAdminKey,
+			&http.Client{Timeout: proofingHTTPTimeout}), nil
+	default:
+		return nil, fmt.Errorf("identity proofing provider %q is not implemented", cfg.IdentityProofingProvider)
 	}
 }
 
@@ -676,6 +711,28 @@ func run() error {
 		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingOrgs{store: orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
 		requireUser, orgHandler.Authorize)
 
+	// Identity proofing: one identity-proofing-service tenant per org, e-mailed
+	// proofing requests. Its own deployment key seals each org's IPS API key;
+	// without it no org can be provisioned (proofing.ErrNoEncryptionKey).
+	ips, err := newProofingProvider(cfg)
+	if err != nil {
+		return err
+	}
+	proofingProbeCtx, proofingProbeCancel := context.WithTimeout(ctx, proofingProbeTimeout)
+	defer proofingProbeCancel()
+	if err := ips.Ping(proofingProbeCtx); err != nil {
+		return fmt.Errorf("identity proofing ping: %w", err)
+	}
+	proofingCipher, err := crypto.NewCipher(cfg.IdentityProofingEncryptionKey)
+	if err != nil {
+		return err
+	}
+	proofingService := proofing.NewService(
+		proofing.NewSettingsStore(pool, recorder, proofingCipher),
+		proofing.NewRequestStore(pool, recorder, proofingCipher),
+		ips, emailService, cfg.AppBaseURL)
+	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
+
 	// Inbound OpenID4VP: an external verifier invoking the business wallet as
 	// the holder (#188). Request Objects are refused until a deployment opts into
 	// the structural (unverified) decoder; the signed-request cryptography is
@@ -707,6 +764,7 @@ func run() error {
 		provisioningHandler,
 		cscHandler,
 		signingHandler,
+		proofingHandler,
 	)
 
 	httpServer := &http.Server{

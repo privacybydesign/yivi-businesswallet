@@ -51,6 +51,8 @@ tags:
       holder of an organisation's credentials. The browser-facing entry point
       GET /openid4vp and the wallet-metadata document
       /.well-known/oauth-authorization-server live outside /api/v1.
+  - name: identity-proofing
+    description: Identity document and face verification through the identity-proofing-service.
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -410,6 +412,58 @@ paths:
                 description: Response payload; shape depends on the endpoint.
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/identity-proofing/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque proofing token from an identity proofing request e-mail.
+    get:
+      tags: [identity-proofing]
+      summary: Preview an identity proofing link by token
+      description: >-
+        Public. Organisation, subject and flow name plus the reconciled status of the
+        request.
+      security: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/identity-proofing/{token}/session:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque proofing token from an identity proofing request e-mail.
+    post:
+      tags: [identity-proofing]
+      summary: Start or resume identity proofing
+      description: >-
+        Public. Returns a fresh vcmrtd/idem `deepLink` on the request's session (created
+        when the request was sent), to show as a QR code and as an open-in-app link: one
+        payload, so both do the same. The identity-proofing-service's claim is single-use
+        and short-lived, so the page asks again when it lapses. No link when the phone is
+        already in the flow or the request is settled; 404 once the session (and so the
+        link) expired.
+      security: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/reidentify/{token}:
@@ -3946,6 +4000,339 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/identity-proofing/flows:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: List the org's identity proofing flows
+      description: >-
+        Requires organisation membership. Active flow versions at the identity-
+        proofing-service. An administrator sees every flow, a member only the flows
+        an administrator made available (`allowed`); `default` is the one the request
+        form preselects, and `completable` is false for a flow a recipient cannot
+        finish with only the vcmrtd app. The organisation's tenant at the
+        identity-proofing-service is provisioned on its first use of any of these
+        routes.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [identity-proofing]
+      summary: Create an identity proofing flow
+      description: >-
+        Requires an administrator role in the organisation. The identity-proofing-service
+        flow configuration: `name`, `steps`, and optionally `requestedAttributes`,
+        `acceptedDocumentTypes`, `acceptedIssuingCountries`, `requiredChecks`,
+        `checkThresholds`, `requiredAssuranceLevel`, `bsnPolicy`, `blurFace`, `blurBsn`,
+        `retentionOverrideSeconds`, `assuranceTiers`, `legalBasis` and
+        `processingPurpose`. Face capture is always set to the app. The service
+        validates the combination and its refusal is returned as 422
+        `rejected_by_provider`. Creates version 1.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The flow does not exist, cannot be completed in the app, or was rejected by the identity proofing service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/versions:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Flow id at the identity-proofing-service (stable across versions).
+    get:
+      tags: [identity-proofing]
+      summary: List every version of an identity proofing flow
+      description: >-
+        Requires an administrator role in the organisation. Oldest first; exactly one
+        is `active`, the version new requests run.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The flow does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [identity-proofing]
+      summary: Edit an identity proofing flow as a new version
+      description: >-
+        Requires an administrator role in the organisation. Same body as creating a
+        flow; the identity-proofing-service stores it as the next version and makes it
+        the active one. Requests already sent keep the version their session pinned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The flow does not exist, or the identity proofing service rejected the configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/versions/{version}/activate:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Flow id at the identity-proofing-service (stable across versions).
+      - name: version
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+        description: Flow version to make active.
+    post:
+      tags: [identity-proofing]
+      summary: Activate a version of an identity proofing flow
+      description: >-
+        Requires an administrator role in the organisation. Makes the version the only
+        active one (a rollback or roll-forward); new requests run it from then on.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The flow or version does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/members:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: List the members a proofing request can be sent to
+      description: >-
+        Requires organisation membership. Every member of the organisation, admins and
+        externals included, ordered by name.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/identity-proofing/flow-selection:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    put:
+      tags: [identity-proofing]
+      summary: Choose which flows members may send requests on
+      description: >-
+        Requires an administrator role in the organisation. Replaces the allow-list:
+        `flowIds` (each an active flow a recipient can finish in the app) and
+        `defaultFlowId` (one of them, or empty when the list is). Returns the org's
+        flows as the list endpoint does for an administrator.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: A flow does not exist or cannot be completed in the app.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: List identity proofing requests
+      description: >-
+        Requires organisation membership. An administrator sees every request of the
+        organisation, a member the requests they sent. Live requests are re-checked at
+        the identity-proofing-service first. Only the outcome and assurance level are
+        returned, never document data.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [identity-proofing]
+      summary: Send an identity proofing request
+      description: >-
+        Requires organisation membership. `userId` (a member of the organisation) and
+        `flowId` (a flow an administrator made available). Creates the session at the
+        identity-proofing-service now and e-mails the member a QR code and a button for
+        one link to the public proofing page, valid exactly as long as that session (15
+        minutes). `mailSent` is false when the mail could not be sent.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The person is not a member, or the flow does not exist, cannot be completed in the app, or is not available to members.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/signing/availability:
     parameters:
       - name: slug

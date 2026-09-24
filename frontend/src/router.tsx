@@ -23,6 +23,9 @@ import IdentityReviews from "./routes/identity-reviews";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
 import VogSubmit from "./routes/vog-submit";
+import IdentityProofing from "./routes/identity-proofing";
+import IdentityProofingFlows from "./routes/identity-proofing-flows";
+import Proof from "./routes/proof";
 import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
 import MemberEdit from "./routes/member-edit";
@@ -59,6 +62,12 @@ const orgCrumb: RouteHandle = {
   },
 };
 const membersCrumb: RouteHandle = { crumb: ({ t }) => t("members.title") };
+const identityProofingCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.title"),
+};
+const identityProofingFlowsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofingFlows.title"),
+};
 const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
 const memberCrumb: RouteHandle = {
   crumb: ({ params, queryClient, t }: CrumbContext) => {
@@ -129,6 +138,9 @@ export const router = createBrowserRouter([
       // A member's VOG submission, keyed by the token from a request/reminder
       // mail or the dashboard banner - public like /claim, no sign-in needed.
       { path: "/vog/:token", Component: VogSubmit },
+      // An identity proofing recipient need not have an account; the link token
+      // from their request e-mail is the key.
+      { path: "/proof/:token", Component: Proof },
       // Inbound OpenID4VP: the address an external verifier redirects to, then
       // the transaction by its opaque id. Not under ProtectedRoute — it handles
       // the sign-in step itself so the id can ride through /login?returnTo=.
@@ -165,6 +177,18 @@ export const router = createBrowserRouter([
                 handle: orgCrumb,
                 children: [
                   { index: true, Component: Dashboard },
+                  {
+                    path: "identity-proofing",
+                    handle: identityProofingCrumb,
+                    children: [
+                      { index: true, Component: IdentityProofing },
+                      {
+                        path: "flows",
+                        Component: IdentityProofingFlows,
+                        handle: identityProofingFlowsCrumb,
+                      },
+                    ],
+                  },
                   {
                     path: "members",
                     handle: membersCrumb,

@@ -13,6 +13,7 @@ require (
 	github.com/klippa-app/go-pdfium v1.19.8
 	github.com/lestrrat-go/jwx/v3 v3.1.1
 	github.com/pressly/goose/v3 v3.27.1
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/image v0.45.0
 	golang.org/x/text v0.42.0
 )

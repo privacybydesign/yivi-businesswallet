@@ -101,6 +101,15 @@ services:
       ATTESTATION_ISSUER_INSTANCE: ${ATTESTATION_ISSUER_INSTANCE:-}
       ATTESTATION_ISSUER_ADMIN_TOKEN: ${ATTESTATION_ISSUER_ADMIN_TOKEN:-}
       ATTESTATION_ISSUER_PING_CREDENTIAL: ${ATTESTATION_ISSUER_PING_CREDENTIAL:-}
+      # Identity proofing (privacybydesign/identity-proofing-service). Defaults to
+      # the in-process stub; set to `ips` with the service URL and its ADMIN_KEY.
+      # A local IPS also publishes host port 8080, which this backend binds, so
+      # remap it (e.g. 8081:8080) and use http://host.docker.internal:8081. The
+      # encryption key (hex 32 bytes) stores each org's IPS API key at rest.
+      IDENTITY_PROOFING_PROVIDER: ${IDENTITY_PROOFING_PROVIDER:-}
+      IDENTITY_PROOFING_URL: ${IDENTITY_PROOFING_URL:-}
+      IDENTITY_PROOFING_ADMIN_KEY: ${IDENTITY_PROOFING_ADMIN_KEY:-}
+      IDENTITY_PROOFING_ENCRYPTION_KEY: ${IDENTITY_PROOFING_ENCRYPTION_KEY:-}
     depends_on:
       db:
         condition: service_healthy

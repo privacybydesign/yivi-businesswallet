@@ -273,7 +273,11 @@ function BlockCard({
             return (
               <div key={field} className="flex flex-col gap-1">
                 <label htmlFor={id} className={EYEBROW}>
-                  {t(`mailTemplates.blockFields.${field}`)}
+                  {block.type === "qr" && field !== "text"
+                    ? t(
+                        `mailTemplates.qrFields.${field === "url" ? "url" : "label"}`,
+                      )
+                    : t(`mailTemplates.blockFields.${field}`)}
                 </label>
                 {multiline ? (
                   <textarea
@@ -300,6 +304,11 @@ function BlockCard({
           {block.type === "button" && (
             <p className="text-ink-soft text-[12.5px]">
               {t("mailTemplates.buttonHint")}
+            </p>
+          )}
+          {block.type === "qr" && (
+            <p className="text-ink-soft text-[12.5px]">
+              {t("mailTemplates.qrHint")}
             </p>
           )}
         </div>

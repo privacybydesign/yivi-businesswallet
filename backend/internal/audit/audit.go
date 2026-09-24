@@ -150,6 +150,18 @@ const (
 	PresentationCompleted   = "presentation.completed"
 	PresentationDenied      = "presentation.denied"
 	PresentationExpired     = "presentation.expired"
+
+	// idnetity profing service
+	IdentityProofingProvisioned     = "identity_proofing.provisioned"
+	IdentityProofingFlowCreated     = "identity_proofing.flow_created"
+	IdentityProofingFlowsConfigured = "identity_proofing.flows_configured"
+
+	// flow versioning and request lifecycle
+	IdentityProofingFlowVersionCreated   = "identity_proofing.flow_version_created"
+	IdentityProofingFlowVersionActivated = "identity_proofing.flow_version_activated"
+	IdentityProofingRequested            = "identity_proofing.requested"
+	IdentityProofingSessionStarted       = "identity_proofing.session_started"
+	IdentityProofingCompleted            = "identity_proofing.completed"
 )
 
 const (
@@ -205,6 +217,10 @@ const (
 	TargetSigningRequest    = "signing_requests"
 
 	TargetPresentationTransaction = "presentation_transaction"
+
+	TargetIdentityProofingSettings = "org_identity_proofing_settings"
+	TargetIdentityProofingFlow     = "identity_proofing_flow"
+	TargetIdentityProofingRequest  = "identity_proofing_request"
 )
 
 type Actor struct {

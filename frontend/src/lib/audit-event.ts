@@ -88,6 +88,14 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "presentation.completed": { icon: "valid", tone: "green" },
   "presentation.denied": { icon: "close", tone: "red" },
   "presentation.expired": { icon: "time", tone: "slate" },
+  "identity_proofing.provisioned": { icon: "settings", tone: "blue" },
+  "identity_proofing.flow_created": { icon: "add", tone: "green" },
+  "identity_proofing.flows_configured": { icon: "settings", tone: "blue" },
+  "identity_proofing.flow_version_created": { icon: "edit", tone: "blue" },
+  "identity_proofing.flow_version_activated": { icon: "valid", tone: "blue" },
+  "identity_proofing.requested": { icon: "email", tone: "amber" },
+  "identity_proofing.session_started": { icon: "scan_qrcode", tone: "blue" },
+  "identity_proofing.completed": { icon: "valid", tone: "green" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -302,6 +310,22 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.presentationDenied");
     case "presentation.expired":
       return t("auditLog.actions.presentationExpired");
+    case "identity_proofing.provisioned":
+      return t("auditLog.actions.identityProofingProvisioned");
+    case "identity_proofing.flow_created":
+      return t("auditLog.actions.identityProofingFlowCreated");
+    case "identity_proofing.flows_configured":
+      return t("auditLog.actions.identityProofingFlowsConfigured");
+    case "identity_proofing.flow_version_created":
+      return t("auditLog.actions.identityProofingFlowVersionCreated");
+    case "identity_proofing.flow_version_activated":
+      return t("auditLog.actions.identityProofingFlowVersionActivated");
+    case "identity_proofing.requested":
+      return t("auditLog.actions.identityProofingRequested");
+    case "identity_proofing.session_started":
+      return t("auditLog.actions.identityProofingSessionStarted");
+    case "identity_proofing.completed":
+      return t("auditLog.actions.identityProofingCompleted");
     default:
       return action;
   }
@@ -381,6 +405,12 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.signingRequests");
     case "presentation_transaction":
       return t("auditLog.targets.presentationTransaction");
+    case "org_identity_proofing_settings":
+      return t("auditLog.targets.orgIdentityProofingSettings");
+    case "identity_proofing_flow":
+      return t("auditLog.targets.identityProofingFlow");
+    case "identity_proofing_request":
+      return t("auditLog.targets.identityProofingRequest");
     default:
       return targetType;
   }

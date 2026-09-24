@@ -20,7 +20,10 @@
     "reidentifyUrl": "https://wallet.example.org/reidentify/sample",
     "dueDate": "2026-08-01",
     "reason": "Your last identity check has expired.",
-    "vogUrl": "https://wallet.example.org/vog/sample"
+    "vogUrl": "https://wallet.example.org/vog/sample",
+    "requesterName": "Sam de Vries",
+    "proofingUrl": "https://wallet.example.org/proof/sample",
+    "validMinutes": "15"
   },
   "events": {
     "membership.invited": "Invited member",
@@ -213,6 +216,18 @@
         { "type": "heading", "text": "Your VOG has expired" },
         { "type": "paragraph", "text": "Your certificate of conduct for {{orgName}} expired on {{dueDate}}. Please upload a new one." },
         { "type": "button", "label": "Upload my VOG", "url": "{{vogUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "identity_proofing_requested": {
+      "subject": "{{orgName}} asks you to verify your identity",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} asks you to verify your identity" },
+        { "type": "paragraph", "text": "{{requesterName}} asked you to verify your identity with your passport or identity card and your face, in the vcmrtd app on your phone." },
+        { "type": "qr", "label": "Scan with your phone's camera", "url": "{{proofingUrl}}" },
+        { "type": "button", "label": "Verify my identity", "url": "{{proofingUrl}}" },
+        { "type": "paragraph", "text": "The QR code and the button open the same page. This link is valid for {{validMinutes}} minutes; after that, ask {{orgName}} for a new one." },
         { "type": "footer" }
       ]
     }

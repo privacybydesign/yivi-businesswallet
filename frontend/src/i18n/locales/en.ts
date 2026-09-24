@@ -30,6 +30,8 @@ export const en = {
   nav: {
     dashboard: "Dashboard",
     members: "Members",
+    identityProofing: "Identity proofing",
+    identityProofingFlows: "Proofing flows",
     qerds: "Secure delivery",
     attestations: "Attestations",
     postguard: "PostGuard files",
@@ -404,6 +406,185 @@ export const en = {
       error: "Could not start re-identification: {{message}}",
     },
   },
+  identityProofing: {
+    title: "Identity proofing",
+    subtitle:
+      "Verify a person's identity with their identity document and face.",
+    members: {
+      title: "Members",
+      hint: "Everyone in this organization, admins and externals included. Pick a flow and press the mail button: the member gets a QR code and a button for one link, valid for 15 minutes.",
+      search: "Search members",
+      member: "Member",
+      lastRequest: "Last request",
+      flow: "Flow",
+      send: "Send",
+      empty: "No members found.",
+      noFlowsAdmin:
+        "No flow is available to members yet. Create one and tick it under",
+      noFlowsMember:
+        "An admin has to make a flow available before you can send a request.",
+      admin: "Admin",
+      external: "External",
+      externalOf: "External · {{org}}",
+      flowFor: "Flow for {{name}}",
+      sendTo: "Mail a proofing request to {{name}}",
+    },
+    requests: {
+      title: "Requests",
+      titleOwn: "Your requests",
+      empty: "No requests yet.",
+      subject: "Person",
+      flow: "Flow",
+      requestedBy: "Requested by",
+      status: "Status",
+      assurance: "Assurance",
+      created: "Sent",
+    },
+    status: {
+      pending: "Link sent",
+      inProgress: "In progress",
+      approved: "Verified",
+      rejected: "Rejected",
+      needsReview: "Needs review",
+      expired: "Expired",
+    },
+    errors: {
+      noEncryptionKey:
+        "This server has no encryption key for identity proofing. Ask your administrator to set IDENTITY_PROOFING_ENCRYPTION_KEY.",
+      flowNotFound: "That flow no longer exists. Pick another one.",
+      flowNotCompletable:
+        "That flow captures the face in a browser, which the person cannot reach yet. Pick a flow that runs in the app.",
+      flowNotAllowed:
+        "That flow is no longer available to members. Pick another one.",
+      memberNotFound: "That person is not a member of this organization.",
+      linkNotFound: "This link is invalid or has expired.",
+      generic: "Something went wrong. Please try again.",
+    },
+    proof: {
+      title: "Verify your identity",
+      requestedBy: "{{org}} asks you to verify your identity.",
+      steps:
+        "You need the vcmrtd app on your phone and your passport or identity card with a chip.",
+      scanHint:
+        "Scan this QR code with the vcmrtd app, or open the app from this phone.",
+      validUntil: "This link is valid until {{time}}.",
+      retry: "Try again",
+      openApp: "Open in the app",
+      refreshing: "Getting a new QR code…",
+      continueInApp: "Continue in the vcmrtd app on your phone.",
+      waiting: "Waiting for the app…",
+      approvedTitle: "Your identity is verified",
+      approvedHint: "You can close this page. {{org}} has been notified.",
+      rejectedTitle: "Your identity could not be verified",
+      rejectedHint: "Contact {{org}} if you think this is a mistake.",
+      reviewTitle: "Your verification is being reviewed",
+      reviewHint: "You can close this page. {{org}} will be told the outcome.",
+      expiredTitle: "This link has expired",
+      expiredHint: "Ask {{org}} to send you a new one.",
+      notFoundTitle: "Link not found",
+      notFoundHint: "This link is invalid or has expired.",
+      errorTitle: "Something went wrong",
+      errorHint: "Please reload the page to try again.",
+    },
+  },
+  identityProofingFlows: {
+    title: "Proofing flows",
+    subtitle:
+      "Define the checks and data of each flow, keep its versions, and choose which flows members may use.",
+    adminOnly: "Only an admin of this organization can manage proofing flows.",
+    notCompletable: "Cannot be sent from the wallet",
+    versionShort: "v{{version}}",
+    edit: "Edit",
+    selection: {
+      title: "Flows",
+      hint: "Members send requests on the flows ticked here; the default is the one preselected for every member. Editing a flow saves a new version, which new requests use from then on.",
+      empty: "No flows yet. Create one with New flow.",
+      default: "Default",
+      save: "Save available flows",
+    },
+    versions: {
+      title: "Versions",
+      hint: "Requests already sent keep the version they started on. Activate an earlier version to roll back.",
+      active: "Active",
+      activate: "Activate",
+    },
+    steps: {
+      document_capture: "Document scan (MRZ)",
+      nfc_read: "NFC chip scan",
+      face_verification: "Face verification",
+    },
+    checks: {
+      passiveAuth: "Passive authentication",
+      chipAuth: "Chip authentication",
+      faceMatch: "Face match",
+      liveness: "Liveness",
+    },
+    attributes: {
+      dg1: "Document and holder",
+      dg11: "DG11 holder extras",
+      dg2: "Document photo",
+      chip_checks: "Chip checks",
+      selfie: "Captured selfie",
+      biometrics: "Face biometrics",
+    },
+    new: {
+      title: "New flow",
+      editTitle: "Edit {{name}}",
+      hint: "A flow is the steps a session walks through, the result data the proofing service returns, and the checks that score its assurance.",
+      editHint:
+        "Saving creates version {{version}} and activates it immediately. Requests already sent keep the version they started on.",
+      name: "Name",
+      namePlaceholder: "NL passport + selfie",
+      create: "Create flow",
+      saveVersion: "Save as version {{version}}",
+      stepsTitle: "Flow steps",
+      documentCaptureHint:
+        "The vcmrtd app scans the document's MRZ with the camera to unlock the chip. Always together with the NFC chip scan.",
+      nfcReadHint:
+        "The vcmrtd app reads the document's chip over NFC. Always together with the document scan.",
+      faceVerificationHint:
+        "One step: selfie capture, liveness and face match against the chip photo.",
+      stepsOrder: "Will be sent in this order: {{steps}}",
+      faceLocationNative:
+        "Face verification runs in the vcmrtd app (native): the person has no browser step.",
+      faceWithoutChip:
+        "Without the NFC chip scan there is no chip photo to compare the face against, so members cannot be sent this flow.",
+      dataTitle: "Requested result data",
+      dataHint:
+        "Controls which result data the proofing service returns. Only data from a step in this flow can be requested. The wallet itself keeps only the outcome and assurance level.",
+      checksTitle: "Required checks",
+      checksHint:
+        "Passive authentication is mandatory with the NFC chip scan and face match with face verification, so they are locked on; chip authentication and liveness stay optional.",
+      faceMatchThreshold: "Face match threshold",
+      faceMatchThresholdHint:
+        "0–1, blank is pass/fail only. Only applies with face verification.",
+      documentsTitle: "Accepted documents",
+      documentTypes: "Accepted document types",
+      documentTypesHint: "Comma-separated, blank accepts any.",
+      issuingCountries: "Accepted issuing countries",
+      issuingCountriesHint:
+        "ICAO 3-letter codes, comma-separated, blank accepts any.",
+      policyTitle: "Assurance and privacy",
+      assuranceLevel: "Required assurance level",
+      assuranceLevelHint:
+        "Substantial needs passive or chip authentication plus face match. High is not achievable yet and is refused by the proofing service.",
+      none: "(none)",
+      inherit: "(inherit organization)",
+      yes: "true",
+      no: "false",
+      bsnPolicy: "BSN policy override",
+      retentionSeconds: "Retention override (seconds)",
+      retentionSecondsHint: "Blank or 0 is no override.",
+      blurFace: "Blur face override",
+      blurBsn: "Blur BSN override",
+      errors: {
+        name: "Give the flow a name.",
+        steps: "Pick at least one step.",
+        faceMatchThreshold: "Enter a number from 0 to 1.",
+        retentionSeconds: "Enter a whole number of seconds.",
+      },
+    },
+  },
   vog: {
     title: "Submit your VOG",
     subtitle:
@@ -575,6 +756,13 @@ export const en = {
     teamsSettingsSaved: "Microsoft Teams settings saved",
     teamsTestSent: "Test notification sent",
     cscSettingsSaved: "Signing provider settings saved",
+    identityProofingFlowCreated: "Flow created",
+    identityProofingFlowsSaved: "Available flows saved",
+    identityProofingFlowVersionSaved: "Version {{version}} saved and active",
+    identityProofingFlowVersionActivated: "Version {{version}} is active",
+    identityProofingMailNotSent:
+      "Request created, but the mail could not be sent. Check this organization's mail settings.",
+    identityProofingRequestSent: "Request sent",
     notificationSettingsSaved: "Notification settings saved",
     provisioningSettingsSaved: "Directory sync settings saved",
     provisioningSyncCompleted: "Directory sync completed",
@@ -718,6 +906,9 @@ export const en = {
       signingCredentials: "Signing credential",
       signingRequests: "Signing request",
       presentationTransaction: "Presentation request",
+      orgIdentityProofingSettings: "Identity proofing settings",
+      identityProofingFlow: "Identity proofing flow",
+      identityProofingRequest: "Identity proofing request",
     },
     actions: {
       orgCreated: "Created organization",
@@ -817,6 +1008,17 @@ export const en = {
       presentationCompleted: "Sent a presentation",
       presentationDenied: "Declined a presentation request",
       presentationExpired: "Presentation request expired",
+      identityProofingProvisioned: "Set up identity proofing",
+      identityProofingFlowCreated: "Created identity proofing flow",
+      identityProofingFlowsConfigured:
+        "Changed the identity proofing flows available to members",
+      identityProofingFlowVersionCreated:
+        "Saved a new version of an identity proofing flow",
+      identityProofingFlowVersionActivated:
+        "Activated a version of an identity proofing flow",
+      identityProofingRequested: "Sent identity proofing request",
+      identityProofingSessionStarted: "Started identity proofing",
+      identityProofingCompleted: "Identity proofing completed",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
     },
@@ -1544,6 +1746,7 @@ export const en = {
       heading: "Heading",
       paragraph: "Paragraph",
       button: "Button",
+      qr: "QR code",
       divider: "Divider",
       footer: "Footer",
     },
@@ -1561,6 +1764,7 @@ export const en = {
       credential_offer: "Credential offer",
       event_notification: "Event notification",
       identity_overdue: "Identity overdue",
+      identity_proofing_requested: "Identity proofing requested",
       identity_reminder: "Identity reminder",
       identity_requested: "Identification requested",
       invitation: "Member invitation",
@@ -1580,6 +1784,8 @@ export const en = {
         "Sent to this organization's admins when something happens that they subscribed to.",
       identity_overdue:
         "Sent to a member whose re-identification deadline has passed, on the reminder cadence.",
+      identity_proofing_requested:
+        "Sent to a person when a member asks them to verify their identity with their document and face.",
       identity_reminder:
         "Sent to a member ahead of their re-identification deadline.",
       identity_requested:
@@ -1607,6 +1813,12 @@ export const en = {
     removeBlock: "Remove block {{number}}",
     moveBlockUp: "Move block {{number}} up",
     moveBlockDown: "Move block {{number}} down",
+    qrFields: {
+      url: "QR code link",
+      label: "Caption (optional)",
+    },
+    qrHint:
+      "The QR code encodes one link variable or a full https:// address. Use the same link as a button so both open the same page.",
     buttonHint:
       "The button link is either one link variable or a full https:// address. The link introduction is the small line above the plain link shown under the button.",
     preview: "Preview",

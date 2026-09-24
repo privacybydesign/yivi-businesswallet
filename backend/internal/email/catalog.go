@@ -61,6 +61,9 @@ const (
 	// KindVogExpired is sent once a member's VOG has expired, on the org's
 	// overdue reminder cadence.
 	KindVogExpired Kind = "vog_expired"
+	// KindIdentityProofingRequested asks a person to prove their identity with
+	// their identity document and face, linking to the public proofing page.
+	KindIdentityProofingRequested Kind = "identity_proofing_requested"
 )
 
 // Variable names. Every placeholder a template may use is one of these, declared
@@ -84,6 +87,9 @@ const (
 	varDueDate        = "dueDate"
 	varReason         = "reason"
 	varVogURL         = "vogUrl"
+	varRequesterName  = "requesterName"
+	varProofingURL    = "proofingUrl"
+	varValidMinutes   = "validMinutes"
 )
 
 // Variable is one substitutable value of a kind. URL variables are additionally
@@ -168,6 +174,12 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varOrgName},
 		{Name: varVogURL, IsURL: true},
 		{Name: varDueDate},
+	},
+	KindIdentityProofingRequested: {
+		{Name: varOrgName},
+		{Name: varRequesterName},
+		{Name: varProofingURL, IsURL: true},
+		{Name: varValidMinutes},
 	},
 }
 
@@ -260,11 +272,15 @@ const (
 	BlockDivider BlockType = "divider"
 	// BlockFooter is small print under a rule, in muted text.
 	BlockFooter BlockType = "footer"
+	// BlockQR is a QR code of a URL, embedded as an inline image, with an optional
+	// caption. Its URL follows the button's rules, so a QR and a button in one
+	// layout can carry the same link.
+	BlockQR BlockType = "qr"
 )
 
 // BlockTypes returns every block type, in the order the editor offers them.
 func BlockTypes() []BlockType {
-	return []BlockType{BlockLogo, BlockHeading, BlockParagraph, BlockButton, BlockDivider, BlockFooter}
+	return []BlockType{BlockLogo, BlockHeading, BlockParagraph, BlockButton, BlockQR, BlockDivider, BlockFooter}
 }
 
 // Block is one building block of a template layout. Which fields apply depends
@@ -275,8 +291,9 @@ type Block struct {
 	Type BlockType `json:"type"`
 	// Text is the prose of a heading, paragraph or footer block.
 	Text string `json:"text,omitempty"`
-	// Label and URL are a button block's call to action. URL is either a single
-	// declared URL variable or an absolute http(s) literal (see validateButtonURL).
+	// Label and URL are a button block's call to action, or a QR block's caption
+	// and encoded link. URL is either a single declared URL variable or an
+	// absolute http(s) literal (see validateButtonURL).
 	Label string `json:"label,omitempty"`
 	URL   string `json:"url,omitempty"`
 	// LinkFallback introduces the bare URL printed under the button. Empty means

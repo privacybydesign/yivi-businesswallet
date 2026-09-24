@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -246,6 +247,18 @@ func (s *Service) SendVogRequested(ctx context.Context, orgID uuid.UUID, to, org
 	})
 }
 
+// SendIdentityProofingRequested asks a member to prove their identity: a QR code
+// and a button for the same proofing link, valid for validFor. Returns
+// ErrNotConfigured when the org has no usable SMTP settings.
+func (s *Service) SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, to, orgName, requesterName, proofingURL string, validFor time.Duration) error {
+	return s.send(ctx, orgID, KindIdentityProofingRequested, []string{to}, map[string]string{
+		varOrgName:       orgName,
+		varRequesterName: requesterName,
+		varProofingURL:   proofingURL,
+		varValidMinutes:  strconv.Itoa(int(validFor / time.Minute)),
+	})
+}
+
 // SendVogReminder tells a member their VOG is expiring soon, linking into the
 // app. Returns ErrNotConfigured when the org has no usable SMTP settings.
 func (s *Service) SendVogReminder(ctx context.Context, orgID uuid.UUID, to, orgName, vogURL, dueDate string) error {
@@ -391,11 +404,14 @@ func (s *Service) compose(ctx context.Context, orgID uuid.UUID, kind Kind, local
 
 	var inline []mailer.InlineImage
 	if body.InlineLogo != nil {
-		inline = []mailer.InlineImage{{
+		inline = append(inline, mailer.InlineImage{
 			ContentID:   body.InlineLogo.ContentID,
 			ContentType: body.InlineLogo.ContentType,
 			Bytes:       body.InlineLogo.Bytes,
-		}}
+		})
+	}
+	for _, img := range body.InlineQR {
+		inline = append(inline, mailer.InlineImage{ContentID: img.ContentID, ContentType: img.ContentType, Bytes: img.Bytes})
 	}
 	return cfg, mailer.Message{
 		Subject:  body.Subject,

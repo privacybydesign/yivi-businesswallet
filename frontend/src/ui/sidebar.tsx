@@ -15,6 +15,9 @@ import * as React from "react";
 type NavLabelKey =
   | "nav.dashboard"
   | "nav.members"
+  | "nav.identityProofing"
+  | "nav.identityProofingFlows"
+  | "nav.Customers"
   | "nav.qerds"
   | "nav.attestations"
   | "nav.postguard"
@@ -34,10 +37,34 @@ interface NavItem {
 
 // showSigning gates the "Sign documents" item on the org having a CSC signing
 // provider configured (see the sidebar body); it is a plugin, absent otherwise.
-function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
+// isAdmin adds the org admin's own tabs.
+function orgNavItems(
+  slug: string,
+  showSigning: boolean,
+  isAdmin: boolean,
+): NavItem[] {
   const items: NavItem[] = [
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
+  ];
+  // Every member can send proofing requests (each sees the org's own); the page
+  // itself explains to a member when an admin has yet to make a flow available.
+  // Only an admin defines the flows. `end` keeps the requests tab from also
+  // lighting up on the flows page nested under it.
+  items.push({
+    to: `/${slug}/identity-proofing`,
+    labelKey: "nav.identityProofing",
+    icon: "scan_qrcode",
+    end: true,
+  });
+  if (isAdmin) {
+    items.push({
+      to: `/${slug}/identity-proofing/flows`,
+      labelKey: "nav.identityProofingFlows",
+      icon: "settings",
+    });
+  }
+  items.push(
     { to: `/${slug}/qerds`, labelKey: "nav.qerds", icon: "email" },
     {
       to: `/${slug}/attestations`,
@@ -45,7 +72,7 @@ function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
       icon: "valid",
     },
     { to: `/${slug}/postguard`, labelKey: "nav.postguard", icon: "lock" },
-  ];
+  );
   if (showSigning) {
     items.push({
       to: `/${slug}/signing`,
@@ -124,7 +151,7 @@ export function Sidebar({
   // for the org currently in the URL.
   const activeOrg = useOrganizationQuery(activeSlug ?? "");
   const navItems = activeSlug
-    ? orgNavItems(activeSlug, showSigning)
+    ? orgNavItems(activeSlug, showSigning, activeOrg.data?.role === "admin")
     : me.isPlatformAdmin
       ? ADMIN_NAV_ITEMS
       : [];

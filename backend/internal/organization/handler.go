@@ -188,6 +188,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PATCH /orgs/{slug}/members/{userId}/type", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMemberType))))
 	mux.Handle("POST /orgs/{slug}/members/{userId}/request-identification", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentification))))
 	mux.Handle("POST /orgs/{slug}/members/request-identification", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentificationBulk))))
+
+	mux.Handle("POST /orgs/{slug}/members/{userId}/request-identity-proofing", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentityProofing))))
+
 	// Any member may mint their own re-identification link (the in-app banner);
 	// it is scoped to the caller's own membership, so no admin gate is needed.
 	mux.Handle("POST /orgs/{slug}/me/reidentify-token", orgScoped(respond.HandlerFunc(h.mintOwnReverifyToken)))

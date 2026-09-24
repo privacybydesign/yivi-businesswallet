@@ -1,6 +1,7 @@
 package email
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -500,5 +501,41 @@ func TestDefaultTemplateReturnsACopy(t *testing.T) {
 	fresh, _ := DefaultTemplate(KindInvitation, LocaleEN)
 	if got := fresh.Blocks[blockIndex(t, fresh, BlockHeading)].Text; got != original {
 		t.Fatalf("mutating a returned template changed the shipped default: %q", got)
+	}
+}
+
+func TestRenderQRBlockEmbedsTheLinkAsAnInlineImage(t *testing.T) {
+	tpl, _ := DefaultTemplate(KindIdentityProofingRequested, LocaleEN)
+	const link = "https://wallet.example.org/proof/abc"
+	body, err := Render(KindIdentityProofingRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
+		varOrgName: "Acme BV", varRequesterName: "Sam", varProofingURL: link, varValidMinutes: "15",
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if len(body.InlineQR) != 1 || body.InlineQR[0].ContentType != qrContentType ||
+		!bytes.HasPrefix(body.InlineQR[0].Bytes, []byte("\x89PNG")) {
+		t.Fatalf("InlineQR = %+v, want one PNG", body.InlineQR)
+	}
+	if !strings.Contains(body.HTMLBody, `src="cid:`+body.InlineQR[0].ContentID+`"`) {
+		t.Errorf("the HTML does not reference the QR image:\n%s", body.HTMLBody)
+	}
+	if !strings.Contains(body.TextBody, link) {
+		t.Errorf("the text part does not carry the link the QR encodes:\n%s", body.TextBody)
+	}
+
+	preview := inlinePreviewLogo(body)
+	if preview.InlineQR != nil || !strings.Contains(preview.HTMLBody, `src="data:image/png;base64,`) {
+		t.Errorf("the preview does not inline the QR image")
+	}
+}
+
+func TestValidateTemplateRejectsAQRBlockWithoutAURLVariable(t *testing.T) {
+	tpl := Template{Subject: "x", Blocks: []Block{
+		{Type: BlockParagraph, Text: "Hello"},
+		{Type: BlockQR, URL: "{{requesterName}}"},
+	}}
+	if err := ValidateTemplate(KindIdentityProofingRequested, tpl); err == nil {
+		t.Error("a QR block on a non-URL variable was accepted")
 	}
 }

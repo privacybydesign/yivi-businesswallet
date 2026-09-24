@@ -69,6 +69,15 @@ const (
 	// at all, never an unkeyed one.
 	envVogReferenceHashKey = "VOG_REFERENCE_HASH_KEY"
 
+	// Identity proofing: the identity-proofing-service (IPS) that runs document +
+	// face verification for an org. The wallet provisions one IPS tenant per org
+	// through the IPS admin API (IDENTITY_PROOFING_ADMIN_KEY) and stores each
+	// tenant's API key encrypted under IDENTITY_PROOFING_ENCRYPTION_KEY.
+	envIdentityProofingProvider      = "IDENTITY_PROOFING_PROVIDER"
+	envIdentityProofingURL           = "IDENTITY_PROOFING_URL"
+	envIdentityProofingAdminKey      = "IDENTITY_PROOFING_ADMIN_KEY"
+	envIdentityProofingEncryptionKey = "IDENTITY_PROOFING_ENCRYPTION_KEY"
+
 	// Attestation issuance (OpenID4VCI). The hosted Veramo issuer is addressed per
 	// instance and authenticated with a Bearer admin token; the ping credential is
 	// offered by the boot probe to validate URL + token + a configured credential.
@@ -240,6 +249,11 @@ const (
 	defaultVogValidatorProvider = ProviderStub
 	defaultVogValidatorURL      = "https://validatie.nl/api/valideer/"
 
+	// ProviderIPS selects the real identity-proofing-service HTTP client;
+	// ProviderStub is the dev/CI default.
+	ProviderIPS                     = "ips"
+	defaultIdentityProofingProvider = ProviderStub
+
 	defaultQerdsDomibusFromParty   = "domibus-blue"
 	defaultQerdsDomibusToParty     = "domibus-red"
 	defaultQerdsDomibusPartyType   = "urn:oasis:names:tc:ebcore:partyid-type:unregistered"
@@ -323,6 +337,15 @@ type Config struct {
 	VogValidatorProvider string
 	VogValidatorURL      string
 	VogReferenceHashKey  string
+
+	IdentityProofingProvider string
+	IdentityProofingURL      string
+	// IdentityProofingAdminKey is the IPS X-Admin-Key the wallet provisions org
+	// tenants with. Required with the ips provider.
+	IdentityProofingAdminKey string
+	// IdentityProofingEncryptionKey encrypts each org's IPS API key at rest.
+	// Empty means no organisation can be provisioned for identity proofing.
+	IdentityProofingEncryptionKey string
 
 	AttestationIssuer         string
 	AttestationIssuerURL      string
@@ -471,6 +494,16 @@ func Load() (Config, error) {
 	}
 	vogValidatorURL := envOrDefault(envVogValidatorURL, defaultVogValidatorURL)
 
+	identityProofingProvider := envOrDefault(envIdentityProofingProvider, defaultIdentityProofingProvider)
+	if identityProofingProvider != ProviderStub && identityProofingProvider != ProviderIPS {
+		return Config{}, fmt.Errorf("config: %s must be %q or %q", envIdentityProofingProvider, ProviderStub, ProviderIPS)
+	}
+	identityProofingURL := os.Getenv(envIdentityProofingURL)
+	identityProofingAdminKey := os.Getenv(envIdentityProofingAdminKey)
+	if identityProofingProvider == ProviderIPS && (identityProofingURL == "" || identityProofingAdminKey == "") {
+		return Config{}, fmt.Errorf("config: %s and %s must be set when %s is %q", envIdentityProofingURL, envIdentityProofingAdminKey, envIdentityProofingProvider, ProviderIPS)
+	}
+
 	attestationIssuer := envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
 	attestationIssuerURL := os.Getenv(envAttestationIssuerURL)
 	attestationIssuerInstance := os.Getenv(envAttestationIssuerInstance)
@@ -564,6 +597,11 @@ func Load() (Config, error) {
 		VogValidatorProvider: vogValidatorProvider,
 		VogValidatorURL:      vogValidatorURL,
 		VogReferenceHashKey:  os.Getenv(envVogReferenceHashKey),
+
+		IdentityProofingProvider:      identityProofingProvider,
+		IdentityProofingURL:           identityProofingURL,
+		IdentityProofingAdminKey:      identityProofingAdminKey,
+		IdentityProofingEncryptionKey: os.Getenv(envIdentityProofingEncryptionKey),
 
 		AttestationIssuer:         attestationIssuer,
 		AttestationIssuerURL:      attestationIssuerURL,

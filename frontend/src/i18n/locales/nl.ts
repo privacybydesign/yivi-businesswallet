@@ -41,6 +41,8 @@ export const nl: Translation<typeof en> = {
   nav: {
     dashboard: "Dashboard",
     members: "Leden",
+    identityProofing: "Identiteitsverificatie",
+    identityProofingFlows: "Verificatieflows",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
     postguard: "PostGuard-bestanden",
@@ -420,6 +422,188 @@ export const nl: Translation<typeof en> = {
       error: "Heridentificatie starten mislukt: {{message}}",
     },
   },
+  identityProofing: {
+    title: "Identiteitsverificatie",
+    subtitle:
+      "Verifieer iemands identiteit met een identiteitsdocument en gezicht.",
+    members: {
+      title: "Leden",
+      hint: "Iedereen in deze organisatie, beheerders en externen ook. Kies een flow en druk op de mailknop: het lid krijgt een QR-code en een knop voor één link, 15 minuten geldig.",
+      search: "Leden zoeken",
+      member: "Lid",
+      lastRequest: "Laatste verzoek",
+      flow: "Flow",
+      send: "Versturen",
+      empty: "Geen leden gevonden.",
+      noFlowsAdmin:
+        "Er is nog geen flow beschikbaar voor leden. Maak er een aan en vink die aan onder",
+      noFlowsMember:
+        "Een beheerder moet eerst een flow beschikbaar stellen voordat je een verzoek kunt versturen.",
+      admin: "Beheerder",
+      external: "Extern",
+      externalOf: "Extern · {{org}}",
+      flowFor: "Flow voor {{name}}",
+      sendTo: "Verificatieverzoek mailen naar {{name}}",
+    },
+    requests: {
+      title: "Verzoeken",
+      titleOwn: "Jouw verzoeken",
+      empty: "Nog geen verzoeken.",
+      subject: "Persoon",
+      flow: "Flow",
+      requestedBy: "Aangevraagd door",
+      status: "Status",
+      assurance: "Betrouwbaarheid",
+      created: "Verstuurd",
+    },
+    status: {
+      pending: "Link verstuurd",
+      inProgress: "Bezig",
+      approved: "Geverifieerd",
+      rejected: "Afgewezen",
+      needsReview: "Wordt beoordeeld",
+      expired: "Verlopen",
+    },
+    errors: {
+      noEncryptionKey:
+        "Deze server heeft geen versleutelingssleutel voor identiteitsverificatie. Vraag je beheerder IDENTITY_PROOFING_ENCRYPTION_KEY in te stellen.",
+      flowNotFound: "Die flow bestaat niet meer. Kies een andere.",
+      flowNotCompletable:
+        "Die flow legt het gezicht vast in een browser, en daar kan de persoon nog niet bij. Kies een flow die in de app werkt.",
+      flowNotAllowed:
+        "Die flow is niet meer beschikbaar voor leden. Kies een andere.",
+      memberNotFound: "Die persoon is geen lid van deze organisatie.",
+      linkNotFound: "Deze link is ongeldig of verlopen.",
+      generic: "Er ging iets mis. Probeer het opnieuw.",
+    },
+    proof: {
+      title: "Verifieer je identiteit",
+      requestedBy: "{{org}} vraagt je je identiteit te verifiëren.",
+      steps:
+        "Je hebt de vcmrtd-app op je telefoon nodig en je paspoort of identiteitskaart met chip.",
+      scanHint:
+        "Scan deze QR-code met de vcmrtd-app, of open de app vanaf deze telefoon.",
+      validUntil: "Deze link is geldig tot {{time}}.",
+      retry: "Opnieuw proberen",
+      openApp: "Openen in de app",
+      refreshing: "Nieuwe QR-code ophalen…",
+      continueInApp: "Ga verder in de vcmrtd-app op je telefoon.",
+      waiting: "Wachten op de app…",
+      approvedTitle: "Je identiteit is geverifieerd",
+      approvedHint:
+        "Je kunt deze pagina sluiten. {{org}} is op de hoogte gebracht.",
+      rejectedTitle: "Je identiteit kon niet worden geverifieerd",
+      rejectedHint:
+        "Neem contact op met {{org}} als je denkt dat dit niet klopt.",
+      reviewTitle: "Je verificatie wordt beoordeeld",
+      reviewHint: "Je kunt deze pagina sluiten. {{org}} hoort de uitkomst.",
+      expiredTitle: "Deze link is verlopen",
+      expiredHint: "Vraag {{org}} je een nieuwe te sturen.",
+      notFoundTitle: "Link niet gevonden",
+      notFoundHint: "Deze link is ongeldig of verlopen.",
+      errorTitle: "Er ging iets mis",
+      errorHint: "Laad de pagina opnieuw om het nog eens te proberen.",
+    },
+  },
+  identityProofingFlows: {
+    title: "Verificatieflows",
+    subtitle:
+      "Bepaal de controles en gegevens van elke flow, bewaar de versies en kies welke flows leden mogen gebruiken.",
+    adminOnly:
+      "Alleen een beheerder van deze organisatie kan verificatieflows beheren.",
+    notCompletable: "Kan niet vanuit de wallet verstuurd worden",
+    versionShort: "v{{version}}",
+    edit: "Bewerken",
+    selection: {
+      title: "Flows",
+      hint: "Leden versturen verzoeken met de flows die hier aangevinkt zijn; de standaardflow staat bij elk lid voorgeselecteerd. Een flow bewerken slaat een nieuwe versie op, die nieuwe verzoeken vanaf dan gebruiken.",
+      empty: "Nog geen flows. Maak er een aan met Nieuwe flow.",
+      default: "Standaard",
+      save: "Beschikbare flows opslaan",
+    },
+    versions: {
+      title: "Versies",
+      hint: "Verzoeken die al verstuurd zijn houden de versie waarmee ze begonnen. Activeer een eerdere versie om terug te gaan.",
+      active: "Actief",
+      activate: "Activeren",
+    },
+    steps: {
+      document_capture: "Documentscan (MRZ)",
+      nfc_read: "NFC-chipscan",
+      face_verification: "Gezichtsverificatie",
+    },
+    checks: {
+      passiveAuth: "Passieve authenticatie",
+      chipAuth: "Chipauthenticatie",
+      faceMatch: "Gezichtsvergelijking",
+      liveness: "Levendheid",
+    },
+    attributes: {
+      dg1: "Document en houder",
+      dg11: "Extra houdergegevens (DG11)",
+      dg2: "Documentfoto",
+      chip_checks: "Chipcontroles",
+      selfie: "Vastgelegde selfie",
+      biometrics: "Gezichtsbiometrie",
+    },
+    new: {
+      title: "Nieuwe flow",
+      editTitle: "{{name}} bewerken",
+      hint: "Een flow bepaalt de stappen van een sessie, de resultaatgegevens die de verificatiedienst teruggeeft en de controles die de betrouwbaarheid bepalen.",
+      editHint:
+        "Opslaan maakt versie {{version}} en zet die meteen actief. Verzoeken die al verstuurd zijn houden de versie waarmee ze begonnen.",
+      name: "Naam",
+      namePlaceholder: "NL-paspoort + selfie",
+      create: "Flow aanmaken",
+      saveVersion: "Opslaan als versie {{version}}",
+      stepsTitle: "Stappen",
+      documentCaptureHint:
+        "De vcmrtd-app scant de MRZ van het document met de camera om de chip te ontgrendelen. Altijd samen met de NFC-chipscan.",
+      nfcReadHint:
+        "De vcmrtd-app leest de chip van het document via NFC. Altijd samen met de documentscan.",
+      faceVerificationHint:
+        "Eén stap: selfie, levendheid en vergelijking met de chipfoto.",
+      stepsOrder: "Wordt in deze volgorde verstuurd: {{steps}}",
+      faceLocationNative:
+        "Gezichtsverificatie gebeurt in de vcmrtd-app (native): de persoon heeft geen browserstap.",
+      faceWithoutChip:
+        "Zonder NFC-chipscan is er geen chipfoto om het gezicht mee te vergelijken, dus deze flow kan niet naar leden worden gestuurd.",
+      dataTitle: "Gevraagde resultaatgegevens",
+      dataHint:
+        "Bepaalt welke resultaatgegevens de verificatiedienst teruggeeft. Alleen gegevens van een stap in deze flow kunnen worden gevraagd. De wallet bewaart zelf alleen de uitkomst en het betrouwbaarheidsniveau.",
+      checksTitle: "Vereiste controles",
+      checksHint:
+        "Passieve authenticatie is verplicht bij de NFC-chipscan en gezichtsvergelijking bij gezichtsverificatie, dus die staan vast aan; chipauthenticatie en levendheid blijven optioneel.",
+      faceMatchThreshold: "Drempel gezichtsvergelijking",
+      faceMatchThresholdHint:
+        "0–1, leeg is alleen geslaagd/gezakt. Alleen bij gezichtsverificatie.",
+      documentsTitle: "Geaccepteerde documenten",
+      documentTypes: "Geaccepteerde documenttypen",
+      documentTypesHint: "Gescheiden door komma's, leeg accepteert alles.",
+      issuingCountries: "Geaccepteerde landen van uitgifte",
+      issuingCountriesHint:
+        "ICAO-codes van drie letters, gescheiden door komma's, leeg accepteert alles.",
+      policyTitle: "Betrouwbaarheid en privacy",
+      assuranceLevel: "Vereist betrouwbaarheidsniveau",
+      assuranceLevelHint:
+        "Substantial vereist passieve of chipauthenticatie plus gezichtsvergelijking. High is nog niet haalbaar en wordt door de verificatiedienst geweigerd.",
+      none: "(geen)",
+      inherit: "(organisatie overnemen)",
+      yes: "true",
+      no: "false",
+      bsnPolicy: "BSN-beleid overschrijven",
+      retentionSeconds: "Bewaartermijn overschrijven (seconden)",
+      retentionSecondsHint: "Leeg of 0 is niet overschrijven.",
+      blurFace: "Gezicht vervagen overschrijven",
+      blurBsn: "BSN vervagen overschrijven",
+      errors: {
+        name: "Geef de flow een naam.",
+        steps: "Kies minstens één stap.",
+        faceMatchThreshold: "Vul een getal van 0 tot 1 in.",
+        retentionSeconds: "Vul een heel aantal seconden in.",
+      },
+    },
+  },
   vog: {
     title: "Dien je VOG in",
     subtitle:
@@ -592,6 +776,13 @@ export const nl: Translation<typeof en> = {
     teamsSettingsSaved: "Microsoft Teams-instellingen opgeslagen",
     teamsTestSent: "Testnotificatie verstuurd",
     cscSettingsSaved: "Instellingen ondertekenprovider opgeslagen",
+    identityProofingFlowCreated: "Flow aangemaakt",
+    identityProofingFlowsSaved: "Beschikbare flows opgeslagen",
+    identityProofingFlowVersionSaved: "Versie {{version}} opgeslagen en actief",
+    identityProofingFlowVersionActivated: "Versie {{version}} is actief",
+    identityProofingMailNotSent:
+      "Verzoek aangemaakt, maar de mail kon niet verstuurd worden. Controleer de mailinstellingen van deze organisatie.",
+    identityProofingRequestSent: "Verzoek verstuurd",
     notificationSettingsSaved: "Notificatie-instellingen opgeslagen",
     provisioningSettingsSaved:
       "Instellingen voor directorysynchronisatie opgeslagen",
@@ -736,6 +927,9 @@ export const nl: Translation<typeof en> = {
       signingCredentials: "Ondertekencredential",
       signingRequests: "Ondertekenverzoek",
       presentationTransaction: "Presentatieverzoek",
+      orgIdentityProofingSettings: "Instellingen identiteitsverificatie",
+      identityProofingFlow: "Identiteitsverificatieflow",
+      identityProofingRequest: "Identiteitsverificatieverzoek",
     },
     actions: {
       orgCreated: "Organisatie aangemaakt",
@@ -836,6 +1030,17 @@ export const nl: Translation<typeof en> = {
       presentationCompleted: "Presentatie verstuurd",
       presentationDenied: "Presentatieverzoek afgewezen",
       presentationExpired: "Presentatieverzoek verlopen",
+      identityProofingProvisioned: "Identiteitsverificatie ingericht",
+      identityProofingFlowCreated: "Identiteitsverificatieflow aangemaakt",
+      identityProofingFlowsConfigured:
+        "Voor leden beschikbare identiteitsverificatieflows gewijzigd",
+      identityProofingFlowVersionCreated:
+        "Nieuwe versie van een identiteitsverificatieflow opgeslagen",
+      identityProofingFlowVersionActivated:
+        "Versie van een identiteitsverificatieflow geactiveerd",
+      identityProofingRequested: "Identiteitsverificatieverzoek verstuurd",
+      identityProofingSessionStarted: "Identiteitsverificatie gestart",
+      identityProofingCompleted: "Identiteitsverificatie afgerond",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
     },
@@ -1586,6 +1791,7 @@ export const nl: Translation<typeof en> = {
       heading: "Kop",
       paragraph: "Alinea",
       button: "Knop",
+      qr: "QR-code",
       divider: "Scheidingslijn",
       footer: "Voettekst",
     },
@@ -1603,6 +1809,7 @@ export const nl: Translation<typeof en> = {
       credential_offer: "Credential uitgegeven",
       event_notification: "Melding van een gebeurtenis",
       identity_overdue: "Identiteit verlopen",
+      identity_proofing_requested: "Identiteitsverificatie gevraagd",
       identity_reminder: "Herinnering identiteit",
       identity_requested: "Identificatie aangevraagd",
       invitation: "Uitnodiging voor lidmaatschap",
@@ -1622,6 +1829,8 @@ export const nl: Translation<typeof en> = {
         "Gaat naar de beheerders van deze organisatie als er iets gebeurt waarop zij zich hebben geabonneerd.",
       identity_overdue:
         "Gaat naar een lid waarvan de heridentificatietermijn is verstreken, volgens het herinneringsritme.",
+      identity_proofing_requested:
+        "Verstuurd naar een persoon als een lid vraagt de identiteit te verifiëren met document en gezicht.",
       identity_reminder:
         "Gaat naar een lid vóór het verstrijken van de heridentificatietermijn.",
       identity_requested:
@@ -1651,6 +1860,12 @@ export const nl: Translation<typeof en> = {
     removeBlock: "Blok {{number}} verwijderen",
     moveBlockUp: "Blok {{number}} omhoog verplaatsen",
     moveBlockDown: "Blok {{number}} omlaag verplaatsen",
+    qrFields: {
+      url: "Link van de QR-code",
+      label: "Onderschrift (optioneel)",
+    },
+    qrHint:
+      "De QR-code bevat één linkvariabele of een volledig https://-adres. Gebruik dezelfde link als een knop, zodat beide dezelfde pagina openen.",
     buttonHint:
       "De knoplink is één linkvariabele of een volledig https://-adres. De introductie is de korte regel boven de kale link onder de knop.",
     preview: "Voorbeeld",
