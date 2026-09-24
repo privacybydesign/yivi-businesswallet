@@ -121,7 +121,7 @@ export default function Dashboard(): React.JSX.Element {
               <dd className="text-ink-soft font-mono">{org.data.euid}</dd>
               <dt className="text-muted">{t("dashboard.wallet.address")}</dt>
               <dd className="text-ink-soft font-mono">
-                {org.data.digitalAddress}
+                {org.data.digitalAddress || t("dashboard.wallet.noAddress")}
               </dd>
               <dt className="text-muted">{t("dashboard.wallet.status")}</dt>
               <dd className="text-ink">{org.data.status}</dd>
