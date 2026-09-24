@@ -361,6 +361,45 @@ func (s *Store) MarkSignerFailed(ctx context.Context, orgID, id, signerID uuid.U
 	})
 }
 
+// DeclineSigner marks one signer declined with their optional reason and ends the
+// whole request: incremental PAdES cannot produce a document a selected signer
+// refused, so a single decline is terminal rather than leaving the request
+// half-signed. Both updates are guarded so a race loses cleanly rather than
+// double-processing: a signer already marked signed reports ErrAlreadySigned, and
+// a request no longer awaiting_signatures (already declined, or completed by a
+// signature that landed first) reports ErrInvalidRequest. The reason is
+// deliberately NOT part of the audit metadata — it is free text a person wrote,
+// shown only in the app and in the requester's mail (see notifications.go's
+// data-minimisation note). signerID is the signer row's own id, so it addresses
+// an internal member and an external signee alike.
+func (s *Store) DeclineSigner(ctx context.Context, orgID, id, signerID uuid.UUID, reason string) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const markSigner = `UPDATE signing_request_signers
+			SET status=$3, declined_at=now(), decline_reason=$4
+			WHERE request_id=$1 AND id=$2 AND status <> $5`
+		tag, err := q.Exec(ctx, markSigner, id, signerID, SignerDeclined, reason, SignerSigned)
+		if err != nil {
+			return fmt.Errorf("signing: decline signer %s: %w", id, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrAlreadySigned
+		}
+		const markRequest = `UPDATE signing_requests SET status=$2, updated_at=now()
+			WHERE id=$1 AND status=$3`
+		tag, err = q.Exec(ctx, markRequest, id, StatusDeclined, StatusAwaitingSignatures)
+		if err != nil {
+			return fmt.Errorf("signing: decline request %s: %w", id, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrInvalidRequest
+		}
+		return s.audit.Record(ctx, q, audit.SigningDeclined,
+			audit.Target{Type: audit.TargetSigningRequest, ID: id.String(), OrgID: &orgID},
+			audit.Updated(map[string]any{"status": StatusAwaitingSignatures},
+				map[string]any{"status": StatusDeclined, "signer": signerID.String()}))
+	})
+}
+
 // GetRequest returns a request's metadata (no document bytes) plus its signer rows
 // (without names — the service enriches those from the member directory). Scoped by
 // org; caller-level authorization (creator/signer/admin) is enforced above.
@@ -544,7 +583,8 @@ func (s *Store) scanRequestList(ctx context.Context, rows pgx.Rows) ([]Request, 
 // left to the service to enrich from the member directory; an external signee carries
 // their own, since there is no directory to look them up in.
 func (s *Store) signersFor(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]Signer, error) {
-	const query = `SELECT request_id, id, user_id, external_email, external_name, sign_order, status, signed_at
+	const query = `SELECT request_id, id, user_id, external_email, external_name, sign_order, status,
+			signed_at, declined_at, decline_reason
 		FROM signing_request_signers WHERE request_id = ANY($1) ORDER BY request_id, sign_order, id`
 	rows, err := s.db.Query(ctx, query, ids)
 	if err != nil {
@@ -558,7 +598,7 @@ func (s *Store) signersFor(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]
 		var sg Signer
 		var email, name string
 		if err := rows.Scan(&requestID, &sg.ID, &sg.UserID, &email, &name,
-			&sg.Order, &sg.Status, &sg.SignedAt); err != nil {
+			&sg.Order, &sg.Status, &sg.SignedAt, &sg.DeclinedAt, &sg.DeclineReason); err != nil {
 			return nil, fmt.Errorf("signing: scan signer: %w", err)
 		}
 		sg.Kind = KindInternal

@@ -23,6 +23,7 @@ export const SIGNING_STATUS = {
   awaitingSignatures: "awaiting_signatures",
   completed: "completed",
   failed: "failed",
+  declined: "declined",
 } as const;
 
 // Signing modes, recipient channels, per-signer and delivery statuses — all mirror
@@ -46,6 +47,7 @@ export const SIGNER_STATUS = {
   pending: "pending",
   signed: "signed",
   failed: "failed",
+  declined: "declined",
 } as const;
 
 export const DELIVERY_STATUS = {
@@ -97,6 +99,8 @@ export const signerSchema = z.object({
   status: z.string(),
   placements: z.array(placementSchema).nullable().default([]),
   signedAt: z.string().optional(),
+  declinedAt: z.string().optional(),
+  declineReason: z.string().optional(),
 });
 export type Signer = z.infer<typeof signerSchema>;
 
@@ -248,6 +252,21 @@ export function startSignRequest(
   });
 }
 
+// declineSignRequest lets a pending signer refuse to sign a request, with an
+// optional reason. It stops the request outright rather than starting a
+// ceremony, so there is no authorize URL to hand off to.
+export function declineSignRequest(
+  slug: string,
+  id: string,
+  reason: string,
+): Promise<void> {
+  return request(`${base(slug)}/requests/${encodeURIComponent(id)}/decline`, {
+    schema: z.void(),
+    method: "POST",
+    body: { reason },
+  });
+}
+
 export function getSigningRequest(
   slug: string,
   id: string,
@@ -331,6 +350,18 @@ export function startExternalSign(token: string): Promise<SigningStart> {
   return request(`${externalBase(token)}/sign`, {
     schema: signingStartSchema,
     method: "POST",
+  });
+}
+
+// declineExternalSign is declineSignRequest's mirror for an external signee.
+export function declineExternalSign(
+  token: string,
+  reason: string,
+): Promise<void> {
+  return request(`${externalBase(token)}/decline`, {
+    schema: z.void(),
+    method: "POST",
+    body: { reason },
   });
 }
 

@@ -109,7 +109,14 @@ export function SigningHistoryPanel({
                               ? "green"
                               : s.status === SIGNER_STATUS.failed
                                 ? "red"
-                                : "default"
+                                : s.status === SIGNER_STATUS.declined
+                                  ? "amber"
+                                  : "default"
+                          }
+                          title={
+                            s.status === SIGNER_STATUS.declined
+                              ? s.declineReason
+                              : undefined
                           }
                         >
                           {s.name || s.email}
@@ -186,7 +193,9 @@ function StatusCell({ req }: { req: SigningRequest }): React.JSX.Element {
       ? "green"
       : req.status === SIGNING_STATUS.failed
         ? "red"
-        : "default";
+        : req.status === SIGNING_STATUS.declined
+          ? "amber"
+          : "default";
   return (
     <div className="flex flex-col gap-1">
       <Tag tone={statusTone}>{requestStatusLabel(t, req.status)}</Tag>

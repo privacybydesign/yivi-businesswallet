@@ -403,3 +403,127 @@ func TestListPendingForUserWaitsForAnEarlierExternalSignee(t *testing.T) {
 		t.Fatalf("after the external signee signed, the member's turn should be offered, got %d requests", len(pending))
 	}
 }
+
+// auditMetadataFor reads the metadata of every event of one action against a
+// target, oldest first — the audit-metadata mirror of mandateAudit in
+// internal/organization, for the one thing this package's tests need it for: the
+// decline reason must never appear here.
+func auditMetadataFor(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID, action, targetID string) []map[string]any {
+	t.Helper()
+	rows, err := pool.Query(context.Background(),
+		`SELECT metadata FROM audit_events
+		 WHERE organization_id = $1 AND action = $2 AND target_id = $3
+		 ORDER BY occurred_at, id`, orgID, action, targetID)
+	if err != nil {
+		t.Fatalf("read audit events: %v", err)
+	}
+	defer rows.Close()
+
+	var out []map[string]any
+	for rows.Next() {
+		var meta map[string]any
+		if err := rows.Scan(&meta); err != nil {
+			t.Fatalf("scan audit metadata: %v", err)
+		}
+		out = append(out, meta)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("audit event rows: %v", err)
+	}
+	return out
+}
+
+// DeclineSigner is the terminal counterpart to RecordSignature: one signer's
+// decline ends the whole request rather than leaving it half-signed, and the
+// free-text reason must reach the app (the signer row) without ever reaching the
+// audit metadata, which the notifications catalog republishes to Slack/Teams.
+func TestDeclineSignerEndsTheRequestButKeepsTheReasonOutOfAudit(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewStore(pool, audit.NewDBRecorder())
+	ctx := context.Background()
+	orgID := makeOrg(t, pool, "acme")
+	alice := makeUser(t, pool, "alice@acme.example")
+	bob := makeUser(t, pool, "bob@acme.example")
+
+	id, created, err := store.CreateRequest(ctx, orgID, alice, "Contract.pdf", []byte(samplePDF), ModeParallel,
+		[]SignerInput{
+			{Kind: KindInternal, UserID: alice, Order: 1},
+			{Kind: KindInternal, UserID: bob, Order: 2},
+		}, RecipientInput{Channel: ChannelNone})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	const reason = "I no longer agree with the terms."
+	if err := store.DeclineSigner(ctx, orgID, id, created[0].ID, reason); err != nil {
+		t.Fatalf("DeclineSigner: %v", err)
+	}
+
+	req, err := store.GetRequest(ctx, orgID, id)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if req.Status != StatusDeclined {
+		t.Fatalf("request status = %q, want %q", req.Status, StatusDeclined)
+	}
+	decliner, other := req.Signers[0], req.Signers[1]
+	if decliner.Status != SignerDeclined {
+		t.Fatalf("decliner status = %q, want %q", decliner.Status, SignerDeclined)
+	}
+	if decliner.DeclinedAt == nil {
+		t.Error("declinedAt should be set on the decliner")
+	}
+	if decliner.DeclineReason != reason {
+		t.Errorf("declineReason = %q, want %q", decliner.DeclineReason, reason)
+	}
+	// The decline stops the request from asking anyone else anything more, but does
+	// not retroactively touch a co-signer's own row.
+	if other.Status != SignerPending {
+		t.Errorf("other signer status = %q, want unchanged %q", other.Status, SignerPending)
+	}
+
+	events := auditMetadataFor(t, pool, orgID, audit.SigningDeclined, id.String())
+	if len(events) != 1 {
+		t.Fatalf("got %d signing.declined events, want 1", len(events))
+	}
+	if _, ok := events[0]["reason"]; ok {
+		t.Error("the decline reason must not reach the audit metadata")
+	}
+	after, _ := events[0]["after"].(map[string]any)
+	if after["signer"] != decliner.ID.String() {
+		t.Errorf("audit after.signer = %v, want %v", after["signer"], decliner.ID)
+	}
+
+	// A second decline race — by the same or another signer — must lose cleanly
+	// against the request no longer being awaiting_signatures.
+	if err := store.DeclineSigner(ctx, orgID, id, other.ID, "too late"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("decline on an already-declined request = %v, want ErrInvalidRequest", err)
+	}
+}
+
+// A signer who has already signed cannot be declined out from under their own
+// completed signature — the guard closes the same race RecordSignature's own
+// RowsAffected check does.
+func TestDeclineSignerRefusesAnAlreadySignedSigner(t *testing.T) {
+	store, pool := newStore(t)
+	ctx := context.Background()
+	orgID := makeOrg(t, pool, "acme")
+	alice := makeUser(t, pool, "alice@acme.example")
+	bob := makeUser(t, pool, "bob@acme.example")
+
+	id, created, err := store.CreateRequest(ctx, orgID, alice, "Contract.pdf", []byte(samplePDF), ModeParallel,
+		[]SignerInput{
+			{Kind: KindInternal, UserID: alice, Order: 1},
+			{Kind: KindInternal, UserID: bob, Order: 2},
+		}, RecipientInput{Channel: ChannelNone})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if _, err := store.RecordSignature(ctx, orgID, id, created[0].ID, []byte(samplePDF+" signed")); err != nil {
+		t.Fatalf("RecordSignature: %v", err)
+	}
+
+	if err := store.DeclineSigner(ctx, orgID, id, created[0].ID, "changed my mind"); !errors.Is(err, ErrAlreadySigned) {
+		t.Fatalf("decline of an already-signed signer = %v, want ErrAlreadySigned", err)
+	}
+}

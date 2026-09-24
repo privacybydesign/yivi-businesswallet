@@ -811,6 +811,7 @@ export const en = {
       signingCompleted: "Completed a document signature",
       signingDelivered: "Delivered a signed document",
       signingFailed: "Document signature failed",
+      signingDeclined: "Declined a document signature",
       presentationRequested: "Received a presentation request",
       presentationOrgSelected: "Selected the organization for a presentation",
       presentationCompleted: "Sent a presentation",
@@ -975,6 +976,8 @@ export const en = {
     requestCompleted: "{{filename}} was signed.",
     requestFailed: "Signing failed: {{reason}}",
     requestFailedGeneric: "the request did not complete",
+    requestDeclined: "{{name}} declined to sign this document.",
+    requestDeclinedReason: "Reason: {{reason}}",
     requestLoadError: "Could not load the signing request.",
     downloadButton: "Download signed PDF",
     downloadedToast: "Signed document downloaded.",
@@ -1095,6 +1098,7 @@ export const en = {
       pending: "Pending",
       signed: "Signed",
       failed: "Failed",
+      declined: "Declined",
     },
     signerKind: {
       internal: "Organization member",
@@ -1104,6 +1108,18 @@ export const en = {
       awaitingSignatures: "Awaiting signatures",
       completed: "Completed",
       failed: "Failed",
+      declined: "Declined",
+    },
+    decline: {
+      button: "Decline",
+      dialogTitle: "Decline to sign",
+      dialogHint:
+        "The requester will be told you declined. This cannot be undone.",
+      reasonLabel: "Reason (optional)",
+      reasonPlaceholder: "Let the requester know why (optional)",
+      confirm: "Decline document",
+      toastSuccess: "You declined to sign this document.",
+      toastError: "Could not decline. Try again.",
     },
     deliveryStatus: {
       notRequested: "No delivery",
@@ -1121,16 +1137,22 @@ export const en = {
         "Link a signing certificate first. This opens your wallet once; after that you can sign.",
       linkButton: "Link signing certificate",
       signButton: "Sign document",
+      declineButton: "Decline",
       notYourTurn:
         "An earlier signer must sign first. Come back to this link later.",
       linkedToast: "Signing certificate linked.",
       linkFailedToast: "Linking the signing certificate was not completed.",
       startError: "Could not start. Try again.",
+      declineError: "Could not decline. Try again.",
       attemptFailed:
         "Your last attempt did not complete. You can try signing again.",
       signedTitle: "You signed this document",
       signedAllHint: "Everyone has signed. The document is complete.",
       signedWaitingHint: "The other signers still have to sign.",
+      declinedTitle: "You declined to sign",
+      declinedHint: "The requester has been notified.",
+      requestDeclinedTitle: "This request was declined",
+      requestDeclinedHint: "Another signer declined to sign this document.",
       failedTitle: "This request did not complete",
       failedHint: "Contact the organization that asked you to sign.",
       invalidTitle: "This link is no longer valid",
@@ -1543,6 +1565,7 @@ export const en = {
       identity_requested: "Identification requested",
       invitation: "Member invitation",
       postguard_file: "Encrypted file",
+      signature_declined: "Signature declined",
       signature_requested: "Signature request",
       signed_document: "Signed document",
       smtp_test: "SMTP test",
@@ -1564,6 +1587,8 @@ export const en = {
       invitation: "Sent to someone invited to join this organization.",
       postguard_file:
         "Sent to a recipient of an encrypted file, when this organization mails through its own SMTP server.",
+      signature_declined:
+        "Sent to a request's creator when a selected signer declines to sign.",
       signature_requested:
         "Sent to a member selected to co-sign a document, linking them to the signing page.",
       signed_document:

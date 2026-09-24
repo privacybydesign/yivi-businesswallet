@@ -22,6 +22,7 @@ import type {
 } from "../api/signing";
 import {
   useCreateSigningRequestMutation,
+  useDeclineSignRequestMutation,
   useInvalidateSigningCredential,
   useLinkSigningCredentialMutation,
   usePendingSigningRequestsQuery,
@@ -51,6 +52,7 @@ import { placementsIncomplete } from "../lib/placement";
 import { toast } from "../lib/toast";
 import { Avatar, Button, Card, Icon, Input, Tag, TopBar } from "../ui";
 import { SigningHistoryPanel } from "./signing-history";
+import { DeclineDialog } from "./signing-decline-dialog";
 
 // The placement editor pulls in pdf.js, which is larger than the rest of the app put
 // together, so it is a chunk of its own: nobody who is not placing a signature on a
@@ -320,6 +322,11 @@ function ActiveRequestCard({
             reason: request.data.error || t("signing.requestFailedGeneric"),
           })}
         </p>
+      ) : request.data.status === SIGNING_STATUS.declined ? (
+        <div className="mt-3 flex flex-col gap-3">
+          <DeclinedNotice request={request.data} />
+          <SignerList request={request.data} />
+        </div>
       ) : (
         <div className="mt-3 flex flex-col gap-3">
           <p className="text-ink-soft text-[13px]">
@@ -329,6 +336,34 @@ function ActiveRequestCard({
         </div>
       )}
     </Card>
+  );
+}
+
+// DeclinedNotice names who declined and, if they gave one, their reason — the
+// terminal counterpart to requestCompleted/requestFailed above.
+function DeclinedNotice({
+  request,
+}: {
+  request: SigningRequest;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const decliner = (request.signers ?? []).find(
+    (s) => s.status === SIGNER_STATUS.declined,
+  );
+  const name = decliner?.name || decliner?.email || "";
+  return (
+    <div>
+      <p className="text-ink text-[13px]">
+        {t("signing.requestDeclined", { name })}
+      </p>
+      {decliner?.declineReason && (
+        <p className="text-ink-soft mt-1 text-[13px]">
+          {t("signing.requestDeclinedReason", {
+            reason: decliner.declineReason,
+          })}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -351,7 +386,9 @@ function SignerList({
               ? "green"
               : s.status === SIGNER_STATUS.failed
                 ? "red"
-                : "default"
+                : s.status === SIGNER_STATUS.declined
+                  ? "amber"
+                  : "default"
           }
         >
           {s.name || s.email}
@@ -379,7 +416,9 @@ function ToSignTab({
   const { t } = useTranslation();
   const pending = usePendingSigningRequestsQuery(slug);
   const start = useStartSignRequestMutation(slug);
+  const decline = useDeclineSignRequestMutation(slug);
   const [signingId, setSigningId] = useState<string | null>(null);
+  const [decliningId, setDecliningId] = useState<string | null>(null);
 
   const onSign = (id: string): void => {
     setSigningId(id);
@@ -390,6 +429,20 @@ function ToSignTab({
         toast.error(startError(error, t));
       },
     });
+  };
+
+  const onDecline = (reason: string): void => {
+    if (!decliningId) return;
+    decline.mutate(
+      { id: decliningId, reason },
+      {
+        onSuccess: () => {
+          toast.success(t("signing.decline.toastSuccess"));
+          setDecliningId(null);
+        },
+        onError: () => toast.error(t("signing.decline.toastError")),
+      },
+    );
   };
 
   const requests = pending.data ?? [];
@@ -443,16 +496,34 @@ function ToSignTab({
                 <SignerList request={req} />
               </div>
             </div>
-            <Button
-              type="button"
-              onClick={() => onSign(req.id)}
-              loading={start.isPending && signingId === req.id}
-              disabled={!isLinked || (start.isPending && signingId === req.id)}
-            >
-              {t("signing.signButton")}
-            </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setDecliningId(req.id)}
+              >
+                {t("signing.decline.button")}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => onSign(req.id)}
+                loading={start.isPending && signingId === req.id}
+                disabled={
+                  !isLinked || (start.isPending && signingId === req.id)
+                }
+              >
+                {t("signing.signButton")}
+              </Button>
+            </div>
           </Card>
         ))
+      )}
+      {decliningId && (
+        <DeclineDialog
+          busy={decline.isPending}
+          onConfirm={onDecline}
+          onClose={() => setDecliningId(null)}
+        />
       )}
     </div>
   );

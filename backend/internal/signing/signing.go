@@ -44,11 +44,15 @@ const ExternalInviteTTL = 30 * 24 * time.Hour
 
 // Request statuses. A request is awaiting_signatures until every selected signer
 // has signed; then completed (delivery, if any, is tracked separately on
-// DeliveryStatus). failed means a signer's ceremony errored out.
+// DeliveryStatus). failed means a signer's ceremony errored out. declined is
+// terminal like completed: incremental PAdES cannot produce a document one
+// selected signer refused, so a single decline ends the request rather than
+// leaving it half-signed.
 const (
 	StatusAwaitingSignatures = "awaiting_signatures"
 	StatusCompleted          = "completed"
 	StatusFailed             = "failed"
+	StatusDeclined           = "declined"
 )
 
 // Signing modes: parallel signers may sign in any order (serialized by an
@@ -74,11 +78,13 @@ const (
 	DeliveryFailed       = "failed"
 )
 
-// Per-signer statuses.
+// Per-signer statuses. declined is terminal for the signer and, unlike failed
+// (a retryable ceremony error), also ends the whole request — see decline.go.
 const (
-	SignerPending = "pending"
-	SignerSigned  = "signed"
-	SignerFailed  = "failed"
+	SignerPending  = "pending"
+	SignerSigned   = "signed"
+	SignerFailed   = "failed"
+	SignerDeclined = "declined"
 )
 
 // Signer kinds: an internal org member (identified by their user id) or an
@@ -191,6 +197,11 @@ type signerNotifier interface {
 	// (built from the raw token) that lets them link a credential and sign without an
 	// org membership.
 	NotifyExternalSignatureRequested(ctx context.Context, orgID uuid.UUID, signeeEmail, documentName, token string) error
+	// NotifyRequesterDeclined tells the request's creator that a selected signer
+	// refused to sign, so a request that will otherwise never complete has a
+	// signal rather than sitting in awaiting_signatures silently. reason is the
+	// signer's optional free text; best-effort like every other notification here.
+	NotifyRequesterDeclined(ctx context.Context, orgID uuid.UUID, requesterEmail, documentName, signerName, reason string) error
 }
 
 // LinkedCredential is a user's cached signing credential (fetched once, so the
@@ -217,6 +228,12 @@ type Signer struct {
 	// block plus a paraph per page. Empty for a signer whose signature is invisible.
 	Placements []Placement `json:"placements"`
 	SignedAt   *time.Time  `json:"signedAt,omitempty"`
+	// DeclinedAt and DeclineReason are set together, only when Status is
+	// SignerDeclined. The reason is free text a person wrote; it is shown here (to
+	// whoever can already see this request) and in the mail to the requester, but
+	// deliberately never reaches audit metadata or the notifications catalog.
+	DeclinedAt    *time.Time `json:"declinedAt,omitempty"`
+	DeclineReason string     `json:"declineReason,omitempty"`
 }
 
 // subject reports whose linked signing credential this signer signs with: their
