@@ -182,6 +182,7 @@ export const MAIL_TEMPLATE_KINDS = [
   "identity_requested",
   "invitation",
   "postguard_file",
+  "signature_declined",
   "signature_requested",
   "signed_document",
   "smtp_test",

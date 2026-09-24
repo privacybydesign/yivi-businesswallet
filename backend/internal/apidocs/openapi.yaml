@@ -490,6 +490,241 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The disclosed identity does not match this member, or is older than the organisation's credential-freshness policy allows.
+  /api/v1/vog/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque VOG submission token from a request or reminder e-mail, or the dashboard banner.
+    get:
+      tags: [organizations]
+      summary: Preview a VOG submission link by token
+      security: []
+      description: >-
+        The organisation, the member it is for, and their screening state (status, whether identity must be confirmed first, whether the pbdf.vog credential is accepted).
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/vog/{token}/upload:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque VOG submission token from a request or reminder e-mail, or the dashboard banner.
+    post:
+      tags: [organizations]
+      summary: Upload a VOG PDF through a submission link
+      security: []
+      description: >-
+        Multipart form with a "file" field carrying the PDF; validated live against validatie.nl and matched against the member's stored identity. 200 for a passing check, 422 for a recorded rejection. A passing check retires the link.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The member has no date of birth on file yet; identify first.
+  /api/v1/vog/{token}/identity-session:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque VOG submission token from a request or reminder e-mail, or the dashboard banner.
+    post:
+      tags: [organizations]
+      summary: Start an identity disclosure for a member who never identified
+      security: []
+      description: >-
+        For a member with no date of birth on file, so a VOG has something to be matched against.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/vog/{token}/identity-complete:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque VOG submission token from a request or reminder e-mail, or the dashboard banner.
+    post:
+      tags: [organizations]
+      summary: Complete the identity disclosure
+      security: []
+      description: >-
+        Records the disclosed identity under the re-identification rules (e-mail must match, name is reconciled, credential freshness is enforced). Responds 204 on success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The disclosure did not match this member.
+  /api/v1/vog/{token}/credential-session:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque VOG submission token from a request or reminder e-mail, or the dashboard banner.
+    post:
+      tags: [organizations]
+      summary: Start the opt-in pbdf.vog credential disclosure
+      security: []
+      description: >-
+        Requires the organisation to have opted in to accepting the pbdf.vog credential.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The organisation does not accept the pbdf.vog credential.
+  /api/v1/vog/{token}/credential-complete:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque VOG submission token from a request or reminder e-mail, or the dashboard banner.
+    post:
+      tags: [organizations]
+      summary: Complete the opt-in pbdf.vog credential disclosure
+      security: []
+      description: >-
+        Same response shape as an upload (200 passing, 422 recorded rejection).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The organisation does not accept the pbdf.vog credential.
+  /api/v1/vog/{token}/identity-credential-session:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque VOG submission token from a request or reminder e-mail, or the dashboard banner.
+    post:
+      tags: [organizations]
+      summary: Start the combined identity + pbdf.vog credential disclosure
+      security: []
+      description: >-
+        One wallet session discloses a verified identity and the pbdf.vog credential, for a member who has never identified.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The organisation does not accept the pbdf.vog credential.
+  /api/v1/vog/{token}/identity-credential-complete:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque VOG submission token from a request or reminder e-mail, or the dashboard banner.
+    post:
+      tags: [organizations]
+      summary: Complete the combined identity + pbdf.vog credential disclosure
+      security: []
+      description: >-
+        Applies the identity half under the re-identification rules first, then evaluates the VOG half against it; same response shape as an upload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The organisation does not accept the pbdf.vog credential.
   /api/v1/me:
     get:
       tags: [auth]
@@ -2895,6 +3130,36 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The mandate has already been revoked or has expired.
+  /api/v1/orgs/{slug}/member-insights:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [organizations]
+      summary: Count members by identity and VOG screening status
+      description: >-
+        Requires an administrator role in the organisation. Counts every active
+        membership by its derived identity status (never, verified, due_soon,
+        overdue, requested) and screening status (not_required, none, requested,
+        valid, expiring, expired, rejected, recheck_required) under the
+        organisation's current policy; every status is present, 0 when empty.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/members:
     parameters:
       - name: slug
@@ -3296,7 +3561,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/orgs/{slug}/me/vog:
+  /api/v1/orgs/{slug}/me/vog-token:
     parameters:
       - name: slug
         in: path
@@ -3306,22 +3571,8 @@ paths:
         description: Organisation slug.
     post:
       tags: [organizations]
-      summary: Upload the caller's own VOG PDF
-      description: >-
-        Any member of the organisation may call this for their own
-        membership. Multipart form with a "file" field carrying the PDF;
-        validated live against validatie.nl and matched against the caller's
-        stored identity.
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                file:
-                  type: string
-                  format: binary
+      summary: Mint the caller's own VOG submission link
+      description: Any member of the organisation may call this for their own membership (the dashboard banner's entry point). Rotates any earlier link.
       responses:
         '2XX':
           description: Successful response.
@@ -3329,8 +3580,6 @@ paths:
             application/json:
               schema:
                 description: Response payload; shape depends on the endpoint.
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3488,72 +3737,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/orgs/{slug}/me/vog/credential-session:
-    parameters:
-      - name: slug
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Organisation slug.
-    post:
-      tags: [organizations]
-      summary: Start the caller's opt-in pbdf.vog credential disclosure
-      description: >-
-        Any member of the organisation may call this for their own
-        membership. Requires the organisation to have opted in to accepting
-        the pbdf.vog credential.
-      responses:
-        '2XX':
-          description: Successful response.
-          content:
-            application/json:
-              schema:
-                description: Response payload; shape depends on the endpoint.
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: The organisation does not accept the pbdf.vog credential.
-  /api/v1/orgs/{slug}/me/vog/credential-complete:
-    parameters:
-      - name: slug
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Organisation slug.
-    post:
-      tags: [organizations]
-      summary: Complete the caller's opt-in pbdf.vog credential disclosure
-      description: Any member of the organisation may call this for their own membership.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              description: JSON request payload; see the endpoint description.
-      responses:
-        '2XX':
-          description: Successful response.
-          content:
-            application/json:
-              schema:
-                description: Response payload; shape depends on the endpoint.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: The organisation does not accept the pbdf.vog credential.
   /api/v1/orgs/{slug}/members/{userId}/avatar:
     parameters:
       - name: slug
@@ -4240,6 +4423,55 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           description: No credential linked, already signed, not your turn, or a signature is in progress.
+  /api/v1/orgs/{slug}/signing/requests/{id}/decline:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Signing request id.
+    post:
+      tags: [signing]
+      summary: Decline to sign a request
+      description: >-
+        Requires organisation membership and that the caller is a pending signer of
+        the request; unlike signing, it need not be their turn in sequential mode.
+        Accepts an optional JSON body `{reason}` (at most 500 characters), shown to
+        the requester. Ends the request outright — marks the signer declined and the
+        whole request `declined`, since incremental PAdES cannot produce a document
+        one selected signer refused — and notifies the requester. Answers 204 on
+        success.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Optional free-text reason shown to the requester.
+      responses:
+        '204':
+          description: The decline was recorded.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Already signed, or a signature is in progress.
   /api/v1/orgs/{slug}/signing/requests/{id}:
     parameters:
       - name: slug
@@ -4419,6 +4651,41 @@ paths:
           description: The signing link is not valid or has expired.
         '409':
           description: No credential linked, already signed, not your turn, or a signature is in progress.
+  /api/v1/signing/external/{token}/decline:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The external signee's one-time invitation token.
+    post:
+      tags: [signing]
+      summary: Decline an external signee's signature
+      description: >-
+        Same as the member decline, keyed by the invitation token: it need not be
+        this signee's turn. Accepts an optional JSON body `{reason}` (at most 500
+        characters), shown to the requester. Ends the request outright and notifies
+        the requester. Answers 204 on success.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Optional free-text reason shown to the requester.
+      responses:
+        '204':
+          description: The decline was recorded.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: The signing link is not valid or has expired.
+        '409':
+          description: Already signed, or a signature is in progress.
   /api/v1/signing/callback:
     get:
       tags: [signing]

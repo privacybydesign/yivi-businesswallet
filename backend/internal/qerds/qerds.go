@@ -58,6 +58,31 @@ type Message struct {
 	QualifiedTimestampSend *time.Time `json:"qualifiedTimestampSend,omitempty"`
 	CreatedAt              time.Time  `json:"createdAt"`
 	UpdatedAt              time.Time  `json:"updatedAt"`
+	// Offer is set when Body carries a credential-offer envelope recognised
+	// elsewhere in the system (internal/attestation) — the parsed summary the
+	// console renders in place of raw envelope JSON. Populated by
+	// Handler.annotateOffer, never by the store: qerds itself does not know what
+	// a credential offer is. Body is redacted in that case (see
+	// CredentialOfferAnnotation) — nil on every message this deployment has not
+	// wired an offer lookup for, or whose body is not one.
+	Offer *CredentialOfferAnnotation `json:"offer,omitempty"`
+}
+
+// CredentialOfferAnnotation is qerds's view of a message whose body carries a
+// credential offer recognised by internal/attestation: enough for the API to
+// name it and link through to a decision, without qerds knowing the envelope's
+// shape (see Handler.SetOfferLookup).
+type CredentialOfferAnnotation struct {
+	SenderOrgName  string `json:"senderOrgName"`
+	CredentialName string `json:"credentialName"`
+	Message        string `json:"message"`
+	// OfferID and Status are set only once a credential_offers row backs this
+	// message — absent while the inbound consumer has not run yet, or when the
+	// sender was not trusted to have an offer queued at all (see
+	// attestation.TrustedOfferSenders). A card with no OfferID has nothing to
+	// link to.
+	OfferID *uuid.UUID `json:"offerId,omitempty"`
+	Status  string     `json:"status,omitempty"`
 }
 
 // Evidence is an append-only ERDS evidence record backing the Art 5(1)(n)

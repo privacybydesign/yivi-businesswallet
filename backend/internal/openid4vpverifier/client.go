@@ -143,7 +143,11 @@ func (c *Client) Result(ctx context.Context, id string) (Presentation, error) {
 	if len(vt.VPToken) == 0 {
 		return Presentation{}, ErrPending
 	}
-	return Presentation{Claims: parseDisclosures(vt.VPToken), IdentityIssuedAt: identityIssuedAt(vt.VPToken)}, nil
+	return Presentation{
+		Claims:           parseDisclosures(vt.VPToken),
+		ByCredential:     parseDisclosuresByCredential(vt.VPToken),
+		IdentityIssuedAt: identityIssuedAt(vt.VPToken),
+	}, nil
 }
 
 // Status reports StatusPending until the presentation completes, then StatusDone.

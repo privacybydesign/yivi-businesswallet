@@ -138,6 +138,7 @@ const (
 	SigningCompleted        = "signing.completed"
 	SigningDelivered        = "signing.delivered"
 	SigningFailed           = "signing.failed"
+	SigningDeclined         = "signing.declined"
 
 	ExportRequested = "organization.export_requested"
 	// OrganizationTerminated records the provider ending service for an

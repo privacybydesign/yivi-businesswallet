@@ -41,7 +41,6 @@ export const nl: Translation<typeof en> = {
   nav: {
     dashboard: "Dashboard",
     members: "Leden",
-    vog: "VOG-screening",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
     postguard: "PostGuard-bestanden",
@@ -422,26 +421,41 @@ export const nl: Translation<typeof en> = {
     },
   },
   vog: {
-    title: "VOG-screening",
+    title: "Dien je VOG in",
     subtitle:
       "{{org}} vraagt leden om een geldige Verklaring Omtrent het Gedrag (VOG).",
-    noDateOfBirth:
-      "Bevestig eerst je identiteit - een VOG-controle vergelijkt met je vastgelegde geboortedatum.",
-    goToReidentify: "Mijn identiteit bevestigen",
+    loading: "Je VOG-inzending wordt geopend…",
+    forEmail: "Voor {{email}}",
+    completing: "Wordt vastgelegd…",
+    submitError: "Kon je VOG niet controleren: {{message}}",
+    linkNotFoundTitle: "Deze link werkt niet meer",
+    linkNotFoundBody:
+      "VOG-links verlopen, een nieuwere link vervangt een oudere, en een link werkt niet meer zodra er een geldige VOG is vastgelegd. Vraag een beheerder van de organisatie om een nieuwe link, of start hem vanuit de wallet.",
+    errorTitle: "Kon deze link niet openen",
+    errorBody: "{{message}}",
+    doneHint:
+      "{{org}} heeft de uitkomst vastgelegd. Je kunt deze pagina sluiten of naar de wallet gaan.",
+    goToApp: "Naar de wallet",
+    identity: {
+      heading: "Bevestig eerst je identiteit",
+      hint: "Een VOG-controle vergelijkt de naam en geboortedatum op het document met je identiteit, en {{org}} heeft nog geen geverifieerde identiteit van je. Scan de code met je wallet om te bevestigen wie je bent; daarna kun je direct je VOG uploaden.",
+      start: "Mijn identiteit bevestigen",
+      combinedHeading: "Of doe beide in één keer",
+      combinedHint:
+        "{{org}} accepteert ook de pbdf.vog-credential. Deel je identiteit en je VOG vanuit je wallet in één scan.",
+      combinedStart: "Identiteit bevestigen en VOG delen",
+      combinedDone: "Je identiteit is bevestigd en je VOG is gecontroleerd",
+    },
     upload: {
       heading: "Upload je VOG",
       hint: "Live gecontroleerd bij validatie.nl en vergeleken met je vastgelegde identiteit. De PDF zelf wordt nooit opgeslagen - alleen de uitkomst.",
       chooseFile: "Kies een PDF",
-      submit: "Uploaden",
       uploading: "Je VOG wordt gecontroleerd…",
-      error: "Kon je VOG niet controleren: {{message}}",
     },
     credential: {
       heading: "Of deel hem vanuit je wallet",
       hint: "{{org}} accepteert ook de pbdf.vog-credential. Deze wordt uitgegeven door Stichting Privacy by Design over een VOG die zij bij uitgifte hebben gevalideerd, geen actuele verklaring van Justis.",
       start: "Delen vanuit wallet",
-      disclosing: "Wachten op je wallet…",
-      error: "Kon je VOG niet controleren: {{message}}",
     },
     result: {
       valid: "Je VOG is geldig.",
@@ -452,7 +466,6 @@ export const nl: Translation<typeof en> = {
       insufficientScope: "Deze VOG dekt niet alles wat {{org}} vereist.",
       tooOld: "Deze VOG is ouder dan {{org}} accepteert.",
     },
-    tryAgain: "Opnieuw proberen",
     banner: {
       none: "{{org}} vraagt een VOG (Verklaring Omtrent het Gedrag) van je.",
       expiring: "Je VOG voor {{org}} verloopt op {{date}}.",
@@ -461,7 +474,8 @@ export const nl: Translation<typeof en> = {
       recheckRequired:
         "De VOG-vereisten van {{org}} zijn gewijzigd; dien een nieuwe VOG in.",
       requested: "{{org}} heeft je gevraagd een VOG in te dienen.",
-      action: "Naar VOG-screening",
+      action: "VOG indienen",
+      error: "Kon je VOG-link niet openen: {{message}}",
     },
   },
   dashboard: {
@@ -474,6 +488,20 @@ export const nl: Translation<typeof en> = {
     stats: {
       attestations: "Uitgegeven attestaties",
       documents: "Te ondertekenen documenten",
+    },
+    insights: {
+      title: "Ledenoverzicht",
+      members: "Leden",
+      notIdentified: "Niet geïdentificeerd",
+      notIdentifiedHint: "Nooit geïdentificeerd, verlopen of gevraagd",
+      vogAttention: "VOG vraagt aandacht",
+      vogAttentionHint:
+        "Ontbreekt, gevraagd, afgewezen, verlopen of opnieuw nodig",
+      vogNotRequired: "Je beleid vereist geen VOG",
+      identityBar: "Identiteitsstatus",
+      screeningBar: "VOG-status",
+      empty: "Nog geen leden.",
+      error: "Kon ledeninzichten niet laden: {{message}}",
     },
     details: "Details",
     id: "ID",
@@ -591,6 +619,7 @@ export const nl: Translation<typeof en> = {
     columns: {
       member: "Lid",
       status: "Status",
+      vog: "VOG",
       actions: "Acties",
     },
     unassigned: "—",
@@ -804,6 +833,7 @@ export const nl: Translation<typeof en> = {
       signingCompleted: "Documenthandtekening voltooid",
       signingDelivered: "Ondertekend document bezorgd",
       signingFailed: "Documenthandtekening mislukt",
+      signingDeclined: "Ondertekening geweigerd",
       presentationRequested: "Presentatieverzoek ontvangen",
       presentationOrgSelected: "Organisatie gekozen voor een presentatie",
       presentationCompleted: "Presentatie verstuurd",
@@ -899,7 +929,7 @@ export const nl: Translation<typeof en> = {
     vogNone: "Geen VOG bekend",
     requestVog: "VOG aanvragen",
     requestVogHint:
-      "Vraagt dit lid om nu een VOG in te dienen. Het lid krijgt een e-mail met een link naar de app.",
+      "Vraagt dit lid om nu een VOG in te dienen. Het lid krijgt een e-mail met een link om hem in te dienen, zonder in te loggen.",
     vogRequested: "VOG aangevraagd",
     uploadVog: "VOG uploaden namens lid",
     uploadVogHint:
@@ -973,6 +1003,8 @@ export const nl: Translation<typeof en> = {
     requestCompleted: "{{filename}} is ondertekend.",
     requestFailed: "Ondertekenen mislukt: {{reason}}",
     requestFailedGeneric: "het verzoek is niet voltooid",
+    requestDeclined: "{{name}} heeft geweigerd dit document te ondertekenen.",
+    requestDeclinedReason: "Reden: {{reason}}",
     requestLoadError: "Kon het ondertekenverzoek niet laden.",
     downloadButton: "Ondertekende PDF downloaden",
     downloadedToast: "Ondertekend document gedownload.",
@@ -1098,6 +1130,7 @@ export const nl: Translation<typeof en> = {
       pending: "In afwachting",
       signed: "Ondertekend",
       failed: "Mislukt",
+      declined: "Geweigerd",
     },
     signerKind: {
       internal: "Lid van de organisatie",
@@ -1107,6 +1140,18 @@ export const nl: Translation<typeof en> = {
       awaitingSignatures: "Wacht op handtekeningen",
       completed: "Voltooid",
       failed: "Mislukt",
+      declined: "Geweigerd",
+    },
+    decline: {
+      button: "Weigeren",
+      dialogTitle: "Weigeren te ondertekenen",
+      dialogHint:
+        "De aanvrager krijgt te horen dat je hebt geweigerd. Dit kan niet ongedaan worden gemaakt.",
+      reasonLabel: "Reden (optioneel)",
+      reasonPlaceholder: "Laat de aanvrager weten waarom (optioneel)",
+      confirm: "Document weigeren",
+      toastSuccess: "Je hebt geweigerd dit document te ondertekenen.",
+      toastError: "Kon niet weigeren. Probeer het opnieuw.",
     },
     deliveryStatus: {
       notRequested: "Geen bezorging",
@@ -1124,17 +1169,24 @@ export const nl: Translation<typeof en> = {
         "Koppel eerst een ondertekencertificaat. Daarvoor opent je wallet één keer; daarna kun je ondertekenen.",
       linkButton: "Ondertekencertificaat koppelen",
       signButton: "Document ondertekenen",
+      declineButton: "Weigeren",
       notYourTurn:
         "Een eerdere ondertekenaar moet eerst tekenen. Kom later terug via deze link.",
       linkedToast: "Ondertekencertificaat gekoppeld.",
       linkFailedToast:
         "Het koppelen van het ondertekencertificaat is niet voltooid.",
       startError: "Kon niet starten. Probeer het opnieuw.",
+      declineError: "Kon niet weigeren. Probeer het opnieuw.",
       attemptFailed:
         "Je laatste poging is niet voltooid. Je kunt het opnieuw proberen.",
       signedTitle: "Je hebt dit document ondertekend",
       signedAllHint: "Iedereen heeft ondertekend. Het document is compleet.",
       signedWaitingHint: "De andere ondertekenaars moeten nog tekenen.",
+      declinedTitle: "Je hebt geweigerd te ondertekenen",
+      declinedHint: "De aanvrager is op de hoogte gebracht.",
+      requestDeclinedTitle: "Dit verzoek is geweigerd",
+      requestDeclinedHint:
+        "Een andere ondertekenaar heeft geweigerd dit document te ondertekenen.",
       failedTitle: "Dit verzoek is niet voltooid",
       failedHint:
         "Neem contact op met de organisatie die je om een handtekening vroeg.",
@@ -1616,6 +1668,7 @@ export const nl: Translation<typeof en> = {
       identity_requested: "Identificatie aangevraagd",
       invitation: "Uitnodiging voor lidmaatschap",
       postguard_file: "Versleuteld bestand",
+      signature_declined: "Ondertekening geweigerd",
       signature_requested: "Ondertekenverzoek",
       signed_document: "Ondertekend document",
       smtp_test: "SMTP-test",
@@ -1640,6 +1693,8 @@ export const nl: Translation<typeof en> = {
         "Gaat naar iemand die is uitgenodigd om lid te worden van deze organisatie.",
       postguard_file:
         "Gaat naar de ontvanger van een versleuteld bestand, als deze organisatie via de eigen SMTP-server mailt.",
+      signature_declined:
+        "Gaat naar de aanvrager van een verzoek als een geselecteerde ondertekenaar weigert te tekenen.",
       signature_requested:
         "Gaat naar een lid dat is geselecteerd om een document mede te ondertekenen, met een link naar de ondertekenpagina.",
       signed_document:
@@ -2023,6 +2078,16 @@ export const nl: Translation<typeof en> = {
       providerRef: "Providerreferentie",
       sentAt: "Verzonden",
       deliveredAt: "Bezorgd",
+    },
+    offer: {
+      title: "Credentialaanbod",
+      status: {
+        accepting: "Bezig met accepteren…",
+        accepted: "Toegevoegd aan de wallet",
+        declined: "Geweigerd",
+      },
+      review: "Bekijk bij Attestaties",
+      rawEnvelope: "Ruwe envelop",
     },
     evidence: {
       title: "Bezorgbewijs",

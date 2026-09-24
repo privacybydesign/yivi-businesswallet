@@ -44,6 +44,9 @@ const (
 	// admins when the provider terminates service (Art 7(6)(f)). It carries a
 	// one-time link because by then nobody there can necessarily sign in.
 	KindExportReady Kind = "export_ready"
+	// KindSignatureDeclined tells a request's creator that a selected signer
+	// refused to sign, linking to the signing page.
+	KindSignatureDeclined Kind = "signature_declined"
 	// KindIdentityReminder is sent ahead of a member's identity_due_at, per the
 	// org's re-identification reminder schedule.
 	KindIdentityReminder Kind = "identity_reminder"
@@ -82,6 +85,7 @@ const (
 	varSigningURL     = "signingUrl"
 	varExportURL      = "exportUrl"
 	varExportExpiry   = "exportExpiry"
+	varSignerName     = "signerName"
 	varReidentifyURL  = "reidentifyUrl"
 	varDueDate        = "dueDate"
 	varReason         = "reason"
@@ -138,6 +142,13 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varOrgName},
 		{Name: varExportExpiry},
 		{Name: varExportURL, IsURL: true},
+	},
+	KindSignatureDeclined: {
+		{Name: varOrgName},
+		{Name: varDocumentName},
+		{Name: varSignerName},
+		{Name: varReason},
+		{Name: varSigningURL, IsURL: true},
 	},
 	KindIdentityReminder: {
 		{Name: varOrgName},

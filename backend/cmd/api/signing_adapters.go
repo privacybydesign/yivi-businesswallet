@@ -124,3 +124,18 @@ func (n signingNotifier) NotifyExternalSignatureRequested(ctx context.Context, o
 	signingURL := strings.TrimRight(n.appBaseURL, "/") + signing.ExternalSignPath(token)
 	return n.email.SendSignatureRequested(ctx, orgID, signeeEmail, org.Name, documentName, signingURL)
 }
+
+// NotifyRequesterDeclined mails the request's creator that a selected signer
+// refused to sign, linking to the org's signing page. Unlike the two notify
+// methods above, the caller has no org slug to build that link from (a decline
+// reaches this from the external-signee route too, which has none), so it is
+// resolved here from the org itself, the same way DeliverEmail resolves the org's
+// display name.
+func (n signingNotifier) NotifyRequesterDeclined(ctx context.Context, orgID uuid.UUID, requesterEmail, documentName, signerName, reason string) error {
+	org, err := n.orgs.GetByID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	signingURL := strings.TrimRight(n.appBaseURL, "/") + "/" + url.PathEscape(org.Slug) + "/signing"
+	return n.email.SendSignatureDeclined(ctx, orgID, requesterEmail, org.Name, documentName, signerName, reason, signingURL)
+}

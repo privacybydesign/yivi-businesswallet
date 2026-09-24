@@ -31,6 +31,8 @@ export function signerStatusLabel(t: TFunction, status: string): string {
       return t("signing.signerStatus.signed");
     case SIGNER_STATUS.failed:
       return t("signing.signerStatus.failed");
+    case SIGNER_STATUS.declined:
+      return t("signing.signerStatus.declined");
     default:
       return status;
   }
@@ -55,6 +57,8 @@ export function requestStatusLabel(t: TFunction, status: string): string {
       return t("signing.requestStatus.completed");
     case SIGNING_STATUS.failed:
       return t("signing.requestStatus.failed");
+    case SIGNING_STATUS.declined:
+      return t("signing.requestStatus.declined");
     default:
       return status;
   }

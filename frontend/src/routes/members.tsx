@@ -7,6 +7,7 @@ import {
   useRequestVogMutation,
   useResendInvitationMutation,
   useRevokeInvitationMutation,
+  useScreeningSettingsQuery,
 } from "../api/organization.queries";
 import type { MemberListEntry, MemberSort } from "../api/organization";
 import { accessMessage } from "../lib/access-message";
@@ -19,6 +20,7 @@ import {
 } from "../lib/identity-status";
 import {
   requestableVog,
+  screeningConfigured,
   screeningStatusHint,
   screeningStatusLabel,
   screeningStatusTone,
@@ -31,6 +33,39 @@ import * as React from "react";
 
 const PAGE_SIZE = 25;
 const SEARCH_DEBOUNCE_MS = 300;
+// Column widths, with and without the VOG column: it only appears once the
+// org's screening policy requires a VOG from anyone, and the other columns
+// give up the room it takes.
+interface ColumnWidths {
+  member: string;
+  jobTitle: string;
+  department: string;
+  status: string;
+  vog: string;
+  role: string;
+  actions: string;
+}
+
+const COLUMN_WIDTHS: ColumnWidths = {
+  member: "w-[22%]",
+  jobTitle: "w-[14%]",
+  department: "w-[14%]",
+  status: "w-[17%]",
+  vog: "",
+  role: "w-[11%]",
+  actions: "w-[18%]",
+};
+
+const COLUMN_WIDTHS_WITH_VOG: ColumnWidths = {
+  member: "w-[20%]",
+  jobTitle: "w-[12%]",
+  department: "w-[12%]",
+  status: "w-[15%]",
+  vog: "w-[13%]",
+  role: "w-[9%]",
+  actions: "w-[15%]",
+};
+
 const COLUMN_COUNT = 7;
 
 type StatusFilter = "" | "active" | "invited";
@@ -66,6 +101,10 @@ export default function Members(): React.JSX.Element {
 
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
+  const screeningSettings = useScreeningSettingsQuery(slug, isAdmin);
+  const showVog = screeningConfigured(screeningSettings.data);
+  const widths = showVog ? COLUMN_WIDTHS_WITH_VOG : COLUMN_WIDTHS;
+  const columnCount = showVog ? COLUMN_COUNT + 1 : COLUMN_COUNT;
 
   // Sort, filter, search, and page live in the URL so the view survives a
   // refresh and can be bookmarked or shared.
@@ -391,51 +430,56 @@ export default function Members(): React.JSX.Element {
                   />
                 </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[22%]"
+                  className={widths.member}
                   sortDir={sortDirOf("name")}
                   onSort={() => toggleSort("name")}
                 >
                   {t("members.columns.member")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[14%]"
+                  className={widths.jobTitle}
                   sortDir={sortDirOf("jobtitle")}
                   onSort={() => toggleSort("jobtitle")}
                 >
                   {t("common.jobTitle")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[14%]"
+                  className={widths.department}
                   sortDir={sortDirOf("department")}
                   onSort={() => toggleSort("department")}
                 >
                   {t("common.department")}
                 </Table.HeaderCell>
                 <Table.HeaderCell
-                  className="w-[17%]"
+                  className={widths.status}
                   sortDir={sortDirOf("status")}
                   onSort={() => toggleSort("status")}
                 >
                   {t("members.columns.status")}
                 </Table.HeaderCell>
+                {showVog && (
+                  <Table.HeaderCell className={widths.vog}>
+                    {t("members.columns.vog")}
+                  </Table.HeaderCell>
+                )}
                 <Table.HeaderCell
-                  className="w-[11%]"
+                  className={widths.role}
                   sortDir={sortDirOf("role")}
                   onSort={() => toggleSort("role")}
                 >
                   {t("common.role")}
                 </Table.HeaderCell>
-                <Table.HeaderCell className="w-[18%]" srOnly>
+                <Table.HeaderCell className={widths.actions} srOnly>
                   {t("members.columns.actions")}
                 </Table.HeaderCell>
               </Table.Head>
               <Table.Body>
                 {org.isPending || members.isPending ? (
-                  <Table.State colSpan={COLUMN_COUNT}>
+                  <Table.State colSpan={columnCount}>
                     {t("common.loading")}
                   </Table.State>
                 ) : entries.length === 0 ? (
-                  <Table.State colSpan={COLUMN_COUNT}>
+                  <Table.State colSpan={columnCount}>
                     {filtered ? t("members.noMatch") : t("members.empty")}
                   </Table.State>
                 ) : (
@@ -526,15 +570,23 @@ export default function Members(): React.JSX.Element {
                                 formatDate={formatDate}
                               />
                             )}
-                            {!pending &&
-                              member.vogStatus !== "not_required" && (
-                                <VogTag
-                                  member={member}
-                                  formatDate={formatDate}
-                                />
-                              )}
                           </div>
                         </Table.Cell>
+                        {showVog && (
+                          <Table.Cell>
+                            {pending ? (
+                              <span className="text-ink-soft">
+                                {t("members.unassigned")}
+                              </span>
+                            ) : member.vogStatus === "not_required" ? (
+                              <span className="text-muted truncate text-[12px]">
+                                {t("members.vog.notRequired")}
+                              </span>
+                            ) : (
+                              <VogTag member={member} formatDate={formatDate} />
+                            )}
+                          </Table.Cell>
+                        )}
                         <Table.Cell>
                           <Tag
                             tone={member.role === "admin" ? "blue" : "default"}
@@ -640,8 +692,9 @@ function IdentityTag({
   );
 }
 
-// VogTag mirrors IdentityTag for the member's VOG screening status; shown only
-// when the org's policy requires one from this member (see the call site).
+// VogTag mirrors IdentityTag for the member's VOG screening status, in the VOG
+// column; shown only when the org's policy requires one from this member (see
+// the call site).
 function VogTag({
   member,
   formatDate,

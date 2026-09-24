@@ -30,7 +30,6 @@ export const en = {
   nav: {
     dashboard: "Dashboard",
     members: "Members",
-    vog: "VOG screening",
     qerds: "Secure delivery",
     attestations: "Attestations",
     postguard: "PostGuard files",
@@ -406,26 +405,41 @@ export const en = {
     },
   },
   vog: {
-    title: "VOG screening",
+    title: "Submit your VOG",
     subtitle:
       "{{org}} asks its members to hold a valid certificate of conduct (VOG).",
-    noDateOfBirth:
-      "Confirm your identity first - a VOG check matches your date of birth on file.",
-    goToReidentify: "Confirm my identity",
+    loading: "Opening your VOG submission…",
+    forEmail: "For {{email}}",
+    completing: "Recording…",
+    submitError: "Could not check your VOG: {{message}}",
+    linkNotFoundTitle: "This link no longer works",
+    linkNotFoundBody:
+      "VOG links expire, a newer one replaces an older one, and a link stops working once a valid VOG is on file. Ask an admin of the organization for a fresh link, or start it from the wallet.",
+    errorTitle: "Could not open this link",
+    errorBody: "{{message}}",
+    doneHint:
+      "{{org}} has recorded the outcome. You can close this page or go to the wallet.",
+    goToApp: "Go to the wallet",
+    identity: {
+      heading: "Confirm your identity first",
+      hint: "A VOG check matches the name and date of birth on the document against your identity, and {{org}} has no verified identity for you yet. Scan the code with your wallet to confirm who you are; you can upload your VOG right after.",
+      start: "Confirm my identity",
+      combinedHeading: "Or do both in one go",
+      combinedHint:
+        "{{org}} also accepts the pbdf.vog credential. Disclose your identity and your VOG from your wallet in a single scan.",
+      combinedStart: "Confirm identity and share VOG",
+      combinedDone: "Your identity is confirmed and your VOG has been checked",
+    },
     upload: {
       heading: "Upload your VOG",
       hint: "Checked live against validatie.nl and matched against your identity on file. The PDF itself is never stored - only the outcome is.",
       chooseFile: "Choose a PDF",
-      submit: "Upload",
       uploading: "Checking your VOG…",
-      error: "Could not check your VOG: {{message}}",
     },
     credential: {
       heading: "Or disclose it from your wallet",
       hint: "{{org}} also accepts the pbdf.vog credential. It is issued by Stichting Privacy by Design about a VOG it validated at issuance, not a live statement from Justis.",
       start: "Disclose from wallet",
-      disclosing: "Waiting for your wallet…",
-      error: "Could not check your VOG: {{message}}",
     },
     result: {
       valid: "Your VOG is valid.",
@@ -436,7 +450,6 @@ export const en = {
       insufficientScope: "This VOG does not cover everything {{org}} requires.",
       tooOld: "This VOG is older than {{org}} accepts.",
     },
-    tryAgain: "Try again",
     banner: {
       none: "{{org}} requires a VOG (certificate of conduct) from you.",
       expiring: "Your VOG for {{org}} expires on {{date}}.",
@@ -445,7 +458,8 @@ export const en = {
       recheckRequired:
         "{{org}}'s VOG requirements changed; please submit a new VOG.",
       requested: "{{org}} has asked you to submit a VOG.",
-      action: "Go to VOG screening",
+      action: "Submit VOG",
+      error: "Could not open your VOG link: {{message}}",
     },
   },
   dashboard: {
@@ -458,6 +472,19 @@ export const en = {
     stats: {
       attestations: "Attestations issued",
       documents: "Documents to sign",
+    },
+    insights: {
+      title: "Member overview",
+      members: "Members",
+      notIdentified: "Not identified",
+      notIdentifiedHint: "Never identified, overdue or asked to identify",
+      vogAttention: "VOG needs attention",
+      vogAttentionHint: "Missing, requested, rejected, expired or to be redone",
+      vogNotRequired: "No VOG required by your policy",
+      identityBar: "Identity status",
+      screeningBar: "VOG status",
+      empty: "No members yet.",
+      error: "Could not load member insights: {{message}}",
     },
     details: "Details",
     id: "ID",
@@ -574,6 +601,7 @@ export const en = {
     columns: {
       member: "Member",
       status: "Status",
+      vog: "VOG",
       actions: "Actions",
     },
     unassigned: "—",
@@ -786,6 +814,7 @@ export const en = {
       signingCompleted: "Completed a document signature",
       signingDelivered: "Delivered a signed document",
       signingFailed: "Document signature failed",
+      signingDeclined: "Declined a document signature",
       presentationRequested: "Received a presentation request",
       presentationOrgSelected: "Selected the organization for a presentation",
       presentationCompleted: "Sent a presentation",
@@ -880,7 +909,7 @@ export const en = {
     vogNone: "No VOG on file",
     requestVog: "Request VOG",
     requestVogHint:
-      "Asks this member to submit a VOG now. They get an e-mail with a link into the app.",
+      "Asks this member to submit a VOG now. They get an e-mail with a link to submit it, no sign-in needed.",
     vogRequested: "VOG requested",
     uploadVog: "Upload VOG on behalf of member",
     uploadVogHint:
@@ -953,6 +982,8 @@ export const en = {
     requestCompleted: "{{filename}} was signed.",
     requestFailed: "Signing failed: {{reason}}",
     requestFailedGeneric: "the request did not complete",
+    requestDeclined: "{{name}} declined to sign this document.",
+    requestDeclinedReason: "Reason: {{reason}}",
     requestLoadError: "Could not load the signing request.",
     downloadButton: "Download signed PDF",
     downloadedToast: "Signed document downloaded.",
@@ -1073,6 +1104,7 @@ export const en = {
       pending: "Pending",
       signed: "Signed",
       failed: "Failed",
+      declined: "Declined",
     },
     signerKind: {
       internal: "Organization member",
@@ -1082,6 +1114,18 @@ export const en = {
       awaitingSignatures: "Awaiting signatures",
       completed: "Completed",
       failed: "Failed",
+      declined: "Declined",
+    },
+    decline: {
+      button: "Decline",
+      dialogTitle: "Decline to sign",
+      dialogHint:
+        "The requester will be told you declined. This cannot be undone.",
+      reasonLabel: "Reason (optional)",
+      reasonPlaceholder: "Let the requester know why (optional)",
+      confirm: "Decline document",
+      toastSuccess: "You declined to sign this document.",
+      toastError: "Could not decline. Try again.",
     },
     deliveryStatus: {
       notRequested: "No delivery",
@@ -1099,16 +1143,22 @@ export const en = {
         "Link a signing certificate first. This opens your wallet once; after that you can sign.",
       linkButton: "Link signing certificate",
       signButton: "Sign document",
+      declineButton: "Decline",
       notYourTurn:
         "An earlier signer must sign first. Come back to this link later.",
       linkedToast: "Signing certificate linked.",
       linkFailedToast: "Linking the signing certificate was not completed.",
       startError: "Could not start. Try again.",
+      declineError: "Could not decline. Try again.",
       attemptFailed:
         "Your last attempt did not complete. You can try signing again.",
       signedTitle: "You signed this document",
       signedAllHint: "Everyone has signed. The document is complete.",
       signedWaitingHint: "The other signers still have to sign.",
+      declinedTitle: "You declined to sign",
+      declinedHint: "The requester has been notified.",
+      requestDeclinedTitle: "This request was declined",
+      requestDeclinedHint: "Another signer declined to sign this document.",
       failedTitle: "This request did not complete",
       failedHint: "Contact the organization that asked you to sign.",
       invalidTitle: "This link is no longer valid",
@@ -1576,6 +1626,7 @@ export const en = {
       identity_requested: "Identification requested",
       invitation: "Member invitation",
       postguard_file: "Encrypted file",
+      signature_declined: "Signature declined",
       signature_requested: "Signature request",
       signed_document: "Signed document",
       smtp_test: "SMTP test",
@@ -1599,6 +1650,8 @@ export const en = {
       invitation: "Sent to someone invited to join this organization.",
       postguard_file:
         "Sent to a recipient of an encrypted file, when this organization mails through its own SMTP server.",
+      signature_declined:
+        "Sent to a request's creator when a selected signer declines to sign.",
       signature_requested:
         "Sent to a member selected to co-sign a document, linking them to the signing page.",
       signed_document:
@@ -1974,6 +2027,16 @@ export const en = {
       providerRef: "Provider reference",
       sentAt: "Sent",
       deliveredAt: "Delivered",
+    },
+    offer: {
+      title: "Credential offer",
+      status: {
+        accepting: "Accepting…",
+        accepted: "Added to the wallet",
+        declined: "Declined",
+      },
+      review: "Review in Attestations",
+      rawEnvelope: "Raw envelope",
     },
     evidence: {
       title: "Delivery evidence",

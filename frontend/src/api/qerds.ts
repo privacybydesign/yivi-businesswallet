@@ -1,6 +1,22 @@
 import { z } from "zod";
 import { request, requestBlob } from "./http";
 
+// The parsed summary of a credential-offer envelope carried in a message body
+// (backend/internal/attestation.CredentialOfferEnvelope), attached server-side
+// when the body is recognised as one — see backend/internal/qerds.Handler.
+// offerId and status are set only once a credential_offers row backs the
+// message: absent while it has not been queued yet, or when the sender was not
+// trusted to have it queued at all.
+export const qerdsCredentialOfferSchema = z.object({
+  senderOrgName: z.string().default(""),
+  credentialName: z.string().default(""),
+  message: z.string().default(""),
+  offerId: z.string().optional(),
+  status: z.string().optional(),
+});
+
+export type QerdsCredentialOffer = z.infer<typeof qerdsCredentialOfferSchema>;
+
 export const qerdsMessageSchema = z.object({
   id: z.string(),
   organizationId: z.string(),
@@ -16,6 +32,7 @@ export const qerdsMessageSchema = z.object({
   qualifiedTimestampSend: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  offer: qerdsCredentialOfferSchema.optional(),
 });
 
 export type QerdsMessage = z.infer<typeof qerdsMessageSchema>;

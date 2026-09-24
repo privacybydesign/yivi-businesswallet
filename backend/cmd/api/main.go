@@ -430,7 +430,18 @@ func run() error {
 			return fmt.Errorf("VOG_REFERENCE_HASH_KEY must be hex-encoded: %w", err)
 		}
 	}
-	screeningService := organization.NewScreeningService(orgStore, vogValidator, authService, vogReferenceHashKey)
+	// The VOG PDF parser is a PDFium WebAssembly pool; compiling the module
+	// takes seconds, so it is built once here rather than per upload.
+	vogParser, err := vog.NewPDFiumParser()
+	if err != nil {
+		return fmt.Errorf("vog parser: %w", err)
+	}
+	defer func() {
+		if err := vogParser.Close(); err != nil {
+			slog.Error("close vog parser", slog.String("error", err.Error()))
+		}
+	}()
+	screeningService := organization.NewScreeningService(orgStore, vogValidator, vogParser, authService, orgService, vogReferenceHashKey)
 
 	// The export store is built here rather than beside the rest of the export
 	// wiring: terminating an organisation queues the bundle it owes in the same
@@ -534,6 +545,11 @@ func run() error {
 	}()
 
 	attestationStore := attestation.NewStore(pool, recorder)
+	// The QERDS message screen renders a credential-offer body as a parsed
+	// attestation summary instead of raw envelope JSON; wired via a setter (like
+	// the inbound consumer below) because qerds.Handler is constructed before
+	// the attestation store exists.
+	qerdsHandler.SetOfferLookup(attestation.NewOfferAnnotator(attestationStore))
 	// An inbound QERDS message carrying an OpenID4VCI credential offer is queued
 	// for the receiving org to accept or decline; accepting redeems it into the
 	// org's holder engine and indexes it (source=qerds).

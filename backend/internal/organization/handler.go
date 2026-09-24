@@ -58,6 +58,10 @@ type repository interface {
 	SaveScreeningSettings(ctx context.Context, orgID uuid.UUID, in ScreeningSettingsInput) (ScreeningSettings, error)
 	ListScreeningHistory(ctx context.Context, orgID, userID uuid.UUID) ([]ScreeningRecord, error)
 	RequestVog(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID, requestedBy uuid.UUID, reason string) ([]RequestedVogMember, error)
+	ScreeningMatchContext(ctx context.Context, orgID, userID uuid.UUID) (ScreeningMatchContext, error)
+	EnsureVogToken(ctx context.Context, orgID, userID uuid.UUID) (string, time.Time, error)
+	VogTokenLookup(ctx context.Context, rawToken string) (VogTokenContext, error)
+	MemberStatusSnapshots(ctx context.Context, orgID uuid.UUID) ([]MemberStatusSnapshot, error)
 }
 
 // screener is the VOG screening seam the handler needs, satisfied by
@@ -66,6 +70,8 @@ type screener interface {
 	UploadVog(ctx context.Context, orgID, userID uuid.UUID, checkedBy string, checkedByUserID *uuid.UUID, pdf []byte) (ScreeningOutcome, error)
 	StartVogCredentialSession(ctx context.Context, orgID uuid.UUID) (auth.Session, error)
 	DiscloseVogCredential(ctx context.Context, orgID, userID uuid.UUID, checkedBy string, checkedByUserID *uuid.UUID, disclosureToken string) (ScreeningOutcome, error)
+	StartIdentityVogCredentialSession(ctx context.Context, orgID uuid.UUID) (auth.Session, error)
+	DiscloseIdentityAndVogCredential(ctx context.Context, orgID, userID uuid.UUID, checkedBy string, checkedByUserID *uuid.UUID, disclosureToken string) (ScreeningOutcome, error)
 }
 
 type inviter interface {
@@ -84,6 +90,7 @@ type inviter interface {
 	StartReverifySession(ctx context.Context, rawToken string) (auth.Session, error)
 	MintOwnReverifyToken(ctx context.Context, orgID, userID uuid.UUID) (string, time.Time, error)
 	CompleteReverification(ctx context.Context, rawToken, disclosureToken string) (ReverifyOutcome, error)
+	CompleteOwnIdentification(ctx context.Context, orgID, userID uuid.UUID, disclosureToken string) error
 }
 
 type auditReader interface {
@@ -162,10 +169,24 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /reidentify/{token}/session", respond.HandlerFunc(h.startReidentify))
 	mux.Handle("POST /reidentify/{token}/complete", respond.HandlerFunc(h.completeReidentify))
 
+	// VOG submission (#242): a bearer token like re-identification's, reached
+	// from a request/reminder e-mail or minted for the caller by the dashboard
+	// banner (POST .../me/vog-token below), so a member submits without
+	// signing in. The pbdf.vog credential paths are gated on the org's opt-in.
+	mux.Handle("GET /vog/{token}", respond.HandlerFunc(h.vogPreview))
+	mux.Handle("POST /vog/{token}/upload", respond.HandlerFunc(h.uploadSelfVog))
+	mux.Handle("POST /vog/{token}/identity-session", respond.HandlerFunc(h.startVogIdentitySession))
+	mux.Handle("POST /vog/{token}/identity-complete", respond.HandlerFunc(h.completeVogIdentification))
+	mux.Handle("POST /vog/{token}/credential-session", respond.HandlerFunc(h.startVogCredentialSession))
+	mux.Handle("POST /vog/{token}/credential-complete", respond.HandlerFunc(h.completeVogCredential))
+	mux.Handle("POST /vog/{token}/identity-credential-session", respond.HandlerFunc(h.startIdentityVogCredentialSession))
+	mux.Handle("POST /vog/{token}/identity-credential-complete", respond.HandlerFunc(h.completeIdentityVogCredential))
+
 	mux.Handle("GET /orgs/{slug}", orgScoped(respond.HandlerFunc(h.details)))
 	mux.Handle("PATCH /orgs/{slug}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.update))))
 	mux.Handle("PUT /orgs/{slug}/data-instruction", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.setDataInstruction))))
 	mux.Handle("GET /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.members))))
+	mux.Handle("GET /orgs/{slug}/member-insights", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberInsights))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.member))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}/avatar", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberAvatar))))
 	mux.Handle("POST /orgs/{slug}/members", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.invite))))
@@ -182,20 +203,16 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.getIdentitySettings))))
 	mux.Handle("PUT /orgs/{slug}/identity-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.putIdentitySettings))))
 
-	// Member screening / VOG (#242): the always-on PDF upload (self and
-	// admin-on-behalf), the admin policy, on-demand request, and history.
+	// Member screening / VOG (#242): the admin policy, upload on a member's
+	// behalf, on-demand request, and history. The member's own submission is
+	// the public /vog/{token} page above; any member may mint their own link.
 	mux.Handle("GET /orgs/{slug}/screening-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.getScreeningSettings))))
 	mux.Handle("PUT /orgs/{slug}/screening-settings", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.putScreeningSettings))))
-	mux.Handle("POST /orgs/{slug}/me/vog", orgScoped(respond.HandlerFunc(h.uploadSelfVog)))
+	mux.Handle("POST /orgs/{slug}/me/vog-token", orgScoped(respond.HandlerFunc(h.mintOwnVogToken)))
 	mux.Handle("POST /orgs/{slug}/members/{userId}/vog", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.uploadMemberVog))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}/vog/history", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.screeningHistory))))
 	mux.Handle("POST /orgs/{slug}/members/{userId}/request-vog", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestVog))))
 	mux.Handle("POST /orgs/{slug}/members/request-vog", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestVogBulk))))
-	// The opt-in pbdf.vog credential disclosure (#242 §4), self-service only -
-	// like the PDF upload, no admin-on-behalf path (the disclosure has to come
-	// from the member's own wallet).
-	mux.Handle("POST /orgs/{slug}/me/vog/credential-session", orgScoped(respond.HandlerFunc(h.startVogCredentialSession)))
-	mux.Handle("POST /orgs/{slug}/me/vog/credential-complete", orgScoped(respond.HandlerFunc(h.completeVogCredential)))
 
 	mux.Handle("POST /orgs/{slug}/invitations/{id}/resend", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.resendInvitation))))
 	mux.Handle("DELETE /orgs/{slug}/invitations/{id}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.revokeInvitation))))
@@ -300,6 +317,10 @@ type ownVogState struct {
 	Status           string     `json:"status"`
 	ValidUntil       *time.Time `json:"validUntil"`
 	AcceptCredential bool       `json:"acceptCredential"`
+	// NeedsIdentity is true when the caller has no date of birth on file, so a
+	// VOG cannot be matched yet: the page offers identification first (or the
+	// combined identity+VOG disclosure) instead of an upload that would fail.
+	NeedsIdentity bool `json:"needsIdentity"`
 }
 
 func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
@@ -336,9 +357,11 @@ func (h *Handler) ownIdentity(ctx context.Context, orgID, userID uuid.UUID) *own
 	return &ownIdentityState{Status: member.IdentityStatus, DueAt: member.IdentityDueAt}
 }
 
-// ownVog resolves the caller's own VOG screening state, mirroring ownIdentity.
+// ownVog resolves the caller's own VOG screening state, mirroring
+// ownIdentity: nil when they have no membership or it cannot be read, since
+// the banner is informational.
 func (h *Handler) ownVog(ctx context.Context, orgID, userID uuid.UUID) *ownVogState {
-	member, err := h.store.GetMember(ctx, orgID, userID)
+	state, err := h.vogState(ctx, orgID, userID)
 	if errors.Is(err, ErrNotMember) {
 		return nil
 	}
@@ -346,13 +369,32 @@ func (h *Handler) ownVog(ctx context.Context, orgID, userID uuid.UUID) *ownVogSt
 		slog.ErrorContext(ctx, "resolving own vog state", slog.String("error", err.Error()))
 		return nil
 	}
+	return &state
+}
+
+// vogState is a member's VOG screening status and what their submission page
+// needs to know, shared by the org detail's own state and the VOG link's
+// preview. ErrNotMember when userID is not a member of orgID.
+func (h *Handler) vogState(ctx context.Context, orgID, userID uuid.UUID) (ownVogState, error) {
+	member, err := h.store.GetMember(ctx, orgID, userID)
+	if err != nil {
+		return ownVogState{}, err
+	}
 	settings, err := h.store.GetScreeningSettings(ctx, orgID)
 	if err != nil {
-		slog.ErrorContext(ctx, "resolving screening settings", slog.String("error", err.Error()))
-		return nil
+		return ownVogState{}, fmt.Errorf("resolving screening settings: %w", err)
+	}
+	matchCtx, err := h.store.ScreeningMatchContext(ctx, orgID, userID)
+	if err != nil {
+		return ownVogState{}, fmt.Errorf("resolving screening match context: %w", err)
 	}
 	member = member.withVogStatus(settings, time.Now())
-	return &ownVogState{Status: member.VogStatus, ValidUntil: member.VogValidUntil, AcceptCredential: settings.AcceptYiviCredential}
+	return ownVogState{
+		Status:           member.VogStatus,
+		ValidUntil:       member.VogValidUntil,
+		AcceptCredential: settings.AcceptYiviCredential,
+		NeedsIdentity:    matchCtx.DateOfBirth == nil,
+	}, nil
 }
 
 type updateRequest struct {

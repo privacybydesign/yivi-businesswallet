@@ -44,8 +44,9 @@ func (stubOrgs) OrgName(context.Context, uuid.UUID) (string, error) { return "Ac
 // and the raw invitation tokens handed to external signees, which is how the test gets
 // hold of the link a real signee would click.
 type capturingNotifier struct {
-	members []string
-	tokens  []string
+	members  []string
+	tokens   []string
+	declined []string
 }
 
 func (c *capturingNotifier) NotifySignatureRequested(_ context.Context, _ uuid.UUID, email, _, _ string) error {
@@ -55,6 +56,11 @@ func (c *capturingNotifier) NotifySignatureRequested(_ context.Context, _ uuid.U
 
 func (c *capturingNotifier) NotifyExternalSignatureRequested(_ context.Context, _ uuid.UUID, _, _, token string) error {
 	c.tokens = append(c.tokens, token)
+	return nil
+}
+
+func (c *capturingNotifier) NotifyRequesterDeclined(_ context.Context, _ uuid.UUID, requesterEmail, _, _, _ string) error {
+	c.declined = append(c.declined, requesterEmail)
 	return nil
 }
 

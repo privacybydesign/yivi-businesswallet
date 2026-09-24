@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
+	"net/http/cookiejar"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,16 +55,63 @@ func (e *testEnv) doMultipart(path string, fieldName, fileName string, content [
 	return resp
 }
 
+// mintOwnVogToken is the dashboard banner's entry point; it returns the raw
+// token out of the link, which is the only way a test can get one (the admin
+// request and the reminder sweep only ever mail it).
+func (e *testEnv) mintOwnVogToken(slug string) string {
+	e.t.Helper()
+	resp := e.do(http.MethodPost, "/api/v1/orgs/"+slug+"/me/vog-token", nil)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		e.t.Fatalf("mint vog token = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		VogURL string `json:"vogUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		e.t.Fatalf("decode vog token: %v", err)
+	}
+	_, token, found := strings.Cut(body.VogURL, "/vog/")
+	if !found || token == "" {
+		e.t.Fatalf("vogUrl = %q, want a /vog/<token> link", body.VogURL)
+	}
+	return token
+}
+
+// signOut drops the session cookie, so what follows runs the way a member
+// opening the e-mailed link on another device would: with no session at all.
+func (e *testEnv) signOut() {
+	e.t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		e.t.Fatalf("cookiejar: %v", err)
+	}
+	e.client.Jar = jar
+}
+
+func vogPath(token, action string) string {
+	return "/api/v1/vog/" + token + "/" + action
+}
+
+// sampleVOG is a real, AES-encrypted Justis document (vogtest); the flows
+// below go through the actual PDFium parser, so the identity a test stores for
+// the member has to be the one printed on it.
+func sampleVOG() vogtest.Sample {
+	return vogtest.Samples()[0]
+}
+
+// matchingVOGPDF is the sample's bytes; pair it with setSampleIdentity.
 func matchingVOGPDF(t *testing.T) []byte {
-	return vogtest.BuildTestPDF(t, []string{
-		"kenmerk: ABC12345XYZ",
-		"Datum: 01-02-2024",
-		"Geslachtsnaam: Jansen",
-		"Tussenvoegsels: van der",
-		"Voornamen: Jan Willem",
-		"Geboortedatum: 03-04-1990",
-		"profiel: 11 43",
-	})
+	t.Helper()
+	return sampleVOG().PDF
+}
+
+// setSampleIdentity stores the identity printed on the sample VOG for the
+// member, so an upload of it passes the identity match.
+func setSampleIdentity(t *testing.T, e *testEnv, orgID, userID uuid.UUID) {
+	t.Helper()
+	s := sampleVOG()
+	setDateOfBirth(t, e, orgID, userID, s.GivenNames, s.Surname, s.DateOfBirth)
 }
 
 func setDateOfBirth(t *testing.T, e *testEnv, orgID, userID uuid.UUID, given, last string, dob time.Time) {
@@ -82,19 +131,43 @@ func TestSelfUploadVogValid(t *testing.T) {
 	me := e.login("jan@example.test")
 	orgID := e.createOrg("Acme", "acme")
 	e.addMembership(me.ID, orgID, organization.RoleMember)
-	setDateOfBirth(t, e, orgID, me.ID, "Jan Willem", "van der Jansen", time.Date(1990, 4, 3, 0, 0, 0, 0, time.UTC))
+	setSampleIdentity(t, e, orgID, me.ID)
+	token := e.mintOwnVogToken("acme")
+	e.signOut()
 
-	resp := e.doMultipart("/api/v1/orgs/acme/me/vog", "file", "vog.pdf", matchingVOGPDF(t))
-	defer func() { _ = resp.Body.Close() }()
+	preview := decodeJSON[struct {
+		OrganizationSlug string `json:"organizationSlug"`
+		Email            string `json:"email"`
+		Status           string `json:"status"`
+		NeedsIdentity    bool   `json:"needsIdentity"`
+	}](t, e.do(http.MethodGet, "/api/v1/vog/"+token, nil))
+	if preview.OrganizationSlug != "acme" || preview.Email != "jan@example.test" || preview.NeedsIdentity {
+		t.Errorf("preview = %+v, want acme / jan, identity on file", preview)
+	}
+
+	resp := e.doMultipart(vogPath(token, "upload"), "file", "vog.pdf", matchingVOGPDF(t))
 	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
 		t.Fatalf("upload status = %d, want 200", resp.StatusCode)
 	}
-	var body vogUploadResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body.Result != "valid" {
+	if body := decodeJSON[vogUploadResponse](t, resp); body.Result != "valid" {
 		t.Errorf("result = %q, want valid", body.Result)
+	}
+
+	// A valid screening retires the link, so it cannot overwrite that result.
+	again := e.do(http.MethodGet, "/api/v1/vog/"+token, nil)
+	_ = again.Body.Close()
+	if again.StatusCode != http.StatusNotFound {
+		t.Errorf("preview after a valid screening = %d, want 404", again.StatusCode)
+	}
+}
+
+func TestVogLinkUnknownToken(t *testing.T) {
+	e := setup(t)
+	resp := e.doMultipart(vogPath("not-a-token", "upload"), "file", "vog.pdf", matchingVOGPDF(t))
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("upload with an unknown token = %d, want 404", resp.StatusCode)
 	}
 }
 
@@ -105,7 +178,7 @@ func TestSelfUploadVogRequiresDateOfBirth(t *testing.T) {
 	e.addMembership(me.ID, orgID, organization.RoleMember)
 	// No date of birth set: the member must re-identify first.
 
-	resp := e.doMultipart("/api/v1/orgs/acme/me/vog", "file", "vog.pdf", matchingVOGPDF(t))
+	resp := e.doMultipart(vogPath(e.mintOwnVogToken("acme"), "upload"), "file", "vog.pdf", matchingVOGPDF(t))
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("upload status = %d, want 409", resp.StatusCode)
@@ -120,7 +193,7 @@ func TestSelfUploadVogMismatch(t *testing.T) {
 	// Stored identity does not match the PDF's name.
 	setDateOfBirth(t, e, orgID, me.ID, "Someone", "Else", time.Date(1990, 4, 3, 0, 0, 0, 0, time.UTC))
 
-	resp := e.doMultipart("/api/v1/orgs/acme/me/vog", "file", "vog.pdf", matchingVOGPDF(t))
+	resp := e.doMultipart(vogPath(e.mintOwnVogToken("acme"), "upload"), "file", "vog.pdf", matchingVOGPDF(t))
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("upload status = %d, want 422", resp.StatusCode)
@@ -142,7 +215,7 @@ func TestAdminUploadVogOnBehalf(t *testing.T) {
 
 	member := e.createUser("jan@example.test")
 	e.addMembership(member, orgID, organization.RoleMember)
-	setDateOfBirth(t, e, orgID, member, "Jan Willem", "van der Jansen", time.Date(1990, 4, 3, 0, 0, 0, 0, time.UTC))
+	setSampleIdentity(t, e, orgID, member)
 
 	resp := e.doMultipart("/api/v1/orgs/acme/members/"+member.String()+"/vog", "file", "vog.pdf", matchingVOGPDF(t))
 	defer func() { _ = resp.Body.Close() }()
@@ -223,5 +296,191 @@ func TestScreeningSettingsSaveAndGet(t *testing.T) {
 	}
 	if !settings.Configured || settings.RequiredFor != "both" {
 		t.Errorf("settings = %+v, want configured/both", settings)
+	}
+}
+
+// ownVogBody mirrors organization's ownVogState as the org detail carries it.
+type ownVogBody struct {
+	Status           string `json:"status"`
+	AcceptCredential bool   `json:"acceptCredential"`
+	NeedsIdentity    bool   `json:"needsIdentity"`
+}
+
+type orgDetailBody struct {
+	Identity *struct {
+		Status string `json:"status"`
+	} `json:"identity"`
+	Vog *ownVogBody `json:"vog"`
+}
+
+func (e *testEnv) orgDetail(slug string) orgDetailBody {
+	e.t.Helper()
+	resp := e.do(http.MethodGet, "/api/v1/orgs/"+slug, nil)
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		e.t.Fatalf("GET org detail = %d, want 200", resp.StatusCode)
+	}
+	return decodeJSON[orgDetailBody](e.t, resp)
+}
+
+// acceptVogCredential turns on the org's pbdf.vog opt-in with the given
+// required codes, as the currently signed-in admin.
+func (e *testEnv) acceptVogCredential(slug string, requiredCodes ...string) {
+	e.t.Helper()
+	payload, _ := json.Marshal(map[string]any{
+		"requiredFor":                 "both",
+		"requiredCodes":               requiredCodes,
+		"recheckAnchor":               "issue_date",
+		"overdueReminderIntervalDays": 7,
+		"overdueReminderMaxCount":     4,
+		"overdueConsequence":          "flag",
+		"acceptYiviCredential":        true,
+	})
+	resp := e.do(http.MethodPut, "/api/v1/orgs/"+slug+"/screening-settings", bytes.NewReader(payload))
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		e.t.Fatalf("save screening settings = %d, want 200", resp.StatusCode)
+	}
+}
+
+// A member who never identified (no date of birth on file) is asked for a
+// VOG. Instead of the 409 the plain paths answer, one combined wallet session
+// discloses identity and pbdf.vog together: the identity is written to the
+// membership and the VOG is matched against it.
+func TestUnidentifiedMemberDisclosesIdentityAndVogInOneSession(t *testing.T) {
+	e := setup(t)
+	orgID := e.adminOf("acme", "Acme", "boss@example.test")
+	e.acceptVogCredential("acme", "11")
+
+	member := e.createUserNamed("jan@example.test", "Jan Willem", "van der Jansen")
+	e.addMembership(member, orgID, organization.RoleMember)
+	e.loginAs("jan@example.test")
+
+	before := e.orgDetail("acme")
+	if before.Vog == nil || !before.Vog.NeedsIdentity {
+		t.Fatalf("own vog state before = %+v, want needsIdentity", before.Vog)
+	}
+
+	token := e.mintOwnVogToken("acme")
+
+	// The plain credential path still refuses: nothing to match against yet.
+	e.discloses("jan@example.test", "Jan Willem", "van der Jansen")
+	e.fake.dateOfBirth = "1990-04-03"
+	e.fake.vog = &fakeVog{givenNames: "Jan Willem", surname: "van der Jansen", dateOfBirth: "1990-04-03", issueDate: time.Now().AddDate(0, -1, 0).Format("2006-01-02"), aspects: []string{"11"}}
+	plain := e.postJSON(vogPath(token, "credential-complete"), map[string]string{"disclosureToken": "presentation-jan@example.test"})
+	_ = plain.Body.Close()
+	if plain.StatusCode != http.StatusConflict {
+		t.Errorf("plain credential-complete = %d, want 409", plain.StatusCode)
+	}
+
+	session := e.do(http.MethodPost, vogPath(token, "identity-credential-session"), nil)
+	sessionBody := decodeJSON[struct {
+		ID         string `json:"id"`
+		WalletLink string `json:"walletLink"`
+	}](t, session)
+	if sessionBody.ID == "" || sessionBody.WalletLink == "" {
+		t.Fatalf("session = %+v, want an id and a wallet link", sessionBody)
+	}
+
+	done := e.postJSON(vogPath(token, "identity-credential-complete"), map[string]string{"disclosureToken": "presentation-jan@example.test"})
+	if done.StatusCode != http.StatusOK {
+		_ = done.Body.Close()
+		t.Fatalf("identity-credential-complete = %d, want 200", done.StatusCode)
+	}
+	outcome := decodeJSON[vogUploadResponse](t, done)
+	if outcome.Result != "valid" {
+		t.Errorf("result = %+v, want valid", outcome)
+	}
+
+	after := e.orgDetail("acme")
+	if after.Identity == nil || after.Identity.Status != organization.IdentityStatusVerified {
+		t.Errorf("identity after = %+v, want verified", after.Identity)
+	}
+	if after.Vog == nil || after.Vog.Status != organization.ScreeningStatusValid || after.Vog.NeedsIdentity {
+		t.Errorf("vog after = %+v, want valid and no longer needing identity", after.Vog)
+	}
+	if n := e.auditCount(orgID, "membership.identity_reverified"); n != 1 {
+		t.Errorf("membership.identity_reverified events = %d, want 1", n)
+	}
+}
+
+// The identity half is held to the re-identification rules: a VOG session
+// whose identity credential names someone else is refused with the
+// re-identification code and records nothing.
+func TestIdentityAndVogSessionRejectsAnotherPersonsIdentity(t *testing.T) {
+	e := setup(t)
+	orgID := e.adminOf("acme", "Acme", "boss@example.test")
+	e.acceptVogCredential("acme")
+	member := e.createUserNamed("jan@example.test", "Jan Willem", "van der Jansen")
+	e.addMembership(member, orgID, organization.RoleMember)
+	e.loginAs("jan@example.test")
+
+	e.discloses("jan@example.test", "Someone", "Else")
+	e.fake.dateOfBirth = "1990-04-03"
+	e.fake.vog = &fakeVog{givenNames: "Someone", surname: "Else", dateOfBirth: "1990-04-03", issueDate: time.Now().Format("2006-01-02")}
+	resp := e.postJSON(vogPath(e.mintOwnVogToken("acme"), "identity-credential-complete"), map[string]string{"disclosureToken": "presentation-jan@example.test"})
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("identity-credential-complete = %d, want 409", resp.StatusCode)
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Code != "name_mismatch" {
+		t.Errorf("code = %q, want name_mismatch", body.Code)
+	}
+	if e.orgDetail("acme").Vog.Status != organization.ScreeningStatusNone {
+		t.Error("a screening was recorded despite the rejected identity")
+	}
+}
+
+// The PDF path for a member who never identified: identify from the VOG link
+// first, then upload through the same link. The identity is the one printed on the
+// sample VOG, so the upload passes the match against it.
+func TestUnidentifiedMemberIdentifiesInAppThenUploads(t *testing.T) {
+	e := setup(t)
+	// The member was invited under the name printed on the sample VOG (an
+	// identity disclosure must match the name on file), but never identified.
+	s := sampleVOG()
+	e.createUserNamed("dibran@example.test", s.GivenNames, s.Surname)
+	me := e.login("dibran@example.test")
+	orgID := e.createOrg("Acme", "acme")
+	e.addMembership(me.ID, orgID, organization.RoleMember)
+	token := e.mintOwnVogToken("acme")
+
+	blocked := e.doMultipart(vogPath(token, "upload"), "file", "vog.pdf", matchingVOGPDF(t))
+	_ = blocked.Body.Close()
+	if blocked.StatusCode != http.StatusConflict {
+		t.Fatalf("upload before identifying = %d, want 409", blocked.StatusCode)
+	}
+
+	session := e.do(http.MethodPost, vogPath(token, "identity-session"), nil)
+	if id := decodeJSON[struct {
+		ID string `json:"id"`
+	}](t, session).ID; id == "" {
+		t.Fatal("identity-session returned no id")
+	}
+
+	e.discloses("dibran@example.test", s.GivenNames, s.Surname)
+	e.fake.dateOfBirth = s.DateOfBirth.Format("2006-01-02")
+	done := e.postJSON(vogPath(token, "identity-complete"), map[string]string{"disclosureToken": disclosureToken})
+	_ = done.Body.Close()
+	if done.StatusCode != http.StatusNoContent {
+		t.Fatalf("identity-complete = %d, want 204", done.StatusCode)
+	}
+	if detail := e.orgDetail("acme"); detail.Vog == nil || detail.Vog.NeedsIdentity {
+		t.Fatalf("own vog state after identifying = %+v, want identity no longer needed", detail.Vog)
+	}
+
+	resp := e.doMultipart(vogPath(token, "upload"), "file", "vog.pdf", matchingVOGPDF(t))
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		t.Fatalf("upload after identifying = %d, want 200", resp.StatusCode)
+	}
+	if outcome := decodeJSON[vogUploadResponse](t, resp); outcome.Result != "valid" {
+		t.Errorf("result = %+v, want valid", outcome)
 	}
 }

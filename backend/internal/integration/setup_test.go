@@ -10,9 +10,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -49,6 +51,9 @@ const disclosureToken = "test-token"
 // fakeVerifier stands in for the EUDI verifier: Result discloses the configured
 // email (and optionally name), so a /claim logs in as that user. The claim shape
 // mirrors the one proven against extractEmail in internal/auth/disclosure_test.go.
+// Claims are reported per credential (ByCredential) as the real client does,
+// and flattened - so a combined identity+VOG presentation reproduces the
+// dateOfBirth collision the per-credential view exists for.
 type fakeVerifier struct {
 	email       string
 	givenNames  string
@@ -59,6 +64,18 @@ type fakeVerifier struct {
 	// compares against the org's policy. Zero means "unknown", as it is for a
 	// presentation that carried no identity credential.
 	identityIssuedAt time.Time
+	// vog, when set, adds a pbdf.vog credential to every presentation.
+	vog *fakeVog
+}
+
+// fakeVog is a disclosed pbdf.vog credential: the identity printed on it and
+// the aspect codes it covers (disclosed as aspectNN = "yes").
+type fakeVog struct {
+	givenNames  string
+	surname     string
+	dateOfBirth string
+	issueDate   string
+	aspects     []string
 }
 
 func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.Scope, _ ...string) (openid4vpverifier.Session, error) {
@@ -66,15 +83,37 @@ func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.
 }
 
 func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Presentation, error) {
-	claims := map[string]string{openid4vpverifier.ClaimEmail: f.email}
-	if f.givenNames != "" || f.familyName != "" {
-		claims[openid4vpverifier.ClaimGivenNames] = f.givenNames
-		claims[openid4vpverifier.ClaimFamilyName] = f.familyName
+	byCredential := map[string]map[string]string{
+		"email": {openid4vpverifier.ClaimEmail: f.email},
 	}
-	if f.dateOfBirth != "" {
-		claims[openid4vpverifier.ClaimDateOfBirth] = f.dateOfBirth
+	if f.givenNames != "" || f.familyName != "" || f.dateOfBirth != "" {
+		passport := map[string]string{}
+		if f.givenNames != "" || f.familyName != "" {
+			passport[openid4vpverifier.ClaimGivenNames] = f.givenNames
+			passport[openid4vpverifier.ClaimFamilyName] = f.familyName
+		}
+		if f.dateOfBirth != "" {
+			passport[openid4vpverifier.ClaimDateOfBirth] = f.dateOfBirth
+		}
+		byCredential["passport"] = passport
 	}
-	return openid4vpverifier.Presentation{Claims: claims, IdentityIssuedAt: f.identityIssuedAt}, nil
+	if f.vog != nil {
+		vogClaims := map[string]string{
+			openid4vpverifier.ClaimVogGivenNames:  f.vog.givenNames,
+			openid4vpverifier.ClaimVogSurname:     f.vog.surname,
+			openid4vpverifier.ClaimVogDateOfBirth: f.vog.dateOfBirth,
+			openid4vpverifier.ClaimVogIssueDate:   f.vog.issueDate,
+		}
+		for _, code := range f.vog.aspects {
+			vogClaims[openid4vpverifier.VogAspectClaim(code)] = "yes"
+		}
+		byCredential["vog"] = vogClaims
+	}
+	claims := map[string]string{}
+	for _, c := range byCredential {
+		maps.Copy(claims, c)
+	}
+	return openid4vpverifier.Presentation{Claims: claims, ByCredential: byCredential, IdentityIssuedAt: f.identityIssuedAt}, nil
 }
 
 func (f *fakeVerifier) Status(_ context.Context, _ string) (string, error) {
@@ -136,7 +175,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
 	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)
-	screeningService := organization.NewScreeningService(orgStore, vog.StubValidator{Code: vog.ResponseAuthentic}, authService, nil)
+	screeningService := organization.NewScreeningService(orgStore, vog.StubValidator{Code: vog.ResponseAuthentic}, vogParser(t), authService, orgService, nil)
 	// nil mailer: invitation e-mail delivery is best-effort and not exercised here.
 	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins, export.NewStore(pool, audit.NewDBRecorder()))
 
@@ -300,4 +339,25 @@ func (e *testEnv) addMembership(userID, orgID uuid.UUID, role string) {
 	if err != nil {
 		e.t.Fatalf("add membership: %v", err)
 	}
+}
+
+// pdfiumOnce builds the one PDFium WebAssembly pool the integration binary
+// shares: compiling the module takes seconds, and every test's server assembly
+// asks for a parser. It is created lazily, after setup's TEST_DATABASE_URL
+// skip, so a run without a database never pays for it.
+var (
+	pdfiumOnce   sync.Once
+	pdfiumParser *vog.PDFiumParser
+	pdfiumErr    error
+)
+
+func vogParser(t *testing.T) *vog.PDFiumParser {
+	t.Helper()
+	pdfiumOnce.Do(func() {
+		pdfiumParser, pdfiumErr = vog.NewPDFiumParser()
+	})
+	if pdfiumErr != nil {
+		t.Fatalf("pdfium parser: %v", pdfiumErr)
+	}
+	return pdfiumParser
 }

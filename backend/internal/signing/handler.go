@@ -17,6 +17,10 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
+// maxDeclineReasonLength bounds the free-text decline reason, mirroring
+// internal/organization's mandate-revocation reason cap.
+const maxDeclineReasonLength = 500
+
 const (
 	// maxUploadMiB is the accepted size of an uploaded PDF, in MiB. It matches the
 	// documented per-file cap on a QERDS attachment (qerds.maxAttachmentBytes), the
@@ -40,6 +44,7 @@ type signingService interface {
 	StartLink(ctx context.Context, orgID, userID uuid.UUID, slug string) (Start, error)
 	CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, slug, filename string, pdf []byte, signers []SignerInput, mode string, rec RecipientInput) (uuid.UUID, error)
 	StartSign(ctx context.Context, orgID, userID uuid.UUID, slug string, requestID uuid.UUID) (Start, error)
+	DeclineSign(ctx context.Context, orgID, userID, requestID uuid.UUID, reason string) error
 	HandleCallback(ctx context.Context, code, state string) string
 	GetRequest(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) (Request, error)
 	GetSignedDocument(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) ([]byte, string, error)
@@ -52,6 +57,7 @@ type signingService interface {
 	ExternalView(ctx context.Context, token string) (ExternalView, error)
 	StartExternalLink(ctx context.Context, token string) (Start, error)
 	StartExternalSign(ctx context.Context, token string) (Start, error)
+	DeclineExternalSign(ctx context.Context, token, reason string) error
 	ExternalDocument(ctx context.Context, token string) ([]byte, string, error)
 }
 
@@ -84,6 +90,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/signing/requests", admin(respond.HandlerFunc(h.listRequests)))
 	mux.Handle("GET /orgs/{slug}/signing/requests/pending", member(respond.HandlerFunc(h.listPending)))
 	mux.Handle("POST /orgs/{slug}/signing/requests/{id}/sign", member(respond.HandlerFunc(h.signRequest)))
+	mux.Handle("POST /orgs/{slug}/signing/requests/{id}/decline", member(respond.HandlerFunc(h.declineRequest)))
 	mux.Handle("GET /orgs/{slug}/signing/requests/{id}", member(respond.HandlerFunc(h.getRequest)))
 	mux.Handle("GET /orgs/{slug}/signing/requests/{id}/document", member(respond.HandlerFunc(h.getDocument)))
 
@@ -99,6 +106,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /signing/external/{token}/document", respond.HandlerFunc(h.externalDocument))
 	mux.Handle("POST /signing/external/{token}/credential/link", respond.HandlerFunc(h.externalLink))
 	mux.Handle("POST /signing/external/{token}/sign", respond.HandlerFunc(h.externalSign))
+	mux.Handle("POST /signing/external/{token}/decline", respond.HandlerFunc(h.externalDecline))
 }
 
 // getAvailability reports whether a signing provider is configured for the org.
@@ -216,6 +224,50 @@ func (h *Handler) signRequest(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	respond.JSON(w, r, http.StatusOK, start)
+	return nil
+}
+
+// declineRequestBody is a decline's optional free-text reason. Absent means no
+// reason was given, which is the common case and not an error.
+type declineRequestBody struct {
+	Reason string `json:"reason"`
+}
+
+// parseDeclineReason reads a decline's optional reason from the request body. An
+// empty body is the common case (no reason given); anything present but
+// unparseable, or over maxDeclineReasonLength, is rejected.
+func parseDeclineReason(r *http.Request) (string, error) {
+	var body declineRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		return "", &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "invalid request body"}
+	}
+	reason := strings.TrimSpace(body.Reason)
+	if len(reason) > maxDeclineReasonLength {
+		return "", &respond.APIError{
+			Status: http.StatusBadRequest, Code: "invalid_input",
+			Message: fmt.Sprintf("reason must be at most %d characters", maxDeclineReasonLength),
+		}
+	}
+	return reason, nil
+}
+
+// declineRequest lets a pending signer refuse to sign the request, with an
+// optional reason. It stops the request outright rather than starting a ceremony.
+func (h *Handler) declineRequest(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	u := auth.UserFromContext(r.Context())
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+	}
+	reason, err := parseDeclineReason(r)
+	if err != nil {
+		return err
+	}
+	if err := h.svc.DeclineSign(r.Context(), org.ID, u.ID, id, reason); err != nil {
+		return h.mapStartError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
@@ -375,6 +427,19 @@ func (h *Handler) externalSign(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	respond.JSON(w, r, http.StatusOK, start)
+	return nil
+}
+
+// externalDecline lets an external signee refuse to sign, with an optional reason.
+func (h *Handler) externalDecline(w http.ResponseWriter, r *http.Request) error {
+	reason, err := parseDeclineReason(r)
+	if err != nil {
+		return err
+	}
+	if err := h.svc.DeclineExternalSign(r.Context(), r.PathValue("token"), reason); err != nil {
+		return h.mapExternalError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

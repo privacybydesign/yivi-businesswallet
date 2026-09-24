@@ -161,3 +161,16 @@ const BANNER_STATUSES = [
 export function needsVogBanner(vog: { status: string } | undefined): boolean {
   return vog !== undefined && BANNER_STATUSES.includes(vog.status);
 }
+
+// SCREENING_OFF is the policy's requiredFor when an org requires a VOG from
+// nobody - including an org that never saved a policy at all.
+const SCREENING_OFF = "nobody";
+
+// screeningConfigured says whether the org's screening policy requires a VOG
+// from anyone, which is what earns the member list its VOG column. Unknown
+// (still loading, or not an admin) reads as off.
+export function screeningConfigured(
+  settings: { requiredFor: string } | undefined,
+): boolean {
+  return settings !== undefined && settings.requiredFor !== SCREENING_OFF;
+}

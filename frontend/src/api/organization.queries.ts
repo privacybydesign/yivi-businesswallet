@@ -13,12 +13,12 @@ import type {
 } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
-  completeVogCredential,
   createDepartment,
   deleteDepartment,
   deleteOrganization,
   getIdentitySettings,
   getMemberAuditEvents,
+  getMemberInsights,
   getMyOrganizations,
   getOrganization,
   getOrganizationAuditEvents,
@@ -30,6 +30,7 @@ import {
   getScreeningSettings,
   inviteMember,
   mintOwnReidentifyLink,
+  mintOwnVogLink,
   removeMember,
   requestIdentification,
   requestVog,
@@ -49,6 +50,7 @@ import type {
   IdentitySettings,
   IdentitySettingsInput,
   Member,
+  MemberInsights,
   MemberListPage,
   MemberListParams,
   MemberType,
@@ -72,6 +74,24 @@ export function organizationQueryKey(slug: string): readonly string[] {
 
 export function organizationMembersQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "members"];
+}
+
+// Nested under organizationQueryKey(slug) on purpose: every mutation that can
+// move a member's identity or VOG status already invalidates that prefix, so
+// the insights refresh with the rest of the org detail.
+export function memberInsightsQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "member-insights"];
+}
+
+export function useMemberInsightsQuery(
+  slug: string,
+  enabled: boolean,
+): UseQueryResult<MemberInsights, Error> {
+  return useQuery({
+    queryKey: memberInsightsQueryKey(slug),
+    queryFn: ({ signal }) => getMemberInsights(slug, signal),
+    enabled: enabled && slug !== "",
+  });
 }
 
 export function organizationDepartmentsQueryKey(
@@ -603,39 +623,46 @@ export function useRequestVogMutation(
   });
 }
 
-// useUploadVogMutation backs both the member's own upload and an admin's
-// upload on a member's behalf (userId set). A rejection is a successful
-// response (result !== "valid"), not a thrown error, so onSuccess always
-// invalidates - the point of uploading is exactly that the status may have
-// changed.
+// useUploadVogMutation is an admin uploading a VOG on a member's behalf. A
+// rejection is a successful response (result !== "valid"), not a thrown
+// error, so onSuccess always invalidates - the point of uploading is exactly
+// that the status may have changed.
 export function useUploadVogMutation(
   slug: string,
-  userId?: string,
+  userId: string,
 ): UseMutationResult<UploadVogResult, Error, File> {
   const queryClient = useQueryClient();
-  const invalidate = (id?: string): void => {
-    void queryClient.invalidateQueries({
-      queryKey: organizationMembersQueryKey(slug),
-    });
-    if (id) {
-      void queryClient.invalidateQueries({
-        queryKey: organizationMemberQueryKey(slug, id),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: screeningHistoryQueryKey(slug, id),
-      });
-    }
-    void queryClient.invalidateQueries({
-      queryKey: organizationQueryKey(slug),
-    });
-    void queryClient.invalidateQueries({
-      queryKey: organizationAuditEventsQueryKey(slug),
-    });
-  };
   return useMutation({
-    mutationFn: (file) => uploadVog(slug, file, userId),
+    mutationFn: (file) => uploadVog(slug, userId, file),
     meta: { suppressErrorToast: true },
-    onSuccess: () => invalidate(userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationMemberQueryKey(slug, userId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: screeningHistoryQueryKey(slug, userId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+// The member's own "submit VOG" action from the dashboard banner: it mints a
+// link and the caller navigates to it, so there is nothing to cache.
+export function useMintOwnVogLinkMutation(
+  slug: string,
+): UseMutationResult<string, Error, void> {
+  return useMutation({
+    mutationFn: () => mintOwnVogLink(slug),
+    meta: { suppressErrorToast: true },
   });
 }
 
@@ -655,30 +682,5 @@ export function useScreeningHistoryQuery(
     queryKey: screeningHistoryQueryKey(slug, userId),
     queryFn: ({ signal }) => getScreeningHistory(slug, userId, signal),
     enabled: enabled && slug !== "" && userId !== "",
-  });
-}
-
-// The member's own pbdf.vog credential disclosure completion. Starting the
-// session is handled by IdentityDisclosure itself (vogCredentialSessionUrl);
-// this only finishes it once the wallet has disclosed.
-export function useCompleteVogCredentialMutation(
-  slug: string,
-): UseMutationResult<UploadVogResult, Error, string> {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (disclosureToken) =>
-      completeVogCredential(slug, disclosureToken),
-    meta: { suppressErrorToast: true },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: organizationMembersQueryKey(slug),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: organizationQueryKey(slug),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: organizationAuditEventsQueryKey(slug),
-      });
-    },
   });
 }

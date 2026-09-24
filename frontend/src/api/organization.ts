@@ -74,6 +74,9 @@ export const ownVogStateSchema = z.object({
   status: z.string(),
   validUntil: z.string().nullable(),
   acceptCredential: z.boolean(),
+  // No date of birth on file yet: a VOG cannot be matched until the member
+  // identifies (on the VOG page, or combined with the credential disclosure).
+  needsIdentity: z.boolean(),
 });
 
 export type OwnVogState = z.infer<typeof ownVogStateSchema>;
@@ -579,7 +582,7 @@ const requestVogResultSchema = z.object({ requested: z.number() });
 export type RequestVogResult = z.infer<typeof requestVogResultSchema>;
 
 // requestVog asks one or several members to submit a VOG now: it flips their
-// status to `requested` and mails each of them a link into the app. The bulk
+// status to `requested` and mails each of them a VOG link (/vog/<token>). The bulk
 // route is used for more than one member, mirroring requestIdentification.
 export function requestVog(
   slug: string,
@@ -602,7 +605,7 @@ export function requestVog(
   );
 }
 
-const uploadVogResultSchema = z.object({
+export const uploadVogResultSchema = z.object({
   result: z.string(),
   missingCodes: z.array(z.string()).optional(),
   rejectionReason: z.string().optional(),
@@ -626,7 +629,7 @@ export function vogOutcomeFromError(error: unknown): UploadVogResult | null {
   return parsed.success ? parsed.data : null;
 }
 
-async function resolveVogOutcome(
+export async function resolveVogOutcome(
   run: () => Promise<UploadVogResult>,
 ): Promise<UploadVogResult> {
   try {
@@ -638,29 +641,44 @@ async function resolveVogOutcome(
   }
 }
 
-// uploadVog submits a VOG PDF for validation (the caller's own membership, or,
-// with userId, an admin uploading on a member's behalf). `result` says
+// uploadVog is an admin uploading a VOG PDF on a member's behalf; a member
+// submits their own through the VOG link (api/vog-link.ts). `result` says
 // whether it passed; a rejection is a completed check, not a thrown error.
 export function uploadVog(
   slug: string,
+  userId: string,
   file: File,
-  userId?: string,
   signal?: AbortSignal,
 ): Promise<UploadVogResult> {
-  const base = `/api/v1/orgs/${encodeURIComponent(slug)}`;
-  const path = userId
-    ? `${base}/members/${encodeURIComponent(userId)}/vog`
-    : `${base}/me/vog`;
   return resolveVogOutcome(() => {
     const body = new FormData();
     body.append("file", file);
-    return request(path, {
-      schema: uploadVogResultSchema,
-      method: "POST",
-      body,
-      signal,
-    });
+    return request(
+      `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}/vog`,
+      {
+        schema: uploadVogResultSchema,
+        method: "POST",
+        body,
+        signal,
+      },
+    );
   });
+}
+
+const vogLinkSchema = z.object({ vogUrl: z.string() });
+
+// mintOwnVogLink is the dashboard banner's entry point: the caller mints a VOG
+// link for their own membership rather than waiting for the e-mail, through
+// the same token mechanism.
+export async function mintOwnVogLink(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const { vogUrl } = await request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/me/vog-token`,
+    { schema: vogLinkSchema, method: "POST", signal },
+  );
+  return vogUrl;
 }
 
 export const screeningRecordSchema = z.object({
@@ -693,29 +711,28 @@ export function getScreeningHistory(
   ).then((r) => r.history);
 }
 
-// vogCredentialSessionUrl is a URL builder, not a request call: it feeds
-// IdentityDisclosure's sessionUrl prop, which starts and polls the session
-// itself.
-export function vogCredentialSessionUrl(slug: string): string {
-  return `/api/v1/orgs/${encodeURIComponent(slug)}/me/vog/credential-session`;
-}
+// memberInsightsSchema mirrors organization.MemberInsights: the org-wide count
+// of active members per derived identity and screening status. Keys are the
+// backend's status strings; the record shape lets a status the backend adds
+// later flow through untouched.
+export const memberInsightsSchema = z.object({
+  members: z.number(),
+  identity: z.record(z.string(), z.number()),
+  screening: z.record(z.string(), z.number()),
+});
 
-export function completeVogCredential(
+export type MemberInsights = z.infer<typeof memberInsightsSchema>;
+
+// getMemberInsights is admin-only and counts server-side: the member list is
+// paged, so tallying it in the client would undercount any org past one page.
+export function getMemberInsights(
   slug: string,
-  disclosureToken: string,
   signal?: AbortSignal,
-): Promise<UploadVogResult> {
-  return resolveVogOutcome(() =>
-    request(
-      `/api/v1/orgs/${encodeURIComponent(slug)}/me/vog/credential-complete`,
-      {
-        schema: uploadVogResultSchema,
-        method: "POST",
-        body: { disclosureToken },
-        signal,
-      },
-    ),
-  );
+): Promise<MemberInsights> {
+  return request(`/api/v1/orgs/${encodeURIComponent(slug)}/member-insights`, {
+    schema: memberInsightsSchema,
+    signal,
+  });
 }
 
 export function getOrganizationDepartments(

@@ -18,10 +18,11 @@
     "signingUrl": "https://wallet.example.org/acme/signing",
     "exportUrl": "https://wallet.example.org/api/v1/export/download/sample",
     "exportExpiry": "24 hours",
+    "signerName": "Sam Jansen",
     "reidentifyUrl": "https://wallet.example.org/reidentify/sample",
     "dueDate": "2026-08-01",
     "reason": "Your last identity check has expired.",
-    "vogUrl": "https://wallet.example.org/acme/vog"
+    "vogUrl": "https://wallet.example.org/vog/sample"
   },
   "events": {
     "membership.invited": "Invited member",
@@ -65,7 +66,8 @@
     "attestation.key_revoked": "Revoked attestation key",
     "signing.requested": "Requested a document signature",
     "signing.completed": "Completed a document signature",
-    "signing.failed": "Document signature failed"
+    "signing.failed": "Document signature failed",
+    "signing.declined": "Declined a document signature"
   },
   "templates": {
     "credential_offer": {
@@ -221,6 +223,17 @@
         {
           "type": "footer"
         }
+      ]
+    },
+    "signature_declined": {
+      "subject": "{{signerName}} declined to sign {{documentName}}",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "A signer declined to sign your document" },
+        { "type": "paragraph", "text": "{{signerName}} declined to sign {{documentName}}." },
+        { "type": "paragraph", "text": "{{reason}}" },
+        { "type": "button", "label": "Review the request", "url": "{{signingUrl}}" },
+        { "type": "footer" }
       ]
     },
     "smtp_test": {

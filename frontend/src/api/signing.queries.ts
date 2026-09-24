@@ -14,6 +14,8 @@ import {
   SIGNER_STATUS,
   SIGNING_STATUS,
   createSigningRequest,
+  declineExternalSign,
+  declineSignRequest,
   getExternalSigning,
   getPendingSigningRequests,
   getSigningAvailability,
@@ -177,6 +179,31 @@ export function useStartSignRequestMutation(
   });
 }
 
+// useDeclineSignRequestMutation lets a pending signer refuse to sign a request.
+// Unlike starting a ceremony, this settles the request immediately, so it
+// invalidates the same queries create does (pending list + history) plus the
+// request's own detail, which the "to sign" card polls once declined.
+export function useDeclineSignRequestMutation(
+  slug: string,
+): UseMutationResult<void, Error, { id: string; reason: string }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }) => declineSignRequest(slug, id, reason),
+    meta: { suppressErrorToast: true },
+    onSuccess: (_data, { id }) => {
+      void queryClient.invalidateQueries({
+        queryKey: signingPendingQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: signingRequestsQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: signingRequestQueryKey(slug, id),
+      });
+    },
+  });
+}
+
 // The external-signee flow is keyed by the invitation token, not by an org slug —
 // the signee has no membership, so none of these queries live under an organisation.
 export function externalSigningQueryKey(token: string): readonly string[] {
@@ -214,6 +241,21 @@ export function useStartExternalSignMutation(
   return useMutation({
     mutationFn: () => startExternalSign(token),
     meta: { suppressErrorToast: true },
+  });
+}
+
+export function useDeclineExternalSignMutation(
+  token: string,
+): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (reason) => declineExternalSign(token, reason),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: externalSigningQueryKey(token),
+      });
+    },
   });
 }
 
