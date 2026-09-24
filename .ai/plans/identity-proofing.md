@@ -500,10 +500,10 @@ Each slice gets a `.ai/plans/<branch>.md`. After the last one, the durable knowl
 ## Open questions
 
 - [ ] **Who is the controller?** This spec assumes the customer is controller, the org is processor and Yivi is sub-processor. That needs a DPA template per customer before the first live key. The chain depends on who hosts the wallet: self-hosted, the operating org is processor and Yivi is sub-processor only for the shared engine; SaaS, Yivi hosts the wallet and is sub-processor for all of it.
-- [ ] **Does the OpenID4VP passport credential carry a portrait claim?** The live-face check on the Yivi path needs it. If it does not, that check stays on the IRMA path, or ships later. Answered: yes, passport, ID-card and driving-licence credentials all carry a portrait claim.
-- [ ] **Customer self-service.** Should customers get their own login to see their sessions, or is the org the only party in the UI? This spec keeps customers API-only. Answered: the org is the only party in the UI; customers have no login.
-- [ ] **Engine hosting.** Should the engine run next to each wallet deployment, or as one shared Yivi service? Face models and the CSCA masterlist favour one shared service. Data locality favours per deployment. Answered: one shared Yivi service.
-- [ ] **Pricing and metering.** Are usage counters per customer per month (the IPS `usage_counters` model) enough for invoicing? Answered: yes, enough for now.
+- [x] **Does the OpenID4VP passport credential carry a portrait claim?** The live-face check on the Yivi path needs it. If it does not, that check stays on the IRMA path, or ships later. Answered: yes, passport, ID-card and driving-licence credentials all carry a portrait claim.
+- [x] **Customer self-service.** Should customers get their own login to see their sessions, or is the org the only party in the UI? This spec keeps customers API-only. Answered: the org is the only party in the UI; customers have no login.
+- [x] **Engine hosting.** Should the engine run next to each wallet deployment, or as one shared Yivi service? Face models and the CSCA masterlist favour one shared service. Data locality favours per deployment. Answered: one shared Yivi service.
+- [x] **Pricing and metering.** Are usage counters per customer per month (the IPS `usage_counters` model) enough for invoicing? Answered: yes, enough for now.
 - [ ] **Aiming for `high`.** Is there a customer that needs `high`, which would justify a certified liveness vendor?
 - [ ] **Regula licence and capacity.** Does the current Regula licence cover wallet use by third-party customers, and at what volume? Should the wallet get its own Regula instance, or keep sharing the passport issuer's?
 - [ ] **Session-Flow branch.** Will it merge upstream before slice 0, and who owns the Idem app changes?
