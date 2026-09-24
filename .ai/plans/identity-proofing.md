@@ -507,3 +507,8 @@ Each slice gets a `.ai/plans/<branch>.md`. After the last one, the durable knowl
 - [ ] **Aiming for `high`.** Is there a customer that needs `high`, which would justify a certified liveness vendor?
 - [ ] **Regula licence and capacity.** Does the current Regula licence cover wallet use by third-party customers, and at what volume? Should the wallet get its own Regula instance, or keep sharing the passport issuer's?
 - [ ] **Session-Flow branch.** Will it merge upstream before slice 0, and who owns the Idem app changes?
+
+## Harvest
+
+- Convention to add/update in `.ai/conventions/`? **none** (no code lands in this design-only PR).
+- Feature doc to write/update in `.ai/features/`? **none yet**: this plan becomes `.ai/features/identity-proofing.md` once slice 0+ lands, per the plans/README Harvest step.
