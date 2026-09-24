@@ -22,8 +22,6 @@ const (
 	// The IPS API key environment. IPS gives it no runtime meaning today (a
 	// sandbox is a tenant flag, not a key kind), so the wallet always mints live.
 	keyEnvironment = "live"
-	// deviceRoleNative is the vcmrtd app slot; the web slot has no end-user page yet.
-	deviceRoleNative = "native"
 
 	// maxResponseBytes caps any IPS answer. A session result embeds the document
 	// and face images, which is what sets the size; everything else is small.
@@ -160,34 +158,39 @@ func (c *Client) CreateSession(ctx context.Context, apiKey string, in SessionInp
 	if in.TTL > 0 {
 		body["ttlSeconds"] = int(in.TTL / time.Second)
 	}
-	var out struct {
-		ID        string     `json:"id"`
-		Token     string     `json:"token"`
-		ExpiresAt time.Time  `json:"expiresAt"`
-		Claims    claimsView `json:"claims"`
-	}
+	var out createdSessionView
 	if err := c.do(ctx, http.MethodPost, "/sessions", tenantHeaders(apiKey), body, &out); err != nil {
 		return Session{}, fmt.Errorf("proofingprovider: create session: %w", err)
 	}
-	if out.ID == "" || out.Token == "" {
-		return Session{}, errors.New("proofingprovider: create session: answer carries no session id or token")
+	sess, err := out.session()
+	if err != nil {
+		return Session{}, fmt.Errorf("proofingprovider: create session: %w", err)
 	}
-	return Session{ID: out.ID, Token: out.Token, ExpiresAt: out.ExpiresAt, Claim: out.Claims.Native.claim()}, nil
+	return sess, nil
 }
 
-// MintClaim asks for a fresh vcmrtd claim link. It returns nil when the phone
-// slot is already claimed: the subject is past the QR and busy in the app.
-func (c *Client) MintClaim(ctx context.Context, apiKey, sessionID, sessionToken string) (*Claim, error) {
-	var out claimsView
-	path := "/sessions/" + url.PathEscape(sessionID) + "/claim-tokens"
-	body := map[string]any{"role": deviceRoleNative}
-	if err := c.do(ctx, http.MethodPost, path, sessionHeaders(apiKey, sessionToken), body, &out); err != nil {
-		return nil, fmt.Errorf("proofingprovider: mint claim: %w", err)
-	}
-	return out.Native.claim(), nil
+// createdSessionView is IPS's answer to creating and to restarting a session.
+type createdSessionView struct {
+	ID          string     `json:"id"`
+	Token       string     `json:"token"`
+	ExpiresAt   time.Time  `json:"expiresAt"`
+	FlowVersion int        `json:"flowVersion"`
+	Claims      claimsView `json:"claims"`
 }
 
-// SessionResult reads a session's status and assurance summary.
+func (v createdSessionView) session() (Session, error) {
+	if v.ID == "" || v.Token == "" {
+		return Session{}, errors.New("answer carries no session id or token")
+	}
+	return Session{
+		ID: v.ID, Token: v.Token, ExpiresAt: v.ExpiresAt, FlowVersion: v.FlowVersion,
+		Claim: v.Claims.Native.claim(),
+	}, nil
+}
+
+func sessionPath(id string) string { return "/sessions/" + url.PathEscape(id) }
+
+// SessionResult reads a session's status, assurance summary and the holder's name.
 func (c *Client) SessionResult(ctx context.Context, apiKey, sessionID, sessionToken string) (Result, error) {
 	var out struct {
 		Status      Status     `json:"status"`
@@ -198,9 +201,16 @@ func (c *Client) SessionResult(ctx context.Context, apiKey, sessionID, sessionTo
 				Level      string `json:"level"`
 				EIDASLevel string `json:"eidasLevel"`
 			} `json:"assurance"`
+			// Only the name fields of the document are decoded; the number, the
+			// date of birth and the rest are left in the body unread.
+			Document *struct {
+				DisplayName string `json:"displayName"`
+				FirstName   string `json:"firstName"`
+				LastName    string `json:"lastName"`
+			} `json:"document"`
 		} `json:"result"`
 	}
-	path := "/sessions/" + url.PathEscape(sessionID) + "/result"
+	path := sessionPath(sessionID) + "/result"
 	if err := c.do(ctx, http.MethodGet, path, sessionHeaders(apiKey, sessionToken), nil, &out); err != nil {
 		return Result{}, fmt.Errorf("proofingprovider: session result: %w", err)
 	}
@@ -208,6 +218,13 @@ func (c *Client) SessionResult(ctx context.Context, apiKey, sessionID, sessionTo
 	if out.Result != nil && out.Result.Assurance != nil {
 		res.AssuranceLevel = out.Result.Assurance.Level
 		res.EIDASLevel = out.Result.Assurance.EIDASLevel
+	}
+	if out.Result != nil && out.Result.Document != nil {
+		doc := out.Result.Document
+		res.Name = strings.TrimSpace(doc.DisplayName)
+		if res.Name == "" {
+			res.Name = strings.TrimSpace(strings.TrimSpace(doc.FirstName) + " " + strings.TrimSpace(doc.LastName))
+		}
 	}
 	return res, nil
 }

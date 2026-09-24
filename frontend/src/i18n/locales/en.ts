@@ -32,6 +32,7 @@ export const en = {
     members: "Members",
     identityProofing: "Identity proofing",
     identityProofingFlows: "Proofing flows",
+    customers: "Customers",
     qerds: "Secure delivery",
     attestations: "Attestations",
     postguard: "PostGuard files",
@@ -410,25 +411,6 @@ export const en = {
     title: "Identity proofing",
     subtitle:
       "Verify a person's identity with their identity document and face.",
-    members: {
-      title: "Members",
-      hint: "Everyone in this organization, admins and externals included. Pick a flow and press the mail button: the member gets a QR code and a button for one link, valid for 15 minutes.",
-      search: "Search members",
-      member: "Member",
-      lastRequest: "Last request",
-      flow: "Flow",
-      send: "Send",
-      empty: "No members found.",
-      noFlowsAdmin:
-        "No flow is available to members yet. Create one and tick it under",
-      noFlowsMember:
-        "An admin has to make a flow available before you can send a request.",
-      admin: "Admin",
-      external: "External",
-      externalOf: "External · {{org}}",
-      flowFor: "Flow for {{name}}",
-      sendTo: "Mail a proofing request to {{name}}",
-    },
     requests: {
       title: "Requests",
       titleOwn: "Your requests",
@@ -439,6 +421,8 @@ export const en = {
       status: "Status",
       assurance: "Assurance",
       created: "Sent",
+      customer: "Customer",
+      verifiedAs: "Verified as {{name}}",
     },
     status: {
       pending: "Link sent",
@@ -447,6 +431,15 @@ export const en = {
       rejected: "Rejected",
       needsReview: "Needs review",
       expired: "Expired",
+    },
+    rejectionReasons: {
+      documentTypeNotAccepted: "document type not accepted by the flow",
+      documentCountryNotAccepted: "issuing country not accepted by the flow",
+      faceStepNotCompleted: "face verification not completed",
+      faceNoMatch: "face did not match the document",
+      docTampered: "document chip data was tampered with",
+      chipCloneDetected: "cloned document chip detected",
+      docExpired: "document expired",
     },
     errors: {
       noEncryptionKey:
@@ -457,34 +450,69 @@ export const en = {
       flowNotAllowed:
         "That flow is no longer available to members. Pick another one.",
       memberNotFound: "That person is not a member of this organization.",
-      linkNotFound: "This link is invalid or has expired.",
+      customerNotFound: "That customer does not exist.",
+      customerExists:
+        "Your organization already has a customer with this name.",
+      flowNotAssigned:
+        "That flow is no longer assigned to this customer. Pick another one.",
       generic: "Something went wrong. Please try again.",
     },
-    proof: {
-      title: "Verify your identity",
-      requestedBy: "{{org}} asks you to verify your identity.",
-      steps:
-        "You need the vcmrtd app on your phone and your passport or identity card with a chip.",
-      scanHint:
-        "Scan this QR code with the vcmrtd app, or open the app from this phone.",
-      validUntil: "This link is valid until {{time}}.",
-      retry: "Try again",
-      openApp: "Open in the app",
-      refreshing: "Getting a new QR code…",
-      continueInApp: "Continue in the vcmrtd app on your phone.",
-      waiting: "Waiting for the app…",
-      approvedTitle: "Your identity is verified",
-      approvedHint: "You can close this page. {{org}} has been notified.",
-      rejectedTitle: "Your identity could not be verified",
-      rejectedHint: "Contact {{org}} if you think this is a mistake.",
-      reviewTitle: "Your verification is being reviewed",
-      reviewHint: "You can close this page. {{org}} will be told the outcome.",
-      expiredTitle: "This link has expired",
-      expiredHint: "Ask {{org}} to send you a new one.",
-      notFoundTitle: "Link not found",
-      notFoundHint: "This link is invalid or has expired.",
-      errorTitle: "Something went wrong",
-      errorHint: "Please reload the page to try again.",
+  },
+  customers: {
+    title: "Customers",
+    subtitle:
+      "Your organization's customers, the flows each may use, and the people you verify for them.",
+    list: {
+      title: "Customers",
+      hint: "A customer has no login of its own: members of your organization send proofing requests for it, on the flows assigned to it.",
+      empty: "No customers yet.",
+      name: "Customer",
+      flows: "Assigned flows",
+      created: "Added",
+      noFlows: "None assigned",
+      flowCount_one: "{{count}} flow",
+      flowCount_other: "{{count}} flows",
+      open: "Open {{name}}",
+    },
+    new: {
+      title: "New customer",
+      name: "Name",
+      namePlaceholder: "Initech BV",
+      nameRequired: "Enter a name.",
+      create: "Add customer",
+    },
+    detail: {
+      back: "All customers",
+      rename: "Rename",
+      name: "Name",
+      save: "Save",
+      cancel: "Cancel",
+      notFound: "This customer does not exist.",
+    },
+    flows: {
+      title: "Assigned flows",
+      hint: "Requests for this customer can use the flows ticked here, whether or not members may use them; the default is preselected. Flows are defined under Proofing flows.",
+      empty: "Your organization has no flows yet.",
+      default: "Default",
+      save: "Save assigned flows",
+    },
+    send: {
+      title: "Verify a person",
+      hint: "The person gets a mail with a QR code and a link for the vcmrtd app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request. They need no account.",
+      email: "E-mail address",
+      emailRequired: "Enter a valid e-mail address.",
+      name: "Name (optional)",
+      nameHint:
+        "Leave it empty if you do not know it: once verified, the name on their document is shown here for 30 days.",
+      flow: "Flow",
+      submit: "Send request",
+      noFlowsAdmin: "Assign a flow to this customer first.",
+      noFlowsMember:
+        "An admin has to assign a flow to this customer before you can send a request.",
+    },
+    requests: {
+      title: "Requests for this customer",
+      titleOwn: "Your requests for this customer",
     },
   },
   identityProofingFlows: {
@@ -763,6 +791,9 @@ export const en = {
     identityProofingMailNotSent:
       "Request created, but the mail could not be sent. Check this organization's mail settings.",
     identityProofingRequestSent: "Request sent",
+    identityProofingCustomerCreated: "Customer added",
+    identityProofingCustomerRenamed: "Customer renamed",
+    identityProofingCustomerFlowsSaved: "Assigned flows saved",
     notificationSettingsSaved: "Notification settings saved",
     provisioningSettingsSaved: "Directory sync settings saved",
     provisioningSyncCompleted: "Directory sync completed",
@@ -869,6 +900,12 @@ export const en = {
       subject: "Subject",
     },
     noSubject: "—",
+    fields: {
+      assuranceLevel: "Assurance",
+      eidasLevel: "eIDAS level",
+      errorCode: "Reason",
+      ipsStatus: "Proofing service status",
+    },
     targets: {
       organization: "Organization",
       member: "Member",
@@ -909,6 +946,7 @@ export const en = {
       orgIdentityProofingSettings: "Identity proofing settings",
       identityProofingFlow: "Identity proofing flow",
       identityProofingRequest: "Identity proofing request",
+      identityProofingCustomer: "Identity proofing customer",
     },
     actions: {
       orgCreated: "Created organization",
@@ -1017,8 +1055,18 @@ export const en = {
       identityProofingFlowVersionActivated:
         "Activated a version of an identity proofing flow",
       identityProofingRequested: "Sent identity proofing request",
+      identityProofingSessionCreated: "Created identity proofing session",
       identityProofingSessionStarted: "Started identity proofing",
+      identityProofingSessionEnded:
+        "Identity proofing session ended unfinished",
       identityProofingCompleted: "Identity proofing completed",
+      identityProofingApproved: "Identity verified",
+      identityProofingRejected: "Identity verification rejected",
+      identityProofingNeedsReview: "Identity verification needs review",
+      identityProofingCustomerCreated: "Added identity proofing customer",
+      identityProofingCustomerUpdated: "Renamed identity proofing customer",
+      identityProofingCustomerFlowsConfigured:
+        "Changed the identity proofing flows assigned to a customer",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
     },
@@ -1101,6 +1149,14 @@ export const en = {
     requestIdentificationHint:
       "Asks this member to re-confirm their identity now. They get an e-mail with a link.",
     identityRequested: "Identification requested",
+    proofing: {
+      flow: "Identity proofing flow",
+      send: "Send identity proofing",
+      hint: "Mails this member a QR code and a link for the vcmrtd app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request.",
+      noFlows:
+        "No flow is available to members yet. Create one and tick it under",
+      lastRequest: "Last proofing:",
+    },
     vogValidUntil: "VOG valid until",
     vogNone: "No VOG on file",
     requestVog: "Request VOG",

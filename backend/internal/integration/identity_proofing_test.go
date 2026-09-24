@@ -29,11 +29,6 @@ type proofingRequestResp struct {
 	MailSent      bool   `json:"mailSent"`
 }
 
-type proofingMemberResp struct {
-	UserID string `json:"userId"`
-	Role   string `json:"role"`
-}
-
 func TestIdentityProofingAdminHTTPFlow(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
@@ -60,11 +55,6 @@ func TestIdentityProofingAdminHTTPFlow(t *testing.T) {
 	flow := decodeJSON[proofingFlowResp](t, resp)
 	if !flow.Completable || flow.Allowed {
 		t.Errorf("created flow = %+v; want completable and not yet available to members", flow)
-	}
-
-	members := decodeJSON[[]proofingMemberResp](t, env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/members", nil))
-	if len(members) != 1 || members[0].UserID != me.ID.String() || members[0].Role != string(organization.RoleAdmin) {
-		t.Fatalf("members = %+v, want the admin themself", members)
 	}
 
 	resp = env.postJSON("/api/v1/orgs/acme/identity-proofing/requests", map[string]any{
@@ -142,12 +132,6 @@ func TestIdentityProofingAdminHTTPFlow(t *testing.T) {
 	if len(list) != 1 || list[0].ID != created.ID {
 		t.Errorf("list = %+v, want the one request", list)
 	}
-
-	resp = env.do(http.MethodGet, "/api/v1/identity-proofing/not-a-token", nil)
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("unknown proofing link = %d, want 404", resp.StatusCode)
-	}
-	_ = resp.Body.Close()
 }
 
 func TestIdentityProofingMemberCanRequestButNotManage(t *testing.T) {
@@ -189,4 +173,121 @@ func TestIdentityProofingMemberCanRequestButNotManage(t *testing.T) {
 	if len(list) != 0 {
 		t.Errorf("member list = %+v, want empty", list)
 	}
+}
+
+type proofingCustomerResp struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	FlowIDs       []string `json:"flowIds"`
+	DefaultFlowID string   `json:"defaultFlowId"`
+}
+
+type proofingCustomerFlowResp struct {
+	ID       string `json:"id"`
+	Assigned bool   `json:"assigned"`
+	Default  bool   `json:"default"`
+}
+
+type proofingCustomerRequestResp struct {
+	ID            string `json:"id"`
+	Status        string `json:"status"`
+	SubjectUserID string `json:"subjectUserId"`
+	CustomerID    string `json:"customerId"`
+	CustomerName  string `json:"customerName"`
+	SubjectEmail  string `json:"subjectEmail"`
+	SubjectName   string `json:"subjectName"`
+}
+
+// An admin creates a customer and assigns it a flow members may not use; a
+// request for that customer then goes to an external subject by address alone.
+func TestIdentityProofingCustomerHTTPFlow(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+
+	resp := env.postJSON("/api/v1/orgs/acme/identity-proofing/flows", map[string]any{
+		"name": "Passport only", "steps": []string{"document_capture", "nfc_read"}, "requiredChecks": []string{"nfc.passive_auth"},
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create flow = %d, want 201", resp.StatusCode)
+	}
+	flow := decodeJSON[proofingFlowResp](t, resp)
+
+	resp = env.postJSON("/api/v1/orgs/acme/customers", map[string]any{"name": "Initech"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create customer = %d, want 201", resp.StatusCode)
+	}
+	customer := decodeJSON[proofingCustomerResp](t, resp)
+	if customer.Name != "Initech" || len(customer.FlowIDs) != 0 {
+		t.Errorf("customer = %+v, want Initech with no flows", customer)
+	}
+	resp = env.postJSON("/api/v1/orgs/acme/customers", map[string]any{"name": "initech"})
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("duplicate customer = %d, want 409", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	base := "/api/v1/orgs/acme/customers/" + customer.ID
+	subject := map[string]any{"customerId": customer.ID, "email": "anna@example.org", "flowId": flow.ID}
+	resp = env.postJSON("/api/v1/orgs/acme/identity-proofing/requests", subject)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("request on an unassigned flow = %d, want 422", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	resp = env.putJSON(base+"/flow-selection", map[string]any{"flowIds": []string{flow.ID}, "defaultFlowId": flow.ID})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("assign flows = %d, want 200", resp.StatusCode)
+	}
+	if flows := decodeJSON[[]proofingCustomerFlowResp](t, resp); len(flows) != 1 || !flows[0].Assigned || !flows[0].Default {
+		t.Errorf("customer flows = %+v, want the flow assigned and default", flows)
+	}
+	if n := env.auditCount(orgID, audit.IdentityProofingCustomerFlowsConfigured); n != 1 {
+		t.Errorf("customer_flows_configured audits = %d, want 1", n)
+	}
+
+	resp = env.postJSON("/api/v1/orgs/acme/identity-proofing/requests", subject)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("request for customer = %d, want 201", resp.StatusCode)
+	}
+	created := decodeJSON[proofingCustomerRequestResp](t, resp)
+	if created.CustomerID != customer.ID || created.CustomerName != "Initech" || created.SubjectUserID != "" ||
+		created.SubjectEmail != "anna@example.org" || created.SubjectName != "" {
+		t.Errorf("created = %+v; want Initech's subject by address, no member", created)
+	}
+
+	list := decodeJSON[[]proofingCustomerRequestResp](t, env.do(http.MethodGet,
+		"/api/v1/orgs/acme/identity-proofing/requests?customerId="+customer.ID, nil))
+	if len(list) != 1 || list[0].ID != created.ID {
+		t.Errorf("customer's requests = %+v, want the one", list)
+	}
+}
+
+func TestIdentityProofingMemberUsesButCannotManageCustomers(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("member@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleMember)
+
+	resp := env.postJSON("/api/v1/orgs/acme/customers", map[string]any{"name": "Initech"})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("member create customer = %d, want 403", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	customers := decodeJSON[[]proofingCustomerResp](t, env.do(http.MethodGet, "/api/v1/orgs/acme/customers", nil))
+	if len(customers) != 0 {
+		t.Errorf("member customers = %+v, want none", customers)
+	}
+	resp = env.putJSON("/api/v1/orgs/acme/customers/00000000-0000-0000-0000-000000000000/flow-selection",
+		map[string]any{"flowIds": []string{}, "defaultFlowId": ""})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("member assign flows = %d, want 403", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	resp = env.do(http.MethodGet, "/api/v1/orgs/acme/customers/00000000-0000-0000-0000-000000000000", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown customer = %d, want 404", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
 }

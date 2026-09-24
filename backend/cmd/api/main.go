@@ -160,7 +160,6 @@ type proofingProvider interface {
 	ListFlowVersions(ctx context.Context, apiKey, id string) ([]proofingprovider.Flow, error)
 	ActivateFlowVersion(ctx context.Context, apiKey, id string, version int) (proofingprovider.Flow, error)
 	CreateSession(ctx context.Context, apiKey string, in proofingprovider.SessionInput) (proofingprovider.Session, error)
-	MintClaim(ctx context.Context, apiKey, sessionID, sessionToken string) (*proofingprovider.Claim, error)
 	SessionResult(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Result, error)
 }
 
@@ -727,10 +726,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	proofingRequests := proofing.NewRequestStore(pool, recorder, proofingCipher)
 	proofingService := proofing.NewService(
 		proofing.NewSettingsStore(pool, recorder, proofingCipher),
-		proofing.NewRequestStore(pool, recorder, proofingCipher),
-		ips, emailService, cfg.AppBaseURL)
+		proofingRequests, proofing.NewCustomerStore(pool, recorder),
+		ips, emailService)
+	// A customer's subject's proofed name is kept for proofing.ProofedNameRetention.
+	startPruner(ctx, "identity_proofing_proofed_names", cfg.SessionPruneEvery, proofingRequests.PurgeProofedNames)
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
 
 	// Inbound OpenID4VP: an external verifier invoking the business wallet as

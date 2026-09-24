@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 // provider is the IPS surface the service drives (implemented by
@@ -27,7 +27,6 @@ type provider interface {
 	ListFlowVersions(ctx context.Context, apiKey, id string) ([]proofingprovider.Flow, error)
 	ActivateFlowVersion(ctx context.Context, apiKey, id string, version int) (proofingprovider.Flow, error)
 	CreateSession(ctx context.Context, apiKey string, in proofingprovider.SessionInput) (proofingprovider.Session, error)
-	MintClaim(ctx context.Context, apiKey, sessionID, sessionToken string) (*proofingprovider.Claim, error)
 	SessionResult(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Result, error)
 }
 
@@ -41,41 +40,45 @@ type settingsStore interface {
 }
 
 type requestStore interface {
-	Create(ctx context.Context, in NewStoredRequest) (Request, string, error)
-	List(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID) ([]Request, error)
-	ByToken(ctx context.Context, rawToken string) (Link, error)
+	Create(ctx context.Context, in NewStoredRequest) (Request, error)
+	AttachSession(ctx context.Context, req Request, sess proofingprovider.Session) (bool, error)
+	List(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error)
 	MarkStarted(ctx context.Context, req Request, sessionID string) error
-	ExpireLink(ctx context.Context, id uuid.UUID, sessionID string) error
-	Members(ctx context.Context, orgID uuid.UUID) ([]Member, error)
+	EndSession(ctx context.Context, req Request, sessionID string, ipsStatus proofingprovider.Status) error
 	Member(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
 	RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
 }
 
-// Mailer sends the proofing-request e-mail (implemented by *email.Service).
-type Mailer interface {
-	SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, to, orgName, requesterName, proofingURL string, validFor time.Duration) error
+type customerStore interface {
+	List(ctx context.Context, orgID uuid.UUID) ([]Customer, error)
+	Get(ctx context.Context, orgID, id uuid.UUID) (Customer, error)
+	Create(ctx context.Context, orgID, createdBy uuid.UUID, name string) (Customer, error)
+	Rename(ctx context.Context, orgID, id uuid.UUID, name string) (Customer, error)
+	SaveFlows(ctx context.Context, orgID, id uuid.UUID, sel FlowSelection) (Customer, error)
 }
 
-// Service orchestrates IPS, the settings and request stores, and the mailer.
+// Mailer sends the proofing-request e-mail (implemented by *email.Service):
+// deepLink is the session's vcmrtd link, validFor how long the session runs.
+type Mailer interface {
+	SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, to, orgName, requesterName, deepLink string, validFor time.Duration) error
+}
+
+// Service orchestrates IPS, the settings, request and customer stores, and the mailer.
 type Service struct {
-	settings   settingsStore
-	requests   requestStore
-	ips        provider
-	mailer     Mailer
-	appBaseURL string
-	now        func() time.Time
+	settings  settingsStore
+	requests  requestStore
+	customers customerStore
+	ips       provider
+	mailer    Mailer
+	now       func() time.Time
 }
 
 // NewService builds the proofing service. A nil mailer skips the e-mail (tests).
-func NewService(settings settingsStore, requests requestStore, ips provider, mailer Mailer, appBaseURL string) *Service {
+func NewService(settings settingsStore, requests requestStore, customers customerStore, ips provider, mailer Mailer) *Service {
 	return &Service{
-		settings: settings, requests: requests, ips: ips, mailer: mailer,
-		appBaseURL: strings.TrimRight(appBaseURL, "/"), now: time.Now,
+		settings: settings, requests: requests, customers: customers, ips: ips, mailer: mailer, now: time.Now,
 	}
 }
-
-// ProofPath is the public page a proofing link opens.
-func ProofPath(rawToken string) string { return "/proof/" + url.PathEscape(rawToken) }
 
 // orgAPIKey returns the org's IPS API key, provisioning the org's own IPS tenant
 // and key on its first use: an org needs no enable step before it can proof.
@@ -147,6 +150,17 @@ func (s *Service) Flows(ctx context.Context, org Org, all bool) ([]OrgFlow, erro
 // active IPS flow a recipient can finish, and a non-empty selection needs a
 // default among it.
 func (s *Service) ConfigureFlows(ctx context.Context, org Org, sel FlowSelection) error {
+	sel, err := s.validSelection(ctx, org, sel)
+	if err != nil {
+		return err
+	}
+	return s.settings.SaveFlowSelection(ctx, org.ID, sel)
+}
+
+// validSelection deduplicates sel and checks it: every flow an active IPS flow
+// of the org a recipient can finish, and a non-empty selection has its default
+// among it. Both the members' allow-list and a customer's assignment are one.
+func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection) (FlowSelection, error) {
 	ids := make([]string, 0, len(sel.FlowIDs))
 	for _, id := range sel.FlowIDs {
 		if !slices.Contains(ids, id) {
@@ -155,25 +169,25 @@ func (s *Service) ConfigureFlows(ctx context.Context, org Org, sel FlowSelection
 	}
 	sel.FlowIDs = ids
 	if len(ids) == 0 && sel.DefaultFlowID != "" {
-		return fmt.Errorf("%w: the default flow must be one of the available flows", ErrInvalidInput)
+		return sel, fmt.Errorf("%w: the default flow must be one of the available flows", ErrInvalidInput)
 	}
 	if len(ids) > 0 && !slices.Contains(ids, sel.DefaultFlowID) {
-		return fmt.Errorf("%w: choose which of the available flows is the default", ErrInvalidInput)
+		return sel, fmt.Errorf("%w: choose which of the available flows is the default", ErrInvalidInput)
 	}
 	flows, err := s.Flows(ctx, org, true)
 	if err != nil {
-		return err
+		return sel, err
 	}
 	for _, id := range ids {
 		i := slices.IndexFunc(flows, func(f OrgFlow) bool { return f.ID == id })
 		if i < 0 {
-			return ErrFlowNotFound
+			return sel, ErrFlowNotFound
 		}
 		if !Completable(flows[i].Flow) {
-			return ErrFlowNotCompletable
+			return sel, ErrFlowNotCompletable
 		}
 	}
-	return s.settings.SaveFlowSelection(ctx, org.ID, sel)
+	return sel, nil
 }
 
 // CreateFlow defines a flow at IPS (version 1) and audits it. IPS validates the
@@ -273,11 +287,6 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 	return in, nil
 }
 
-// Members lists everyone a request can be sent to.
-func (s *Service) Members(ctx context.Context, orgID uuid.UUID) ([]Member, error) {
-	return s.requests.Members(ctx, orgID)
-}
-
 // Requester is the member sending a request.
 type Requester struct {
 	UserID uuid.UUID
@@ -285,66 +294,66 @@ type Requester struct {
 }
 
 // Sent is a stored request and whether its e-mail went out. A request whose mail
-// failed still stands (and is audited), but with a link this short-lived the
-// sender needs to know, so the failure is reported rather than only logged.
+// failed still stands (and is audited), but the sender needs to know the
+// recipient never got the link, so the failure is reported rather than only
+// logged.
 type Sent struct {
 	Request  Request
 	MailSent bool
 }
 
-// CreateRequest sends a member a proofing request on one of the flows the org
-// admin made available: it creates the IPS session now, stores the request with
-// a link that expires with that session, and mails the member the link as a QR
-// code and a button.
+// CreateRequest sends a proofing request: to a member, on one of the flows the
+// org admin made available to members, or for a customer to its subject, on one
+// of the flows assigned to that customer. It creates the request's IPS session,
+// stores the request with it, and mails the subject the session's vcmrtd deep
+// link: SessionTTL runs from the send. A session whose request then fails to
+// store lapses unused at IPS.
 func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in NewRequest) (Sent, error) {
-	subject, err := s.requests.Member(ctx, org.ID, in.SubjectUserID)
+	subject, err := s.subject(ctx, org, in)
 	if err != nil {
 		return Sent{}, err
 	}
-	flows, err := s.Flows(ctx, org, true)
+	flow, err := s.sendableFlow(ctx, org, in)
 	if err != nil {
 		return Sent{}, err
 	}
-	i := slices.IndexFunc(flows, func(f OrgFlow) bool { return f.ID == in.FlowID })
-	switch {
-	case i < 0:
-		return Sent{}, ErrFlowNotFound
-	case !Completable(flows[i].Flow):
-		return Sent{}, ErrFlowNotCompletable
-	case !flows[i].Allowed:
-		return Sent{}, ErrFlowNotAllowed
-	}
-	flow := flows[i].Flow
-
 	apiKey, err := s.orgAPIKey(ctx, org)
 	if err != nil {
 		return Sent{}, err
 	}
+
 	id := uuid.New()
 	sess, err := s.ips.CreateSession(ctx, apiKey, proofingprovider.SessionInput{
 		FlowID: flow.ID, ClientReference: id.String(), TTL: SessionTTL,
 	})
 	if err != nil {
-		return Sent{}, fmt.Errorf("proofing: create session org %s: %w", org.ID, err)
+		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", id, err)
 	}
-	// The link lives exactly as long as the session, never past SessionTTL.
-	linkExpiresAt := s.now().Add(SessionTTL)
-	if !sess.ExpiresAt.IsZero() && sess.ExpiresAt.Before(linkExpiresAt) {
-		linkExpiresAt = sess.ExpiresAt
+	if sess.Claim == nil {
+		return Sent{}, fmt.Errorf("proofing: create session request %s: IPS offered no vcmrtd link", id)
 	}
-
-	req, rawToken, err := s.requests.Create(ctx, NewStoredRequest{
+	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: id, OrgID: org.ID, RequestedBy: by.UserID, Subject: subject,
-		Flow: flow, Session: sess, LinkExpiresAt: linkExpiresAt,
+		Flow: flow, LinkExpiresAt: sess.ExpiresAt,
 	})
 	if err != nil {
 		return Sent{}, err
 	}
+	attached, err := s.requests.AttachSession(ctx, req, sess)
+	if err != nil {
+		return Sent{}, err
+	}
+	if !attached {
+		return Sent{}, fmt.Errorf("proofing: attach session request %s: the new request moved on", id)
+	}
+	if sess.FlowVersion != 0 {
+		req.FlowVersion = sess.FlowVersion
+	}
+	req.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt}
+
 	out := Sent{Request: req}
 	if s.mailer != nil {
-		link := s.appBaseURL + ProofPath(rawToken)
-		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, subject.Email, org.Name, by.Name, link,
-			linkExpiresAt.Sub(s.now()).Round(time.Minute))
+		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, subject.Email, org.Name, by.Name, sess.Claim.DeepLink, SessionTTL)
 		if err != nil {
 			slog.WarnContext(ctx, "identity proofing: request e-mail not sent",
 				slog.String("org_id", org.ID.String()), slog.String("request_id", req.ID.String()), slog.Any("error", err))
@@ -354,11 +363,68 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	return out, nil
 }
 
-// Requests lists the org's requests (or one member's), re-checking a bounded
-// number of live ones at IPS first so a closed recipient page still lands its
-// outcome here.
-func (s *Service) Requests(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID) ([]Request, error) {
-	reqs, err := s.requests.List(ctx, orgID, requestedBy)
+// subject resolves who a new request goes to: the member, or the customer's
+// subject by the address and optional name the sender gave.
+func (s *Service) subject(ctx context.Context, org Org, in NewRequest) (Subject, error) {
+	if in.CustomerID == nil {
+		m, err := s.requests.Member(ctx, org.ID, in.SubjectUserID)
+		if err != nil {
+			return Subject{}, err
+		}
+		return Subject{UserID: &m.UserID, Name: m.Name, Email: m.Email}, nil
+	}
+	if in.SubjectUserID != uuid.Nil {
+		return Subject{}, fmt.Errorf("%w: a request goes to a member or to a customer's subject, not both", ErrInvalidInput)
+	}
+	if _, err := s.customers.Get(ctx, org.ID, *in.CustomerID); err != nil {
+		return Subject{}, err
+	}
+	email, err := user.ParseEmail(in.SubjectEmail)
+	if err != nil {
+		return Subject{}, fmt.Errorf("%w: enter a valid e-mail address", ErrInvalidInput)
+	}
+	name := strings.TrimSpace(in.SubjectName)
+	if len(name) > maxSubjectNameLength {
+		return Subject{}, fmt.Errorf("%w: the name is too long", ErrInvalidInput)
+	}
+	return Subject{CustomerID: in.CustomerID, Name: name, Email: string(email)}, nil
+}
+
+// sendableFlow is the flow a new request runs, if the sender may use it: for a
+// member, a flow the admin made available to members; for a customer's subject,
+// one assigned to that customer. Either way it must be one a recipient can finish.
+func (s *Service) sendableFlow(ctx context.Context, org Org, in NewRequest) (proofingprovider.Flow, error) {
+	flows, err := s.Flows(ctx, org, true)
+	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	i := slices.IndexFunc(flows, func(f OrgFlow) bool { return f.ID == in.FlowID })
+	switch {
+	case i < 0:
+		return proofingprovider.Flow{}, ErrFlowNotFound
+	case !Completable(flows[i].Flow):
+		return proofingprovider.Flow{}, ErrFlowNotCompletable
+	}
+	if in.CustomerID == nil {
+		if !flows[i].Allowed {
+			return proofingprovider.Flow{}, ErrFlowNotAllowed
+		}
+		return flows[i].Flow, nil
+	}
+	customer, err := s.customers.Get(ctx, org.ID, *in.CustomerID)
+	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if !slices.Contains(customer.Flows.FlowIDs, in.FlowID) {
+		return proofingprovider.Flow{}, ErrFlowNotAssigned
+	}
+	return flows[i].Flow, nil
+}
+
+// Requests lists the org's requests narrowed by filter, re-checking a bounded
+// number of live ones at IPS first: this read is how an outcome lands here.
+func (s *Service) Requests(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error) {
+	reqs, err := s.requests.List(ctx, orgID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -377,56 +443,6 @@ func (s *Service) Requests(ctx context.Context, orgID uuid.UUID, requestedBy *uu
 		reqs[i] = s.reconcile(ctx, apiKey, reqs[i])
 	}
 	return reqs, nil
-}
-
-// Link resolves a public proofing link, reconciling a live session first.
-func (s *Service) Link(ctx context.Context, rawToken string) (Link, error) {
-	link, err := s.requests.ByToken(ctx, rawToken)
-	if err != nil || !link.Request.needsReconcile() {
-		return link, err
-	}
-	apiKey, err := s.settings.APIKey(ctx, link.Request.OrganizationID)
-	if err != nil {
-		return Link{}, err
-	}
-	link.Request = s.reconcile(ctx, apiKey, link.Request)
-	return link, nil
-}
-
-// Start gives the recipient their next step: a fresh vcmrtd/idem claim on the
-// request's session while it lives. IPS's claim is single-use and shorter-lived
-// than the session, so the page asks again whenever the one it shows lapses.
-func (s *Service) Start(ctx context.Context, rawToken string) (StartResult, error) {
-	link, err := s.Link(ctx, rawToken)
-	if err != nil {
-		return StartResult{}, err
-	}
-	req := link.Request
-	if req.Status.Settled() {
-		return StartResult{Status: req.Status}, nil
-	}
-	if req.session == nil || !s.now().Before(req.session.ExpiresAt) {
-		return StartResult{}, ErrLinkNotFound
-	}
-	apiKey, err := s.settings.APIKey(ctx, req.OrganizationID)
-	if err != nil {
-		return StartResult{}, err
-	}
-	claim, err := s.ips.MintClaim(ctx, apiKey, req.session.ID, req.session.Token)
-	if err != nil {
-		return StartResult{}, fmt.Errorf("proofing: mint claim request %s: %w", req.ID, err)
-	}
-	return startResult(StatusInProgress, claim), nil
-}
-
-func startResult(status Status, claim *proofingprovider.Claim) StartResult {
-	out := StartResult{Status: status}
-	if claim != nil {
-		out.DeepLink = claim.DeepLink
-		expiresAt := claim.ExpiresAt
-		out.ClaimExpiresAt = &expiresAt
-	}
-	return out
 }
 
 // reconcile reads the request's IPS session and records what IPS decided. An IPS
@@ -468,16 +484,16 @@ func (s *Service) reconcile(ctx context.Context, apiKey string, req Request) Req
 		if req.Status.Settled() {
 			return req
 		}
-		// The link and the session share one lifetime: a session IPS ended early
-		// ends the link with it.
-		if err := s.requests.ExpireLink(ctx, req.ID, sess.ID); err != nil {
-			slog.WarnContext(ctx, "identity proofing: expire link failed",
+		// The session ended undecided, and with it the request: a new one means
+		// a new mail.
+		if err := s.requests.EndSession(ctx, req, sess.ID, res.Status); err != nil {
+			slog.WarnContext(ctx, "identity proofing: end session failed",
 				slog.String("request_id", req.ID.String()), slog.Any("error", err))
 			return req
 		}
-		if now := s.now(); now.Before(req.LinkExpiresAt) {
-			req.LinkExpiresAt = now
-		}
+		ended, now := *sess, s.now()
+		ended.EndedAt = &now
+		req.session = &ended
 		return req
 	default:
 		return req
@@ -485,16 +501,97 @@ func (s *Service) reconcile(ctx context.Context, apiKey string, req Request) Req
 	if next == req.Status {
 		return req
 	}
+	// The name read off the document is kept only for a customer's subject the
+	// sender may know only by address, and only once the document is approved.
+	if req.CustomerID == nil || next != StatusApproved {
+		res.Name = ""
+	}
 	if err := s.requests.RecordOutcome(ctx, req, sess.ID, next, res); err != nil {
 		slog.WarnContext(ctx, "identity proofing: record outcome failed",
 			slog.String("request_id", req.ID.String()), slog.Any("error", err))
 		return req
 	}
 	req.Status, req.AssuranceLevel, req.EIDASLevel, req.ErrorCode = next, res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
+	req.ProofedName = res.Name
 	completedAt := s.now()
 	if res.CompletedAt != nil {
 		completedAt = *res.CompletedAt
 	}
 	req.CompletedAt = &completedAt
 	return req
+}
+
+// Customers lists the org's customers, each with its assigned flows.
+func (s *Service) Customers(ctx context.Context, orgID uuid.UUID) ([]Customer, error) {
+	return s.customers.List(ctx, orgID)
+}
+
+// Customer returns one of the org's customers.
+func (s *Service) Customer(ctx context.Context, orgID, id uuid.UUID) (Customer, error) {
+	return s.customers.Get(ctx, orgID, id)
+}
+
+// CustomerFlows is the org's flows with the customer's assignment applied: every
+// flow (the admin's view, to assign from) or only the assigned ones a recipient
+// can finish (what a member may send on for the customer).
+func (s *Service) CustomerFlows(ctx context.Context, org Org, id uuid.UUID, all bool) ([]CustomerFlow, error) {
+	customer, err := s.customers.Get(ctx, org.ID, id)
+	if err != nil {
+		return nil, err
+	}
+	flows, err := s.Flows(ctx, org, true)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CustomerFlow, 0, len(flows))
+	for _, f := range flows {
+		cf := CustomerFlow{
+			Flow:     f.Flow,
+			Assigned: slices.Contains(customer.Flows.FlowIDs, f.ID) && Completable(f.Flow),
+			Default:  f.ID == customer.Flows.DefaultFlowID,
+		}
+		if all || cf.Assigned {
+			out = append(out, cf)
+		}
+	}
+	return out, nil
+}
+
+// CreateCustomer adds a customer to the org, with no flows assigned yet.
+func (s *Service) CreateCustomer(ctx context.Context, orgID, createdBy uuid.UUID, name string) (Customer, error) {
+	name, err := customerName(name)
+	if err != nil {
+		return Customer{}, err
+	}
+	return s.customers.Create(ctx, orgID, createdBy, name)
+}
+
+// RenameCustomer changes a customer's name.
+func (s *Service) RenameCustomer(ctx context.Context, orgID, id uuid.UUID, name string) (Customer, error) {
+	name, err := customerName(name)
+	if err != nil {
+		return Customer{}, err
+	}
+	return s.customers.Rename(ctx, orgID, id, name)
+}
+
+// AssignCustomerFlows replaces the flows assigned to a customer. Any flow of the
+// org a recipient can finish may be assigned, whether or not members may use it.
+func (s *Service) AssignCustomerFlows(ctx context.Context, org Org, id uuid.UUID, sel FlowSelection) (Customer, error) {
+	if _, err := s.customers.Get(ctx, org.ID, id); err != nil {
+		return Customer{}, err
+	}
+	sel, err := s.validSelection(ctx, org, sel)
+	if err != nil {
+		return Customer{}, err
+	}
+	return s.customers.SaveFlows(ctx, org.ID, id, sel)
+}
+
+func customerName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" || len(name) > maxCustomerNameLength {
+		return "", fmt.Errorf("%w: a customer needs a name of at most %d characters", ErrInvalidInput, maxCustomerNameLength)
+	}
+	return name, nil
 }

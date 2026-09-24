@@ -17,7 +17,7 @@ type NavLabelKey =
   | "nav.members"
   | "nav.identityProofing"
   | "nav.identityProofingFlows"
-  | "nav.Customers"
+  | "nav.customers"
   | "nav.qerds"
   | "nav.attestations"
   | "nav.postguard"
@@ -47,15 +47,13 @@ function orgNavItems(
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
   ];
-  // Every member can send proofing requests (each sees the org's own); the page
-  // itself explains to a member when an admin has yet to make a flow available.
-  // Only an admin defines the flows. `end` keeps the requests tab from also
-  // lighting up on the flows page nested under it.
+  // The org's customers are a page of their own, not a part of proofing. A
+  // member is sent a proofing request from their detail page; an admin also
+  // gets the flows those requests run on.
   items.push({
-    to: `/${slug}/identity-proofing`,
-    labelKey: "nav.identityProofing",
-    icon: "scan_qrcode",
-    end: true,
+    to: `/${slug}/customers`,
+    labelKey: "nav.customers",
+    icon: "personal",
   });
   if (isAdmin) {
     items.push({

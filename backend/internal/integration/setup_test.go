@@ -231,7 +231,8 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	proofingHandler := proofing.NewHandler(proofing.NewService(
 		proofing.NewSettingsStore(pool, audit.NewDBRecorder(), proofingCipher),
 		proofing.NewRequestStore(pool, audit.NewDBRecorder(), proofingCipher),
-		proofingprovider.NewStub(), nil, "http://app.test"), requireUser, orgHandler.Authorize)
+		proofing.NewCustomerStore(pool, audit.NewDBRecorder()),
+		proofingprovider.NewStub(), nil), requireUser, orgHandler.Authorize)
 
 	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler, proofingHandler))
 	t.Cleanup(srv.Close)

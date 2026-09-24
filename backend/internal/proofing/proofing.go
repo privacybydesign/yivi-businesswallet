@@ -8,18 +8,25 @@
 // an org admin may define flows (the checks a request runs) and choose which of
 // them members may send on.
 //
-// A request goes to a member of the org. Sending it creates the IPS session, and
-// the e-mail carries a QR code and a button for one wallet link that lives
-// exactly as long as that session (SessionTTL, IPS's own cap). The link's page
-// shows IPS's vcmrtd/idem QR code and deep link, one payload in two forms, and
-// re-mints it while the session lives: IPS's claim inside it is single-use and
-// shorter-lived than the session. Outcomes are reconciled on read (the
-// recipient's page polls, the request list re-checks live requests). The IPS webhook is not used: it goes to a
-// per-session URL and carries the full personal-data result.
+// An org also has customers (its B2B clients, with no login of their own): an
+// admin assigns each a subset of the org's flows, and any member can send a
+// request for a customer to that customer's subject, an external person known
+// only by an e-mail address and an optional name.
+//
+// A request goes to a member of the org or to a customer's subject. Sending it
+// creates the IPS session (SessionTTL, IPS's own default lifetime) and mails its
+// vcmrtd deep link, as a QR code and a button: there is no page in between, so
+// the mail is the session. The link's claim is single use, and IPS keeps it
+// claimable as long as the session (ClaimTokenTTL). Nothing restarts a session:
+// once it ends, a new request means a new mail. Outcomes are reconciled on read
+// (the request list re-checks live requests). The IPS webhook is not used:
+// it goes to a per-session URL and carries the full personal-data result.
 //
 // Data minimisation: only the outcome is kept (status, achieved assurance levels,
-// IPS error code). The document fields, BSN and images IPS returns are never
-// decoded, stored or audited.
+// IPS error code). For a customer's subject, the name read off an approved
+// document is kept too, sealed, for ProofedNameRetention: the sender may have
+// known only an e-mail address. The other document fields, the BSN and images
+// IPS returns are never decoded, stored or audited, and neither is the name.
 package proofing
 
 import (
@@ -32,10 +39,10 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
-// SessionTTL is how long a sent request can be completed: its IPS session's
-// lifetime and so its mailed link's. It is IPS's own maximum session lifetime;
-// IPS clamps anything longer to it.
-const SessionTTL = 15 * time.Minute
+// SessionTTL is how long a mailed session runs, counted from the send: IPS's own
+// default session lifetime (SessionCreateTTL), within its hard cap. The mail
+// states it in minutes, so it is whole minutes.
+const SessionTTL = 10 * time.Minute
 
 // maxReconcilePerList bounds how many live requests one list read re-checks at
 // IPS, so a list stays one bounded round of calls however many are open.
@@ -44,14 +51,27 @@ const maxReconcilePerList = 10
 // maxListedRequests caps one list read, newest first.
 const maxListedRequests = 200
 
+// ProofedNameRetention is how long the name read off a customer's subject's
+// document is kept before the pruner clears it: long enough for the member to
+// act on the outcome, not a record of the person.
+const ProofedNameRetention = 30 * 24 * time.Hour
+
+// maxCustomerNameLength and maxSubjectNameLength bound the names a member types.
+const (
+	maxCustomerNameLength = 200
+	maxSubjectNameLength  = 200
+)
+
 var (
 	ErrNotProvisioned     = errors.New("proofing: organization has no identity proofing tenant")
 	ErrNoEncryptionKey    = errors.New("proofing: no identity proofing encryption key configured")
-	ErrLinkNotFound       = errors.New("proofing: proofing link not found or expired")
 	ErrFlowNotFound       = errors.New("proofing: flow not found")
 	ErrFlowNotCompletable = errors.New("proofing: flow needs a browser step the recipient cannot reach")
 	ErrFlowNotAllowed     = errors.New("proofing: flow is not available to members")
 	ErrMemberNotFound     = errors.New("proofing: not a member of this organization")
+	ErrCustomerNotFound   = errors.New("proofing: customer not found")
+	ErrCustomerExists     = errors.New("proofing: a customer with this name already exists")
+	ErrFlowNotAssigned    = errors.New("proofing: flow is not assigned to the customer")
 	ErrInvalidInput       = errors.New("proofing: invalid input")
 )
 
@@ -79,16 +99,25 @@ type Request struct {
 	OrganizationID  uuid.UUID
 	RequestedBy     *uuid.UUID
 	RequestedByName string
-	// SubjectUserID is the member the request was sent to; nil for a request
-	// from before requests went to members, or once the member's user is gone.
+	// SubjectUserID is the member the request was sent to; nil for a customer's
+	// subject, a request from before requests went to members, or once the
+	// member's user is gone.
 	SubjectUserID *uuid.UUID
-	SubjectName   string
-	SubjectEmail  string
-	FlowID        string
-	FlowName      string
+	// CustomerID is the customer a request was sent for; nil for a member.
+	CustomerID   *uuid.UUID
+	CustomerName string
+	// SubjectName is empty for a customer's subject sent without a name.
+	SubjectName  string
+	SubjectEmail string
+	// ProofedName is the name read off a customer's subject's approved document,
+	// until ProofedNameRetention clears it; empty otherwise.
+	ProofedName string
+	FlowID      string
+	FlowName    string
 	// FlowVersion is the IPS flow version the session pinned; 0 when unknown.
-	FlowVersion    int
-	Status         Status
+	FlowVersion int
+	Status      Status
+	// LinkExpiresAt is when the mailed session ends: its IPS expiry at send.
 	LinkExpiresAt  time.Time
 	AssuranceLevel string
 	EIDASLevel     string
@@ -102,23 +131,55 @@ type Request struct {
 }
 
 type ipsSession struct {
-	ID        string
-	Token     string
+	ID    string
+	Token string
+	// ExpiresAt is IPS's hard cap for the session: past it, it is certainly over.
 	ExpiresAt time.Time
+	// EndedAt is when the wallet saw the session end without an outcome (expired
+	// or cancelled at IPS); nil while it may still run or decide.
+	EndedAt *time.Time
 }
 
-// EffectiveStatus is Status with an unfinished request past its link reading as
-// expired: nobody can start or finish it any more.
+// liveSession returns the request's IPS session while it can still run, else nil.
+func (r Request) liveSession(now time.Time) *ipsSession {
+	if r.session == nil || r.session.EndedAt != nil || !now.Before(r.session.ExpiresAt) {
+		return nil
+	}
+	return r.session
+}
+
+// EffectiveStatus is Status with an unfinished request whose session is over
+// reading as expired: the mail was the session, so nothing can start again.
 func (r Request) EffectiveStatus(now time.Time) Status {
-	if !r.Status.Settled() && now.After(r.LinkExpiresAt) {
+	if !r.Status.Settled() && r.liveSession(now) == nil {
 		return StatusExpired
 	}
 	return r.Status
 }
 
-// needsReconcile reports whether IPS may hold a newer state than the row.
+// SessionExpiresAt is when the request's running IPS session ends, or nil when
+// it is over.
+func (r Request) SessionExpiresAt(now time.Time) *time.Time {
+	sess := r.liveSession(now)
+	if sess == nil {
+		return nil
+	}
+	at := sess.ExpiresAt
+	return &at
+}
+
+// needsReconcile reports whether IPS may hold a newer state than the row: an
+// attached session not yet seen to end (running, or past its cap with its end or
+// a last-moment outcome still unread), or an outcome still under review.
 func (r Request) needsReconcile() bool {
-	return r.session != nil && (r.Status == StatusPending || r.Status == StatusInProgress || r.Status == StatusNeedsReview)
+	switch {
+	case r.session == nil:
+		return false
+	case r.Status == StatusNeedsReview:
+		return true
+	default:
+		return (r.Status == StatusPending || r.Status == StatusInProgress) && r.session.EndedAt == nil
+	}
 }
 
 // Member is a person a request can be sent to: any member of the org, admin or
@@ -154,24 +215,48 @@ type OrgFlow struct {
 	Default bool
 }
 
-// Link is what a proofing link resolves to on the public page.
-type Link struct {
-	Request          Request
-	OrganizationName string
+// RequestFilter narrows a request list: to the requests one member sent, and/or
+// to one customer's. A nil field does not narrow.
+type RequestFilter struct {
+	RequestedBy *uuid.UUID
+	CustomerID  *uuid.UUID
 }
 
-// NewRequest is a member's ask to proof another member on a flow.
+// NewRequest is a member's ask to proof someone on a flow: another member
+// (SubjectUserID), or, with a CustomerID, that customer's subject by e-mail
+// address and an optional name.
 type NewRequest struct {
 	SubjectUserID uuid.UUID
+	CustomerID    *uuid.UUID
+	SubjectEmail  string
+	SubjectName   string
 	FlowID        string
 }
 
-// StartResult is the recipient's next step: a vcmrtd link to show as a QR, or
-// none when the phone is already in the flow or the request is settled.
-type StartResult struct {
-	Status         Status
-	DeepLink       string
-	ClaimExpiresAt *time.Time
+// Subject is who a stored request went to: a member (UserID) or a customer's
+// subject (CustomerID), never both.
+type Subject struct {
+	UserID     *uuid.UUID
+	CustomerID *uuid.UUID
+	Name       string
+	Email      string
+}
+
+// Customer is one of the org's B2B customers, with the org flows assigned to it.
+type Customer struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Name           string
+	Flows          FlowSelection
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// CustomerFlow is one of the org's IPS flows with a customer's assignment applied.
+type CustomerFlow struct {
+	proofingprovider.Flow
+	Assigned bool
+	Default  bool
 }
 
 // faceSteps are the IPS flow steps that capture the subject's face. With the

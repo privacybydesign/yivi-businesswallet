@@ -229,7 +229,7 @@ func Render(kind Kind, locale Locale, tpl Template, brand Brand, vars map[string
 			return Body{}, fmt.Errorf("email: kind %q: missing variable %q", kind, v.Name)
 		}
 		if v.IsURL {
-			if err := validateAbsoluteHTTPURL(value); err != nil {
+			if err := v.validateURL(value); err != nil {
 				return Body{}, fmt.Errorf("email: kind %q: variable %q: %w", kind, v.Name, err)
 			}
 		}
@@ -245,14 +245,18 @@ func Render(kind Kind, locale Locale, tpl Template, brand Brand, vars map[string
 	content := resolveContent(tpl, vars)
 	content.locale = locale
 	// The resolved URL is what actually lands in the href, so it is checked here
-	// too rather than only in its two source shapes.
+	// too rather than only in its two source shapes. An app deep link was checked
+	// against its own scheme above, and validateButtonURL lets it in only whole.
+	appLinks := appLinkValues(variables, vars)
 	var qrImages []InlineImage
 	for i, blk := range content.blocks {
 		if blk.typ != BlockButton && blk.typ != BlockQR {
 			continue
 		}
-		if err := validateAbsoluteHTTPURL(blk.url); err != nil {
-			return Body{}, fmt.Errorf("email: kind %q: blocks[%d]: url: %w", kind, i, err)
+		if !appLinks[blk.url] {
+			if err := validateAbsoluteHTTPURL(blk.url); err != nil {
+				return Body{}, fmt.Errorf("email: kind %q: blocks[%d]: url: %w", kind, i, err)
+			}
 		}
 		if blk.typ == BlockQR {
 			png, err := qrcode.Encode(blk.url, qrcode.Medium, qrPixels)
@@ -333,10 +337,41 @@ func declares(variables []Variable, name string) bool {
 	return false
 }
 
+// validateURL checks a URL variable's value: an app deep link of the variable's
+// AppScheme, else an absolute http(s) URL.
+func (v Variable) validateURL(value string) error {
+	if v.AppScheme == "" {
+		return validateAbsoluteHTTPURL(value)
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("not a URL: %w", err)
+	}
+	if parsed.Scheme != v.AppScheme {
+		return fmt.Errorf("must be a %s: link", v.AppScheme)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("must have a host")
+	}
+	return nil
+}
+
+// appLinkValues is the set of app deep links among vars: the resolved block URLs
+// Render has already checked against their own scheme.
+func appLinkValues(variables []Variable, vars map[string]string) map[string]bool {
+	links := map[string]bool{}
+	for _, v := range variables {
+		if v.IsURL && v.AppScheme != "" {
+			links[vars[v.Name]] = true
+		}
+	}
+	return links
+}
+
 // validateAbsoluteHTTPURL requires a parseable absolute http(s) URL with a host.
-// Applied to every URL variable and to the resolved button URL (and, for a
-// literal, at save time via validateButtonURL), so a call to action can never
-// link to a relative path or a javascript:/data: scheme.
+// Applied to every URL variable without an AppScheme and to the resolved button
+// URL (and, for a literal, at save time via validateButtonURL), so a call to
+// action can never link to a relative path or a javascript:/data: scheme.
 func validateAbsoluteHTTPURL(value string) error {
 	if value == "" {
 		return fmt.Errorf("must not be empty")

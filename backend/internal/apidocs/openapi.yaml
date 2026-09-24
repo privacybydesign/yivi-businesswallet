@@ -414,58 +414,6 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/identity-proofing/{token}:
-    parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Opaque proofing token from an identity proofing request e-mail.
-    get:
-      tags: [identity-proofing]
-      summary: Preview an identity proofing link by token
-      description: >-
-        Public. Organisation, subject and flow name plus the reconciled status of the
-        request.
-      security: []
-      responses:
-        '2XX':
-          description: Successful response.
-          content:
-            application/json:
-              schema:
-                description: Response payload; shape depends on the endpoint.
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/v1/identity-proofing/{token}/session:
-    parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Opaque proofing token from an identity proofing request e-mail.
-    post:
-      tags: [identity-proofing]
-      summary: Start or resume identity proofing
-      description: >-
-        Public. Returns a fresh vcmrtd/idem `deepLink` on the request's session (created
-        when the request was sent), to show as a QR code and as an open-in-app link: one
-        payload, so both do the same. The identity-proofing-service's claim is single-use
-        and short-lived, so the page asks again when it lapses. No link when the phone is
-        already in the flow or the request is settled; 404 once the session (and so the
-        link) expired.
-      security: []
-      responses:
-        '2XX':
-          description: Successful response.
-          content:
-            application/json:
-              schema:
-                description: Response payload; shape depends on the endpoint.
-        '404':
-          $ref: '#/components/responses/NotFound'
   /api/v1/reidentify/{token}:
     parameters:
       - name: token
@@ -4200,31 +4148,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /api/v1/orgs/{slug}/identity-proofing/members:
-    parameters:
-      - name: slug
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Organisation slug.
-    get:
-      tags: [identity-proofing]
-      summary: List the members a proofing request can be sent to
-      description: >-
-        Requires organisation membership. Every member of the organisation, admins and
-        externals included, ordered by name.
-      responses:
-        '2XX':
-          description: Successful response.
-          content:
-            application/json:
-              schema:
-                description: Response payload; shape depends on the endpoint.
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/identity-proofing/flow-selection:
     parameters:
       - name: slug
@@ -4279,9 +4202,19 @@ paths:
       summary: List identity proofing requests
       description: >-
         Requires organisation membership. An administrator sees every request of the
-        organisation, a member the requests they sent. Live requests are re-checked at
-        the identity-proofing-service first. Only the outcome and assurance level are
-        returned, never document data.
+        organisation, a member the requests they sent; `?customerId=` narrows either to
+        one customer's. Live requests are re-checked at the identity-proofing-service
+        first. Only the outcome and assurance level are returned, and for a customer's
+        approved subject the name read off the document (`proofedName`), until its
+        retention (30 days) clears it. No other document data.
+      parameters:
+        - name: customerId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Only the requests sent for this customer.
       responses:
         '2XX':
           description: Successful response.
@@ -4303,11 +4236,14 @@ paths:
       tags: [identity-proofing]
       summary: Send an identity proofing request
       description: >-
-        Requires organisation membership. `userId` (a member of the organisation) and
-        `flowId` (a flow an administrator made available). Creates the session at the
-        identity-proofing-service now and e-mails the member a QR code and a button for
-        one link to the public proofing page, valid exactly as long as that session (15
-        minutes). `mailSent` is false when the mail could not be sent.
+        Requires organisation membership. Either `userId` (a member of the organisation)
+        with `flowId` a flow an administrator made available to members, or
+        `customerId` (one of the organisation's customers) with `email` and an optional
+        `name` of that customer's subject, an external person, and `flowId` a flow
+        assigned to that customer. Creates the session at the identity-proofing-service
+        (10 minutes, counted from the send) and e-mails the subject its vcmrtd deep link
+        as a QR code and a button; after the session ends, a new request means a new
+        mail. `mailSent` is false when the mail could not be sent.
       responses:
         '2XX':
           description: Successful response.
@@ -4328,7 +4264,211 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: The person is not a member, or the flow does not exist, cannot be completed in the app, or is not available to members.
+          description: The person is not a member, or the flow does not exist, cannot be completed in the app, or is not available to members or assigned to the customer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/customers:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: List the organisation's customers
+      description: >-
+        Requires organisation membership. The organisation's B2B customers, by name,
+        each with the flow ids assigned to it (`flowIds`) and its default
+        (`defaultFlowId`). A customer has no login; members send requests for it.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [identity-proofing]
+      summary: Add a customer
+      description: >-
+        Requires an administrator role in the organisation. `name` (unique within the
+        organisation, ignoring case). The customer starts with no flows assigned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The organisation already has a customer with this name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/customers/{customerID}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: customerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Customer id.
+    get:
+      tags: [identity-proofing]
+      summary: Get a customer
+      description: Requires organisation membership.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [identity-proofing]
+      summary: Rename a customer
+      description: Requires an administrator role in the organisation. `name`, as on create.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The organisation already has a customer with this name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/customers/{customerID}/flows:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: customerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Customer id.
+    get:
+      tags: [identity-proofing]
+      summary: List a customer's flows
+      description: >-
+        Requires organisation membership. An administrator sees every flow of the
+        organisation with `assigned` and `default` for this customer; a member only the
+        assigned flows a recipient can finish.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/customers/{customerID}/flow-selection:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: customerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Customer id.
+    put:
+      tags: [identity-proofing]
+      summary: Assign flows to a customer
+      description: >-
+        Requires an administrator role in the organisation. Replaces the customer's
+        assignment: `flowIds` (any active flow of the organisation a recipient can
+        finish in the app, whether or not members may use it) and `defaultFlowId` (one
+        of them, or empty when the list is). Returns the customer's flows as the list
+        endpoint does for an administrator.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: A flow does not exist or cannot be completed in the app.
           content:
             application/json:
               schema:

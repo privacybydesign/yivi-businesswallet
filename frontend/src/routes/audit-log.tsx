@@ -120,7 +120,7 @@ export default function AuditLog(): React.JSX.Element {
                   ) : (
                     events.map((event) => {
                       const visual = auditVisual(event.action);
-                      const subject = auditSubject(event, dateFormatter);
+                      const subject = auditSubject(event, dateFormatter, t);
                       return (
                         <Table.Row key={event.id}>
                           <Table.Cell>

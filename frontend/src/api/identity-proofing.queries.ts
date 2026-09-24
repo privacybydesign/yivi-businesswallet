@@ -3,27 +3,29 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   activateProofingFlowVersion,
+  createProofingCustomer,
   createProofingFlow,
   createProofingFlowVersion,
   createProofingRequest,
+  getProofingCustomer,
+  getProofingCustomerFlows,
+  getProofingCustomers,
   getProofingFlowVersions,
-  getProofingMembers,
   getProofingFlows,
-  getProofingLink,
   getProofingRequests,
+  renameProofingCustomer,
+  setProofingCustomerFlows,
   setProofingFlowSelection,
-  startProofing,
 } from "./identity-proofing";
 import type {
+  ProofingCustomer,
+  ProofingCustomerFlow,
   ProofingFlow,
   ProofingFlowSelection,
   ProofingFlowSpec,
-  ProofingLink,
-  ProofingMember,
   ProofingRequest,
   ProofingRequestInput,
   ProofingSent,
-  ProofingStart,
 } from "./identity-proofing";
 import { toast } from "../lib/toast";
 import { isProofingLive } from "../lib/identity-proofing";
@@ -32,7 +34,6 @@ import { isProofingLive } from "../lib/identity-proofing";
 // flight is re-fetched until it settles. The recipient's own page polls faster:
 // it is watching one phone finish.
 const REQUESTS_POLL_INTERVAL_MS = 10_000;
-const LINK_POLL_INTERVAL_MS = 3000;
 
 export function proofingQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "identity-proofing"];
@@ -42,8 +43,35 @@ export function proofingFlowsQueryKey(slug: string): readonly string[] {
   return [...proofingQueryKey(slug), "flows"];
 }
 
+// Every request list, the org's and each customer's, sits under this key, so
+// invalidating it refreshes them all.
 export function proofingRequestsQueryKey(slug: string): readonly string[] {
   return [...proofingQueryKey(slug), "requests"];
+}
+
+function proofingCustomerRequestsQueryKey(
+  slug: string,
+  customerId: string,
+): readonly string[] {
+  return [...proofingRequestsQueryKey(slug), "customer", customerId];
+}
+
+export function proofingCustomersQueryKey(slug: string): readonly string[] {
+  return [...proofingQueryKey(slug), "customers"];
+}
+
+export function proofingCustomerQueryKey(
+  slug: string,
+  customerId: string,
+): readonly string[] {
+  return [...proofingCustomersQueryKey(slug), customerId];
+}
+
+function proofingCustomerFlowsQueryKey(
+  slug: string,
+  customerId: string,
+): readonly string[] {
+  return [...proofingCustomerQueryKey(slug, customerId), "flows"];
 }
 
 export function proofingFlowVersionsQueryKey(
@@ -51,14 +79,6 @@ export function proofingFlowVersionsQueryKey(
   flowId: string,
 ): readonly string[] {
   return [...proofingFlowsQueryKey(slug), flowId, "versions"];
-}
-
-export function proofingMembersQueryKey(slug: string): readonly string[] {
-  return [...proofingQueryKey(slug), "members"];
-}
-
-export function proofingLinkQueryKey(token: string): readonly string[] {
-  return ["identity-proofing", "link", token];
 }
 
 export function useProofingFlowsQuery(
@@ -148,16 +168,6 @@ export function useActivateProofingFlowVersionMutation(
   });
 }
 
-export function useProofingMembersQuery(
-  slug: string,
-): UseQueryResult<ProofingMember[], Error> {
-  return useQuery({
-    queryKey: proofingMembersQueryKey(slug),
-    queryFn: ({ signal }) => getProofingMembers(slug, signal),
-    enabled: slug !== "",
-  });
-}
-
 // The answer is the org's flow list as an admin sees it, so it replaces the
 // cached list rather than refetching it.
 export function useSetProofingFlowSelectionMutation(
@@ -175,14 +185,17 @@ export function useSetProofingFlowSelectionMutation(
   });
 }
 
+// customerId narrows the list to the requests sent for that customer.
 export function useProofingRequestsQuery(
   slug: string,
-  enabled = true,
+  customerId?: string,
 ): UseQueryResult<ProofingRequest[], Error> {
   return useQuery({
-    queryKey: proofingRequestsQueryKey(slug),
-    queryFn: ({ signal }) => getProofingRequests(slug, signal),
-    enabled: enabled && slug !== "",
+    queryKey: customerId
+      ? proofingCustomerRequestsQueryKey(slug, customerId)
+      : proofingRequestsQueryKey(slug),
+    queryFn: ({ signal }) => getProofingRequests(slug, customerId, signal),
+    enabled: slug !== "" && customerId !== "",
     refetchInterval: (query) =>
       query.state.data?.some((r) => isProofingLive(r.status))
         ? REQUESTS_POLL_INTERVAL_MS
@@ -213,33 +226,102 @@ export function useCreateProofingRequestMutation(
   });
 }
 
-// polling is on once the recipient has started: before that nothing changes
-// at the proofing service.
-export function useProofingLinkQuery(
-  token: string,
-  polling: boolean,
-): UseQueryResult<ProofingLink, Error> {
+export function useProofingCustomersQuery(
+  slug: string,
+): UseQueryResult<ProofingCustomer[], Error> {
   return useQuery({
-    queryKey: proofingLinkQueryKey(token),
-    queryFn: ({ signal }) => getProofingLink(token, signal),
-    enabled: token !== "",
-    refetchInterval: (query) =>
-      polling && isProofingLive(query.state.data?.status ?? "")
-        ? LINK_POLL_INTERVAL_MS
-        : false,
+    queryKey: proofingCustomersQueryKey(slug),
+    queryFn: ({ signal }) => getProofingCustomers(slug, signal),
+    enabled: slug !== "",
   });
 }
 
-export function useStartProofingMutation(
-  token: string,
-): UseMutationResult<ProofingStart, Error, void> {
+export function useProofingCustomerQuery(
+  slug: string,
+  customerId: string,
+): UseQueryResult<ProofingCustomer, Error> {
+  return useQuery({
+    queryKey: proofingCustomerQueryKey(slug, customerId),
+    queryFn: ({ signal }) => getProofingCustomer(slug, customerId, signal),
+    enabled: slug !== "" && customerId !== "",
+  });
+}
+
+export function useCreateProofingCustomerMutation(
+  slug: string,
+): UseMutationResult<ProofingCustomer, Error, string> {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
-    mutationFn: () => startProofing(token),
+    mutationFn: (name) => createProofingCustomer(slug, name),
     meta: { suppressErrorToast: true },
     onSuccess: () => {
+      toast.success(t("toasts.identityProofingCustomerCreated"));
       void queryClient.invalidateQueries({
-        queryKey: proofingLinkQueryKey(token),
+        queryKey: proofingCustomersQueryKey(slug),
+      });
+    },
+  });
+}
+
+// A new name shows in the list and in the customer's requests.
+export function useRenameProofingCustomerMutation(
+  slug: string,
+  customerId: string,
+): UseMutationResult<ProofingCustomer, Error, string> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (name) => renameProofingCustomer(slug, customerId, name),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.identityProofingCustomerRenamed"));
+      void queryClient.invalidateQueries({
+        queryKey: proofingCustomersQueryKey(slug),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: proofingRequestsQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useProofingCustomerFlowsQuery(
+  slug: string,
+  customerId: string,
+): UseQueryResult<ProofingCustomerFlow[], Error> {
+  return useQuery({
+    queryKey: proofingCustomerFlowsQueryKey(slug, customerId),
+    queryFn: ({ signal }) => getProofingCustomerFlows(slug, customerId, signal),
+    enabled: slug !== "" && customerId !== "",
+  });
+}
+
+// The answer is the customer's flows as an admin sees them, so it replaces the
+// cached list; the customer list shows the new assignment too.
+export function useSetProofingCustomerFlowsMutation(
+  slug: string,
+  customerId: string,
+): UseMutationResult<ProofingCustomerFlow[], Error, ProofingFlowSelection> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (selection) =>
+      setProofingCustomerFlows(slug, customerId, selection),
+    meta: { suppressErrorToast: true },
+    onSuccess: (flows) => {
+      toast.success(t("toasts.identityProofingCustomerFlowsSaved"));
+      queryClient.setQueryData(
+        proofingCustomerFlowsQueryKey(slug, customerId),
+        flows,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: proofingCustomersQueryKey(slug),
+        exact: true,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: proofingCustomerQueryKey(slug, customerId),
+        exact: true,
       });
     },
   });

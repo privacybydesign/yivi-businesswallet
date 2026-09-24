@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,37 +150,46 @@ func makeMember(t *testing.T, pool *pgxpool.Pool, orgID, userID uuid.UUID, role 
 	}
 }
 
-func newStoredRequest(orgID, requestedBy uuid.UUID, subject Member, sessionID string) NewStoredRequest {
-	expires := time.Now().Add(SessionTTL)
+func memberSubject(m Member) Subject {
+	return Subject{UserID: &m.UserID, Name: m.Name, Email: m.Email}
+}
+
+func newStoredRequest(orgID, requestedBy uuid.UUID, subject Subject) NewStoredRequest {
 	return NewStoredRequest{
 		ID: uuid.New(), OrgID: orgID, RequestedBy: requestedBy, Subject: subject,
 		Flow:          proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Name: "Passport + face"}, ID: "f1", Version: 3},
-		Session:       proofingprovider.Session{ID: sessionID, Token: "rp-token", ExpiresAt: expires},
-		LinkExpiresAt: expires,
+		LinkExpiresAt: time.Now().Add(SessionTTL),
 	}
 }
 
-func TestRequestStoreMembersListsEveryRole(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
-	orgID := makeOrg(t, pool, "acme")
-	admin := makeUser(t, pool, "admin@example.org")
-	member := makeUser(t, pool, "member@example.org")
-	makeMember(t, pool, orgID, admin, "admin")
-	makeMember(t, pool, orgID, member, "member")
-	outsider := makeUser(t, pool, "outsider@example.org")
-	ctx := context.Background()
+// attachedSession is the IPS session a recipient's start attaches, pinned to a
+// newer flow version than the one the request was sent on.
+func attachedSession(id string) proofingprovider.Session {
+	return proofingprovider.Session{ID: id, Token: "rp-token", ExpiresAt: time.Now().Add(SessionTTL), FlowVersion: 4}
+}
 
-	members, err := store.Members(ctx, orgID)
-	if err != nil || len(members) != 2 {
-		t.Fatalf("Members = %+v, %v; want the admin and the member", members, err)
+// createStarted stores a request and attaches its session, as sending does.
+func createStarted(t *testing.T, store *RequestStore, in NewStoredRequest, sessionID string) Request {
+	t.Helper()
+	ctx := context.Background()
+	req, err := store.Create(ctx, in)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	if members[0].Name != "Sam de Vries" || members[0].MemberType != "employee" {
-		t.Errorf("member = %+v", members[0])
+	if ok, err := store.AttachSession(ctx, req, attachedSession(sessionID)); err != nil || !ok {
+		t.Fatalf("AttachSession = %v, %v", ok, err)
 	}
-	if _, err := store.Member(ctx, orgID, outsider); !errors.Is(err, ErrMemberNotFound) {
-		t.Errorf("Member(outsider) = %v, want ErrMemberNotFound", err)
+	return onlyRequest(t, store, in.OrgID)
+}
+
+// onlyRequest reads the org's one request back.
+func onlyRequest(t *testing.T, store *RequestStore, orgID uuid.UUID) Request {
+	t.Helper()
+	reqs, err := store.List(context.Background(), orgID, RequestFilter{})
+	if err != nil || len(reqs) != 1 {
+		t.Fatalf("List = %+v, %v; want one request", reqs, err)
 	}
+	return reqs[0]
 }
 
 func TestRequestStoreLifecycle(t *testing.T) {
@@ -195,77 +205,245 @@ func TestRequestStoreLifecycle(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	req, raw, err := store.Create(ctx, newStoredRequest(orgID, requester, subject, "s1"))
+	req, err := store.Create(ctx, newStoredRequest(orgID, requester, memberSubject(subject)))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if req.Status != StatusPending || req.RequestedByName != "Sam de Vries" || req.SubjectUserID == nil ||
-		*req.SubjectUserID != subjectID || req.FlowVersion != 3 || req.session == nil || req.session.Token != "rp-token" {
-		t.Errorf("created = %+v", req)
+		*req.SubjectUserID != subjectID || req.FlowVersion != 3 || req.session != nil {
+		t.Errorf("created = %+v; want a pending request with no session yet", req)
 	}
 
-	var hash, tokenCT []byte
-	if err := pool.QueryRow(ctx, `SELECT token_hash, ips_session_token_ciphertext FROM identity_proofing_requests WHERE id = $1`,
-		req.ID).Scan(&hash, &tokenCT); err != nil {
+	// Sending attaches the session once; a second attach is refused.
+	if ok, err := store.AttachSession(ctx, req, attachedSession("s1")); err != nil || !ok {
+		t.Fatalf("AttachSession = %v, %v", ok, err)
+	}
+	if ok, err := store.AttachSession(ctx, req, attachedSession("s2")); err != nil || ok {
+		t.Errorf("second AttachSession = %v, %v; want it refused", ok, err)
+	}
+	if n := auditCount(t, pool, audit.IdentityProofingSessionCreated); n != 1 {
+		t.Errorf("session_created audits = %d, want 1", n)
+	}
+	sent := onlyRequest(t, store, orgID)
+	if s := sent.session; s == nil || s.ID != "s1" || s.Token != "rp-token" || s.EndedAt != nil || sent.FlowVersion != 4 {
+		t.Errorf("sent = %+v; want session s1 on the pinned version", sent)
+	}
+
+	var tokenCT []byte
+	if err := pool.QueryRow(ctx, `SELECT ips_session_token_ciphertext FROM identity_proofing_requests WHERE id = $1`,
+		req.ID).Scan(&tokenCT); err != nil {
 		t.Fatalf("read row: %v", err)
 	}
-	if bytes.Contains(hash, []byte(raw)) || bytes.Contains(tokenCT, []byte("rp-token")) {
-		t.Error("the link token or the session token is stored in the clear")
-	}
-
-	link, err := store.ByToken(ctx, raw)
-	if err != nil || link.OrganizationName != "acme" || link.Request.ID != req.ID {
-		t.Fatalf("ByToken = %+v, %v", link, err)
-	}
-	if _, err := store.ByToken(ctx, "unknown"); !errors.Is(err, ErrLinkNotFound) {
-		t.Errorf("unknown token = %v, want ErrLinkNotFound", err)
+	if bytes.Contains(tokenCT, []byte("rp-token")) {
+		t.Error("the session token is stored in the clear")
 	}
 
 	for range 2 {
-		if err := store.MarkStarted(ctx, link.Request, "s1"); err != nil {
+		if err := store.MarkStarted(ctx, sent, "s1"); err != nil {
 			t.Fatalf("MarkStarted: %v", err)
 		}
 	}
 	if n := auditCount(t, pool, audit.IdentityProofingSessionStarted); n != 1 {
 		t.Errorf("session_started audits = %d, want 1", n)
 	}
-	link, _ = store.ByToken(ctx, raw)
+	started := onlyRequest(t, store, orgID)
 
 	res := proofingprovider.Result{Status: proofingprovider.StatusApproved, AssuranceLevel: "high", EIDASLevel: "substantial"}
 	for range 2 {
-		if err := store.RecordOutcome(ctx, link.Request, "s1", StatusApproved, res); err != nil {
+		if err := store.RecordOutcome(ctx, started, "s1", StatusApproved, res); err != nil {
 			t.Fatalf("RecordOutcome: %v", err)
 		}
 	}
-	if n := auditCount(t, pool, audit.IdentityProofingCompleted); n != 1 {
-		t.Errorf("completed audits = %d, want 1", n)
+	if n := auditCount(t, pool, audit.IdentityProofingApproved); n != 1 {
+		t.Errorf("approved audits = %d, want 1", n)
 	}
 
-	mine, err := store.List(ctx, orgID, &requester)
+	mine, err := store.List(ctx, orgID, RequestFilter{RequestedBy: &requester})
 	if err != nil || len(mine) != 1 || mine[0].Status != StatusApproved || mine[0].EIDASLevel != "substantial" {
 		t.Fatalf("List own = %+v, %v", mine, err)
 	}
 	other := uuid.New()
-	if theirs, err := store.List(ctx, orgID, &other); err != nil || len(theirs) != 0 {
+	if theirs, err := store.List(ctx, orgID, RequestFilter{RequestedBy: &other}); err != nil || len(theirs) != 0 {
 		t.Errorf("List for another member = %+v, %v; want none", theirs, err)
 	}
 }
 
-func TestRequestStoreExpireLinkEndsTheLink(t *testing.T) {
+// A session that ends undecided ends the request: the end is recorded once,
+// and the request reads as expired.
+func TestRequestStoreEndSessionExpiresTheRequest(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
 	requester := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
 
-	req, raw, err := store.Create(ctx, newStoredRequest(orgID, requester, Member{UserID: requester, Name: "Sam", Email: "sam@example.org"}, "s1"))
+	req := createStarted(t, store,
+		newStoredRequest(orgID, requester, memberSubject(Member{UserID: requester, Name: "Sam", Email: "sam@example.org"})), "s1")
+	if err := store.MarkStarted(ctx, req, "s1"); err != nil {
+		t.Fatalf("MarkStarted: %v", err)
+	}
+	for range 2 {
+		if err := store.EndSession(ctx, req, "s1", proofingprovider.StatusCancelled); err != nil {
+			t.Fatalf("EndSession: %v", err)
+		}
+	}
+	if n := auditCount(t, pool, audit.IdentityProofingSessionEnded); n != 1 {
+		t.Errorf("session_ended audits = %d, want 1", n)
+	}
+	ended := onlyRequest(t, store, orgID)
+	if ended.needsReconcile() || ended.liveSession(time.Now()) != nil || ended.EffectiveStatus(time.Now()) != StatusExpired {
+		t.Errorf("ended = %+v; want the session over and the request expired", ended)
+	}
+}
+
+func TestCustomerStoreLifecycle(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewCustomerStore(pool, audit.NewDBRecorder())
+	orgID := makeOrg(t, pool, "acme")
+	otherOrg := makeOrg(t, pool, "globex")
+	admin := makeUser(t, pool, "admin@example.org")
+	ctx := context.Background()
+
+	c, err := store.Create(ctx, orgID, admin, "Initech")
+	if err != nil || c.Name != "Initech" || len(c.Flows.FlowIDs) != 0 {
+		t.Fatalf("Create = %+v, %v", c, err)
+	}
+	if _, err := store.Create(ctx, orgID, admin, "INITECH"); !errors.Is(err, ErrCustomerExists) {
+		t.Errorf("duplicate name err = %v, want ErrCustomerExists", err)
+	}
+	if _, err := store.Create(ctx, otherOrg, admin, "Initech"); err != nil {
+		t.Errorf("another org's customer of the same name: %v", err)
+	}
+	if _, err := store.Get(ctx, otherOrg, c.ID); !errors.Is(err, ErrCustomerNotFound) {
+		t.Errorf("Get from another org = %v, want ErrCustomerNotFound", err)
+	}
+
+	if c, err = store.Rename(ctx, orgID, c.ID, "Initech BV"); err != nil || c.Name != "Initech BV" {
+		t.Fatalf("Rename = %+v, %v", c, err)
+	}
+	sel := FlowSelection{FlowIDs: []string{"f1", "f2"}, DefaultFlowID: "f2"}
+	if c, err = store.SaveFlows(ctx, orgID, c.ID, sel); err != nil {
+		t.Fatalf("SaveFlows: %v", err)
+	}
+	if !slices.Equal(c.Flows.FlowIDs, sel.FlowIDs) || c.Flows.DefaultFlowID != "f2" {
+		t.Errorf("flows = %+v, want %+v", c.Flows, sel)
+	}
+	if c, err = store.SaveFlows(ctx, orgID, c.ID, FlowSelection{FlowIDs: []string{}}); err != nil || len(c.Flows.FlowIDs) != 0 {
+		t.Errorf("clearing flows = %+v, %v", c.Flows, err)
+	}
+
+	list, err := store.List(ctx, orgID)
+	if err != nil || len(list) != 1 || list[0].ID != c.ID {
+		t.Errorf("List = %+v, %v; want only this org's customer", list, err)
+	}
+	for action, want := range map[string]int{
+		audit.IdentityProofingCustomerCreated:         2,
+		audit.IdentityProofingCustomerUpdated:         1,
+		audit.IdentityProofingCustomerFlowsConfigured: 2,
+	} {
+		if n := auditCount(t, pool, action); n != want {
+			t.Errorf("%s audits = %d, want %d", action, n, want)
+		}
+	}
+}
+
+// A rejection is audited as its own action, with IPS's error code as the reason
+// and the subject it was about.
+func TestRequestStoreRejectionAuditsReason(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	requester := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	req := createStarted(t, store, newStoredRequest(orgID, requester,
+		Subject{Name: "Anna Jansen", Email: "anna@example.org"}), "s1")
+
+	const code = "DOCUMENT_TYPE_NOT_ACCEPTED"
+	res := proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: code}
+	if err := store.RecordOutcome(ctx, req, "s1", StatusRejected, res); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	if n := auditCount(t, pool, audit.IdentityProofingApproved); n != 0 {
+		t.Errorf("approved audits = %d, want 0", n)
+	}
+	var after struct {
+		Status       string `json:"status"`
+		ErrorCode    string `json:"errorCode"`
+		SubjectName  string `json:"subjectName"`
+		SubjectEmail string `json:"subjectEmail"`
+	}
+	if err := pool.QueryRow(ctx, `SELECT metadata->'after' FROM audit_events WHERE action = $1`,
+		audit.IdentityProofingRejected).Scan(&after); err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	if after.Status != string(StatusRejected) || after.ErrorCode != code ||
+		after.SubjectName != "Anna Jansen" || after.SubjectEmail != "anna@example.org" {
+		t.Errorf("rejected audit after = %+v", after)
+	}
+}
+
+// A customer's subject is stored without a member; the proofed name is sealed,
+// shown until its retention passes, and then purged.
+func TestRequestStoreCustomerSubjectAndProofedName(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	orgID := makeOrg(t, pool, "acme")
+	requester := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, requester, "Initech")
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf("create customer: %v", err)
 	}
-	if err := store.ExpireLink(ctx, req.ID, "s1"); err != nil {
-		t.Fatalf("ExpireLink: %v", err)
+
+	req := createStarted(t, store, newStoredRequest(orgID, requester,
+		Subject{CustomerID: &customer.ID, Email: "anna@example.org"}), "s1")
+	if req.SubjectUserID != nil || req.CustomerID == nil || *req.CustomerID != customer.ID || req.CustomerName != "Initech" {
+		t.Errorf("created = %+v", req)
 	}
-	if _, err := store.ByToken(ctx, raw); !errors.Is(err, ErrLinkNotFound) {
-		t.Errorf("ByToken after expiry = %v, want ErrLinkNotFound", err)
+
+	const name = "Anna Jansen"
+	res := proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: name}
+	if err := store.RecordOutcome(ctx, req, "s1", StatusApproved, res); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	var nameCT []byte
+	if err := pool.QueryRow(ctx, `SELECT proofed_name_ciphertext FROM identity_proofing_requests WHERE id = $1`,
+		req.ID).Scan(&nameCT); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if len(nameCT) == 0 || bytes.Contains(nameCT, []byte(name)) {
+		t.Error("the proofed name is missing or stored in the clear")
+	}
+	var metadata string
+	if err := pool.QueryRow(ctx, `SELECT metadata::text FROM audit_events WHERE action = $1`,
+		audit.IdentityProofingApproved).Scan(&metadata); err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	if strings.Contains(metadata, name) {
+		t.Error("the proofed name was audited")
+	}
+
+	theirs, err := store.List(ctx, orgID, RequestFilter{CustomerID: &customer.ID})
+	if err != nil || len(theirs) != 1 || theirs[0].ProofedName != name {
+		t.Fatalf("List for customer = %+v, %v", theirs, err)
+	}
+	other := uuid.New()
+	if none, err := store.List(ctx, orgID, RequestFilter{CustomerID: &other}); err != nil || len(none) != 0 {
+		t.Errorf("List for another customer = %+v, %v; want none", none, err)
+	}
+
+	if n, err := store.PurgeProofedNames(ctx); err != nil || n != 0 {
+		t.Errorf("purge within retention = %d, %v; want nothing purged", n, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests SET proofed_name_purge_after = now() WHERE id = $1`, req.ID); err != nil {
+		t.Fatalf("age the name: %v", err)
+	}
+	if n, err := store.PurgeProofedNames(ctx); err != nil || n != 1 {
+		t.Errorf("purge past retention = %d, %v; want one", n, err)
+	}
+	after, err := store.List(ctx, orgID, RequestFilter{CustomerID: &customer.ID})
+	if err != nil || len(after) != 1 || after[0].ProofedName != "" || after[0].Status != StatusApproved {
+		t.Errorf("after purge = %+v, %v; want the outcome without the name", after, err)
 	}
 }

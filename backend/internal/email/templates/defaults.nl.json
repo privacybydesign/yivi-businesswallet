@@ -22,8 +22,8 @@
     "reason": "Je laatste identiteitscontrole is verlopen.",
     "vogUrl": "https://wallet.example.org/vog/sample",
     "requesterName": "Sam de Vries",
-    "proofingUrl": "https://wallet.example.org/proof/sample",
-    "validMinutes": "15"
+    "proofingUrl": "vcmrtd://verify?handover=sample&api=https%3A%2F%2Fproofing.example.org",
+    "validMinutes": "10"
   },
   "events": {
     "membership.invited": "Lid uitgenodigd",
@@ -225,9 +225,9 @@
         { "type": "logo" },
         { "type": "heading", "text": "{{orgName}} vraagt je je identiteit te verifiëren" },
         { "type": "paragraph", "text": "{{requesterName}} vraagt je je identiteit te verifiëren met je paspoort of identiteitskaart en je gezicht, in de vcmrtd-app op je telefoon." },
-        { "type": "qr", "label": "Scan met de camera van je telefoon", "url": "{{proofingUrl}}" },
-        { "type": "button", "label": "Mijn identiteit verifiëren", "url": "{{proofingUrl}}" },
-        { "type": "paragraph", "text": "De QR-code en de knop openen dezelfde pagina. Deze link is {{validMinutes}} minuten geldig; vraag daarna {{orgName}} om een nieuwe." },
+        { "type": "qr", "label": "Scan met de vcmrtd-app", "url": "{{proofingUrl}}" },
+        { "type": "button", "label": "Openen in de vcmrtd-app", "url": "{{proofingUrl}}" },
+        { "type": "paragraph", "text": "Lees je dit op je telefoon? Tik dan op de knop. De QR-code en de knop starten dezelfde sessie, die {{validMinutes}} minuten geldig is vanaf het versturen van deze e-mail. Vraag daarna {{orgName}} om een nieuwe." },
         { "type": "footer" }
       ]
     }

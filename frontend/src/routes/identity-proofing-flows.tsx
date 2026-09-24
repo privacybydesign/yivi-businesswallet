@@ -27,6 +27,7 @@ import {
   attributeAvailable,
   draftFromFlow,
   draftSteps,
+  editedFlowSelection,
   emptyFlowDraft,
   flowDraftError,
   flowSpecFromDraft,
@@ -131,16 +132,12 @@ function FlowsCard({
   );
   const [historyOf, setHistoryOf] = useState<string | null>(null);
 
-  const listed = flows.filter((f) => allowed.has(f.id));
   // A default the admin unticked falls to the first flow still ticked.
-  const effectiveDefault = allowed.has(defaultId)
-    ? defaultId
-    : (listed[0]?.id ?? "");
-  const saved = flows.filter((f) => f.allowed);
-  const dirty =
-    saved.length !== listed.length ||
-    saved.some((f) => !allowed.has(f.id)) ||
-    (flows.find((f) => f.default)?.id ?? "") !== effectiveDefault;
+  const { selection, dirty } = editedFlowSelection(flows, allowed, defaultId, {
+    flowIds: flows.filter((f) => f.allowed).map((f) => f.id),
+    defaultFlowId: flows.find((f) => f.default)?.id ?? "",
+  });
+  const effectiveDefault = selection.defaultFlowId;
 
   function toggle(id: string, on: boolean): void {
     setAllowed((current) => {
@@ -156,10 +153,7 @@ function FlowsCard({
 
   function submit(event: React.FormEvent): void {
     event.preventDefault();
-    save.mutate({
-      flowIds: listed.map((f) => f.id),
-      defaultFlowId: effectiveDefault,
-    });
+    save.mutate(selection);
   }
 
   return (

@@ -506,9 +506,9 @@ func TestDefaultTemplateReturnsACopy(t *testing.T) {
 
 func TestRenderQRBlockEmbedsTheLinkAsAnInlineImage(t *testing.T) {
 	tpl, _ := DefaultTemplate(KindIdentityProofingRequested, LocaleEN)
-	const link = "https://wallet.example.org/proof/abc"
+	const link = "vcmrtd://verify?handover=abc&api=https%3A%2F%2Fproofing.example.org"
 	body, err := Render(KindIdentityProofingRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
-		varOrgName: "Acme BV", varRequesterName: "Sam", varProofingURL: link, varValidMinutes: "15",
+		varOrgName: "Acme BV", varRequesterName: "Sam", varProofingURL: link, varValidMinutes: "10",
 	})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -527,6 +527,32 @@ func TestRenderQRBlockEmbedsTheLinkAsAnInlineImage(t *testing.T) {
 	preview := inlinePreviewLogo(body)
 	if preview.InlineQR != nil || !strings.Contains(preview.HTMLBody, `src="data:image/png;base64,`) {
 		t.Errorf("the preview does not inline the QR image")
+	}
+}
+
+// The proofing link is a vcmrtd deep link and nothing else: an http(s) URL or
+// another scheme in its place is refused, not delivered.
+func TestRenderHoldsAnAppLinkVariableToItsScheme(t *testing.T) {
+	tpl, _ := DefaultTemplate(KindIdentityProofingRequested, LocaleEN)
+	for _, link := range []string{"https://wallet.example.org/proof/abc", "javascript:alert(1)", "vcmrtd:verify"} {
+		_, err := Render(KindIdentityProofingRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
+			varOrgName: "Acme BV", varRequesterName: "Sam", varProofingURL: link, varValidMinutes: "10",
+		})
+		if err == nil {
+			t.Errorf("Render accepted %q as the proofing link", link)
+		}
+	}
+}
+
+// Only the variable that declares the scheme may carry it: an http(s) variable
+// holding a vcmrtd link still fails.
+func TestRenderRefusesAnAppLinkInAnHTTPVariable(t *testing.T) {
+	tpl, _ := DefaultTemplate(KindVogRequested, LocaleEN)
+	_, err := Render(KindVogRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
+		varOrgName: "Acme BV", varVogURL: "vcmrtd://verify?handover=abc", varReason: "Expired.",
+	})
+	if err == nil {
+		t.Error("Render accepted a vcmrtd link as an http(s) URL variable")
 	}
 }
 

@@ -37,6 +37,7 @@ import {
 } from "../lib/audit-event";
 import { fullName, personInitials } from "../lib/name";
 import { useWhenFormatter } from "../lib/format-when";
+import { MemberProofing } from "./member-proofing";
 import { Avatar, Button, Card, Icon, Modal, Tag, TopBar } from "../ui";
 import * as React from "react";
 
@@ -83,7 +84,7 @@ function TimelineItem({
   isLast: boolean;
 }): React.JSX.Element {
   const visual = auditVisual(event.action);
-  const subject = auditSubject(event, dateFormatter);
+  const subject = auditSubject(event, dateFormatter, t);
   return (
     <li className="flex gap-3">
       <div className="flex flex-col items-center">
@@ -417,6 +418,7 @@ export default function MemberDetail(): React.JSX.Element {
             )}
           </div>
           <div className="border-line flex flex-col gap-2 border-t p-4">
+            <MemberProofing slug={slug} userId={id} />
             {requestableIdentity({
               status: "active",
               identityStatus: member.identityStatus,

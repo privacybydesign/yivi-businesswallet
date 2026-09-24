@@ -2,11 +2,13 @@ import { createBrowserRouter } from "react-router";
 import type { CrumbContext, RouteHandle } from "./ui";
 import type { Member, OrganizationDetail } from "./api/organization";
 import type { QerdsMessageWithEvidence } from "./api/qerds";
+import type { ProofingCustomer } from "./api/identity-proofing";
 import {
   organizationMemberQueryKey,
   organizationQueryKey,
 } from "./api/organization.queries";
 import { qerdsMessageQueryKey } from "./api/qerds.queries";
+import { proofingCustomerQueryKey } from "./api/identity-proofing.queries";
 import { fullName } from "./lib/name";
 import Root from "./routes/root";
 import RootRedirect from "./routes/root-redirect";
@@ -23,9 +25,9 @@ import IdentityReviews from "./routes/identity-reviews";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
 import VogSubmit from "./routes/vog-submit";
-import IdentityProofing from "./routes/identity-proofing";
 import IdentityProofingFlows from "./routes/identity-proofing-flows";
-import Proof from "./routes/proof";
+import Customers from "./routes/customers";
+import CustomerDetail from "./routes/customer-detail";
 import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
 import MemberEdit from "./routes/member-edit";
@@ -67,6 +69,17 @@ const identityProofingCrumb: RouteHandle = {
 };
 const identityProofingFlowsCrumb: RouteHandle = {
   crumb: ({ t }) => t("identityProofingFlows.title"),
+};
+const customersCrumb: RouteHandle = {
+  crumb: ({ t }) => t("customers.title"),
+};
+const customerCrumb: RouteHandle = {
+  crumb: ({ params, queryClient, t }: CrumbContext) => {
+    const customer = queryClient.getQueryData<ProofingCustomer>(
+      proofingCustomerQueryKey(params.orgSlug ?? "", params.customerId ?? ""),
+    );
+    return customer?.name ?? t("customers.title");
+  },
 };
 const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
 const memberCrumb: RouteHandle = {
@@ -138,9 +151,6 @@ export const router = createBrowserRouter([
       // A member's VOG submission, keyed by the token from a request/reminder
       // mail or the dashboard banner - public like /claim, no sign-in needed.
       { path: "/vog/:token", Component: VogSubmit },
-      // An identity proofing recipient need not have an account; the link token
-      // from their request e-mail is the key.
-      { path: "/proof/:token", Component: Proof },
       // Inbound OpenID4VP: the address an external verifier redirects to, then
       // the transaction by its opaque id. Not under ProtectedRoute — it handles
       // the sign-in step itself so the id can ride through /login?returnTo=.
@@ -181,11 +191,24 @@ export const router = createBrowserRouter([
                     path: "identity-proofing",
                     handle: identityProofingCrumb,
                     children: [
-                      { index: true, Component: IdentityProofing },
                       {
                         path: "flows",
                         Component: IdentityProofingFlows,
                         handle: identityProofingFlowsCrumb,
+                      },
+                    ],
+                  },
+                  // The org's own customers: proofing requests are one thing
+                  // done for them, so they are not filed under proofing.
+                  {
+                    path: "customers",
+                    handle: customersCrumb,
+                    children: [
+                      { index: true, Component: Customers },
+                      {
+                        path: ":customerId",
+                        Component: CustomerDetail,
+                        handle: customerCrumb,
                       },
                     ],
                   },

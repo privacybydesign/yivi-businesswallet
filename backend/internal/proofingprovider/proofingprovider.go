@@ -95,6 +95,8 @@ type Session struct {
 	ID        string
 	Token     string
 	ExpiresAt time.Time
+	// FlowVersion is the flow version IPS pinned the session to; 0 when unknown.
+	FlowVersion int
 	// Claim is the vcmrtd link for the subject's phone, nil when IPS offered none.
 	Claim *Claim
 }
@@ -120,14 +122,19 @@ const (
 	StatusCancelled   Status = "cancelled"
 )
 
-// Result is a session's outcome, reduced to the assurance summary. The IPS
-// result also carries document fields, the BSN and images; they are never decoded.
+// Result is a session's outcome, reduced to the assurance summary and the
+// subject's name. The IPS result also carries the other document fields, the BSN
+// and images; they are never decoded.
 type Result struct {
 	Status         Status
 	ErrorCode      string
 	AssuranceLevel string
 	EIDASLevel     string
 	CompletedAt    *time.Time
+	// Name is the holder's name as read off the document: its DG11 display name
+	// when IPS has one, else the MRZ first and last name. Empty when the flow did
+	// not request the document data (dg1) or the session has no result yet.
+	Name string
 }
 
 // ErrNotFound is IPS answering 404: an unknown session, or a tenant it no longer has.

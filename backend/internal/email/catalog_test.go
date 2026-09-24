@@ -79,8 +79,8 @@ func sampleVars(kind Kind) map[string]string {
 		return map[string]string{
 			varOrgName:       "Acme BV",
 			varRequesterName: "Sam de Vries",
-			varProofingURL:   "https://wallet.example.org/proof/abc",
-			varValidMinutes:  "15",
+			varProofingURL:   "vcmrtd://verify?handover=abc&api=https%3A%2F%2Fproofing.example.org",
+			varValidMinutes:  "10",
 		}
 	default:
 		return nil
@@ -342,8 +342,8 @@ func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
 		varVogURL:         "https://wallet.example.org/vog/abc",
 		varSignerName:     "Sam Jansen",
 		varRequesterName:  "Sam de Vries",
-		varProofingURL:    "https://wallet.example.org/proof/sample",
-		varValidMinutes:   "15",
+		varProofingURL:    "vcmrtd://verify?handover=sample&api=https%3A%2F%2Fproofing.example.org",
+		varValidMinutes:   "10",
 	}
 	if err := validateSamples(complete); err != nil {
 		t.Fatalf("validateSamples on the complete set = %v, want nil", err)

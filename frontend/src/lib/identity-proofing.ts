@@ -1,6 +1,10 @@
 import type { TFunction } from "i18next";
 import { ApiError } from "../api/http";
-import type { ProofingFlow, ProofingFlowSpec } from "../api/identity-proofing";
+import type {
+  ProofingFlow,
+  ProofingFlowSelection,
+  ProofingFlowSpec,
+} from "../api/identity-proofing";
 import { errorCode } from "./api-error";
 
 // Identity proofing request statuses as the backend reports them
@@ -319,11 +323,50 @@ export function latestRequestByMember<
 export function sendableFlows<T extends { allowed: boolean; default: boolean }>(
   flows: readonly T[],
 ): { sendable: T[]; initial: T | undefined } {
-  const sendable = flows.filter((flow) => flow.allowed);
+  return withInitial(flows.filter((flow) => flow.allowed));
+}
 
+export function assignedFlows<
+  T extends { assigned: boolean; default: boolean },
+>(flows: readonly T[]): { sendable: T[]; initial: T | undefined } {
+  return withInitial(flows.filter((flow) => flow.assigned));
+}
+
+function withInitial<T extends { default: boolean }>(
+  sendable: T[],
+): { sendable: T[]; initial: T | undefined } {
   return {
     sendable,
     initial: sendable.find((flow) => flow.default) ?? sendable[0],
+  };
+}
+
+export function editedFlowSelection(
+  flows: readonly { id: string }[],
+  ticked: ReadonlySet<string>,
+  defaultId: string,
+  saved: ProofingFlowSelection,
+): { selection: ProofingFlowSelection; dirty: boolean } {
+  const flowIds = flows.filter((f) => ticked.has(f.id)).map((f) => f.id);
+  const defaultFlowId = ticked.has(defaultId) ? defaultId : (flowIds[0] ?? "");
+  const dirty =
+    saved.flowIds.length !== flowIds.length ||
+    saved.flowIds.some((id) => !ticked.has(id)) ||
+    saved.defaultFlowId !== defaultFlowId;
+  return { selection: { flowIds, defaultFlowId }, dirty };
+}
+
+export function requestSubject(request: {
+  subjectName: string;
+  subjectEmail: string;
+  proofedName?: string | undefined;
+}): { name: string; verifiedAs: string | undefined } {
+  const given = request.subjectName.trim();
+  const proofed = request.proofedName?.trim() ?? "";
+  const name = given || proofed || request.subjectEmail;
+  return {
+    name,
+    verifiedAs: proofed !== "" && proofed !== name ? proofed : undefined,
   };
 }
 
@@ -342,6 +385,29 @@ function serverMessage(error: unknown): string | null {
   return null;
 }
 
+// Why the proofing service did not approve a session, from its errorCode. An
+// unknown code is shown as is, so a new one still says something.
+export function proofingRejectionReason(code: string, t: TFunction): string {
+  switch (code) {
+    case "DOCUMENT_TYPE_NOT_ACCEPTED":
+      return t("identityProofing.rejectionReasons.documentTypeNotAccepted");
+    case "DOCUMENT_COUNTRY_NOT_ACCEPTED":
+      return t("identityProofing.rejectionReasons.documentCountryNotAccepted");
+    case "FACE_STEP_NOT_COMPLETED":
+      return t("identityProofing.rejectionReasons.faceStepNotCompleted");
+    case "FACE_NO_MATCH":
+      return t("identityProofing.rejectionReasons.faceNoMatch");
+    case "DOC_TAMPERED":
+      return t("identityProofing.rejectionReasons.docTampered");
+    case "CHIP_CLONE_DETECTED":
+      return t("identityProofing.rejectionReasons.chipCloneDetected");
+    case "DOC_EXPIRED":
+      return t("identityProofing.rejectionReasons.docExpired");
+    default:
+      return code;
+  }
+}
+
 // The copy an identity proofing API error shows, keyed on its stable code.
 export function proofingErrorMessage(error: unknown, t: TFunction): string {
   switch (errorCode(error)) {
@@ -355,8 +421,12 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.flowNotAllowed");
     case "member_not_found":
       return t("identityProofing.errors.memberNotFound");
-    case "proofing_link_not_found":
-      return t("identityProofing.errors.linkNotFound");
+    case "customer_not_found":
+      return t("identityProofing.errors.customerNotFound");
+    case "customer_exists":
+      return t("identityProofing.errors.customerExists");
+    case "flow_not_assigned":
+      return t("identityProofing.errors.flowNotAssigned");
     case "invalid_input":
     case "rejected_by_provider":
       return serverMessage(error) ?? t("identityProofing.errors.generic");

@@ -62,7 +62,8 @@ const (
 	// overdue reminder cadence.
 	KindVogExpired Kind = "vog_expired"
 	// KindIdentityProofingRequested asks a person to prove their identity with
-	// their identity document and face, linking to the public proofing page.
+	// their identity document and face: a QR code and a button carrying the
+	// vcmrtd deep link of an IPS session created at send.
 	KindIdentityProofingRequested Kind = "identity_proofing_requested"
 )
 
@@ -92,14 +93,20 @@ const (
 	varValidMinutes   = "validMinutes"
 )
 
+// appSchemeVCMRTD is the scheme of the vcmrtd app's deep links (identity
+// proofing): the one non-http(s) URL a mail may carry.
+const appSchemeVCMRTD = "vcmrtd"
+
 // Variable is one substitutable value of a kind. URL variables are additionally
 // checked to be absolute http(s) before substitution, because they end up in an
 // href and a relative or javascript: value would be worse than a missing link. A
 // literal button URL gets the same check at save time (validateButtonURL); only a
-// URL variable may stand in for one.
+// URL variable may stand in for one. A URL variable with an AppScheme carries an
+// app deep link of exactly that scheme instead of an http(s) URL.
 type Variable struct {
-	Name  string
-	IsURL bool
+	Name      string
+	IsURL     bool
+	AppScheme string
 }
 
 // kindVariables is the allowlist per kind. A kind's caller supplies exactly these.
@@ -178,7 +185,7 @@ var kindVariables = map[Kind][]Variable{
 	KindIdentityProofingRequested: {
 		{Name: varOrgName},
 		{Name: varRequesterName},
-		{Name: varProofingURL, IsURL: true},
+		{Name: varProofingURL, IsURL: true, AppScheme: appSchemeVCMRTD},
 		{Name: varValidMinutes},
 	},
 }
@@ -469,7 +476,7 @@ func validateSamples(samples map[string]string) error {
 				return fmt.Errorf("no sample value for %q (declared by kind %q)", v.Name, kind)
 			}
 			if v.IsURL {
-				if err := validateAbsoluteHTTPURL(value); err != nil {
+				if err := v.validateURL(value); err != nil {
 					return fmt.Errorf("sample for %q: %w", v.Name, err)
 				}
 			}

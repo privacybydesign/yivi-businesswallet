@@ -247,14 +247,15 @@ func (s *Service) SendVogRequested(ctx context.Context, orgID uuid.UUID, to, org
 	})
 }
 
-// SendIdentityProofingRequested asks a member to prove their identity: a QR code
-// and a button for the same proofing link, valid for validFor. Returns
-// ErrNotConfigured when the org has no usable SMTP settings.
-func (s *Service) SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, to, orgName, requesterName, proofingURL string, validFor time.Duration) error {
+// SendIdentityProofingRequested asks a person to prove their identity: a QR code
+// and a button for the same vcmrtd deep link of an IPS session, which runs for
+// validFor from the send. Returns ErrNotConfigured when the org has no usable
+// SMTP settings.
+func (s *Service) SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, to, orgName, requesterName, deepLink string, validFor time.Duration) error {
 	return s.send(ctx, orgID, KindIdentityProofingRequested, []string{to}, map[string]string{
 		varOrgName:       orgName,
 		varRequesterName: requesterName,
-		varProofingURL:   proofingURL,
+		varProofingURL:   deepLink,
 		varValidMinutes:  strconv.Itoa(int(validFor / time.Minute)),
 	})
 }

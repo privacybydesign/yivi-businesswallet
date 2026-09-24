@@ -2,16 +2,25 @@
 
 **Status:** Integrated (backend + frontend). Every org gets its own IPS tenant on
 first use. An admin defines flows (full IPS configuration, versioned) on the
-"Proofing flows" tab and picks which ones members may use. The "Identity
-proofing" tab lists every member of the org (admins and externals included) with
-a flow picker and a mail button. The mail carries a QR code and a button for one
-15-minute link, and the outcome lands on the request and in the audit log.
+"Proofing flows" tab and picks which ones members may use. A member is sent a
+request from their member detail page (admin-only, like that page): a flow
+picker over those flows, a send button and the last request's status. There is
+no separate members tab. "Customers" is its own top-level page
+(`/{org}/customers`, API `/orgs/{slug}/customers`), not a part of proofing: it
+lists the org's customers (B2B clients, no login); an admin assigns each a
+subset of the org's flows, and any member verifies an external person for a
+customer by e-mail address and an optional name. Sending creates a 10-minute
+IPS session and mails its vcmrtd deep link as a QR code and a button: the mail
+is the session, with no wallet page in between. The outcome lands on the
+request and in the audit log.
 **Slice:** `internal/proofingprovider` (the IPS client + stub, leaf level),
 `internal/proofing` (settings, flow selection, members, requests, service,
 handler), `internal/email` (kind `identity_proofing_requested`, the `qr` block),
-`frontend/src/routes/identity-proofing.tsx` (members + requests),
+`frontend/src/routes/member-proofing.tsx` (the member detail panel),
 `frontend/src/routes/identity-proofing-flows.tsx` (admin: flow editor, versions,
-selection) and the public `frontend/src/routes/proof.tsx`.
+selection), `frontend/src/routes/customers.tsx` + `customer-detail.tsx`
+(customers, assignment, send, requests). There is no public recipient page:
+the mail is the session.
 **Depends on:** `privacybydesign/identity-proofing-service` ("IPS"), an HTTP
 service we are a relying party of. It is itself work in progress: its
 device-binding API (claims, handover, `/submit`) was uncommitted on its
@@ -33,9 +42,18 @@ device-binding API (claims, handover, `/submit`) was uncommitted on its
   the encryption key exists *before* calling IPS, so a missing key never leaves an
   orphaned tenant. Two concurrent first uses can leave one unused tenant at IPS;
   it is logged, not prevented. There is no enable step or on/off state.
-- **Sub-tenants: not used.** IPS sub-tenants only override privacy knobs (BSN
-  policy, blurring), share the parent's keys and cannot own flows. The wallet has
-  departments but no sub-orgs. Revisit when IPS scopes flows per sub-tenant.
+- **Customers are the wallet's, not IPS sub-tenants.** IPS sub-tenants only
+  override privacy knobs (BSN policy, blurring), share the parent's keys and
+  cannot own flows, so a customer (`identity_proofing_customers`) is a wallet row
+  under the org and every session still runs on the org's IPS tenant. A customer
+  has no login and no API key: members act for it (the design plan's
+  "org is the only party in the UI"). Flows stay the org's; a customer gets an
+  allow-list over them with one default (`identity_proofing_customer_flows`,
+  audited `customer_flows_configured` with before/after), independent of the
+  members' list: any completable org flow may be assigned. Customers are created
+  and renamed (`customer_created`/`customer_updated`), never deleted: a request
+  references its customer `ON DELETE RESTRICT`. This deliberately differs from
+  `.ai/plans/identity-proofing.md`, where each customer owns its flows.
 - **Flows live at IPS**, versioned, managed like IPS's own admin page
   (`/api/v1/db-test/admin`): that page, not the tenant API docs, is the editor
   the wallet's "Proofing flows" tab mirrors. It calls `/api/v1/flows` with the
@@ -73,49 +91,90 @@ device-binding API (claims, handover, `/submit`) was uncommitted on its
   (`flow_not_allowed`) on any flow outside the list, for admins too. An id IPS no
   longer lists is ignored on read. With the stub provider, flows live in memory, so
   a backend restart empties the list while the selection rows stay (and are ignored).
-- **Recipients are members only.** A request names a `userId` of the org
-  (`subject_user_id`): any role, employees and externals of this org alike; the
-  name and address are a snapshot. No free-form recipients.
-- **Roles:** any member lists members and allowed flows, sends requests, and
-  sees the requests they sent; creating and editing flows, versions and the
-  selection are `RequireOrgAdmin`; an admin lists every flow (with
-  `allowed`/`default`) and every request of the org.
+- **Recipients: a member, or a customer's subject.** A request names either a
+  `userId` of the org (`subject_user_id`; any role, employees and externals
+  alike) on a flow members may use, or a `customerId` plus an e-mail address and
+  an optional name (a CHECK keeps the two exclusive) on a flow assigned to that
+  customer (`flow_not_assigned` otherwise). A subject is never a user or member.
+  Name and address are a snapshot; `subject_name` is `''` when none was given.
+  The mail does not name the customer yet.
+- **Roles:** any member lists allowed flows, customers and a customer's
+  assigned flows, sends requests, and sees the requests they sent; creating and
+  editing flows, versions and the selection, and creating, renaming and assigning
+  flows to customers, are `RequireOrgAdmin`; an admin lists every flow (with
+  `allowed`/`default`, or `assigned`/`default` per customer) and every request of
+  the org. `GET requests?customerId=` narrows either view to one customer.
 
-## 2. One lifetime: the mail, the link and the session
+## 2. The mail is the session
 
-IPS caps a session at 15 minutes (`SessionMaxLifetime`, hardcoded) and its claim
-(the `handover` token in the QR/deep link) at 5 minutes, single use. The wallet
-therefore creates the IPS session **when the mail is sent** (`ttlSeconds` = 900)
-and stores the request with `link_expires_at` = the session's expiry, never more
-than `proofing.SessionTTL`. The mail's `qr` block and its button carry the **same**
-wallet link, `/proof/{token}` (token hashed at rest), so both do the same thing
-and expire together. That page shows IPS's `vcmrtd://verify?handover=…&api=…`
-deep link as both a QR code and an open-in-app link (one payload), and re-mints
-the claim via `/claim-tokens` when it lapses, while the session lives. An IPS
-session that ends early (expired or cancelled) ends the link with it
-(`ExpireLink`). There is no restart: a new request means a new mail. The `api`
-host is IPS's `PUBLIC_BASE_URL`, which must be reachable from the phone. A mail
-that fails to send leaves the request standing but answers `mailSent: false`, and
-the UI says so.
+This copies IPS's own timing (`identity-proofing-service`,
+`backend/internal/api/api.go` `DefaultConfig`): a session runs
+`SessionCreateTTL` (10 minutes) within the hard cap `SessionMaxLifetime`
+(15), and its claim, the `handover` token in the `vcmrtd://verify?handover=…&api=…`
+deep link, is claimable for `ClaimTokenTTL`, single use. IPS keeps a claim
+claimable as long as a default session (10 minutes, never past the session's
+own expiry; raised from 5 for this), so the mailed QR works for the whole
+session.
+
+**Send.** `CreateRequest` creates the IPS session (`ttlSeconds` = 600,
+`proofing.SessionTTL`, client reference = the request id), stores the request
+with `link_expires_at` = the session's expiry, attaches the session
+(`AttachSession`, audited `identity_proofing.session_created`; `flow_version`
+becomes the version IPS pinned), and mails the create response's native claim:
+the `qr` block and the button carry the **same** vcmrtd deep link, and the text
+states `validMinutes`. A session with no native claim is an error and nothing is
+stored. A session whose request then fails to store lapses unused at IPS. Scan
+the QR from inside vcmrtd; the button is for a mail read on the phone.
+
+The mail cannot re-mint the claim, and nothing restarts a session: when IPS
+reports it `expired` or `cancelled` undecided, `EndSession` stamps
+`ips_session_ended_at` (audited `identity_proofing.session_ended`) and the
+request reads as expired. A new request means a new mail.
+
+**Mail URLs.** A mail URL is otherwise absolute http(s) only. The proofing
+link variable (`proofingUrl`) is declared with `AppScheme: "vcmrtd"`
+(`internal/email/catalog.go`): its value must be a `vcmrtd:` link with a host,
+checked at render, and only that variable may carry the scheme.
+
+The `api` host in the deep link is IPS's `PUBLIC_BASE_URL`, which must be
+reachable from the phone. A mail that fails to send leaves the request standing
+but answers `mailSent: false`, and the UI says so.
+
+Mail goes through the org's own SMTP settings (`internal/email`); in the dev
+stack the seeded org points at Mailpit (`localhost:8025`), so nothing leaves the
+machine until an admin sets a real server under e-mail settings.
 
 ## 3. Outcomes: poll-on-read, no webhook
 
-The public page and the request list reconcile against
+The request list reconciles against
 `GET /api/v1/sessions/{id}/result` (the list re-checks at most
 `maxReconcilePerList` live rows per read). The IPS webhook is **not** used: it
 goes to a per-session `callbackUrl` and carries the full result, including the
 document fields and images. `needs_review` is not final: it keeps being
 reconciled. IPS `opened`/`in_progress` moves the request from `pending` to
-`in_progress` (audited `session_started`). `expired` is
-derived from `link_expires_at`, never stored. An IPS failure during a read is
+`in_progress` (audited `session_started`); an attached session is reconciled
+until it is seen to end or decide, also past its cap, so a last-moment outcome
+is never lost. `expired` is
+derived (no live session and no outcome), never stored. An IPS failure during a read is
 logged and the last known status is shown.
 
 ## 4. Data minimisation
 
 Stored and audited: status, IPS assurance tier, achieved eIDAS level, IPS error
-code. Never the document fields, BSN or images. `proofingprovider` does not
-decode them. Its decoder reads the result into a struct holding only
-`status/errorCode/completedAt/result.assurance`.
+code (the reason, shown in words by `proofingRejectionReason`). Each outcome is
+its own action, `identity_proofing.approved` / `.rejected` / `.needs_review`, so
+a rejection never reads as a success; `identity_proofing.completed` is only on
+rows written before that split. Every request event names its subject
+(`subjectName` when sent with one, `subjectEmail`). Never the other document fields, BSN or images. `proofingprovider` decodes
+only `status/errorCode/completedAt/result.assurance` and the document's name
+(`displayName`, else `firstName lastName`).
+
+The name is the one exception, and only for a **customer's subject** once the
+session is **approved** (the sender may know only an address): it is sealed
+under `IDENTITY_PROOFING_ENCRYPTION_KEY` in `proofed_name_ciphertext`, shown as
+`proofedName`, never audited, and cleared by the `identity_proofing_proofed_names`
+pruner after `proofing.ProofedNameRetention` (30 days). A member's request, or a
+rejected or `needs_review` one, keeps no name.
 
 ## 5. Known IPS gaps to track
 

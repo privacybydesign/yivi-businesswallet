@@ -43,6 +43,7 @@ export const nl: Translation<typeof en> = {
     members: "Leden",
     identityProofing: "Identiteitsverificatie",
     identityProofingFlows: "Verificatieflows",
+    customers: "Klanten",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
     postguard: "PostGuard-bestanden",
@@ -426,25 +427,6 @@ export const nl: Translation<typeof en> = {
     title: "Identiteitsverificatie",
     subtitle:
       "Verifieer iemands identiteit met een identiteitsdocument en gezicht.",
-    members: {
-      title: "Leden",
-      hint: "Iedereen in deze organisatie, beheerders en externen ook. Kies een flow en druk op de mailknop: het lid krijgt een QR-code en een knop voor één link, 15 minuten geldig.",
-      search: "Leden zoeken",
-      member: "Lid",
-      lastRequest: "Laatste verzoek",
-      flow: "Flow",
-      send: "Versturen",
-      empty: "Geen leden gevonden.",
-      noFlowsAdmin:
-        "Er is nog geen flow beschikbaar voor leden. Maak er een aan en vink die aan onder",
-      noFlowsMember:
-        "Een beheerder moet eerst een flow beschikbaar stellen voordat je een verzoek kunt versturen.",
-      admin: "Beheerder",
-      external: "Extern",
-      externalOf: "Extern · {{org}}",
-      flowFor: "Flow voor {{name}}",
-      sendTo: "Verificatieverzoek mailen naar {{name}}",
-    },
     requests: {
       title: "Verzoeken",
       titleOwn: "Jouw verzoeken",
@@ -455,6 +437,8 @@ export const nl: Translation<typeof en> = {
       status: "Status",
       assurance: "Betrouwbaarheid",
       created: "Verstuurd",
+      customer: "Klant",
+      verifiedAs: "Geverifieerd als {{name}}",
     },
     status: {
       pending: "Link verstuurd",
@@ -463,6 +447,16 @@ export const nl: Translation<typeof en> = {
       rejected: "Afgewezen",
       needsReview: "Wordt beoordeeld",
       expired: "Verlopen",
+    },
+    rejectionReasons: {
+      documentTypeNotAccepted: "documenttype niet toegestaan in de flow",
+      documentCountryNotAccepted:
+        "land van uitgifte niet toegestaan in de flow",
+      faceStepNotCompleted: "gezichtsverificatie niet afgerond",
+      faceNoMatch: "gezicht komt niet overeen met het document",
+      docTampered: "chipgegevens van het document zijn gemanipuleerd",
+      chipCloneDetected: "gekloonde documentchip gedetecteerd",
+      docExpired: "document verlopen",
     },
     errors: {
       noEncryptionKey:
@@ -473,36 +467,68 @@ export const nl: Translation<typeof en> = {
       flowNotAllowed:
         "Die flow is niet meer beschikbaar voor leden. Kies een andere.",
       memberNotFound: "Die persoon is geen lid van deze organisatie.",
-      linkNotFound: "Deze link is ongeldig of verlopen.",
+      customerNotFound: "Die klant bestaat niet.",
+      customerExists: "Je organisatie heeft al een klant met deze naam.",
+      flowNotAssigned:
+        "Die flow is niet meer aan deze klant toegewezen. Kies een andere.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
     },
-    proof: {
-      title: "Verifieer je identiteit",
-      requestedBy: "{{org}} vraagt je je identiteit te verifiëren.",
-      steps:
-        "Je hebt de vcmrtd-app op je telefoon nodig en je paspoort of identiteitskaart met chip.",
-      scanHint:
-        "Scan deze QR-code met de vcmrtd-app, of open de app vanaf deze telefoon.",
-      validUntil: "Deze link is geldig tot {{time}}.",
-      retry: "Opnieuw proberen",
-      openApp: "Openen in de app",
-      refreshing: "Nieuwe QR-code ophalen…",
-      continueInApp: "Ga verder in de vcmrtd-app op je telefoon.",
-      waiting: "Wachten op de app…",
-      approvedTitle: "Je identiteit is geverifieerd",
-      approvedHint:
-        "Je kunt deze pagina sluiten. {{org}} is op de hoogte gebracht.",
-      rejectedTitle: "Je identiteit kon niet worden geverifieerd",
-      rejectedHint:
-        "Neem contact op met {{org}} als je denkt dat dit niet klopt.",
-      reviewTitle: "Je verificatie wordt beoordeeld",
-      reviewHint: "Je kunt deze pagina sluiten. {{org}} hoort de uitkomst.",
-      expiredTitle: "Deze link is verlopen",
-      expiredHint: "Vraag {{org}} je een nieuwe te sturen.",
-      notFoundTitle: "Link niet gevonden",
-      notFoundHint: "Deze link is ongeldig of verlopen.",
-      errorTitle: "Er ging iets mis",
-      errorHint: "Laad de pagina opnieuw om het nog eens te proberen.",
+  },
+  customers: {
+    title: "Klanten",
+    subtitle:
+      "De klanten van je organisatie, de flows die elk mag gebruiken, en de mensen die je voor hen verifieert.",
+    list: {
+      title: "Klanten",
+      hint: "Een klant heeft geen eigen login: leden van je organisatie versturen verificatieverzoeken voor de klant, op de flows die aan de klant zijn toegewezen.",
+      empty: "Nog geen klanten.",
+      name: "Klant",
+      flows: "Toegewezen flows",
+      created: "Toegevoegd",
+      noFlows: "Geen toegewezen",
+      flowCount_one: "{{count}} flow",
+      flowCount_other: "{{count}} flows",
+      open: "{{name}} openen",
+    },
+    new: {
+      title: "Nieuwe klant",
+      name: "Naam",
+      namePlaceholder: "Initech BV",
+      nameRequired: "Vul een naam in.",
+      create: "Klant toevoegen",
+    },
+    detail: {
+      back: "Alle klanten",
+      rename: "Hernoemen",
+      name: "Naam",
+      save: "Opslaan",
+      cancel: "Annuleren",
+      notFound: "Deze klant bestaat niet.",
+    },
+    flows: {
+      title: "Toegewezen flows",
+      hint: "Verzoeken voor deze klant kunnen de hier aangevinkte flows gebruiken, ook als leden ze niet mogen gebruiken; de standaardflow is voorgeselecteerd. Flows maak je onder Verificatieflows.",
+      empty: "Je organisatie heeft nog geen flows.",
+      default: "Standaard",
+      save: "Toegewezen flows opslaan",
+    },
+    send: {
+      title: "Een persoon verifiëren",
+      hint: "De persoon krijgt een mail met een QR-code en een link voor de vcmrtd-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek. Een account is niet nodig.",
+      email: "E-mailadres",
+      emailRequired: "Vul een geldig e-mailadres in.",
+      name: "Naam (optioneel)",
+      nameHint:
+        "Laat leeg als je die niet weet: na verificatie staat de naam van het document hier 30 dagen.",
+      flow: "Flow",
+      submit: "Verzoek versturen",
+      noFlowsAdmin: "Wijs eerst een flow aan deze klant toe.",
+      noFlowsMember:
+        "Een beheerder moet eerst een flow aan deze klant toewijzen voordat je een verzoek kunt versturen.",
+    },
+    requests: {
+      title: "Verzoeken voor deze klant",
+      titleOwn: "Jouw verzoeken voor deze klant",
     },
   },
   identityProofingFlows: {
@@ -783,6 +809,9 @@ export const nl: Translation<typeof en> = {
     identityProofingMailNotSent:
       "Verzoek aangemaakt, maar de mail kon niet verstuurd worden. Controleer de mailinstellingen van deze organisatie.",
     identityProofingRequestSent: "Verzoek verstuurd",
+    identityProofingCustomerCreated: "Klant toegevoegd",
+    identityProofingCustomerRenamed: "Klant hernoemd",
+    identityProofingCustomerFlowsSaved: "Toegewezen flows opgeslagen",
     notificationSettingsSaved: "Notificatie-instellingen opgeslagen",
     provisioningSettingsSaved:
       "Instellingen voor directorysynchronisatie opgeslagen",
@@ -890,6 +919,12 @@ export const nl: Translation<typeof en> = {
       subject: "Onderwerp",
     },
     noSubject: "—",
+    fields: {
+      assuranceLevel: "Betrouwbaarheid",
+      eidasLevel: "eIDAS-niveau",
+      errorCode: "Reden",
+      ipsStatus: "Status bij verificatiedienst",
+    },
     targets: {
       organization: "Organisatie",
       member: "Lid",
@@ -930,6 +965,7 @@ export const nl: Translation<typeof en> = {
       orgIdentityProofingSettings: "Instellingen identiteitsverificatie",
       identityProofingFlow: "Identiteitsverificatieflow",
       identityProofingRequest: "Identiteitsverificatieverzoek",
+      identityProofingCustomer: "Identiteitsverificatieklant",
     },
     actions: {
       orgCreated: "Organisatie aangemaakt",
@@ -1039,8 +1075,19 @@ export const nl: Translation<typeof en> = {
       identityProofingFlowVersionActivated:
         "Versie van een identiteitsverificatieflow geactiveerd",
       identityProofingRequested: "Identiteitsverificatieverzoek verstuurd",
+      identityProofingSessionCreated: "Identiteitsverificatiesessie aangemaakt",
       identityProofingSessionStarted: "Identiteitsverificatie gestart",
+      identityProofingSessionEnded:
+        "Identiteitsverificatiesessie onafgerond beëindigd",
       identityProofingCompleted: "Identiteitsverificatie afgerond",
+      identityProofingApproved: "Identiteit geverifieerd",
+      identityProofingRejected: "Identiteitsverificatie afgewezen",
+      identityProofingNeedsReview:
+        "Identiteitsverificatie moet beoordeeld worden",
+      identityProofingCustomerCreated: "Identiteitsverificatieklant toegevoegd",
+      identityProofingCustomerUpdated: "Identiteitsverificatieklant hernoemd",
+      identityProofingCustomerFlowsConfigured:
+        "Aan een klant toegewezen identiteitsverificatieflows gewijzigd",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
     },
@@ -1124,6 +1171,14 @@ export const nl: Translation<typeof en> = {
     requestIdentificationHint:
       "Vraagt dit lid om nu zijn identiteit opnieuw te bevestigen. Het lid krijgt een e-mail met een link.",
     identityRequested: "Identificatie aangevraagd",
+    proofing: {
+      flow: "Flow voor identiteitsverificatie",
+      send: "Identiteitsverificatie versturen",
+      hint: "Mailt dit lid een QR-code en een link voor de vcmrtd-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek.",
+      noFlows:
+        "Er is nog geen flow beschikbaar voor leden. Maak er een aan en vink die aan onder",
+      lastRequest: "Laatste verificatie:",
+    },
     vogValidUntil: "VOG geldig tot",
     vogNone: "Geen VOG bekend",
     requestVog: "VOG aanvragen",

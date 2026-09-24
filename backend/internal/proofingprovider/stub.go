@@ -6,24 +6,32 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
 )
 
 const (
-	// stubSessionTTL and stubClaimTTL mirror IPS's own caps, so dev exercises the
-	// same "the QR lapses, ask for a fresh one" path production does.
-	stubSessionTTL = 15 * time.Minute
-	stubClaimTTL   = 5 * time.Minute
+	// stubSessionTTL and stubClaimTTL mirror IPS's own defaults: a claim lasts
+	// as long as a default session, so a mailed QR works for the whole session.
+	stubSessionTTL = 10 * time.Minute
+	stubClaimTTL   = 10 * time.Minute
 
 	stubAssuranceLevel = "substantial"
-	stubIDBytes        = 8
+	// stubProofedName stands in for the name an approved session read off the
+	// subject's document.
+	stubProofedName = "Anna Jansen"
+	stubIDBytes     = 8
+	// stubAPIBaseURL stands in for IPS's PUBLIC_BASE_URL in a stub deep link.
+	// .invalid never resolves (RFC 2606).
+	stubAPIBaseURL = "http://ips.stub.invalid"
 )
 
 // Stub is an in-process IPS for dev/CI and tests. Flows and their versions live
-// in memory per API key (a restart empties them); a session resolves to Outcome on its first result read, standing in for
-// the subject finishing the vcmrtd flow. Outcome defaults to approved.
+// in memory per API key (a restart empties them). No phone can reach a stub
+// session, so it stays created (pending) until it expires, unless a test sets
+// Outcome to stand in for the subject finishing the vcmrtd flow.
 type Stub struct {
 	Outcome Status
 
@@ -33,14 +41,16 @@ type Stub struct {
 }
 
 type stubSession struct {
-	apiKey    string
-	token     string
-	expiresAt time.Time
+	apiKey      string
+	token       string
+	flowID      string
+	flowVersion int
+	expiresAt   time.Time
 }
 
-// NewStub builds an empty Stub that approves every session.
+// NewStub builds an empty Stub whose sessions never decide.
 func NewStub() *Stub {
-	return &Stub{Outcome: StatusApproved, flows: map[string][]Flow{}, sessions: map[string]stubSession{}}
+	return &Stub{flows: map[string][]Flow{}, sessions: map[string]stubSession{}}
 }
 
 func (*Stub) Ping(context.Context) error { return nil }
@@ -155,13 +165,23 @@ func stubValidate(in FlowSpec) error {
 func (s *Stub) CreateSession(_ context.Context, apiKey string, in SessionInput) (Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	known := false
+	version := 0
 	for _, f := range s.flows[apiKey] {
-		known = known || (f.ID == in.FlowID && f.Active)
+		if f.ID == in.FlowID && f.Active {
+			version = f.Version
+		}
 	}
-	if !known {
+	if version == 0 {
 		return Session{}, &RejectedError{Status: http.StatusBadRequest, Message: "unknown flow"}
 	}
+	ttl := stubSessionTTL
+	if in.TTL > 0 {
+		ttl = min(in.TTL, stubSessionTTL)
+	}
+	return s.createLocked(apiKey, in.FlowID, version, ttl)
+}
+
+func (s *Stub) createLocked(apiKey, flowID string, version int, ttl time.Duration) (Session, error) {
 	id, err := stubID("ses")
 	if err != nil {
 		return Session{}, err
@@ -171,19 +191,8 @@ func (s *Stub) CreateSession(_ context.Context, apiKey string, in SessionInput) 
 		return Session{}, err
 	}
 	now := time.Now().UTC()
-	ttl := stubSessionTTL
-	if in.TTL > 0 {
-		ttl = min(in.TTL, stubSessionTTL)
-	}
-	s.sessions[id] = stubSession{apiKey: apiKey, token: token, expiresAt: now.Add(ttl)}
-	return Session{ID: id, Token: token, ExpiresAt: now.Add(ttl), Claim: stubClaim(id, now)}, nil
-}
-
-func (s *Stub) MintClaim(_ context.Context, apiKey, sessionID, sessionToken string) (*Claim, error) {
-	if _, err := s.session(apiKey, sessionID, sessionToken); err != nil {
-		return nil, err
-	}
-	return stubClaim(sessionID, time.Now().UTC()), nil
+	s.sessions[id] = stubSession{apiKey: apiKey, token: token, flowID: flowID, flowVersion: version, expiresAt: now.Add(ttl)}
+	return Session{ID: id, Token: token, ExpiresAt: now.Add(ttl), FlowVersion: version, Claim: stubClaim(id, now)}, nil
 }
 
 func (s *Stub) SessionResult(_ context.Context, apiKey, sessionID, sessionToken string) (Result, error) {
@@ -194,10 +203,14 @@ func (s *Stub) SessionResult(_ context.Context, apiKey, sessionID, sessionToken 
 	if time.Now().After(sess.expiresAt) {
 		return Result{Status: StatusExpired}, nil
 	}
+	if s.Outcome == "" {
+		return Result{Status: StatusCreated}, nil
+	}
 	now := time.Now().UTC()
 	res := Result{Status: s.Outcome, CompletedAt: &now}
 	if s.Outcome == StatusApproved {
 		res.AssuranceLevel, res.EIDASLevel = stubAssuranceLevel, stubAssuranceLevel
+		res.Name = stubProofedName
 	}
 	return res, nil
 }
@@ -212,8 +225,12 @@ func (s *Stub) session(apiKey, sessionID, sessionToken string) (stubSession, err
 	return sess, nil
 }
 
+// stubClaim has IPS's deep link shape (device_access.go grantResponse), the
+// one the vcmrtd app accepts: a handover token and the IPS base URL as api.
+// The stub serves no API, so its api is a host that never resolves.
 func stubClaim(sessionID string, now time.Time) *Claim {
-	return &Claim{DeepLink: "vcmrtd://verify?handover=stub-" + sessionID, ExpiresAt: now.Add(stubClaimTTL)}
+	link := "vcmrtd://verify?handover=" + url.QueryEscape("stub-"+sessionID) + "&api=" + url.QueryEscape(stubAPIBaseURL)
+	return &Claim{DeepLink: link, ExpiresAt: now.Add(stubClaimTTL)}
 }
 
 func stubID(prefix string) (string, error) {

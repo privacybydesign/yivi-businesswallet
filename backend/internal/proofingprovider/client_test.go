@@ -73,7 +73,7 @@ func TestCreateSessionReadsNativeClaim(t *testing.T) {
 			t.Errorf("session request = %v", body)
 		}
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":"s1","token":"tok","status":"created","expiresAt":"2026-09-23T10:15:00Z",
+		_, _ = w.Write([]byte(`{"id":"s1","token":"tok","status":"created","expiresAt":"2026-09-23T10:15:00Z","flowVersion":3,
 			"claims":{"web":{"url":"https://ips/x"},"native":{"deepLink":"vcmrtd://verify?handover=h","expiresAt":"2026-09-23T10:05:00Z"}}}`))
 	})
 
@@ -81,21 +81,8 @@ func TestCreateSessionReadsNativeClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if sess.ID != "s1" || sess.Token != "tok" || sess.Claim == nil || sess.Claim.DeepLink != "vcmrtd://verify?handover=h" {
+	if sess.ID != "s1" || sess.Token != "tok" || sess.Claim == nil || sess.Claim.DeepLink != "vcmrtd://verify?handover=h" || sess.FlowVersion != 3 {
 		t.Errorf("session = %+v", sess)
-	}
-}
-
-func TestMintClaimNilWhenSlotClaimed(t *testing.T) {
-	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+testSessionToken {
-			t.Errorf("session bearer missing")
-		}
-		_, _ = w.Write([]byte(`{}`))
-	})
-	claim, err := client.MintClaim(context.Background(), testAPIKey, "s1", testSessionToken)
-	if err != nil || claim != nil {
-		t.Fatalf("MintClaim = %+v, %v; want nil, nil", claim, err)
 	}
 }
 
@@ -134,17 +121,32 @@ func TestFlowVersionCalls(t *testing.T) {
 	}
 }
 
-func TestSessionResultDecodesAssuranceOnly(t *testing.T) {
-	client, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"id":"s1","status":"approved","completedAt":"2026-09-23T10:10:00Z",
-			"result":{"document":{"personalNumber":"999999990"},"assurance":{"level":"high","eidasLevel":"substantial"}}}`))
-	})
-	res, err := client.SessionResult(context.Background(), testAPIKey, "s1", testSessionToken)
-	if err != nil {
-		t.Fatalf("SessionResult: %v", err)
+func TestSessionResultDecodesAssuranceAndNameOnly(t *testing.T) {
+	cases := map[string]struct {
+		document string
+		want     string
+	}{
+		"display name wins": {`{"displayName":"Ánna Jansen","firstName":"ANNA","lastName":"JANSEN","personalNumber":"999999990"}`, "Ánna Jansen"},
+		"mrz name":          {`{"firstName":"ANNA","lastName":"JANSEN","personalNumber":"999999990"}`, "ANNA JANSEN"},
+		"no name":           {`{"personalNumber":"999999990"}`, ""},
 	}
-	if res.Status != StatusApproved || res.AssuranceLevel != "high" || res.EIDASLevel != "substantial" || res.CompletedAt == nil {
-		t.Errorf("result = %+v", res)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			client, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"id":"s1","status":"approved","completedAt":"2026-09-23T10:10:00Z",
+					"result":{"document":` + tc.document + `,"assurance":{"level":"high","eidasLevel":"substantial"}}}`))
+			})
+			res, err := client.SessionResult(context.Background(), testAPIKey, "s1", testSessionToken)
+			if err != nil {
+				t.Fatalf("SessionResult: %v", err)
+			}
+			if res.Status != StatusApproved || res.AssuranceLevel != "high" || res.EIDASLevel != "substantial" || res.CompletedAt == nil {
+				t.Errorf("result = %+v", res)
+			}
+			if res.Name != tc.want {
+				t.Errorf("name = %q, want %q", res.Name, tc.want)
+			}
+		})
 	}
 }
 

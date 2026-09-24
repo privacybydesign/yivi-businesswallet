@@ -160,8 +160,18 @@ const (
 	IdentityProofingFlowVersionCreated   = "identity_proofing.flow_version_created"
 	IdentityProofingFlowVersionActivated = "identity_proofing.flow_version_activated"
 	IdentityProofingRequested            = "identity_proofing.requested"
+	IdentityProofingSessionCreated       = "identity_proofing.session_created"
 	IdentityProofingSessionStarted       = "identity_proofing.session_started"
-	IdentityProofingCompleted            = "identity_proofing.completed"
+	IdentityProofingSessionEnded         = "identity_proofing.session_ended"
+	// an IPS outcome, one action per decision so a rejection never reads as a success
+	IdentityProofingApproved    = "identity_proofing.approved"
+	IdentityProofingRejected    = "identity_proofing.rejected"
+	IdentityProofingNeedsReview = "identity_proofing.needs_review"
+
+	// the org's customers and the flows assigned to each
+	IdentityProofingCustomerCreated         = "identity_proofing.customer_created"
+	IdentityProofingCustomerUpdated         = "identity_proofing.customer_updated"
+	IdentityProofingCustomerFlowsConfigured = "identity_proofing.customer_flows_configured"
 )
 
 const (
@@ -221,6 +231,7 @@ const (
 	TargetIdentityProofingSettings = "org_identity_proofing_settings"
 	TargetIdentityProofingFlow     = "identity_proofing_flow"
 	TargetIdentityProofingRequest  = "identity_proofing_request"
+	TargetIdentityProofingCustomer = "identity_proofing_customer"
 )
 
 type Actor struct {

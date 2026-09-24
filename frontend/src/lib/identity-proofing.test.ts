@@ -3,9 +3,11 @@ import { ApiError } from "../api/http";
 import i18n from "../i18n";
 import type { ProofingFlow } from "../api/identity-proofing";
 import {
+  assignedFlows,
   attributeAvailable,
   draftFromFlow,
   draftSteps,
+  editedFlowSelection,
   emptyFlowDraft,
   flowDraftError,
   flowSpecFromDraft,
@@ -13,6 +15,7 @@ import {
   latestRequestByMember,
   proofingErrorMessage,
   proofingStatusLabel,
+  requestSubject,
   sendableFlows,
 } from "./identity-proofing";
 import type { ProofingFlowDraft } from "./identity-proofing";
@@ -210,6 +213,87 @@ describe("sendableFlows", () => {
       "b",
     );
     expect(sendableFlows([flow("a", false)]).initial).toBeUndefined();
+  });
+});
+
+describe("assignedFlows", () => {
+  it("offers only a customer's assigned flows and starts on its default", () => {
+    const { sendable, initial } = assignedFlows([
+      { id: "a", assigned: false, default: false },
+      { id: "b", assigned: true, default: false },
+      { id: "c", assigned: true, default: true },
+    ]);
+    expect(sendable.map((f) => f.id)).toEqual(["b", "c"]);
+    expect(initial?.id).toBe("c");
+  });
+});
+
+describe("editedFlowSelection", () => {
+  const flows = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  const saved = { flowIds: ["a", "c"], defaultFlowId: "c" };
+
+  it("is clean when it matches the saved selection", () => {
+    const { selection, dirty } = editedFlowSelection(
+      flows,
+      new Set(["c", "a"]),
+      "c",
+      saved,
+    );
+    expect(selection).toEqual({ flowIds: ["a", "c"], defaultFlowId: "c" });
+    expect(dirty).toBe(false);
+  });
+
+  it("falls the default to the first ticked flow once it is unticked", () => {
+    const { selection, dirty } = editedFlowSelection(
+      flows,
+      new Set(["b", "a"]),
+      "c",
+      saved,
+    );
+    expect(selection).toEqual({ flowIds: ["a", "b"], defaultFlowId: "a" });
+    expect(dirty).toBe(true);
+  });
+
+  it("has no default when nothing is ticked", () => {
+    expect(editedFlowSelection(flows, new Set(), "c", saved).selection).toEqual(
+      { flowIds: [], defaultFlowId: "" },
+    );
+  });
+
+  it("is dirty when only the default moved", () => {
+    expect(
+      editedFlowSelection(flows, new Set(["a", "c"]), "a", saved).dirty,
+    ).toBe(true);
+  });
+});
+
+describe("requestSubject", () => {
+  const email = "anna@example.org";
+
+  it("names a subject by the given name, then the verified one, then the address", () => {
+    expect(
+      requestSubject({ subjectName: "Anna", subjectEmail: email }).name,
+    ).toBe("Anna");
+    expect(
+      requestSubject({
+        subjectName: " ",
+        subjectEmail: email,
+        proofedName: "Anna Jansen",
+      }),
+    ).toEqual({ name: "Anna Jansen", verifiedAs: undefined });
+    expect(requestSubject({ subjectName: "", subjectEmail: email }).name).toBe(
+      email,
+    );
+  });
+
+  it("adds the verified name when it differs from the given one", () => {
+    expect(
+      requestSubject({
+        subjectName: "Anna",
+        subjectEmail: email,
+        proofedName: "Anna Maria Jansen",
+      }).verifiedAs,
+    ).toBe("Anna Maria Jansen");
   });
 });
 
