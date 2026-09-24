@@ -138,6 +138,7 @@ const (
 	SigningCompleted        = "signing.completed"
 	SigningDelivered        = "signing.delivered"
 	SigningFailed           = "signing.failed"
+	SigningDeclined         = "signing.declined"
 
 	// Inbound OpenID4VP presentations (#188): the business wallet acting as the
 	// holder toward an external verifier. Requested is written pre-auth (no actor,

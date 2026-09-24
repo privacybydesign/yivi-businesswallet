@@ -82,6 +82,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "signing.completed": { icon: "valid", tone: "green" },
   "signing.delivered": { icon: "email", tone: "green" },
   "signing.failed": { icon: "warning", tone: "red" },
+  "signing.declined": { icon: "close", tone: "slate" },
   "presentation.requested": { icon: "scan_qrcode", tone: "amber" },
   "presentation.org_selected": { icon: "personal", tone: "blue" },
   "presentation.completed": { icon: "valid", tone: "green" },
@@ -289,6 +290,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.signingDelivered");
     case "signing.failed":
       return t("auditLog.actions.signingFailed");
+    case "signing.declined":
+      return t("auditLog.actions.signingDeclined");
     case "presentation.requested":
       return t("auditLog.actions.presentationRequested");
     case "presentation.org_selected":

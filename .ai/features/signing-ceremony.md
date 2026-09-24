@@ -349,3 +349,49 @@ signing pass renders them.
   agreeing to.
 - Rotation is handled through the viewport in the browser; nothing on the backend reads `/Rotate`,
   because it never has to convert a coordinate.
+
+## Declining (a signer refuses)
+
+A pending signer — member or external signee — can refuse a request outright instead of the only
+prior outcome being to eventually sign it (#262).
+
+- **Terminal for the whole request, not just that signer.** New per-signer status `declined`
+  (alongside `pending`/`signed`/`failed`) and a matching request status `declined`
+  (`20260924100000_signing_decline.sql` extends the signer-status CHECK; the request-status column
+  carries no CHECK to extend). Incremental PAdES cannot produce a document one selected signer
+  refused, so `Store.DeclineSigner` marks the signer and ends the request in one transaction — a
+  sequential request's later signers are never notified and never see the document, and a parallel
+  request's other pending signers simply stop being offered it. Signatures already applied stay on
+  the stored document.
+- **No turn check.** Unlike `StartSign`, decline does not run `checkTurn`: refusing up front is
+  more useful than being forced to wait for a turn a signer already intends to reject. The guards
+  it does reuse are `ErrNotSigner`, `ErrAlreadySigned`, `ErrInvalidRequest` (the request is no
+  longer `awaiting_signatures` — including a race against another decline) and `ErrSignInProgress`
+  (a ceremony currently holds the per-request in-flight lock, so a decline cannot race the parked
+  pdfsign pass — see `Service.isActive`).
+- **The reason is free text a person wrote, and stays out of publishable metadata.** An optional
+  reason (`decline_reason`, capped at 500 characters like the mandate-revocation reason) is stored
+  on the signer row and shown in the app (anyone who can already see the request) and in the mail
+  to the requester — but the audit event (`signing.declined`) only ever records the signer id and
+  the status change, mirroring the data-minimisation rule the rest of `internal/notifications`
+  follows. `signing.declined` is still in the subscribable `signing` catalog group precisely
+  because its metadata carries no more than `signing.requested`/`.completed`/`.failed` already do.
+- **Routes**: `POST …/signing/requests/{id}/decline` (member) and
+  `POST /api/v1/signing/external/{token}/decline` (external signee), both accepting an optional
+  JSON body `{reason}` and answering 204.
+- **Notifying the requester.** A new `signerNotifier.NotifyRequesterDeclined` seam (best-effort,
+  like every other notification here) mails the request's creator — a new `email` Kind
+  (`signature_declined`) with a `reason` placeholder that drops its paragraph when empty, same as
+  `identity_requested`/`vog_requested`. The adapter (`cmd/api/signing_adapters.go`) resolves the
+  org's slug itself from the org id (`organization.Store.GetByID`) rather than needing one threaded
+  through, because a decline reaching this from the external-signee route has no org-slug context
+  to pass down.
+- **UI.** The "To sign" tab and the external signee's own page both get a **Decline** button next
+  to Sign, opening a shared `DeclineDialog` (an optional reason, a destructive confirm) — offered
+  whenever the signer is still pending, independent of whether they have linked a credential or it
+  is their turn. History and the active-request card show who declined, when, and the reason.
+
+### Follow-ups
+- Cancel by the requester (withdrawing a request nobody has refused yet) is the mirror image and
+  does not exist — noted in #262 as deliberately out of scope, with the status model already
+  shaped to leave room for it.

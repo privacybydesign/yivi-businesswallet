@@ -830,6 +830,7 @@ export const nl: Translation<typeof en> = {
       signingCompleted: "Documenthandtekening voltooid",
       signingDelivered: "Ondertekend document bezorgd",
       signingFailed: "Documenthandtekening mislukt",
+      signingDeclined: "Ondertekening geweigerd",
       presentationRequested: "Presentatieverzoek ontvangen",
       presentationOrgSelected: "Organisatie gekozen voor een presentatie",
       presentationCompleted: "Presentatie verstuurd",
@@ -996,6 +997,8 @@ export const nl: Translation<typeof en> = {
     requestCompleted: "{{filename}} is ondertekend.",
     requestFailed: "Ondertekenen mislukt: {{reason}}",
     requestFailedGeneric: "het verzoek is niet voltooid",
+    requestDeclined: "{{name}} heeft geweigerd dit document te ondertekenen.",
+    requestDeclinedReason: "Reden: {{reason}}",
     requestLoadError: "Kon het ondertekenverzoek niet laden.",
     downloadButton: "Ondertekende PDF downloaden",
     downloadedToast: "Ondertekend document gedownload.",
@@ -1121,6 +1124,7 @@ export const nl: Translation<typeof en> = {
       pending: "In afwachting",
       signed: "Ondertekend",
       failed: "Mislukt",
+      declined: "Geweigerd",
     },
     signerKind: {
       internal: "Lid van de organisatie",
@@ -1130,6 +1134,18 @@ export const nl: Translation<typeof en> = {
       awaitingSignatures: "Wacht op handtekeningen",
       completed: "Voltooid",
       failed: "Mislukt",
+      declined: "Geweigerd",
+    },
+    decline: {
+      button: "Weigeren",
+      dialogTitle: "Weigeren te ondertekenen",
+      dialogHint:
+        "De aanvrager krijgt te horen dat je hebt geweigerd. Dit kan niet ongedaan worden gemaakt.",
+      reasonLabel: "Reden (optioneel)",
+      reasonPlaceholder: "Laat de aanvrager weten waarom (optioneel)",
+      confirm: "Document weigeren",
+      toastSuccess: "Je hebt geweigerd dit document te ondertekenen.",
+      toastError: "Kon niet weigeren. Probeer het opnieuw.",
     },
     deliveryStatus: {
       notRequested: "Geen bezorging",
@@ -1147,17 +1163,24 @@ export const nl: Translation<typeof en> = {
         "Koppel eerst een ondertekencertificaat. Daarvoor opent je wallet één keer; daarna kun je ondertekenen.",
       linkButton: "Ondertekencertificaat koppelen",
       signButton: "Document ondertekenen",
+      declineButton: "Weigeren",
       notYourTurn:
         "Een eerdere ondertekenaar moet eerst tekenen. Kom later terug via deze link.",
       linkedToast: "Ondertekencertificaat gekoppeld.",
       linkFailedToast:
         "Het koppelen van het ondertekencertificaat is niet voltooid.",
       startError: "Kon niet starten. Probeer het opnieuw.",
+      declineError: "Kon niet weigeren. Probeer het opnieuw.",
       attemptFailed:
         "Je laatste poging is niet voltooid. Je kunt het opnieuw proberen.",
       signedTitle: "Je hebt dit document ondertekend",
       signedAllHint: "Iedereen heeft ondertekend. Het document is compleet.",
       signedWaitingHint: "De andere ondertekenaars moeten nog tekenen.",
+      declinedTitle: "Je hebt geweigerd te ondertekenen",
+      declinedHint: "De aanvrager is op de hoogte gebracht.",
+      requestDeclinedTitle: "Dit verzoek is geweigerd",
+      requestDeclinedHint:
+        "Een andere ondertekenaar heeft geweigerd dit document te ondertekenen.",
       failedTitle: "Dit verzoek is niet voltooid",
       failedHint:
         "Neem contact op met de organisatie die je om een handtekening vroeg.",
@@ -1584,6 +1607,7 @@ export const nl: Translation<typeof en> = {
       identity_requested: "Identificatie aangevraagd",
       invitation: "Uitnodiging voor lidmaatschap",
       postguard_file: "Versleuteld bestand",
+      signature_declined: "Ondertekening geweigerd",
       signature_requested: "Ondertekenverzoek",
       signed_document: "Ondertekend document",
       smtp_test: "SMTP-test",
@@ -1606,6 +1630,8 @@ export const nl: Translation<typeof en> = {
         "Gaat naar iemand die is uitgenodigd om lid te worden van deze organisatie.",
       postguard_file:
         "Gaat naar de ontvanger van een versleuteld bestand, als deze organisatie via de eigen SMTP-server mailt.",
+      signature_declined:
+        "Gaat naar de aanvrager van een verzoek als een geselecteerde ondertekenaar weigert te tekenen.",
       signature_requested:
         "Gaat naar een lid dat is geselecteerd om een document mede te ondertekenen, met een link naar de ondertekenpagina.",
       signed_document:

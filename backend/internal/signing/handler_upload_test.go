@@ -39,6 +39,10 @@ func (s *recordingService) StartSign(context.Context, uuid.UUID, uuid.UUID, stri
 	panic("unused")
 }
 
+func (s *recordingService) DeclineSign(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) error {
+	panic("unused")
+}
+
 func (s *recordingService) HandleCallback(context.Context, string, string) string { panic("unused") }
 
 func (s *recordingService) GetRequest(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, bool) (Request, error) {
@@ -72,6 +76,10 @@ func (s *recordingService) StartExternalLink(context.Context, string) (Start, er
 }
 
 func (s *recordingService) StartExternalSign(context.Context, string) (Start, error) {
+	panic("unused")
+}
+
+func (s *recordingService) DeclineExternalSign(context.Context, string, string) error {
 	panic("unused")
 }
 

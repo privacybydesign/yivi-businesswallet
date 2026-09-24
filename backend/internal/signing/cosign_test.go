@@ -12,6 +12,7 @@ import (
 type fakeNotifier struct {
 	emails   []string
 	external []string
+	declined []string
 }
 
 func (f *fakeNotifier) NotifySignatureRequested(_ context.Context, _ uuid.UUID, email, _, _ string) error {
@@ -21,6 +22,11 @@ func (f *fakeNotifier) NotifySignatureRequested(_ context.Context, _ uuid.UUID, 
 
 func (f *fakeNotifier) NotifyExternalSignatureRequested(_ context.Context, _ uuid.UUID, email, _, _ string) error {
 	f.external = append(f.external, email)
+	return nil
+}
+
+func (f *fakeNotifier) NotifyRequesterDeclined(_ context.Context, _ uuid.UUID, requesterEmail, _, _, _ string) error {
+	f.declined = append(f.declined, requesterEmail)
 	return nil
 }
 

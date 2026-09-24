@@ -185,6 +185,20 @@ func (s *Service) SendSignatureRequested(ctx context.Context, orgID uuid.UUID, t
 	})
 }
 
+// SendSignatureDeclined tells the request's creator that a selected signer
+// refused to sign, linking back to the signing page. reason may be empty, in
+// which case the template's reason paragraph drops out. Returns
+// ErrNotConfigured when the org has no usable SMTP settings.
+func (s *Service) SendSignatureDeclined(ctx context.Context, orgID uuid.UUID, to, orgName, documentName, signerName, reason, signingURL string) error {
+	return s.send(ctx, orgID, KindSignatureDeclined, []string{to}, map[string]string{
+		varOrgName:      orgName,
+		varDocumentName: documentName,
+		varSignerName:   signerName,
+		varReason:       reason,
+		varSigningURL:   signingURL,
+	})
+}
+
 // SendIdentityReminder tells a member their re-identification is due soon,
 // linking to the re-identification flow. Returns ErrNotConfigured when the org
 // has no usable SMTP settings.

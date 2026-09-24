@@ -161,9 +161,14 @@ var catalog = []CatalogEntry{
 	// org's own document filename, the signing mode, signer counts, and redaction-safe
 	// status/error strings (see internal/signing/store.go) — never the disclosed legal
 	// identity that keeps signing.signed / accept_rejected out of this list.
+	// signing.declined is the one exception with a person-authored payload — the
+	// decline reason — and that free text is kept out of the audit metadata
+	// entirely (see DeclineSigner), so what this list admits is only ever a
+	// signer id and a status, same shape as the rest.
 	{audit.SigningRequested, GroupSigning},
 	{audit.SigningCompleted, GroupSigning},
 	{audit.SigningFailed, GroupSigning},
+	{audit.SigningDeclined, GroupSigning},
 }
 
 // subscribable indexes the catalog for the per-event lookup on the write path.

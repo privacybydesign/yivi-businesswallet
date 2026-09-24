@@ -16,6 +16,7 @@
     "auditUrl": "https://wallet.example.org/acme/audit-log",
     "documentName": "Contract.pdf",
     "signingUrl": "https://wallet.example.org/acme/signing",
+    "signerName": "Sam Jansen",
     "reidentifyUrl": "https://wallet.example.org/reidentify/sample",
     "dueDate": "2026-08-01",
     "reason": "Your last identity check has expired.",
@@ -68,7 +69,8 @@
 
     "signing.requested": "Requested a document signature",
     "signing.completed": "Completed a document signature",
-    "signing.failed": "Document signature failed"
+    "signing.failed": "Document signature failed",
+    "signing.declined": "Declined a document signature"
   },
   "templates": {
     "credential_offer": {
@@ -131,6 +133,17 @@
         { "type": "heading", "text": "A document is waiting for your signature" },
         { "type": "paragraph", "text": "{{orgName}} has asked you to sign {{documentName}}." },
         { "type": "button", "label": "Review and sign", "url": "{{signingUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "signature_declined": {
+      "subject": "{{signerName}} declined to sign {{documentName}}",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "A signer declined to sign your document" },
+        { "type": "paragraph", "text": "{{signerName}} declined to sign {{documentName}}." },
+        { "type": "paragraph", "text": "{{reason}}" },
+        { "type": "button", "label": "Review the request", "url": "{{signingUrl}}" },
         { "type": "footer" }
       ]
     },

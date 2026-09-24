@@ -4182,6 +4182,55 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           description: No credential linked, already signed, not your turn, or a signature is in progress.
+  /api/v1/orgs/{slug}/signing/requests/{id}/decline:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Signing request id.
+    post:
+      tags: [signing]
+      summary: Decline to sign a request
+      description: >-
+        Requires organisation membership and that the caller is a pending signer of
+        the request; unlike signing, it need not be their turn in sequential mode.
+        Accepts an optional JSON body `{reason}` (at most 500 characters), shown to
+        the requester. Ends the request outright — marks the signer declined and the
+        whole request `declined`, since incremental PAdES cannot produce a document
+        one selected signer refused — and notifies the requester. Answers 204 on
+        success.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Optional free-text reason shown to the requester.
+      responses:
+        '204':
+          description: The decline was recorded.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Already signed, or a signature is in progress.
   /api/v1/orgs/{slug}/signing/requests/{id}:
     parameters:
       - name: slug
@@ -4361,6 +4410,41 @@ paths:
           description: The signing link is not valid or has expired.
         '409':
           description: No credential linked, already signed, not your turn, or a signature is in progress.
+  /api/v1/signing/external/{token}/decline:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The external signee's one-time invitation token.
+    post:
+      tags: [signing]
+      summary: Decline an external signee's signature
+      description: >-
+        Same as the member decline, keyed by the invitation token: it need not be
+        this signee's turn. Accepts an optional JSON body `{reason}` (at most 500
+        characters), shown to the requester. Ends the request outright and notifies
+        the requester. Answers 204 on success.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Optional free-text reason shown to the requester.
+      responses:
+        '204':
+          description: The decline was recorded.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: The signing link is not valid or has expired.
+        '409':
+          description: Already signed, or a signature is in progress.
   /api/v1/signing/callback:
     get:
       tags: [signing]

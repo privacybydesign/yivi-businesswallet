@@ -40,6 +40,9 @@ const (
 	// KindSignatureRequested tells a selected member that a document is waiting for
 	// their signature, linking to the signing page.
 	KindSignatureRequested Kind = "signature_requested"
+	// KindSignatureDeclined tells a request's creator that a selected signer
+	// refused to sign, linking to the signing page.
+	KindSignatureDeclined Kind = "signature_declined"
 	// KindIdentityReminder is sent ahead of a member's identity_due_at, per the
 	// org's re-identification reminder schedule.
 	KindIdentityReminder Kind = "identity_reminder"
@@ -76,6 +79,7 @@ const (
 	varAuditURL       = "auditUrl"
 	varDocumentName   = "documentName"
 	varSigningURL     = "signingUrl"
+	varSignerName     = "signerName"
 	varReidentifyURL  = "reidentifyUrl"
 	varDueDate        = "dueDate"
 	varReason         = "reason"
@@ -126,6 +130,13 @@ var kindVariables = map[Kind][]Variable{
 	KindSignatureRequested: {
 		{Name: varOrgName},
 		{Name: varDocumentName},
+		{Name: varSigningURL, IsURL: true},
+	},
+	KindSignatureDeclined: {
+		{Name: varOrgName},
+		{Name: varDocumentName},
+		{Name: varSignerName},
+		{Name: varReason},
 		{Name: varSigningURL, IsURL: true},
 	},
 	KindIdentityReminder: {
