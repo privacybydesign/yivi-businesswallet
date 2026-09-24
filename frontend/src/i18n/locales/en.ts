@@ -495,6 +495,7 @@ export const en = {
       kvkNumber: "KVK number",
       euid: "EUID",
       address: "Digital address",
+      noAddress: "No default digital address",
       status: "Status",
     },
   },

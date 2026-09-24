@@ -512,6 +512,7 @@ export const nl: Translation<typeof en> = {
       kvkNumber: "KVK-nummer",
       euid: "EUID",
       address: "Digitaal adres",
+      noAddress: "Geen standaard digitaal adres",
       status: "Status",
     },
   },
