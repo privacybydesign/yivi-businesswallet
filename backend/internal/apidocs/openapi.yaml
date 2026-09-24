@@ -4444,7 +4444,7 @@ paths:
         '404':
           description: The signing link is not valid or has expired.
         '409':
-          description: Already signed, the request is no longer awaiting signatures, or a signature is in progress.
+          description: Already signed, or a signature is in progress.
   /api/v1/signing/callback:
     get:
       tags: [signing]
