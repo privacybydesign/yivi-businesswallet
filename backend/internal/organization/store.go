@@ -36,13 +36,14 @@ type rowScanner interface {
 }
 
 const (
-	orgColumns  = `id, name, slug, kvk_number, euid, digital_address, status, bootstrapped_at`
-	orgColumnsQ = `o.id, o.name, o.slug, o.kvk_number, o.euid, o.digital_address, o.status, o.bootstrapped_at`
+	orgColumns  = `id, name, slug, kvk_number, euid, digital_address, status, bootstrapped_at, data_instruction, terminated_at, erasure_pending_at`
+	orgColumnsQ = `o.id, o.name, o.slug, o.kvk_number, o.euid, o.digital_address, o.status, o.bootstrapped_at, o.data_instruction, o.terminated_at, o.erasure_pending_at`
 )
 
 func scanOrg(row rowScanner) (Organization, error) {
 	var o Organization
-	err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status, &o.BootstrappedAt)
+	err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status,
+		&o.BootstrappedAt, &o.DataInstruction, &o.TerminatedAt, &o.ErasurePendingAt)
 	return o, err
 }
 
@@ -53,7 +54,9 @@ func scanOrgWithLogo(row rowScanner) (Organization, error) {
 	var o Organization
 	var hasLogo bool
 	var themeUpdatedAt *time.Time
-	if err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status, &o.BootstrappedAt, &hasLogo, &themeUpdatedAt); err != nil {
+	if err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status,
+		&o.BootstrappedAt, &o.DataInstruction, &o.TerminatedAt, &o.ErasurePendingAt,
+		&hasLogo, &themeUpdatedAt); err != nil {
 		return Organization{}, err
 	}
 	o.LogoURI = logoURL(o.Slug, hasLogo, themeUpdatedAt)
@@ -133,7 +136,8 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, name string) (Organiza
 		var oldName string
 		err := q.QueryRow(ctx, update, id, name).Scan(
 			&org.ID, &org.Name, &org.Slug, &org.KVKNumber, &org.EUID,
-			&org.DigitalAddress, &org.Status, &org.BootstrappedAt, &oldName)
+			&org.DigitalAddress, &org.Status, &org.BootstrappedAt, &org.DataInstruction,
+			&org.TerminatedAt, &org.ErasurePendingAt, &oldName)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}

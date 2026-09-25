@@ -533,6 +533,8 @@ export const nl: Translation<typeof en> = {
     home: "Terug naar home",
   },
   toasts: {
+    exportQueued: "Uw export wordt voorbereid. U kunt deze pagina verlaten.",
+    dataInstructionSaved: "Opgeslagen wat er met uw gegevens gebeurt.",
     dismiss: "Sluiten",
     error: "Er is iets misgegaan. Probeer het opnieuw.",
     invitationSent: "Uitnodiging verstuurd",
@@ -737,6 +739,7 @@ export const nl: Translation<typeof en> = {
       orgCscSettings: "Instellingen ondertekenprovider",
       signingCredentials: "Ondertekencredential",
       signingRequests: "Ondertekenverzoek",
+      export: "Gegevensexport",
       presentationTransaction: "Presentatieverzoek",
     },
     actions: {
@@ -841,6 +844,9 @@ export const nl: Translation<typeof en> = {
       presentationExpired: "Presentatieverzoek verlopen",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
+      exportRequested: "Organisatiegegevens geëxporteerd",
+      organizationTerminated: "Dienstverlening voor de organisatie beëindigd",
+      dataInstructionUpdated: "Gegevensinstructie bij beëindiging bijgewerkt",
     },
   },
   memberInvite: {
@@ -1233,6 +1239,7 @@ export const nl: Translation<typeof en> = {
     tabSigning: "Ondertekenen",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
+    tabExport: "Gegevensexport",
     adminOnly: "Alleen organisatiebeheerders kunnen instellingen beheren.",
     orgProfile: "Organisatieprofiel",
     discard: "Verwerpen",
@@ -1263,6 +1270,59 @@ export const nl: Translation<typeof en> = {
     configureTeams: "Microsoft Teams configureren",
     loadError: "Kon notificatie-instellingen niet laden: {{message}}",
     saveError: "Kon notificatie-instellingen niet opslaan: {{message}}",
+  },
+  exportSettings: {
+    adminOnly:
+      "De export bevat de persoonsgegevens van alle leden, dus alleen beheerders van de organisatie kunnen deze opvragen.",
+    requestTitle: "Exporteer uw gegevens",
+    requestIntro:
+      "Download alles wat deze wallet voor uw organisatie bewaart, in een open formaat dat een andere aanbieder kan lezen. U heeft dit recht op grond van artikel 5(1)(l) van de verordening voor de Europese zakelijke wallet.",
+    sectionsLabel: "Wat u meeneemt",
+    sectionsHint:
+      "Vink niets aan om alles te exporteren. Dat is wat u wilt als u overstapt naar een andere aanbieder.",
+    sections: {
+      ownerIdentification: "Organisatie en mensen",
+      attestations: "Attestaties",
+      qerds: "Aangetekende bezorging",
+      auditRecords: "Activiteitenlog",
+    },
+    sectionHints: {
+      ownerIdentification:
+        "De registeridentiteit van uw organisatie, afdelingen en iedereen die lid is of is uitgenodigd.",
+      attestations:
+        "Attestaties die u heeft uitgegeven, attestaties die u bewaart en de bijbehorende credentials.",
+      qerds:
+        "Verzonden en ontvangen berichten, hun bijlagen en het gekwalificeerde bewijs van bezorging.",
+      auditRecords: "Alles wat er in deze wallet is gebeurd.",
+    },
+    requestAll: "Alles exporteren",
+    requestSelected_one: "{{count}} onderdeel exporteren",
+    requestSelected_other: "{{count}} onderdelen exporteren",
+    historyTitle: "Recente exports",
+    noExports: "U heeft nog niets geëxporteerd.",
+    download: "Downloaden",
+    originTermination: "Dienst beëindigd",
+    status: {
+      queued: "In de wachtrij",
+      running: "Wordt voorbereid",
+      ready: "Klaar",
+      failed: "Mislukt",
+    },
+    instructionTitle: "Als deze dienst stopt",
+    instructionIntro:
+      "Geef nu aan wat er met uw gegevens moet gebeuren als wij uw organisatie niet langer bedienen. Wij vragen dit vooraf, omdat er op dat moment misschien niemand meer is om het aan te vragen.",
+    instructions: {
+      transfer: "Geef mijn gegevens aan mij over",
+      delete: "Geef mijn gegevens over en wis ze daarna",
+    },
+    instructionHints: {
+      transfer:
+        "Wij maken uw export en sturen die naar uw beheerders. Uw gegevens blijven staan totdat u ons vraagt ze te verwijderen.",
+      delete:
+        "Wij maken uw export, sturen die naar uw beheerders en leggen vast dat uw gegevens gewist moeten worden.",
+    },
+    erasurePending:
+      "De dienstverlening voor deze organisatie is beëindigd en het wissen van uw gegevens is vastgelegd als openstaand.",
   },
   identitySettings: {
     heading: "Heridentificatie",
@@ -1605,6 +1665,7 @@ export const nl: Translation<typeof en> = {
     kinds: {
       credential_offer: "Credential uitgegeven",
       event_notification: "Melding van een gebeurtenis",
+      export_ready: "Gegevensexport gereed",
       identity_overdue: "Identiteit verlopen",
       identity_reminder: "Herinnering identiteit",
       identity_requested: "Identificatie aangevraagd",
@@ -1623,6 +1684,8 @@ export const nl: Translation<typeof en> = {
         "Gaat naar een persoon als deze organisatie een credential aan die persoon uitgeeft.",
       event_notification:
         "Gaat naar de beheerders van deze organisatie als er iets gebeurt waarop zij zich hebben geabonneerd.",
+      export_ready:
+        "Gaat naar de beheerders van deze organisatie wanneer de dienstverlening eindigt, met een eenmalige link naar hun gegevensexport.",
       identity_overdue:
         "Gaat naar een lid waarvan de heridentificatietermijn is verstreken, volgens het herinneringsritme.",
       identity_reminder:

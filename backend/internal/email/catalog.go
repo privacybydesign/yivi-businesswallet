@@ -40,6 +40,10 @@ const (
 	// KindSignatureRequested tells a selected member that a document is waiting for
 	// their signature, linking to the signing page.
 	KindSignatureRequested Kind = "signature_requested"
+	// KindExportReady hands an organisation's data-portability bundle to its
+	// admins when the provider terminates service (Art 7(6)(f)). It carries a
+	// one-time link because by then nobody there can necessarily sign in.
+	KindExportReady Kind = "export_ready"
 	// KindSignatureDeclined tells a request's creator that a selected signer
 	// refused to sign, linking to the signing page.
 	KindSignatureDeclined Kind = "signature_declined"
@@ -79,6 +83,8 @@ const (
 	varAuditURL       = "auditUrl"
 	varDocumentName   = "documentName"
 	varSigningURL     = "signingUrl"
+	varExportURL      = "exportUrl"
+	varExportExpiry   = "exportExpiry"
 	varSignerName     = "signerName"
 	varReidentifyURL  = "reidentifyUrl"
 	varDueDate        = "dueDate"
@@ -131,6 +137,11 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varOrgName},
 		{Name: varDocumentName},
 		{Name: varSigningURL, IsURL: true},
+	},
+	KindExportReady: {
+		{Name: varOrgName},
+		{Name: varExportExpiry},
+		{Name: varExportURL, IsURL: true},
 	},
 	KindSignatureDeclined: {
 		{Name: varOrgName},

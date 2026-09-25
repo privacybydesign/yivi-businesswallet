@@ -168,3 +168,19 @@ func TestComposePassesEudiVerifierConfigToBackend(t *testing.T) {
 		}
 	}
 }
+
+// TestComposePassesExportBundleCapToBackend holds the export cap to the same
+// passthrough rule. Without the declaration a deployment that raised the cap in
+// .env would keep the built-in one and quietly record omissions it did not ask
+// for.
+func TestComposePassesExportBundleCapToBackend(t *testing.T) {
+	backendEnvironment := backendComposeEnvironment(t)
+
+	value, ok := backendEnvironment[envExportMaxBundleBytes]
+	if !ok {
+		t.Fatalf("backend service does not pass %s through; setting it in .env would do nothing", envExportMaxBundleBytes)
+	}
+	if want := "${" + envExportMaxBundleBytes + ":-}"; value != want {
+		t.Errorf("backend %s = %q, want %q", envExportMaxBundleBytes, value, want)
+	}
+}

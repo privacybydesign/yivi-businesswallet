@@ -26,6 +26,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/devverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/export"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vppresenter"
@@ -178,7 +179,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	// nil mailer: invitation e-mail delivery is best-effort and not exercised here.
 	// nil defaultAddress: this router does not wire QERDS, so /orgs/{slug} falls
 	// back to the organization row's snapshot address.
-	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins, nil)
+	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins, nil, export.NewStore(pool, audit.NewDBRecorder()))
 
 	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
 	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())

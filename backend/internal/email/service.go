@@ -158,6 +158,19 @@ func (s *Service) SendEventNotification(ctx context.Context, orgID uuid.UUID, re
 	})
 }
 
+// SendExportReady hands an organisation's data-portability bundle to its admins
+// after the provider terminates service (Art 7(6)(f)). It uses sendToEach rather
+// than sendLocalized because there is no retry behind it: the export ran once,
+// and stopping at the first rejected admin would leave the rest unnotified with
+// no second attempt coming.
+func (s *Service) SendExportReady(ctx context.Context, orgID uuid.UUID, recipients []string, orgName, downloadURL, expiry string) error {
+	return s.sendToEach(ctx, orgID, KindExportReady, s.locale(""), recipients, map[string]string{
+		varOrgName:      orgName,
+		varExportURL:    downloadURL,
+		varExportExpiry: expiry,
+	})
+}
+
 // SendSignedDocument delivers a completed co-signed document to its recipient as a
 // PDF attachment, with the org's cover message. Returns ErrNotConfigured when the
 // org has no usable SMTP settings.
