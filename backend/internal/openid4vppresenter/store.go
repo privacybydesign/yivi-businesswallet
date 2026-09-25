@@ -142,6 +142,52 @@ func (s *Store) SelectOrganization(ctx context.Context, id, orgID uuid.UUID, org
 	return t, nil
 }
 
+// GetPendingForOrg resolves an org-scoped presentation transaction waiting on
+// the governance layer (#113), by its row id — not the opaque, client-facing id
+// Get resolves. ErrNotPending covers a transaction that belongs to a different
+// organization, was never selected, or has already been decided or expired: the
+// same answer for all four, so an admin cannot use it to probe another
+// organization's queue or learn a decided transaction's outcome this way.
+func (s *Store) GetPendingForOrg(ctx context.Context, orgID, id uuid.UUID) (Transaction, error) {
+	const q = `SELECT ` + transactionColumns + ` FROM openid4vp_transactions
+		WHERE id = $1 AND organization_id = $2 AND status = $3 AND consumed_at IS NULL AND expires_at > now()`
+	t, err := scanTransaction(s.db.QueryRow(ctx, q, id, orgID, StatusOrgSelected))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Transaction{}, ErrNotPending
+	}
+	if err != nil {
+		return Transaction{}, fmt.Errorf("openid4vppresenter: get pending %s org %s: %w", id, orgID, err)
+	}
+	return t, nil
+}
+
+// ListPendingForOrg returns the organization's presentation transactions
+// waiting on the governance layer: a member selected this org, and now an admin
+// must approve or deny before anything reaches the verifier.
+func (s *Store) ListPendingForOrg(ctx context.Context, orgID uuid.UUID) ([]Transaction, error) {
+	const q = `SELECT ` + transactionColumns + ` FROM openid4vp_transactions
+		WHERE organization_id = $1 AND status = $2 AND consumed_at IS NULL AND expires_at > now()
+		ORDER BY expires_at ASC`
+	rows, err := s.db.Query(ctx, q, orgID, StatusOrgSelected)
+	if err != nil {
+		return nil, fmt.Errorf("openid4vppresenter: list pending org %s: %w", orgID, err)
+	}
+	defer rows.Close()
+
+	out := []Transaction{}
+	for rows.Next() {
+		t, err := scanTransaction(rows)
+		if err != nil {
+			return nil, fmt.Errorf("openid4vppresenter: list pending scan: %w", err)
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("openid4vppresenter: list pending rows: %w", err)
+	}
+	return out, nil
+}
+
 // Complete consumes an org_selected transaction as completed: the Authorization
 // Response has been delivered.
 func (s *Store) Complete(ctx context.Context, id uuid.UUID) error {
