@@ -252,6 +252,23 @@ func (a qerdsOfferSender) SendCredentialOffer(ctx context.Context, orgID uuid.UU
 	return err
 }
 
+// qerdsDefaultAddress adapts qerds.Store to the organization slice's
+// defaultAddressResolver seam: the dashboard's Wallet card shows the org's
+// live default QERDS address rather than the registration-time snapshot on
+// the organization row (#260).
+type qerdsDefaultAddress struct{ store *qerds.Store }
+
+func (a qerdsDefaultAddress) DefaultDigitalAddress(ctx context.Context, orgID uuid.UUID) (string, bool, error) {
+	addr, err := a.store.DefaultAddress(ctx, orgID)
+	if errors.Is(err, qerds.ErrNoSenderAddress) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return addr.Address, true, nil
+}
+
 func newQerdsProvider(cfg config.Config) (qerdsProvider, error) {
 	switch cfg.QerdsProvider {
 	case config.ProviderStub:
@@ -443,11 +460,16 @@ func run() error {
 	}()
 	screeningService := organization.NewScreeningService(orgStore, vogValidator, vogParser, authService, orgService, vogReferenceHashKey)
 
+	// Built ahead of qerdsService/qerdsHandler below so the org handler can read
+	// an org's live default address for its Wallet card (#260) without this
+	// slice importing qerds, which already imports organization for org-scoped
+	// auth and would cycle.
+	qerdsStore := qerds.NewStore(pool, recorder)
 	// The export store is built here rather than beside the rest of the export
 	// wiring: terminating an organisation queues the bundle it owes in the same
 	// transaction, so the org handler needs it.
 	exportStore := export.NewStore(pool, recorder)
-	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins, exportStore)
+	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins, qerdsDefaultAddress{qerdsStore}, exportStore)
 
 	// Daily re-identification reminder sweep (#240 §6): mails members whose
 	// identity is due soon or overdue, per each org's own policy.
@@ -468,7 +490,6 @@ func run() error {
 	if err := qerdsProv.Ping(qerdsProbeCtx); err != nil {
 		return fmt.Errorf("qerds provider ping: %w", err)
 	}
-	qerdsStore := qerds.NewStore(pool, recorder)
 	qerdsService := qerds.NewService(qerdsStore, qerdsStore, qerdsProv)
 	qerdsHandler := qerds.NewHandler(qerdsService, qerdsStore, qerdsStore, qerdsStore, requireUser, orgHandler.Authorize, cfg.QerdsWebhookSecret, cfg.QerdsDefaultAddressDomain)
 

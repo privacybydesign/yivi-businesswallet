@@ -512,6 +512,7 @@ export const nl: Translation<typeof en> = {
       kvkNumber: "KVK-nummer",
       euid: "EUID",
       address: "Digitaal adres",
+      noAddress: "Geen standaard digitaal adres",
       status: "Status",
     },
   },
@@ -564,6 +565,7 @@ export const nl: Translation<typeof en> = {
     qerdsInboxChecked_other: "{{count}} nieuwe berichten ontvangen",
     qerdsAddressAdded: "Digitaal adres toegevoegd",
     qerdsAddressDefaultChanged: "Standaardadres bijgewerkt",
+    qerdsAddressDeleted: "Digitaal adres verwijderd",
     qerdsContactAdded: "Contact toegevoegd",
     qerdsContactDeleted: "Contact verwijderd",
     postguardKeySaved: "API-sleutel opgeslagen",
@@ -783,6 +785,7 @@ export const nl: Translation<typeof en> = {
       qerdsMessageReceived: "Beveiligd bericht ontvangen",
       qerdsAddressProvisioned: "Digitaal adres aangemaakt",
       qerdsAddressDefaultChanged: "Standaardadres gewijzigd",
+      qerdsAddressDeleted: "Digitaal adres verwijderd",
       qerdsContactAdded: "Contact toegevoegd",
       qerdsContactDeleted: "Contact verwijderd",
       postguardKeySet: "PostGuard API-sleutel ingesteld",
@@ -2154,6 +2157,14 @@ export const nl: Translation<typeof en> = {
       taken: "Dat digitale adres is al in gebruik.",
       outsideNamespace:
         "Een digitaal adres moet binnen de naamruimte van je organisatie vallen (de slug).",
+      delete: "Verwijderen",
+      deleteTitle: "Digitaal adres verwijderen",
+      deleteConfirm:
+        "“{{address}}” verwijderen? Berichtgeschiedenis behoudt dit adres, maar niets dat hiernaartoe is geadresseerd wordt nog bezorgd.",
+      isDefault:
+        "Dit is het standaardadres van je organisatie. Stel eerst een ander adres als standaard in.",
+      lastRemaining:
+        "Dit is het enige digitale adres van je organisatie. Maak eerst een ander adres aan.",
       error: "Er is iets misgegaan: {{message}}",
     },
     contacts: {

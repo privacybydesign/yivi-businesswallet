@@ -191,6 +191,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.qerdsAddressProvisioned");
     case "qerds.address_default_changed":
       return t("auditLog.actions.qerdsAddressDefaultChanged");
+    case "qerds.address_deleted":
+      return t("auditLog.actions.qerdsAddressDeleted");
     case "qerds.contact_added":
       return t("auditLog.actions.qerdsContactAdded");
     case "qerds.contact_deleted":

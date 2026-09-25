@@ -495,6 +495,7 @@ export const en = {
       kvkNumber: "KVK number",
       euid: "EUID",
       address: "Digital address",
+      noAddress: "No default digital address",
       status: "Status",
     },
   },
@@ -547,6 +548,7 @@ export const en = {
     qerdsInboxChecked_other: "{{count}} new messages received",
     qerdsAddressAdded: "Digital address added",
     qerdsAddressDefaultChanged: "Default address updated",
+    qerdsAddressDeleted: "Digital address deleted",
     qerdsContactAdded: "Contact added",
     qerdsContactDeleted: "Contact deleted",
     postguardKeySaved: "API key saved",
@@ -765,6 +767,7 @@ export const en = {
       qerdsMessageReceived: "Received secure message",
       qerdsAddressProvisioned: "Provisioned digital address",
       qerdsAddressDefaultChanged: "Changed default address",
+      qerdsAddressDeleted: "Deleted digital address",
       qerdsContactAdded: "Added contact",
       qerdsContactDeleted: "Deleted contact",
       postguardKeySet: "Set PostGuard API key",
@@ -2102,6 +2105,14 @@ export const en = {
       taken: "That digital address is already taken.",
       outsideNamespace:
         "A digital address must be within your organization's namespace (its slug).",
+      delete: "Delete",
+      deleteTitle: "Delete digital address",
+      deleteConfirm:
+        "Delete “{{address}}”? Message history keeps this address, but nothing addressed to it will route here anymore.",
+      isDefault:
+        "This is your organization's default address. Make another address the default first.",
+      lastRemaining:
+        "This is your organization's only digital address. Provision another one first.",
       error: "Something went wrong: {{message}}",
     },
     contacts: {

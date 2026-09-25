@@ -237,6 +237,21 @@ export function setDefaultQerdsAddress(
   );
 }
 
+export function deleteQerdsAddress(
+  slug: string,
+  addressId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/qerds/addresses/${encodeURIComponent(addressId)}`,
+    {
+      schema: z.void(),
+      method: "DELETE",
+      signal,
+    },
+  );
+}
+
 export function getQerdsContacts(
   slug: string,
   signal?: AbortSignal,

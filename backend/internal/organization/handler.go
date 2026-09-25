@@ -113,24 +113,37 @@ type inviteMailer interface {
 	SendVogRequested(ctx context.Context, orgID uuid.UUID, to, orgName, vogURL, reason string) error
 }
 
+// defaultAddressResolver resolves an organization's live default QERDS
+// sending address (qerds_addresses.is_default), which the Wallet card shows in
+// place of the registration-time snapshot on the organization row (#260). Kept
+// as a local interface so this slice does not import qerds — which already
+// imports organization for org-scoped auth, so the reverse import would
+// cycle. Satisfied by an adapter over *qerds.Store, wired in cmd/api/main.go.
+type defaultAddressResolver interface {
+	// DefaultDigitalAddress returns the organization's default address. ok is
+	// false when none is provisioned.
+	DefaultDigitalAddress(ctx context.Context, orgID uuid.UUID) (address string, ok bool, err error)
+}
+
 // exports queues the bundle a termination owes. Nil disables the route: a
 // deployment without the export slice cannot honour Art 7(6)(f), and refusing is
 // better than terminating with no handover.
 type Handler struct {
-	store       repository
-	service     inviter
-	screening   screener
-	reader      auditReader
-	issuer      sessionIssuer
-	mailer      inviteMailer
-	appBaseURL  string
-	requireUser func(http.Handler) http.Handler
-	admins      auth.PlatformAdmins
-	exports     exportQueuer
+	store          repository
+	service        inviter
+	screening      screener
+	reader         auditReader
+	issuer         sessionIssuer
+	mailer         inviteMailer
+	defaultAddress defaultAddressResolver
+	appBaseURL     string
+	requireUser    func(http.Handler) http.Handler
+	admins         auth.PlatformAdmins
+	exports        exportQueuer
 }
 
-func NewHandler(store repository, service inviter, screening screener, reader auditReader, issuer sessionIssuer, mailer inviteMailer, appBaseURL string, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins, exports exportQueuer) *Handler {
-	return &Handler{store: store, service: service, screening: screening, reader: reader, issuer: issuer, mailer: mailer, appBaseURL: strings.TrimRight(appBaseURL, "/"), requireUser: requireUser, admins: admins, exports: exports}
+func NewHandler(store repository, service inviter, screening screener, reader auditReader, issuer sessionIssuer, mailer inviteMailer, appBaseURL string, requireUser func(http.Handler) http.Handler, admins auth.PlatformAdmins, defaultAddress defaultAddressResolver, exports exportQueuer) *Handler {
+	return &Handler{store: store, service: service, screening: screening, reader: reader, issuer: issuer, mailer: mailer, defaultAddress: defaultAddress, appBaseURL: strings.TrimRight(appBaseURL, "/"), requireUser: requireUser, admins: admins, exports: exports}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -326,6 +339,22 @@ type ownVogState struct {
 func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	org := OrgFromContext(ctx)
+
+	// h.defaultAddress is nil only in test setups that don't wire QERDS, mirroring
+	// sendInviteEmail's h.mailer guard; a real deployment always wires it, so a
+	// resolver error here is unexpected and fails the request rather than
+	// falling back to the stale snapshot this replaces.
+	if h.defaultAddress != nil {
+		address, ok, err := h.defaultAddress.DefaultDigitalAddress(ctx, org.ID)
+		if err != nil {
+			return fmt.Errorf("resolving default digital address for org %s: %w", org.ID, err)
+		}
+		org.DigitalAddress = ""
+		if ok {
+			org.DigitalAddress = address
+		}
+	}
+
 	respond.JSON(w, r, http.StatusOK, orgDetailResponse{
 		Organization: org,
 		Role:         roleFromContext(ctx),

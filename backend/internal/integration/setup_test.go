@@ -177,7 +177,9 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)
 	screeningService := organization.NewScreeningService(orgStore, vog.StubValidator{Code: vog.ResponseAuthentic}, vogParser(t), authService, orgService, nil)
 	// nil mailer: invitation e-mail delivery is best-effort and not exercised here.
-	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins, export.NewStore(pool, audit.NewDBRecorder()))
+	// nil defaultAddress: this router does not wire QERDS, so /orgs/{slug} falls
+	// back to the organization row's snapshot address.
+	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, nil, "", requireUser, admins, nil, export.NewStore(pool, audit.NewDBRecorder()))
 
 	attestationStore := attestation.NewStore(pool, audit.NewDBRecorder())
 	issuerSettingsStore := issuersettings.NewStore(pool, audit.NewDBRecorder())
