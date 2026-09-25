@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
@@ -33,10 +36,20 @@ func NewHandler(svc *Service, metadata *MetadataHandler, requireUser, authorize 
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
+	admin := func(next http.Handler) http.Handler {
+		return h.requireUser(h.authorize(organization.RequireOrgAdmin(next)))
+	}
+
 	mux.Handle("POST /openid4vp/start", respond.HandlerFunc(h.start))
 	mux.Handle("GET /openid4vp/{id}/status", respond.HandlerFunc(h.status))
 	mux.Handle("GET /openid4vp/{id}/orgs", h.requireUser(respond.HandlerFunc(h.orgs)))
 	mux.Handle("POST /orgs/{slug}/openid4vp/{id}/select", h.requireUser(h.authorize(respond.HandlerFunc(h.selectOrg))))
+
+	// The governance layer's approval queue (#113): presentation requests a
+	// member selected this org for, waiting on an admin to approve or deny.
+	mux.Handle("GET /orgs/{slug}/openid4vp/requests", admin(respond.HandlerFunc(h.pendingRequests)))
+	mux.Handle("POST /orgs/{slug}/openid4vp/requests/{id}/approve", admin(respond.HandlerFunc(h.approveRequest)))
+	mux.Handle("POST /orgs/{slug}/openid4vp/requests/{id}/decline", admin(respond.HandlerFunc(h.declineRequest)))
 }
 
 // RegisterRoot mounts the wallet-metadata document outside /api/v1: it is
@@ -125,6 +138,64 @@ func (h *Handler) selectOrg(w http.ResponseWriter, r *http.Request) error {
 		return mapError(err)
 	}
 	respond.JSON(w, r, http.StatusOK, selectResponse(res))
+	return nil
+}
+
+// pendingRequestView is one row of the approval queue: enough for an admin to
+// decide, never the query or response material (the same minimisation as
+// statusResponse).
+type pendingRequestView struct {
+	ID        string    `json:"id"`
+	Verifier  string    `json:"verifier"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+func (h *Handler) pendingRequests(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	pending, err := h.svc.PendingApprovals(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("listing pending presentation requests: %w", err)
+	}
+	out := make([]pendingRequestView, 0, len(pending))
+	for _, t := range pending {
+		out = append(out, pendingRequestView{ID: t.ID.String(), Verifier: t.VerifierIdentity, ExpiresAt: t.ExpiresAt})
+	}
+	respond.JSON(w, r, http.StatusOK, out)
+	return nil
+}
+
+func requestID(r *http.Request) (uuid.UUID, error) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return uuid.Nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+	}
+	return id, nil
+}
+
+func (h *Handler) approveRequest(w http.ResponseWriter, r *http.Request) error {
+	id, err := requestID(r)
+	if err != nil {
+		return err
+	}
+	org := organization.OrgFromContext(r.Context())
+	redirect, err := h.svc.Approve(r.Context(), org.ID, id)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, selectResponse{Status: StatusCompleted, RedirectURI: redirect})
+	return nil
+}
+
+func (h *Handler) declineRequest(w http.ResponseWriter, r *http.Request) error {
+	id, err := requestID(r)
+	if err != nil {
+		return err
+	}
+	org := organization.OrgFromContext(r.Context())
+	if err := h.svc.Deny(r.Context(), org.ID, id); err != nil {
+		return mapError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
