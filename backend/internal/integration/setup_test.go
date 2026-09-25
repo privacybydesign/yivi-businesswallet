@@ -150,10 +150,33 @@ type testEnv struct {
 	verifier devverifier.Identity
 }
 
+// presenterMode picks which posture newTestEnv wires the inbound OpenID4VP
+// presenter under: presenterAutoPresent matches the dev/CI posture every
+// existing test here relies on (org selection completes the presentation at
+// once); presenterManualApproval leaves a selected transaction at org_selected
+// for the governance layer (#113), for tests of the admin approval queue.
+type presenterMode int
+
+const (
+	presenterAutoPresent presenterMode = iota
+	presenterManualApproval
+)
+
 // setup assembles the real router exactly as cmd/api does (minus the IRMA boot
 // probe and the pruner) and returns an env with a cookie-jar HTTP client so the
 // session cookie set by /claim is replayed automatically.
 func setup(t *testing.T, platformAdmins ...string) *testEnv {
+	return newTestEnv(t, presenterAutoPresent, platformAdmins...)
+}
+
+// setupManualApproval is setup with the inbound OpenID4VP presenter left
+// waiting for an admin's decision instead of auto-presenting, for the
+// governance layer's approval-queue tests.
+func setupManualApproval(t *testing.T) *testEnv {
+	return newTestEnv(t, presenterManualApproval)
+}
+
+func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *testEnv {
 	t.Helper()
 	pool, _ := testdb.Fresh(t)
 
@@ -192,8 +215,10 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	// Inbound OpenID4VP under the dev posture the Compose stack runs with: plain
 	// http to the in-process fake verifier, request objects signed by a relying
 	// party whose freshly minted root this router trusts (the production
-	// validator, not the structural decoder), and auto-present so the stub
-	// holder's canned vp_token is delivered right after organization selection.
+	// validator, not the structural decoder). Under presenterAutoPresent the
+	// stub holder's canned vp_token is delivered right after organization
+	// selection; under presenterManualApproval the transaction instead waits at
+	// org_selected for the approval queue.
 	verifierIdentity, err := devverifier.NewIdentity("verifier.test")
 	if err != nil {
 		t.Fatalf("verifier identity: %v", err)
@@ -208,7 +233,7 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	presenterService := openid4vppresenter.NewService(
 		presenterStore, orgStore, eudiholder.NewStubHolder(),
 		openid4vppresenter.NewFetcher(presenterPolicy), presenterValidator, openid4vppresenter.NewResponder(presenterPolicy),
-		true,
+		mode == presenterAutoPresent,
 	)
 	presenterMetadata, err := openid4vppresenter.NewMetadataHandler(
 		openid4vppresenter.NewMetadata("http://app.test", eudiholder.Formats(), presenterValidator))
