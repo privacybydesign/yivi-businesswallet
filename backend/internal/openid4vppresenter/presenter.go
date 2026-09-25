@@ -14,6 +14,14 @@
 // out — to the governance layer (#113). Until that layer lands, completing a
 // presentation right after organization selection is a dev-only flag, never a
 // default. See .ai/features/openid4vp-inbound.md.
+//
+// A second invocation seam (issue #271) carries the same Authorization Request
+// over QERDS instead of a browser: the receiving organization is already known
+// from the address the message arrived on, so Receiver queues it straight at
+// StatusOrgSelected — the QERDS analogue of a browser's org picker — and it
+// waits there for the same governance decision (#113) any org_selected
+// transaction does, regardless of how it arrived. See
+// .ai/features/oid4vp-over-qerds.md.
 package openid4vppresenter
 
 import (
@@ -95,8 +103,13 @@ type Transaction struct {
 	Status         string
 	UserID         *uuid.UUID
 	OrganizationID *uuid.UUID
-	ExpiresAt      time.Time
-	ConsumedAt     *time.Time
+	// SourceMessageID is set only for a transaction that arrived over QERDS
+	// (Receiver): the inbound qerds_messages row, also the idempotency key that
+	// stops a re-delivered request from being queued twice. Nil for a browser
+	// invocation.
+	SourceMessageID *uuid.UUID
+	ExpiresAt       time.Time
+	ConsumedAt      *time.Time
 }
 
 // EffectiveStatus is the stored status with expiry applied: an unconsumed row

@@ -33,14 +33,14 @@ func NewStore(db database.DB, recorder audit.Recorder, ttl time.Duration) *Store
 const transactionColumns = `
 	id, client_id, request_uri, request_uri_method, verifier_identity, dcql_query,
 	nonce, state, response_uri, response_mode, request_object, status, user_id, organization_id,
-	expires_at, consumed_at`
+	source_message_id, expires_at, consumed_at`
 
 func scanTransaction(row pgx.Row) (Transaction, error) {
 	var t Transaction
 	err := row.Scan(
 		&t.ID, &t.ClientID, &t.RequestURI, &t.RequestURIMethod, &t.VerifierIdentity, &t.DCQLQuery,
 		&t.Nonce, &t.State, &t.ResponseURI, &t.ResponseMode, &t.RequestObject, &t.Status, &t.UserID, &t.OrganizationID,
-		&t.ExpiresAt, &t.ConsumedAt,
+		&t.SourceMessageID, &t.ExpiresAt, &t.ConsumedAt,
 	)
 	return t, err
 }
@@ -86,6 +86,67 @@ func (s *Store) Create(ctx context.Context, in NewTransaction) (string, error) {
 		return "", err
 	}
 	return raw, nil
+}
+
+// CreateForOrganization stores a validated Authorization Request that arrived
+// over QERDS, already addressed to orgID by the receiving digital address: the
+// browser flow's pending_auth/org-picker steps do not apply, so the row starts
+// straight at org_selected. Idempotent on (organization_id, source_message_id):
+// a re-delivered message resolves to the row already queued (recorded=false), so
+// a decision an admin already made is never reopened.
+func (s *Store) CreateForOrganization(ctx context.Context, orgID, sourceMessageID uuid.UUID, in NewTransaction) (Transaction, bool, error) {
+	_, hash, err := newID()
+	if err != nil {
+		return Transaction{}, false, err
+	}
+	const insert = `
+		INSERT INTO openid4vp_transactions (
+			id_hash, client_id, request_uri, request_uri_method, verifier_identity, dcql_query,
+			nonce, state, response_uri, response_mode, request_object, status, organization_id,
+			source_message_id, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		ON CONFLICT (organization_id, source_message_id) WHERE source_message_id IS NOT NULL DO NOTHING
+		RETURNING ` + transactionColumns
+	expiresAt := time.Now().Add(s.ttl)
+	var (
+		t        Transaction
+		recorded bool
+	)
+	err = database.InTx(ctx, s.db, func(tx database.Querier) error {
+		t, err = scanTransaction(tx.QueryRow(ctx, insert,
+			hash[:], in.ClientID, in.RequestURI, in.RequestURIMethod, in.Request.VerifierIdentity, in.Request.DCQLQuery,
+			in.Request.Nonce, in.Request.State, in.Request.ResponseURI, in.Request.ResponseMode, in.Request.Raw,
+			StatusOrgSelected, orgID, sourceMessageID, expiresAt,
+		))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // handled below: already queued by an earlier delivery
+		}
+		if err != nil {
+			return fmt.Errorf("openid4vppresenter: create for organization %s: %w", orgID, err)
+		}
+		recorded = true
+		return s.audit.Record(ctx, tx, audit.PresentationRequestReceived,
+			audit.Target{Type: audit.TargetPresentationTransaction, ID: t.ID.String(), OrgID: &orgID},
+			audit.Created(map[string]any{"verifier": t.VerifierIdentity}))
+	})
+	if err != nil {
+		return Transaction{}, false, err
+	}
+	if recorded {
+		return t, true, nil
+	}
+
+	// DO NOTHING returned no row: read back the row an earlier delivery already
+	// queued rather than handing the caller a zero value it could mistake for a
+	// fresh one — the same contract attestation.Store.RecordOffer honours.
+	const existing = `SELECT ` + transactionColumns + ` FROM openid4vp_transactions
+		WHERE organization_id = $1 AND source_message_id = $2`
+	t, err = scanTransaction(s.db.QueryRow(ctx, existing, orgID, sourceMessageID))
+	if err != nil {
+		return Transaction{}, false, fmt.Errorf("openid4vppresenter: read queued request for message %s org %s: %w",
+			sourceMessageID, orgID, err)
+	}
+	return t, false, nil
 }
 
 // Get resolves the browser's opaque id to its transaction, expired and consumed

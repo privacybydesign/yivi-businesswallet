@@ -820,6 +820,7 @@ export const en = {
       presentationCompleted: "Sent a presentation",
       presentationDenied: "Declined a presentation request",
       presentationExpired: "Presentation request expired",
+      presentationRequestReceived: "Received a presentation request over QERDS",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
     },
