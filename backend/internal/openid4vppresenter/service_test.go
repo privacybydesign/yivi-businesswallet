@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/privacybydesign/irmago/eudi/openid4vp"
@@ -14,6 +15,11 @@ import (
 
 type fakeStore struct {
 	created []NewTransaction
+	// orgTransactions holds every row CreateForOrganization queued, keyed by id
+	// — enough for a QERDS test to inspect what landed without a Service method
+	// to read it back through (that read belongs to whatever lists an org's
+	// org_selected queue; #113's governance layer, not this seam).
+	orgTransactions map[uuid.UUID]Transaction
 }
 
 func (f *fakeStore) Create(_ context.Context, in NewTransaction) (string, error) {
@@ -30,6 +36,41 @@ func (*fakeStore) SelectOrganization(context.Context, uuid.UUID, uuid.UUID, stri
 }
 func (*fakeStore) Complete(context.Context, uuid.UUID) error     { return nil }
 func (*fakeStore) Deny(context.Context, uuid.UUID, string) error { return nil }
+
+func (f *fakeStore) CreateForOrganization(_ context.Context, orgID, sourceMessageID uuid.UUID, in NewTransaction) (Transaction, bool, error) {
+	for _, existing := range f.orgTransactions {
+		if existing.OrganizationID != nil && *existing.OrganizationID == orgID &&
+			existing.SourceMessageID != nil && *existing.SourceMessageID == sourceMessageID {
+			return existing, false, nil
+		}
+	}
+	f.created = append(f.created, in)
+	id := uuid.New()
+	t := Transaction{
+		ID: id, ClientID: in.ClientID, RequestURI: in.RequestURI, RequestURIMethod: in.RequestURIMethod,
+		VerifierIdentity: in.Request.VerifierIdentity, DCQLQuery: in.Request.DCQLQuery, Nonce: in.Request.Nonce,
+		ResponseURI: in.Request.ResponseURI, ResponseMode: in.Request.ResponseMode, RequestObject: in.Request.Raw,
+		Status: StatusOrgSelected, OrganizationID: &orgID, SourceMessageID: &sourceMessageID,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	if f.orgTransactions == nil {
+		f.orgTransactions = map[uuid.UUID]Transaction{}
+	}
+	f.orgTransactions[id] = t
+	return t, true, nil
+}
+
+// forOrg returns the rows CreateForOrganization queued for orgID, for tests to
+// assert on directly.
+func (f *fakeStore) forOrg(orgID uuid.UUID) []Transaction {
+	var out []Transaction
+	for _, t := range f.orgTransactions {
+		if t.OrganizationID != nil && *t.OrganizationID == orgID {
+			out = append(out, t)
+		}
+	}
+	return out
+}
 
 type fakeOrgs struct{}
 
@@ -111,5 +152,42 @@ func TestStartAcceptsGetAndPostMethods(t *testing.T) {
 		if store.created[0].RequestURIMethod != want {
 			t.Errorf("method %q persisted as %q", method, store.created[0].RequestURIMethod)
 		}
+	}
+}
+
+// ReceiveFromQERDS shares Start's invocation validation, so a QERDS-originated
+// request is rejected the same way — before it is queued for anyone to decide.
+func TestReceiveFromQERDSRejectsAmbiguousForms(t *testing.T) {
+	svc, store, fetcher := newTestService()
+	_, _, err := svc.ReceiveFromQERDS(context.Background(), uuid.New(), uuid.New(), StartRequest{ClientID: testClientID})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("err = %v, want %v", err, ErrInvalidRequest)
+	}
+	if fetcher.called || len(store.created) != 0 {
+		t.Fatal("rejected request reached the fetcher or the store")
+	}
+}
+
+// A valid invocation lands org-bound at org_selected, skipping the browser's
+// pending_auth/org-picker steps entirely, and is idempotent on the source
+// message.
+func TestReceiveFromQERDSQueuesOrgBound(t *testing.T) {
+	svc, _, _ := newTestService()
+	orgID, msgID := uuid.New(), uuid.New()
+	req := StartRequest{ClientID: testClientID, RequestURI: "https://v/req"}
+
+	t1, recorded, err := svc.ReceiveFromQERDS(context.Background(), orgID, msgID, req)
+	if err != nil {
+		t.Fatalf("ReceiveFromQERDS: %v", err)
+	}
+	if !recorded {
+		t.Fatal("first delivery must be recorded")
+	}
+	if t1.Status != StatusOrgSelected || t1.OrganizationID == nil || *t1.OrganizationID != orgID {
+		t.Fatalf("queued transaction = %+v, want org-bound org_selected", t1)
+	}
+
+	if _, recorded, err := svc.ReceiveFromQERDS(context.Background(), orgID, msgID, req); err != nil || recorded {
+		t.Fatalf("re-delivery: recorded=%v err=%v, want recorded=false err=nil", recorded, err)
 	}
 }

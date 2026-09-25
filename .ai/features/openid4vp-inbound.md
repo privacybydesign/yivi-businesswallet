@@ -12,7 +12,9 @@ Design of record: `.ai/plans/openid4vp-invocation.md`. Local end-to-end testing:
 **Counterpart:** `.ai/features/auth-openid4vp.md` is the *outbound* role — this backend as a
 requestor asking a natural person's device wallet for a login disclosure. This file is the
 opposite role: an **external verifier** invoking the **business wallet itself** to present an
-**organization's** credentials.
+**organization's** credentials. `.ai/features/oid4vp-over-qerds.md` (#271) is a second invocation
+seam into the same crypto (§1, §2's `Present`/`Responder`): the request travels over QERDS instead
+of a browser, and the organization is bound at receipt instead of picked by a logged-in user.
 
 ---
 
