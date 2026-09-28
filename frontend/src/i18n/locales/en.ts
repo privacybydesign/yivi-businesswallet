@@ -505,6 +505,9 @@ export const en = {
         "That flow is no longer assigned to this customer. Pick another one.",
       customerPaused:
         "Proofing is paused for this customer. An admin can resume it on the customer's page.",
+      sessionOver: "This session has ended. Start a new one.",
+      methodUnavailable:
+        "The identity proofing service cannot run Yivi app sessions yet. Choose the Idem app.",
       generic: "Something went wrong. Please try again.",
     },
   },
@@ -598,6 +601,21 @@ export const en = {
     send: {
       title: "Verify a person",
       hint: "The person gets a mail with a QR code and a link for the vcmrtd app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request. They need no account.",
+      hintOnScreen:
+        "The person is with you. A page shows them what is collected, lets them choose the Yivi app or the Idem app, and shows its QR code. Nothing is mailed.",
+      channel: "How does the person get the QR code?",
+      channels: {
+        email: {
+          title: "Send by e-mail",
+          hint: "A mail with the QR code and a link.",
+        },
+        onScreen: {
+          title: "Show on this screen",
+          hint: "A page here, for a person who is with you.",
+        },
+      },
+      emailOptional: "E-mail address (optional)",
+      submitOnScreen: "Open page",
       email: "E-mail address",
       emailRequired: "Enter a valid e-mail address.",
       name: "Name (optional)",
@@ -609,6 +627,102 @@ export const en = {
       noFlowsAdmin: "Assign a flow to this customer first, on the Flows tab.",
       noFlowsMember:
         "An admin has to assign a flow to this customer before you can send a request.",
+    },
+    onScreen: {
+      title: "Verify a person",
+      missingFlow:
+        "This flow is no longer assigned to the customer. Go back and pick another one.",
+      steps: {
+        overview: "What is collected",
+        method: "Choose an app",
+        session: "Scan the QR code",
+      },
+      overview: {
+        heading: "{{name}} wants to verify your identity",
+        intro:
+          "You check your identity with your passport or ID card. {{name}} receives:",
+        noData: "Only the outcome: whether your identity was verified.",
+        flow: "Flow",
+        assurance: "Assurance level",
+        retention_one:
+          "The name on your document is kept for {{count}} day after verification, then deleted.",
+        retention_other:
+          "The name on your document is kept for {{count}} days after verification, then deleted.",
+        support: "Questions? {{contact}}",
+        privacy: "Privacy statement",
+        cancel: "Cancel",
+        continue: "Continue",
+      },
+      attributeDetails: {
+        dg1: "Your name, date of birth and nationality, and the document's number and expiry date.",
+        dg11: "Extra details about you stored on the document's chip.",
+        dg2: "The photo stored on the document's chip.",
+        chip_checks: "Whether the chip is genuine and unaltered.",
+        selfie: "A photo of your face taken during the check.",
+        biometrics: "How well your face matches the document photo.",
+      },
+      method: {
+        heading: "How do you want to verify?",
+        yivi: {
+          title: "Yivi app",
+          detail:
+            "Share the passport or ID card already in your Yivi app, then look into the camera here.",
+        },
+        idem: {
+          title: "Idem app",
+          detail:
+            "Scan your passport or ID card with the Idem app and hold it to your phone to read its chip.",
+        },
+        back: "Back",
+        continue: "Show QR code",
+      },
+      scan: {
+        yiviHeading: "Scan with the Yivi app",
+        yiviHint:
+          "Open the Yivi app and scan this code, or tap the button if this page is on your phone.",
+        openYivi: "Open in the Yivi app",
+        idemHeading: "Scan with the Idem app",
+        idemHint: "Open the Idem app and scan this code from inside the app.",
+        openIdem: "Open in the Idem app",
+        starting: "Starting the session…",
+        expiresIn: "Valid for {{time}}",
+        expired: "This code has expired.",
+        restart: "Start again",
+        inProgress: "The session is open on the phone.",
+      },
+      yiviEnded: "The Yivi app session ended: {{reason}}",
+      yiviCodes: {
+        cancelled: "it was cancelled in the app.",
+        timeout: "it was not finished in time.",
+        invalidProof: "the shared data could not be verified.",
+        photoMissing: "the shared card has no photo.",
+        referenceNoFace: "no face was found on the shared photo.",
+      },
+      face: {
+        heading: "Look into the camera",
+        hint: "Keep your face in the frame. It is compared with the photo from your Yivi app; nothing is stored.",
+        progress: "Match {{count}} of {{total}}",
+        noFace: "No face found. Move closer to the camera.",
+        cameraError:
+          "The camera could not be opened. Allow this page to use it and try again.",
+        retry: "Try again",
+      },
+      outcome: {
+        approved: {
+          title: "Identity verified",
+          message: "The check is complete.",
+        },
+        rejected: {
+          title: "Not verified",
+          message: "The check did not succeed.",
+        },
+        expired: {
+          title: "Session ended",
+          message: "The check was not finished in time.",
+        },
+        back: "Back to {{name}}",
+        again: "Verify again",
+      },
     },
     sessions: {
       method: "Method",

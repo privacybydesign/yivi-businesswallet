@@ -4307,7 +4307,12 @@ paths:
         assigned to that customer. Creates the session at the identity-proofing-service
         (10 minutes, counted from the send) and e-mails the subject its vcmrtd deep link
         as a QR code and a button; after the session ends, a new request means a new
-        mail. `mailSent` is false when the mail could not be sent.
+        mail. `mailSent` is false when the mail could not be sent. `method` is the app
+        the subject proofs with (`idem_app`, the default, or `yivi_app`) and `channel`
+        how the session reaches them (`email`, the default, or `on_screen`). An
+        on-screen request mails nothing and needs no `email` for a customer's subject;
+        an on-screen Idem request answers the vcmrtd link as `deepLink`, and a Yivi one
+        must be on-screen, its disclosure started through `yivi/start`.
       responses:
         '2XX':
           description: Successful response.
@@ -4329,6 +4334,180 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           description: The person is not a member, or the flow does not exist, cannot be completed in the app, or is not available to members or assigned to the customer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Request (session) id.
+    get:
+      tags: [identity-proofing]
+      summary: Get one identity proofing request
+      description: >-
+        Requires organisation membership. The request, re-checked at the
+        identity-proofing-service while it is live: what an on-screen session's page
+        polls. An administrator sees any request, a member only one they sent.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/yivi/start:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Request (session) id.
+    post:
+      tags: [identity-proofing]
+      summary: Start an on-screen request's Yivi disclosure
+      description: >-
+        Requires organisation membership, and a request sent on-screen for the Yivi
+        app. Starts (or, after a cancel in the app, restarts) the disclosure of the
+        subject's passport or ID-card credential and answers its `sessionPtr`, the
+        JSON the Yivi app scans as a QR code, with `expiresAt`. The Yivi requestor
+        token stays at the identity-proofing-service.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request does not run in the Yivi app, its session has ended (`session_over`), or the identity-proofing-service has no Yivi server configured (`method_unavailable`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Request (session) id.
+    get:
+      tags: [identity-proofing]
+      summary: Redeem an on-screen request's Yivi disclosure
+      description: >-
+        Requires organisation membership. `done` is false while the subject has not
+        finished in the Yivi app. Once done, `ok` true moves the session on to the face
+        check (`stableFrames` matching frames approve it, `maxAttempts` without them
+        reject it); `ok` false ended the session and `code` says why (cancelled,
+        timeout, invalid_proof, photo_missing, reference_no_face). No disclosed value
+        is returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request does not run in the Yivi app, or its session has ended (`session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/yivi/face:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Request (session) id.
+    post:
+      tags: [identity-proofing]
+      summary: Score one face frame of an on-screen Yivi request
+      description: >-
+        Requires organisation membership. `image` is one live camera frame as a JPEG
+        data URL (at most 2 MiB), scored against the photo the subject disclosed. The
+        frame passes through to the identity-proofing-service and is not kept; the
+        answer is only the progress (`faceDetected`, `matched`, `consecutive`,
+        `attempts`) and the `decision` (pending, approved, rejected), which is
+        recorded on the request at once.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request does not run in the Yivi app, or its session has ended (`session_over`).
           content:
             application/json:
               schema:

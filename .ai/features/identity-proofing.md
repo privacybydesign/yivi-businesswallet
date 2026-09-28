@@ -17,10 +17,18 @@ through the public API with one of their keys. Sending creates an IPS session
 (2, 5 or 10 minutes, per customer) and mails its vcmrtd deep link as a QR code
 and a button: the mail is the session, with no wallet page in between. The
 outcome lands on the request, in the audit log and at the customer's webhook.
-Not built from the design: the hosted flow (and with it "Open hosted flow",
-allowed return URLs and the consent-screen preview; Branding previews the mail
-instead), test-mode keys and the sandbox, and the method column (every session
-runs in vcmrtd).
+The send form can instead **show the session on this screen**
+(`channel: on_screen`, for a subject who is with the member): it opens
+`customers/{id}/verify?flow=`, a page in the customer's branding that shows what
+the flow collects, lets the subject pick the Yivi app or the Idem app, and only
+then creates the request (so the session's minutes start there). Idem shows the
+vcmrtd QR and link; Yivi starts the disclosure (`yivi/start`, its `sessionPtr` as
+the QR and an `irma.app/-/session#` link), polls `yivi/disclosure`, then runs the
+face check from the browser camera (`yivi/face`). Both count down to the
+session's expiry and poll `GET requests/{id}` for the outcome. Nothing is
+mailed, and the subject's name and address travel in router state, not the URL.
+Not built from the design: a public hosted page for a subject on their own
+device (with allowed return URLs), test-mode keys and the sandbox.
 **Slice:** `internal/proofingprovider` (the IPS client + stub, leaf level),
 `internal/proofing` (settings, flow selection, members, requests, service,
 handler), `internal/email` (kind `identity_proofing_requested`, the `qr` block),

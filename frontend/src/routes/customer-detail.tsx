@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { ApiError } from "../api/http";
@@ -16,6 +16,7 @@ import {
 } from "../api/identity-proofing.queries";
 import type {
   ProofingCustomer,
+  ProofingChannel,
   ProofingCustomerFlow,
   ProofingFlow,
   ProofingRequest,
@@ -704,6 +705,13 @@ function AssignedFlowsCard({
   );
 }
 
+// How a request reaches its subject: a mail that is the session, or this
+// screen, which walks the person present through it.
+const SEND_CHANNELS: { value: ProofingChannel; key: "email" | "onScreen" }[] = [
+  { value: "email", key: "email" },
+  { value: "on_screen", key: "onScreen" },
+];
+
 function SendForm({
   slug,
   customer,
@@ -726,16 +734,31 @@ function SendForm({
   const [name, setName] = useState("");
   const [picked, setPicked] = useState("");
   const [touched, setTouched] = useState(false);
+  const [channel, setChannel] = useState<ProofingChannel>("email");
+  const navigate = useNavigate();
   // A pick that is no longer assigned falls back to the default.
   const flowId = sendable.some((f) => f.id === picked)
     ? picked
     : (initial?.id ?? "");
-  const emailMissing = !email.includes("@");
+  const onScreen = channel === "on_screen";
+  // On screen the person is present: an address is optional, but one given
+  // must still be one.
+  const emailMissing = onScreen
+    ? email.trim() !== "" && !email.includes("@")
+    : !email.includes("@");
 
   function submit(event: React.FormEvent): void {
     event.preventDefault();
     setTouched(true);
     if (emailMissing || flowId === "") {
+      return;
+    }
+    if (onScreen) {
+      // The session starts on the page, once the person has picked an app.
+      void navigate(
+        `verify?${new URLSearchParams({ flow: flowId }).toString()}`,
+        { state: { name: name.trim(), email: email.trim() } },
+      );
       return;
     }
     create.mutate(
@@ -753,7 +776,9 @@ function SendForm({
 
   return (
     <div className="flex flex-col gap-4">
-      <p className={HINT}>{t("customers.send.hint")}</p>
+      <p className={HINT}>
+        {onScreen ? t("customers.send.hintOnScreen") : t("customers.send.hint")}
+      </p>
       {sendable.length === 0 ? (
         <p className="text-ink-soft text-[13px]">
           {isAdmin
@@ -762,9 +787,44 @@ function SendForm({
         </p>
       ) : (
         <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+          <fieldset className="flex flex-col gap-2">
+            <legend className={`${LABEL} mb-1`}>
+              {t("customers.send.channel")}
+            </legend>
+            {SEND_CHANNELS.map((option) => (
+              <label
+                key={option.value}
+                className={[
+                  "rounded-yivi flex cursor-pointer items-start gap-3 border p-3",
+                  channel === option.value
+                    ? "border-primary bg-highlight"
+                    : "border-line-strong bg-surface",
+                ].join(" ")}
+              >
+                <input
+                  type="radio"
+                  name="proofing-channel"
+                  value={option.value}
+                  checked={channel === option.value}
+                  onChange={() => setChannel(option.value)}
+                  className="mt-1"
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span className="text-ink text-[13.5px] font-semibold">
+                    {t(`customers.send.channels.${option.key}.title`)}
+                  </span>
+                  <span className={HINT}>
+                    {t(`customers.send.channels.${option.key}.hint`)}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
           <div className="flex flex-col gap-1">
             <label htmlFor="proofing-subject-email" className={LABEL}>
-              {t("customers.send.email")}
+              {onScreen
+                ? t("customers.send.emailOptional")
+                : t("customers.send.email")}
             </label>
             <Input
               id="proofing-subject-email"
@@ -817,9 +877,15 @@ function SendForm({
             <Button type="button" variant="secondary" onClick={onCancel}>
               {t("customers.send.cancel")}
             </Button>
-            <Button type="submit" icon="email" loading={create.isPending}>
-              {t("customers.send.submit")}
-            </Button>
+            {onScreen ? (
+              <Button type="submit" icon="scan_qrcode">
+                {t("customers.send.submitOnScreen")}
+              </Button>
+            ) : (
+              <Button type="submit" icon="email" loading={create.isPending}>
+                {t("customers.send.submit")}
+              </Button>
+            )}
           </div>
         </form>
       )}

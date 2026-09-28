@@ -29,6 +29,10 @@ import {
   saveProofingWebhook,
   sendProofingWebhookTest,
   getProofingRequestEvents,
+  getProofingRequest,
+  getProofingYiviDisclosure,
+  startProofingYivi,
+  submitProofingFaceFrame,
 } from "./identity-proofing";
 import type {
   ProofingCustomer,
@@ -46,6 +50,9 @@ import type {
   ProofingBrandingInput,
   ProofingWebhook,
   WebhookDelivery,
+  ProofingFaceVerdict,
+  ProofingYiviDisclosure,
+  ProofingYiviStart,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
@@ -58,6 +65,9 @@ const REQUESTS_POLL_INTERVAL_MS = 10_000;
 // The worker sends a due delivery within seconds, so a pending one is watched
 // until it is sent.
 const DELIVERIES_POLL_INTERVAL_MS = 5_000;
+// The on-screen page is watching one phone finish, so it re-reads its request
+// and the Yivi disclosure much sooner.
+const ON_SCREEN_POLL_INTERVAL_MS = 2_000;
 
 export function proofingQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "identity-proofing"];
@@ -253,16 +263,20 @@ export function useCreateProofingRequestMutation(
   return useMutation({
     mutationFn: (input) => createProofingRequest(slug, input),
     meta: { suppressErrorToast: true },
-    onSuccess: (sent) => {
+    onSuccess: (sent, input) => {
+      void queryClient.invalidateQueries({
+        queryKey: proofingRequestsQueryKey(slug),
+      });
+      // An on-screen session is on the page that asked for it: nothing mailed.
+      if ("channel" in input && input.channel === "on_screen") {
+        return;
+      }
       // The request stands either way, without the mail the member has no link.
       if (sent.mailSent) {
         toast.success(t("toasts.identityProofingRequestSent"));
       } else {
         toast.error(t("toasts.identityProofingMailNotSent"));
       }
-      void queryClient.invalidateQueries({
-        queryKey: proofingRequestsQueryKey(slug),
-      });
     },
   });
 }
@@ -617,5 +631,57 @@ export function useProofingRequestEventsQuery(
     queryFn: ({ signal }) => getProofingRequestEvents(slug, requestId, signal),
     enabled: slug !== "" && requestId !== "",
     refetchInterval: live ? REQUESTS_POLL_INTERVAL_MS : false,
+  });
+}
+
+// One request, re-checked at the proofing service on every read: what the
+// on-screen page polls while the subject is busy on their phone.
+export function useProofingRequestQuery(
+  slug: string,
+  requestId: string,
+): UseQueryResult<ProofingRequest, Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), requestId],
+    queryFn: ({ signal }) => getProofingRequest(slug, requestId, signal),
+    enabled: slug !== "" && requestId !== "",
+    refetchInterval: (query) =>
+      query.state.data === undefined || isProofingLive(query.state.data.status)
+        ? ON_SCREEN_POLL_INTERVAL_MS
+        : false,
+  });
+}
+
+export function useStartProofingYiviMutation(
+  slug: string,
+): UseMutationResult<ProofingYiviStart, Error, string> {
+  return useMutation({
+    mutationFn: (requestId) => startProofingYivi(slug, requestId),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+// Polled until the subject has finished in the Yivi app; enabled only while
+// the page shows the Yivi QR.
+export function useProofingYiviDisclosureQuery(
+  slug: string,
+  requestId: string,
+  enabled: boolean,
+): UseQueryResult<ProofingYiviDisclosure, Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), requestId, "yivi"],
+    queryFn: ({ signal }) => getProofingYiviDisclosure(slug, requestId, signal),
+    enabled: enabled && slug !== "" && requestId !== "",
+    refetchInterval: (query) =>
+      query.state.data?.done ? false : ON_SCREEN_POLL_INTERVAL_MS,
+  });
+}
+
+export function useSubmitProofingFaceFrameMutation(
+  slug: string,
+  requestId: string,
+): UseMutationResult<ProofingFaceVerdict, Error, string> {
+  return useMutation({
+    mutationFn: (image) => submitProofingFaceFrame(slug, requestId, image),
+    meta: { suppressErrorToast: true },
   });
 }

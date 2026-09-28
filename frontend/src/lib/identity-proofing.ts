@@ -433,6 +433,10 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.flowNotAssigned");
     case "customer_paused":
       return t("identityProofing.errors.customerPaused");
+    case "session_over":
+      return t("identityProofing.errors.sessionOver");
+    case "method_unavailable":
+      return t("identityProofing.errors.methodUnavailable");
     case "invalid_input":
     case "rejected_by_provider":
       return serverMessage(error) ?? t("identityProofing.errors.generic");
@@ -599,6 +603,26 @@ export function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / SECONDS_PER_MINUTE);
   const rest = String(seconds % SECONDS_PER_MINUTE).padStart(SECONDS_PAD, "0");
   return `${minutes}:${rest}`;
+}
+
+// Whole seconds from now until expiresAt, never below zero: what an on-screen
+// session's countdown shows.
+export function secondsUntil(expiresAt: string, nowMs: number): number {
+  const ms = Date.parse(expiresAt) - nowMs;
+  return Number.isFinite(ms) ? Math.max(0, Math.ceil(ms / MS_PER_SECOND)) : 0;
+}
+
+// The Yivi app's universal link for a session pointer: it opens the app on
+// this device, as @privacybydesign/yivi-client builds it for mobile. The QR
+// carries the pointer itself as JSON.
+const YIVI_SESSION_LINK_PREFIX = "https://irma.app/-/session#";
+
+export function yiviSessionQrPayload(sessionPtr: unknown): string {
+  return JSON.stringify(sessionPtr);
+}
+
+export function yiviSessionLink(sessionPtr: unknown): string {
+  return `${YIVI_SESSION_LINK_PREFIX}${encodeURIComponent(yiviSessionQrPayload(sessionPtr))}`;
 }
 
 // The short form of a request id shown in tables: enough to tell rows apart

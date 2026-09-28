@@ -522,6 +522,9 @@ export const nl: Translation<typeof en> = {
         "Die flow is niet meer aan deze klant toegewezen. Kies een andere.",
       customerPaused:
         "Verificatie is gepauzeerd voor deze klant. Een beheerder kan het hervatten op de pagina van de klant.",
+      sessionOver: "Deze sessie is afgelopen. Start een nieuwe.",
+      methodUnavailable:
+        "De verificatiedienst kan nog geen sessies met de Yivi-app uitvoeren. Kies de Idem-app.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
     },
   },
@@ -615,6 +618,21 @@ export const nl: Translation<typeof en> = {
     send: {
       title: "Een persoon verifiëren",
       hint: "De persoon krijgt een mail met een QR-code en een link voor de vcmrtd-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek. Een account is niet nodig.",
+      hintOnScreen:
+        "De persoon is bij je. Een pagina laat zien wat er wordt verzameld, laat kiezen tussen de Yivi-app en de Idem-app en toont de QR-code. Er wordt niets gemaild.",
+      channel: "Hoe krijgt de persoon de QR-code?",
+      channels: {
+        email: {
+          title: "Per e-mail versturen",
+          hint: "Een mail met de QR-code en een link.",
+        },
+        onScreen: {
+          title: "Op dit scherm tonen",
+          hint: "Een pagina hier, voor iemand die bij je is.",
+        },
+      },
+      emailOptional: "E-mailadres (optioneel)",
+      submitOnScreen: "Pagina openen",
       email: "E-mailadres",
       emailRequired: "Vul een geldig e-mailadres in.",
       name: "Naam (optioneel)",
@@ -627,6 +645,103 @@ export const nl: Translation<typeof en> = {
         "Wijs eerst een flow aan deze klant toe, op het tabblad Flows.",
       noFlowsMember:
         "Een beheerder moet eerst een flow aan deze klant toewijzen voordat je een verzoek kunt versturen.",
+    },
+    onScreen: {
+      title: "Een persoon verifiëren",
+      missingFlow:
+        "Deze flow is niet meer aan de klant toegewezen. Ga terug en kies een andere.",
+      steps: {
+        overview: "Wat er wordt verzameld",
+        method: "Kies een app",
+        session: "Scan de QR-code",
+      },
+      overview: {
+        heading: "{{name}} wil je identiteit verifiëren",
+        intro:
+          "Je bevestigt je identiteit met je paspoort of identiteitskaart. {{name}} ontvangt:",
+        noData: "Alleen de uitkomst: of je identiteit is geverifieerd.",
+        flow: "Flow",
+        assurance: "Betrouwbaarheidsniveau",
+        retention_one:
+          "De naam op je document wordt na verificatie {{count}} dag bewaard en daarna verwijderd.",
+        retention_other:
+          "De naam op je document wordt na verificatie {{count}} dagen bewaard en daarna verwijderd.",
+        support: "Vragen? {{contact}}",
+        privacy: "Privacyverklaring",
+        cancel: "Annuleren",
+        continue: "Verder",
+      },
+      attributeDetails: {
+        dg1: "Je naam, geboortedatum en nationaliteit, en het nummer en de vervaldatum van het document.",
+        dg11: "Extra gegevens over jou op de chip van het document.",
+        dg2: "De foto op de chip van het document.",
+        chip_checks: "Of de chip echt en onveranderd is.",
+        selfie: "Een foto van je gezicht tijdens de controle.",
+        biometrics:
+          "Hoe goed je gezicht overeenkomt met de foto op het document.",
+      },
+      method: {
+        heading: "Hoe wil je je verifiëren?",
+        yivi: {
+          title: "Yivi-app",
+          detail:
+            "Deel het paspoort of de identiteitskaart die al in je Yivi-app staat en kijk daarna hier in de camera.",
+        },
+        idem: {
+          title: "Idem-app",
+          detail:
+            "Scan je paspoort of identiteitskaart met de Idem-app en houd het tegen je telefoon om de chip te lezen.",
+        },
+        back: "Terug",
+        continue: "QR-code tonen",
+      },
+      scan: {
+        yiviHeading: "Scan met de Yivi-app",
+        yiviHint:
+          "Open de Yivi-app en scan deze code, of tik op de knop als deze pagina op je telefoon staat.",
+        openYivi: "Openen in de Yivi-app",
+        idemHeading: "Scan met de Idem-app",
+        idemHint: "Open de Idem-app en scan deze code vanuit de app.",
+        openIdem: "Openen in de Idem-app",
+        starting: "De sessie wordt gestart…",
+        expiresIn: "Geldig voor {{time}}",
+        expired: "Deze code is verlopen.",
+        restart: "Opnieuw beginnen",
+        inProgress: "De sessie is geopend op de telefoon.",
+      },
+      yiviEnded: "De sessie in de Yivi-app is beëindigd: {{reason}}",
+      yiviCodes: {
+        cancelled: "hij is in de app geannuleerd.",
+        timeout: "hij is niet op tijd afgerond.",
+        invalidProof: "de gedeelde gegevens konden niet worden gecontroleerd.",
+        photoMissing: "de gedeelde kaart heeft geen foto.",
+        referenceNoFace: "op de gedeelde foto is geen gezicht gevonden.",
+      },
+      face: {
+        heading: "Kijk in de camera",
+        hint: "Houd je gezicht in beeld. Het wordt vergeleken met de foto uit je Yivi-app; er wordt niets bewaard.",
+        progress: "Match {{count}} van {{total}}",
+        noFace: "Geen gezicht gevonden. Kom dichter bij de camera.",
+        cameraError:
+          "De camera kon niet worden geopend. Geef deze pagina toegang en probeer het opnieuw.",
+        retry: "Opnieuw proberen",
+      },
+      outcome: {
+        approved: {
+          title: "Identiteit geverifieerd",
+          message: "De controle is afgerond.",
+        },
+        rejected: {
+          title: "Niet geverifieerd",
+          message: "De controle is niet gelukt.",
+        },
+        expired: {
+          title: "Sessie beëindigd",
+          message: "De controle is niet op tijd afgerond.",
+        },
+        back: "Terug naar {{name}}",
+        again: "Opnieuw verifiëren",
+      },
     },
     sessions: {
       method: "Methode",

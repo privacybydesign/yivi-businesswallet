@@ -14,6 +14,9 @@ import {
   flowDraftError,
   flowSpecFromDraft,
   formatDuration,
+  secondsUntil,
+  yiviSessionLink,
+  yiviSessionQrPayload,
   isProofingLive,
   isProofingStep,
   isRequestedAttribute,
@@ -595,5 +598,37 @@ describe("session method and timeline", () => {
       ),
     ).toEqual(["eIDAS substantial"]);
     expect(sessionEventDetail({}, t)).toEqual([]);
+  });
+});
+
+describe("secondsUntil", () => {
+  const now = Date.parse("2026-09-28T10:00:00Z");
+
+  it("rounds a part second up, so 0 means the session is over", () => {
+    expect(secondsUntil("2026-09-28T10:10:00Z", now)).toBe(600);
+    expect(secondsUntil("2026-09-28T10:00:00.200Z", now)).toBe(1);
+  });
+
+  it("never goes below zero, also for an unreadable time", () => {
+    expect(secondsUntil("2026-09-28T09:59:00Z", now)).toBe(0);
+    expect(secondsUntil("not a time", now)).toBe(0);
+  });
+});
+
+describe("Yivi session pointer", () => {
+  const ptr = {
+    u: "https://yivi.example/irma/session/abc",
+    irmaqr: "disclosing",
+  };
+
+  it("puts the pointer itself in the QR code", () => {
+    expect(JSON.parse(yiviSessionQrPayload(ptr))).toEqual(ptr);
+  });
+
+  it("opens the Yivi app with the pointer in the link's fragment", () => {
+    const link = yiviSessionLink(ptr);
+    const [prefix, fragment] = link.split("#");
+    expect(prefix).toBe("https://irma.app/-/session");
+    expect(JSON.parse(decodeURIComponent(fragment ?? ""))).toEqual(ptr);
   });
 });

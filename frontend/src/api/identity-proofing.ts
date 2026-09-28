@@ -83,9 +83,11 @@ export const proofingRequestSchema = z.object({
 export type ProofingRequest = z.infer<typeof proofingRequestSchema>;
 
 // mailSent is false when the org's mail could not be sent: the request stands,
-// but the recipient never got its link.
+// but the recipient never got its link. deepLink is an on-screen Idem session's
+// vcmrtd link, the QR code the page shows; absent for a mailed or Yivi request.
 export const proofingSentSchema = proofingRequestSchema.extend({
   mailSent: z.boolean(),
+  deepLink: z.string().optional(),
 });
 
 export type ProofingSent = z.infer<typeof proofingSentSchema>;
@@ -115,9 +117,23 @@ export interface ProofingFlowSelection {
   defaultFlowId: string;
 }
 
+// The app the subject proofs with, and how the session reaches them: mailed
+// (the default) or shown on the sender's screen. A Yivi session runs its face
+// check in the browser showing its QR, so it is on-screen only.
+export const PROOFING_METHODS = ["idem_app", "yivi_app"] as const;
+export type ProofingMethod = (typeof PROOFING_METHODS)[number];
+export type ProofingChannel = "email" | "on_screen";
+
 export type ProofingRequestInput =
   | { userId: string; flowId: string }
-  | { customerId: string; email: string; name: string; flowId: string };
+  | {
+      customerId: string;
+      email: string;
+      name: string;
+      flowId: string;
+      method?: ProofingMethod;
+      channel?: ProofingChannel;
+    };
 
 // A paused customer takes no new request; requests already sent run out.
 export const PROOFING_CUSTOMER_STATUSES = ["active", "paused"] as const;
@@ -626,6 +642,93 @@ export function getProofingRequestEvents(
       schema: z
         .object({ events: z.array(auditEventSchema) })
         .transform((page) => page.events),
+      signal,
+    },
+  );
+}
+
+export function getProofingRequest(
+  slug: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<ProofingRequest> {
+  return request(`${base(slug)}/requests/${encodeURIComponent(requestId)}`, {
+    schema: proofingRequestSchema,
+    signal,
+  });
+}
+
+// The Yivi disclosure an on-screen Yivi request asks for. sessionPtr is what
+// the Yivi app scans: the QR carries it as JSON.
+export const proofingYiviStartSchema = z.object({
+  sessionPtr: z.unknown(),
+  expiresAt: z.string(),
+});
+
+export type ProofingYiviStart = z.infer<typeof proofingYiviStartSchema>;
+
+export function startProofingYivi(
+  slug: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<ProofingYiviStart> {
+  return request(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/yivi/start`,
+    { schema: proofingYiviStartSchema, method: "POST", signal },
+  );
+}
+
+// done is false while the subject has not finished in the Yivi app; ok false
+// ended the session and code says why, ok true moves on to the face check.
+export const proofingYiviDisclosureSchema = z.object({
+  done: z.boolean(),
+  ok: z.boolean(),
+  code: z.string().optional(),
+  stableFrames: z.number().optional(),
+  maxAttempts: z.number().optional(),
+});
+
+export type ProofingYiviDisclosure = z.infer<
+  typeof proofingYiviDisclosureSchema
+>;
+
+export function getProofingYiviDisclosure(
+  slug: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<ProofingYiviDisclosure> {
+  return request(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/yivi/disclosure`,
+    { schema: proofingYiviDisclosureSchema, signal },
+  );
+}
+
+// One live camera frame scored against the disclosed photo. decision is
+// "pending", "approved" or "rejected".
+export const proofingFaceVerdictSchema = z.object({
+  faceDetected: z.boolean(),
+  matched: z.boolean(),
+  consecutive: z.number(),
+  stableFrames: z.number(),
+  attempts: z.number(),
+  maxAttempts: z.number(),
+  decision: z.string(),
+});
+
+export type ProofingFaceVerdict = z.infer<typeof proofingFaceVerdictSchema>;
+
+export function submitProofingFaceFrame(
+  slug: string,
+  requestId: string,
+  image: string,
+  signal?: AbortSignal,
+): Promise<ProofingFaceVerdict> {
+  return request(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/yivi/face`,
+    {
+      schema: proofingFaceVerdictSchema,
+      method: "POST",
+      body: { image },
       signal,
     },
   );

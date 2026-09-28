@@ -30,6 +30,7 @@ import VogSubmit from "./routes/vog-submit";
 import IdentityProofingFlows from "./routes/identity-proofing-flows";
 import IdentityProofingOverview from "./routes/identity-proofing-overview";
 import Customers from "./routes/customers";
+import CustomerVerify from "./routes/customer-verify";
 import CustomerDetail from "./routes/customer-detail";
 import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
@@ -83,6 +84,9 @@ const customerCrumb: RouteHandle = {
     );
     return customer?.name ?? t("customers.title");
   },
+};
+const customerVerifyCrumb: RouteHandle = {
+  crumb: ({ t }) => t("customers.onScreen.title"),
 };
 const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
 const memberCrumb: RouteHandle = {
@@ -226,8 +230,15 @@ export const router = createBrowserRouter([
                           { index: true, Component: Customers },
                           {
                             path: ":customerId",
-                            Component: CustomerDetail,
                             handle: customerCrumb,
+                            children: [
+                              { index: true, Component: CustomerDetail },
+                              {
+                                path: "verify",
+                                Component: CustomerVerify,
+                                handle: customerVerifyCrumb,
+                              },
+                            ],
                           },
                         ],
                       },

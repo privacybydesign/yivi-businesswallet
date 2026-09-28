@@ -17,7 +17,6 @@ type NavLabelKey =
   | "nav.members"
   | "nav.identityProofing"
   | "nav.identityProofingOverview"
-  | "nav.identityProofingFlows"
   | "nav.customers"
   | "nav.qerds"
   | "nav.attestations"
@@ -42,35 +41,22 @@ type NavChild = Omit<NavItem, "icon" | "children">;
 
 // showSigning gates the "Sign documents" item on the org having a CSC signing
 // provider configured (see the sidebar body); it is a plugin, absent otherwise.
-// isAdmin adds the org admin's own tabs.
-function orgNavItems(
-  slug: string,
-  showSigning: boolean,
-  isAdmin: boolean,
-): NavItem[] {
+function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
   const items: NavItem[] = [
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
   ];
-  // Identity proofing is the org's customers and the flows their requests run
-  // on; only an admin manages the flows. A member is sent a proofing request
-  // from their detail page, not from here.
+  // Identity proofing is the org's customers. A member is sent a proofing
+  // request from their detail page, not from here.
   const proofing = `/${slug}/identity-proofing`;
-  const proofingPages: NavChild[] = [
-    { to: proofing, labelKey: "nav.identityProofingOverview", end: true },
-    { to: `${proofing}/customers`, labelKey: "nav.customers" },
-  ];
-  if (isAdmin) {
-    proofingPages.push({
-      to: `${proofing}/flows`,
-      labelKey: "nav.identityProofingFlows",
-    });
-  }
   items.push({
     to: proofing,
     labelKey: "nav.identityProofing",
     icon: "scan_qrcode",
-    children: proofingPages,
+    children: [
+      { to: proofing, labelKey: "nav.identityProofingOverview", end: true },
+      { to: `${proofing}/customers`, labelKey: "nav.customers" },
+    ],
   });
   items.push(
     { to: `/${slug}/qerds`, labelKey: "nav.qerds", icon: "email" },
@@ -161,15 +147,15 @@ export function Sidebar({
   );
   const showSigning = Boolean(signing.data?.available);
 
-  // Platform admins outrank any single org; otherwise show the membership role
-  // for the org currently in the URL.
-  const activeOrg = useOrganizationQuery(activeSlug ?? "");
   const navItems = activeSlug
-    ? orgNavItems(activeSlug, showSigning, activeOrg.data?.role === "admin")
+    ? orgNavItems(activeSlug, showSigning)
     : me.isPlatformAdmin
       ? ADMIN_NAV_ITEMS
       : [];
 
+  // Platform admins outrank any single org; otherwise show the membership role
+  // for the org currently in the URL.
+  const activeOrg = useOrganizationQuery(activeSlug ?? "");
   const roleLabel = me.isPlatformAdmin
     ? t("nav.platformAdmin")
     : activeOrg.data?.role;
