@@ -35,7 +35,10 @@ function Breadcrumb({ items }: { items: BreadcrumbItem[] }): React.JSX.Element {
         {items.map((item, index) => {
           const isLast = index === items.length - 1;
           return (
-            <li key={item.label} className="flex items-center gap-1.5">
+            // Keyed by position: two crumbs can share a label (a record's
+            // crumb falls back to its list's name while it loads), and a
+            // duplicate key leaves a stale item behind when the label changes.
+            <li key={index} className="flex items-center gap-1.5">
               {item.to && !isLast ? (
                 <Link
                   to={item.to}

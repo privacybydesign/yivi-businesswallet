@@ -3,6 +3,8 @@ import type { CrumbContext, RouteHandle } from "./ui";
 import type { Member, OrganizationDetail } from "./api/organization";
 import type { QerdsMessageWithEvidence } from "./api/qerds";
 import type { ProofingCustomer } from "./api/identity-proofing";
+import type { HeldAttestationClaims } from "./api/attestations";
+import { credentialDisplayName } from "./lib/credential-display";
 import {
   organizationMemberQueryKey,
   organizationQueryKey,
@@ -26,6 +28,7 @@ import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
 import VogSubmit from "./routes/vog-submit";
 import IdentityProofingFlows from "./routes/identity-proofing-flows";
+import IdentityProofingOverview from "./routes/identity-proofing-overview";
 import Customers from "./routes/customers";
 import CustomerDetail from "./routes/customer-detail";
 import MemberInvite from "./routes/member-invite";
@@ -117,8 +120,27 @@ const attestationsCrumb: RouteHandle = {
 };
 // The credential's own name is only known once its claims load, and the page's
 // title already carries it, so the crumb stays a static label.
+// The credential's name once its detail is cached (in whichever language it was
+// read), else a generic label.
 const heldCredentialCrumb: RouteHandle = {
-  crumb: ({ t }) => t("attestations.held.detail.title"),
+  crumb: ({ params, queryClient, t }: CrumbContext) => {
+    const cached = queryClient
+      .getQueriesData<HeldAttestationClaims>({
+        queryKey: [
+          "organizations",
+          "detail",
+          params.orgSlug ?? "",
+          "attestations",
+          "held",
+          params.heldId ?? "",
+        ],
+      })
+      .map(([, data]) => data)
+      .find((data) => data?.vct !== undefined);
+    return cached
+      ? cached.displayName || credentialDisplayName(cached.vct)
+      : t("attestations.held.detail.title");
+  },
 };
 const postguardCrumb: RouteHandle = { crumb: ({ t }) => t("postguard.title") };
 const postguardSendCrumb: RouteHandle = {
@@ -191,24 +213,23 @@ export const router = createBrowserRouter([
                     path: "identity-proofing",
                     handle: identityProofingCrumb,
                     children: [
+                      { index: true, Component: IdentityProofingOverview },
                       {
                         path: "flows",
                         Component: IdentityProofingFlows,
                         handle: identityProofingFlowsCrumb,
                       },
-                    ],
-                  },
-                  // The org's own customers: proofing requests are one thing
-                  // done for them, so they are not filed under proofing.
-                  {
-                    path: "customers",
-                    handle: customersCrumb,
-                    children: [
-                      { index: true, Component: Customers },
                       {
-                        path: ":customerId",
-                        Component: CustomerDetail,
-                        handle: customerCrumb,
+                        path: "customers",
+                        handle: customersCrumb,
+                        children: [
+                          { index: true, Component: Customers },
+                          {
+                            path: ":customerId",
+                            Component: CustomerDetail,
+                            handle: customerCrumb,
+                          },
+                        ],
                       },
                     ],
                   },

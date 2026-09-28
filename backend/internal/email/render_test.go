@@ -509,6 +509,7 @@ func TestRenderQRBlockEmbedsTheLinkAsAnInlineImage(t *testing.T) {
 	const link = "vcmrtd://verify?handover=abc&api=https%3A%2F%2Fproofing.example.org"
 	body, err := Render(KindIdentityProofingRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
 		varOrgName: "Acme BV", varRequesterName: "Sam", varProofingURL: link, varValidMinutes: "10",
+		varSupportContact: "", varPrivacyURL: "",
 	})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -537,6 +538,7 @@ func TestRenderHoldsAnAppLinkVariableToItsScheme(t *testing.T) {
 	for _, link := range []string{"https://wallet.example.org/proof/abc", "javascript:alert(1)", "vcmrtd:verify"} {
 		_, err := Render(KindIdentityProofingRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
 			varOrgName: "Acme BV", varRequesterName: "Sam", varProofingURL: link, varValidMinutes: "10",
+			varSupportContact: "", varPrivacyURL: "",
 		})
 		if err == nil {
 			t.Errorf("Render accepted %q as the proofing link", link)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
@@ -46,10 +47,29 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flow-selection", admin(respond.HandlerFunc(h.configureFlows)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.listRequests)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.createRequest)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/stats", member(respond.HandlerFunc(h.stats)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}", member(respond.HandlerFunc(h.getRequest)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/events", member(respond.HandlerFunc(h.requestEvents)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/start", member(respond.HandlerFunc(h.startYivi)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure", member(respond.HandlerFunc(h.yiviDisclosure)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/face", member(respond.HandlerFunc(h.faceFrame)))
 	mux.Handle("GET /orgs/{slug}/customers", member(respond.HandlerFunc(h.listCustomers)))
 	mux.Handle("POST /orgs/{slug}/customers", admin(respond.HandlerFunc(h.createCustomer)))
 	mux.Handle("GET /orgs/{slug}/customers/{customerID}", member(respond.HandlerFunc(h.getCustomer)))
-	mux.Handle("PATCH /orgs/{slug}/customers/{customerID}", admin(respond.HandlerFunc(h.renameCustomer)))
+	mux.Handle("PATCH /orgs/{slug}/customers/{customerID}", admin(respond.HandlerFunc(h.updateCustomer)))
+	mux.Handle("DELETE /orgs/{slug}/customers/{customerID}", admin(respond.HandlerFunc(h.removeCustomer)))
+	mux.Handle("GET /orgs/{slug}/customers/{customerID}/api-keys", admin(respond.HandlerFunc(h.listAPIKeys)))
+	mux.Handle("POST /orgs/{slug}/customers/{customerID}/api-keys", admin(respond.HandlerFunc(h.createAPIKey)))
+	mux.Handle("DELETE /orgs/{slug}/customers/{customerID}/api-keys/{keyID}", admin(respond.HandlerFunc(h.revokeAPIKey)))
+	mux.Handle("PUT /orgs/{slug}/customers/{customerID}/branding", admin(respond.HandlerFunc(h.saveBranding)))
+	mux.Handle("GET /orgs/{slug}/customers/{customerID}/logo", member(respond.HandlerFunc(h.serveCustomerLogo)))
+	mux.Handle("GET /orgs/{slug}/customers/{customerID}/webhook", admin(respond.HandlerFunc(h.getWebhook)))
+	mux.Handle("PUT /orgs/{slug}/customers/{customerID}/webhook", admin(respond.HandlerFunc(h.saveWebhook)))
+	mux.Handle("DELETE /orgs/{slug}/customers/{customerID}/webhook", admin(respond.HandlerFunc(h.removeWebhook)))
+	mux.Handle("POST /orgs/{slug}/customers/{customerID}/webhook/rotate-secret", admin(respond.HandlerFunc(h.rotateWebhookSecret)))
+	mux.Handle("POST /orgs/{slug}/customers/{customerID}/webhook/test", admin(respond.HandlerFunc(h.testWebhook)))
+	mux.Handle("GET /orgs/{slug}/customers/{customerID}/webhook/deliveries", admin(respond.HandlerFunc(h.listWebhookDeliveries)))
+	h.registerPublicAPI(mux)
 	mux.Handle("GET /orgs/{slug}/customers/{customerID}/flows", member(respond.HandlerFunc(h.listCustomerFlows)))
 	mux.Handle("PUT /orgs/{slug}/customers/{customerID}/flow-selection", admin(respond.HandlerFunc(h.assignCustomerFlows)))
 }
@@ -165,6 +185,7 @@ func (h *Handler) activateFlowVersion(w http.ResponseWriter, r *http.Request) er
 type requestResponse struct {
 	ID              uuid.UUID  `json:"id"`
 	RequestedByName string     `json:"requestedByName"`
+	APIKeyName      string     `json:"apiKeyName,omitempty"`
 	SubjectUserID   *uuid.UUID `json:"subjectUserId,omitempty"`
 	CustomerID      *uuid.UUID `json:"customerId,omitempty"`
 	CustomerName    string     `json:"customerName,omitempty"`
@@ -172,10 +193,13 @@ type requestResponse struct {
 	SubjectEmail    string     `json:"subjectEmail"`
 	// ProofedName is the name read off a customer's subject's approved document,
 	// until its retention clears it.
-	ProofedName    string     `json:"proofedName,omitempty"`
-	FlowID         string     `json:"flowId"`
-	FlowName       string     `json:"flowName"`
-	FlowVersion    int        `json:"flowVersion,omitempty"`
+	ProofedName string `json:"proofedName,omitempty"`
+	FlowID      string `json:"flowId"`
+	FlowName    string `json:"flowName"`
+	FlowVersion int    `json:"flowVersion,omitempty"`
+	// Method is the app the session was created for, then the one IPS reports
+	// the subject used; absent on a request from before the choice existed.
+	Method         string     `json:"method,omitempty"`
 	Status         Status     `json:"status"`
 	AssuranceLevel string     `json:"assuranceLevel,omitempty"`
 	EIDASLevel     string     `json:"eidasLevel,omitempty"`
@@ -187,10 +211,10 @@ type requestResponse struct {
 
 func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
-		ID: req.ID, RequestedByName: req.RequestedByName, SubjectUserID: req.SubjectUserID,
+		ID: req.ID, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		CustomerID: req.CustomerID, CustomerName: req.CustomerName,
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
-		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Status: req.EffectiveStatus(now),
+		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Status: req.EffectiveStatus(now),
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 	}
@@ -225,14 +249,158 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// requestEvents is one request's timeline, oldest first: every audit event
+// about it (sent, session created and started, outcome, expiry). An admin sees
+// any request's, a member only one they sent.
+// sentRequestTarget is the request a per-request route names, and the caller
+// it is scoped to: nil for an admin, who reaches every request of the org, else
+// the member, who reaches only the ones they sent.
+func sentRequestTarget(r *http.Request) (uuid.UUID, *uuid.UUID, error) {
+	id, err := uuid.Parse(r.PathValue("requestID"))
+	if err != nil {
+		return uuid.Nil, nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+	}
+	if organization.IsAdmin(r.Context()) {
+		return id, nil, nil
+	}
+	caller := auth.UserFromContext(r.Context()).ID
+	return id, &caller, nil
+}
+
+// getRequest is one request, re-checked at IPS: what the on-screen page polls.
+func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
+	id, requestedBy, err := sentRequestTarget(r)
+	if err != nil {
+		return err
+	}
+	req, err := h.service.Request(r.Context(), orgFromRequest(r).ID, id, requestedBy)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, newRequestResponse(req, time.Now()))
+	return nil
+}
+
+type yiviStartResponse struct {
+	// SessionPtr is what the subject's Yivi app scans: the QR carries it as JSON.
+	SessionPtr json.RawMessage `json:"sessionPtr"`
+	ExpiresAt  time.Time       `json:"expiresAt"`
+}
+
+func (h *Handler) startYivi(w http.ResponseWriter, r *http.Request) error {
+	id, requestedBy, err := sentRequestTarget(r)
+	if err != nil {
+		return err
+	}
+	started, err := h.service.StartYivi(r.Context(), orgFromRequest(r).ID, id, requestedBy)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, yiviStartResponse{SessionPtr: started.SessionPtr, ExpiresAt: started.ExpiresAt})
+	return nil
+}
+
+type yiviDisclosureResponse struct {
+	// Done is false while the subject has not finished in the Yivi app.
+	Done bool `json:"done"`
+	// OK is the disclosure giving a photo to check the face against; false
+	// ended the session, and Code says why.
+	OK           bool   `json:"ok"`
+	Code         string `json:"code,omitempty"`
+	StableFrames int    `json:"stableFrames,omitempty"`
+	MaxAttempts  int    `json:"maxAttempts,omitempty"`
+}
+
+func (h *Handler) yiviDisclosure(w http.ResponseWriter, r *http.Request) error {
+	id, requestedBy, err := sentRequestTarget(r)
+	if err != nil {
+		return err
+	}
+	disclosure, err := h.service.YiviDisclosure(r.Context(), orgFromRequest(r).ID, id, requestedBy)
+	if errors.Is(err, proofingprovider.ErrDisclosurePending) {
+		respond.JSON(w, r, http.StatusOK, yiviDisclosureResponse{})
+		return nil
+	}
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, yiviDisclosureResponse{
+		Done: true, OK: disclosure.OK, Code: disclosure.Code,
+		StableFrames: disclosure.StableFrames, MaxAttempts: disclosure.MaxAttempts,
+	})
+	return nil
+}
+
+// maxFaceFrameBytes caps one camera frame as the page sends it: a JPEG data
+// URL of a few hundred kilobytes at most.
+const maxFaceFrameBytes = 2 << 20
+
+type faceFrameRequest struct {
+	Image string `json:"image"`
+}
+
+type faceFrameResponse struct {
+	FaceDetected bool   `json:"faceDetected"`
+	Matched      bool   `json:"matched"`
+	Consecutive  int    `json:"consecutive"`
+	StableFrames int    `json:"stableFrames"`
+	Attempts     int    `json:"attempts"`
+	MaxAttempts  int    `json:"maxAttempts"`
+	Decision     string `json:"decision"`
+}
+
+func (h *Handler) faceFrame(w http.ResponseWriter, r *http.Request) error {
+	id, requestedBy, err := sentRequestTarget(r)
+	if err != nil {
+		return err
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxFaceFrameBytes)
+	var body faceFrameRequest
+	if err := decode(r, &body); err != nil {
+		return err
+	}
+	if body.Image == "" {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "a frame needs an image"}
+	}
+	verdict, err := h.service.FaceFrame(r.Context(), orgFromRequest(r).ID, id, requestedBy, body.Image)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, faceFrameResponse{
+		FaceDetected: verdict.FaceDetected, Matched: verdict.Matched, Consecutive: verdict.Consecutive,
+		StableFrames: verdict.StableFrames, Attempts: verdict.Attempts, MaxAttempts: verdict.MaxAttempts,
+		Decision: string(verdict.Decision),
+	})
+	return nil
+}
+
+func (h *Handler) requestEvents(w http.ResponseWriter, r *http.Request) error {
+	id, requestedBy, err := sentRequestTarget(r)
+	if err != nil {
+		return err
+	}
+	events, err := h.service.RequestEvents(r.Context(), orgFromRequest(r).ID, id, requestedBy)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, struct {
+		Events []audit.Event `json:"events"`
+	}{events})
+	return nil
+}
+
 // createRequestRequest names a member (userId), or a customer and its subject's
 // e-mail address and optional name.
+// Method (idem_app, the default, or yivi_app) is the app the subject proofs
+// with, Channel (email, the default, or on_screen) how the session reaches them.
 type createRequestRequest struct {
-	UserID     uuid.UUID  `json:"userId"`
-	CustomerID *uuid.UUID `json:"customerId"`
-	Email      string     `json:"email"`
-	Name       string     `json:"name"`
-	FlowID     string     `json:"flowId"`
+	UserID     uuid.UUID               `json:"userId"`
+	CustomerID *uuid.UUID              `json:"customerId"`
+	Email      string                  `json:"email"`
+	Name       string                  `json:"name"`
+	FlowID     string                  `json:"flowId"`
+	Method     proofingprovider.Method `json:"method"`
+	Channel    Channel                 `json:"channel"`
 }
 
 type createRequestResponse struct {
@@ -240,6 +408,9 @@ type createRequestResponse struct {
 	// MailSent is false when the org's mail could not be sent; the request
 	// stands, but the recipient never got its link.
 	MailSent bool `json:"mailSent"`
+	// DeepLink is an on-screen Idem session's vcmrtd link, for the page to show
+	// as the QR code; absent for a mailed request and a Yivi one.
+	DeepLink string `json:"deepLink,omitempty"`
 }
 
 func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
@@ -252,13 +423,16 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 		Requester{UserID: caller.ID, Name: displayName(caller)}, NewRequest{
 			SubjectUserID: body.UserID, CustomerID: body.CustomerID,
 			SubjectEmail: body.Email, SubjectName: body.Name, FlowID: body.FlowID,
+			Method: body.Method, Channel: body.Channel,
 		})
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusCreated, createRequestResponse{
-		requestResponse: newRequestResponse(sent.Request, time.Now()), MailSent: sent.MailSent,
-	})
+	out := createRequestResponse{requestResponse: newRequestResponse(sent.Request, time.Now()), MailSent: sent.MailSent}
+	if body.Channel == ChannelOnScreen {
+		out.DeepLink = sent.DeepLink
+	}
+	respond.JSON(w, r, http.StatusCreated, out)
 	return nil
 }
 
@@ -273,18 +447,38 @@ func displayName(u user.User) string {
 }
 
 type customerResponse struct {
-	ID            uuid.UUID `json:"id"`
-	Name          string    `json:"name"`
-	FlowIDs       []string  `json:"flowIds"`
-	DefaultFlowID string    `json:"defaultFlowId,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID            uuid.UUID      `json:"id"`
+	Name          string         `json:"name"`
+	FlowIDs       []string       `json:"flowIds"`
+	DefaultFlowID string         `json:"defaultFlowId,omitempty"`
+	Status        CustomerStatus `json:"status"`
+	PausedAt      *time.Time     `json:"pausedAt,omitempty"`
+	// SessionTTLSeconds is how long a mailed session runs; DataRetentionDays how
+	// long an approved subject's proofed name is kept.
+	SessionTTLSeconds int                   `json:"sessionTtlSeconds"`
+	DataRetentionDays int                   `json:"dataRetentionDays"`
+	Webhook           webhookHealthResponse `json:"webhook"`
+	Branding          brandingResponse      `json:"branding"`
+	CreatedAt         time.Time             `json:"createdAt"`
+	UpdatedAt         time.Time             `json:"updatedAt"`
 }
 
-func newCustomerResponse(c Customer) customerResponse {
+// newCustomerResponse shows a customer with its endpoint's health; a customer
+// absent from health has no endpoint.
+func newCustomerResponse(slug string, c Customer, health map[uuid.UUID]WebhookHealth) customerResponse {
 	return customerResponse{
-		ID: c.ID, Name: c.Name, FlowIDs: c.Flows.FlowIDs, DefaultFlowID: c.Flows.DefaultFlowID,
-		CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		ID:                c.ID,
+		Name:              c.Name,
+		FlowIDs:           c.Flows.FlowIDs,
+		DefaultFlowID:     c.Flows.DefaultFlowID,
+		Status:            c.Status(),
+		PausedAt:          c.PausedAt,
+		SessionTTLSeconds: int(c.Settings.SessionTTL.Seconds()),
+		DataRetentionDays: c.Settings.DataRetentionDays,
+		Webhook:           newWebhookHealthResponse(health[c.ID]),
+		Branding:          newBrandingResponse(slug, c),
+		CreatedAt:         c.CreatedAt,
+		UpdatedAt:         c.UpdatedAt,
 	}
 }
 
@@ -297,13 +491,18 @@ func customerIDFromPath(r *http.Request) (uuid.UUID, error) {
 }
 
 func (h *Handler) listCustomers(w http.ResponseWriter, r *http.Request) error {
-	customers, err := h.service.Customers(r.Context(), orgFromRequest(r).ID)
+	orgID := orgFromRequest(r).ID
+	customers, err := h.service.Customers(r.Context(), orgID)
+	if err != nil {
+		return mapError(err)
+	}
+	health, err := h.service.WebhookHealth(r.Context(), orgID)
 	if err != nil {
 		return mapError(err)
 	}
 	out := make([]customerResponse, 0, len(customers))
 	for _, c := range customers {
-		out = append(out, newCustomerResponse(c))
+		out = append(out, newCustomerResponse(r.PathValue("slug"), c, health))
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
@@ -323,7 +522,7 @@ func (h *Handler) createCustomer(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusCreated, newCustomerResponse(c))
+	respond.JSON(w, r, http.StatusCreated, newCustomerResponse(r.PathValue("slug"), c, nil))
 	return nil
 }
 
@@ -332,28 +531,122 @@ func (h *Handler) getCustomer(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	c, err := h.service.Customer(r.Context(), orgFromRequest(r).ID, id)
+	orgID := orgFromRequest(r).ID
+	c, err := h.service.Customer(r.Context(), orgID, id)
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, newCustomerResponse(c))
+	return h.respondCustomer(w, r, c)
+}
+
+// respondCustomer answers with one customer and its endpoint's health.
+func (h *Handler) respondCustomer(w http.ResponseWriter, r *http.Request, c Customer) error {
+	health, err := h.service.WebhookHealth(r.Context(), c.OrganizationID)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, newCustomerResponse(r.PathValue("slug"), c, health))
 	return nil
 }
 
-func (h *Handler) renameCustomer(w http.ResponseWriter, r *http.Request) error {
+// updateCustomerRequest renames a customer, pauses or resumes proofing for it,
+// and/or changes its session settings; an absent field is left as it is.
+type updateCustomerRequest struct {
+	Name              *string `json:"name"`
+	Paused            *bool   `json:"paused"`
+	SessionTTLSeconds *int    `json:"sessionTtlSeconds"`
+	DataRetentionDays *int    `json:"dataRetentionDays"`
+}
+
+func (h *Handler) updateCustomer(w http.ResponseWriter, r *http.Request) error {
 	id, err := customerIDFromPath(r)
 	if err != nil {
 		return err
 	}
-	var body customerRequest
+	var body updateCustomerRequest
 	if err := decode(r, &body); err != nil {
 		return err
 	}
-	c, err := h.service.RenameCustomer(r.Context(), orgFromRequest(r).ID, id, body.Name)
+	if body.Name == nil && body.Paused == nil && body.SessionTTLSeconds == nil && body.DataRetentionDays == nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "nothing to update"}
+	}
+	orgID := orgFromRequest(r).ID
+	var c Customer
+	if body.Name != nil {
+		if c, err = h.service.RenameCustomer(r.Context(), orgID, id, *body.Name); err != nil {
+			return mapError(err)
+		}
+	}
+	if body.Paused != nil {
+		if c, err = h.service.SetCustomerPaused(r.Context(), orgID, id, *body.Paused); err != nil {
+			return mapError(err)
+		}
+	}
+	if body.SessionTTLSeconds != nil || body.DataRetentionDays != nil {
+		current, err := h.service.Customer(r.Context(), orgID, id)
+		if err != nil {
+			return mapError(err)
+		}
+		settings := current.Settings
+		if body.SessionTTLSeconds != nil {
+			settings.SessionTTL = time.Duration(*body.SessionTTLSeconds) * time.Second
+		}
+		if body.DataRetentionDays != nil {
+			settings.DataRetentionDays = *body.DataRetentionDays
+		}
+		if c, err = h.service.SaveCustomerSettings(r.Context(), orgID, id, settings); err != nil {
+			return mapError(err)
+		}
+	}
+	return h.respondCustomer(w, r, c)
+}
+
+func (h *Handler) removeCustomer(w http.ResponseWriter, r *http.Request) error {
+	id, err := customerIDFromPath(r)
+	if err != nil {
+		return err
+	}
+	if err := h.service.RemoveCustomer(r.Context(), orgFromRequest(r).ID, id); err != nil {
+		return mapError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+type statsRowResponse struct {
+	CustomerID  uuid.UUID `json:"customerId"`
+	FlowID      string    `json:"flowId"`
+	Sessions    int       `json:"sessions"`
+	Approved    int       `json:"approved"`
+	Rejected    int       `json:"rejected"`
+	NeedsReview int       `json:"needsReview"`
+	Expired     int       `json:"expired"`
+}
+
+type statsResponse struct {
+	Since time.Time          `json:"since"`
+	Rows  []statsRowResponse `json:"rows"`
+}
+
+// stats counts the customer requests of the last StatsWindow per customer and
+// flow: an admin's over every request of the org, a member's over the ones they
+// sent, as listRequests shows them.
+func (h *Handler) stats(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	var requestedBy *uuid.UUID
+	if !organization.IsAdmin(r.Context()) {
+		id := auth.UserFromContext(r.Context()).ID
+		requestedBy = &id
+	}
+	rows, since, err := h.service.Stats(r.Context(), org.ID, requestedBy)
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, newCustomerResponse(c))
+	out := statsResponse{Since: since, Rows: make([]statsRowResponse, 0, len(rows))}
+	for _, row := range rows {
+		out.Rows = append(out.Rows, statsRowResponse(row))
+	}
+	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }
 
@@ -433,8 +726,24 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusConflict, Code: "customer_exists", Message: "a customer with this name already exists"}
 	case errors.Is(err, ErrFlowNotAssigned):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_assigned", Message: "this flow is not assigned to the customer"}
+	case errors.Is(err, ErrCustomerPaused):
+		return &respond.APIError{Status: http.StatusConflict, Code: "customer_paused", Message: "proofing is paused for this customer"}
+	case errors.Is(err, ErrAPIKeyNotFound):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "api_key_not_found", Message: "this API key does not exist"}
+	case errors.Is(err, ErrRequestNotFound):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "session_not_found", Message: "this session does not exist"}
+	case errors.Is(err, ErrWebhookNotFound):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "webhook_not_found", Message: "this customer has no webhook endpoint"}
+	case errors.Is(err, ErrNoCustomerLogo):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "no logo set"}
 	case errors.Is(err, ErrFlowNotAllowed):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_allowed", Message: "your organization's admin has not made this flow available"}
+	case errors.Is(err, ErrWrongMethod):
+		return &respond.APIError{Status: http.StatusConflict, Code: "wrong_method", Message: "this session does not run in the Yivi app"}
+	case errors.Is(err, ErrSessionOver):
+		return &respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}
+	case errors.Is(err, proofingprovider.ErrMethodUnavailable):
+		return &respond.APIError{Status: http.StatusConflict, Code: "method_unavailable", Message: "the identity proofing service cannot run Yivi app sessions: it has no Yivi server configured"}
 	case errors.As(err, &rejected):
 		// IPS's own validation message (e.g. which check a step requires) is what
 		// the admin needs to fix the flow.

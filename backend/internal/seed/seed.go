@@ -88,7 +88,6 @@ var yiviTeam = []demoUser{
 	{email: "m.kamphuis@yivi.app", givenNames: "Martijn", lastName: "Kamphuis"},
 	{email: "r.hensen@yivi.app", givenNames: "Ruben", lastName: "Hensen"},
 	{email: "d.mulder@yivi.app", givenNames: "Dibran", lastName: "Mulder"},
-	{email: "j.lin@caesar.nl", givenNames: "Jameson", lastName: "Lin"},
 }
 
 // partnerOrganization pairs a staging pilot organisation with the team

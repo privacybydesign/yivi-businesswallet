@@ -247,17 +247,48 @@ func (s *Service) SendVogRequested(ctx context.Context, orgID uuid.UUID, to, org
 	})
 }
 
+// ProofingMail is one identity proofing request's mail: the vcmrtd deep link
+// of an IPS session, which runs for ValidFor from the send. OrgName is who asks
+// (the org, or the customer it proofs for); SupportContact and PrivacyURL are
+// the customer's, and their paragraphs are left out when empty. Brand, when
+// set, is the customer's own look in place of the org's theme.
+type ProofingMail struct {
+	To             string
+	OrgName        string
+	RequesterName  string
+	DeepLink       string
+	ValidFor       time.Duration
+	SupportContact string
+	PrivacyURL     string
+	Brand          *CustomerBrand
+}
+
+// CustomerBrand is a proofing customer's mail look: its primary colour ("" is
+// the org's) and its logo (none shows its name as the wordmark, never the
+// org's logo under the customer's name).
+type CustomerBrand struct {
+	PrimaryColor string
+	Logo         Logo
+}
+
 // SendIdentityProofingRequested asks a person to prove their identity: a QR code
-// and a button for the same vcmrtd deep link of an IPS session, which runs for
-// validFor from the send. Returns ErrNotConfigured when the org has no usable
-// SMTP settings.
-func (s *Service) SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, to, orgName, requesterName, deepLink string, validFor time.Duration) error {
-	return s.send(ctx, orgID, KindIdentityProofingRequested, []string{to}, map[string]string{
-		varOrgName:       orgName,
-		varRequesterName: requesterName,
-		varProofingURL:   deepLink,
-		varValidMinutes:  strconv.Itoa(int(validFor / time.Minute)),
-	})
+// and a button for the same vcmrtd deep link. Returns ErrNotConfigured when the
+// org has no usable SMTP settings.
+func (s *Service) SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, m ProofingMail) error {
+	vars := map[string]string{
+		varOrgName:        m.OrgName,
+		varRequesterName:  m.RequesterName,
+		varProofingURL:    m.DeepLink,
+		varValidMinutes:   strconv.Itoa(int(m.ValidFor / time.Minute)),
+		varSupportContact: m.SupportContact,
+		varPrivacyURL:     m.PrivacyURL,
+	}
+	cfg, msg, err := s.composeBranded(ctx, orgID, KindIdentityProofingRequested, s.locale(""), vars, m.Brand)
+	if err != nil {
+		return err
+	}
+	msg.To = m.To
+	return s.sender.Send(cfg, msg)
 }
 
 // SendVogReminder tells a member their VOG is expiring soon, linking into the
@@ -381,6 +412,12 @@ func (s *Service) sendToEach(ctx context.Context, orgID uuid.UUID, kind Kind, lo
 // carries no To: the caller sets it per recipient, so the body is rendered once
 // however many addresses it goes to.
 func (s *Service) compose(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, vars map[string]string) (mailer.Config, mailer.Message, error) {
+	return s.composeBranded(ctx, orgID, kind, locale, vars, nil)
+}
+
+// composeBranded is compose with a proofing customer's look, when set, in place
+// of the org's theme.
+func (s *Service) composeBranded(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, vars map[string]string, customer *CustomerBrand) (mailer.Config, mailer.Message, error) {
 	resolved, ok, err := s.settings.configFor(ctx, orgID)
 	if err != nil {
 		return mailer.Config{}, mailer.Message{}, err
@@ -398,7 +435,11 @@ func (s *Service) compose(ctx context.Context, orgID uuid.UUID, kind Kind, local
 		return mailer.Config{}, mailer.Message{}, err
 	}
 
-	body, err := Render(kind, locale, tpl, s.brandWithLogo(ctx, orgID, tpl), vars)
+	brand := s.brandWithLogo(ctx, orgID, tpl)
+	if customer != nil {
+		brand = s.customerBrand(ctx, orgID, tpl, *customer)
+	}
+	body, err := Render(kind, locale, tpl, brand, vars)
 	if err != nil {
 		return mailer.Config{}, mailer.Message{}, err
 	}
@@ -462,19 +503,39 @@ func (s *Service) templateFor(ctx context.Context, orgID uuid.UUID, kind Kind, l
 	return tpl, nil
 }
 
+// customerBrand is the org's palette with the customer's primary colour, and
+// the customer's logo (or the wordmark) when the layout has a logo block.
+func (s *Service) customerBrand(ctx context.Context, orgID uuid.UUID, tpl Template, c CustomerBrand) Brand {
+	seeds := s.seedsFor(ctx, orgID)
+	if c.PrimaryColor != "" {
+		seeds.PrimaryColor = c.PrimaryColor
+	}
+	brand := resolveBrand(seeds)
+	if templateHasLogoBlock(tpl) {
+		brand.Logo = c.Logo
+	}
+	return brand
+}
+
 // brandFor resolves the org's palette, falling back to the default Yivi look when
 // there is no brand source or it errors: an unbranded mail still delivers.
 func (s *Service) brandFor(ctx context.Context, orgID uuid.UUID) Brand {
+	return resolveBrand(s.seedsFor(ctx, orgID))
+}
+
+// seedsFor is the org's theme seeds, or none (the default Yivi look) when there
+// is no brand source or it errors.
+func (s *Service) seedsFor(ctx context.Context, orgID uuid.UUID) Seeds {
 	if s.brand == nil {
-		return resolveBrand(Seeds{})
+		return Seeds{}
 	}
 	seeds, err := s.brand.MailBrandSeeds(ctx, orgID)
 	if err != nil {
 		slog.WarnContext(ctx, "resolving mail branding failed, sending with the default palette",
 			"org_id", orgID, "error", err)
-		return resolveBrand(Seeds{})
+		return Seeds{}
 	}
-	return resolveBrand(seeds)
+	return seeds
 }
 
 // brandWithLogo resolves the palette and, only when the layout actually has a logo

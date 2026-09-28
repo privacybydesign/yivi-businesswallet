@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
@@ -65,6 +66,7 @@ type fakeRequests struct {
 	names    []string
 	started  int
 	ended    int
+	methods  []proofingprovider.Method
 }
 
 func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, error) {
@@ -93,13 +95,14 @@ func (f *fakeRequests) List(context.Context, uuid.UUID, RequestFilter) ([]Reques
 	return []Request{*f.stored}, nil
 }
 
-func (f *fakeRequests) MarkStarted(context.Context, Request, string) error {
+func (f *fakeRequests) MarkStarted(_ context.Context, _ Request, _ string, method proofingprovider.Method) error {
+	f.methods = append(f.methods, method)
 	f.started++
 	f.stored.Status = StatusInProgress
 	return nil
 }
 
-func (f *fakeRequests) EndSession(context.Context, Request, string, proofingprovider.Status) error {
+func (f *fakeRequests) EndSession(context.Context, Request, string, proofingprovider.Status, proofingprovider.Method) error {
 	f.ended++
 	now := time.Now()
 	f.stored.session.EndedAt = &now
@@ -122,9 +125,35 @@ func (f *fakeRequests) RecordOutcome(_ context.Context, _ Request, _ string, sta
 	return nil
 }
 
+func (f *fakeRequests) GetForCustomer(_ context.Context, _, customerID, id uuid.UUID) (Request, error) {
+	if f.stored == nil || f.stored.ID != id || f.stored.CustomerID == nil || *f.stored.CustomerID != customerID {
+		return Request{}, ErrRequestNotFound
+	}
+	return *f.stored, nil
+}
+
+func (f *fakeRequests) Get(_ context.Context, _, id uuid.UUID) (Request, error) {
+	if f.stored == nil || f.stored.ID != id {
+		return Request{}, ErrRequestNotFound
+	}
+	return *f.stored, nil
+}
+
+func (f *fakeRequests) ListLive(context.Context, int) ([]Request, error) {
+	if f.stored == nil || !f.stored.needsReconcile() {
+		return []Request{}, nil
+	}
+	return []Request{*f.stored}, nil
+}
+
+func (f *fakeRequests) Stats(context.Context, uuid.UUID, *uuid.UUID, time.Time) ([]StatsRow, error) {
+	return []StatsRow{}, nil
+}
+
 type fakeCustomers struct {
 	byID  map[uuid.UUID]Customer
 	saved []FlowSelection
+	logo  CustomerLogo
 }
 
 func (f *fakeCustomers) List(context.Context, uuid.UUID) ([]Customer, error) {
@@ -162,6 +191,52 @@ func (f *fakeCustomers) SaveFlows(_ context.Context, _, id uuid.UUID, sel FlowSe
 	c.Flows = sel
 	f.byID[id] = c
 	return c, nil
+}
+
+func (f *fakeCustomers) SetPaused(_ context.Context, _, id uuid.UUID, paused bool) (Customer, error) {
+	c := f.byID[id]
+	c.PausedAt = nil
+	if paused {
+		now := time.Now()
+		c.PausedAt = &now
+	}
+	f.byID[id] = c
+	return c, nil
+}
+
+func (f *fakeCustomers) SaveSettings(_ context.Context, _, id uuid.UUID, settings CustomerSettings) (Customer, error) {
+	c := f.byID[id]
+	c.Settings = settings
+	f.byID[id] = c
+	return c, nil
+}
+
+func (f *fakeCustomers) Remove(_ context.Context, _, id uuid.UUID) error {
+	if _, ok := f.byID[id]; !ok {
+		return ErrCustomerNotFound
+	}
+	delete(f.byID, id)
+	return nil
+}
+
+func (f *fakeCustomers) SaveBranding(_ context.Context, _, id uuid.UUID, b CustomerBranding, logo LogoChange) (Customer, error) {
+	c := f.byID[id]
+	if logo.Replace {
+		b.HasLogo = len(logo.Logo.Bytes) > 0
+		f.logo = logo.Logo
+	} else {
+		b.HasLogo = c.Branding.HasLogo
+	}
+	c.Branding = b
+	f.byID[id] = c
+	return c, nil
+}
+
+func (f *fakeCustomers) Logo(_ context.Context, _, id uuid.UUID) (CustomerLogo, error) {
+	if !f.byID[id].Branding.HasLogo {
+		return CustomerLogo{}, ErrNoCustomerLogo
+	}
+	return f.logo, nil
 }
 
 type fakeIPS struct {
@@ -226,9 +301,22 @@ func (f *fakeIPS) SessionResult(context.Context, string, string, string) (proofi
 	return f.result, f.resultErr
 }
 
+func (*fakeIPS) StartYiviDisclosure(context.Context, string) (proofingprovider.YiviStart, error) {
+	return proofingprovider.YiviStart{}, nil
+}
+
+func (*fakeIPS) YiviDisclosureResult(context.Context, string) (proofingprovider.YiviDisclosure, error) {
+	return proofingprovider.YiviDisclosure{}, nil
+}
+
+func (*fakeIPS) SubmitFaceFrame(context.Context, string, string) (proofingprovider.FaceVerdict, error) {
+	return proofingprovider.FaceVerdict{}, nil
+}
+
 type sentMail struct {
-	to, requester, deepLink string
-	validFor                time.Duration
+	to, orgName, requester, deepLink string
+	validFor                         time.Duration
+	mail                             email.ProofingMail
 }
 
 type fakeMailer struct {
@@ -236,8 +324,10 @@ type fakeMailer struct {
 	err  error
 }
 
-func (f *fakeMailer) SendIdentityProofingRequested(_ context.Context, _ uuid.UUID, to, _, requester, deepLink string, validFor time.Duration) error {
-	f.sent = append(f.sent, sentMail{to: to, requester: requester, deepLink: deepLink, validFor: validFor})
+func (f *fakeMailer) SendIdentityProofingRequested(_ context.Context, _ uuid.UUID, m email.ProofingMail) error {
+	f.sent = append(f.sent, sentMail{
+		to: m.To, orgName: m.OrgName, requester: m.RequesterName, deepLink: m.DeepLink, validFor: m.ValidFor, mail: m,
+	})
 	return f.err
 }
 
@@ -292,7 +382,7 @@ func newFixture(provisioned bool) fixture {
 	if provisioned {
 		f.settings.apiKey = testAPIKey
 	}
-	f.svc = NewService(f.settings, f.requests, f.customers, f.ips, f.mailer)
+	f.svc = NewService(Stores{Settings: f.settings, Requests: f.requests, Customers: f.customers}, f.ips, f.mailer)
 	return f
 }
 
@@ -635,6 +725,110 @@ func TestCreateRequestForCustomerValidates(t *testing.T) {
 				t.Errorf("a refused request created a session or sent mail")
 			}
 		})
+	}
+}
+
+// The app a subject used is carried from IPS's first report of the session
+// opening onto the request, and kept once a later read no longer lists it.
+func TestReconcileRecordsTheMethod(t *testing.T) {
+	f := newFixture(true)
+	f.send(t)
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusInProgress, Method: proofingprovider.MethodIdem}
+	if got := f.reconcile(t); got.Method != proofingprovider.MethodIdem {
+		t.Errorf("method after start = %q, want %q", got.Method, proofingprovider.MethodIdem)
+	}
+	if len(f.requests.methods) != 1 || f.requests.methods[0] != proofingprovider.MethodIdem {
+		t.Errorf("stored methods = %v, want the Idem app once", f.requests.methods)
+	}
+}
+
+// A paused customer takes no new request, and resuming it takes them again.
+func TestCreateRequestForPausedCustomerIsRefused(t *testing.T) {
+	f := newFixture(true)
+	ctx := context.Background()
+	if _, err := f.svc.SetCustomerPaused(ctx, testOrg.ID, initech.ID, true); err != nil {
+		t.Fatalf("SetCustomerPaused: %v", err)
+	}
+	in := NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID}
+	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()}, in); !errors.Is(err, ErrCustomerPaused) {
+		t.Fatalf("err = %v, want %v", err, ErrCustomerPaused)
+	}
+	if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 {
+		t.Errorf("a refused request created a session or sent mail")
+	}
+	if _, err := f.svc.SetCustomerPaused(ctx, testOrg.ID, initech.ID, false); err != nil {
+		t.Fatalf("SetCustomerPaused: %v", err)
+	}
+	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()}, in); err != nil {
+		t.Errorf("CreateRequest after resume: %v", err)
+	}
+}
+
+// A customer's session lifetime is what IPS is asked for and what the mail says.
+func TestCreateRequestForCustomerUsesItsSessionLifetime(t *testing.T) {
+	f := newFixture(true)
+	ctx := context.Background()
+	short := CustomerSettings{SessionTTL: 2 * time.Minute, DataRetentionDays: 7}
+	if _, err := f.svc.SaveCustomerSettings(ctx, testOrg.ID, initech.ID, short); err != nil {
+		t.Fatalf("SaveCustomerSettings: %v", err)
+	}
+	f.sendForCustomer(t, "anna@example.org", "")
+	if got := f.ips.sessions[0].TTL; got != short.SessionTTL {
+		t.Errorf("session TTL = %v, want %v", got, short.SessionTTL)
+	}
+	if got := f.mailer.sent[0].validFor; got != short.SessionTTL {
+		t.Errorf("mail validFor = %v, want %v", got, short.SessionTTL)
+	}
+}
+
+func TestSaveCustomerSettingsOffersOnlyItsOptions(t *testing.T) {
+	f := newFixture(true)
+	for _, settings := range []CustomerSettings{
+		{SessionTTL: 3 * time.Minute, DataRetentionDays: 30},
+		{SessionTTL: SessionTTL, DataRetentionDays: 365},
+	} {
+		if _, err := f.svc.SaveCustomerSettings(context.Background(), testOrg.ID, initech.ID, settings); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("SaveCustomerSettings(%+v) = %v, want ErrInvalidInput", settings, err)
+		}
+	}
+}
+
+// A customer's subject's mail is signed and styled as the customer; a member's
+// stays the org's.
+func TestCustomerSubjectMailCarriesTheCustomersBranding(t *testing.T) {
+	f := newFixture(true)
+	ctx := context.Background()
+	logo := LogoChange{Replace: true, Logo: CustomerLogo{Bytes: []byte("\x89PNG"), ContentType: "image/png"}}
+	if _, err := f.svc.SaveCustomerBranding(ctx, testOrg.ID, initech.ID, CustomerBranding{
+		DisplayName: " Initech Verzekeringen ", PrimaryColor: "#1F5B4A",
+		SupportContact: "help@initech.example", PrivacyURL: "https://initech.example/privacy",
+	}, logo); err != nil {
+		t.Fatalf("SaveCustomerBranding: %v", err)
+	}
+	f.sendForCustomer(t, "anna@example.org", "")
+	f.send(t)
+
+	customer, member := f.mailer.sent[0].mail, f.mailer.sent[1].mail
+	if customer.OrgName != "Initech Verzekeringen" || customer.RequesterName != "Initech Verzekeringen" ||
+		customer.SupportContact != "help@initech.example" || customer.PrivacyURL != "https://initech.example/privacy" ||
+		customer.Brand == nil || customer.Brand.PrimaryColor != "#1F5B4A" || customer.Brand.Logo.ContentType != "image/png" {
+		t.Errorf("customer mail = %+v; want Initech's name, contact, privacy statement, colour and logo", customer)
+	}
+	if member.OrgName != testOrg.Name || member.Brand != nil || member.SupportContact != "" {
+		t.Errorf("member mail = %+v; want the org's, unbranded", member)
+	}
+}
+
+func TestSaveCustomerBrandingValidates(t *testing.T) {
+	f := newFixture(true)
+	for name, b := range map[string]CustomerBranding{
+		"colour":       {PrimaryColor: "green"},
+		"http privacy": {PrivacyURL: "http://initech.example/privacy"},
+		"relative":     {PrivacyURL: "/privacy"},
+	} {
+		if _, err := f.svc.SaveCustomerBranding(context.Background(), testOrg.ID, initech.ID, b, LogoChange{}); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("%s: err = %v, want ErrInvalidInput", name, err)
+		}
 	}
 }
 

@@ -44,6 +44,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/signing"
@@ -77,6 +78,15 @@ const (
 	// One IPS call per request; a session result embeds the document images,
 	// which is what the headroom is for.
 	proofingHTTPTimeout = 30 * time.Second
+	// proofingReconcileEvery is how often live proofing sessions are re-checked
+	// at IPS: every read is audited there, so not faster than an outcome needs.
+	proofingReconcileEvery = time.Minute
+	// proofingWebhookDeliveryEvery is how often due webhook deliveries are sent;
+	// the first attempt of an event waits at most this long.
+	proofingWebhookDeliveryEvery = 10 * time.Second
+	// heldStatusRecheckEvery is how often held credentials' status lists are
+	// re-read: issuers publish revocations on the scale of hours, not seconds.
+	heldStatusRecheckEvery = 6 * time.Hour
 
 	issuerProbeTimeout = 10 * time.Second
 	issuerHTTPTimeout  = 15 * time.Second
@@ -161,6 +171,9 @@ type proofingProvider interface {
 	ActivateFlowVersion(ctx context.Context, apiKey, id string, version int) (proofingprovider.Flow, error)
 	CreateSession(ctx context.Context, apiKey string, in proofingprovider.SessionInput) (proofingprovider.Session, error)
 	SessionResult(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Result, error)
+	StartYiviDisclosure(ctx context.Context, sessionToken string) (proofingprovider.YiviStart, error)
+	YiviDisclosureResult(ctx context.Context, sessionToken string) (proofingprovider.YiviDisclosure, error)
+	SubmitFaceFrame(ctx context.Context, sessionToken, image string) (proofingprovider.FaceVerdict, error)
 }
 
 func newProofingProvider(cfg config.Config) (proofingProvider, error) {
@@ -608,6 +621,9 @@ func run() error {
 	attestationService := attestation.NewService(
 		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
 	)
+	// Re-read the issuer status list of every held credential, so a credential
+	// revoked after it was received stops reading as valid.
+	startPruner(ctx, "attestation_held_status", heldStatusRecheckEvery, attestationService.RecheckAllHeld)
 	// Auto-issue an org's configured onboarding attestations when a member accepts
 	// an invitation. Wired via a setter (like the inbound QERDS consumer) because
 	// the org service is constructed before the attestation service.
@@ -727,12 +743,23 @@ func run() error {
 		return err
 	}
 	proofingRequests := proofing.NewRequestStore(pool, recorder, proofingCipher)
-	proofingService := proofing.NewService(
-		proofing.NewSettingsStore(pool, recorder, proofingCipher),
-		proofingRequests, proofing.NewCustomerStore(pool, recorder),
-		ips, emailService)
-	// A customer's subject's proofed name is kept for proofing.ProofedNameRetention.
+	proofingWebhooks := proofing.NewWebhookStore(pool, recorder, proofingCipher)
+	proofingService := proofing.NewService(proofing.Stores{
+		Settings:  proofing.NewSettingsStore(pool, recorder, proofingCipher),
+		Requests:  proofingRequests,
+		Customers: proofing.NewCustomerStore(pool, recorder),
+		APIKeys:   proofing.NewAPIKeyStore(pool, recorder),
+		Webhooks:  proofingWebhooks,
+		Events:    audit.NewReader(pool),
+	}, ips, emailService)
+	// A customer's subject's proofed name is kept for its customer's data retention.
 	startPruner(ctx, "identity_proofing_proofed_names", cfg.SessionPruneEvery, proofingRequests.PurgeProofedNames)
+	// Outcomes and expiries land without anyone reading a list, and each sends
+	// its customer's webhook; the deliverer sends those, https to public
+	// addresses only.
+	startPruner(ctx, "identity_proofing_reconcile", proofingReconcileEvery, proofingService.ReconcileLive)
+	startPruner(ctx, "identity_proofing_webhooks",
+		proofingWebhookDeliveryEvery, proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).DeliverDue)
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
 
 	// Inbound OpenID4VP: an external verifier invoking the business wallet as

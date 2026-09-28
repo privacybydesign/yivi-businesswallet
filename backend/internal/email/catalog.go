@@ -91,6 +91,10 @@ const (
 	varRequesterName  = "requesterName"
 	varProofingURL    = "proofingUrl"
 	varValidMinutes   = "validMinutes"
+	// varSupportContact and varPrivacyURL are the proofing customer's own, and
+	// empty for a member's request: their paragraphs are then left out.
+	varSupportContact = "supportContact"
+	varPrivacyURL     = "privacyUrl"
 )
 
 // appSchemeVCMRTD is the scheme of the vcmrtd app's deep links (identity
@@ -187,6 +191,8 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varRequesterName},
 		{Name: varProofingURL, IsURL: true, AppScheme: appSchemeVCMRTD},
 		{Name: varValidMinutes},
+		{Name: varSupportContact},
+		{Name: varPrivacyURL},
 	},
 }
 

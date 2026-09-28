@@ -16,8 +16,10 @@
 package proofingprovider
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -87,6 +89,9 @@ type SessionInput struct {
 	ClientReference string
 	Language        string
 	TTL             time.Duration
+	// Method is the app the subject proofs with: MethodIdem (the default when
+	// empty) or MethodYivi. MethodBrowser cannot be asked for.
+	Method Method
 }
 
 // Session is a created IPS session. Token is the relying-party bearer token every
@@ -97,7 +102,8 @@ type Session struct {
 	ExpiresAt time.Time
 	// FlowVersion is the flow version IPS pinned the session to; 0 when unknown.
 	FlowVersion int
-	// Claim is the vcmrtd link for the subject's phone, nil when IPS offered none.
+	// Claim is the vcmrtd link for the subject's phone, nil when IPS offered none
+	// (always for MethodYivi, whose page starts the Yivi disclosure instead).
 	Claim *Claim
 }
 
@@ -126,6 +132,9 @@ const (
 // subject's name. The IPS result also carries the other document fields, the BSN
 // and images; they are never decoded.
 type Result struct {
+	// Method is how the subject took part: MethodIdem, MethodYivi or
+	// MethodBrowser; "" while no device has claimed the session.
+	Method         Method
 	Status         Status
 	ErrorCode      string
 	AssuranceLevel string
@@ -137,10 +146,112 @@ type Result struct {
 	Name string
 }
 
+// Method is the app a subject proofed with, as the wallet shows it.
+type Method string
+
+const (
+	// MethodIdem is the Idem app (vcmrtd), IPS's native device: it reads the
+	// document's chip over NFC.
+	MethodIdem Method = "idem_app"
+	// MethodYivi is a disclosure of existing identity credentials from the Yivi
+	// app (IPS's biometric_bound_login).
+	MethodYivi Method = "yivi_app"
+	// MethodBrowser is IPS's web device alone, with no app involved.
+	MethodBrowser Method = "browser"
+)
+
+// IPS device roles (device_access.go): the native slot is vcmrtd/Idem.
+const (
+	deviceRoleNative = "native"
+	deviceRoleWeb    = "web"
+)
+
+// methodOf derives the method from what IPS reports: a Yivi disclosure in the
+// result, else the devices that claimed the session, native before web.
+func methodOf(disclosed bool, roles []string) Method {
+	switch {
+	case disclosed:
+		return MethodYivi
+	case slices.Contains(roles, deviceRoleNative):
+		return MethodIdem
+	case slices.Contains(roles, deviceRoleWeb):
+		return MethodBrowser
+	default:
+		return ""
+	}
+}
+
+// ipsMethod is IPS's name for the method a session is created for.
+func ipsMethod(m Method) (string, error) {
+	switch m {
+	case "", MethodIdem:
+		return ipsMethodNFCPassport, nil
+	case MethodYivi:
+		return ipsMethodBoundLogin, nil
+	default:
+		return "", fmt.Errorf("proofingprovider: no session can be started for method %q", m)
+	}
+}
+
+// IPS session methods (session.Method): the vcmrtd chip read, and the Yivi
+// disclosure of a photo credential followed by a live face check.
+const (
+	ipsMethodNFCPassport = "nfc_passport"
+	ipsMethodBoundLogin  = "biometric_bound_login"
+)
+
+// YiviStart is the Yivi disclosure a MethodYivi session asks for. SessionPtr
+// is the pointer the Yivi app scans, as IPS gave it: the QR carries it as JSON.
+type YiviStart struct {
+	SessionPtr json.RawMessage
+	ExpiresAt  time.Time
+}
+
+// YiviDisclosure is a redeemed Yivi disclosure. OK false ended the session
+// (Code says why: cancelled, timeout, invalid_proof, photo_missing,
+// reference_no_face); OK true moves on to the face check, which approves after
+// StableFrames matching frames and rejects after MaxAttempts without them.
+type YiviDisclosure struct {
+	OK           bool
+	Code         string
+	StableFrames int
+	MaxAttempts  int
+}
+
+// FaceDecision is where a MethodYivi session's face check stands.
+type FaceDecision string
+
+const (
+	FaceDecisionPending  FaceDecision = "pending"
+	FaceDecisionApproved FaceDecision = "approved"
+	FaceDecisionRejected FaceDecision = "rejected"
+)
+
+// FaceVerdict is one live camera frame scored against the disclosed photo. No
+// score, face box or image is kept: only the progress the page shows.
+type FaceVerdict struct {
+	FaceDetected bool
+	Matched      bool
+	Consecutive  int
+	StableFrames int
+	Attempts     int
+	MaxAttempts  int
+	Decision     FaceDecision
+}
+
+// ErrDisclosurePending is IPS answering that the Yivi disclosure is not
+// finished yet: the subject has not scanned the QR or not confirmed in the app.
+var ErrDisclosurePending = errors.New("proofingprovider: disclosure not finished")
+
+// ErrMethodUnavailable is IPS refusing a session for a method it cannot run:
+// MethodYivi on an IPS without a Yivi server.
+var ErrMethodUnavailable = errors.New("proofingprovider: method unavailable")
+
 // ErrNotFound is IPS answering 404: an unknown session, or a tenant it no longer has.
 var ErrNotFound = errors.New("proofingprovider: not found")
 
-// RejectedError is IPS refusing a request as invalid (400/409/422). Message is
+// RejectedError is IPS refusing a request as invalid (400/409/422), or a
+// subject-facing call on a session that is over (410). Message is
 // IPS's own explanation (e.g. which check a flow step requires) and is safe to
 // show to the org admin who made the request.
 type RejectedError struct {

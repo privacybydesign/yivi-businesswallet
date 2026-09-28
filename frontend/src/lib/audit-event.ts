@@ -1,7 +1,10 @@
 import type { TFunction } from "i18next";
 import type { AuditEvent } from "../api/organization";
 import type { IconName } from "../ui";
-import { proofingRejectionReason } from "./identity-proofing";
+import {
+  proofingMethodLabel,
+  proofingRejectionReason,
+} from "./identity-proofing";
 
 export type AuditTone = "green" | "blue" | "red" | "amber" | "violet" | "slate";
 
@@ -53,6 +56,8 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "user.identity_review_rejected": { icon: "close", tone: "red" },
   "user.purged": { icon: "delete", tone: "red" },
   "attestation.schema_created": { icon: "add", tone: "green" },
+  "attestation.held_received": { icon: "add", tone: "green" },
+  "attestation.held_status_changed": { icon: "warning", tone: "amber" },
   "attestation.schema_updated": { icon: "edit", tone: "blue" },
   "attestation.schema_deleted": { icon: "delete", tone: "red" },
   "attestation.template_created": { icon: "add", tone: "green" },
@@ -109,6 +114,12 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
     icon: "settings",
     tone: "blue",
   },
+  "identity_proofing.customer_removed": { icon: "delete", tone: "red" },
+  "identity_proofing.api_key_created": { icon: "add", tone: "green" },
+  "identity_proofing.api_key_revoked": { icon: "close", tone: "red" },
+  "identity_proofing.webhook_configured": { icon: "settings", tone: "blue" },
+  "identity_proofing.webhook_secret_rotated": { icon: "lock", tone: "amber" },
+  "identity_proofing.webhook_removed": { icon: "delete", tone: "red" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -267,6 +278,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.attestationKeySuspended");
     case "attestation.key_revoked":
       return t("auditLog.actions.attestationKeyRevoked");
+    case "attestation.held_received":
+      return t("auditLog.actions.attestationHeldReceived");
+    case "attestation.held_status_changed":
+      return t("auditLog.actions.attestationHeldStatusChanged");
     case "attestation.held_deleted":
       return t("auditLog.actions.attestationHeldDeleted");
     case "attestation.offer_accepted":
@@ -355,6 +370,18 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingCustomerUpdated");
     case "identity_proofing.customer_flows_configured":
       return t("auditLog.actions.identityProofingCustomerFlowsConfigured");
+    case "identity_proofing.customer_removed":
+      return t("auditLog.actions.identityProofingCustomerRemoved");
+    case "identity_proofing.api_key_created":
+      return t("auditLog.actions.identityProofingApiKeyCreated");
+    case "identity_proofing.api_key_revoked":
+      return t("auditLog.actions.identityProofingApiKeyRevoked");
+    case "identity_proofing.webhook_configured":
+      return t("auditLog.actions.identityProofingWebhookConfigured");
+    case "identity_proofing.webhook_secret_rotated":
+      return t("auditLog.actions.identityProofingWebhookSecretRotated");
+    case "identity_proofing.webhook_removed":
+      return t("auditLog.actions.identityProofingWebhookRemoved");
     default:
       return action;
   }
@@ -482,6 +509,8 @@ function addedFieldLabel(key: string, t: TFunction): string | null {
       return t("auditLog.fields.errorCode");
     case "ipsStatus":
       return t("auditLog.fields.ipsStatus");
+    case "method":
+      return t("auditLog.fields.method");
     default:
       return null;
   }
@@ -514,7 +543,9 @@ export function auditSubject(
         const value =
           key === "errorCode" && typeof after[key] === "string"
             ? proofingRejectionReason(after[key], t)
-            : fieldValue(after[key], dateFormatter);
+            : key === "method" && typeof after[key] === "string"
+              ? proofingMethodLabel(after[key], t)
+              : fieldValue(after[key], dateFormatter);
         return label
           ? `${label}: ${value}`
           : `${fieldValue(before[key], dateFormatter)} → ${value}`;

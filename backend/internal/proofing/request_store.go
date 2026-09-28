@@ -35,12 +35,14 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.created_at, r.updated_at, r.completed_at,
 	r.ips_session_id, r.ips_session_token_ciphertext, r.ips_session_expires_at, r.ips_session_ended_at,
 	r.subject_user_id, COALESCE(r.flow_version, 0),
-	r.customer_id, COALESCE(c.name, ''), r.proofed_name_ciphertext`
+	r.customer_id, COALESCE(c.name, ''), r.proofed_name_ciphertext, c.data_retention_days,
+	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, '')`
 
 // requestFrom joins a request to its sender and its customer.
 const requestFrom = ` FROM identity_proofing_requests r
 	LEFT JOIN users u ON u.id = r.requested_by
-	LEFT JOIN identity_proofing_customers c ON c.id = r.customer_id`
+	LEFT JOIN identity_proofing_customers c ON c.id = r.customer_id
+	LEFT JOIN identity_proofing_api_keys k ON k.id = r.api_key_id`
 
 func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	var r Request
@@ -48,12 +50,17 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	var tokenCT []byte
 	var sessionExpiresAt, sessionEndedAt *time.Time
 	var nameCT []byte
+	var retentionDays *int
 	if err := row.Scan(&r.ID, &r.OrganizationID, &r.RequestedBy, &r.RequestedByName,
 		&r.SubjectName, &r.SubjectEmail, &r.FlowID, &r.FlowName, &r.Status, &r.LinkExpiresAt,
 		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &r.SubjectUserID, &r.FlowVersion,
-		&r.CustomerID, &r.CustomerName, &nameCT); err != nil {
+		&r.CustomerID, &r.CustomerName, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method); err != nil {
 		return Request{}, err
+	}
+	r.NameRetention = ProofedNameRetention
+	if retentionDays != nil {
+		r.NameRetention = CustomerSettings{DataRetentionDays: *retentionDays}.DataRetention()
 	}
 	if nameCT != nil {
 		if s.cipher == nil {
@@ -84,12 +91,19 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 // NewStoredRequest is a request about to be mailed. It has no IPS session yet:
 // that is created when the recipient starts (AttachSession).
 type NewStoredRequest struct {
-	ID            uuid.UUID
-	OrgID         uuid.UUID
-	RequestedBy   uuid.UUID
+	ID    uuid.UUID
+	OrgID uuid.UUID
+	// RequestedBy is the member who sent it, APIKeyID the customer key that
+	// created it; exactly one is set.
+	RequestedBy   *uuid.UUID
+	APIKeyID      *uuid.UUID
 	Subject       Subject
 	Flow          proofingprovider.Flow
 	LinkExpiresAt time.Time
+	// Method is the app the session was created for; IPS's later report of
+	// the app the subject used replaces it.
+	Method  proofingprovider.Method
+	Channel Channel
 }
 
 // Create stores a new request and audits identity_proofing.requested in the same
@@ -98,20 +112,26 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `INSERT INTO identity_proofing_requests
 			(id, organization_id, requested_by, subject_user_id, customer_id, subject_name, subject_email,
-			 flow_id, flow_name, flow_version, link_expires_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''))`
 		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, in.Subject.CustomerID,
-			in.Subject.Name, in.Subject.Email, in.Flow.ID, in.Flow.Name, in.Flow.Version, in.LinkExpiresAt); err != nil {
+			in.Subject.Name, in.Subject.Email, in.Flow.ID, in.Flow.Name, in.Flow.Version, in.LinkExpiresAt,
+			in.APIKeyID, string(in.Method)); err != nil {
 			return fmt.Errorf("proofing: create request org %s: %w", in.OrgID, err)
 		}
 		fields := withAuditSubject(map[string]any{
 			"flowId": in.Flow.ID, "flowName": in.Flow.Name, "flowVersion": in.Flow.Version,
+			"channel": string(in.Channel),
 		}, in.Subject.Name, in.Subject.Email)
+		fields = withMethod(fields, in.Method)
 		if in.Subject.UserID != nil {
 			fields["subjectUserId"] = in.Subject.UserID.String()
 		}
 		if in.Subject.CustomerID != nil {
 			fields["customerId"] = in.Subject.CustomerID.String()
+		}
+		if in.APIKeyID != nil {
+			fields["apiKeyId"] = in.APIKeyID.String()
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingRequested,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: in.ID.String(), OrgID: &in.OrgID},
@@ -121,6 +141,60 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 		return Request{}, err
 	}
 	return s.get(ctx, in.ID)
+}
+
+// ListLive returns up to limit requests, across every org, whose IPS session
+// may hold a newer state than the row (see Request.needsReconcile), the least
+// recently updated first: the background reconciler's work list.
+func (s *RequestStore) ListLive(ctx context.Context, limit int) ([]Request, error) {
+	query := `SELECT ` + requestColumns + requestFrom + `
+		WHERE r.ips_session_id IS NOT NULL AND (r.status = 'needs_review'
+			OR (r.status IN ('pending', 'in_progress') AND r.ips_session_ended_at IS NULL))
+		ORDER BY r.updated_at LIMIT $1`
+	rows, err := s.db.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list live requests: %w", err)
+	}
+	defer rows.Close()
+	out := []Request{}
+	for rows.Next() {
+		req, err := s.scanRequest(rows)
+		if err != nil {
+			return nil, fmt.Errorf("proofing: scan live request: %w", err)
+		}
+		out = append(out, req)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("proofing: list live requests: %w", err)
+	}
+	return out, nil
+}
+
+// Get returns one of the org's requests, or ErrRequestNotFound.
+func (s *RequestStore) Get(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
+	query := `SELECT ` + requestColumns + requestFrom + ` WHERE r.id = $1 AND r.organization_id = $2`
+	req, err := s.scanRequest(s.db.QueryRow(ctx, query, id, orgID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Request{}, ErrRequestNotFound
+	}
+	if err != nil {
+		return Request{}, fmt.Errorf("proofing: get request %s: %w", id, err)
+	}
+	return req, nil
+}
+
+// GetForCustomer returns one of a customer's requests, or ErrRequestNotFound.
+func (s *RequestStore) GetForCustomer(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, error) {
+	query := `SELECT ` + requestColumns + requestFrom + `
+		WHERE r.id = $1 AND r.organization_id = $2 AND r.customer_id = $3`
+	req, err := s.scanRequest(s.db.QueryRow(ctx, query, id, orgID, customerID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Request{}, ErrRequestNotFound
+	}
+	if err != nil {
+		return Request{}, fmt.Errorf("proofing: get request %s: %w", id, err)
+	}
+	return req, nil
 }
 
 func (s *RequestStore) get(ctx context.Context, id uuid.UUID) (Request, error) {
@@ -195,11 +269,12 @@ func (s *RequestStore) AttachSession(ctx context.Context, req Request, sess proo
 // MarkStarted records that the subject's phone joined the session (IPS reports
 // it opened), and audits identity_proofing.session_started. A no-op when the row
 // already moved on, so concurrent pollers record it once.
-func (s *RequestStore) MarkStarted(ctx context.Context, req Request, sessionID string) error {
+func (s *RequestStore) MarkStarted(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		const update = `UPDATE identity_proofing_requests SET status = 'in_progress', updated_at = now()
+		const update = `UPDATE identity_proofing_requests
+			SET status = 'in_progress', method = COALESCE(NULLIF($3, ''), method), updated_at = now()
 			WHERE id = $1 AND ips_session_id = $2 AND status = 'pending'`
-		tag, err := q.Exec(ctx, update, req.ID, sessionID)
+		tag, err := q.Exec(ctx, update, req.ID, sessionID, string(method))
 		if err != nil {
 			return fmt.Errorf("proofing: mark started request %s: %w", req.ID, err)
 		}
@@ -210,31 +285,44 @@ func (s *RequestStore) MarkStarted(ctx context.Context, req Request, sessionID s
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Updated(
 				req.auditFields(map[string]any{"status": string(req.Status)}),
-				req.auditFields(map[string]any{"status": string(StatusInProgress)})))
+				req.auditFields(withMethod(map[string]any{"status": string(StatusInProgress)}, method))))
 	})
+}
+
+// withMethod adds the method a subject used to an audit snapshot, when known.
+func withMethod(fields map[string]any, method proofingprovider.Method) map[string]any {
+	if method != "" {
+		fields["method"] = string(method)
+	}
+	return fields
 }
 
 // EndSession records that the request's IPS session ended without an outcome
 // (expired, or cancelled at IPS), which ends the request: it reads as expired
 // from then on. Audited identity_proofing.session_ended with IPS's status. A
 // no-op once recorded, so concurrent pollers record it once.
-func (s *RequestStore) EndSession(ctx context.Context, req Request, sessionID string, ipsStatus proofingprovider.Status) error {
+func (s *RequestStore) EndSession(ctx context.Context, req Request, sessionID string, ipsStatus proofingprovider.Status, method proofingprovider.Method) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		const update = `UPDATE identity_proofing_requests SET ips_session_ended_at = now(), updated_at = now()
+		const update = `UPDATE identity_proofing_requests
+			SET ips_session_ended_at = now(), method = COALESCE(NULLIF($3, ''), method), updated_at = now()
 			WHERE id = $1 AND ips_session_id = $2 AND ips_session_ended_at IS NULL
 				AND status IN ('pending', 'in_progress')`
-		tag, err := q.Exec(ctx, update, req.ID, sessionID)
+		tag, err := q.Exec(ctx, update, req.ID, sessionID, string(method))
 		if err != nil {
 			return fmt.Errorf("proofing: end session request %s: %w", req.ID, err)
 		}
 		if tag.RowsAffected() == 0 {
 			return nil
 		}
-		return s.audit.Record(ctx, q, audit.IdentityProofingSessionEnded,
+		if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionEnded,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Updated(
 				req.auditFields(map[string]any{"status": string(req.Status)}),
-				req.auditFields(map[string]any{"status": string(StatusExpired), "ipsStatus": string(ipsStatus)})))
+				req.auditFields(withMethod(map[string]any{"status": string(StatusExpired), "ipsStatus": string(ipsStatus)}, method)))); err != nil {
+			return err
+		}
+		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionExpired, &req.ID,
+			sessionEventData(req, StatusExpired))
 	})
 }
 
@@ -257,7 +345,9 @@ func withAuditSubject(fields map[string]any, name, email string) map[string]any 
 	if name != "" {
 		fields["subjectName"] = name
 	}
-	fields["subjectEmail"] = email
+	if email != "" {
+		fields["subjectEmail"] = email
+	}
 	return fields
 }
 
@@ -309,25 +399,30 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 		if nameCT, err = s.cipher.Encrypt([]byte(res.Name)); err != nil {
 			return fmt.Errorf("proofing: encrypt proofed name request %s: %w", req.ID, err)
 		}
-		at := time.Now().Add(ProofedNameRetention)
+		retention := req.NameRetention
+		if retention == 0 {
+			retention = ProofedNameRetention
+		}
+		at := time.Now().Add(retention)
 		purgeAfter = &at
 	}
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE identity_proofing_requests SET
 				status = $3, assurance_level = NULLIF($4, ''), eidas_level = NULLIF($5, ''),
 				error_code = NULLIF($6, ''), completed_at = COALESCE($7, now()), updated_at = now(),
-				proofed_name_ciphertext = $8, proofed_name_purge_after = $9
+				proofed_name_ciphertext = $8, proofed_name_purge_after = $9,
+				method = COALESCE(NULLIF($10, ''), method)
 			WHERE id = $1 AND ips_session_id = $2
 				AND status IN ('pending', 'in_progress', 'needs_review') AND status <> $3`
 		tag, err := q.Exec(ctx, update, req.ID, sessionID, string(status),
-			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, purgeAfter)
+			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, purgeAfter, string(res.Method))
 		if err != nil {
 			return fmt.Errorf("proofing: record outcome request %s: %w", req.ID, err)
 		}
 		if tag.RowsAffected() == 0 {
 			return nil
 		}
-		after := map[string]any{"status": string(status)}
+		after := withMethod(map[string]any{"status": string(status)}, res.Method)
 		for key, value := range map[string]string{
 			"assuranceLevel": res.AssuranceLevel, "eidasLevel": res.EIDASLevel, "errorCode": res.ErrorCode,
 		} {
@@ -335,20 +430,76 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 				after[key] = value
 			}
 		}
-		return s.audit.Record(ctx, q, action,
+		if err := s.audit.Record(ctx, q, action,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}), req.auditFields(after)))
+			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}), req.auditFields(after))); err != nil {
+			return err
+		}
+		event, ok := outcomeEvents[status]
+		if !ok {
+			return nil
+		}
+		decided := req
+		decided.AssuranceLevel, decided.EIDASLevel, decided.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
+		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, event, &req.ID, sessionEventData(decided, status))
 	})
 }
 
 // PurgeProofedNames clears every proofed name past its retention, for the
-// pruner. The request and its outcome stay. Not audited: nothing was decided.
+// pruner, and sends session.purged to the endpoint of each purged request's
+// customer that subscribed to it. The request and its outcome stay. Not
+// audited: nothing was decided.
 func (s *RequestStore) PurgeProofedNames(ctx context.Context) (int64, error) {
-	tag, err := s.db.Exec(ctx, `UPDATE identity_proofing_requests
-		SET proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL, updated_at = now()
-		WHERE proofed_name_purge_after <= now()`)
+	var n int64
+	err := s.db.QueryRow(ctx, `WITH purged AS (
+			UPDATE identity_proofing_requests
+			SET proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL, updated_at = now()
+			WHERE proofed_name_purge_after <= now()
+			RETURNING id, organization_id, customer_id, status, flow_id
+		), enqueued AS (
+			INSERT INTO identity_proofing_webhook_deliveries (organization_id, customer_id, event, request_id, payload)
+			SELECT p.organization_id, p.customer_id, $1, p.id,
+				jsonb_build_object('sessionId', p.id, 'status', p.status, 'flowId', p.flow_id)
+			FROM purged p JOIN identity_proofing_webhooks w ON w.customer_id = p.customer_id
+			WHERE $1 = ANY (w.events)
+		)
+		SELECT count(*) FROM purged`, EventSessionPurged).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("proofing: purge proofed names: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	return n, nil
+}
+
+// Stats counts the customer requests sent since since, per customer and flow,
+// by outcome; requestedBy narrows them to the requests one member sent. A row
+// counts as expired exactly when Request.EffectiveStatus reads it so, and as
+// last reconciled: an outcome IPS holds but no list read picked up yet is not in
+// it.
+func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error) {
+	const query = `SELECT customer_id, flow_id, count(*),
+			count(*) FILTER (WHERE status = $4),
+			count(*) FILTER (WHERE status = $5),
+			count(*) FILTER (WHERE status = $6),
+			count(*) FILTER (WHERE status NOT IN ($4, $5, $6) AND (ips_session_id IS NULL
+				OR ips_session_ended_at IS NOT NULL OR ips_session_expires_at IS NULL
+				OR ips_session_expires_at <= now()))
+		FROM identity_proofing_requests
+		WHERE organization_id = $1 AND customer_id IS NOT NULL
+			AND ($2::uuid IS NULL OR requested_by = $2) AND created_at >= $3
+		GROUP BY customer_id, flow_id
+		ORDER BY customer_id, flow_id`
+	rows, err := s.db.Query(ctx, query, orgID, requestedBy, since,
+		StatusApproved, StatusRejected, StatusNeedsReview)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: stats org %s: %w", orgID, err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (StatsRow, error) {
+		var r StatsRow
+		err := row.Scan(&r.CustomerID, &r.FlowID, &r.Sessions, &r.Approved, &r.Rejected, &r.NeedsReview, &r.Expired)
+		return r, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("proofing: stats org %s: %w", orgID, err)
+	}
+	return out, nil
 }

@@ -77,10 +77,12 @@ func sampleVars(kind Kind) map[string]string {
 		}
 	case KindIdentityProofingRequested:
 		return map[string]string{
-			varOrgName:       "Acme BV",
-			varRequesterName: "Sam de Vries",
-			varProofingURL:   "vcmrtd://verify?handover=abc&api=https%3A%2F%2Fproofing.example.org",
-			varValidMinutes:  "10",
+			varOrgName:        "Acme BV",
+			varRequesterName:  "Sam de Vries",
+			varProofingURL:    "vcmrtd://verify?handover=abc&api=https%3A%2F%2Fproofing.example.org",
+			varValidMinutes:   "10",
+			varSupportContact: "support@initech.example",
+			varPrivacyURL:     "https://initech.example/privacy",
 		}
 	default:
 		return nil
@@ -344,6 +346,8 @@ func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
 		varRequesterName:  "Sam de Vries",
 		varProofingURL:    "vcmrtd://verify?handover=sample&api=https%3A%2F%2Fproofing.example.org",
 		varValidMinutes:   "10",
+		varSupportContact: "support@example.org",
+		varPrivacyURL:     "https://example.org/privacy",
 	}
 	if err := validateSamples(complete); err != nil {
 		t.Fatalf("validateSamples on the complete set = %v, want nil", err)

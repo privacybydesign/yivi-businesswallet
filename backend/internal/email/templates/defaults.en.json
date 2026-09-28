@@ -23,7 +23,9 @@
     "vogUrl": "https://wallet.example.org/vog/sample",
     "requesterName": "Sam de Vries",
     "proofingUrl": "vcmrtd://verify?handover=sample&api=https%3A%2F%2Fproofing.example.org",
-    "validMinutes": "10"
+    "validMinutes": "10",
+    "supportContact": "support@example.org",
+    "privacyUrl": "https://example.org/privacy"
   },
   "events": {
     "membership.invited": "Invited member",
@@ -228,6 +230,8 @@
         { "type": "qr", "label": "Scan with the vcmrtd app", "url": "{{proofingUrl}}" },
         { "type": "button", "label": "Open in the vcmrtd app", "url": "{{proofingUrl}}" },
         { "type": "paragraph", "text": "Reading this on your phone? Tap the button. The QR code and the button start the same session, which is valid for {{validMinutes}} minutes from when this e-mail was sent. After that, ask {{orgName}} for a new one." },
+        { "type": "paragraph", "text": "Questions about this request? Contact {{supportContact}}." },
+        { "type": "paragraph", "text": "How your data is handled: {{privacyUrl}}" },
         { "type": "footer" }
       ]
     }

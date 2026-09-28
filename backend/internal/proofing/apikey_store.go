@@ -1,0 +1,180 @@
+package proofing
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+)
+
+const (
+	// apiKeyPrefix starts every customer API key, so a leaked one is
+	// recognisable (and scannable) as ours.
+	apiKeyPrefix = "yp_live_"
+	// apiKeySecretBytes is the random part of a key.
+	apiKeySecretBytes = 32
+	// apiKeyShownPrefix is how much of a key stays visible after creation.
+	apiKeyShownPrefix = len(apiKeyPrefix) + 4
+	// maxAPIKeyNameLength bounds the label an admin gives a key.
+	maxAPIKeyNameLength = 100
+)
+
+// APIKey is one of a customer's API keys, without its secret.
+type APIKey struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	CustomerID     uuid.UUID
+	Name           string
+	Prefix         string
+	CreatedAt      time.Time
+	LastUsedAt     *time.Time
+	RevokedAt      *time.Time
+}
+
+// APIKeyCaller is who an authenticated API key acts for: the key, its customer
+// and the customer's org.
+type APIKeyCaller struct {
+	KeyID      uuid.UUID
+	KeyName    string
+	CustomerID uuid.UUID
+	Org        Org
+}
+
+// APIKeyStore persists customer API keys, hashed. Creating and revoking one is
+// audited.
+type APIKeyStore struct {
+	db    database.DB
+	audit audit.Recorder
+}
+
+func NewAPIKeyStore(db database.DB, recorder audit.Recorder) *APIKeyStore {
+	return &APIKeyStore{db: db, audit: recorder}
+}
+
+func newAPIKeySecret() (raw string, hash [sha256.Size]byte) {
+	b := make([]byte, apiKeySecretBytes)
+	_, _ = rand.Read(b)
+	raw = apiKeyPrefix + base64.RawURLEncoding.EncodeToString(b)
+	return raw, sha256.Sum256([]byte(raw))
+}
+
+const apiKeyColumns = `id, organization_id, customer_id, name, prefix, created_at, last_used_at, revoked_at`
+
+func scanAPIKey(row pgx.CollectableRow) (APIKey, error) {
+	var k APIKey
+	err := row.Scan(&k.ID, &k.OrganizationID, &k.CustomerID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt)
+	return k, err
+}
+
+// Create stores a new key for a customer and returns it with its secret, which
+// is never readable again. Audited identity_proofing.api_key_created.
+func (s *APIKeyStore) Create(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string) (APIKey, string, error) {
+	raw, hash := newAPIKeySecret()
+	prefix := raw[:apiKeyShownPrefix]
+	var id uuid.UUID
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		if _, err := getCustomer(ctx, q, orgID, customerID); err != nil {
+			return err
+		}
+		if err := q.QueryRow(ctx, `INSERT INTO identity_proofing_api_keys
+			(organization_id, customer_id, name, prefix, secret_hash, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+			orgID, customerID, name, prefix, hash[:], createdBy).Scan(&id); err != nil {
+			return fmt.Errorf("proofing: create api key customer %s: %w", customerID, err)
+		}
+		return s.audit.Record(ctx, q, audit.IdentityProofingAPIKeyCreated,
+			audit.Target{Type: audit.TargetIdentityProofingCustomer, ID: customerID.String(), OrgID: &orgID},
+			audit.Created(map[string]any{"apiKeyId": id.String(), "name": name, "prefix": prefix}))
+	})
+	if err != nil {
+		return APIKey{}, "", err
+	}
+	key, err := s.get(ctx, orgID, customerID, id)
+	return key, raw, err
+}
+
+func (s *APIKeyStore) get(ctx context.Context, orgID, customerID, id uuid.UUID) (APIKey, error) {
+	rows, err := s.db.Query(ctx, `SELECT `+apiKeyColumns+` FROM identity_proofing_api_keys
+		WHERE organization_id = $1 AND customer_id = $2 AND id = $3`, orgID, customerID, id)
+	if err != nil {
+		return APIKey{}, fmt.Errorf("proofing: read api key %s: %w", id, err)
+	}
+	key, err := pgx.CollectExactlyOneRow(rows, scanAPIKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return APIKey{}, ErrAPIKeyNotFound
+	}
+	if err != nil {
+		return APIKey{}, fmt.Errorf("proofing: read api key %s: %w", id, err)
+	}
+	return key, nil
+}
+
+// List returns a customer's keys, revoked ones included, oldest first.
+func (s *APIKeyStore) List(ctx context.Context, orgID, customerID uuid.UUID) ([]APIKey, error) {
+	rows, err := s.db.Query(ctx, `SELECT `+apiKeyColumns+` FROM identity_proofing_api_keys
+		WHERE organization_id = $1 AND customer_id = $2 ORDER BY created_at, id`, orgID, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list api keys customer %s: %w", customerID, err)
+	}
+	out, err := pgx.CollectRows(rows, scanAPIKey)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list api keys customer %s: %w", customerID, err)
+	}
+	return out, nil
+}
+
+// Revoke stops a key authenticating and audits identity_proofing.api_key_revoked.
+// Revoking a revoked key changes and audits nothing.
+func (s *APIKeyStore) Revoke(ctx context.Context, orgID, customerID, id uuid.UUID) (APIKey, error) {
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		var name, prefix string
+		err := q.QueryRow(ctx, `UPDATE identity_proofing_api_keys SET revoked_at = now()
+			WHERE organization_id = $1 AND customer_id = $2 AND id = $3 AND revoked_at IS NULL
+			RETURNING name, prefix`, orgID, customerID, id).Scan(&name, &prefix)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("proofing: revoke api key %s: %w", id, err)
+		}
+		return s.audit.Record(ctx, q, audit.IdentityProofingAPIKeyRevoked,
+			audit.Target{Type: audit.TargetIdentityProofingCustomer, ID: customerID.String(), OrgID: &orgID},
+			audit.Deleted(map[string]any{"apiKeyId": id.String(), "name": name, "prefix": prefix}))
+	})
+	if err != nil {
+		return APIKey{}, err
+	}
+	return s.get(ctx, orgID, customerID, id)
+}
+
+// Authenticate resolves a raw key to the key, its customer and org, and stamps
+// its last use. An unknown, malformed or revoked key is ErrAPIKeyInvalid.
+func (s *APIKeyStore) Authenticate(ctx context.Context, raw string) (APIKeyCaller, error) {
+	if !strings.HasPrefix(raw, apiKeyPrefix) {
+		return APIKeyCaller{}, ErrAPIKeyInvalid
+	}
+	hash := sha256.Sum256([]byte(raw))
+	var c APIKeyCaller
+	err := s.db.QueryRow(ctx, `UPDATE identity_proofing_api_keys k SET last_used_at = now()
+		FROM organizations o
+		WHERE k.secret_hash = $1 AND k.revoked_at IS NULL AND o.id = k.organization_id
+		RETURNING k.id, k.name, k.customer_id, o.id, o.name`, hash[:]).
+		Scan(&c.KeyID, &c.KeyName, &c.CustomerID, &c.Org.ID, &c.Org.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return APIKeyCaller{}, ErrAPIKeyInvalid
+	}
+	if err != nil {
+		return APIKeyCaller{}, fmt.Errorf("proofing: authenticate api key: %w", err)
+	}
+	return c, nil
+}

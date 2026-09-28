@@ -13,6 +13,10 @@ import {
   heldNeedsAttention,
   heldSections,
   heldStatus,
+  heldDaysToExpiry,
+  heldFormatLabel,
+  heldHistory,
+  heldStatusCounts,
 } from "./held-credential";
 
 const NOW = new Date("2026-06-01T12:00:00Z");
@@ -35,6 +39,8 @@ function held(overrides: Partial<HeldAttestation> = {}): HeldAttestation {
     displayName: "",
     logoUri: "",
     revoked: false,
+    format: "",
+    hasStatusList: false,
     ...overrides,
   };
 }
@@ -200,21 +206,31 @@ describe("heldSections", () => {
 
   it("splits the list into what needs attention and what is valid", () => {
     const sections = heldSections(all, noFilters, NOW);
-    expect(ids(sections.attention)).toEqual(["soon", "expired", "revoked"]);
+    expect(ids(sections.attention)).toEqual(["revoked", "expired", "soon"]);
     expect(ids(sections.valid)).toEqual(["valid"]);
   });
 
-  it("keeps the order the backend served (most recent first)", () => {
-    const sections = heldSections([revoked, expired, soon], noFilters, NOW);
-    expect(ids(sections.attention)).toEqual(["revoked", "expired", "soon"]);
+  it("puts the worst first, keeping the backend's order within one state", () => {
+    const older = held({ id: "revoked-older", revoked: true });
+    const sections = heldSections(
+      [soon, revoked, expired, older],
+      noFilters,
+      NOW,
+    );
+    expect(ids(sections.attention)).toEqual([
+      "revoked",
+      "revoked-older",
+      "expired",
+      "soon",
+    ]);
   });
 
   it("pairs each credential with the status the card badges", () => {
     const sections = heldSections(all, noFilters, NOW);
     expect(sections.attention.map((row) => row.status)).toEqual([
-      "expiringSoon",
-      "expired",
       "revoked",
+      "expired",
+      "expiringSoon",
     ]);
     expect(sections.valid[0].status).toBe("valid");
   });
@@ -225,7 +241,7 @@ describe("heldSections", () => {
       { ...noFilters, status: "attention" },
       NOW,
     );
-    expect(ids(sections.attention)).toEqual(["soon", "expired", "revoked"]);
+    expect(ids(sections.attention)).toEqual(["revoked", "expired", "soon"]);
     expect(sections.valid).toEqual([]);
   });
 
@@ -251,7 +267,7 @@ describe("heldSections", () => {
       { query: "registration", status: "attention", source: "" },
       NOW,
     );
-    expect(ids(sections.attention)).toEqual(["soon", "expired", "revoked"]);
+    expect(ids(sections.attention)).toEqual(["revoked", "expired", "soon"]);
 
     const noMatch = heldSections(
       all,
@@ -313,5 +329,91 @@ describe("held sources backend/frontend parity", () => {
 
   it.each(backendSources)("names the source %s", (source) => {
     expect(sourceLabels[source]).toBeTruthy();
+  });
+});
+
+describe("the wallet's status chips", () => {
+  it("counts every credential under its status", () => {
+    const counts = heldStatusCounts(
+      [
+        held({ revoked: true }),
+        held({ expiresAt: daysFromNow(-3) }),
+        held({ expiresAt: daysFromNow(10) }),
+        held({ expiresAt: daysFromNow(300) }),
+        held(),
+      ],
+      NOW,
+    );
+    expect(counts).toEqual({
+      "": 5,
+      valid: 2,
+      expiringSoon: 1,
+      expired: 1,
+      revoked: 1,
+    });
+  });
+
+  it("reads whole days to or since expiry", () => {
+    expect(heldDaysToExpiry(held({ expiresAt: daysFromNow(14) }), NOW)).toBe(
+      14,
+    );
+    expect(heldDaysToExpiry(held({ expiresAt: daysFromNow(-34) }), NOW)).toBe(
+      -34,
+    );
+    expect(heldDaysToExpiry(held(), NOW)).toBeNull();
+  });
+});
+
+describe("heldHistory", () => {
+  const actor = {
+    preferredName: null,
+    givenNames: "Dibran",
+    lastName: "Mulder",
+  };
+
+  it("orders the trail, naming who accepted and from whom", () => {
+    const entries = heldHistory(
+      [
+        {
+          occurredAt: "2026-07-22T06:12:00Z",
+          action: "attestation.held_status_changed",
+          metadata: { before: { revoked: false }, after: { revoked: true } },
+          actor: null,
+        },
+        {
+          occurredAt: "2026-01-09T11:05:00Z",
+          action: "attestation.held_received",
+          metadata: { after: { sender: "QTSP Nederland" } },
+          actor,
+        },
+      ],
+      {
+        receivedAt: "2026-01-09T11:05:00Z",
+        statusCheckedAt: "2026-07-23T00:00:00Z",
+      },
+    );
+    expect(entries.map((e) => e.kind)).toEqual([
+      "received",
+      "statusChanged",
+      "statusChecked",
+    ]);
+    expect(entries[0]).toMatchObject({
+      actor: "Dibran Mulder",
+      sender: "QTSP Nederland",
+    });
+    expect(entries[1].revoked).toBe(true);
+  });
+
+  it("adds the receipt of a credential received before the trail recorded it", () => {
+    const entries = heldHistory([], { receivedAt: "2026-01-09T11:05:00Z" });
+    expect(entries).toEqual([
+      { at: "2026-01-09T11:05:00Z", kind: "received", action: "" },
+    ]);
+  });
+
+  it("names SD-JWT VC formats", () => {
+    expect(heldFormatLabel("dc+sd-jwt")).toBe("SD-JWT VC");
+    expect(heldFormatLabel("mso_mdoc")).toBe("mso_mdoc");
+    expect(heldFormatLabel("")).toBe("—");
   });
 });

@@ -178,8 +178,12 @@ function tristate(value: boolean | undefined): Tristate {
   return value === undefined ? "" : value ? "true" : "false";
 }
 
+// A flow as any list returns it (the org's, or a customer's), without the
+// list's own selection flags: what the editor needs to seed a new version.
+export type EditableFlow = Omit<ProofingFlow, "allowed" | "default">;
+
 // The editor state for a new version of an existing flow.
-export function draftFromFlow(flow: ProofingFlow): ProofingFlowDraft {
+export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
   const checks = new Set(flow.requiredChecks ?? []);
   const threshold = flow.checkThresholds?.[CHECK_FACE_MATCH];
   return {
@@ -427,10 +431,300 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.customerExists");
     case "flow_not_assigned":
       return t("identityProofing.errors.flowNotAssigned");
+    case "customer_paused":
+      return t("identityProofing.errors.customerPaused");
     case "invalid_input":
     case "rejected_by_provider":
       return serverMessage(error) ?? t("identityProofing.errors.generic");
     default:
       return t("identityProofing.errors.generic");
   }
+}
+
+// The outcome counts of a set of stats rows, summed.
+export interface ProofingTotals {
+  sessions: number;
+  approved: number;
+  rejected: number;
+  needsReview: number;
+  expired: number;
+}
+
+const NO_SESSIONS: ProofingTotals = {
+  sessions: 0,
+  approved: 0,
+  rejected: 0,
+  needsReview: 0,
+  expired: 0,
+};
+
+export function sumProofingStats(
+  rows: readonly ProofingTotals[],
+): ProofingTotals {
+  return rows.reduce(
+    (sum, row) => ({
+      sessions: sum.sessions + row.sessions,
+      approved: sum.approved + row.approved,
+      rejected: sum.rejected + row.rejected,
+      needsReview: sum.needsReview + row.needsReview,
+      expired: sum.expired + row.expired,
+    }),
+    NO_SESSIONS,
+  );
+}
+
+// Stats rows summed per key: per customer, or per flow of one customer.
+export function proofingStatsBy<T extends ProofingTotals>(
+  rows: readonly T[],
+  key: (row: T) => string,
+): Map<string, ProofingTotals> {
+  const groups = new Map<string, T[]>();
+  for (const row of rows) {
+    const k = key(row);
+    groups.set(k, [...(groups.get(k) ?? []), row]);
+  }
+  return new Map([...groups].map(([k, group]) => [k, sumProofingStats(group)]));
+}
+
+export function noProofingSessions(): ProofingTotals {
+  return { ...NO_SESSIONS };
+}
+
+// The share of sessions verified, 0..1; undefined with no sessions, which a
+// percentage cannot express.
+export function verifiedShare(totals: ProofingTotals): number | undefined {
+  return totals.sessions === 0 ? undefined : totals.approved / totals.sessions;
+}
+
+// The customers whose name holds the search, ignoring case and surrounding
+// space; every customer for an empty search.
+export function searchCustomers<T extends { name: string }>(
+  customers: readonly T[],
+  search: string,
+): T[] {
+  const needle = search.trim().toLocaleLowerCase();
+  if (needle === "") {
+    return [...customers];
+  }
+  return customers.filter((c) => c.name.toLocaleLowerCase().includes(needle));
+}
+
+// A requested-data value the wallet has copy for; IPS may add others.
+export type RequestedAttribute = (typeof REQUESTED_ATTRIBUTES)[number]["value"];
+
+export function isRequestedAttribute(
+  value: string,
+): value is RequestedAttribute {
+  return REQUESTED_ATTRIBUTES.some((a) => a.value === value);
+}
+
+// A flow step the wallet has copy for.
+export type ProofingStep =
+  | typeof STEP_DOCUMENT_CAPTURE
+  | typeof STEP_NFC_READ
+  | typeof STEP_FACE_VERIFICATION;
+
+const PROOFING_STEPS: readonly string[] = [
+  STEP_DOCUMENT_CAPTURE,
+  STEP_NFC_READ,
+  STEP_FACE_VERIFICATION,
+];
+
+export function isProofingStep(value: string): value is ProofingStep {
+  return PROOFING_STEPS.includes(value);
+}
+
+// The Sessions tab's filters: every session, or one outcome. Pending, in
+// progress and under review show under "all" only.
+export const SESSION_FILTERS = [
+  "all",
+  "verified",
+  "failed",
+  "expired",
+] as const;
+export type SessionFilter = (typeof SESSION_FILTERS)[number];
+
+const FILTER_STATUS: Record<Exclude<SessionFilter, "all">, string> = {
+  verified: "approved",
+  failed: "rejected",
+  expired: "expired",
+};
+
+export function matchesSessionFilter(
+  status: string,
+  filter: SessionFilter,
+): boolean {
+  return filter === "all" || FILTER_STATUS[filter] === status;
+}
+
+export function sessionFilterCounts(
+  requests: readonly { status: string }[],
+): Record<SessionFilter, number> {
+  const count = (filter: SessionFilter): number =>
+    requests.filter((r) => matchesSessionFilter(r.status, filter)).length;
+  return {
+    all: requests.length,
+    verified: count("verified"),
+    failed: count("failed"),
+    expired: count("expired"),
+  };
+}
+
+const MS_PER_SECOND = 1000;
+const SECONDS_PER_MINUTE = 60;
+const SECONDS_PAD = 2;
+
+// How long a finished session ran, in whole seconds: from the send to its
+// outcome, or to its expiry for one nobody finished. Undefined while it runs.
+export function sessionDurationSeconds(request: {
+  status: string;
+  createdAt: string;
+  completedAt?: string | undefined;
+  linkExpiresAt: string;
+}): number | undefined {
+  const end =
+    request.completedAt ??
+    (request.status === "expired" ? request.linkExpiresAt : undefined);
+  if (end === undefined) {
+    return undefined;
+  }
+  const ms = Date.parse(end) - Date.parse(request.createdAt);
+  return Number.isFinite(ms)
+    ? Math.max(0, Math.round(ms / MS_PER_SECOND))
+    : undefined;
+}
+
+// "m:ss", as a stopwatch reads.
+export function formatDuration(seconds: number): string {
+  const minutes = Math.floor(seconds / SECONDS_PER_MINUTE);
+  const rest = String(seconds % SECONDS_PER_MINUTE).padStart(SECONDS_PAD, "0");
+  return `${minutes}:${rest}`;
+}
+
+// The short form of a request id shown in tables: enough to tell rows apart
+// and to find the full id in the audit log.
+const SHORT_ID_LENGTH = 8;
+
+export function shortRequestId(id: string): string {
+  return id.replaceAll("-", "").slice(0, SHORT_ID_LENGTH);
+}
+
+// The session settings an admin may pick for a customer, mirroring
+// SessionTTLOptions and DataRetentionDayOptions in backend/internal/proofing
+// (identity-proofing.test.ts holds the two together).
+export const SESSION_TTL_OPTIONS_SECONDS = [120, 300, 600] as const;
+export const DATA_RETENTION_DAY_OPTIONS = [7, 30, 90] as const;
+
+const SECONDS_IN_MINUTE = 60;
+
+export function ttlMinutes(seconds: number): number {
+  return Math.round(seconds / SECONDS_IN_MINUTE);
+}
+
+// How a customer reads in the lists: paused, or active and needing attention
+// because its webhook endpoint is failing, or plainly active.
+export type CustomerDisplayStatus = "active" | "paused" | "needs_attention";
+
+export function customerDisplayStatus(customer: {
+  status: string;
+  webhook: { state: string };
+}): CustomerDisplayStatus {
+  if (customer.status === "paused") {
+    return "paused";
+  }
+  return customer.webhook.state === "failing" ? "needs_attention" : "active";
+}
+
+// A delivery answered 2xx.
+const HTTP_SUCCESS_CLASS = 2;
+const HTTP_STATUS_CLASS_DIVISOR = 100;
+
+export function isSuccessStatus(code: number): boolean {
+  return Math.floor(code / HTTP_STATUS_CLASS_DIVISOR) === HTTP_SUCCESS_CLASS;
+}
+
+// The text colour readable on a #rrggbb fill (WCAG relative luminance): the
+// branding preview mirrors what the mail shell does to its button label.
+const LUMINANCE_THRESHOLD = 0.179;
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+const CHANNEL_MAX = 255;
+const SRGB_LINEAR_LIMIT = 0.03928;
+const SRGB_LINEAR_DIVISOR = 12.92;
+const SRGB_OFFSET = 0.055;
+const SRGB_SCALE = 1.055;
+const SRGB_GAMMA = 2.4;
+const LUMINANCE_WEIGHTS = [0.2126, 0.7152, 0.0722] as const;
+const HEX_RADIX = 16;
+const HEX_PAIR = 2;
+
+export function isHexColor(value: string): boolean {
+  return HEX_COLOR.test(value);
+}
+
+export function readableTextOn(hex: string): "#ffffff" | "#000000" {
+  if (!isHexColor(hex)) {
+    return "#ffffff";
+  }
+  const luminance = LUMINANCE_WEIGHTS.reduce((sum, weight, i) => {
+    const start = 1 + i * HEX_PAIR;
+    const c =
+      parseInt(hex.slice(start, start + HEX_PAIR), HEX_RADIX) / CHANNEL_MAX;
+    const linear =
+      c <= SRGB_LINEAR_LIMIT
+        ? c / SRGB_LINEAR_DIVISOR
+        : ((c + SRGB_OFFSET) / SRGB_SCALE) ** SRGB_GAMMA;
+    return sum + weight * linear;
+  }, 0);
+  return luminance > LUMINANCE_THRESHOLD ? "#000000" : "#ffffff";
+}
+
+// The app a subject proofed with, as the backend reports it (proofingprovider
+// Method). No method is a session nobody opened; an unknown one shows as is.
+export function proofingMethodLabel(
+  method: string | undefined,
+  t: TFunction,
+): string {
+  switch (method) {
+    case "idem_app":
+      return t("identityProofing.methods.idemApp");
+    case "yivi_app":
+      return t("identityProofing.methods.yiviApp");
+    case "browser":
+      return t("identityProofing.methods.browser");
+    case undefined:
+    case "":
+      return "—";
+    default:
+      return method;
+  }
+}
+
+// What a session timeline shows under an event: the app used, the assurance
+// reached and why it failed, read from the event's "after" snapshot. The
+// status change itself is the event's own label.
+export function sessionEventDetail(
+  metadata: Record<string, unknown>,
+  t: TFunction,
+): string[] {
+  const after = metadata.after;
+  if (typeof after !== "object" || after === null) {
+    return [];
+  }
+  const fields = after as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof fields.method === "string" && fields.method !== "") {
+    parts.push(proofingMethodLabel(fields.method, t));
+  }
+  if (typeof fields.eidasLevel === "string" && fields.eidasLevel !== "") {
+    parts.push(t("customers.flows.eidas", { level: fields.eidasLevel }));
+  }
+  if (typeof fields.errorCode === "string" && fields.errorCode !== "") {
+    parts.push(proofingRejectionReason(fields.errorCode, t));
+  }
+  if (typeof fields.flowVersion === "number") {
+    parts.push(
+      t("identityProofingFlows.versionShort", { version: fields.flowVersion }),
+    );
+  }
+  return parts;
 }

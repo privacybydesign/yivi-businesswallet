@@ -31,6 +31,7 @@ package proofing
 
 import (
 	"errors"
+	"regexp"
 	"slices"
 	"time"
 
@@ -48,6 +49,10 @@ const SessionTTL = 10 * time.Minute
 // IPS, so a list stays one bounded round of calls however many are open.
 const maxReconcilePerList = 10
 
+// maxReconcilePerRound bounds how many live requests the background reconciler
+// re-checks at IPS per round, across every org.
+const maxReconcilePerRound = 50
+
 // maxListedRequests caps one list read, newest first.
 const maxListedRequests = 200
 
@@ -56,10 +61,87 @@ const maxListedRequests = 200
 // act on the outcome, not a record of the person.
 const ProofedNameRetention = 30 * 24 * time.Hour
 
+// hoursPerDay converts a customer's data retention in days to a duration.
+const hoursPerDay = 24
+
+// SessionTTLOptions are the session lifetimes an admin may pick for a
+// customer; SessionTTL is the default and the longest IPS keeps a claim.
+var SessionTTLOptions = []time.Duration{2 * time.Minute, 5 * time.Minute, SessionTTL}
+
+// DataRetentionDayOptions are the proofed-name retentions, in days, an admin
+// may pick for a customer; ProofedNameRetention is the default.
+var DataRetentionDayOptions = []int{7, 30, 90}
+
+// CustomerBranding is how the proofing mail to a customer's subjects looks:
+// DisplayName signs it ("" is the customer's name), PrimaryColor colours it
+// ("" is the org's), and SupportContact and PrivacyURL are added to it ("" leaves
+// each out). HasLogo reports a stored logo, read with CustomerStore.Logo.
+type CustomerBranding struct {
+	DisplayName    string
+	PrimaryColor   string
+	SupportContact string
+	PrivacyURL     string
+	HasLogo        bool
+}
+
+// CustomerLogo is a customer's logo image, sniffed at upload.
+type CustomerLogo struct {
+	Bytes       []byte
+	ContentType string
+}
+
+// LogoChange is what a branding save does to the logo: nothing, replace it
+// with Logo, or (Replace with an empty Logo) remove it.
+type LogoChange struct {
+	Replace bool
+	Logo    CustomerLogo
+}
+
+func (b CustomerBranding) auditFields() map[string]any {
+	return map[string]any{
+		"displayName": b.DisplayName, "primaryColor": b.PrimaryColor,
+		"supportContact": b.SupportContact, "privacyUrl": b.PrivacyURL, "hasLogo": b.HasLogo,
+	}
+}
+
+// SignedAs is the name the customer's mail signs with.
+func (c Customer) SignedAs() string {
+	if c.Branding.DisplayName != "" {
+		return c.Branding.DisplayName
+	}
+	return c.Name
+}
+
+// CustomerSettings are a customer's session settings.
+type CustomerSettings struct {
+	SessionTTL        time.Duration
+	DataRetentionDays int
+}
+
+// DataRetention is DataRetentionDays as a duration.
+func (c CustomerSettings) DataRetention() time.Duration {
+	return time.Duration(c.DataRetentionDays) * hoursPerDay * time.Hour
+}
+
+func (c CustomerSettings) auditFields() map[string]any {
+	return map[string]any{
+		"sessionTtlSeconds": int(c.SessionTTL.Seconds()),
+		"dataRetentionDays": c.DataRetentionDays,
+	}
+}
+
+// hexColor is the #rrggbb form a customer's primary colour takes.
+var hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// StatsWindow is how far back the proofing overview counts requests.
+const StatsWindow = 30 * 24 * time.Hour
+
 // maxCustomerNameLength and maxSubjectNameLength bound the names a member types.
 const (
 	maxCustomerNameLength = 200
 	maxSubjectNameLength  = 200
+	maxWebhookURLLength   = 2048
+	maxSupportContactLen  = 200
 )
 
 var (
@@ -72,7 +154,17 @@ var (
 	ErrCustomerNotFound   = errors.New("proofing: customer not found")
 	ErrCustomerExists     = errors.New("proofing: a customer with this name already exists")
 	ErrFlowNotAssigned    = errors.New("proofing: flow is not assigned to the customer")
+	ErrCustomerPaused     = errors.New("proofing: proofing is paused for the customer")
+	ErrAPIKeyNotFound     = errors.New("proofing: api key not found")
+	ErrAPIKeyInvalid      = errors.New("proofing: invalid api key")
+	ErrRequestNotFound    = errors.New("proofing: request not found")
+	ErrWebhookNotFound    = errors.New("proofing: webhook not configured")
+	ErrNoCustomerLogo     = errors.New("proofing: customer has no logo")
 	ErrInvalidInput       = errors.New("proofing: invalid input")
+	// ErrWrongMethod is a Yivi-only call on a request that runs in the Idem app.
+	ErrWrongMethod = errors.New("proofing: the request does not run in the Yivi app")
+	// ErrSessionOver is a call on a request whose session can no longer run.
+	ErrSessionOver = errors.New("proofing: the request's session is over")
 )
 
 // Status is a request's lifecycle state. Expired is derived (see Request.EffectiveStatus).
@@ -99,6 +191,10 @@ type Request struct {
 	OrganizationID  uuid.UUID
 	RequestedBy     *uuid.UUID
 	RequestedByName string
+	// APIKeyID is the customer key that created the request through the API,
+	// instead of a member; APIKeyName its label, empty once the key is gone.
+	APIKeyID   *uuid.UUID
+	APIKeyName string
 	// SubjectUserID is the member the request was sent to; nil for a customer's
 	// subject, a request from before requests went to members, or once the
 	// member's user is gone.
@@ -116,7 +212,12 @@ type Request struct {
 	FlowName    string
 	// FlowVersion is the IPS flow version the session pinned; 0 when unknown.
 	FlowVersion int
-	Status      Status
+	// Method is how the subject took part; "" while no device claimed it.
+	Method proofingprovider.Method
+	// NameRetention is how long a proofed name is kept: the customer's data
+	// retention, or ProofedNameRetention for a member's request.
+	NameRetention time.Duration
+	Status        Status
 	// LinkExpiresAt is when the mailed session ends: its IPS expiry at send.
 	LinkExpiresAt  time.Time
 	AssuranceLevel string
@@ -231,7 +332,29 @@ type NewRequest struct {
 	SubjectEmail  string
 	SubjectName   string
 	FlowID        string
+	// SkipMail leaves the mail out: an API caller that shows the deep link in
+	// its own interface.
+	SkipMail bool
+	// Method is the app the subject proofs with: the Idem app (vcmrtd, the
+	// default when empty) or the Yivi app.
+	Method proofingprovider.Method
+	// Channel is how the subject gets the session: mailed (the default when
+	// empty), or shown on the sender's screen, where the subject scans it.
+	Channel Channel
 }
+
+// Channel is how a request reaches its subject.
+type Channel string
+
+const (
+	// ChannelEmail mails the session's QR code and link: the mail is the session.
+	ChannelEmail Channel = "email"
+	// ChannelOnScreen shows the session on the sender's screen once the subject
+	// accepted what will be collected: nothing is mailed, and a customer's
+	// subject needs no address. The Yivi app's face check runs on that screen,
+	// so a Yivi session is only ever delivered this way.
+	ChannelOnScreen Channel = "on_screen"
+)
 
 // Subject is who a stored request went to: a member (UserID) or a customer's
 // subject (CustomerID), never both.
@@ -248,8 +371,45 @@ type Customer struct {
 	OrganizationID uuid.UUID
 	Name           string
 	Flows          FlowSelection
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// PausedAt is when an admin paused proofing for the customer; nil while it
+	// is active.
+	PausedAt  *time.Time
+	Settings  CustomerSettings
+	Branding  CustomerBranding
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// CustomerStatus is whether new requests can be sent for a customer.
+type CustomerStatus string
+
+const (
+	CustomerActive CustomerStatus = "active"
+	CustomerPaused CustomerStatus = "paused"
+)
+
+// Paused reports whether proofing is paused for the customer.
+func (c Customer) Paused() bool { return c.PausedAt != nil }
+
+// Status is the customer's CustomerStatus.
+func (c Customer) Status() CustomerStatus {
+	if c.Paused() {
+		return CustomerPaused
+	}
+	return CustomerActive
+}
+
+// StatsRow counts one customer's requests on one flow within StatsWindow, by
+// outcome. Sessions is every request sent; what the outcome counts leave is
+// still pending or in progress.
+type StatsRow struct {
+	CustomerID  uuid.UUID
+	FlowID      string
+	Sessions    int
+	Approved    int
+	Rejected    int
+	NeedsReview int
+	Expired     int
 }
 
 // CustomerFlow is one of the org's IPS flows with a customer's assignment applied.

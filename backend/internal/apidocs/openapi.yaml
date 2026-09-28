@@ -1052,6 +1052,70 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/held/{id}/history:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Held credential id.
+    get:
+      tags: [attestation]
+      summary: Get a held credential's history
+      description: >-
+        Requires organisation membership. The audit events about the held credential,
+        oldest first: received, each status change its issuer's status list reported,
+        removal.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/held/recheck:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [attestation]
+      summary: Re-check the status of the held credentials
+      description: >-
+        Requires an administrator role in the organisation. Re-reads the issuer status
+        list of every credential the organisation holds (it also runs every six hours)
+        and audits each one that moved between valid and revoked. Answers `changed`,
+        how many did.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/attestations/held/{id}:
     parameters:
       - name: slug
@@ -4258,7 +4322,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned.
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned, or proofing is paused for the customer (`customer_paused`).
           content:
             application/json:
               schema:
@@ -4269,6 +4333,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/events:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Request (session) id.
+    get:
+      tags: [identity-proofing]
+      summary: Get a proofing request's timeline
+      description: >-
+        Requires organisation membership. Every audit event about the request, oldest
+        first: sent, session created and started, the outcome or expiry. An
+        administrator sees any request's, a member only one they sent.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/identity-proofing/stats:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: Count customer proofing requests of the last 30 days
+      description: >-
+        Requires organisation membership. Counts the requests sent for the
+        organisation's customers since `since` (30 days ago), one row per customer and
+        flow: `sessions` sent, and of those `approved`, `rejected`, `needsReview` and
+        `expired`; the rest are still pending or in progress. An administrator's counts
+        cover every request of the organisation, a member's the requests they sent. The
+        counts are as last reconciled by a request list read.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/customers:
     parameters:
       - name: slug
@@ -4356,8 +4486,14 @@ paths:
           $ref: '#/components/responses/NotFound'
     patch:
       tags: [identity-proofing]
-      summary: Rename a customer
-      description: Requires an administrator role in the organisation. `name`, as on create.
+      summary: Rename, pause or resume a customer
+      description: >-
+        Requires an administrator role in the organisation. `name`, as on create,
+        and/or `paused`: while a customer is paused (`status` `paused`), no request can
+        be sent for it; requests already sent run out as usual. An absent field is left
+        as it is. `sessionTtlSeconds` (120, 300 or 600) is how long a mailed session
+        runs; `dataRetentionDays` (7, 30 or 90) how long an approved subject's name is
+        kept.
       responses:
         '2XX':
           description: Successful response.
@@ -4379,6 +4515,500 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+    delete:
+      tags: [identity-proofing]
+      summary: Remove a customer
+      description: >-
+        Requires an administrator role in the organisation. Deletes the customer with
+        every session sent for it (its subjects' addresses, names and outcomes), its API
+        keys and webhook endpoint. The audit trail stays.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/customers/{customerID}/api-keys:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: customerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Customer id.
+    get:
+      tags: [identity-proofing]
+      summary: List a customer's API keys
+      description: >-
+        Requires an administrator role in the organisation. Every key of the customer,
+        revoked ones included, oldest first: its name, its public `prefix`, when it was
+        created and last used, and `revokedAt` once revoked. Never a secret.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [identity-proofing]
+      summary: Create a customer API key
+      description: >-
+        Requires an administrator role in the organisation. `name` labels the key. The
+        answer carries the key's `secret` (`yp_live_…`), the one time it is readable: only
+        its SHA-256 is kept. The customer's backend sends it as a Bearer token to the
+        public `/api/v1/proofing` routes.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/customers/{customerID}/api-keys/{keyID}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: customerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Customer id.
+      - name: keyID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: API key id.
+    delete:
+      tags: [identity-proofing]
+      summary: Revoke a customer API key
+      description: >-
+        Requires an administrator role in the organisation. The key stops
+        authenticating at once and stays listed with `revokedAt`. Revoking it again changes
+        nothing.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/customers/{customerID}/branding:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: customerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Customer id.
+    put:
+      tags: [identity-proofing]
+      summary: Set a customer's branding
+      description: >-
+        Requires an administrator role in the organisation. A multipart form:
+        `displayName` (the name the proofing mail signs with; empty is the customer's
+        name), `primaryColor` (`#rrggbb`; empty is the organisation's), `supportContact`
+        and `privacyUrl` (an https URL), each added to the mail and left out when empty,
+        and a `logo` file (PNG, JPEG, GIF or WebP, at most 512 KiB; mail clients do not
+        render SVG) or `removeLogo=true`. Returns the customer.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: The logo is too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/customers/{customerID}/logo:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: customerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Customer id.
+    get:
+      tags: [identity-proofing]
+      summary: Get a customer's logo
+      description: >-
+        Requires organisation membership. The logo image, served with a locked-down
+        content security policy.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/customers/{customerID}/webhook:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: customerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Customer id.
+    get:
+      tags: [identity-proofing]
+      summary: Get a customer's webhook endpoint
+      description: >-
+        Requires an administrator role in the organisation. `configured` is false for a
+        customer without one. The endpoint's `url`, subscribed `events`, the last four
+        characters of its signing secret, its `health` (`delivering`, `failing` since
+        `failingSince` with `pendingRetries`, or `not_configured`), the `availableEvents`
+        and `maxAttempts`.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [identity-proofing]
+      summary: Set a customer's webhook endpoint
+      description: >-
+        Requires an administrator role in the organisation. `url` (absolute https; it
+        must resolve to a public address when an event is sent) and `events`, at least one
+        of `session.verified`, `session.failed`, `session.expired` and `session.purged`. A
+        new endpoint's answer carries its signing `secret` (`whsec_…`), the one time it is
+        readable. Each event is a POST of `{id, type, createdAt, data}` (the session id,
+        outcome and assurance; never the person's name or address) signed in the
+        `Yivi-Signature` header as `t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`, with
+        `Yivi-Event` and `Yivi-Delivery`. A non-2xx answer is retried with exponential
+        back-off, up to 8 attempts over about 24 hours.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The deployment has no identity proofing encryption key to seal the secret with.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [identity-proofing]
+      summary: Remove a customer's webhook endpoint
+      description: >-
+        Requires an administrator role in the organisation. Deliveries still waiting
+        for it are dropped.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/customers/{customerID}/webhook/rotate-secret:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: customerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Customer id.
+    post:
+      tags: [identity-proofing]
+      summary: Rotate a customer's webhook signing secret
+      description: >-
+        Requires an administrator role in the organisation. The answer carries the new
+        `secret`, the one time it is readable; deliveries still waiting are signed with it.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/customers/{customerID}/webhook/test:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: customerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Customer id.
+    post:
+      tags: [identity-proofing]
+      summary: Send a test webhook event
+      description: >-
+        Requires an administrator role in the organisation. Queues a `test` event for
+        the endpoint, whatever it subscribed to; it is sent within seconds.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/customers/{customerID}/webhook/deliveries:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: customerID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Customer id.
+    get:
+      tags: [identity-proofing]
+      summary: List a customer's recent webhook deliveries
+      description: >-
+        Requires an administrator role in the organisation. The 20 most recent, newest
+        first: the event, the session it is about, its state (`pending`, `delivered` or
+        `failed`), attempts, and the last status code or error.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/proofing/flows:
+    get:
+      tags: [identity-proofing]
+      summary: List the customer's flows (public API)
+      description: >-
+        Authenticated with a customer API key as a Bearer token, not a session. The
+        flows assigned to the key's customer that a subject can finish, with the default
+        one marked.
+      security:
+        - customerApiKey: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/proofing/sessions:
+    post:
+      tags: [identity-proofing]
+      summary: Create a proofing session (public API)
+      description: >-
+        Authenticated with a customer API key as a Bearer token. `email` and an optional
+        `name` of the subject, `flowId` (absent is the customer's default flow) and
+        `sendMail` (absent or true mails the subject as a member's request would). The
+        answer carries the session's vcmrtd `deepLink`, for a caller that shows the QR code
+        itself, and `mailSent`. Refused while the customer is paused.
+      security:
+        - customerApiKey: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Proofing is paused for the customer, or the deployment has no encryption key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The flow does not exist, cannot be completed in the app, or is not assigned to the customer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/sessions/{sessionID}:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Session id, as the create answer gave it.
+    get:
+      tags: [identity-proofing]
+      summary: Get a proofing session (public API)
+      description: >-
+        Authenticated with a customer API key as a Bearer token. One of the customer's
+        sessions, re-checked at the identity-proofing-service first while it may still
+        change: its `status`, assurance, `errorCode`, and for an approved subject the name
+        read off the document (`proofedName`) until the customer's data retention clears
+        it.
+      security:
+        - customerApiKey: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/customers/{customerID}/flows:
     parameters:
       - name: slug
@@ -6036,6 +6666,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 components:
   securitySchemes:
+    customerApiKey:
+      type: http
+      scheme: bearer
+      description: A proofing customer's API key (`yp_live_…`), for the public `/api/v1/proofing` routes.
     cookieAuth:
       type: apiKey
       in: cookie

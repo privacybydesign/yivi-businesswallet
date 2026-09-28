@@ -150,6 +150,36 @@ func TestSessionResultDecodesAssuranceAndNameOnly(t *testing.T) {
 	}
 }
 
+// The method is read off the devices that took part and a Yivi disclosure,
+// never off anything that identifies the device or the person.
+func TestSessionResultDecodesTheMethod(t *testing.T) {
+	cases := map[string]struct {
+		body string
+		want Method
+	}{
+		"nobody opened it": {`{"status":"created","devices":[]}`, ""},
+		"idem app":         {`{"status":"in_progress","devices":[{"deviceId":"d1","role":"native","via":"claim"}]}`, MethodIdem},
+		"web then idem": {`{"status":"approved","devices":[{"deviceId":"d1","role":"web","via":"claim"},` +
+			`{"deviceId":"d2","role":"native","via":"handover"}]}`, MethodIdem},
+		"browser only": {`{"status":"in_progress","devices":[{"deviceId":"d1","role":"web","via":"claim"}]}`, MethodBrowser},
+		"yivi":         {`{"status":"approved","result":{"disclosure":{"source":"yivi"}},"devices":[{"role":"web"}]}`, MethodYivi},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			client, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			})
+			res, err := client.SessionResult(context.Background(), testAPIKey, "s1", testSessionToken)
+			if err != nil {
+				t.Fatalf("SessionResult: %v", err)
+			}
+			if res.Method != tc.want {
+				t.Errorf("method = %q, want %q", res.Method, tc.want)
+			}
+		})
+	}
+}
+
 func TestErrorsMapAndRedact(t *testing.T) {
 	status := http.StatusBadRequest
 	client, srv := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {

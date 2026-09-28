@@ -42,7 +42,8 @@ export const nl: Translation<typeof en> = {
     dashboard: "Dashboard",
     members: "Leden",
     identityProofing: "Identiteitsverificatie",
-    identityProofingFlows: "Verificatieflows",
+    identityProofingOverview: "Overzicht",
+    identityProofingFlows: "Flows",
     customers: "Klanten",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
@@ -427,6 +428,49 @@ export const nl: Translation<typeof en> = {
     title: "Identiteitsverificatie",
     subtitle:
       "Verifieer iemands identiteit met een identiteitsdocument en gezicht.",
+    overview: {
+      apiDocs: "API-documentatie",
+      title: "Overzicht",
+      subtitle:
+        "Identiteitscontroles die je voor je klanten uitvoert. Laatste 30 dagen.",
+      stats: {
+        sessions: "Sessies",
+        sessionsHint_one: "voor {{count}} klant",
+        sessionsHint_other: "voor {{count}} klanten",
+        verified: "Geverifieerd",
+        verifiedHint: "{{share}} van de sessies",
+        failed: "Mislukt",
+        failedHint: "Niet door de controles gekomen",
+        expired: "Verlopen",
+        expiredHint: "Niet binnen 10 minuten afgerond",
+        noSessions: "Nog geen sessies",
+      },
+      recent: {
+        title: "Recente sessies",
+        scope: "alle klanten",
+        scopeOwn: "door jou verstuurd",
+        customer: "Klant",
+        flow: "Flow",
+        result: "Resultaat",
+        started: "Gestart",
+        empty: "Nog geen sessies.",
+      },
+      customers: {
+        title: "Klanten",
+        viewAll: "Alles bekijken",
+        empty: "Nog geen klanten.",
+        summary: "{{count}} sessies · {{share}} geverifieerd",
+        noSessions: "Geen sessies in 30 dagen",
+        webhookAlertNoAnswer_one:
+          "{{name}}: webhook antwoordt niet sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
+        webhookAlertNoAnswer_other:
+          "{{name}}: webhook antwoordt niet sinds {{since}}. {{count}} resultaten wachten op een nieuwe poging.",
+        webhookAlert_one:
+          "{{name}}: webhook geeft {{code}} sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
+        webhookAlert_other:
+          "{{name}}: webhook geeft {{code}} sinds {{since}}. {{count}} resultaten wachten op een nieuwe poging.",
+      },
+    },
     requests: {
       title: "Verzoeken",
       titleOwn: "Jouw verzoeken",
@@ -440,11 +484,16 @@ export const nl: Translation<typeof en> = {
       customer: "Klant",
       verifiedAs: "Geverifieerd als {{name}}",
     },
+    methods: {
+      idemApp: "Idem-app",
+      yiviApp: "Yivi-app",
+      browser: "Browser",
+    },
     status: {
       pending: "Link verstuurd",
       inProgress: "Bezig",
       approved: "Geverifieerd",
-      rejected: "Afgewezen",
+      rejected: "Mislukt",
       needsReview: "Wordt beoordeeld",
       expired: "Verlopen",
     },
@@ -471,24 +520,34 @@ export const nl: Translation<typeof en> = {
       customerExists: "Je organisatie heeft al een klant met deze naam.",
       flowNotAssigned:
         "Die flow is niet meer aan deze klant toegewezen. Kies een andere.",
+      customerPaused:
+        "Verificatie is gepauzeerd voor deze klant. Een beheerder kan het hervatten op de pagina van de klant.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
     },
   },
   customers: {
     title: "Klanten",
     subtitle:
-      "De klanten van je organisatie, de flows die elk mag gebruiken, en de mensen die je voor hen verifieert.",
+      "Organisaties waarvoor je mensen verifieert. Elk heeft eigen flows en sessies.",
+    add: "Klant toevoegen",
+    status: {
+      active: "Actief",
+      paused: "Gepauzeerd",
+      needsAttention: "Aandacht nodig",
+    },
     list: {
-      title: "Klanten",
-      hint: "Een klant heeft geen eigen login: leden van je organisatie versturen verificatieverzoeken voor de klant, op de flows die aan de klant zijn toegewezen.",
-      empty: "Nog geen klanten.",
+      search: "Klanten zoeken",
+      count_one: "{{count}} klant",
+      count_other: "{{count}} klanten",
       name: "Klant",
-      flows: "Toegewezen flows",
-      created: "Toegevoegd",
-      noFlows: "Geen toegewezen",
-      flowCount_one: "{{count}} flow",
-      flowCount_other: "{{count}} flows",
-      open: "{{name}} openen",
+      flows: "Flows",
+      sessions: "Sessies 30d",
+      verified: "Geverifieerd",
+      status: "Status",
+      added: "Toegevoegd {{date}}",
+      empty: "Nog geen klanten.",
+      noMatch: "Geen klant komt overeen met je zoekopdracht.",
+      webhook: "Webhook",
     },
     new: {
       title: "Nieuwe klant",
@@ -496,18 +555,59 @@ export const nl: Translation<typeof en> = {
       namePlaceholder: "Initech BV",
       nameRequired: "Vul een naam in.",
       create: "Klant toevoegen",
+      cancel: "Annuleren",
     },
     detail: {
-      back: "Alle klanten",
-      rename: "Hernoemen",
-      name: "Naam",
-      save: "Opslaan",
-      cancel: "Annuleren",
+      since_one:
+        "{{id}} · klant sinds {{date}} · {{count}} sessie in de laatste 30 dagen",
+      since_other:
+        "{{id}} · klant sinds {{date}} · {{count}} sessies in de laatste 30 dagen",
       notFound: "Deze klant bestaat niet.",
+      verify: "Een persoon verifiëren",
+      pause: "Verificatie pauzeren",
+      resume: "Verificatie hervatten",
+      pausedNotice:
+        "Verificatie is gepauzeerd voor deze klant: er kan geen nieuw verzoek worden verstuurd totdat een beheerder het hervat.",
+      pauseConfirm: {
+        title: "Verificatie pauzeren voor {{name}}?",
+        message:
+          "Er kan geen nieuw verzoek voor deze klant worden verstuurd totdat je het hervat. Verzoeken die al verstuurd zijn lopen gewoon af.",
+        confirm: "Verificatie pauzeren",
+      },
+    },
+    tabs: {
+      flows: "Flows",
+      sessions: "Sessies",
+      settings: "Instellingen",
+      branding: "Huisstijl",
+      apiKeys: "API-sleutels",
+      webhooks: "Webhooks",
     },
     flows: {
+      live: "Actief",
+      eidas: "eIDAS {{level}}",
+      intro:
+        "Een flow bepaalt welke gegevens worden gevraagd en het minimale betrouwbaarheidsniveau. Verzoeken voor deze klant kunnen de hier toegewezen flows gebruiken.",
+      sharedEditNote:
+        "Flows worden gedeeld: deze wijziging geldt voor elke klant en elk lid dat deze flow gebruikt.",
+      newFlowNote: "De nieuwe flow wordt meteen aan {{name}} toegewezen.",
+      newFlow: "Nieuwe flow",
+      assignExisting: "Bestaande flows toewijzen",
+      assignFailed:
+        "De flow is opgeslagen, maar niet aan deze klant toegewezen: {{reason}}",
+      noneAssignedAdmin:
+        "Er zijn nog geen flows aan deze klant toegewezen. Maak er een met Nieuwe flow, of wijs een bestaande flow van je organisatie toe.",
+      done: "Klaar",
+      noneAssigned: "Er zijn nog geen flows aan deze klant toegewezen.",
+      sessions_one: "{{count}} sessie in 30 dagen",
+      sessions_other: "{{count}} sessies in 30 dagen",
+      requestedData: "Gevraagde gegevens",
+      assuranceSteps: "Betrouwbaarheid · stappen",
+      noAssurance: "Geen minimumniveau",
+      noData: "Niets gevraagd",
+      edit: "Flow bewerken",
       title: "Toegewezen flows",
-      hint: "Verzoeken voor deze klant kunnen de hier aangevinkte flows gebruiken, ook als leden ze niet mogen gebruiken; de standaardflow is voorgeselecteerd. Flows maak je onder Verificatieflows.",
+      hint: "Verzoeken voor deze klant kunnen de hier aangevinkte flows gebruiken, ook als leden ze niet mogen gebruiken; de standaardflow is voorgeselecteerd. Flows maak je onder",
       empty: "Je organisatie heeft nog geen flows.",
       default: "Standaard",
       save: "Toegewezen flows opslaan",
@@ -522,13 +622,184 @@ export const nl: Translation<typeof en> = {
         "Laat leeg als je die niet weet: na verificatie staat de naam van het document hier 30 dagen.",
       flow: "Flow",
       submit: "Verzoek versturen",
-      noFlowsAdmin: "Wijs eerst een flow aan deze klant toe.",
+      cancel: "Annuleren",
+      noFlowsAdmin:
+        "Wijs eerst een flow aan deze klant toe, op het tabblad Flows.",
       noFlowsMember:
         "Een beheerder moet eerst een flow aan deze klant toewijzen voordat je een verzoek kunt versturen.",
     },
-    requests: {
-      title: "Verzoeken voor deze klant",
-      titleOwn: "Jouw verzoeken voor deze klant",
+    sessions: {
+      method: "Methode",
+      timeline: "Tijdlijn",
+      noEvents: "Nog niets vastgelegd.",
+      filterLabel: "Sessies filteren",
+      filters: {
+        all: "Alle {{count}}",
+        verified: "Geverifieerd {{count}}",
+        failed: "Mislukt {{count}}",
+        expired: "Verlopen {{count}}",
+      },
+      retention_one:
+        "De naam van een document wordt {{count}} dag na verificatie gewist. Resultaten en het auditspoor blijven.",
+      retention_other:
+        "De naam van een document wordt {{count}} dagen na verificatie gewist. Resultaten en het auditspoor blijven.",
+      retentionOwn_one:
+        "Je ziet de sessies die jij verstuurde. De naam van een document wordt {{count}} dag na verificatie gewist.",
+      retentionOwn_other:
+        "Je ziet de sessies die jij verstuurde. De naam van een document wordt {{count}} dagen na verificatie gewist.",
+      viaApiKey: "API-sleutel · {{name}}",
+      session: "Sessie",
+      result: "Resultaat",
+      started: "Gestart",
+      duration: "Duur",
+      details: "Details van sessie {{id}}",
+      fullId: "Sessie-id",
+      reason: "Reden",
+      completed: "Afgerond",
+      failedBecause: "{{status}} · {{reason}}",
+    },
+    settings: {
+      sessionsTitle: "Sessies",
+      qrLifetime: "Geldigheid QR-code",
+      qrLifetimeHint:
+        "Daarna verloopt de sessie en is een nieuw verzoek nodig.",
+      minutes_one: "{{count}} min",
+      minutes_other: "{{count}} min",
+      retention: "Bewaartermijn",
+      retentionHint:
+        "De naam van een goedgekeurd document wordt na deze periode gewist.",
+      days_one: "{{count}} dag",
+      days_other: "{{count}} dagen",
+      nameTitle: "Naam",
+      nameHint: "Zichtbaar voor je leden en in het auditlog.",
+      save: "Opslaan",
+      removeTitle: "Klant verwijderen",
+      removeHint:
+        "Trekt de API-sleutels in, verwijdert de webhook en wist de sessies. Auditlog-regels blijven bewaard.",
+      remove: "Klant verwijderen",
+      removeConfirm: {
+        title: "{{name}} verwijderen?",
+        message:
+          "De API-sleutels werken niet meer, de webhook wordt verwijderd en elke sessie voor deze klant wordt gewist, met de adressen en namen van de personen. Het auditlog bewaart wat er gebeurde. Dit kan niet ongedaan worden gemaakt.",
+      },
+    },
+    webhookState: {
+      delivering: "Levert af",
+      deliveringCode: "Levert af · {{code}}",
+      failing: "Faalt · {{code}} sinds {{since}}",
+      failingNoAnswer: "Faalt · geen antwoord sinds {{since}}",
+      notConfigured: "Niet ingesteld",
+    },
+    secret: {
+      copy: "Kopiëren",
+      copied: "Gekopieerd",
+      done: "Ik heb het bewaard",
+    },
+    branding: {
+      title: "Huisstijl van de mail",
+      hint: "De verificatiemail die de personen van je klant krijgen, is ondertekend en opgemaakt als de klant.",
+      displayName: "Weergavenaam",
+      displayNameHint:
+        "Ondertekent de verificatiemail en het onderwerp. Leeg gebruikt de naam van de klant.",
+      logo: "Logo",
+      logoSet: "Huidig logo",
+      noLogo: "Geen logo: de weergavenaam staat er in plaats daarvan",
+      logoHint:
+        "PNG, JPEG, GIF of WebP, hooguit 512 KB. Mailprogramma's tonen geen SVG.",
+      upload: "Uploaden",
+      replace: "Vervangen",
+      removeLogo: "Verwijderen",
+      primaryColor: "Primaire kleur",
+      customColor: "Kies een kleur",
+      orgColor: "Standaard",
+      colorInvalid: "Vul een hexkleur in zoals #1F5B4A.",
+      primaryColorHint:
+        "Gebruikt voor de knop en het merkteken van de mail. De tekst erop wordt aangepast voor contrast.",
+      supportContact: "Supportcontact",
+      supportPlaceholder: "klantenservice@example.nl",
+      privacyUrl: "URL van de privacyverklaring",
+      privacyPlaceholder: "https://example.nl/privacy",
+      discard: "Verwerpen",
+      save: "Huisstijl opslaan",
+      preview: {
+        caption: "Live voorbeeld · verificatiemail",
+        heading: "{{name}} vraagt je je identiteit te verifiëren",
+        body: "{{name}} vraagt je je identiteit te verifiëren met je paspoort of identiteitskaart en je gezicht, in de vcmrtd-app op je telefoon.",
+        button: "Openen in de vcmrtd-app",
+        support: "Vragen over dit verzoek? Neem contact op met {{contact}}.",
+        privacy: "Hoe er met je gegevens wordt omgegaan: {{url}}",
+        footer: "Identiteitscontrole door Yivi",
+      },
+    },
+    apiKeys: {
+      intro:
+        "De backend van de klant maakt met deze sleutels sessies aan en leest de uitkomst via de verificatie-API.",
+      create: "API-sleutel aanmaken",
+      name: "Naam",
+      namePlaceholder: "Productiebackend",
+      key: "Sleutel",
+      prefix: "{{prefix}}…",
+      created: "Aangemaakt",
+      lastUsed: "Laatst gebruikt",
+      neverUsed: "Nooit",
+      empty: "Nog geen API-sleutels.",
+      revoked: "Ingetrokken",
+      revoke: "Intrekken",
+      revokeConfirm: {
+        title: "{{name}} intrekken?",
+        message:
+          "De backend van de klant kan deze sleutel meteen niet meer gebruiken. Dit kan niet ongedaan worden gemaakt.",
+      },
+      createdTitle: "Je nieuwe API-sleutel",
+      createdHint:
+        "Kopieer hem nu en geef hem veilig aan de klant: hij wordt niet opnieuw getoond. Alleen een hash ervan wordt bewaard.",
+      usageTitle: "De API gebruiken",
+      usageHint:
+        "Stuur de sleutel mee als Bearer-token. Zonder flowId wordt de standaardflow van de klant gebruikt; met sendMail false toon je de deepLink uit het antwoord zelf als QR-code.",
+    },
+    webhooks: {
+      endpoint: "Endpoint",
+      formHint:
+        "De wallet stuurt een ondertekend bericht naar deze URL als een sessie geverifieerd is, mislukt, verloopt of als de persoonsgegevens gewist zijn.",
+      url: "URL",
+      urlPlaceholder: "https://api.example.nl/hooks/yivi-proofing",
+      events: "Gebeurtenissen",
+      save: "Endpoint opslaan",
+      delivering: "Levert af",
+      failing: "Faalt",
+      secret: "Ondertekeningsgeheim",
+      retries: "Herhalingen",
+      retriesValue_one:
+        "Exponentieel uitstel, tot {{count}} poging binnen 24 uur",
+      retriesValue_other:
+        "Exponentieel uitstel, tot {{count}} pogingen binnen 24 uur",
+      queued_one: "{{count}} resultaat wacht op een nieuwe poging",
+      queued_other: "{{count}} resultaten wachten op een nieuwe poging",
+      test: "Testbericht sturen",
+      rotate: "Geheim vernieuwen",
+      edit: "Bewerken",
+      remove: "Verwijderen",
+      rotateConfirm: {
+        title: "Ondertekeningsgeheim vernieuwen?",
+        message:
+          "Berichten worden vanaf nu met het nieuwe geheim ondertekend, ook de berichten die op een nieuwe poging wachten. De klant moet overstappen.",
+      },
+      removeConfirm: {
+        title: "Webhook-endpoint verwijderen?",
+        message:
+          "Er worden geen berichten meer naartoe gestuurd, en de berichten die op een nieuwe poging wachten vervallen.",
+      },
+      secretTitle: "Je ondertekeningsgeheim",
+      secretHint:
+        "Kopieer het nu en geef het veilig aan de klant: het wordt niet opnieuw getoond. De klant controleert er de Yivi-Signature-header mee.",
+      recent: "Recente afleveringen",
+      notConfigured: "Stel een endpoint in om de afleveringen hier te zien.",
+      noDeliveries: "Nog geen berichten verstuurd.",
+      queuedTag: "In de wachtrij",
+      noAnswer: "Geen antwoord",
+      retrying_one: "poging {{count}} mislukt, opnieuw",
+      retrying_other: "{{count}} pogingen mislukt, opnieuw",
+      gaveUp: "opgegeven",
     },
   },
   identityProofingFlows: {
@@ -742,6 +1013,12 @@ export const nl: Translation<typeof en> = {
     home: "Terug naar home",
   },
   toasts: {
+    attestationHeldRecheckedSame:
+      "Status opnieuw gecontroleerd: niets veranderd",
+    attestationHeldRechecked_one:
+      "Status opnieuw gecontroleerd: {{count}} credential veranderd",
+    attestationHeldRechecked_other:
+      "Status opnieuw gecontroleerd: {{count}} credentials veranderd",
     dismiss: "Sluiten",
     error: "Er is iets misgegaan. Probeer het opnieuw.",
     invitationSent: "Uitnodiging verstuurd",
@@ -811,6 +1088,15 @@ export const nl: Translation<typeof en> = {
     identityProofingRequestSent: "Verzoek verstuurd",
     identityProofingCustomerCreated: "Klant toegevoegd",
     identityProofingCustomerRenamed: "Klant hernoemd",
+    identityProofingCustomerPaused: "Verificatie gepauzeerd",
+    identityProofingCustomerResumed: "Verificatie hervat",
+    identityProofingCustomerRemoved: "Klant verwijderd",
+    identityProofingBrandingSaved: "Huisstijl opgeslagen",
+    identityProofingApiKeyRevoked: "API-sleutel ingetrokken",
+    identityProofingWebhookSaved: "Webhook opgeslagen",
+    identityProofingWebhookRemoved: "Webhook verwijderd",
+    identityProofingWebhookTestQueued: "Testbericht in de wachtrij",
+    identityProofingCustomerSettingsSaved: "Sessie-instellingen opgeslagen",
     identityProofingCustomerFlowsSaved: "Toegewezen flows opgeslagen",
     notificationSettingsSaved: "Notificatie-instellingen opgeslagen",
     provisioningSettingsSaved:
@@ -920,6 +1206,7 @@ export const nl: Translation<typeof en> = {
     },
     noSubject: "—",
     fields: {
+      method: "Methode",
       assuranceLevel: "Betrouwbaarheid",
       eidasLevel: "eIDAS-niveau",
       errorCode: "Reden",
@@ -968,6 +1255,9 @@ export const nl: Translation<typeof en> = {
       identityProofingCustomer: "Identiteitsverificatieklant",
     },
     actions: {
+      attestationHeldReceived: "Credential ontvangen",
+      attestationHeldStatusChanged:
+        "Status van credential gewijzigd bij de uitgever",
       orgCreated: "Organisatie aangemaakt",
       orgUpdated: "Organisatie bijgewerkt",
       orgDeleted: "Organisatie verwijderd",
@@ -1085,9 +1375,15 @@ export const nl: Translation<typeof en> = {
       identityProofingNeedsReview:
         "Identiteitsverificatie moet beoordeeld worden",
       identityProofingCustomerCreated: "Identiteitsverificatieklant toegevoegd",
-      identityProofingCustomerUpdated: "Identiteitsverificatieklant hernoemd",
+      identityProofingCustomerUpdated: "Identiteitsverificatieklant bijgewerkt",
       identityProofingCustomerFlowsConfigured:
         "Aan een klant toegewezen identiteitsverificatieflows gewijzigd",
+      identityProofingCustomerRemoved: "Identiteitsverificatieklant verwijderd",
+      identityProofingApiKeyCreated: "API-sleutel van klant aangemaakt",
+      identityProofingApiKeyRevoked: "API-sleutel van klant ingetrokken",
+      identityProofingWebhookConfigured: "Webhook van klant ingesteld",
+      identityProofingWebhookSecretRotated: "Webhookgeheim van klant vernieuwd",
+      identityProofingWebhookRemoved: "Webhook van klant verwijderd",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
     },
@@ -2444,6 +2740,72 @@ export const nl: Translation<typeof en> = {
       loadError: "Kan de aanbiedingen niet laden: {{message}}",
     },
     held: {
+      chip: "{{label}}  {{count}}",
+      shown_one: "{{shown}} van {{count}} credential",
+      shown_other: "{{shown}} van {{count}} credentials",
+      noMatchHint: "Probeer een ander filter of wis de zoekopdracht.",
+      credentialCount_one: "{{count}} credential",
+      credentialCount_other: "{{count}} credentials",
+      line: {
+        revoked: "ingetrokken door de uitgever",
+        expired: "verlopen {{date}}",
+        expiring_one: "verloopt over {{count}} dag",
+        expiring_other: "verloopt over {{count}} dagen",
+      },
+      reason: {
+        revoked: "Op de statuslijst van de uitgever",
+        revokedChecked: "Ingetrokken gezien {{date}}",
+        expired_one: "{{count}} dag geleden verlopen",
+        expired_other: "{{count}} dagen geleden verlopen",
+        expiring: "Vernieuwen voor {{date}}",
+      },
+      banner: {
+        revoked: "Ingetrokken door de uitgever",
+        revokedChecked: "Ingetrokken door de uitgever, gezien {{date}}",
+        revokedBody:
+          "De uitgever heeft deze credential op zijn statuslijst gezet. Hij kan niet meer worden getoond: elke verificateur die de statuslijst controleert, weigert hem. Verwijderen uit de wallet maakt de intrekking niet ongedaan.",
+        expired: "Verlopen op {{date}}",
+        expiredBody:
+          "De attributen hieronder zijn nog leesbaar, maar verificateurs weigeren hem totdat je een nieuwe van de uitgever ontvangt.",
+        expiring: "Verloopt op {{date}}",
+        expiringBody:
+          "Vraag de uitgever voor die datum om een nieuwe om onderbreking te voorkomen.",
+        valid: "Geldig tot {{date}}",
+        validForever: "Geldig, verloopt niet",
+        validBody:
+          "De handtekening en de uitgever zijn bij ontvangst gecontroleerd, en de status wordt opnieuw gecontroleerd tegen de statuslijst van de uitgever.",
+        validNoStatusBody:
+          "De handtekening en de uitgever zijn bij ontvangst gecontroleerd. De uitgever publiceert er geen statuslijst voor, dus hij kan niet worden ingetrokken.",
+      },
+      history: {
+        received: "Ontvangen",
+        via: "via {{source}}",
+        from: "van {{sender}}",
+        acceptedBy: "geaccepteerd door {{name}}",
+        revoked: "Ingetrokken door de uitgever",
+        revokedDetail: "gevonden op zijn statuslijst",
+        reinstated: "Weer geldig",
+        reinstatedDetail:
+          "de statuslijst van de uitgever markeert hem niet meer",
+        checked: "Statuslijst gecontroleerd",
+        checkedRevoked: "ingetrokken",
+        checkedValid: "niet ingetrokken",
+        removed: "Verwijderd",
+      },
+      checks: {
+        signature: "Handtekening geldig",
+        issuerTrusted: "Uitgever vertrouwd",
+        atReceipt: "bij ontvangst, {{date}}",
+        seeded: "Demo-credential uit de seed, niet gecontroleerd",
+        noStatusList: "Geen statuslijst: kan niet worden ingetrokken",
+        revoked: "Ingetrokken op de statuslijst van de uitgever",
+        notRevoked: "Niet op de statuslijst",
+        checked: "gecontroleerd {{when}}",
+        outsideValidity: "Buiten de geldigheidsperiode",
+        expired: "verlopen {{date}}",
+        withinValidity: "Binnen de geldigheidsperiode",
+        lastChecked: "laatst gecontroleerd {{when}}",
+      },
       empty: "Nog geen credentials ontvangen.",
       noMatch: "Geen credentials komen overeen met je zoekopdracht.",
       delete: "Verwijderen",
@@ -2454,6 +2816,7 @@ export const nl: Translation<typeof en> = {
       expires: "Verloopt {{date}}",
       expiredOn: "Verlopen {{date}}",
       fields: {
+        validUntil: "Geldig tot",
         issuer: "Uitgegeven door",
         source: "Ontvangen via",
         received: "Ontvangen",
@@ -2471,6 +2834,7 @@ export const nl: Translation<typeof en> = {
         revoked: "Ingetrokken",
       },
       filters: {
+        all: "Alle",
         status: "Status",
         allStatuses: "Alle statussen",
         attention: "Vraagt aandacht",
@@ -2483,6 +2847,24 @@ export const nl: Translation<typeof en> = {
         bootstrap: "Onboarding",
       },
       detail: {
+        byline:
+          "Uitgegeven door {{issuer}} · ontvangen {{received}} via {{source}}",
+        export: "Exporteren als JSON",
+        recheck: "Status opnieuw controleren",
+        attributeCount_one: "{{count}} attribuut",
+        attributeCount_other: "{{count}} attributen",
+        attributesNote:
+          "Attributen worden alleen op je eigen wallet-infrastructuur opgeslagen. Elke vrijgave wordt vastgelegd in het auditlog.",
+        history: "Geschiedenis",
+        provenance: "Herkomst",
+        checks: "Controles",
+        issuerEndpoint: "Endpoint van de uitgever",
+        format: "Formaat",
+        receivedVia: "{{date}} · via {{source}}",
+        validity: "Geldigheid",
+        validityRevoked: "{{validity}}, ingetrokken",
+        heldBy: "In bezit van",
+        heldByValue: "Business wallet van {{org}}",
         title: "Credential",
         notFound: "Deze credential zit niet in de wallet.",
         type: "Type credential",

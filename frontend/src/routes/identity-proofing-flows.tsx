@@ -33,7 +33,11 @@ import {
   flowSpecFromDraft,
   proofingErrorMessage,
 } from "../lib/identity-proofing";
-import type { ProofingFlowDraft, Tristate } from "../lib/identity-proofing";
+import type {
+  EditableFlow,
+  ProofingFlowDraft,
+  Tristate,
+} from "../lib/identity-proofing";
 import { Button, Card, Input, Tag, TopBar } from "../ui";
 
 const LABEL = "text-ink-soft text-[12px] font-semibold";
@@ -44,7 +48,7 @@ const SECTION = "font-display text-[14px] font-bold";
 const SELECT_CLASS =
   "rounded-yivi border-line-strong bg-surface text-ink w-full border px-3 py-2 text-[13.5px] leading-relaxed transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3 h-10";
 
-type EditorMode = { kind: "new" } | { kind: "edit"; flow: ProofingFlow };
+export type EditorMode = { kind: "new" } | { kind: "edit"; flow: EditableFlow };
 
 // The org admin's identity proofing flows: define flows at the proofing
 // service with every setting it takes, edit one by saving a new version (active
@@ -352,14 +356,21 @@ function VersionHistory({
   );
 }
 
-function FlowEditor({
+// The flow editor, here and on a customer's Flows tab: onDone closes it (after
+// a save or a cancel), onSaved gets the saved flow first.
+export function FlowEditor({
   slug,
   mode,
   onDone,
+  onSaved,
+  note,
 }: {
   slug: string;
   mode: EditorMode;
   onDone: () => void;
+  onSaved?: (flow: ProofingFlow) => void;
+  // Shown under the heading, e.g. that a shared flow changes for everyone.
+  note?: string;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const editing = mode.kind === "edit" ? mode.flow : null;
@@ -393,7 +404,12 @@ function FlowEditor({
     if (invalid !== null) {
       return;
     }
-    save.mutate(flowSpecFromDraft(draft), { onSuccess: onDone });
+    save.mutate(flowSpecFromDraft(draft), {
+      onSuccess: (flow) => {
+        onSaved?.(flow);
+        onDone();
+      },
+    });
   }
 
   const fieldError = (field: typeof invalid): string | null =>
@@ -420,6 +436,7 @@ function FlowEditor({
                 })
               : t("identityProofingFlows.new.hint")}
           </p>
+          {note && <p className={`${HINT} mt-1 font-semibold`}>{note}</p>}
         </div>
 
         <Field

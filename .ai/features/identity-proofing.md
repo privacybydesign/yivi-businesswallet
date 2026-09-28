@@ -1,25 +1,38 @@
 # Feature: Identity proofing (identity-proofing-service)
 
 **Status:** Integrated (backend + frontend). Every org gets its own IPS tenant on
-first use. An admin defines flows (full IPS configuration, versioned) on the
-"Proofing flows" tab and picks which ones members may use. A member is sent a
-request from their member detail page (admin-only, like that page): a flow
-picker over those flows, a send button and the last request's status. There is
-no separate members tab. "Customers" is its own top-level page
-(`/{org}/customers`, API `/orgs/{slug}/customers`), not a part of proofing: it
-lists the org's customers (B2B clients, no login); an admin assigns each a
-subset of the org's flows, and any member verifies an external person for a
-customer by e-mail address and an optional name. Sending creates a 10-minute
-IPS session and mails its vcmrtd deep link as a QR code and a button: the mail
-is the session, with no wallet page in between. The outcome lands on the
-request and in the audit log.
+first use. The sidebar's "Identity proofing" section holds three pages under
+`/{org}/identity-proofing`: **Overview** (the last 30 days' customer sessions
+counted, the newest ones, the customers, and an alert per failing webhook),
+**Customers** (search, 30-day sessions and verified share, webhook health,
+status) and, admin-only, **Flows** (full IPS configuration, versioned, and which
+flows members may use). A customer's page has tabs: Flows and Sessions for every
+member; Branding, API keys, Webhooks and Settings for an admin. "Verify a
+person" in its header opens the send form; an admin can pause a customer, after
+which no request can be sent for it (`customer_paused`, 409) while sent ones run
+out. The customers API stays at `/orgs/{slug}/customers`. A member is sent a
+request from their member detail page (admin-only, like that page). Customers
+are B2B clients with no login: members act for them, and their own backend can
+through the public API with one of their keys. Sending creates an IPS session
+(2, 5 or 10 minutes, per customer) and mails its vcmrtd deep link as a QR code
+and a button: the mail is the session, with no wallet page in between. The
+outcome lands on the request, in the audit log and at the customer's webhook.
+Not built from the design: the hosted flow (and with it "Open hosted flow",
+allowed return URLs and the consent-screen preview; Branding previews the mail
+instead), test-mode keys and the sandbox, and the method column (every session
+runs in vcmrtd).
 **Slice:** `internal/proofingprovider` (the IPS client + stub, leaf level),
 `internal/proofing` (settings, flow selection, members, requests, service,
 handler), `internal/email` (kind `identity_proofing_requested`, the `qr` block),
 `frontend/src/routes/member-proofing.tsx` (the member detail panel),
+`frontend/src/routes/identity-proofing-overview.tsx` (the overview),
+`frontend/src/routes/customer-*-tab.tsx` (branding, API keys, webhooks,
+settings), `internal/proofing/api_handler.go` (the public API),
+`webhook*.go` (endpoint, outbox, deliverer), `internal/safehttp` (the SSRF
+guard every externally supplied URL goes through),
 `frontend/src/routes/identity-proofing-flows.tsx` (admin: flow editor, versions,
 selection), `frontend/src/routes/customers.tsx` + `customer-detail.tsx`
-(customers, assignment, send, requests). There is no public recipient page:
+(customers, tabs, assignment, send, requests, pause). There is no public recipient page:
 the mail is the session.
 **Depends on:** `privacybydesign/identity-proofing-service` ("IPS"), an HTTP
 service we are a relying party of. It is itself work in progress: its
@@ -50,9 +63,10 @@ device-binding API (claims, handover, `/submit`) was uncommitted on its
   "org is the only party in the UI"). Flows stay the org's; a customer gets an
   allow-list over them with one default (`identity_proofing_customer_flows`,
   audited `customer_flows_configured` with before/after), independent of the
-  members' list: any completable org flow may be assigned. Customers are created
-  and renamed (`customer_created`/`customer_updated`), never deleted: a request
-  references its customer `ON DELETE RESTRICT`. This deliberately differs from
+  members' list: any completable org flow may be assigned. Customers are created,
+  renamed and paused or resumed (`customer_created`; `customer_updated` with the
+  `name` or `status` before and after; `paused_at` on the row), never deleted: a
+  request references its customer `ON DELETE RESTRICT`. This deliberately differs from
   `.ai/plans/identity-proofing.md`, where each customer owns its flows.
 - **Flows live at IPS**, versioned, managed like IPS's own admin page
   (`/api/v1/db-test/admin`): that page, not the tenant API docs, is the editor
@@ -157,6 +171,71 @@ until it is seen to end or decide, also past its cap, so a last-moment outcome
 is never lost. `expired` is
 derived (no live session and no outcome), never stored. An IPS failure during a read is
 logged and the last known status is shown.
+
+**Counts.** `GET /identity-proofing/stats` counts the customer requests of the
+last `StatsWindow` (30 days) per customer and flow, by outcome, scoped like the
+request list (an admin's the org's, a member's their own). Expired is derived
+in SQL exactly as `EffectiveStatus` does. The counts are as last reconciled:
+they read the rows, never IPS, so an outcome no list read has picked up yet is
+not in them. The stats query key sits under the requests key, so whatever
+refreshes the request lists refreshes the counts.
+
+**Background reconciler.** `ReconcileLive` re-checks up to 50 live requests
+across every org each minute, so an outcome or expiry lands (and its webhook is
+sent) with nobody reading a list. Every IPS result read is audited at IPS, which
+is why it is not faster.
+
+**Method and timeline.** `proofingprovider` derives the app a subject used
+from the `/result` answer, reading only each device's `role` and whether a
+Yivi `disclosure` exists: `yivi_app` (a Yivi disclosure), `idem_app` (IPS's
+native device; vcmrtd is the Idem app), `browser` (the web device alone), or
+none while no device claimed the session. It is stored on the request
+(`method`) by `MarkStarted`, `RecordOutcome` and `EndSession`, and carried in
+their audit snapshots. `GET /identity-proofing/requests/{id}/events` is the
+request's timeline: its audit events (target `identity_proofing_request`),
+oldest first, for an admin or the member who sent it. Everything `reconcile`
+records runs under `audit.WithoutActor`: the outcome is the subject's doing,
+not that of whoever's read triggered the check (rows written before this
+still name the reader).
+
+## 3a. Customer API, webhooks, branding
+
+- **API keys** (`identity_proofing_api_keys`): `yp_live_` + 32 random bytes,
+  stored as SHA-256 only, shown once; `prefix` tells keys apart. Revoke is
+  permanent; removing the customer removes them. Audited `api_key_created` /
+  `api_key_revoked` on the customer. There is no test mode.
+- **Public API** (`/api/v1/proofing/{flows,sessions,sessions/{id}}`, Bearer
+  key, no cookie): acts exactly as a member sending for the customer, on its
+  assigned flows (no `flowId` is its default), refused while paused. `sendMail:
+  false` skips the mail; the create answer always carries the `deepLink`. A
+  request made this way has `requested_by` NULL and `api_key_id` set, and every
+  mail for a customer's subject names the customer as requester, never the key.
+  No rate limit of our own (IPS limits session creation per IP).
+- **Webhooks**: one endpoint per customer (`identity_proofing_webhooks`, secret
+  sealed with the proofing key, `whsec_…`, shown once). Events
+  `session.verified` / `.failed` / `.expired` / `.purged` are written to the
+  outbox (`identity_proofing_webhook_deliveries`) in the same transaction as the
+  change (`RecordOutcome`, `EndSession`, `PurgeProofedNames`); `test` is sent on
+  request whatever is subscribed. The payload is the session id, status, flow and
+  assurance: never a name or address (the API has those). The deliverer runs
+  every 10 s, leases due rows (`FOR UPDATE SKIP LOCKED`, 5-minute lease), POSTs
+  through `safehttp` (https, public addresses only, dialed IP = vetted IP, no
+  redirects) with `Yivi-Signature: t=<unix>,v1=<hex HMAC-SHA256("<t>.<body>")>`,
+  `Yivi-Event`, `Yivi-Delivery`; 8 attempts over about 24 h, then `failed`.
+  Health (`delivering` / `failing` since / pending retries) is derived from the
+  deliveries; a failing endpoint makes an active customer read "Needs attention".
+- **Branding** (columns on the customer): display name, `#rrggbb` colour, logo
+  (PNG/JPEG/GIF/WebP, 512 KiB; no SVG, mail clients do not render it), support
+  contact, https privacy URL. It applies to the proofing mail of the customer's
+  subjects: subject, heading and requester are the display name, the colour
+  replaces the org's primary seed, the logo replaces the org's (none shows the
+  name as wordmark, never the org's logo), and the `supportContact` /
+  `privacyUrl` paragraphs appear only when set (an all-empty paragraph collapses).
+- **Settings**: `session_ttl_seconds` (120/300/600) and `data_retention_days`
+  (7/30/90, the proofed-name retention). The frontend options are held to the Go
+  lists by `lib/identity-proofing.test.ts`.
+- **Remove customer** deletes its requests (addresses, names, outcomes), keys,
+  endpoint and deliveries; the audit trail stays (`customer_removed`).
 
 ## 4. Data minimisation
 

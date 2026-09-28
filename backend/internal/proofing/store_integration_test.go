@@ -6,8 +6,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +22,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
 
@@ -156,7 +162,7 @@ func memberSubject(m Member) Subject {
 
 func newStoredRequest(orgID, requestedBy uuid.UUID, subject Subject) NewStoredRequest {
 	return NewStoredRequest{
-		ID: uuid.New(), OrgID: orgID, RequestedBy: requestedBy, Subject: subject,
+		ID: uuid.New(), OrgID: orgID, RequestedBy: &requestedBy, Subject: subject,
 		Flow:          proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Name: "Passport + face"}, ID: "f1", Version: 3},
 		LinkExpiresAt: time.Now().Add(SessionTTL),
 	}
@@ -239,7 +245,7 @@ func TestRequestStoreLifecycle(t *testing.T) {
 	}
 
 	for range 2 {
-		if err := store.MarkStarted(ctx, sent, "s1"); err != nil {
+		if err := store.MarkStarted(ctx, sent, "s1", proofingprovider.MethodIdem); err != nil {
 			t.Fatalf("MarkStarted: %v", err)
 		}
 	}
@@ -247,6 +253,9 @@ func TestRequestStoreLifecycle(t *testing.T) {
 		t.Errorf("session_started audits = %d, want 1", n)
 	}
 	started := onlyRequest(t, store, orgID)
+	if started.Method != proofingprovider.MethodIdem {
+		t.Errorf("method = %q, want the Idem app", started.Method)
+	}
 
 	res := proofingprovider.Result{Status: proofingprovider.StatusApproved, AssuranceLevel: "high", EIDASLevel: "substantial"}
 	for range 2 {
@@ -279,11 +288,11 @@ func TestRequestStoreEndSessionExpiresTheRequest(t *testing.T) {
 
 	req := createStarted(t, store,
 		newStoredRequest(orgID, requester, memberSubject(Member{UserID: requester, Name: "Sam", Email: "sam@example.org"})), "s1")
-	if err := store.MarkStarted(ctx, req, "s1"); err != nil {
+	if err := store.MarkStarted(ctx, req, "s1", ""); err != nil {
 		t.Fatalf("MarkStarted: %v", err)
 	}
 	for range 2 {
-		if err := store.EndSession(ctx, req, "s1", proofingprovider.StatusCancelled); err != nil {
+		if err := store.EndSession(ctx, req, "s1", proofingprovider.StatusCancelled, ""); err != nil {
 			t.Fatalf("EndSession: %v", err)
 		}
 	}
@@ -445,5 +454,300 @@ func TestRequestStoreCustomerSubjectAndProofedName(t *testing.T) {
 	after, err := store.List(ctx, orgID, RequestFilter{CustomerID: &customer.ID})
 	if err != nil || len(after) != 1 || after[0].ProofedName != "" || after[0].Status != StatusApproved {
 		t.Errorf("after purge = %+v, %v; want the outcome without the name", after, err)
+	}
+}
+
+func TestCustomerStorePauseAndResume(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewCustomerStore(pool, audit.NewDBRecorder())
+	orgID := makeOrg(t, pool, "acme")
+	admin := makeUser(t, pool, "admin@example.org")
+	ctx := context.Background()
+	c, err := store.Create(ctx, orgID, admin, "Initech")
+	if err != nil || c.Status() != CustomerActive {
+		t.Fatalf("Create = %+v, %v; want an active customer", c, err)
+	}
+
+	if c, err = store.SetPaused(ctx, orgID, c.ID, true); err != nil || c.Status() != CustomerPaused {
+		t.Fatalf("pause = %+v, %v", c, err)
+	}
+	// Pausing a paused customer changes and audits nothing.
+	if c, err = store.SetPaused(ctx, orgID, c.ID, true); err != nil || !c.Paused() {
+		t.Fatalf("pause again = %+v, %v", c, err)
+	}
+	if c, err = store.SetPaused(ctx, orgID, c.ID, false); err != nil || c.Status() != CustomerActive {
+		t.Fatalf("resume = %+v, %v", c, err)
+	}
+	if _, err := store.SetPaused(ctx, orgID, uuid.New(), true); !errors.Is(err, ErrCustomerNotFound) {
+		t.Errorf("pause unknown = %v, want ErrCustomerNotFound", err)
+	}
+	if n := auditCount(t, pool, audit.IdentityProofingCustomerUpdated); n != 2 {
+		t.Errorf("customer_updated audited %d times, want 2", n)
+	}
+}
+
+func TestRequestStoreStatsCountsCustomerRequestsByOutcome(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	kim := makeUser(t, pool, "kim@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	subject := Subject{CustomerID: &customer.ID, Email: "anna@example.org"}
+
+	// Sam: one approved, one still running. Kim: one never attached (expired).
+	approved, err := store.Create(ctx, newStoredRequest(orgID, sam, subject))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if ok, err := store.AttachSession(ctx, approved, attachedSession("s1")); err != nil || !ok {
+		t.Fatalf("AttachSession = %v, %v", ok, err)
+	}
+	if err := store.RecordOutcome(ctx, approved, "s1", StatusApproved, proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	running, err := store.Create(ctx, newStoredRequest(orgID, sam, subject))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if ok, err := store.AttachSession(ctx, running, attachedSession("s2")); err != nil || !ok {
+		t.Fatalf("AttachSession = %v, %v", ok, err)
+	}
+	if _, err := store.Create(ctx, newStoredRequest(orgID, kim, subject)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	since := time.Now().Add(-StatsWindow)
+	rows, err := store.Stats(ctx, orgID, nil, since)
+	want := StatsRow{CustomerID: customer.ID, FlowID: "f1", Sessions: 3, Approved: 1, Expired: 1}
+	if err != nil || len(rows) != 1 || rows[0] != want {
+		t.Errorf("Stats = %+v, %v; want [%+v]", rows, err, want)
+	}
+	rows, err = store.Stats(ctx, orgID, &sam, since)
+	want = StatsRow{CustomerID: customer.ID, FlowID: "f1", Sessions: 2, Approved: 1}
+	if err != nil || len(rows) != 1 || rows[0] != want {
+		t.Errorf("Stats for sam = %+v, %v; want [%+v]", rows, err, want)
+	}
+	if rows, err = store.Stats(ctx, orgID, nil, time.Now().Add(time.Minute)); err != nil || len(rows) != 0 {
+		t.Errorf("Stats after every request = %+v, %v; want none", rows, err)
+	}
+}
+
+func TestCustomerStoreRemovePurgesItsRequests(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	customers := NewCustomerStore(pool, audit.NewDBRecorder())
+	requests := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	gone, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	kept, err := customers.Create(ctx, orgID, sam, "Globex")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, c := range []Customer{gone, kept} {
+		if _, err := requests.Create(ctx, newStoredRequest(orgID, sam, Subject{CustomerID: &c.ID, Email: "a@example.org"})); err != nil {
+			t.Fatalf("create request: %v", err)
+		}
+	}
+
+	if err := customers.Remove(ctx, orgID, gone.ID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := customers.Get(ctx, orgID, gone.ID); !errors.Is(err, ErrCustomerNotFound) {
+		t.Errorf("Get removed = %v, want ErrCustomerNotFound", err)
+	}
+	left := onlyRequest(t, requests, orgID)
+	if left.CustomerID == nil || *left.CustomerID != kept.ID {
+		t.Errorf("left request = %+v, want only the kept customer's", left)
+	}
+	if err := customers.Remove(ctx, orgID, gone.ID); !errors.Is(err, ErrCustomerNotFound) {
+		t.Errorf("Remove again = %v, want ErrCustomerNotFound", err)
+	}
+	if n := auditCount(t, pool, audit.IdentityProofingCustomerRemoved); n != 1 {
+		t.Errorf("customer_removed audited %d times, want 1", n)
+	}
+}
+
+func TestCustomerStoreSavesSettingsAndRetainsNamesForThem(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	customers := NewCustomerStore(pool, audit.NewDBRecorder())
+	requests := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	c, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil || c.Settings.SessionTTL != SessionTTL || c.Settings.DataRetention() != ProofedNameRetention {
+		t.Fatalf("Create = %+v, %v; want the default settings", c, err)
+	}
+	week := CustomerSettings{SessionTTL: 5 * time.Minute, DataRetentionDays: 7}
+	if c, err = customers.SaveSettings(ctx, orgID, c.ID, week); err != nil || c.Settings != week {
+		t.Fatalf("SaveSettings = %+v, %v", c.Settings, err)
+	}
+
+	req := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &c.ID, Email: "a@example.org"}), "s1")
+	if req.NameRetention != week.DataRetention() {
+		t.Errorf("NameRetention = %v, want %v", req.NameRetention, week.DataRetention())
+	}
+	res := proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna"}
+	if err := requests.RecordOutcome(ctx, req, "s1", StatusApproved, res); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	var purgeAfter time.Time
+	if err := pool.QueryRow(ctx, `SELECT proofed_name_purge_after FROM identity_proofing_requests WHERE id = $1`,
+		req.ID).Scan(&purgeAfter); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if want := time.Now().Add(week.DataRetention()); purgeAfter.Sub(want).Abs() > time.Minute {
+		t.Errorf("purge after = %v, want about %v", purgeAfter, want)
+	}
+}
+
+func TestWebhookOutboxDeliversSignedEventsWithBackOff(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	webhooks := NewWebhookStore(pool, audit.NewDBRecorder(), cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+
+	var failing atomic.Bool
+	type received struct {
+		event, signature string
+		body             []byte
+	}
+	got := make(chan received, 10)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got <- received{r.Header.Get(EventHeader), r.Header.Get(SignatureHeader), body}
+		if failing.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	t.Cleanup(receiver.Close)
+
+	// Only session.verified is subscribed to.
+	hook, secret, err := webhooks.Save(ctx, orgID, customer.ID, receiver.URL, []string{EventSessionVerified})
+	if err != nil || !strings.HasPrefix(secret, webhookSecretPrefix) || hook.SecretLast4 != secretLast4(secret) {
+		t.Fatalf("Save = %+v, %q, %v", hook, secret, err)
+	}
+	if _, again, err := webhooks.Save(ctx, orgID, customer.ID, receiver.URL, WebhookEvents); err != nil || again != "" {
+		t.Fatalf("second Save = %q, %v; want the secret kept", again, err)
+	}
+	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, receiver.URL, []string{EventSessionVerified}); err != nil {
+		t.Fatalf("third Save: %v", err)
+	}
+
+	subject := Subject{CustomerID: &customer.ID, Email: "a@example.org"}
+	approved := createStarted(t, requests, newStoredRequest(orgID, sam, subject), "s1")
+	res := proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: "substantial", Name: "Anna"}
+	if err := requests.RecordOutcome(ctx, approved, "s1", StatusApproved, res); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+
+	deliverer := NewDeliverer(webhooks, safehttp.Policy{AllowInsecureHTTP: true})
+	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
+		t.Fatalf("DeliverDue = %d, %v; want the one verified event", n, err)
+	}
+	first := <-got
+	if first.event != EventSessionVerified {
+		t.Errorf("event = %q, want %q", first.event, EventSessionVerified)
+	}
+	ts := strings.TrimPrefix(strings.Split(first.signature, ",")[0], "t=")
+	if tsTime, _ := strconv.ParseInt(ts, 10, 64); first.signature != webhookSignature(secret, time.Unix(tsTime, 0), first.body) {
+		t.Errorf("signature %q does not verify under the secret", first.signature)
+	}
+	if bytes.Contains(first.body, []byte("Anna")) || bytes.Contains(first.body, []byte("a@example.org")) {
+		t.Errorf("the event body carries personal data: %s", first.body)
+	}
+	if !bytes.Contains(first.body, []byte(approved.ID.String())) || !bytes.Contains(first.body, []byte("substantial")) {
+		t.Errorf("the event body misses the session or its assurance: %s", first.body)
+	}
+
+	// A failing endpoint is retried later, not now, and shows as failing.
+	failing.Store(true)
+	if err := webhooks.SendTest(ctx, orgID, customer.ID); err != nil {
+		t.Fatalf("SendTest: %v", err)
+	}
+	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
+		t.Fatalf("DeliverDue test = %d, %v", n, err)
+	}
+	<-got
+	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 0 {
+		t.Errorf("DeliverDue right after a failure = %d, %v; want nothing due", n, err)
+	}
+	health, err := webhooks.Health(ctx, orgID)
+	h := health[customer.ID]
+	if err != nil || h.State != WebhookFailing || h.LastStatusCode == nil || *h.LastStatusCode != http.StatusServiceUnavailable ||
+		h.PendingRetries != 1 || h.FailingSince == nil {
+		t.Errorf("health = %+v, %v; want failing on 503 with one retry pending", h, err)
+	}
+	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	if err != nil || len(deliveries) != 2 || deliveries[0].Event != EventTest || deliveries[0].Status != DeliveryPending ||
+		deliveries[0].Attempts != 1 || deliveries[1].Status != DeliveryDelivered {
+		t.Errorf("deliveries = %+v, %v", deliveries, err)
+	}
+
+	// Removing the endpoint drops what waits for it.
+	if err := webhooks.Remove(ctx, orgID, customer.ID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if deliveries, _ := webhooks.Deliveries(ctx, orgID, customer.ID); len(deliveries) != 1 {
+		t.Errorf("deliveries after remove = %+v, want only the delivered one", deliveries)
+	}
+	for action, want := range map[string]int{
+		audit.IdentityProofingWebhookConfigured: 3, audit.IdentityProofingWebhookRemoved: 1,
+	} {
+		if n := auditCount(t, pool, action); n != want {
+			t.Errorf("%s audited %d times, want %d", action, n, want)
+		}
+	}
+}
+
+func TestPurgeProofedNamesSendsPurgedEvent(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", []string{EventSessionPurged}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	req := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	if err := requests.RecordOutcome(ctx, req, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna"}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests SET proofed_name_purge_after = now() - interval '1 second'`); err != nil {
+		t.Fatalf("age: %v", err)
+	}
+	if n, err := requests.PurgeProofedNames(ctx); err != nil || n != 1 {
+		t.Fatalf("PurgeProofedNames = %d, %v", n, err)
+	}
+	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionPurged ||
+		deliveries[0].RequestID == nil || *deliveries[0].RequestID != req.ID {
+		t.Errorf("deliveries = %+v, %v; want only session.purged for the request", deliveries, err)
 	}
 }

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { request } from "./http";
+import { auditEventSchema } from "./organization";
+import type { AuditEvent } from "./organization";
 
 // Identity proofing through the identity-proofing-service (IPS): one IPS tenant
 // per organization (provisioned on its first use), flows defined by org admins
@@ -55,6 +57,8 @@ export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
 export const proofingRequestSchema = z.object({
   id: z.string(),
   requestedByName: z.string(),
+  // Set for a request the customer's backend created with one of its keys.
+  apiKeyName: z.string().optional(),
   subjectUserId: z.string().optional(),
   customerId: z.string().optional(),
   customerName: z.string().optional(),
@@ -64,6 +68,9 @@ export const proofingRequestSchema = z.object({
   flowId: z.string(),
   flowName: z.string(),
   flowVersion: z.number().optional(),
+  // The app the subject used ("idem_app", "yivi_app", "browser"); absent while
+  // nobody opened the session.
+  method: z.string().optional(),
   status: z.string(),
   assuranceLevel: z.string().optional(),
   eidasLevel: z.string().optional(),
@@ -112,16 +119,138 @@ export type ProofingRequestInput =
   | { userId: string; flowId: string }
   | { customerId: string; email: string; name: string; flowId: string };
 
+// A paused customer takes no new request; requests already sent run out.
+export const PROOFING_CUSTOMER_STATUSES = ["active", "paused"] as const;
+
+// How a customer's webhook endpoint has been answering. State is a plain
+// string: an unknown one renders neutrally.
+export const webhookHealthSchema = z.object({
+  state: z.string(),
+  lastStatusCode: z.number().optional(),
+  failingSince: z.string().optional(),
+  pendingRetries: z.number(),
+});
+
+export type WebhookHealth = z.infer<typeof webhookHealthSchema>;
+
+// Empty strings fall back: the customer's name, the org's colour, no logo.
+export const proofingCustomerBrandingSchema = z.object({
+  displayName: z.string(),
+  primaryColor: z.string(),
+  supportContact: z.string(),
+  privacyUrl: z.string(),
+  logoUri: z.string(),
+});
+
+export type ProofingCustomerBranding = z.infer<
+  typeof proofingCustomerBrandingSchema
+>;
+
 export const proofingCustomerSchema = z.object({
   id: z.string(),
   name: z.string(),
   flowIds: z.array(z.string()),
   defaultFlowId: z.string().optional(),
+  status: z.enum(PROOFING_CUSTOMER_STATUSES),
+  pausedAt: z.string().optional(),
+  sessionTtlSeconds: z.number(),
+  dataRetentionDays: z.number(),
+  webhook: webhookHealthSchema,
+  branding: proofingCustomerBrandingSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 
 export type ProofingCustomer = z.infer<typeof proofingCustomerSchema>;
+
+// A customer's requests on one flow since `since`, by outcome; what the outcome
+// counts leave is still pending or in progress. As last reconciled by a request
+// list read.
+export const proofingStatsRowSchema = z.object({
+  customerId: z.string(),
+  flowId: z.string(),
+  sessions: z.number(),
+  approved: z.number(),
+  rejected: z.number(),
+  needsReview: z.number(),
+  expired: z.number(),
+});
+
+export type ProofingStatsRow = z.infer<typeof proofingStatsRowSchema>;
+
+export const proofingStatsSchema = z.object({
+  since: z.string(),
+  rows: z.array(proofingStatsRowSchema),
+});
+
+export type ProofingStats = z.infer<typeof proofingStatsSchema>;
+
+// An absent field is left as it is.
+export interface ProofingCustomerUpdate {
+  name?: string;
+  paused?: boolean;
+  sessionTtlSeconds?: number;
+  dataRetentionDays?: number;
+}
+
+export const proofingApiKeySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  prefix: z.string(),
+  createdAt: z.string(),
+  lastUsedAt: z.string().optional(),
+  revokedAt: z.string().optional(),
+});
+
+export type ProofingApiKey = z.infer<typeof proofingApiKeySchema>;
+
+// The one answer that carries the key's secret.
+export const createdProofingApiKeySchema = proofingApiKeySchema.extend({
+  secret: z.string(),
+});
+
+export type CreatedProofingApiKey = z.infer<typeof createdProofingApiKeySchema>;
+
+// A customer's endpoint; secret is set only in the answer that created it or
+// rotated it.
+export const proofingWebhookSchema = z.object({
+  configured: z.boolean(),
+  url: z.string().optional(),
+  events: z.array(z.string()),
+  secretLast4: z.string().optional(),
+  secret: z.string().optional(),
+  health: webhookHealthSchema,
+  availableEvents: z.array(z.string()),
+  maxAttempts: z.number(),
+});
+
+export type ProofingWebhook = z.infer<typeof proofingWebhookSchema>;
+
+export const webhookDeliverySchema = z.object({
+  id: z.string(),
+  event: z.string(),
+  sessionId: z.string().optional(),
+  status: z.string(),
+  attempts: z.number(),
+  lastStatusCode: z.number().optional(),
+  lastError: z.string().optional(),
+  lastAttemptAt: z.string().optional(),
+  deliveredAt: z.string().optional(),
+  createdAt: z.string(),
+});
+
+export type WebhookDelivery = z.infer<typeof webhookDeliverySchema>;
+
+// A branding save: the text fields, and a new logo file or its removal
+// (neither keeps it).
+export interface ProofingBrandingInput {
+  displayName: string;
+  primaryColor: string;
+  supportContact: string;
+  privacyUrl: string;
+  logo?: File;
+  removeLogo?: boolean;
+}
 
 export const proofingCustomerFlowSchema = proofingFlowSchema
   .omit({ allowed: true, default: true })
@@ -218,6 +347,17 @@ export function setProofingFlowSelection(
   });
 }
 
+// The org's customer requests of the last 30 days, counted per customer and flow.
+export function getProofingStats(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ProofingStats> {
+  return request(`${base(slug)}/stats`, {
+    schema: proofingStatsSchema,
+    signal,
+  });
+}
+
 // customerId narrows the list to the requests sent for that customer.
 export function getProofingRequests(
   slug: string,
@@ -284,16 +424,16 @@ export function getProofingCustomer(
   });
 }
 
-export function renameProofingCustomer(
+export function updateProofingCustomer(
   slug: string,
   customerId: string,
-  name: string,
+  update: ProofingCustomerUpdate,
   signal?: AbortSignal,
 ): Promise<ProofingCustomer> {
   return request(customerBase(slug, customerId), {
     schema: proofingCustomerSchema,
     method: "PATCH",
-    body: { name },
+    body: update,
     signal,
   });
 }
@@ -321,4 +461,172 @@ export function setProofingCustomerFlows(
     body: selection,
     signal,
   });
+}
+
+export function removeProofingCustomer(
+  slug: string,
+  customerId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(customerBase(slug, customerId), {
+    schema: z.void(),
+    method: "DELETE",
+    signal,
+  });
+}
+
+export function saveProofingCustomerBranding(
+  slug: string,
+  customerId: string,
+  input: ProofingBrandingInput,
+  signal?: AbortSignal,
+): Promise<ProofingCustomer> {
+  const form = new FormData();
+  form.set("displayName", input.displayName);
+  form.set("primaryColor", input.primaryColor);
+  form.set("supportContact", input.supportContact);
+  form.set("privacyUrl", input.privacyUrl);
+  if (input.logo) {
+    form.set("logo", input.logo);
+  } else if (input.removeLogo) {
+    form.set("removeLogo", "true");
+  }
+  return request(`${customerBase(slug, customerId)}/branding`, {
+    schema: proofingCustomerSchema,
+    method: "PUT",
+    body: form,
+    signal,
+  });
+}
+
+export function getProofingApiKeys(
+  slug: string,
+  customerId: string,
+  signal?: AbortSignal,
+): Promise<ProofingApiKey[]> {
+  return request(`${customerBase(slug, customerId)}/api-keys`, {
+    schema: z.array(proofingApiKeySchema),
+    signal,
+  });
+}
+
+export function createProofingApiKey(
+  slug: string,
+  customerId: string,
+  name: string,
+  signal?: AbortSignal,
+): Promise<CreatedProofingApiKey> {
+  return request(`${customerBase(slug, customerId)}/api-keys`, {
+    schema: createdProofingApiKeySchema,
+    method: "POST",
+    body: { name },
+    signal,
+  });
+}
+
+export function revokeProofingApiKey(
+  slug: string,
+  customerId: string,
+  keyId: string,
+  signal?: AbortSignal,
+): Promise<ProofingApiKey> {
+  return request(
+    `${customerBase(slug, customerId)}/api-keys/${encodeURIComponent(keyId)}`,
+    { schema: proofingApiKeySchema, method: "DELETE", signal },
+  );
+}
+
+function webhookBase(slug: string, customerId: string): string {
+  return `${customerBase(slug, customerId)}/webhook`;
+}
+
+export function getProofingWebhook(
+  slug: string,
+  customerId: string,
+  signal?: AbortSignal,
+): Promise<ProofingWebhook> {
+  return request(webhookBase(slug, customerId), {
+    schema: proofingWebhookSchema,
+    signal,
+  });
+}
+
+export function saveProofingWebhook(
+  slug: string,
+  customerId: string,
+  input: { url: string; events: string[] },
+  signal?: AbortSignal,
+): Promise<ProofingWebhook> {
+  return request(webhookBase(slug, customerId), {
+    schema: proofingWebhookSchema,
+    method: "PUT",
+    body: input,
+    signal,
+  });
+}
+
+export function removeProofingWebhook(
+  slug: string,
+  customerId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(webhookBase(slug, customerId), {
+    schema: z.void(),
+    method: "DELETE",
+    signal,
+  });
+}
+
+export function rotateProofingWebhookSecret(
+  slug: string,
+  customerId: string,
+  signal?: AbortSignal,
+): Promise<ProofingWebhook> {
+  return request(`${webhookBase(slug, customerId)}/rotate-secret`, {
+    schema: proofingWebhookSchema,
+    method: "POST",
+    body: {},
+    signal,
+  });
+}
+
+export function sendProofingWebhookTest(
+  slug: string,
+  customerId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(`${webhookBase(slug, customerId)}/test`, {
+    schema: z.void(),
+    method: "POST",
+    body: {},
+    signal,
+  });
+}
+
+export function getProofingWebhookDeliveries(
+  slug: string,
+  customerId: string,
+  signal?: AbortSignal,
+): Promise<WebhookDelivery[]> {
+  return request(`${webhookBase(slug, customerId)}/deliveries`, {
+    schema: z.array(webhookDeliverySchema),
+    signal,
+  });
+}
+
+// One request's timeline: its audit events, oldest first.
+export function getProofingRequestEvents(
+  slug: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<AuditEvent[]> {
+  return request(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/events`,
+    {
+      schema: z
+        .object({ events: z.array(auditEventSchema) })
+        .transform((page) => page.events),
+      signal,
+    },
+  );
 }

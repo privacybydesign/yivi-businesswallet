@@ -151,7 +151,11 @@ type claimsView struct {
 
 // CreateSession starts a proofing session on a flow.
 func (c *Client) CreateSession(ctx context.Context, apiKey string, in SessionInput) (Session, error) {
-	body := map[string]any{"flow": in.FlowID, "clientReference": in.ClientReference}
+	method, err := ipsMethod(in.Method)
+	if err != nil {
+		return Session{}, err
+	}
+	body := map[string]any{"flow": in.FlowID, "clientReference": in.ClientReference, "method": method}
 	if in.Language != "" {
 		body["language"] = in.Language
 	}
@@ -160,6 +164,10 @@ func (c *Client) CreateSession(ctx context.Context, apiKey string, in SessionInp
 	}
 	var out createdSessionView
 	if err := c.do(ctx, http.MethodPost, "/sessions", tenantHeaders(apiKey), body, &out); err != nil {
+		if errors.Is(err, errUnavailable) && in.Method == MethodYivi {
+			// IPS runs the Yivi method only with a Yivi server configured.
+			err = ErrMethodUnavailable
+		}
 		return Session{}, fmt.Errorf("proofingprovider: create session: %w", err)
 	}
 	sess, err := out.session()
@@ -208,13 +216,26 @@ func (c *Client) SessionResult(ctx context.Context, apiKey, sessionID, sessionTo
 				FirstName   string `json:"firstName"`
 				LastName    string `json:"lastName"`
 			} `json:"document"`
+			// Only whether a Yivi disclosure happened; its attributes stay unread.
+			Disclosure *struct {
+				Source string `json:"source"`
+			} `json:"disclosure"`
 		} `json:"result"`
+		// Only each device's role: which app took part, not which device.
+		Devices []struct {
+			Role string `json:"role"`
+		} `json:"devices"`
 	}
 	path := sessionPath(sessionID) + "/result"
 	if err := c.do(ctx, http.MethodGet, path, sessionHeaders(apiKey, sessionToken), nil, &out); err != nil {
 		return Result{}, fmt.Errorf("proofingprovider: session result: %w", err)
 	}
 	res := Result{Status: out.Status, ErrorCode: out.ErrorCode, CompletedAt: out.CompletedAt}
+	roles := make([]string, 0, len(out.Devices))
+	for _, d := range out.Devices {
+		roles = append(roles, d.Role)
+	}
+	res.Method = methodOf(out.Result != nil && out.Result.Disclosure != nil, roles)
 	if out.Result != nil && out.Result.Assurance != nil {
 		res.AssuranceLevel = out.Result.Assurance.Level
 		res.EIDASLevel = out.Result.Assurance.EIDASLevel
@@ -227,6 +248,77 @@ func (c *Client) SessionResult(ctx context.Context, apiKey, sessionID, sessionTo
 		}
 	}
 	return res, nil
+}
+
+// appPath is a MethodYivi session's subject-facing IPS route. The session token
+// in the path is the credential: IPS gives such a session no device slots.
+func appPath(sessionToken, route string) string {
+	return "/app/" + url.PathEscape(sessionToken) + route
+}
+
+// StartYiviDisclosure starts (or, after a cancel in the app, restarts) the Yivi
+// disclosure of a MethodYivi session, which IPS then reports opened.
+func (c *Client) StartYiviDisclosure(ctx context.Context, sessionToken string) (YiviStart, error) {
+	var out struct {
+		SessionPtr json.RawMessage `json:"sessionPtr"`
+		ExpiresAt  time.Time       `json:"expiresAt"`
+	}
+	if err := c.do(ctx, http.MethodPost, appPath(sessionToken, "/yivi/start"), nil, map[string]any{}, &out); err != nil {
+		if errors.Is(err, errUnavailable) {
+			err = ErrMethodUnavailable
+		}
+		return YiviStart{}, fmt.Errorf("proofingprovider: start yivi disclosure: %w", err)
+	}
+	if len(out.SessionPtr) == 0 {
+		return YiviStart{}, errors.New("proofingprovider: start yivi disclosure: answer carries no session pointer")
+	}
+	return YiviStart{SessionPtr: out.SessionPtr, ExpiresAt: out.ExpiresAt}, nil
+}
+
+// YiviDisclosureResult redeems a MethodYivi session's finished disclosure, or
+// answers ErrDisclosurePending while the subject has not finished it.
+func (c *Client) YiviDisclosureResult(ctx context.Context, sessionToken string) (YiviDisclosure, error) {
+	var out struct {
+		OK           bool   `json:"ok"`
+		Code         string `json:"code"`
+		StableFrames int    `json:"stableFrames"`
+		MaxAttempts  int    `json:"maxAttempts"`
+	}
+	err := c.do(ctx, http.MethodGet, appPath(sessionToken, "/yivi/result"), nil, nil, &out)
+	if rejected := (*RejectedError)(nil); errors.As(err, &rejected) && rejected.Status == http.StatusConflict &&
+		strings.Contains(rejected.Message, ipsDisclosurePendingMessage) {
+		return YiviDisclosure{}, ErrDisclosurePending
+	}
+	if err != nil {
+		return YiviDisclosure{}, fmt.Errorf("proofingprovider: yivi disclosure result: %w", err)
+	}
+	return YiviDisclosure{OK: out.OK, Code: out.Code, StableFrames: out.StableFrames, MaxAttempts: out.MaxAttempts}, nil
+}
+
+// ipsDisclosurePendingMessage is the part of IPS's 409 that tells a Yivi
+// session still running from one that is over (bound_login.go).
+const ipsDisclosurePendingMessage = "not finished yet"
+
+// SubmitFaceFrame scores one live camera frame (a JPEG data URL or base64) of a
+// MethodYivi session against the disclosed photo.
+func (c *Client) SubmitFaceFrame(ctx context.Context, sessionToken, image string) (FaceVerdict, error) {
+	var out struct {
+		FaceDetected bool         `json:"faceDetected"`
+		Matched      bool         `json:"matched"`
+		Consecutive  int          `json:"consecutive"`
+		StableFrames int          `json:"stableFrames"`
+		Attempts     int          `json:"attempts"`
+		MaxAttempts  int          `json:"maxAttempts"`
+		Decision     FaceDecision `json:"decision"`
+	}
+	body := map[string]string{"image": image}
+	if err := c.do(ctx, http.MethodPost, appPath(sessionToken, "/face"), nil, body, &out); err != nil {
+		return FaceVerdict{}, fmt.Errorf("proofingprovider: face frame: %w", err)
+	}
+	return FaceVerdict{
+		FaceDetected: out.FaceDetected, Matched: out.Matched, Consecutive: out.Consecutive,
+		StableFrames: out.StableFrames, Attempts: out.Attempts, MaxAttempts: out.MaxAttempts, Decision: out.Decision,
+	}, nil
 }
 
 func (c *Client) adminHeaders() http.Header {
@@ -278,8 +370,10 @@ func (c *Client) do(ctx context.Context, method, path string, headers http.Heade
 	case resp.StatusCode == http.StatusNotFound:
 		return ErrNotFound
 	case resp.StatusCode == http.StatusBadRequest, resp.StatusCode == http.StatusConflict,
-		resp.StatusCode == http.StatusUnprocessableEntity:
+		resp.StatusCode == http.StatusGone, resp.StatusCode == http.StatusUnprocessableEntity:
 		return &RejectedError{Status: resp.StatusCode, Message: rejectionMessage(limited)}
+	case resp.StatusCode == http.StatusServiceUnavailable:
+		return errUnavailable
 	case resp.StatusCode/100 != 2:
 		return fmt.Errorf("status %d", resp.StatusCode)
 	}
@@ -291,6 +385,10 @@ func (c *Client) do(ctx context.Context, method, path string, headers http.Heade
 	}
 	return nil
 }
+
+// errUnavailable is IPS answering 503: a method it cannot run, or IPS itself
+// unable to serve. The callers that can tell which say so.
+var errUnavailable = fmt.Errorf("status %d", http.StatusServiceUnavailable)
 
 // rejectionMessage reads IPS's {"error": "..."} body, capped.
 func rejectionMessage(r io.Reader) string {

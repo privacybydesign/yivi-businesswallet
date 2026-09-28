@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -31,5 +32,12 @@ func TestDecodeCursorRejectsGarbage(t *testing.T) {
 		if _, err := DecodeCursor(c); err == nil {
 			t.Errorf("DecodeCursor(%q) = nil error, want error", c)
 		}
+	}
+}
+
+func TestWithoutActorClearsTheActor(t *testing.T) {
+	ctx := ContextWithActor(context.Background(), Actor{UserID: uuid.New()})
+	if _, ok := ActorFromContext(WithoutActor(ctx)); ok {
+		t.Error("an actor survived WithoutActor")
 	}
 }

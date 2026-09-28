@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/http";
 import i18n from "../i18n";
@@ -11,12 +13,30 @@ import {
   emptyFlowDraft,
   flowDraftError,
   flowSpecFromDraft,
+  formatDuration,
   isProofingLive,
+  isProofingStep,
+  isRequestedAttribute,
   latestRequestByMember,
   proofingErrorMessage,
+  proofingStatsBy,
   proofingStatusLabel,
   requestSubject,
+  searchCustomers,
   sendableFlows,
+  sessionDurationSeconds,
+  sessionFilterCounts,
+  shortRequestId,
+  sumProofingStats,
+  verifiedShare,
+  customerDisplayStatus,
+  DATA_RETENTION_DAY_OPTIONS,
+  isHexColor,
+  isSuccessStatus,
+  proofingMethodLabel,
+  sessionEventDetail,
+  readableTextOn,
+  SESSION_TTL_OPTIONS_SECONDS,
 } from "./identity-proofing";
 import type { ProofingFlowDraft } from "./identity-proofing";
 
@@ -323,6 +343,12 @@ describe("proofingErrorMessage", () => {
     );
   });
 
+  it("says a paused customer takes no request", () => {
+    expect(
+      proofingErrorMessage(apiError(409, "customer_paused", "internal"), t),
+    ).toBe(t("identityProofing.errors.customerPaused"));
+  });
+
   it("maps known codes to their own copy", () => {
     expect(
       proofingErrorMessage(apiError(422, "flow_not_allowed", "internal"), t),
@@ -333,5 +359,241 @@ describe("proofingErrorMessage", () => {
     expect(proofingErrorMessage(new Error("boom"), t)).toBe(
       t("identityProofing.errors.generic"),
     );
+  });
+});
+
+describe("proofing stats", () => {
+  const row = (
+    customerId: string,
+    flowId: string,
+    sessions: number,
+    approved: number,
+  ): {
+    customerId: string;
+    flowId: string;
+    sessions: number;
+    approved: number;
+    rejected: number;
+    needsReview: number;
+    expired: number;
+  } => ({
+    customerId,
+    flowId,
+    sessions,
+    approved,
+    rejected: 1,
+    needsReview: 0,
+    expired: 1,
+  });
+  const rows = [
+    row("c1", "f1", 10, 6),
+    row("c1", "f2", 4, 2),
+    row("c2", "f1", 5, 3),
+  ];
+
+  it("sums every row", () => {
+    expect(sumProofingStats(rows)).toEqual({
+      sessions: 19,
+      approved: 11,
+      rejected: 3,
+      needsReview: 0,
+      expired: 3,
+    });
+    expect(sumProofingStats([]).sessions).toBe(0);
+  });
+
+  it("groups per customer and per flow", () => {
+    const perCustomer = proofingStatsBy(rows, (r) => r.customerId);
+    expect(perCustomer.get("c1")?.sessions).toBe(14);
+    expect(perCustomer.get("c2")?.approved).toBe(3);
+    expect(perCustomer.has("c3")).toBe(false);
+    const perFlow = proofingStatsBy(
+      rows.filter((r) => r.customerId === "c1"),
+      (r) => r.flowId,
+    );
+    expect([...perFlow.keys()]).toEqual(["f1", "f2"]);
+  });
+
+  it("has no verified share without sessions", () => {
+    expect(verifiedShare(sumProofingStats([]))).toBeUndefined();
+    expect(verifiedShare(sumProofingStats([row("c", "f", 4, 3)]))).toBe(0.75);
+  });
+});
+
+describe("searchCustomers", () => {
+  const customers = [{ name: "Veldhuis Verzekeringen" }, { name: "Kliq" }];
+
+  it("matches on the name, ignoring case and space", () => {
+    expect(searchCustomers(customers, "  VERZ ")).toEqual([customers[0]]);
+    expect(searchCustomers(customers, "")).toEqual(customers);
+    expect(searchCustomers(customers, "nope")).toEqual([]);
+  });
+});
+
+describe("known flow values", () => {
+  it("recognises only values the wallet has copy for", () => {
+    expect(isRequestedAttribute("dg1")).toBe(true);
+    expect(isRequestedAttribute("dg14")).toBe(false);
+    expect(isProofingStep("nfc_read")).toBe(true);
+    expect(isProofingStep("video_call")).toBe(false);
+  });
+});
+
+describe("sessions tab", () => {
+  const sent = "2026-09-25T10:00:00Z";
+  const expires = "2026-09-25T10:10:00Z";
+
+  it("counts each filter", () => {
+    const statuses = ["approved", "approved", "rejected", "expired", "pending"];
+    expect(sessionFilterCounts(statuses.map((status) => ({ status })))).toEqual(
+      {
+        all: 5,
+        verified: 2,
+        failed: 1,
+        expired: 1,
+      },
+    );
+  });
+
+  it("times a session to its outcome or its expiry", () => {
+    const base = { createdAt: sent, linkExpiresAt: expires };
+    expect(
+      sessionDurationSeconds({
+        ...base,
+        status: "approved",
+        completedAt: "2026-09-25T10:00:48Z",
+      }),
+    ).toBe(48);
+    expect(sessionDurationSeconds({ ...base, status: "expired" })).toBe(600);
+    expect(
+      sessionDurationSeconds({ ...base, status: "in_progress" }),
+    ).toBeUndefined();
+  });
+
+  it("formats like a stopwatch", () => {
+    expect(formatDuration(48)).toBe("0:48");
+    expect(formatDuration(151)).toBe("2:31");
+    expect(formatDuration(600)).toBe("10:00");
+  });
+
+  it("shortens a request id", () => {
+    expect(shortRequestId("8f2k1a2b-0000-4000-8000-000000000000")).toBe(
+      "8f2k1a2b",
+    );
+  });
+});
+
+// The session settings the Settings tab offers are the ones the backend accepts.
+describe("session settings mirror backend/internal/proofing", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../backend/internal/proofing/proofing.go",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const minutes = (expr: string): number => {
+    const named = /const SessionTTL = (\d+) \* time\.Minute/.exec(source);
+    const literal = /^(\d+) \* time\.Minute$/.exec(expr.trim());
+    if (expr.trim() === "SessionTTL" && named) return Number(named[1]);
+    if (literal) return Number(literal[1]);
+    throw new Error(`unparsed session lifetime ${expr}`);
+  };
+
+  it("offers every session lifetime and no other", () => {
+    const list = /SessionTTLOptions = \[\]time\.Duration\{([^}]*)\}/.exec(
+      source,
+    );
+    expect(list).not.toBeNull();
+    const backend = list![1].split(",").map((e) => minutes(e) * 60);
+    expect([...SESSION_TTL_OPTIONS_SECONDS]).toEqual(backend);
+  });
+
+  it("offers every data retention and no other", () => {
+    const list = /DataRetentionDayOptions = \[\]int\{([^}]*)\}/.exec(source);
+    expect(list).not.toBeNull();
+    const backend = list![1].split(",").map((e) => Number(e.trim()));
+    expect([...DATA_RETENTION_DAY_OPTIONS]).toEqual(backend);
+  });
+});
+
+describe("customerDisplayStatus", () => {
+  it("flags an active customer whose webhook fails", () => {
+    expect(
+      customerDisplayStatus({
+        status: "active",
+        webhook: { state: "failing" },
+      }),
+    ).toBe("needs_attention");
+    expect(
+      customerDisplayStatus({
+        status: "paused",
+        webhook: { state: "failing" },
+      }),
+    ).toBe("paused");
+    expect(
+      customerDisplayStatus({
+        status: "active",
+        webhook: { state: "delivering" },
+      }),
+    ).toBe("active");
+  });
+
+  it("tells a 2xx from the rest", () => {
+    expect(isSuccessStatus(204)).toBe(true);
+    expect(isSuccessStatus(503)).toBe(false);
+    expect(isSuccessStatus(301)).toBe(false);
+  });
+});
+
+describe("readableTextOn", () => {
+  it("puts white on dark fills and black on light ones", () => {
+    expect(readableTextOn("#1F5B4A")).toBe("#ffffff");
+    expect(readableTextOn("#1A1A1A")).toBe("#ffffff");
+    expect(readableTextOn("#F5D547")).toBe("#000000");
+    expect(readableTextOn("not a colour")).toBe("#ffffff");
+    expect(isHexColor("#abcdef")).toBe(true);
+    expect(isHexColor("abcdef")).toBe(false);
+  });
+});
+
+describe("session method and timeline", () => {
+  it("names the app a subject used", () => {
+    expect(proofingMethodLabel("idem_app", t)).toBe(
+      t("identityProofing.methods.idemApp"),
+    );
+    expect(proofingMethodLabel("yivi_app", t)).toBe(
+      t("identityProofing.methods.yiviApp"),
+    );
+    expect(proofingMethodLabel(undefined, t)).toBe("—");
+    expect(proofingMethodLabel("carrier_pigeon", t)).toBe("carrier_pigeon");
+  });
+
+  it("details an event from its after snapshot", () => {
+    expect(
+      sessionEventDetail(
+        {
+          before: { status: "in_progress" },
+          after: {
+            status: "rejected",
+            method: "idem_app",
+            errorCode: "DOC_EXPIRED",
+          },
+        },
+        t,
+      ),
+    ).toEqual([
+      t("identityProofing.methods.idemApp"),
+      t("identityProofing.rejectionReasons.docExpired"),
+    ]);
+    expect(
+      sessionEventDetail(
+        { after: { status: "approved", eidasLevel: "substantial" } },
+        t,
+      ),
+    ).toEqual(["eIDAS substantial"]);
+    expect(sessionEventDetail({}, t)).toEqual([]);
   });
 });

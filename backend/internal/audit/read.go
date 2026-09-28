@@ -104,6 +104,13 @@ func (r *Reader) ListForMember(ctx context.Context, orgID, userID uuid.UUID, aft
 	return r.page(ctx, filter, []any{orgID, userID.String(), userID}, after, limit)
 }
 
+// ListForTarget returns the org's events about one target (e.g. one identity
+// proofing request), newest first.
+func (r *Reader) ListForTarget(ctx context.Context, orgID uuid.UUID, targetType, targetID string, after *Cursor, limit int) (Page, error) {
+	filter := `a.organization_id = $1 AND a.target_type = $2 AND a.target_id = $3`
+	return r.page(ctx, filter, []any{orgID, targetType, targetID}, after, limit)
+}
+
 func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, after *Cursor, limit int) (Page, error) {
 	switch {
 	case limit <= 0:

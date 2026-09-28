@@ -3,7 +3,11 @@
 package integration
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
@@ -262,6 +266,23 @@ func TestIdentityProofingCustomerHTTPFlow(t *testing.T) {
 	if len(list) != 1 || list[0].ID != created.ID {
 		t.Errorf("customer's requests = %+v, want the one", list)
 	}
+
+	// The request's timeline is its audit trail, oldest first.
+	timeline := decodeJSON[struct {
+		Events []struct {
+			Action   string `json:"action"`
+			TargetID string `json:"targetId"`
+		} `json:"events"`
+	}](t, env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/requests/"+created.ID+"/events", nil))
+	if len(timeline.Events) != 2 || timeline.Events[0].Action != audit.IdentityProofingRequested ||
+		timeline.Events[1].Action != audit.IdentityProofingSessionCreated || timeline.Events[0].TargetID != created.ID {
+		t.Errorf("timeline = %+v; want requested, then session_created", timeline.Events)
+	}
+	resp = env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/requests/00000000-0000-0000-0000-000000000000/events", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown request's timeline = %d, want 404", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
 }
 
 func TestIdentityProofingMemberUsesButCannotManageCustomers(t *testing.T) {
@@ -288,6 +309,140 @@ func TestIdentityProofingMemberUsesButCannotManageCustomers(t *testing.T) {
 	resp = env.do(http.MethodGet, "/api/v1/orgs/acme/customers/00000000-0000-0000-0000-000000000000", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("unknown customer = %d, want 404", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+}
+
+type proofingAPIKeyResp struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Prefix    string `json:"prefix"`
+	Secret    string `json:"secret"`
+	RevokedAt string `json:"revokedAt"`
+}
+
+type proofingAPISessionResp struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	FlowID   string `json:"flowId"`
+	DeepLink string `json:"deepLink"`
+	MailSent bool   `json:"mailSent"`
+}
+
+// apiCall calls the public proofing API with a customer key and no cookie.
+func (e *testEnv) apiCall(method, path, key string, body any) *http.Response {
+	e.t.Helper()
+	var reader io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			e.t.Fatalf("marshal: %v", err)
+		}
+		reader = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, e.server.URL+path, reader)
+	if err != nil {
+		e.t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		e.t.Fatalf("do %s %s: %v", method, path, err)
+	}
+	return resp
+}
+
+func TestIdentityProofingCustomerAPIKeyHTTPFlow(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+
+	flow := decodeJSON[proofingFlowResp](t, env.postJSON("/api/v1/orgs/acme/identity-proofing/flows", map[string]any{
+		"name": "Passport only", "steps": []string{"document_capture", "nfc_read"}, "requiredChecks": []string{"nfc.passive_auth"},
+	}))
+	customer := decodeJSON[proofingCustomerResp](t, env.postJSON("/api/v1/orgs/acme/customers", map[string]any{"name": "Initech"}))
+	base := "/api/v1/orgs/acme/customers/" + customer.ID
+	resp := env.putJSON(base+"/flow-selection", map[string]any{"flowIds": []string{flow.ID}, "defaultFlowId": flow.ID})
+	_ = resp.Body.Close()
+
+	resp = env.postJSON(base+"/api-keys", map[string]any{"name": "Production backend"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create key = %d, want 201", resp.StatusCode)
+	}
+	key := decodeJSON[proofingAPIKeyResp](t, resp)
+	if !strings.HasPrefix(key.Secret, "yp_live_") || !strings.HasPrefix(key.Secret, key.Prefix) {
+		t.Fatalf("created key = %+v; want a yp_live_ secret starting with its prefix", key)
+	}
+	listed := decodeJSON[[]proofingAPIKeyResp](t, env.do(http.MethodGet, base+"/api-keys", nil))
+	if len(listed) != 1 || listed[0].Secret != "" {
+		t.Errorf("listed keys = %+v; want the one key without its secret", listed)
+	}
+
+	resp = env.apiCall(http.MethodGet, "/api/v1/proofing/flows", "yp_live_nope", nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unknown key = %d, want 401", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	// No flow named: the customer's default. No mail: the caller shows the link.
+	resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
+		map[string]any{"email": "anna@example.org", "sendMail": false})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("api create session = %d, want 201", resp.StatusCode)
+	}
+	session := decodeJSON[proofingAPISessionResp](t, resp)
+	if session.Status != "pending" || session.FlowID != flow.ID || !strings.HasPrefix(session.DeepLink, "vcmrtd://") || session.MailSent {
+		t.Errorf("api session = %+v; want pending on the default flow with its deep link and no mail", session)
+	}
+	got := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+session.ID, key.Secret, nil))
+	if got.ID != session.ID {
+		t.Errorf("api get session = %+v, want %s", got, session.ID)
+	}
+
+	// The org's list names the key as the sender.
+	list := decodeJSON[[]struct {
+		ID         string `json:"id"`
+		APIKeyName string `json:"apiKeyName"`
+	}](t, env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/requests?customerId="+customer.ID, nil))
+	if len(list) != 1 || list[0].APIKeyName != "Production backend" {
+		t.Errorf("requests = %+v, want the one sent by the key", list)
+	}
+
+	resp = env.do(http.MethodPatch, base, strings.NewReader(`{"paused":true}`))
+	_ = resp.Body.Close()
+	resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret, map[string]any{"email": "anna@example.org"})
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("api create session while paused = %d, want 409", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	resp = env.do(http.MethodDelete, base+"/api-keys/"+key.ID, nil)
+	if revoked := decodeJSON[proofingAPIKeyResp](t, resp); revoked.RevokedAt == "" {
+		t.Errorf("revoked key = %+v, want revokedAt", revoked)
+	}
+	resp = env.apiCall(http.MethodGet, "/api/v1/proofing/flows", key.Secret, nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("revoked key = %d, want 401", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	for action, want := range map[string]int{
+		audit.IdentityProofingAPIKeyCreated: 1, audit.IdentityProofingAPIKeyRevoked: 1,
+	} {
+		if n := env.auditCount(orgID, action); n != want {
+			t.Errorf("%s audits = %d, want %d", action, n, want)
+		}
+	}
+
+	resp = env.do(http.MethodDelete, base, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("remove customer = %d, want 204", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	resp = env.do(http.MethodGet, base, nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("removed customer = %d, want 404", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
 }

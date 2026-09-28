@@ -1,23 +1,37 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
-  useCreateProofingCustomerMutation,
   useProofingCustomersQuery,
+  useProofingStatsQuery,
 } from "../api/identity-proofing.queries";
-import { useWhenFormatter } from "../lib/format-when";
-import { proofingErrorMessage } from "../lib/identity-proofing";
-import { Button, Card, Input, Table, Tag, TopBar } from "../ui";
+import { useDateFormatter } from "../lib/format-when";
+import { usePercentFormatter } from "../lib/format-percent";
+import {
+  noProofingSessions,
+  proofingErrorMessage,
+  proofingStatsBy,
+  searchCustomers,
+  shortRequestId,
+  verifiedShare,
+} from "../lib/identity-proofing";
+import { Button, Card, Icon, Input, Table, TopBar } from "../ui";
+import {
+  CustomerMark,
+  CustomerStatusTag,
+  NewCustomerModal,
+  WebhookStateText,
+} from "./proofing-customer-ui";
 
-const ERROR = "text-error text-[12.5px]";
-const CUSTOMER_COLUMNS = 3;
+const CUSTOMER_COLUMNS = 7;
+const SEARCH_ICON_SIZE = 15;
+const OPEN_ICON_SIZE = 18;
 
-// The org's customers (sub-tenants with no login of their own): each is the
-// party the org verifies external people for, on the flows an admin assigned to
-// it. Every member sees the list and opens a customer to send requests; only an
-// admin adds customers.
+// The org's customers (no login of their own): each is a party the org verifies
+// external people for, on the flows an admin assigned to it. Every member sees
+// the list and opens a customer to send requests; only an admin adds customers.
 export default function Customers(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug } = useParams();
@@ -25,148 +39,152 @@ export default function Customers(): React.JSX.Element {
   const slug = orgSlug!;
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
+  const [adding, setAdding] = useState(false);
 
   return (
     <>
-      <TopBar title={t("customers.title")} subtitle={t("customers.subtitle")} />
-      <div className="flex flex-col gap-6 p-8">
-        {isAdmin && <NewCustomerCard slug={slug} />}
+      <TopBar
+        title={t("customers.title")}
+        subtitle={t("customers.subtitle")}
+        actions={
+          isAdmin && (
+            <Button icon="add" onClick={() => setAdding(true)}>
+              {t("customers.add")}
+            </Button>
+          )
+        }
+      />
+      {adding && (
+        <NewCustomerModal slug={slug} onClose={() => setAdding(false)} />
+      )}
+      <div className="flex flex-col gap-4 p-4 sm:p-8">
         <CustomersTable slug={slug} />
       </div>
     </>
   );
 }
 
-function NewCustomerCard({ slug }: { slug: string }): React.JSX.Element {
-  const { t } = useTranslation();
-  const create = useCreateProofingCustomerMutation(slug);
-  const [name, setName] = useState("");
-  const [touched, setTouched] = useState(false);
-  const missing = name.trim() === "";
-
-  function submit(event: React.FormEvent): void {
-    event.preventDefault();
-    setTouched(true);
-    if (missing) {
-      return;
-    }
-    create.mutate(name.trim(), {
-      onSuccess: () => {
-        setName("");
-        setTouched(false);
-      },
-    });
-  }
-
-  return (
-    <Card className="p-6">
-      <h2 className="font-display text-[16px] font-bold">
-        {t("customers.new.title")}
-      </h2>
-      <form
-        className="mt-4 flex flex-wrap items-start gap-3"
-        onSubmit={submit}
-        noValidate
-      >
-        <div className="flex w-full max-w-sm flex-col gap-1">
-          <label
-            htmlFor="proofing-customer-name"
-            className="text-ink-soft text-[12px] font-semibold"
-          >
-            {t("customers.new.name")}
-          </label>
-          <Input
-            id="proofing-customer-name"
-            value={name}
-            placeholder={t("customers.new.namePlaceholder")}
-            aria-invalid={touched && missing}
-            onChange={(event) => setName(event.target.value)}
-          />
-          {touched && missing && (
-            <p className={ERROR}>{t("customers.new.nameRequired")}</p>
-          )}
-          {create.isError && (
-            <p className={ERROR}>{proofingErrorMessage(create.error, t)}</p>
-          )}
-        </div>
-        <Button
-          type="submit"
-          icon="add"
-          className="sm:mt-[22px]"
-          loading={create.isPending}
-        >
-          {t("customers.new.create")}
-        </Button>
-      </form>
-    </Card>
-  );
-}
-
 function CustomersTable({ slug }: { slug: string }): React.JSX.Element {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const customers = useProofingCustomersQuery(slug);
-  const formatWhen = useWhenFormatter();
+  const stats = useProofingStatsQuery(slug);
+  const formatDate = useDateFormatter();
+  const formatPercent = usePercentFormatter();
+  const [search, setSearch] = useState("");
+  const perCustomer = proofingStatsBy(
+    stats.data?.rows ?? [],
+    (r) => r.customerId,
+  );
+  const shown = searchCustomers(customers.data ?? [], search);
 
   return (
-    <Card>
-      <div className="px-6 pt-5 pb-3">
-        <h2 className="font-display text-[16px] font-bold">
-          {t("customers.list.title")}
-        </h2>
-        <p className="text-ink-soft mt-1 text-[12px]">
-          {t("customers.list.hint")}
-        </p>
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative w-full max-w-xs">
+          <span className="text-muted pointer-events-none absolute top-1/2 left-3 -translate-y-1/2">
+            <Icon name="search" size={SEARCH_ICON_SIZE} />
+          </span>
+          <Input
+            type="search"
+            value={search}
+            className="pl-9"
+            placeholder={t("customers.list.search")}
+            aria-label={t("customers.list.search")}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </div>
+        {customers.data && (
+          <span className="text-muted text-[12.5px]">
+            {t("customers.list.count", { count: customers.data.length })}
+          </span>
+        )}
       </div>
-      <Table>
-        <Table.Head>
-          <Table.HeaderCell>{t("customers.list.name")}</Table.HeaderCell>
-          <Table.HeaderCell>{t("customers.list.flows")}</Table.HeaderCell>
-          <Table.HeaderCell>{t("customers.list.created")}</Table.HeaderCell>
-        </Table.Head>
-        <Table.Body>
-          {customers.isPending ? (
-            <Table.State colSpan={CUSTOMER_COLUMNS}>
-              {t("common.loading")}
-            </Table.State>
-          ) : customers.isError ? (
-            <Table.State colSpan={CUSTOMER_COLUMNS}>
-              {proofingErrorMessage(customers.error, t)}
-            </Table.State>
-          ) : customers.data.length === 0 ? (
-            <Table.State colSpan={CUSTOMER_COLUMNS}>
-              {t("customers.list.empty")}
-            </Table.State>
-          ) : (
-            customers.data.map((customer) => (
-              <Table.Row key={customer.id}>
-                <Table.Cell>
-                  <Link
-                    to={`/${slug}/customers/${customer.id}`}
-                    className="text-link font-semibold underline"
-                    aria-label={t("customers.list.open", {
-                      name: customer.name,
-                    })}
+      <Card>
+        <Table>
+          <Table.Head>
+            <Table.HeaderCell>{t("customers.list.name")}</Table.HeaderCell>
+            <Table.HeaderCell>{t("customers.list.flows")}</Table.HeaderCell>
+            <Table.HeaderCell>{t("customers.list.sessions")}</Table.HeaderCell>
+            <Table.HeaderCell>{t("customers.list.verified")}</Table.HeaderCell>
+            <Table.HeaderCell>{t("customers.list.webhook")}</Table.HeaderCell>
+            <Table.HeaderCell>{t("customers.list.status")}</Table.HeaderCell>
+            <Table.HeaderCell aria-hidden="true" />
+          </Table.Head>
+          <Table.Body>
+            {customers.isPending ? (
+              <Table.State colSpan={CUSTOMER_COLUMNS}>
+                {t("common.loading")}
+              </Table.State>
+            ) : customers.isError ? (
+              <Table.State colSpan={CUSTOMER_COLUMNS}>
+                {proofingErrorMessage(customers.error, t)}
+              </Table.State>
+            ) : customers.data.length === 0 ? (
+              <Table.State colSpan={CUSTOMER_COLUMNS}>
+                {t("customers.list.empty")}
+              </Table.State>
+            ) : shown.length === 0 ? (
+              <Table.State colSpan={CUSTOMER_COLUMNS}>
+                {t("customers.list.noMatch")}
+              </Table.State>
+            ) : (
+              shown.map((customer) => {
+                const to = `/${slug}/identity-proofing/customers/${customer.id}`;
+                const totals =
+                  perCustomer.get(customer.id) ?? noProofingSessions();
+                const share = verifiedShare(totals);
+                return (
+                  <Table.Row
+                    key={customer.id}
+                    className="hover:bg-surface-2 cursor-pointer transition-colors"
+                    onClick={() => void navigate(to)}
                   >
-                    {customer.name}
-                  </Link>
-                </Table.Cell>
-                <Table.Cell>
-                  {customer.flowIds.length === 0 ? (
-                    <Tag tone="amber">{t("customers.list.noFlows")}</Tag>
-                  ) : (
-                    <Tag tone="blue">
-                      {t("customers.list.flowCount", {
-                        count: customer.flowIds.length,
-                      })}
-                    </Tag>
-                  )}
-                </Table.Cell>
-                <Table.Cell>{formatWhen(customer.createdAt)}</Table.Cell>
-              </Table.Row>
-            ))
-          )}
-        </Table.Body>
-      </Table>
-    </Card>
+                    <Table.Cell>
+                      <div className="flex items-center gap-3">
+                        <CustomerMark customer={customer} />
+                        <div className="min-w-0">
+                          <Link
+                            to={to}
+                            className="text-ink font-semibold hover:underline"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {customer.name}
+                          </Link>
+                          <div
+                            className="text-muted font-mono text-[11.5px]"
+                            title={t("customers.list.added", {
+                              date: formatDate(customer.createdAt),
+                            })}
+                          >
+                            {shortRequestId(customer.id)}
+                          </div>
+                        </div>
+                      </div>
+                    </Table.Cell>
+                    <Table.Cell>{customer.flowIds.length}</Table.Cell>
+                    <Table.Cell>
+                      {stats.data ? totals.sessions : "—"}
+                    </Table.Cell>
+                    <Table.Cell>
+                      {share === undefined ? "—" : formatPercent(share)}
+                    </Table.Cell>
+                    <Table.Cell className="text-[12.5px]">
+                      <WebhookStateText webhook={customer.webhook} />
+                    </Table.Cell>
+                    <Table.Cell>
+                      <CustomerStatusTag customer={customer} />
+                    </Table.Cell>
+                    <Table.Cell className="text-muted w-10 text-right">
+                      <Icon name="chevron_right" size={OPEN_ICON_SIZE} />
+                    </Table.Cell>
+                  </Table.Row>
+                );
+              })
+            )}
+          </Table.Body>
+        </Table>
+      </Card>
+    </>
   );
 }

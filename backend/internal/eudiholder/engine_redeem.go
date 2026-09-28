@@ -17,6 +17,7 @@ import (
 	"github.com/privacybydesign/irmago/eudi/openid4vci"
 	"github.com/privacybydesign/irmago/eudi/sdjwt"
 	"github.com/privacybydesign/irmago/eudi/services"
+	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
 	"github.com/privacybydesign/irmago/eudi/storage/db"
 	"github.com/privacybydesign/irmago/eudi/storage/db/models"
 )
@@ -45,15 +46,9 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		return Redeemed{}, err
 	}
 
-	conf, err := eudi.NewConfiguration(st)
+	conf, err := e.configuration(st, orgID)
 	if err != nil {
-		return Redeemed{}, fmt.Errorf("eudiholder: redeem config org %s: %w", orgID, err)
-	}
-	if e.redeem.StagingTrustAnchors {
-		conf.EnableStagingTrustAnchors()
-	}
-	if err := conf.Reload(); err != nil {
-		return Redeemed{}, fmt.Errorf("eudiholder: redeem load trust anchors org %s: %w", orgID, err)
+		return Redeemed{}, err
 	}
 
 	// x509Context is the trust material *both* x5c validations run against — the
@@ -75,10 +70,7 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 	// wires it. Its cache is the org's own status_list_cache table (AutoMigrated
 	// with the rest of the holder schema). Credentials that carry no
 	// status.status_list reference are unaffected — the check is a no-op for them.
-	statusChecker := statuslist.NewChecker(statuslist.VerificationContext{
-		X509Context: x509Context,
-		Clock:       eudijwt.NewSystemClock(),
-	}, db.NewStatusListCacheStore(st.Db()))
+	statusChecker := newStatusChecker(x509Context, st)
 
 	verCtx := sdjwtvc.SdJwtVcVerificationContext{
 		X509VerificationContext: x509Context,
@@ -169,6 +161,58 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 // Token it points at are two separate chain validations, and a partner signs
 // both under the same root: trusting the root for one and not the other rejects
 // the credential just as surely as trusting it for neither.
+// configuration loads the org's irmago configuration with its trust anchors
+// (and the staging anchors when configured): what both receiving a credential
+// and re-checking its status verify against.
+func (e *Engine) configuration(st irmastorage.Storage, orgID uuid.UUID) (*eudi.Configuration, error) {
+	conf, err := eudi.NewConfiguration(st)
+	if err != nil {
+		return nil, fmt.Errorf("eudiholder: config org %s: %w", orgID, err)
+	}
+	if e.redeem.StagingTrustAnchors {
+		conf.EnableStagingTrustAnchors()
+	}
+	if err := conf.Reload(); err != nil {
+		return nil, fmt.Errorf("eudiholder: load trust anchors org %s: %w", orgID, err)
+	}
+	return conf, nil
+}
+
+// newStatusChecker is the org's Token Status List checker: status lists verify
+// against x509Context, and its cache is the org's status_list_cache table.
+func newStatusChecker(x509Context eudijwt.X509VerificationContext, st irmastorage.Storage) *statuslist.Checker {
+	return statuslist.NewChecker(statuslist.VerificationContext{
+		X509Context: x509Context,
+		Clock:       eudijwt.NewSystemClock(),
+	}, db.NewStatusListCacheStore(st.Db()))
+}
+
+// RefreshStatuses re-reads the Token Status List of every credential the org
+// holds that carries a status reference, and writes the observed status and the
+// time of the check back (irmago's RevocationService.RefreshStatuses, one check
+// per batch). It reports how many batches changed status. A list that cannot be
+// fetched or verified is logged and skipped, keeping the last known status.
+func (e *Engine) RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, error) {
+	st, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return 0, err
+	}
+	conf, err := e.configuration(st, orgID)
+	if err != nil {
+		return 0, err
+	}
+	x509Context, err := e.trustContext(&conf.Issuers)
+	if err != nil {
+		return 0, err
+	}
+	revocation := services.NewRevocationService(newStatusChecker(x509Context, st), db.NewCredentialStore(st.Db()))
+	changed, err := revocation.RefreshStatuses(ctx)
+	if err != nil {
+		return changed, fmt.Errorf("eudiholder: refresh statuses org %s: %w", orgID, err)
+	}
+	return changed, nil
+}
+
 func (e *Engine) trustContext(base eudijwt.X509VerificationContext) (eudijwt.X509VerificationContext, error) {
 	if len(e.redeem.TrustChainPEM) == 0 {
 		return base, nil

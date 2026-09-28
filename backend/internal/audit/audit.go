@@ -107,8 +107,12 @@ const (
 	AttestationKeySuspended    = "attestation.key_suspended"
 	AttestationKeyRevoked      = "attestation.key_revoked"
 	AttestationHeldDeleted     = "attestation.held_deleted"
-	AttestationOfferAccepted   = "attestation.offer_accepted"
-	AttestationOfferDeclined   = "attestation.offer_declined"
+	// A credential the organization holds entered the wallet (an accepted offer),
+	// and the issuer's status list changed its state; target is the held id.
+	AttestationHeldReceived      = "attestation.held_received"
+	AttestationHeldStatusChanged = "attestation.held_status_changed"
+	AttestationOfferAccepted     = "attestation.offer_accepted"
+	AttestationOfferDeclined     = "attestation.offer_declined"
 
 	EmailSettingsUpdated = "email.settings_updated"
 	EmailTemplateUpdated = "email.template_updated"
@@ -172,6 +176,12 @@ const (
 	IdentityProofingCustomerCreated         = "identity_proofing.customer_created"
 	IdentityProofingCustomerUpdated         = "identity_proofing.customer_updated"
 	IdentityProofingCustomerFlowsConfigured = "identity_proofing.customer_flows_configured"
+	IdentityProofingCustomerRemoved         = "identity_proofing.customer_removed"
+	IdentityProofingAPIKeyCreated           = "identity_proofing.api_key_created"
+	IdentityProofingAPIKeyRevoked           = "identity_proofing.api_key_revoked"
+	IdentityProofingWebhookConfigured       = "identity_proofing.webhook_configured"
+	IdentityProofingWebhookSecretRotated    = "identity_proofing.webhook_secret_rotated"
+	IdentityProofingWebhookRemoved          = "identity_proofing.webhook_removed"
 )
 
 const (
@@ -242,6 +252,13 @@ type ctxKey struct{}
 
 func ContextWithActor(ctx context.Context, a Actor) context.Context {
 	return context.WithValue(ctx, ctxKey{}, a)
+}
+
+// WithoutActor clears the actor for what ctx records next: a change the system
+// makes on its own account while serving someone (e.g. an outcome read from an
+// external service during a list read) is not that person's doing.
+func WithoutActor(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxKey{}, nil)
 }
 
 // ActorFromContext returns the actor behind the current request, if one was

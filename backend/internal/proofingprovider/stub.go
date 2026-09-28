@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -23,15 +24,21 @@ const (
 	// subject's document.
 	stubProofedName = "Anna Jansen"
 	stubIDBytes     = 8
-	// stubAPIBaseURL stands in for IPS's PUBLIC_BASE_URL in a stub deep link.
-	// .invalid never resolves (RFC 2606).
+	// stubAPIBaseURL stands in for IPS's PUBLIC_BASE_URL in a stub deep link,
+	// stubYiviURL for its Yivi server in a stub session pointer. .invalid never
+	// resolves (RFC 2606).
 	stubAPIBaseURL = "http://ips.stub.invalid"
+	stubYiviURL    = "http://yivi.stub.invalid"
+	// stubStableFrames and stubMaxAttempts mirror IPS's bound-login defaults.
+	stubStableFrames = 3
+	stubMaxAttempts  = 40
 )
 
 // Stub is an in-process IPS for dev/CI and tests. Flows and their versions live
 // in memory per API key (a restart empties them). No phone can reach a stub
 // session, so it stays created (pending) until it expires, unless a test sets
-// Outcome to stand in for the subject finishing the vcmrtd flow.
+// Outcome to stand in for the subject finishing the vcmrtd flow, or the Yivi
+// disclosure and face check (which stay pending while Outcome is empty).
 type Stub struct {
 	Outcome Status
 
@@ -45,6 +52,7 @@ type stubSession struct {
 	token       string
 	flowID      string
 	flowVersion int
+	method      Method
 	expiresAt   time.Time
 }
 
@@ -174,14 +182,17 @@ func (s *Stub) CreateSession(_ context.Context, apiKey string, in SessionInput) 
 	if version == 0 {
 		return Session{}, &RejectedError{Status: http.StatusBadRequest, Message: "unknown flow"}
 	}
+	if _, err := ipsMethod(in.Method); err != nil {
+		return Session{}, err
+	}
 	ttl := stubSessionTTL
 	if in.TTL > 0 {
 		ttl = min(in.TTL, stubSessionTTL)
 	}
-	return s.createLocked(apiKey, in.FlowID, version, ttl)
+	return s.createLocked(apiKey, in.FlowID, version, ttl, in.Method)
 }
 
-func (s *Stub) createLocked(apiKey, flowID string, version int, ttl time.Duration) (Session, error) {
+func (s *Stub) createLocked(apiKey, flowID string, version int, ttl time.Duration, method Method) (Session, error) {
 	id, err := stubID("ses")
 	if err != nil {
 		return Session{}, err
@@ -191,8 +202,14 @@ func (s *Stub) createLocked(apiKey, flowID string, version int, ttl time.Duratio
 		return Session{}, err
 	}
 	now := time.Now().UTC()
-	s.sessions[id] = stubSession{apiKey: apiKey, token: token, flowID: flowID, flowVersion: version, expiresAt: now.Add(ttl)}
-	return Session{ID: id, Token: token, ExpiresAt: now.Add(ttl), FlowVersion: version, Claim: stubClaim(id, now)}, nil
+	s.sessions[id] = stubSession{
+		apiKey: apiKey, token: token, flowID: flowID, flowVersion: version, method: method, expiresAt: now.Add(ttl),
+	}
+	sess := Session{ID: id, Token: token, ExpiresAt: now.Add(ttl), FlowVersion: version}
+	if method != MethodYivi {
+		sess.Claim = stubClaim(id, now)
+	}
+	return sess, nil
 }
 
 func (s *Stub) SessionResult(_ context.Context, apiKey, sessionID, sessionToken string) (Result, error) {
@@ -207,7 +224,12 @@ func (s *Stub) SessionResult(_ context.Context, apiKey, sessionID, sessionToken 
 		return Result{Status: StatusCreated}, nil
 	}
 	now := time.Now().UTC()
-	res := Result{Status: s.Outcome, CompletedAt: &now}
+	// The stub's subject finished in the app the session was created for.
+	method := MethodIdem
+	if sess.method == MethodYivi {
+		method = MethodYivi
+	}
+	res := Result{Status: s.Outcome, CompletedAt: &now, Method: method}
 	if s.Outcome == StatusApproved {
 		res.AssuranceLevel, res.EIDASLevel = stubAssuranceLevel, stubAssuranceLevel
 		res.Name = stubProofedName
@@ -223,6 +245,64 @@ func (s *Stub) session(apiKey, sessionID, sessionToken string) (stubSession, err
 		return stubSession{}, ErrNotFound
 	}
 	return sess, nil
+}
+
+// yiviSession finds a live MethodYivi session by its token, the way IPS's
+// subject-facing routes do.
+func (s *Stub) yiviSession(sessionToken string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, sess := range s.sessions {
+		if sess.token != sessionToken {
+			continue
+		}
+		if sess.method != MethodYivi || time.Now().After(sess.expiresAt) {
+			return "", &RejectedError{Status: http.StatusConflict, Message: "not a running Yivi session"}
+		}
+		return id, nil
+	}
+	return "", ErrNotFound
+}
+
+func (s *Stub) StartYiviDisclosure(_ context.Context, sessionToken string) (YiviStart, error) {
+	id, err := s.yiviSession(sessionToken)
+	if err != nil {
+		return YiviStart{}, err
+	}
+	ptr, err := json.Marshal(map[string]string{"u": stubYiviURL + "/irma/session/" + id, "irmaqr": "disclosing"})
+	if err != nil {
+		return YiviStart{}, fmt.Errorf("proofingprovider: stub session pointer: %w", err)
+	}
+	return YiviStart{SessionPtr: ptr, ExpiresAt: time.Now().UTC().Add(stubSessionTTL)}, nil
+}
+
+// YiviDisclosureResult stays pending until a test sets Outcome.
+func (s *Stub) YiviDisclosureResult(_ context.Context, sessionToken string) (YiviDisclosure, error) {
+	if _, err := s.yiviSession(sessionToken); err != nil {
+		return YiviDisclosure{}, err
+	}
+	if s.Outcome == "" {
+		return YiviDisclosure{}, ErrDisclosurePending
+	}
+	return YiviDisclosure{OK: true, StableFrames: stubStableFrames, MaxAttempts: stubMaxAttempts}, nil
+}
+
+// SubmitFaceFrame decides as Outcome says: approved or rejected at once,
+// pending otherwise.
+func (s *Stub) SubmitFaceFrame(_ context.Context, sessionToken, _ string) (FaceVerdict, error) {
+	if _, err := s.yiviSession(sessionToken); err != nil {
+		return FaceVerdict{}, err
+	}
+	verdict := FaceVerdict{FaceDetected: true, StableFrames: stubStableFrames, MaxAttempts: stubMaxAttempts, Attempts: 1}
+	switch s.Outcome {
+	case StatusApproved:
+		verdict.Matched, verdict.Consecutive, verdict.Decision = true, stubStableFrames, FaceDecisionApproved
+	case StatusRejected:
+		verdict.Decision = FaceDecisionRejected
+	default:
+		verdict.Decision = FaceDecisionPending
+	}
+	return verdict, nil
 }
 
 // stubClaim has IPS's deep link shape (device_access.go grantResponse), the

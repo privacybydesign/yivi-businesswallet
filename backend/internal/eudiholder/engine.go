@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/privacybydesign/irmago/eudi"
@@ -300,29 +301,62 @@ func (e *Engine) Validities(ctx context.Context, orgID uuid.UUID) (map[string]He
 	if err != nil {
 		return nil, err
 	}
-	// One row per credential instance: its own id (the ref) and status bit, plus its
-	// batch's expiry — expiry is a property of the batch, revocation of the instance.
+	// One row per credential instance: its own id (the ref), its batch, its status
+	// reference and bit, plus its batch's claims. A status refresh writes back only
+	// one representative instance per batch (irmago's RevocationService), so the
+	// status facts are aggregated per batch below: a batch is revoked together.
 	var rows []struct {
-		ID              datatypes.UUID
-		ExpiresAt       datatypes.NullTime
-		LastKnownStatus uint8
+		ID                datatypes.UUID
+		CredentialBatchID datatypes.UUID
+		ExpiresAt         datatypes.NullTime
+		IssuedAt          datatypes.NullTime
+		Format            string
+		HasStatusList     bool
+		LastKnownStatus   uint8
+		LastStatusCheckAt *time.Time
 	}
 	if err := eng.Db().WithContext(ctx).
 		Model(&models.IssuedCredentialInstance{}).
 		Select(`issued_credential_instances.id,
+			issued_credential_instances.credential_batch_id,
 			credential_batches.expires_at,
-			issued_credential_instances.last_known_status`).
+			credential_batches.issued_at,
+			credential_batches.format,
+			issued_credential_instances.status_list_uri IS NOT NULL AS has_status_list,
+			issued_credential_instances.last_known_status,
+			issued_credential_instances.last_status_check_at`).
 		Joins(`JOIN credential_batches
 			ON credential_batches.id = issued_credential_instances.credential_batch_id`).
 		Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("eudiholder: validities org %s: %w", orgID, err)
 	}
+	type batchStatus struct {
+		revoked, hasStatusList bool
+		checkedAt              *time.Time
+	}
+	batches := map[datatypes.UUID]batchStatus{}
+	for _, row := range rows {
+		b := batches[row.CredentialBatchID]
+		b.revoked = b.revoked || statusRevoked(row.LastKnownStatus)
+		b.hasStatusList = b.hasStatusList || row.HasStatusList
+		if row.LastStatusCheckAt != nil && (b.checkedAt == nil || row.LastStatusCheckAt.After(*b.checkedAt)) {
+			b.checkedAt = row.LastStatusCheckAt
+		}
+		batches[row.CredentialBatchID] = b
+	}
 	validities := make(map[string]HeldValidity, len(rows))
 	for _, row := range rows {
-		validity := HeldValidity{Revoked: statusRevoked(row.LastKnownStatus)}
+		b := batches[row.CredentialBatchID]
+		validity := HeldValidity{
+			Format: row.Format, Revoked: b.revoked, HasStatusList: b.hasStatusList, StatusCheckedAt: b.checkedAt,
+		}
 		if row.ExpiresAt.Valid {
 			expiresAt := row.ExpiresAt.V
 			validity.ExpiresAt = &expiresAt
+		}
+		if row.IssuedAt.Valid {
+			issuedAt := row.IssuedAt.V
+			validity.IssuedAt = &issuedAt
 		}
 		validities[row.ID.String()] = validity
 	}

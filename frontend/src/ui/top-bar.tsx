@@ -9,12 +9,18 @@ interface TopBarProps {
   title: string;
   subtitle?: string;
   actions?: ReactNode;
+  // Shown before the title block, e.g. the avatar of the record it is about.
+  leading?: ReactNode;
+  // Shown beside the title, e.g. status tags.
+  badges?: ReactNode;
 }
 
 export function TopBar({
   title,
   subtitle,
   actions,
+  leading,
+  badges,
 }: TopBarProps): React.JSX.Element {
   const { t } = useTranslation();
   const nav = useMobileNav();
@@ -32,11 +38,15 @@ export function TopBar({
               <Icon name="menu" size={22} />
             </button>
           )}
+          {leading && <div className="shrink-0 self-end">{leading}</div>}
           <div className="min-w-0">
             <Breadcrumbs />
-            <h1 className="text-[22px] leading-[1.15] font-bold tracking-[-0.01em] sm:text-[26px]">
-              {title}
-            </h1>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h1 className="text-[22px] leading-[1.15] font-bold tracking-[-0.01em] sm:text-[26px]">
+                {title}
+              </h1>
+              {badges}
+            </div>
             {subtitle && (
               <div className="text-topbar-fg-soft mt-1 text-[12.5px]">
                 {subtitle}
