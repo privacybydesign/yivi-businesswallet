@@ -4,7 +4,9 @@ Status: **design** (not yet built). Grounds the receive/hold work described in
 [`attestations.md`](./attestations.md) §9.5 (`source=qerds`) and the QERDS
 transport in [`qerds.md`](./qerds.md). Companion to the in-flight change that
 replaces the proprietary QERDS "claim-link notification" with a real OpenID4VCI
-Credential Offer.
+Credential Offer. [`oid4vp-over-qerds.md`](./oid4vp-over-qerds.md) is the same
+shape in the opposite direction: a presentation *request* delivered over QERDS
+instead of a credential offer.
 
 ## 1. Purpose & scope
 
