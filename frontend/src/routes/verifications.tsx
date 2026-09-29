@@ -450,7 +450,7 @@ function ResultCard({ session }: { session: Verification }): React.JSX.Element {
       </div>
 
       <div>
-        <h3 className="text-ink-soft text-[12px] font-semibold uppercase">
+        <h3 className="text-ink-soft text-[12px] font-semibold">
           {t("verifications.result.checks")}
         </h3>
         <ul className="mt-2 flex flex-col gap-1.5">
@@ -462,7 +462,7 @@ function ResultCard({ session }: { session: Verification }): React.JSX.Element {
 
       {claims.length > 0 && (
         <div>
-          <h3 className="text-ink-soft text-[12px] font-semibold uppercase">
+          <h3 className="text-ink-soft text-[12px] font-semibold">
             {t("verifications.result.disclosed")}
           </h3>
           <dl className="mt-2 grid grid-cols-[minmax(120px,40%)_1fr] gap-y-1.5 text-[13.5px]">
