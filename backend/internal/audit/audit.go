@@ -151,6 +151,10 @@ const (
 	PresentationCompleted   = "presentation.completed"
 	PresentationDenied      = "presentation.denied"
 	PresentationExpired     = "presentation.expired"
+	// PresentationRequestReceived (#271) is the QERDS counterpart of
+	// PresentationRequested: the organization is already known from the
+	// receiving digital address, so the row is written org-scoped from the start.
+	PresentationRequestReceived = "presentation.request_received"
 )
 
 const (

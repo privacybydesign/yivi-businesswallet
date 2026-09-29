@@ -23,6 +23,7 @@ type (
 		SelectOrganization(ctx context.Context, id, orgID uuid.UUID, orgName string) (Transaction, error)
 		Complete(ctx context.Context, id uuid.UUID) error
 		Deny(ctx context.Context, id uuid.UUID, reason string) error
+		CreateForOrganization(ctx context.Context, orgID, sourceMessageID uuid.UUID, in NewTransaction) (Transaction, bool, error)
 	}
 	organizationLister interface {
 		ListForUser(ctx context.Context, userID uuid.UUID) ([]organization.Organization, error)
@@ -85,27 +86,7 @@ type StartRequest struct {
 // persists the transaction. It returns the opaque id the browser carries from
 // here on — through login, if needed.
 func (s *Service) Start(ctx context.Context, req StartRequest) (string, error) {
-	if req.ClientID == "" {
-		return "", fmt.Errorf("%w: client_id is required", ErrInvalidRequest)
-	}
-	switch {
-	case req.Request != "" && req.RequestURI != "":
-		return "", fmt.Errorf("%w: request and request_uri are mutually exclusive", ErrInvalidRequest)
-	case req.Request != "":
-		return "", fmt.Errorf("%w: by-value request objects are not supported; use request_uri", ErrInvalidRequest)
-	case req.RequestURI == "":
-		return "", fmt.Errorf("%w: request_uri is required", ErrInvalidRequest)
-	}
-	method, err := normalizeRequestURIMethod(req.RequestURIMethod)
-	if err != nil {
-		return "", err
-	}
-
-	raw, err := s.fetcher.Fetch(ctx, req.RequestURI)
-	if err != nil {
-		return "", err
-	}
-	ro, err := s.validator.Validate(ctx, req.ClientID, raw)
+	method, ro, err := s.validate(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -115,6 +96,59 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (string, error) {
 		RequestURIMethod: method,
 		Request:          ro,
 	})
+}
+
+// ReceiveFromQERDS validates an Authorization Request that arrived over QERDS
+// (Receiver), already addressed to orgID by the receiving digital address, and
+// queues it at StatusOrgSelected for that organization to decide on — skipping
+// the browser's pending_auth/org-picker steps, which do not apply here. From
+// there it is exactly the browser flow's post-selection state, decided by
+// whatever the governance layer (#113) provides for any org_selected
+// transaction, regardless of origin. Idempotent on sourceMessageID: a
+// re-delivered message resolves to the row already queued (recorded=false).
+func (s *Service) ReceiveFromQERDS(ctx context.Context, orgID, sourceMessageID uuid.UUID, req StartRequest) (Transaction, bool, error) {
+	method, ro, err := s.validate(ctx, req)
+	if err != nil {
+		return Transaction{}, false, err
+	}
+	return s.store.CreateForOrganization(ctx, orgID, sourceMessageID, NewTransaction{
+		ClientID:         req.ClientID,
+		RequestURI:       req.RequestURI,
+		RequestURIMethod: method,
+		Request:          ro,
+	})
+}
+
+// validate is the invocation-independent half of Start/ReceiveFromQERDS: reject
+// the unsupported/ambiguous forms, normalize request_uri_method, then fetch and
+// validate the Request Object. Neither caller persists anything this did not
+// already validate.
+func (s *Service) validate(ctx context.Context, req StartRequest) (string, RequestObject, error) {
+	if req.ClientID == "" {
+		return "", RequestObject{}, fmt.Errorf("%w: client_id is required", ErrInvalidRequest)
+	}
+	switch {
+	case req.Request != "" && req.RequestURI != "":
+		return "", RequestObject{}, fmt.Errorf("%w: request and request_uri are mutually exclusive", ErrInvalidRequest)
+	case req.Request != "":
+		return "", RequestObject{}, fmt.Errorf("%w: by-value request objects are not supported; use request_uri", ErrInvalidRequest)
+	case req.RequestURI == "":
+		return "", RequestObject{}, fmt.Errorf("%w: request_uri is required", ErrInvalidRequest)
+	}
+	method, err := normalizeRequestURIMethod(req.RequestURIMethod)
+	if err != nil {
+		return "", RequestObject{}, err
+	}
+
+	raw, err := s.fetcher.Fetch(ctx, req.RequestURI)
+	if err != nil {
+		return "", RequestObject{}, err
+	}
+	ro, err := s.validator.Validate(ctx, req.ClientID, raw)
+	if err != nil {
+		return "", RequestObject{}, err
+	}
+	return method, ro, nil
 }
 
 // normalizeRequestURIMethod validates request_uri_method: absent defaults to get
