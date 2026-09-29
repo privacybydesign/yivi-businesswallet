@@ -27,7 +27,7 @@ type fakeStore struct {
 	mu sync.Mutex
 	// pending backs GetPendingForOrg/ListPendingForOrg; claimed holds what
 	// ClaimPendingForOrg moved out of pending, the fake's stand-in for the real
-	// store's StatusApproving row. Complete and Deny remove an entry from
+	// store's statusApproving row. Complete and Deny remove an entry from
 	// whichever of the two holds it, the same way the real store's status guard
 	// accepts either, so a test can tell a decided transaction from one still
 	// awaiting approval.

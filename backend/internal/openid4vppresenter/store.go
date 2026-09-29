@@ -223,7 +223,7 @@ func (s *Store) GetPendingForOrg(ctx context.Context, orgID, id uuid.UUID) (Tran
 }
 
 // ClaimPendingForOrg atomically moves an org-scoped, org_selected transaction to
-// StatusApproving for orgID — the same one-time-use guard SelectOrganization
+// statusApproving for orgID — the same one-time-use guard SelectOrganization
 // uses, so only one caller's UPDATE can match the row. Approve claims with this,
 // not GetPendingForOrg, before it ever reaches the verifier: a plain read let two
 // concurrent Approve calls on the same transaction both pass the check and both
@@ -236,7 +236,7 @@ func (s *Store) ClaimPendingForOrg(ctx context.Context, orgID, id uuid.UUID) (Tr
 		SET status = $3
 		WHERE id = $1 AND organization_id = $2 AND status = $4 AND consumed_at IS NULL AND expires_at > now()
 		RETURNING ` + transactionColumns
-	t, err := scanTransaction(s.db.QueryRow(ctx, q, id, orgID, StatusApproving, StatusOrgSelected))
+	t, err := scanTransaction(s.db.QueryRow(ctx, q, id, orgID, statusApproving, StatusOrgSelected))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Transaction{}, ErrNotPending
 	}
@@ -289,7 +289,7 @@ func (s *Store) Deny(ctx context.Context, id uuid.UUID, reason string) error {
 // consumableFrom lists the pre-terminal statuses a row can be completed or
 // denied from: org_selected (a direct Deny, or Approve's auto-present
 // shortcut) and approving (Approve's atomic claim, present() resolving it).
-var consumableFrom = []string{StatusOrgSelected, StatusApproving}
+var consumableFrom = []string{StatusOrgSelected, statusApproving}
 
 func (s *Store) consume(ctx context.Context, id uuid.UUID, status, action string, extra map[string]any) error {
 	const q = `
