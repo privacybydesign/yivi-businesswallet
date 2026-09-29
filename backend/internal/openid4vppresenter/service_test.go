@@ -25,7 +25,7 @@ type fakeStore struct {
 	// drives a concurrent Approve call at this store, mirroring the real one's
 	// atomic UPDATE.
 	mu sync.Mutex
-	// pending backs GetPendingForOrg/ListPendingForOrg; claimed holds what
+	// pending backs DenyPendingForOrg/ListPendingForOrg; claimed holds what
 	// ClaimPendingForOrg moved out of pending, the fake's stand-in for the real
 	// store's statusApproving row. Complete and Deny remove an entry from
 	// whichever of the two holds it, the same way the real store's status guard
@@ -84,14 +84,20 @@ func (f *fakeStore) consume(id uuid.UUID) bool {
 	return false
 }
 
-func (f *fakeStore) GetPendingForOrg(_ context.Context, orgID, id uuid.UUID) (Transaction, error) {
+// DenyPendingForOrg is the fake's atomic stand-in for the real store's
+// UPDATE ... WHERE status = org_selected: like ClaimPendingForOrg, it only
+// matches a row still in pending, never one ClaimPendingForOrg already moved
+// to claimed.
+func (f *fakeStore) DenyPendingForOrg(_ context.Context, orgID, id uuid.UUID, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	t, ok := f.pending[id]
 	if !ok || t.OrganizationID == nil || *t.OrganizationID != orgID {
-		return Transaction{}, ErrNotPending
+		return ErrNotPending
 	}
-	return t, nil
+	delete(f.pending, id)
+	f.denied = append(f.denied, id)
+	return nil
 }
 
 // ClaimPendingForOrg is the fake's atomic stand-in for the real store's
@@ -379,6 +385,70 @@ func TestApproveDoesNotDeliverTwiceToASlowerConcurrentCall(t *testing.T) {
 	}
 	if firstErr != nil {
 		t.Fatalf("first Approve: %v, want nil", firstErr)
+	}
+}
+
+// racyDenyStore delays Deny's atomic write until the test releases it, so a
+// concurrent Approve's claim can be driven into that window regardless of when
+// Deny's call was made — proving the write itself, not just a timing accident,
+// rejects a row Approve has already claimed.
+type racyDenyStore struct {
+	*fakeStore
+	writing chan struct{}
+	resume  chan struct{}
+}
+
+func (s *racyDenyStore) DenyPendingForOrg(ctx context.Context, orgID, id uuid.UUID, reason string) error {
+	close(s.writing)
+	<-s.resume
+	return s.fakeStore.DenyPendingForOrg(ctx, orgID, id, reason)
+}
+
+// Before the fix, Deny's precondition check (GetPendingForOrg) only matched
+// org_selected, but its write (Store.Deny) also matched approving. A
+// concurrent Approve claiming the row between Deny's check and its write let
+// Deny mark the transaction denied+consumed after Approve had already started
+// delivering it to the verifier — so Approve then found its own row gone and
+// reported an error despite the verifier having received a valid response.
+// DenyPendingForOrg's single atomic write, scoped to org_selected only, closes
+// that window: it is delayed here past Approve's claim and still refuses.
+func TestDenyDoesNotRaceAConcurrentApprove(t *testing.T) {
+	store := &fakeStore{}
+	racy := &racyDenyStore{fakeStore: store, writing: make(chan struct{}), resume: make(chan struct{})}
+	responder := &blockingResponder{entered: make(chan struct{}), release: make(chan struct{})}
+	svc := NewService(racy, fakeOrgs{}, eudiholder.NewStubHolder(), &fakeFetcher{}, fakeValidator{}, responder, false)
+	orgID, id := uuid.New(), uuid.New()
+	store.pending = map[uuid.UUID]Transaction{
+		id: {ID: id, OrganizationID: &orgID, ClientID: testClientID, DCQLQuery: []byte(`{}`)},
+	}
+
+	denyErr := make(chan error, 1)
+	go func() {
+		denyErr <- svc.Deny(context.Background(), orgID, id)
+	}()
+	<-racy.writing // Deny has been called and is about to run its write
+
+	approveErr := make(chan error, 1)
+	go func() {
+		_, err := svc.Approve(context.Background(), orgID, id)
+		approveErr <- err
+	}()
+	<-responder.entered // Approve has claimed the row and is mid-delivery to the verifier
+
+	close(racy.resume) // let Deny's write run now, against the claimed, in-flight row
+	if err := <-denyErr; !errors.Is(err, ErrNotPending) {
+		t.Fatalf("Deny racing a concurrent Approve = %v, want ErrNotPending", err)
+	}
+
+	close(responder.release)
+	if err := <-approveErr; err != nil {
+		t.Fatalf("Approve: %v, want nil — the verifier already received its response", err)
+	}
+	if len(store.completed) != 1 || store.completed[0] != id {
+		t.Fatalf("completed = %v, want [%s]", store.completed, id)
+	}
+	if len(store.denied) != 0 {
+		t.Fatal("Deny must not consume a transaction a concurrent Approve already claimed")
 	}
 }
 

@@ -131,8 +131,11 @@ queue or a transaction someone else already decided — that call fails with
 `Approve` does that check as an atomic claim (`Store.ClaimPendingForOrg`, `org_selected` →
 the internal `approving` status `EffectiveStatus` folds back to `org_selected`) rather than a
 plain read, so two concurrent Approve calls on the same transaction cannot both pass it and
-both reach the verifier; `Deny`'s own terminal write (`Store.Deny`) is already the one-time-use
-guard, so it keeps the plain `Store.GetPendingForOrg` read.
+both reach the verifier. `Deny` claims and denies in the same single write
+(`Store.DenyPendingForOrg`, scoped to `org_selected` only): a plain read-then-act let a
+concurrent `Approve` claim the row between Deny's check and its write, so Deny still marked it
+denied after the verifier had already received the response. Scoping the write to
+`org_selected` means it never matches a row `Approve` has already claimed.
 
 `Approve` runs the identical `present` step `OPENID4VP_PRESENTER_AUTO_PRESENT=true` (dev / CI)
 takes right after selection, just gated behind the admin's click instead of running

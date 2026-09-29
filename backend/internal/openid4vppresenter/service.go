@@ -24,9 +24,9 @@ type (
 		Complete(ctx context.Context, id uuid.UUID) error
 		Deny(ctx context.Context, id uuid.UUID, reason string) error
 		CreateForOrganization(ctx context.Context, orgID, sourceMessageID uuid.UUID, in NewTransaction) (Transaction, bool, error)
-		// GetPendingForOrg, ClaimPendingForOrg and ListPendingForOrg back the admin
+		// DenyPendingForOrg, ClaimPendingForOrg and ListPendingForOrg back the admin
 		// approval queue (#113); see PendingApprovals, Approve and Deny below.
-		GetPendingForOrg(ctx context.Context, orgID, id uuid.UUID) (Transaction, error)
+		DenyPendingForOrg(ctx context.Context, orgID, id uuid.UUID, reason string) error
 		ClaimPendingForOrg(ctx context.Context, orgID, id uuid.UUID) (Transaction, error)
 		ListPendingForOrg(ctx context.Context, orgID uuid.UUID) ([]Transaction, error)
 	}
@@ -277,12 +277,12 @@ func (s *Service) Approve(ctx context.Context, orgID, id uuid.UUID) (string, err
 }
 
 // Deny refuses a pending presentation transaction on an admin's decision.
-// Nothing is built or sent to the verifier.
+// Nothing is built or sent to the verifier. DenyPendingForOrg's atomic org +
+// status guard, scoped to org_selected only, means a transaction a concurrent
+// Approve has already claimed does not match: Deny cannot mark a transaction
+// denied after Approve has started delivering it to the verifier.
 func (s *Service) Deny(ctx context.Context, orgID, id uuid.UUID) error {
-	if _, err := s.store.GetPendingForOrg(ctx, orgID, id); err != nil {
-		return err
-	}
-	return s.store.Deny(ctx, id, "admin_declined")
+	return s.store.DenyPendingForOrg(ctx, orgID, id, "admin_declined")
 }
 
 // present builds the vp_token for orgID and delivers it. Any failure consumes the
