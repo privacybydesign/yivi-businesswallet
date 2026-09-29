@@ -24,9 +24,10 @@ type (
 		Complete(ctx context.Context, id uuid.UUID) error
 		Deny(ctx context.Context, id uuid.UUID, reason string) error
 		CreateForOrganization(ctx context.Context, orgID, sourceMessageID uuid.UUID, in NewTransaction) (Transaction, bool, error)
-		// GetPendingForOrg and ListPendingForOrg back the admin approval queue
-		// (#113); see PendingApprovals, Approve and Deny below.
+		// GetPendingForOrg, ClaimPendingForOrg and ListPendingForOrg back the admin
+		// approval queue (#113); see PendingApprovals, Approve and Deny below.
 		GetPendingForOrg(ctx context.Context, orgID, id uuid.UUID) (Transaction, error)
+		ClaimPendingForOrg(ctx context.Context, orgID, id uuid.UUID) (Transaction, error)
 		ListPendingForOrg(ctx context.Context, orgID uuid.UUID) ([]Transaction, error)
 	}
 	organizationLister interface {
@@ -261,12 +262,14 @@ func (s *Service) PendingApprovals(ctx context.Context, orgID uuid.UUID) ([]Tran
 
 // Approve completes a pending presentation transaction on an admin's decision —
 // the manual counterpart to the autoPresent dev flag, reusing the same present
-// step Select's auto-present path takes. GetPendingForOrg's org + status guard
-// runs first, so an admin can only approve their own organization's queue;
-// ErrNotPending covers a transaction that moved on (decided, expired) since it
-// was listed.
+// step Select's auto-present path takes. ClaimPendingForOrg's atomic org +
+// status guard runs first, so an admin can only approve their own
+// organization's queue and two concurrent Approve calls on the same
+// transaction cannot both reach present() and deliver it twice; ErrNotPending
+// covers a transaction that moved on (decided, expired, or claimed by another
+// call) since it was listed.
 func (s *Service) Approve(ctx context.Context, orgID, id uuid.UUID) (string, error) {
-	t, err := s.store.GetPendingForOrg(ctx, orgID, id)
+	t, err := s.store.ClaimPendingForOrg(ctx, orgID, id)
 	if err != nil {
 		return "", err
 	}

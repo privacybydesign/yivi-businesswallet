@@ -42,6 +42,14 @@ const (
 	// presentation now waits for the governance decision (#113) — or, under the
 	// dev-only auto-present flag, has been sent.
 	StatusOrgSelected = "org_selected"
+	// StatusApproving: an admin's Approve claimed the transaction and is
+	// building/delivering the presentation. Internal only — EffectiveStatus folds
+	// it back to org_selected — so it exists purely to make the claim atomic:
+	// Store.ClaimPendingForOrg's one-time-use guard lets only one concurrent
+	// Approve move a row out of org_selected, closing the race where a second
+	// caller's plain read of the same row would otherwise also reach the
+	// verifier.
+	StatusApproving = "approving"
 	// StatusCompleted: the Authorization Response was delivered to the verifier.
 	StatusCompleted = "completed"
 	// StatusDenied: the presentation was refused — by validation, by the
@@ -114,10 +122,16 @@ type Transaction struct {
 
 // EffectiveStatus is the stored status with expiry applied: an unconsumed row
 // past expires_at reads as expired even before the pruner marks it, so a resumed
-// browser is told the truth without a write on a GET.
+// browser is told the truth without a write on a GET. StatusApproving is never
+// returned here — it is Approve's internal claim, not a status the browser's
+// fixed status enum knows about — so it reads as the org_selected it still is
+// from the browser's perspective.
 func (t Transaction) EffectiveStatus(now time.Time) string {
 	if t.ConsumedAt == nil && now.After(t.ExpiresAt) {
 		return StatusExpired
+	}
+	if t.Status == StatusApproving {
+		return StatusOrgSelected
 	}
 	return t.Status
 }

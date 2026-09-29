@@ -125,10 +125,14 @@ verifier yet. `Service.PendingApprovals(orgID)` lists an organization's `org_sel
 transactions (`GET /orgs/{slug}/openid4vp/requests`, admin-gated, member-invisible); an
 admin decides with `Approve` (`POST …/requests/{id}/approve`) or `Deny`
 (`POST …/requests/{id}/decline`). Both re-check the transaction still belongs to `orgID` and
-is still `org_selected` (`Store.GetPendingForOrg`) before acting, so an admin cannot approve
-another organization's queue or a transaction someone else already decided — that call fails
-with `transaction_not_pending` (409), the same conflict `select` itself returns for a reused
-id.
+is still `org_selected` before acting, so an admin cannot approve another organization's
+queue or a transaction someone else already decided — that call fails with
+`transaction_not_pending` (409), the same conflict `select` itself returns for a reused id.
+`Approve` does that check as an atomic claim (`Store.ClaimPendingForOrg`, `org_selected` →
+the internal `approving` status `EffectiveStatus` folds back to `org_selected`) rather than a
+plain read, so two concurrent Approve calls on the same transaction cannot both pass it and
+both reach the verifier; `Deny`'s own terminal write (`Store.Deny`) is already the one-time-use
+guard, so it keeps the plain `Store.GetPendingForOrg` read.
 
 `Approve` runs the identical `present` step `OPENID4VP_PRESENTER_AUTO_PRESENT=true` (dev / CI)
 takes right after selection, just gated behind the admin's click instead of running

@@ -3,6 +3,7 @@ package openid4vppresenter
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,10 +21,18 @@ type fakeStore struct {
 	// to read it back through (that read belongs to whatever lists an org's
 	// org_selected queue; #113's governance layer, not this seam).
 	orgTransactions map[uuid.UUID]Transaction
-	// pending backs GetPendingForOrg/ListPendingForOrg; Complete and Deny remove
-	// an entry the same way the real store's status guard does, so a test can
-	// tell a decided transaction from one still awaiting approval.
+	// mu guards pending/claimed/completed/denied: TestApproveDoesNotDeliverTwice
+	// drives a concurrent Approve call at this store, mirroring the real one's
+	// atomic UPDATE.
+	mu sync.Mutex
+	// pending backs GetPendingForOrg/ListPendingForOrg; claimed holds what
+	// ClaimPendingForOrg moved out of pending, the fake's stand-in for the real
+	// store's StatusApproving row. Complete and Deny remove an entry from
+	// whichever of the two holds it, the same way the real store's status guard
+	// accepts either, so a test can tell a decided transaction from one still
+	// awaiting approval.
 	pending   map[uuid.UUID]Transaction
+	claimed   map[uuid.UUID]Transaction
 	completed []uuid.UUID
 	denied    []uuid.UUID
 }
@@ -42,24 +51,42 @@ func (*fakeStore) SelectOrganization(context.Context, uuid.UUID, uuid.UUID, stri
 }
 
 func (f *fakeStore) Complete(_ context.Context, id uuid.UUID) error {
-	if _, ok := f.pending[id]; !ok {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.consume(id) {
 		return ErrNotPending
 	}
-	delete(f.pending, id)
 	f.completed = append(f.completed, id)
 	return nil
 }
 
 func (f *fakeStore) Deny(_ context.Context, id uuid.UUID, _ string) error {
-	if _, ok := f.pending[id]; !ok {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.consume(id) {
 		return ErrNotPending
 	}
-	delete(f.pending, id)
 	f.denied = append(f.denied, id)
 	return nil
 }
 
+// consume removes id from whichever of pending/claimed holds it, mirroring the
+// real store's consume() accepting either pre-terminal status. Caller holds mu.
+func (f *fakeStore) consume(id uuid.UUID) bool {
+	if _, ok := f.pending[id]; ok {
+		delete(f.pending, id)
+		return true
+	}
+	if _, ok := f.claimed[id]; ok {
+		delete(f.claimed, id)
+		return true
+	}
+	return false
+}
+
 func (f *fakeStore) GetPendingForOrg(_ context.Context, orgID, id uuid.UUID) (Transaction, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	t, ok := f.pending[id]
 	if !ok || t.OrganizationID == nil || *t.OrganizationID != orgID {
 		return Transaction{}, ErrNotPending
@@ -67,7 +94,27 @@ func (f *fakeStore) GetPendingForOrg(_ context.Context, orgID, id uuid.UUID) (Tr
 	return t, nil
 }
 
+// ClaimPendingForOrg is the fake's atomic stand-in for the real store's
+// UPDATE ... WHERE status = org_selected: mu makes the check-and-move a single
+// step, so two goroutines racing on the same id cannot both see it pending.
+func (f *fakeStore) ClaimPendingForOrg(_ context.Context, orgID, id uuid.UUID) (Transaction, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.pending[id]
+	if !ok || t.OrganizationID == nil || *t.OrganizationID != orgID {
+		return Transaction{}, ErrNotPending
+	}
+	delete(f.pending, id)
+	if f.claimed == nil {
+		f.claimed = map[uuid.UUID]Transaction{}
+	}
+	f.claimed[id] = t
+	return t, nil
+}
+
 func (f *fakeStore) ListPendingForOrg(_ context.Context, orgID uuid.UUID) ([]Transaction, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	out := []Transaction{}
 	for _, t := range f.pending {
 		if t.OrganizationID != nil && *t.OrganizationID == orgID {
@@ -137,6 +184,30 @@ func (fakeValidator) ClientIDPrefixes() []string { return nil }
 type fakeResponder struct{}
 
 func (fakeResponder) Send(context.Context, Transaction, openid4vp.VpToken) (string, error) {
+	return "", nil
+}
+
+// blockingResponder lets TestApproveDoesNotDeliverTwiceToASlowerConcurrentCall
+// pause a first Approve call at the exact instant it starts delivering to the
+// verifier, then drive a second Approve call on the same transaction into that
+// window deterministically — a stand-in for a truly concurrent second caller,
+// without depending on goroutine scheduling to land in the same window.
+type blockingResponder struct {
+	mu      sync.Mutex
+	calls   int
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingResponder) Send(context.Context, Transaction, openid4vp.VpToken) (string, error) {
+	r.mu.Lock()
+	r.calls++
+	first := r.calls == 1
+	r.mu.Unlock()
+	if first {
+		close(r.entered)
+		<-r.release
+	}
 	return "", nil
 }
 
@@ -269,6 +340,45 @@ func TestApproveIsScopedToTheOwningOrganization(t *testing.T) {
 	}
 	if len(store.completed) != 0 {
 		t.Fatal("a cross-organization approve must not complete anything")
+	}
+}
+
+// A plain read-then-act GetPendingForOrg let a second, concurrent Approve call
+// on the same transaction pass the check and reach the verifier before the
+// first call's delivery had committed anything back to the store. This pauses
+// a first Approve call at the instant it starts delivering — deterministically,
+// rather than racing goroutine scheduling to land two calls in that window —
+// and drives a second Approve call on the identical transaction into it: with
+// the fix (ClaimPendingForOrg) that second call finds nothing pending and never
+// reaches the verifier; before it, both did.
+func TestApproveDoesNotDeliverTwiceToASlowerConcurrentCall(t *testing.T) {
+	store := &fakeStore{}
+	responder := &blockingResponder{entered: make(chan struct{}), release: make(chan struct{})}
+	svc := NewService(store, fakeOrgs{}, eudiholder.NewStubHolder(), &fakeFetcher{}, fakeValidator{}, responder, false)
+	orgID, id := uuid.New(), uuid.New()
+	store.pending = map[uuid.UUID]Transaction{
+		id: {ID: id, OrganizationID: &orgID, ClientID: testClientID, DCQLQuery: []byte(`{}`)},
+	}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := svc.Approve(context.Background(), orgID, id)
+		firstDone <- err
+	}()
+	<-responder.entered // the first call has read/claimed and is mid-delivery
+
+	_, secondErr := svc.Approve(context.Background(), orgID, id)
+	close(responder.release)
+	firstErr := <-firstDone
+
+	if responder.calls != 1 {
+		t.Fatalf("verifier deliveries = %d, want exactly 1 (no double delivery)", responder.calls)
+	}
+	if !errors.Is(secondErr, ErrNotPending) {
+		t.Fatalf("second, concurrent Approve = %v, want ErrNotPending", secondErr)
+	}
+	if firstErr != nil {
+		t.Fatalf("first Approve: %v, want nil", firstErr)
 	}
 }
 

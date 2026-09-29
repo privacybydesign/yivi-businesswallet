@@ -222,6 +222,30 @@ func (s *Store) GetPendingForOrg(ctx context.Context, orgID, id uuid.UUID) (Tran
 	return t, nil
 }
 
+// ClaimPendingForOrg atomically moves an org-scoped, org_selected transaction to
+// StatusApproving for orgID — the same one-time-use guard SelectOrganization
+// uses, so only one caller's UPDATE can match the row. Approve claims with this,
+// not GetPendingForOrg, before it ever reaches the verifier: a plain read let two
+// concurrent Approve calls on the same transaction both pass the check and both
+// deliver the presentation before either terminal write landed. ErrNotPending
+// covers everything GetPendingForOrg already covered, plus a transaction a
+// concurrent Approve just claimed.
+func (s *Store) ClaimPendingForOrg(ctx context.Context, orgID, id uuid.UUID) (Transaction, error) {
+	const q = `
+		UPDATE openid4vp_transactions
+		SET status = $3
+		WHERE id = $1 AND organization_id = $2 AND status = $4 AND consumed_at IS NULL AND expires_at > now()
+		RETURNING ` + transactionColumns
+	t, err := scanTransaction(s.db.QueryRow(ctx, q, id, orgID, StatusApproving, StatusOrgSelected))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Transaction{}, ErrNotPending
+	}
+	if err != nil {
+		return Transaction{}, fmt.Errorf("openid4vppresenter: claim %s org %s: %w", id, orgID, err)
+	}
+	return t, nil
+}
+
 // ListPendingForOrg returns the organization's presentation transactions
 // waiting on the governance layer: a member selected this org, and now an admin
 // must approve or deny before anything reaches the verifier.
@@ -249,26 +273,32 @@ func (s *Store) ListPendingForOrg(ctx context.Context, orgID uuid.UUID) ([]Trans
 	return out, nil
 }
 
-// Complete consumes an org_selected transaction as completed: the Authorization
-// Response has been delivered.
+// Complete consumes a pending transaction (org_selected, or approving mid an
+// admin's Approve) as completed: the Authorization Response has been delivered.
 func (s *Store) Complete(ctx context.Context, id uuid.UUID) error {
 	return s.consume(ctx, id, StatusCompleted, audit.PresentationCompleted, nil)
 }
 
-// Deny consumes an org_selected transaction as denied, recording why (a short,
-// code-like reason — never response material).
+// Deny consumes a pending transaction (org_selected, or approving mid an
+// admin's Approve) as denied, recording why (a short, code-like reason — never
+// response material).
 func (s *Store) Deny(ctx context.Context, id uuid.UUID, reason string) error {
 	return s.consume(ctx, id, StatusDenied, audit.PresentationDenied, map[string]any{"reason": reason})
 }
+
+// consumableFrom lists the pre-terminal statuses a row can be completed or
+// denied from: org_selected (a direct Deny, or Approve's auto-present
+// shortcut) and approving (Approve's atomic claim, present() resolving it).
+var consumableFrom = []string{StatusOrgSelected, StatusApproving}
 
 func (s *Store) consume(ctx context.Context, id uuid.UUID, status, action string, extra map[string]any) error {
 	const q = `
 		UPDATE openid4vp_transactions
 		SET status = $2, consumed_at = now()
-		WHERE id = $1 AND status = $3 AND consumed_at IS NULL
+		WHERE id = $1 AND status = ANY($3) AND consumed_at IS NULL
 		RETURNING ` + transactionColumns
 	return database.InTx(ctx, s.db, func(tx database.Querier) error {
-		t, err := scanTransaction(tx.QueryRow(ctx, q, id, status, StatusOrgSelected))
+		t, err := scanTransaction(tx.QueryRow(ctx, q, id, status, consumableFrom))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotPending
 		}
