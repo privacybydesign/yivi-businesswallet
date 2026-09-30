@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   createQerdsAddress,
   createQerdsContact,
+  deleteQerdsAddress,
   deleteQerdsContact,
   getQerdsAddresses,
   getQerdsContacts,
@@ -150,6 +151,23 @@ export function useSetDefaultQerdsAddressMutation(
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.qerdsAddressDefaultChanged"));
+      void queryClient.invalidateQueries({
+        queryKey: qerdsAddressesQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useDeleteQerdsAddressMutation(
+  slug: string,
+): UseMutationResult<void, Error, { addressId: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ addressId }) => deleteQerdsAddress(slug, addressId),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.qerdsAddressDeleted"));
       void queryClient.invalidateQueries({
         queryKey: qerdsAddressesQueryKey(slug),
       });

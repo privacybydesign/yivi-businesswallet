@@ -85,6 +85,62 @@ func TestSetDefaultAddress(t *testing.T) {
 	}
 }
 
+// TestDeleteAddress covers the guardrails: a lone address is refused as the
+// last remaining one, a default among several is refused as the default, an
+// unknown or cross-org id is not-found, and a plain non-default delete
+// succeeds and drops out of ListAddresses.
+func TestDeleteAddress(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+	orgID := seedOrg(t, ctx, pool, "acme")
+
+	store := qerds.NewStore(pool, audit.NopRecorder{})
+
+	first, err := store.ProvisionAddress(ctx, orgID, "one@qerds.localhost", true, "")
+	if err != nil {
+		t.Fatalf("provision first: %v", err)
+	}
+
+	// A lone address is both the default and the org's last one; the last-
+	// remaining guard is what should fire, since there is nothing to promote.
+	if err := store.DeleteAddress(ctx, orgID, first.ID); !errors.Is(err, qerds.ErrAddressLastRemaining) {
+		t.Fatalf("delete lone address err = %v, want ErrAddressLastRemaining", err)
+	}
+
+	second, err := store.ProvisionAddress(ctx, orgID, "two@qerds.localhost", false, "")
+	if err != nil {
+		t.Fatalf("provision second: %v", err)
+	}
+
+	// The default cannot be deleted while another address exists to take over.
+	if err := store.DeleteAddress(ctx, orgID, first.ID); !errors.Is(err, qerds.ErrAddressIsDefault) {
+		t.Fatalf("delete default err = %v, want ErrAddressIsDefault", err)
+	}
+
+	// Unknown id is not-found.
+	if err := store.DeleteAddress(ctx, orgID, uuid.New()); !errors.Is(err, qerds.ErrAddressNotFound) {
+		t.Fatalf("unknown id err = %v, want ErrAddressNotFound", err)
+	}
+
+	// Another org cannot delete this org's address.
+	otherOrgID := seedOrg(t, ctx, pool, "other")
+	if err := store.DeleteAddress(ctx, otherOrgID, second.ID); !errors.Is(err, qerds.ErrAddressNotFound) {
+		t.Fatalf("cross-org err = %v, want ErrAddressNotFound", err)
+	}
+
+	// The non-default address can be deleted, leaving only the default.
+	if err := store.DeleteAddress(ctx, orgID, second.ID); err != nil {
+		t.Fatalf("DeleteAddress: %v", err)
+	}
+	remaining, err := store.ListAddresses(ctx, orgID)
+	if err != nil {
+		t.Fatalf("ListAddresses: %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].ID != first.ID {
+		t.Fatalf("remaining = %+v, want only %v", remaining, first.ID)
+	}
+}
+
 // TestProvisionAddressCrossOrgCollision is the store-level defence for
 // namespace ownership: the global uniqueness constraint stops a second org from
 // provisioning an address another org already holds, surfaced as ErrAddressTaken.

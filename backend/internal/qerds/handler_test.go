@@ -257,6 +257,10 @@ func (m *recordingAddressManager) SetDefaultAddress(_ context.Context, _, _ uuid
 	return Address{}, nil
 }
 
+func (m *recordingAddressManager) DeleteAddress(_ context.Context, _, _ uuid.UUID) error {
+	return nil
+}
+
 func provisionRequest(t *testing.T, slug, body string) (*httptest.ResponseRecorder, *http.Request) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/orgs/"+slug+"/qerds/addresses", bytes.NewBufferString(body))

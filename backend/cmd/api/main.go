@@ -281,6 +281,23 @@ func (a qerdsOfferSender) SendCredentialOffer(ctx context.Context, orgID uuid.UU
 	return err
 }
 
+// qerdsDefaultAddress adapts qerds.Store to the organization slice's
+// defaultAddressResolver seam: the dashboard's Wallet card shows the org's
+// live default QERDS address rather than the registration-time snapshot on
+// the organization row (#260).
+type qerdsDefaultAddress struct{ store *qerds.Store }
+
+func (a qerdsDefaultAddress) DefaultDigitalAddress(ctx context.Context, orgID uuid.UUID) (string, bool, error) {
+	addr, err := a.store.DefaultAddress(ctx, orgID)
+	if errors.Is(err, qerds.ErrNoSenderAddress) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return addr.Address, true, nil
+}
+
 func newQerdsProvider(cfg config.Config) (qerdsProvider, error) {
 	switch cfg.QerdsProvider {
 	case config.ProviderStub:
@@ -314,8 +331,10 @@ func main() {
 // newOpenID4VPPresenter wires the inbound-presentation slice. The Request Object
 // validator verifies the JAR's signature and x509_san_dns chain against irmago's
 // pinned Yivi relying-party anchors plus OPENID4VP_VERIFIER_TRUST_CHAIN;
-// UnverifiedDecoder (structural checks only) is the explicit dev / CI opt-out.
-func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit.Recorder, orgStore *organization.Store, holder eudiholder.Holder, requireUser, authorize func(http.Handler) http.Handler) (*openid4vppresenter.Handler, error) {
+// UnverifiedDecoder (structural checks only) is the explicit dev / CI opt-out. The
+// service is returned alongside the handler because it is also the QERDS receive
+// path's collaborator (openid4vppresenter.Receiver, wired into qerdsService below).
+func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit.Recorder, orgStore *organization.Store, holder eudiholder.Holder, requireUser, authorize func(http.Handler) http.Handler) (*openid4vppresenter.Handler, *openid4vppresenter.Service, error) {
 	policy := openid4vppresenter.Policy{AllowInsecureHTTP: cfg.OpenID4VPPresenterAllowInsecureHTTP}
 	var validator openid4vppresenter.Validator
 	if cfg.OpenID4VPPresenterAllowUnverifiedRequests {
@@ -324,7 +343,7 @@ func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit
 	} else {
 		trust, err := eudiholder.NewVerifierTrust([]byte(cfg.OpenID4VPVerifierTrustChain), cfg.AttestationHolderStagingAnchors)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", "OPENID4VP_VERIFIER_TRUST_CHAIN", err)
+			return nil, nil, fmt.Errorf("%s: %w", "OPENID4VP_VERIFIER_TRUST_CHAIN", err)
 		}
 		validator = openid4vppresenter.NewVerifyingValidator(trust, policy)
 	}
@@ -340,9 +359,25 @@ func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit
 	metadata, err := openid4vppresenter.NewMetadataHandler(
 		openid4vppresenter.NewMetadata(cfg.AppBaseURL, eudiholder.Formats(), validator))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return openid4vppresenter.NewHandler(svc, metadata, requireUser, authorize), nil
+	return openid4vppresenter.NewHandler(svc, metadata, requireUser, authorize), svc, nil
+}
+
+// chainedInboundConsumer notifies each QERDS inbound consumer in turn. Every
+// consumer already ignores an envelope type it does not recognise (see
+// attestation.OfferReceiver, openid4vppresenter.Receiver), so trying them in
+// sequence is enough — qerds.Service holds only one InboundConsumer, and a
+// deployment now queues two unrelated kinds of inbound envelope from it.
+type chainedInboundConsumer []qerds.InboundConsumer
+
+func (c chainedInboundConsumer) OnInboundMessage(ctx context.Context, in qerds.Inbound) error {
+	for _, consumer := range c {
+		if err := consumer.OnInboundMessage(ctx, in); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func run() error {
@@ -472,7 +507,12 @@ func run() error {
 	}()
 	screeningService := organization.NewScreeningService(orgStore, vogValidator, vogParser, authService, orgService, vogReferenceHashKey)
 
-	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins)
+	// Built ahead of qerdsService/qerdsHandler below so the org handler can read
+	// an org's live default address for its Wallet card (#260) without this
+	// slice importing qerds, which already imports organization for org-scoped
+	// auth and would cycle.
+	qerdsStore := qerds.NewStore(pool, recorder)
+	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins, qerdsDefaultAddress{qerdsStore})
 
 	// Daily re-identification reminder sweep (#240 §6): mails members whose
 	// identity is due soon or overdue, per each org's own policy.
@@ -493,7 +533,6 @@ func run() error {
 	if err := qerdsProv.Ping(qerdsProbeCtx); err != nil {
 		return fmt.Errorf("qerds provider ping: %w", err)
 	}
-	qerdsStore := qerds.NewStore(pool, recorder)
 	qerdsService := qerds.NewService(qerdsStore, qerdsStore, qerdsProv)
 	qerdsHandler := qerds.NewHandler(qerdsService, qerdsStore, qerdsStore, qerdsStore, requireUser, orgHandler.Authorize, cfg.QerdsWebhookSecret, cfg.QerdsDefaultAddressDomain)
 
@@ -569,6 +608,20 @@ func run() error {
 		}
 	}()
 
+	// Inbound OpenID4VP: an external verifier invoking the business wallet as
+	// the holder (#188), and — via the QERDS receiver wired into qerdsService
+	// below — another org's wallet doing the same over QERDS (#271). Request
+	// Objects are refused until a deployment opts into the structural
+	// (unverified) decoder; the signed-request cryptography is #112's, and
+	// completing a presentation right after organization selection is a dev-only
+	// stand-in for the consent layer (#113). Built ahead of the QERDS wiring
+	// below because presenterService is its Receiver's collaborator. See
+	// .ai/features/openid4vp-inbound.md and .ai/features/oid4vp-over-qerds.md.
+	presenterHandler, presenterService, err := newOpenID4VPPresenter(cfg, pool, recorder, orgStore, attHolder, requireUser, orgHandler.Authorize)
+	if err != nil {
+		return err
+	}
+
 	attestationStore := attestation.NewStore(pool, recorder)
 	// The QERDS message screen renders a credential-offer body as a parsed
 	// attestation summary instead of raw envelope JSON; wired via a setter (like
@@ -602,7 +655,10 @@ func run() error {
 			"offers from ANY sender address will be queued for acceptance. Set "+
 			"QERDS_TRUSTED_OFFER_SENDERS before peering with an external AS4 party.")
 	}
-	qerdsService.SetInboundConsumer(attestation.NewOfferReceiver(attestationStore, trustedSenders))
+	qerdsService.SetInboundConsumer(chainedInboundConsumer{
+		attestation.NewOfferReceiver(attestationStore, trustedSenders),
+		openid4vppresenter.NewReceiver(presenterService),
+	})
 
 	// The other inbound path is the push webhook, which serves only when a
 	// secret is configured (a secretless deployment 404s it). Say so at boot:
@@ -761,17 +817,6 @@ func run() error {
 	startPruner(ctx, "identity_proofing_webhooks",
 		proofingWebhookDeliveryEvery, proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).DeliverDue)
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
-
-	// Inbound OpenID4VP: an external verifier invoking the business wallet as
-	// the holder (#188). Request Objects are refused until a deployment opts into
-	// the structural (unverified) decoder; the signed-request cryptography is
-	// #112's, and completing a presentation right after organization selection is
-	// a dev-only stand-in for the consent layer (#113). See
-	// .ai/features/openid4vp-inbound.md.
-	presenterHandler, err := newOpenID4VPPresenter(cfg, pool, recorder, orgStore, attHolder, requireUser, orgHandler.Authorize)
-	if err != nil {
-		return err
-	}
 
 	handler := server.New(
 		pool,

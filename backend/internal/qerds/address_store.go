@@ -101,6 +101,45 @@ func (s *Store) SetDefaultAddress(ctx context.Context, orgID, addressID uuid.UUI
 	return a, err
 }
 
+// DeleteAddress removes a digital address from an organization's set. It
+// refuses to remove the current default (ErrAddressIsDefault — promote another
+// address first via SetDefaultAddress) or the organization's only remaining
+// address (ErrAddressLastRemaining), since an org with zero addresses can
+// neither send nor receive. Returns ErrAddressNotFound if the address does not
+// belong to the organization.
+func (s *Store) DeleteAddress(ctx context.Context, orgID, id uuid.UUID) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		const owned = `SELECT ` + addressColumns + ` FROM qerds_addresses WHERE id = $1 AND organization_id = $2`
+		existing, err := scanAddress(q.QueryRow(ctx, owned, id, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAddressNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("qerds: load address %s: %w", id, err)
+		}
+
+		const count = `SELECT count(*) FROM qerds_addresses WHERE organization_id = $1`
+		var total int
+		if err := q.QueryRow(ctx, count, orgID).Scan(&total); err != nil {
+			return fmt.Errorf("qerds: count addresses org %s: %w", orgID, err)
+		}
+		if total <= 1 {
+			return ErrAddressLastRemaining
+		}
+		if existing.IsDefault {
+			return ErrAddressIsDefault
+		}
+
+		const del = `DELETE FROM qerds_addresses WHERE id = $1`
+		if _, err := q.Exec(ctx, del, id); err != nil {
+			return fmt.Errorf("qerds: delete address %s: %w", id, err)
+		}
+		return s.audit.Record(ctx, q, audit.QerdsAddressDeleted,
+			audit.Target{Type: audit.TargetQerdsAddress, ID: id.String(), OrgID: &orgID},
+			audit.Deleted(map[string]any{"address": existing.Address}))
+	})
+}
+
 // ListAddresses returns an organization's digital addresses, default first.
 func (s *Store) ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, error) {
 	const query = `SELECT ` + addressColumns + ` FROM qerds_addresses WHERE organization_id = $1 ORDER BY is_default DESC, created_at`

@@ -20,6 +20,15 @@ var (
 	ErrAddressTaken       = errors.New("qerds: digital address already taken")
 	ErrSenderNotOwned     = errors.New("qerds: sender address not owned by organization")
 
+	// ErrAddressIsDefault and ErrAddressLastRemaining guard DeleteAddress: every
+	// organization needs at least one address, and that address must be the
+	// default sendMessage falls back to (see DefaultAddress), so neither the
+	// current default nor an organization's only remaining address can be
+	// deleted. A lone address is always the default too, but the checks are
+	// kept distinct so each fails with a message matching what the caller sees.
+	ErrAddressIsDefault     = errors.New("qerds: cannot delete the organization's default digital address")
+	ErrAddressLastRemaining = errors.New("qerds: cannot delete an organization's only digital address")
+
 	ErrAddressOutsideNamespace = errors.New("qerds: address is outside the organization namespace")
 
 	ErrContactNotFound     = errors.New("qerds: contact not found")

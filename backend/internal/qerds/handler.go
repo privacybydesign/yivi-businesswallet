@@ -48,6 +48,7 @@ type addressManager interface {
 	ProvisionAddress(ctx context.Context, orgID uuid.UUID, address string, makeDefault bool, providerRef string) (Address, error)
 	ListAddresses(ctx context.Context, orgID uuid.UUID) ([]Address, error)
 	SetDefaultAddress(ctx context.Context, orgID, addressID uuid.UUID) (Address, error)
+	DeleteAddress(ctx context.Context, orgID, addressID uuid.UUID) error
 }
 
 type contactManager interface {
@@ -136,6 +137,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/qerds/addresses", orgScoped(respond.HandlerFunc(h.listAddresses)))
 	mux.Handle("POST /orgs/{slug}/qerds/addresses", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.provisionAddress))))
 	mux.Handle("POST /orgs/{slug}/qerds/addresses/{id}/default", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.setDefaultAddress))))
+	mux.Handle("DELETE /orgs/{slug}/qerds/addresses/{id}", orgScoped(organization.RequireOrgAdmin(respond.HandlerFunc(h.deleteAddress))))
 
 	mux.Handle("GET /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.listContacts)))
 	mux.Handle("POST /orgs/{slug}/qerds/contacts", orgScoped(respond.HandlerFunc(h.createContact)))
@@ -427,6 +429,31 @@ func (h *Handler) setDefaultAddress(w http.ResponseWriter, r *http.Request) erro
 	}
 
 	respond.JSON(w, r, http.StatusOK, addr)
+	return nil
+}
+
+func (h *Handler) deleteAddress(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid address id")
+	}
+
+	org := organization.OrgFromContext(r.Context())
+	err = h.addresses.DeleteAddress(r.Context(), org.ID, id)
+	if errors.Is(err, ErrAddressNotFound) {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "address_not_found", Message: "digital address not found"}
+	}
+	if errors.Is(err, ErrAddressIsDefault) {
+		return &respond.APIError{Status: http.StatusConflict, Code: "address_is_default", Message: "cannot delete the organization's default digital address"}
+	}
+	if errors.Is(err, ErrAddressLastRemaining) {
+		return &respond.APIError{Status: http.StatusConflict, Code: "address_last_remaining", Message: "cannot delete the organization's only digital address"}
+	}
+	if err != nil {
+		return fmt.Errorf("deleting qerds address: %w", err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

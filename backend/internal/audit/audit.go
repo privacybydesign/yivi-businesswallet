@@ -71,6 +71,7 @@ const (
 	QerdsMessageReceived       = "qerds.message_received"
 	QerdsAddressProvisioned    = "qerds.address_provisioned"
 	QerdsAddressDefaultChanged = "qerds.address_default_changed"
+	QerdsAddressDeleted        = "qerds.address_deleted"
 	QerdsContactAdded          = "qerds.contact_added"
 	QerdsContactDeleted        = "qerds.contact_deleted"
 
@@ -154,6 +155,10 @@ const (
 	PresentationCompleted   = "presentation.completed"
 	PresentationDenied      = "presentation.denied"
 	PresentationExpired     = "presentation.expired"
+	// PresentationRequestReceived (#271) is the QERDS counterpart of
+	// PresentationRequested: the organization is already known from the
+	// receiving digital address, so the row is written org-scoped from the start.
+	PresentationRequestReceived = "presentation.request_received"
 
 	// idnetity profing service
 	IdentityProofingProvisioned     = "identity_proofing.provisioned"
