@@ -471,6 +471,7 @@ func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 	if identity.Status == proofingprovider.StatusApproved {
 		out.Photo, out.Selfie = newAdminImage(identity.Photo), newAdminImage(identity.Selfie)
 		out.DocumentImage = newAdminImage(identity.DocumentImage)
+		out.DocumentImageBack = newAdminImage(identity.DocumentImageBack)
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
@@ -478,13 +479,14 @@ func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 
 // adminResultResponse is the customer API's result as an admin reads it in the
 // wallet: for an approval, also the document's portrait, the live selfie
-// matched against it and the photo of the document's printed page. The
+// matched against it and the photos of the document's front and back. The
 // customer API never carries an image.
 type adminResultResponse struct {
 	apiResultResponse
-	Photo         *adminImage `json:"photo,omitempty"`
-	Selfie        *adminImage `json:"selfie,omitempty"`
-	DocumentImage *adminImage `json:"documentImage,omitempty"`
+	Photo             *adminImage `json:"photo,omitempty"`
+	Selfie            *adminImage `json:"selfie,omitempty"`
+	DocumentImage     *adminImage `json:"documentImage,omitempty"`
+	DocumentImageBack *adminImage `json:"documentImageBack,omitempty"`
 }
 
 // adminImage is a face image, its bytes standard base64.

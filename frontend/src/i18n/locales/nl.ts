@@ -705,7 +705,8 @@ export const nl: Translation<typeof en> = {
         dg11: "Je geboorteplaats en persoonsnummer (BSN), als je document die op de chip heeft staan.",
         dg2: "Je pasfoto op de chip van het document.",
         chip_checks: "Of de chip echt en onveranderd is.",
-        document_image: "Een foto van de bedrukte pagina van je document.",
+        document_image:
+          "Foto's van de voor- en achterkant van je document (bij een paspoort alleen de fotopagina).",
         selfie: "Een foto van je gezicht tijdens de controle.",
         biometrics:
           "Hoe goed je gezicht overeenkomt met de foto op het document.",
@@ -810,7 +811,8 @@ export const nl: Translation<typeof en> = {
           "Het openen van een afgeronde sessie wordt vastgelegd in het auditlog.",
         photo: "Documentfoto",
         selfie: "Selfie",
-        documentImage: "Foto van het document",
+        documentImage: "Voorkant van het document",
+        documentImageBack: "Achterkant van het document",
         none: "Geen identiteit: de controle is niet goedgekeurd.",
         name: "Naam",
         birthDate: "Geboortedatum",
@@ -1081,7 +1083,7 @@ export const nl: Translation<typeof en> = {
       dg11: "Geboorteplaats en persoonsnummer (BSN)",
       dg2: "Pasfoto van de chip",
       chip_checks: "Uitkomst chipcontroles",
-      document_image: "Foto van het document",
+      document_image: "Foto's van het document",
       selfie: "Selfie",
       biometrics: "Scores gezichtscontrole",
     },
@@ -1091,7 +1093,7 @@ export const nl: Translation<typeof en> = {
       dg2: "De pasfoto van de houder op de chip, getoond naast de selfie.",
       chip_checks: "Of de chip echt bleek en geen kopie.",
       document_image:
-        "Een foto van de bedrukte pagina van het document, zoals gemaakt: het BSN daarop wordt nog niet vervaagd.",
+        "De voor- en achterkant van het document (bij een paspoort alleen de fotopagina), zoals gemaakt: het BSN daarop wordt nog niet vervaagd.",
       selfie:
         "De foto van het gezicht die tijdens de gezichtscontrole is gemaakt.",
       biometrics:
@@ -1113,7 +1115,7 @@ export const nl: Translation<typeof en> = {
       nfcReadHint:
         "De persoon houdt het document tegen de telefoon en de Idem-app leest de chip. Altijd samen met het scannen van het document.",
       documentPhotoHint:
-        "De persoon fotografeert in de Idem-app de bedrukte pagina van het paspoort of de ID-kaart. De Idem-app kan dit nog niet: tot die tijd kan een flow met deze stap niet worden verstuurd.",
+        "De persoon fotografeert in de Idem-app de voor- en achterkant van de ID-kaart of het rijbewijs, of de fotopagina van het paspoort. De Idem-app kan dit nog niet: tot die tijd kan een flow met deze stap niet worden verstuurd.",
       faceVerificationHint:
         "De persoon maakt een selfie; die wordt gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
       stepsOrder: "Wordt in deze volgorde verstuurd: {{steps}}",

@@ -427,7 +427,8 @@ func TestSessionIdentityMapsTheResult(t *testing.T) {
 			"biometrics":{"faceMatchScore":0.81,"livenessResult":"passed"},
 			"photo":{"imageBase64":"iVBORw==","mimeType":"image/png"},
 			"selfie":{"imageBase64":"PHN2Zz4=","mimeType":"image/svg+xml"},
-			"documentImage":{"imageBase64":"/9j/","mimeType":"image/jpeg"}},
+			"documentImage":{"imageBase64":"/9j/","mimeType":"image/jpeg"},
+			"documentImageBack":{"imageBase64":"/9j/","mimeType":"image/jpeg"}},
 			"devices":[{"role":"native"}]}`))
 	})
 	id, err := client.SessionIdentity(context.Background(), testAPIKey, "s1", testSessionToken)
@@ -449,8 +450,8 @@ func TestSessionIdentityMapsTheResult(t *testing.T) {
 	if id.Selfie != nil {
 		t.Errorf("selfie = %+v; want an SVG left out", id.Selfie)
 	}
-	if id.DocumentImage == nil || id.DocumentImage.MimeType != "image/jpeg" {
-		t.Errorf("document image = %+v; want the JPEG", id.DocumentImage)
+	if id.DocumentImage == nil || id.DocumentImageBack == nil || id.DocumentImageBack.MimeType != "image/jpeg" {
+		t.Errorf("document images = %+v, %+v; want the front and back JPEGs", id.DocumentImage, id.DocumentImageBack)
 	}
 }
 

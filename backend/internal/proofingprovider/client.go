@@ -318,9 +318,10 @@ func (c *Client) SessionIdentity(ctx context.Context, apiKey, sessionID, session
 			Disclosure *struct {
 				Source string `json:"source"`
 			} `json:"disclosure"`
-			Photo         *ipsImage `json:"photo"`
-			Selfie        *ipsImage `json:"selfie"`
-			DocumentImage *ipsImage `json:"documentImage"`
+			Photo             *ipsImage `json:"photo"`
+			Selfie            *ipsImage `json:"selfie"`
+			DocumentImage     *ipsImage `json:"documentImage"`
+			DocumentImageBack *ipsImage `json:"documentImageBack"`
 		} `json:"result"`
 		Devices []struct {
 			Role string `json:"role"`
@@ -364,7 +365,8 @@ func (c *Client) SessionIdentity(ctx context.Context, apiKey, sessionID, session
 		ev.FaceMatch, ev.Liveness = b.FaceMatchScore, b.LivenessResult
 	}
 	id.Evidence = ev
-	id.Photo, id.Selfie, id.DocumentImage = res.Photo.image(), res.Selfie.image(), res.DocumentImage.image()
+	id.Photo, id.Selfie = res.Photo.image(), res.Selfie.image()
+	id.DocumentImage, id.DocumentImageBack = res.DocumentImage.image(), res.DocumentImageBack.image()
 	return id, nil
 }
 

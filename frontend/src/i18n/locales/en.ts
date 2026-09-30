@@ -686,7 +686,8 @@ export const en = {
         dg11: "Your place of birth and personal number (BSN), if your document stores them on its chip.",
         dg2: "Your passport photo stored on the document's chip.",
         chip_checks: "Whether the chip is genuine and unaltered.",
-        document_image: "A photo of the printed page of your document.",
+        document_image:
+          "Photos of the front and back of your document (only the photo page of a passport).",
         selfie: "A photo of your face taken during the check.",
         biometrics: "How well your face matches the document photo.",
       },
@@ -788,7 +789,8 @@ export const en = {
         audited: "Opening a settled session is recorded in the audit log.",
         photo: "Document photo",
         selfie: "Selfie",
-        documentImage: "Photo of the document",
+        documentImage: "Front of the document",
+        documentImageBack: "Back of the document",
         none: "No identity: the check did not approve.",
         name: "Name",
         birthDate: "Date of birth",
@@ -1055,7 +1057,7 @@ export const en = {
       dg11: "Place of birth and personal number (BSN)",
       dg2: "Personal photo from the chip",
       chip_checks: "Chip check results",
-      document_image: "Photo of the document",
+      document_image: "Photos of the document",
       selfie: "Selfie",
       biometrics: "Face check scores",
     },
@@ -1065,7 +1067,7 @@ export const en = {
       dg2: "The holder's passport photo stored on the chip, shown next to the selfie.",
       chip_checks: "Whether the chip proved genuine and not copied.",
       document_image:
-        "A photo of the document's printed page, as taken: the BSN printed on it is not blurred yet.",
+        "The front and back of the document (only the photo page of a passport), as taken: the BSN printed on it is not blurred yet.",
       selfie: "The photo of the person's face taken during the face check.",
       biometrics:
         "How closely the face matched the document photo, and whether it was a live person.",
@@ -1086,7 +1088,7 @@ export const en = {
       nfcReadHint:
         "The person holds the document against their phone and the Idem app reads its chip. Always together with the document scan.",
       documentPhotoHint:
-        "The person photographs the printed page of their passport or ID card in the Idem app. The Idem app cannot do this yet: until it can, a flow with this step cannot be sent.",
+        "The person photographs the front and back of their ID card or driving licence, or the photo page of their passport, in the Idem app. The Idem app cannot do this yet: until it can, a flow with this step cannot be sent.",
       faceVerificationHint:
         "The person takes a selfie, which is checked to be a live person and compared with the photo on the chip.",
       stepsOrder: "Will be sent in this order: {{steps}}",

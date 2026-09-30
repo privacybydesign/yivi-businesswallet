@@ -1430,8 +1430,8 @@ function IdentityRows({
 }
 
 // The document's photo (read off the chip over NFC, or the disclosed
-// credential's) beside the live selfie matched against it, and the photo of
-// the document's printed page; only an approval carries them, and only when
+// credential's) beside the live selfie matched against it, and the photos of
+// the document's front and back; only an approval carries them, and only when
 // the flow requested them.
 function IdentityPhotos({
   result,
@@ -1443,6 +1443,7 @@ function IdentityPhotos({
     { key: "photo", image: result.photo },
     { key: "selfie", image: result.selfie },
     { key: "documentImage", image: result.documentImage },
+    { key: "documentImageBack", image: result.documentImageBack },
   ] as const;
   if (photos.every(({ image }) => !image)) return null;
   return (

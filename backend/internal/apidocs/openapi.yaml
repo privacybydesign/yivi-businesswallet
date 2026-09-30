@@ -4761,8 +4761,9 @@ paths:
         result, read from the identity-proofing-service on each call, in the shape of the
         customer API's `GET /proofing/sessions/{id}/result`: `identity` only for an
         approval, and `evidence`. For an approval it also carries `photo` (the document's
-        portrait), `selfie` (the live face matched against it) and `documentImage` (the photo of
-        the document's printed page), each `{mimeType, data}`
+        portrait), `selfie` (the live face matched against it), and `documentImage` and
+        `documentImageBack` (photos of the document's front and back; no back for a passport),
+        each `{mimeType, data}`
         with `data` base64, when the flow requested them; the customer API never does.
         Audited `identity_proofing.result_read` with the
         administrator as actor on every read. A member's request, or one erased, is 404.

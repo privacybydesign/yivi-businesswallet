@@ -194,9 +194,11 @@ type Identity struct {
 	// when the flow did not request them or IPS released none a browser shows.
 	Photo  *Image
 	Selfie *Image
-	// DocumentImage is the photo of the document's printed page (the
-	// document_photo step), its printed BSN blurred under the tenant's policy.
-	DocumentImage *Image
+	// DocumentImage and DocumentImageBack are the photos of the document's
+	// front and back (the document_photo step; no back for a passport), the
+	// printed BSN blurred under the tenant's policy.
+	DocumentImage     *Image
+	DocumentImageBack *Image
 }
 
 // Image is a face image as IPS releases it: already converted to a format a

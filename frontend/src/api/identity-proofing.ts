@@ -797,6 +797,7 @@ export const proofingResultSchema = z.object({
   photo: proofingImageSchema.optional(),
   selfie: proofingImageSchema.optional(),
   documentImage: proofingImageSchema.optional(),
+  documentImageBack: proofingImageSchema.optional(),
 });
 
 export type ProofingResult = z.infer<typeof proofingResultSchema>;
