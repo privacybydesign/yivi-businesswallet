@@ -2548,6 +2548,133 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/openid4vp/requests:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [openid4vp]
+      summary: List presentation requests awaiting an approval decision
+      description: >-
+        Transactions a member selected this organisation for (status
+        org_selected) that have not yet been approved or denied. Requires an
+        administrator role. Neither the DCQL query nor any response material is
+        returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/openid4vp/requests/{id}/approve:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [openid4vp]
+      summary: Approve a pending presentation request
+      description: >-
+        The governance-layer counterpart to the dev-only auto-present flag:
+        builds the presentation from the organisation's held credentials and
+        delivers it to the verifier. Requires an administrator role. Returns 409
+        when the request does not belong to this organisation or is not
+        awaiting approval (already decided, or expired) — the same conflict
+        select uses for a transaction that has moved on.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  redirectUri:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The request does not belong to this organisation, or is not awaiting approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The organisation holds no credential that satisfies the request; the transaction is consumed as denied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: The presentation could not be built or delivered; the transaction is consumed as denied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/openid4vp/requests/{id}/decline:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [openid4vp]
+      summary: Decline a pending presentation request
+      description: >-
+        Nothing is built or sent to the verifier. Requires an administrator
+        role. Returns 409 when the request does not belong to this organisation
+        or is not awaiting approval.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The request does not belong to this organisation, or is not awaiting approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/issuer/settings:
     parameters:
       - name: slug

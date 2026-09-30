@@ -24,6 +24,11 @@ type (
 		Complete(ctx context.Context, id uuid.UUID) error
 		Deny(ctx context.Context, id uuid.UUID, reason string) error
 		CreateForOrganization(ctx context.Context, orgID, sourceMessageID uuid.UUID, in NewTransaction) (Transaction, bool, error)
+		// DenyPendingForOrg, ClaimPendingForOrg and ListPendingForOrg back the admin
+		// approval queue (#113); see PendingApprovals, Approve and Deny below.
+		DenyPendingForOrg(ctx context.Context, orgID, id uuid.UUID, reason string) error
+		ClaimPendingForOrg(ctx context.Context, orgID, id uuid.UUID) (Transaction, error)
+		ListPendingForOrg(ctx context.Context, orgID uuid.UUID) ([]Transaction, error)
 	}
 	organizationLister interface {
 		ListForUser(ctx context.Context, userID uuid.UUID) ([]organization.Organization, error)
@@ -52,8 +57,10 @@ type Service struct {
 	fetcher   requestFetcher
 	validator Validator
 	responder responseSender
-	// autoPresent completes a presentation right after organization selection.
-	// It stands in for the governance layer (#113) in dev / CI only.
+	// autoPresent completes a presentation right after organization selection,
+	// skipping even the governance layer's approval queue (PendingApprovals /
+	// Approve / Deny, #113). Dev / CI only; a real deployment leaves it off and
+	// lets an admin decide.
 	autoPresent bool
 	now         func() time.Time
 }
@@ -225,7 +232,8 @@ type SelectResult struct {
 // Select records the caller's choice of organization. org has already been
 // resolved by the tenant seam from the caller's membership. Without the
 // auto-present flag the transaction rests at org_selected for the governance
-// layer; with it, the presentation is built and delivered now.
+// layer (PendingApprovals / Approve / Deny); with it, the presentation is built
+// and delivered now.
 func (s *Service) Select(ctx context.Context, rawID string, userID uuid.UUID, org organization.Organization) (SelectResult, error) {
 	t, err := s.pending(ctx, rawID, userID)
 	if err != nil {
@@ -243,6 +251,38 @@ func (s *Service) Select(ctx context.Context, rawID string, userID uuid.UUID, or
 		return SelectResult{}, err
 	}
 	return SelectResult{Status: StatusCompleted, RedirectURI: redirect}, nil
+}
+
+// PendingApprovals lists the organization's presentation transactions waiting
+// on the governance layer (#113): a member selected this org, and now an admin
+// must approve or deny before anything reaches the verifier.
+func (s *Service) PendingApprovals(ctx context.Context, orgID uuid.UUID) ([]Transaction, error) {
+	return s.store.ListPendingForOrg(ctx, orgID)
+}
+
+// Approve completes a pending presentation transaction on an admin's decision —
+// the manual counterpart to the autoPresent dev flag, reusing the same present
+// step Select's auto-present path takes. ClaimPendingForOrg's atomic org +
+// status guard runs first, so an admin can only approve their own
+// organization's queue and two concurrent Approve calls on the same
+// transaction cannot both reach present() and deliver it twice; ErrNotPending
+// covers a transaction that moved on (decided, expired, or claimed by another
+// call) since it was listed.
+func (s *Service) Approve(ctx context.Context, orgID, id uuid.UUID) (string, error) {
+	t, err := s.store.ClaimPendingForOrg(ctx, orgID, id)
+	if err != nil {
+		return "", err
+	}
+	return s.present(ctx, t, orgID)
+}
+
+// Deny refuses a pending presentation transaction on an admin's decision.
+// Nothing is built or sent to the verifier. DenyPendingForOrg's atomic org +
+// status guard, scoped to org_selected only, means a transaction a concurrent
+// Approve has already claimed does not match: Deny cannot mark a transaction
+// denied after Approve has started delivering it to the verifier.
+func (s *Service) Deny(ctx context.Context, orgID, id uuid.UUID) error {
+	return s.store.DenyPendingForOrg(ctx, orgID, id, "admin_declined")
 }
 
 // present builds the vp_token for orgID and delivers it. Any failure consumes the
