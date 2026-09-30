@@ -37,6 +37,9 @@ const ERROR = "text-error text-[12.5px]";
 const RECENT_SESSIONS = 6;
 const RECENT_COLUMNS = 5;
 const ALERT_ICON_SIZE = 14;
+// The recent sessions' customer filter: a compact version of the form select.
+const FILTER_SELECT_CLASS =
+  "rounded-yivi border-line-strong bg-surface text-ink h-8 max-w-56 border px-2.5 text-[12.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
 // The API reference the backend serves (internal/apidocs).
 const API_DOCS_PATH = "/api/docs";
 
@@ -118,7 +121,11 @@ function ActiveOverview({
           <StatsRow stats={stats.data} />
         )}
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-          <RecentSessions slug={slug} isAdmin={isAdmin} />
+          <RecentSessions
+            slug={slug}
+            isAdmin={isAdmin}
+            customers={customers.data ?? []}
+          />
           <CustomersCard slug={slug} customers={customers} stats={stats.data} />
         </div>
         {isAdmin && <ProofingPauseCard slug={slug} />}
@@ -202,15 +209,22 @@ function StatCell({
   );
 }
 
+// The newest sessions across every customer, or of the one customer picked:
+// that customer's own list, so its newest show even when other customers'
+// fill the org's.
 function RecentSessions({
   slug,
   isAdmin,
+  customers,
 }: {
   slug: string;
   isAdmin: boolean;
+  customers: ProofingCustomer[];
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const requests = useProofingRequestsQuery(slug);
+  // "" is every customer.
+  const [customerId, setCustomerId] = useState("");
+  const requests = useProofingRequestsQuery(slug, customerId || undefined);
   const formatWhen = useWhenFormatter();
   const navigate = useNavigate();
   // Requests arrive newest first; a member's own proofing is not a customer's.
@@ -220,15 +234,36 @@ function RecentSessions({
 
   return (
     <Card>
-      <div className="flex items-baseline gap-2 px-5 pt-4 pb-3">
-        <h2 className="font-display text-[16px] font-bold">
-          {t("identityProofing.overview.recent.title")}
-        </h2>
-        <span className="text-muted text-[12px]">
-          {isAdmin
-            ? t("identityProofing.overview.recent.scope")
-            : t("identityProofing.overview.recent.scopeOwn")}
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 pt-4 pb-3">
+        <div className="flex items-baseline gap-2">
+          <h2 className="font-display text-[16px] font-bold">
+            {t("identityProofing.overview.recent.title")}
+          </h2>
+          {customerId === "" && (
+            <span className="text-muted text-[12px]">
+              {isAdmin
+                ? t("identityProofing.overview.recent.scope")
+                : t("identityProofing.overview.recent.scopeOwn")}
+            </span>
+          )}
+        </div>
+        {customers.length > 0 && (
+          <select
+            aria-label={t("identityProofing.overview.recent.filterLabel")}
+            className={FILTER_SELECT_CLASS}
+            value={customerId}
+            onChange={(event) => setCustomerId(event.target.value)}
+          >
+            <option value="">
+              {t("identityProofing.overview.recent.allCustomers")}
+            </option>
+            {customers.map((customer) => (
+              <option key={customer.id} value={customer.id}>
+                {customer.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <Table>
         <Table.Head>
@@ -257,7 +292,9 @@ function RecentSessions({
             </Table.State>
           ) : recent.length === 0 ? (
             <Table.State colSpan={RECENT_COLUMNS}>
-              {t("identityProofing.overview.recent.empty")}
+              {customerId === ""
+                ? t("identityProofing.overview.recent.empty")
+                : t("identityProofing.overview.recent.emptyCustomer")}
             </Table.State>
           ) : (
             recent.map((request) => {

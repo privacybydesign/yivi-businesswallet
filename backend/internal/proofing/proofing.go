@@ -609,22 +609,14 @@ func MeetsAssurance(achieved, required string) bool {
 // session, which the wallet does not have.
 const stepNFCRead = "nfc_read"
 
-// stepDocumentPhoto is a photo of the document's printed page, taken in the
-// Idem app.
+// stepDocumentPhoto is the photos of the document's front and back, taken in
+// the Idem app.
 const stepDocumentPhoto = "document_photo"
 
-// appPendingSteps are IPS steps the Idem app cannot run yet: a session of a
-// flow with one would never finish.
-var appPendingSteps = []string{stepDocumentPhoto}
-
 // Completable reports whether a recipient can finish flow f with only the
-// vcmrtd app and the wallet's session: every step must be one the app runs,
-// and a face step must run in the app and have the chip photo to compare
-// against.
+// vcmrtd app and the wallet's session: a face step must run in the app and
+// have the chip photo to compare against.
 func Completable(f proofingprovider.Flow) bool {
-	if slices.ContainsFunc(f.Steps, func(step string) bool { return slices.Contains(appPendingSteps, step) }) {
-		return false
-	}
 	if !hasFaceStep(f.Steps) {
 		return true
 	}

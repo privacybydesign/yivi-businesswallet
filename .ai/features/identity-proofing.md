@@ -143,9 +143,9 @@ service we are a relying party of. It is itself work in progress. Every IPS wire
   (`YiviAppAvailable`, mirrored by `yiviAppAvailable`). IPS's Yivi face check
   (bound login) always scores on its own engine, whatever the flow names. A face step without `nfc_read` needs a
   per-session reference photo the wallet does not have, so such a flow is not
-  `completable` and cannot be made available or sent. Neither is a flow with
-  `document_photo` until the Idem app can take it (`appPendingSteps`: drop
-  the step from that list once it ships); it also rules out the Yivi app. "Edit" is
+  `completable` and cannot be made available or sent. A flow with
+  `document_photo` (front and back, or a passport's photo page) runs in the
+  Idem app only: it rules out the Yivi app. "Edit" is
   `POST /flows/{id}/versions`: the new version is active at once, and a session
   pins the version active when it is created, so sent requests keep theirs
   (`flow_version`). Activating an earlier version rolls back. Audited:

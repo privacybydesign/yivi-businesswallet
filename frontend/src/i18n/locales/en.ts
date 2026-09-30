@@ -457,6 +457,9 @@ export const en = {
         result: "Result",
         started: "Started",
         empty: "No sessions yet.",
+        emptyCustomer: "No sessions for this customer yet.",
+        filterLabel: "Show sessions of",
+        allCustomers: "All customers",
       },
       customers: {
         title: "Customers",
@@ -1088,7 +1091,7 @@ export const en = {
       nfcReadHint:
         "The person holds the document against their phone and the Idem app reads its chip. Always together with the document scan.",
       documentPhotoHint:
-        "The person photographs the front and back of their ID card or driving licence, or the photo page of their passport, in the Idem app. The Idem app cannot do this yet: until it can, a flow with this step cannot be sent.",
+        "The person photographs the front and back of their ID card or driving licence, or the photo page of their passport, in the Idem app.",
       faceVerificationHint:
         "The person takes a selfie, which is checked to be a live person and compared with the photo on the chip.",
       stepsOrder: "Will be sent in this order: {{steps}}",

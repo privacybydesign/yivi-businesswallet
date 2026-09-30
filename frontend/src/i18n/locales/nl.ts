@@ -474,6 +474,9 @@ export const nl: Translation<typeof en> = {
         result: "Resultaat",
         started: "Gestart",
         empty: "Nog geen sessies.",
+        emptyCustomer: "Nog geen sessies voor deze klant.",
+        filterLabel: "Sessies tonen van",
+        allCustomers: "Alle klanten",
       },
       customers: {
         title: "Klanten",
@@ -1115,7 +1118,7 @@ export const nl: Translation<typeof en> = {
       nfcReadHint:
         "De persoon houdt het document tegen de telefoon en de Idem-app leest de chip. Altijd samen met het scannen van het document.",
       documentPhotoHint:
-        "De persoon fotografeert in de Idem-app de voor- en achterkant van de ID-kaart of het rijbewijs, of de fotopagina van het paspoort. De Idem-app kan dit nog niet: tot die tijd kan een flow met deze stap niet worden verstuurd.",
+        "De persoon fotografeert in de Idem-app de voor- en achterkant van de ID-kaart of het rijbewijs, of de fotopagina van het paspoort.",
       faceVerificationHint:
         "De persoon maakt een selfie; die wordt gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
       stepsOrder: "Wordt in deze volgorde verstuurd: {{steps}}",

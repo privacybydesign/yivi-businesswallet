@@ -1026,8 +1026,8 @@ func TestCompletable(t *testing.T) {
 	if Completable(testFlow("c", "c", []string{"face_verification"}, selfieLocationNative)) {
 		t.Error("a face step without the chip needs a reference photo the wallet does not have")
 	}
-	if Completable(testFlow("d", "d", []string{"document_capture", "nfc_read", "document_photo"}, "")) {
-		t.Error("the Idem app cannot photograph the document yet")
+	if !Completable(testFlow("d", "d", []string{"document_capture", "nfc_read", "document_photo"}, "")) {
+		t.Error("the Idem app photographs the document")
 	}
 }
 
