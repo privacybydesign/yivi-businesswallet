@@ -2047,6 +2047,10 @@ export const nl: Translation<typeof en> = {
       credentials: "Attestaties",
       vct: "Type attestatie",
       vctPlaceholder: "Type attestatie, bijv. nl.kvk.registration",
+      chooseType: "Kies een attestatie",
+      otherType: "Ander type attestatie…",
+      pickAttributes:
+        "Vink de gegevens aan die u nodig hebt. Zonder aangevinkte gegevens bewijst het antwoord alleen dat de organisatie deze attestatie bezit.",
       claims: "Gegevens",
       claimsPlaceholder: "Gegevens, gescheiden door komma's (optioneel)",
       addCredential: "Attestatie toevoegen",
@@ -2056,7 +2060,7 @@ export const nl: Translation<typeof en> = {
       errors: {
         recipientRequired: "Vul het adres van de ontvanger in.",
         recipientInvalid: "Vul een geldig adres in.",
-        vctRequired: "Vul een type attestatie in.",
+        vctRequired: "Kies een attestatie, of vul een type attestatie in.",
         vctInvalid: "Een type attestatie mag geen spaties bevatten.",
         claimInvalid: "Een gegevensnaam mag geen spaties bevatten.",
         tooManyClaims: "Vraag maximaal 50 gegevens per attestatie.",
