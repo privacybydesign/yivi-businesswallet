@@ -150,4 +150,12 @@ type RequestObject struct {
 	DCQLQuery        json.RawMessage
 	// Raw is the validated JAR itself, persisted for the response step.
 	Raw string
+	// CertifiedName and CertifiedAddresses are what the verified relying-party
+	// certificate itself states: the subject's organization (else common name)
+	// and its rfc822Name SANs. Only VerifyingValidator sets them, and only after
+	// the chain verified. ReceiveFromQERDS requires the QERDS sender to be one of
+	// the addresses, which is what stops one organization relaying a request
+	// another minted (see .ai/features/oid4vp-over-qerds.md).
+	CertifiedName      string
+	CertifiedAddresses []string
 }

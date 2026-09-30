@@ -71,6 +71,14 @@ services:
         07/TFijN8nVPqhQO10JEO/rEIlev7UShm2t++AIhANufg1L0hHTNSbQG8iBf2aM0
         pgShtDARmjf5Z53cvlWE
         -----END CERTIFICATE-----
+      # Org-to-org credential requests (#271): the receiving org's wallet is
+      # this same backend, so it fetches request_uri and posts the answer to
+      # itself over the Compose network (plain http, allowed by the flag
+      # above). The requester CA is ephemeral here: set
+      # OPENID4VP_REQUESTER_CA_CERT/KEY to keep one across restarts. See
+      # .ai/features/oid4vp-over-qerds.md.
+      OPENID4VP_REQUESTER_PUBLIC_URL: ${OPENID4VP_REQUESTER_PUBLIC_URL:-http://backend:8080}
+      OPENID4VP_ORG_REQUEST_TTL: ${OPENID4VP_ORG_REQUEST_TTL:-168h}
       # QERDS transport: stub by default. Set QERDS_PROVIDER=domibus (+ URL) in
       # .env to drive the real Domibus AS4 access point (run with --profile domibus).
       QERDS_PROVIDER: ${QERDS_PROVIDER:-stub}

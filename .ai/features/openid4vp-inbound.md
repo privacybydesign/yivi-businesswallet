@@ -8,15 +8,17 @@ Request Object verification, DCQL matching over the org's held credentials, sele
 disclosure with a key-bound SD-JWT VC presentation, `direct_post` and encrypted
 `direct_post.jwt` responses. The consent/approval decision itself
 ([#113](https://github.com/privacybydesign/yivi-businesswallet/issues/113)) is now built as an
-admin approval queue (§5); a fine-grained permission model and an approval-inbox UI are not
-(§9).
+admin approval queue (§5), with its inbox in the console (*Credential requests → Incoming*,
+`frontend/src/routes/credential-requests.tsx`); a fine-grained permission model is not (§9).
 Design of record: `.ai/plans/openid4vp-invocation.md`. Local end-to-end testing: §8.
 **Counterpart:** `.ai/features/auth-openid4vp.md` is the *outbound* role — this backend as a
 requestor asking a natural person's device wallet for a login disclosure. This file is the
 opposite role: an **external verifier** invoking the **business wallet itself** to present an
 **organization's** credentials. `.ai/features/oid4vp-over-qerds.md` (#271) is a second invocation
 seam into the same crypto (§1, §2's `Present`/`Responder`): the request travels over QERDS instead
-of a browser, and the organization is bound at receipt instead of picked by a logged-in user.
+of a browser, and the organization is bound at receipt instead of picked by a logged-in user. That
+file also covers the sending side, where an organization is the relying party
+(`internal/openid4vprequester`).
 
 ---
 
@@ -28,7 +30,8 @@ of a browser, and the organization is bound at receipt instead of picked by a lo
 | Transaction table | `openid4vp_transactions` (migration `20260909090000`) |
 | `Present` on the holder engine (DCQL match, selective disclosure, KB-JWT) | `eudiholder.Engine.Present` (`engine_present.go`), `eudiholder.Formats()` |
 | Verifier / issuer trust without per-org storage | `eudiholder.NewVerifierTrust`, `eudiholder.NewIssuerTrust` (`verifiertrust.go`) |
-| Local relying party for dev and tests | `internal/devverifier` (identity, JAR signing, response verification), `cmd/devverifier` (HTTP), `dev-setup/devverifier/` (checked-in dev chain) |
+| Relying-party crypto (JAR signing, response verification), shared with the org-to-org sender | `internal/relyingparty` |
+| Local relying party for dev and tests | `internal/devverifier` (identity), `cmd/devverifier` (HTTP), `dev-setup/devverifier/` (checked-in dev chain) |
 | Audit vocabulary | `audit.Presentation*`, `audit.TargetPresentationTransaction` |
 | Admin approval queue (#113) | `Service.PendingApprovals` / `Approve` / `Deny`, `GET\|POST /orgs/{slug}/openid4vp/requests…` |
 | Wallet metadata | `GET /.well-known/oauth-authorization-server` (root mux, via `server.RootRegisterer`) |
@@ -146,13 +149,16 @@ reason — one nonce, one attempt. An org that holds nothing satisfying a requir
 query is `denied` with reason `no_matching_credential` and 422 to the browser. `Deny` is the
 same terminal `denied` state, without ever calling the holder.
 
-The queue list (`pendingRequestView`) carries only the transaction's row id, the verifier
-identity and its expiry — never the DCQL query, nonce or response material, mirroring
-`statusResponse`'s minimisation on the public side.
+The queue list (`pendingRequestView`) carries the transaction's row id, the verifier identity,
+its expiry and a summary of what an approval would share (`requestedCredentials`: per
+credential query the acceptable vcts and the claim paths, `requested.go`) — never the raw DCQL
+query, nonce or response material. The summary is admin-only; the public `status` stays as
+minimal as before.
 
 What this is **not**: a fine-grained permission (any `admin`, not a distinct `approvals`
-role), a policy engine (no auto-approve/auto-decline rules), four-eyes/dual-control, or an
-approval-inbox UI — see §9.
+role), a policy engine (no auto-approve/auto-decline rules), or four-eyes/dual-control — see
+§9. A transaction that arrived over QERDS expires after `OPENID4VP_ORG_REQUEST_TTL` (default a
+week), not `OPENID4VP_TRANSACTION_TTL`: it waits for an admin, not for an open browser.
 
 **`Engine.Present`** (`eudiholder/engine_present.go`) is irmago's holder pipeline driven
 headlessly: `eudi_sdjwt_dcql.SdJwtVcDcqlHandler` over the org's storage finds candidates
@@ -274,9 +280,7 @@ dev flag is needed there. `cmd/devverifier` loads the identity from
   finer `approvals` permission the RBAC design (`.ai/plans/rbac-model.md`, #115) sketches is
   not in `main` (`RequirePermission` doesn't exist yet), so this reuses `RequireOrgAdmin`
   like every other admin-only route; a policy engine (auto-approve/auto-decline rules) and
-  four-eyes/dual-control are not built; there is no frontend approval-inbox screen yet
-  (`GET/POST /orgs/{slug}/openid4vp/requests…` has no route or component in
-  `frontend/src/routes/`).
+  four-eyes/dual-control are not built.
 - Presenting to the hosted Yivi verifier needs a relying-party certificate that authorizes
   organization credential types; today its certificate lists `pbdf-staging.*` only.
 - A `wallet_nonce`-driven `post` fetch (sending `wallet_metadata`) if a verifier ever

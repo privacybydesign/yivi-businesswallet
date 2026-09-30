@@ -24,7 +24,7 @@ func TestPresentationRequestOverQERDSEndToEnd(t *testing.T) {
 
 	requesterOrg, holderOrg := uuid.New(), uuid.New()
 	const holderAddress = "holder@qerds.localhost"
-	requesterQ := newMemQerdsForPresenter(requesterOrg, "requester@qerds.localhost")
+	requesterQ := newMemQerdsForPresenter(requesterOrg, testSender)
 	holderQ := newMemQerdsForPresenter(holderOrg, holderAddress)
 	svcRequester := qerds.NewService(requesterQ, requesterQ, prov)
 	svcHolder := qerds.NewService(holderQ, holderQ, prov)
@@ -55,8 +55,8 @@ func TestPresentationRequestOverQERDSEndToEnd(t *testing.T) {
 	if queued[0].Status != StatusOrgSelected {
 		t.Errorf("status = %q, want %q", queued[0].Status, StatusOrgSelected)
 	}
-	if queued[0].VerifierIdentity == "" {
-		t.Error("queued request carries no verifier identity")
+	if queued[0].VerifierIdentity != testCertifiedName {
+		t.Errorf("verifier identity = %q, want the certified name %q", queued[0].VerifierIdentity, testCertifiedName)
 	}
 }
 

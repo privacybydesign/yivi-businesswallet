@@ -24,7 +24,7 @@ func TestReceiverQueuesPresentationRequest(t *testing.T) {
 	rec := NewReceiver(svc)
 
 	orgID, msgID := uuid.New(), uuid.New()
-	if err := rec.OnInboundMessage(context.Background(), qerds.Inbound{OrgID: orgID, MessageID: msgID, Body: requestBody(t)}); err != nil {
+	if err := rec.OnInboundMessage(context.Background(), qerds.Inbound{OrgID: orgID, MessageID: msgID, Sender: testSender, Body: requestBody(t)}); err != nil {
 		t.Fatalf("OnInboundMessage: %v", err)
 	}
 
@@ -62,7 +62,7 @@ func TestReceiverIdempotentOnRedelivery(t *testing.T) {
 	ctx := context.Background()
 	orgID, msgID := uuid.New(), uuid.New()
 	body := requestBody(t)
-	if err := rec.OnInboundMessage(ctx, qerds.Inbound{OrgID: orgID, MessageID: msgID, Body: body}); err != nil {
+	if err := rec.OnInboundMessage(ctx, qerds.Inbound{OrgID: orgID, MessageID: msgID, Sender: testSender, Body: body}); err != nil {
 		t.Fatalf("first OnInboundMessage: %v", err)
 	}
 	queued := store.forOrg(orgID)
@@ -76,7 +76,7 @@ func TestReceiverIdempotentOnRedelivery(t *testing.T) {
 	decided.Status = StatusDenied
 	store.orgTransactions[decided.ID] = decided
 
-	if err := rec.OnInboundMessage(ctx, qerds.Inbound{OrgID: orgID, MessageID: msgID, Body: body}); err != nil {
+	if err := rec.OnInboundMessage(ctx, qerds.Inbound{OrgID: orgID, MessageID: msgID, Sender: testSender, Body: body}); err != nil {
 		t.Fatalf("second OnInboundMessage: %v", err)
 	}
 	queued = store.forOrg(orgID)

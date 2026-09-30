@@ -182,8 +182,18 @@ func (f *fakeFetcher) Fetch(context.Context, string) ([]byte, error) {
 
 type fakeValidator struct{}
 
+// testSender is the QERDS address fakeValidator's certificate certifies, and
+// testCertifiedName the organization it names.
+const (
+	testSender        = "requester@qerds.localhost"
+	testCertifiedName = "Requester Org B.V."
+)
+
 func (fakeValidator) Validate(_ context.Context, clientID string, _ []byte) (RequestObject, error) {
-	return RequestObject{ClientID: clientID, VerifierIdentity: "v", Nonce: "n", ResponseURI: "https://v/r", ResponseMode: "direct_post", DCQLQuery: []byte(`{}`)}, nil
+	return RequestObject{
+		ClientID: clientID, VerifierIdentity: "v", Nonce: "n", ResponseURI: "https://v/r", ResponseMode: "direct_post", DCQLQuery: []byte(`{}`),
+		CertifiedName: testCertifiedName, CertifiedAddresses: []string{testSender},
+	}, nil
 }
 func (fakeValidator) ClientIDPrefixes() []string { return nil }
 
@@ -276,7 +286,7 @@ func TestStartAcceptsGetAndPostMethods(t *testing.T) {
 // request is rejected the same way — before it is queued for anyone to decide.
 func TestReceiveFromQERDSRejectsAmbiguousForms(t *testing.T) {
 	svc, store, fetcher := newTestService()
-	_, _, err := svc.ReceiveFromQERDS(context.Background(), uuid.New(), uuid.New(), StartRequest{ClientID: testClientID})
+	_, _, err := svc.ReceiveFromQERDS(context.Background(), uuid.New(), uuid.New(), testSender, StartRequest{ClientID: testClientID})
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("err = %v, want %v", err, ErrInvalidRequest)
 	}
@@ -293,7 +303,7 @@ func TestReceiveFromQERDSQueuesOrgBound(t *testing.T) {
 	orgID, msgID := uuid.New(), uuid.New()
 	req := StartRequest{ClientID: testClientID, RequestURI: "https://v/req"}
 
-	t1, recorded, err := svc.ReceiveFromQERDS(context.Background(), orgID, msgID, req)
+	t1, recorded, err := svc.ReceiveFromQERDS(context.Background(), orgID, msgID, testSender, req)
 	if err != nil {
 		t.Fatalf("ReceiveFromQERDS: %v", err)
 	}
@@ -304,8 +314,36 @@ func TestReceiveFromQERDSQueuesOrgBound(t *testing.T) {
 		t.Fatalf("queued transaction = %+v, want org-bound org_selected", t1)
 	}
 
-	if _, recorded, err := svc.ReceiveFromQERDS(context.Background(), orgID, msgID, req); err != nil || recorded {
+	if _, recorded, err := svc.ReceiveFromQERDS(context.Background(), orgID, msgID, testSender, req); err != nil || recorded {
 		t.Fatalf("re-delivery: recorded=%v err=%v, want recorded=false err=nil", recorded, err)
+	}
+	if t1.VerifierIdentity != testCertifiedName {
+		t.Errorf("verifier identity = %q, want the certified name %q", t1.VerifierIdentity, testCertifiedName)
+	}
+}
+
+// The relay case (#271): org A forwards a request org C signed. C's certificate
+// does not certify A's address, so the request is refused instead of queuing
+// under A's name — and so is one from a sender that claims no address at all.
+func TestReceiveFromQERDSRefusesUncertifiedSender(t *testing.T) {
+	for _, sender := range []string{"relayer@qerds.localhost", ""} {
+		svc, store, _ := newTestService()
+		orgID := uuid.New()
+		_, _, err := svc.ReceiveFromQERDS(context.Background(), orgID, uuid.New(), sender, StartRequest{ClientID: testClientID, RequestURI: "https://v/req"})
+		if !errors.Is(err, ErrInvalidRequestObject) {
+			t.Errorf("sender %q: err = %v, want %v", sender, err, ErrInvalidRequestObject)
+		}
+		if len(store.forOrg(orgID)) != 0 {
+			t.Errorf("sender %q: an uncertified request was queued", sender)
+		}
+	}
+}
+
+// The address match ignores case, like the QERDS sender allowlists.
+func TestReceiveFromQERDSMatchesSenderCaseInsensitively(t *testing.T) {
+	svc, _, _ := newTestService()
+	if _, _, err := svc.ReceiveFromQERDS(context.Background(), uuid.New(), uuid.New(), "Requester@QERDS.localhost", StartRequest{ClientID: testClientID, RequestURI: "https://v/req"}); err != nil {
+		t.Fatalf("ReceiveFromQERDS: %v", err)
 	}
 }
 

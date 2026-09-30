@@ -20,6 +20,7 @@ import (
 	eudijwt "github.com/privacybydesign/irmago/eudi/jwt"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/devverifier"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/relyingparty"
 )
 
 const (
@@ -43,7 +44,7 @@ type session struct {
 	requestObject string
 	fetched       bool
 	encryptionKey *ecdsa.PrivateKey
-	presented     []devverifier.Presented
+	presented     []relyingparty.Presented
 	failure       string
 	done          bool
 }
@@ -124,11 +125,11 @@ func (s *server) newSession(vct string, claims []string, mode string) (*session,
 	if _, err := rand.Read(idBytes); err != nil {
 		return nil, err
 	}
-	nonce, err := devverifier.RandomToken()
+	nonce, err := relyingparty.RandomToken()
 	if err != nil {
 		return nil, err
 	}
-	state, err := devverifier.RandomToken()
+	state, err := relyingparty.RandomToken()
 	if err != nil {
 		return nil, err
 	}
@@ -141,11 +142,11 @@ func (s *server) newSession(vct string, claims []string, mode string) (*session,
 		nonce:        nonce,
 		state:        state,
 	}
-	dcql, err := devverifier.SimpleDCQL(defaultQueryID, vct, claims)
+	dcql, err := relyingparty.SimpleDCQL(defaultQueryID, vct, claims)
 	if err != nil {
 		return nil, err
 	}
-	req := devverifier.Request{
+	req := relyingparty.Request{
 		Nonce:        nonce,
 		State:        state,
 		ResponseURI:  s.internalURL + "/response/" + sess.id,
@@ -154,14 +155,14 @@ func (s *server) newSession(vct string, claims []string, mode string) (*session,
 		ClientName:   "Dev Verifier",
 	}
 	if mode == string(openid4vp.ResponseMode_DirectPostJwt) {
-		key, err := devverifier.NewEncryptionKey()
+		key, err := relyingparty.NewEncryptionKey()
 		if err != nil {
 			return nil, err
 		}
 		sess.encryptionKey = key
 		req.EncryptionKey = &key.PublicKey
 	}
-	jar, err := devverifier.SignRequestObject(s.identity, req)
+	jar, err := relyingparty.SignRequestObject(s.identity.Signer(), req)
 	if err != nil {
 		return nil, err
 	}
@@ -270,9 +271,9 @@ func (s *server) response(w http.ResponseWriter, r *http.Request) {
 	case state != sess.state:
 		sess.failure = fmt.Sprintf("state mismatch: got %q", state)
 	case len(token) == 0:
-		sess.failure = devverifier.ErrNoPresentations.Error()
+		sess.failure = relyingparty.ErrNoPresentations.Error()
 	default:
-		sess.presented = devverifier.VerifyVPToken(token, s.issuerTrust, sess.nonce, s.identity.ClientID())
+		sess.presented = relyingparty.VerifyVPToken(token, s.issuerTrust, sess.nonce, s.identity.ClientID())
 	}
 	if sess.failure != "" {
 		slog.Warn("response refused", slog.String("session", sess.id), slog.String("error", sess.failure))
@@ -290,12 +291,12 @@ func (s *server) decodeResponse(sess *session, form url.Values) (map[string][]st
 		if form.Get("response") == "" {
 			return nil, "", errors.New("direct_post.jwt response without `response`")
 		}
-		return devverifier.DecryptResponse(form.Get("response"), sess.encryptionKey)
+		return relyingparty.DecryptResponse(form.Get("response"), sess.encryptionKey)
 	}
 	if form.Get("vp_token") == "" {
 		return nil, "", errors.New("direct_post response without `vp_token`")
 	}
-	token, err := devverifier.ParseVPToken(form.Get("vp_token"))
+	token, err := relyingparty.ParseVPToken(form.Get("vp_token"))
 	return token, form.Get("state"), err
 }
 

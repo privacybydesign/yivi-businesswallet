@@ -89,6 +89,9 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "presentation.denied": { icon: "close", tone: "red" },
   "presentation.expired": { icon: "time", tone: "slate" },
   "presentation.request_received": { icon: "scan_qrcode", tone: "amber" },
+  "presentation.request_sent": { icon: "email", tone: "blue" },
+  "presentation.response_received": { icon: "valid", tone: "green" },
+  "presentation.request_failed": { icon: "warning", tone: "red" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -307,6 +310,12 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.presentationExpired");
     case "presentation.request_received":
       return t("auditLog.actions.presentationRequestReceived");
+    case "presentation.request_sent":
+      return t("auditLog.actions.presentationRequestSent");
+    case "presentation.response_received":
+      return t("auditLog.actions.presentationResponseReceived");
+    case "presentation.request_failed":
+      return t("auditLog.actions.presentationRequestFailed");
     default:
       return action;
   }
@@ -386,6 +395,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.signingRequests");
     case "presentation_transaction":
       return t("auditLog.targets.presentationTransaction");
+    case "outbound_presentation_request":
+      return t("auditLog.targets.outboundPresentationRequest");
     default:
       return targetType;
   }
