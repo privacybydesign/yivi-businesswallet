@@ -45,6 +45,7 @@ export const nl: Translation<typeof en> = {
     attestations: "Attestaties",
     postguard: "PostGuard-bestanden",
     signing: "Documenten ondertekenen",
+    credentialRequests: "Gegevensverzoeken",
     auditLog: "Auditlogboek",
     adminDashboard: "Overzicht",
     allOrganizations: "Organisaties",
@@ -587,6 +588,9 @@ export const nl: Translation<typeof en> = {
     attestationOfferCancelled: "Aanbod geannuleerd",
     credentialOfferAccepted: "Credential toegevoegd aan de wallet",
     credentialOfferDeclined: "Aanbod geweigerd",
+    credentialRequestSent: "Gegevensverzoek verstuurd",
+    credentialRequestApproved: "Gegevens gedeeld",
+    credentialRequestDeclined: "Verzoek geweigerd",
     emailSettingsSaved: "E-mailinstellingen opgeslagen",
     emailTestSent: "Test-e-mail verstuurd",
     slackSettingsSaved: "Slack-instellingen opgeslagen",
@@ -738,6 +742,7 @@ export const nl: Translation<typeof en> = {
       signingCredentials: "Ondertekencredential",
       signingRequests: "Ondertekenverzoek",
       presentationTransaction: "Presentatieverzoek",
+      outboundPresentationRequest: "Gegevensverzoek",
     },
     actions: {
       orgCreated: "Organisatie aangemaakt",
@@ -840,6 +845,8 @@ export const nl: Translation<typeof en> = {
       presentationDenied: "Presentatieverzoek afgewezen",
       presentationExpired: "Presentatieverzoek verlopen",
       presentationRequestReceived: "Presentatieverzoek via QERDS ontvangen",
+      presentationRequestSent: "Gegevens bij een organisatie opgevraagd",
+      presentationResponseReceived: "Antwoord op een gegevensverzoek ontvangen",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
     },
@@ -1980,6 +1987,80 @@ export const nl: Translation<typeof en> = {
   rootEmpty: {
     title: "Nog geen organisaties",
     body: "Je bent geen lid van een organisatie. Neem contact op met je beheerder om toegang te krijgen.",
+  },
+  credentialRequests: {
+    title: "Gegevensverzoeken",
+    subtitle:
+      "Vraag andere organisaties via veilige bezorging om gegevens, en beslis over wat zij van u vragen.",
+    newRequest: "Gegevens opvragen",
+    adminOnly:
+      "Alleen beheerders kunnen gegevensverzoeken zien en erover beslissen.",
+    loadError: "Gegevensverzoeken konden niet worden geladen: {{message}}",
+    tabs: {
+      incoming: "Ontvangen",
+      sent: "Verzonden",
+    },
+    incoming: {
+      description:
+        "Andere organisaties die uw organisatie om gegevens vragen. Goedkeuren deelt precies wat zij vroegen, uit de attestaties die uw organisatie bezit. De aanvrager wordt genoemd zoals zijn certificaat hem noemt.",
+      empty: "Er wachten geen verzoeken op een beslissing.",
+      pending: "Wacht op beslissing",
+      expires: "Verloopt {{when}}",
+      shares: "Deelt: {{claims}}",
+      sharesNoClaims: "Deelt dat uw organisatie deze attestatie bezit",
+      approve: "Goedkeuren en delen",
+      decline: "Weigeren",
+      confirmApprove:
+        "De gevraagde gegevens delen met {{verifier}}? Dit kan niet ongedaan worden gemaakt.",
+      confirmDecline:
+        "Het verzoek van {{verifier}} weigeren? Er wordt niets gedeeld.",
+    },
+    sent: {
+      empty: "Uw organisatie heeft nog geen gegevens opgevraagd.",
+      to: "Aan {{recipient}}",
+      fetched: "geopend door de wallet van de ontvanger",
+      notFetched: "nog niet ontvangen",
+      asked: "Gevraagd: {{claims}}",
+      noClaims: "Alleen de attestatie zelf gevraagd, geen gegevens",
+      issuer: "Uitgever",
+      status: {
+        sent: "Wacht op antwoord",
+        completed: "Beantwoord",
+        failed: "Mislukt",
+        expired: "Verlopen",
+      },
+      failure: {
+        qerdsSendFailed: "Het verzoek kon niet worden bezorgd.",
+        verificationFailed:
+          "Het antwoord kon niet worden geverifieerd; er is niets bewaard.",
+        incompleteResponse:
+          "Het antwoord bevatte niet alle gevraagde attestaties.",
+      },
+    },
+    form: {
+      title: "Gegevens opvragen",
+      from: "Van",
+      fromDefault: "Standaardadres",
+      recipient: "Adres van de ontvanger",
+      recipientPlaceholder: "organisatie@qerds.example",
+      credentials: "Attestaties",
+      vct: "Type attestatie",
+      vctPlaceholder: "Type attestatie, bijv. nl.kvk.registration",
+      claims: "Gegevens",
+      claimsPlaceholder: "Gegevens, gescheiden door komma's (optioneel)",
+      addCredential: "Attestatie toevoegen",
+      removeCredential: "Attestatie verwijderen",
+      send: "Verzoek versturen",
+      note: "Het verzoek wordt ondertekend als {{org}} en via veilige bezorging verstuurd. De beheerder van de ontvanger beslist of er wordt gedeeld.",
+      errors: {
+        recipientRequired: "Vul het adres van de ontvanger in.",
+        recipientInvalid: "Vul een geldig adres in.",
+        vctRequired: "Vul een type attestatie in.",
+        vctInvalid: "Een type attestatie mag geen spaties bevatten.",
+        claimInvalid: "Een gegevensnaam mag geen spaties bevatten.",
+        tooManyClaims: "Vraag maximaal 50 gegevens per attestatie.",
+      },
+    },
   },
   qerds: {
     title: "Veilige bezorging",

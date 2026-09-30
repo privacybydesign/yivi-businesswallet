@@ -1,4 +1,4 @@
-package devverifier
+package relyingparty
 
 import (
 	"crypto"
@@ -60,14 +60,14 @@ type Presented struct {
 func DecryptResponse(response string, key *ecdsa.PrivateKey) (map[string][]string, string, error) {
 	plaintext, err := jwe.Decrypt([]byte(response), jwe.WithKey(jwa.ECDH_ES(), key))
 	if err != nil {
-		return nil, "", fmt.Errorf("devverifier: decrypt response: %w", err)
+		return nil, "", fmt.Errorf("relyingparty: decrypt response: %w", err)
 	}
 	var payload struct {
 		VPToken map[string][]string `json:"vp_token"`
 		State   string              `json:"state"`
 	}
 	if err := json.Unmarshal(plaintext, &payload); err != nil {
-		return nil, "", fmt.Errorf("devverifier: decode decrypted response: %w", err)
+		return nil, "", fmt.Errorf("relyingparty: decode decrypted response: %w", err)
 	}
 	return payload.VPToken, payload.State, nil
 }
@@ -76,7 +76,7 @@ func DecryptResponse(response string, key *ecdsa.PrivateKey) (map[string][]strin
 func ParseVPToken(raw string) (map[string][]string, error) {
 	var token map[string][]string
 	if err := json.Unmarshal([]byte(raw), &token); err != nil {
-		return nil, fmt.Errorf("devverifier: decode vp_token: %w", err)
+		return nil, fmt.Errorf("relyingparty: decode vp_token: %w", err)
 	}
 	return token, nil
 }
@@ -289,4 +289,19 @@ func contentClaims(payload map[string]any) map[string]any {
 }
 
 // ErrNoPresentations is returned when a response carried an empty vp_token.
-var ErrNoPresentations = errors.New("devverifier: vp_token holds no presentations")
+var ErrNoPresentations = errors.New("relyingparty: vp_token holds no presentations")
+
+// TokenVerifier is VerifyVPToken bound to one issuer trust, for a caller that
+// takes the verification step as a seam.
+type TokenVerifier struct {
+	issuerTrust eudijwt.X509VerificationContext
+}
+
+func NewTokenVerifier(issuerTrust eudijwt.X509VerificationContext) TokenVerifier {
+	return TokenVerifier{issuerTrust: issuerTrust}
+}
+
+// Verify runs VerifyVPToken against the bound issuer trust.
+func (v TokenVerifier) Verify(token map[string][]string, nonce, clientID string) []Presented {
+	return VerifyVPToken(token, v.issuerTrust, nonce, clientID)
+}

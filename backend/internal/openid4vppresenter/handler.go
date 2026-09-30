@@ -142,12 +142,14 @@ func (h *Handler) selectOrg(w http.ResponseWriter, r *http.Request) error {
 }
 
 // pendingRequestView is one row of the approval queue: enough for an admin to
-// decide, never the query or response material (the same minimisation as
-// statusResponse).
+// decide — who asks, and which credential types and claims an approval would
+// share (RequestedCredentials) — never the raw query, nonce or response
+// material (the same minimisation as statusResponse).
 type pendingRequestView struct {
-	ID        string    `json:"id"`
-	Verifier  string    `json:"verifier"`
-	ExpiresAt time.Time `json:"expiresAt"`
+	ID          string                `json:"id"`
+	Verifier    string                `json:"verifier"`
+	ExpiresAt   time.Time             `json:"expiresAt"`
+	Credentials []RequestedCredential `json:"credentials"`
 }
 
 func (h *Handler) pendingRequests(w http.ResponseWriter, r *http.Request) error {
@@ -158,7 +160,10 @@ func (h *Handler) pendingRequests(w http.ResponseWriter, r *http.Request) error 
 	}
 	out := make([]pendingRequestView, 0, len(pending))
 	for _, t := range pending {
-		out = append(out, pendingRequestView{ID: t.ID.String(), Verifier: t.VerifierIdentity, ExpiresAt: t.ExpiresAt})
+		out = append(out, pendingRequestView{
+			ID: t.ID.String(), Verifier: t.VerifierIdentity, ExpiresAt: t.ExpiresAt,
+			Credentials: RequestedCredentials(t.DCQLQuery),
+		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil

@@ -19,6 +19,7 @@ type NavLabelKey =
   | "nav.attestations"
   | "nav.postguard"
   | "nav.signing"
+  | "nav.credentialRequests"
   | "nav.auditLog"
   | "nav.settings"
   | "nav.adminDashboard"
@@ -34,7 +35,12 @@ interface NavItem {
 
 // showSigning gates the "Sign documents" item on the org having a CSC signing
 // provider configured (see the sidebar body); it is a plugin, absent otherwise.
-function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
+// showAdmin adds the items only an organization admin can use.
+function orgNavItems(
+  slug: string,
+  showSigning: boolean,
+  showAdmin: boolean,
+): NavItem[] {
   const items: NavItem[] = [
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
@@ -51,6 +57,13 @@ function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
       to: `/${slug}/signing`,
       labelKey: "nav.signing",
       icon: "edit",
+    });
+  }
+  if (showAdmin) {
+    items.push({
+      to: `/${slug}/credential-requests`,
+      labelKey: "nav.credentialRequests",
+      icon: "scan_qrcode",
     });
   }
   items.push(
@@ -75,6 +88,7 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
 ];
 
 const NAV_ICON_SIZE = 16;
+const ORG_ADMIN_ROLE = "admin";
 
 interface SidebarProps {
   me: Me;
@@ -124,7 +138,11 @@ export function Sidebar({
   // for the org currently in the URL.
   const activeOrg = useOrganizationQuery(activeSlug ?? "");
   const navItems = activeSlug
-    ? orgNavItems(activeSlug, showSigning)
+    ? orgNavItems(
+        activeSlug,
+        showSigning,
+        activeOrg.data?.role === ORG_ADMIN_ROLE,
+      )
     : me.isPlatformAdmin
       ? ADMIN_NAV_ITEMS
       : [];

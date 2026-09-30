@@ -15,6 +15,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/devverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vppresenter"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/relyingparty"
 )
 
 // fakeInboundVerifier is the external verifier that invokes the business wallet:
@@ -62,11 +63,11 @@ func newFakeInboundVerifier(t *testing.T, identity devverifier.Identity) *fakeIn
 // requestObject is a JAR signed by the trusted relying-party identity, as the
 // hosted Yivi verifier would sign one.
 func (f *fakeInboundVerifier) requestObject() []byte {
-	dcql, err := devverifier.SimpleDCQL("kvk", "nl.kvk.registration", nil)
+	dcql, err := relyingparty.SimpleDCQL("kvk", "nl.kvk.registration", nil)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	jar, err := devverifier.SignRequestObject(f.identity, devverifier.Request{
+	jar, err := relyingparty.SignRequestObject(f.identity.Signer(), relyingparty.Request{
 		Nonce:        inboundNonce,
 		State:        inboundState,
 		ResponseURI:  f.server.URL + "/response",

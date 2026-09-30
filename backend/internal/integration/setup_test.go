@@ -229,7 +229,7 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 	}
 	presenterPolicy := openid4vppresenter.Policy{AllowInsecureHTTP: true}
 	presenterValidator := openid4vppresenter.NewVerifyingValidator(verifierTrust, presenterPolicy)
-	presenterStore := openid4vppresenter.NewStore(pool, audit.NewDBRecorder(), sessionTTL)
+	presenterStore := openid4vppresenter.NewStore(pool, audit.NewDBRecorder(), sessionTTL, sessionTTL)
 	presenterService := openid4vppresenter.NewService(
 		presenterStore, orgStore, eudiholder.NewStubHolder(),
 		openid4vppresenter.NewFetcher(presenterPolicy), presenterValidator, openid4vppresenter.NewResponder(presenterPolicy),

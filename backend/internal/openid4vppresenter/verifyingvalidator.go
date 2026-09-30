@@ -88,5 +88,16 @@ func (v *VerifyingValidator) Validate(_ context.Context, clientID string, reques
 		}
 		f.encryptionKeys = keys
 	}
-	return checkFields(v.policy, clientID, identity, raw, f)
+	ro, err := checkFields(v.policy, clientID, identity, raw, f)
+	if err != nil {
+		return RequestObject{}, err
+	}
+	if leaf != nil {
+		ro.CertifiedName = leaf.Subject.CommonName
+		if len(leaf.Subject.Organization) > 0 && leaf.Subject.Organization[0] != "" {
+			ro.CertifiedName = leaf.Subject.Organization[0]
+		}
+		ro.CertifiedAddresses = leaf.EmailAddresses
+	}
+	return ro, nil
 }

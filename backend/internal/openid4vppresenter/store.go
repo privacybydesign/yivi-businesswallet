@@ -24,10 +24,14 @@ type Store struct {
 	db    database.DB
 	audit audit.Recorder
 	ttl   time.Duration
+	// qerdsTTL bounds a request that arrived over QERDS. It waits in the approval
+	// queue until an admin looks at it, not for a browser that is already open,
+	// so it outlives ttl by hours or days.
+	qerdsTTL time.Duration
 }
 
-func NewStore(db database.DB, recorder audit.Recorder, ttl time.Duration) *Store {
-	return &Store{db: db, audit: recorder, ttl: ttl}
+func NewStore(db database.DB, recorder audit.Recorder, ttl, qerdsTTL time.Duration) *Store {
+	return &Store{db: db, audit: recorder, ttl: ttl, qerdsTTL: qerdsTTL}
 }
 
 const transactionColumns = `
@@ -107,7 +111,7 @@ func (s *Store) CreateForOrganization(ctx context.Context, orgID, sourceMessageI
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT (organization_id, source_message_id) WHERE source_message_id IS NOT NULL DO NOTHING
 		RETURNING ` + transactionColumns
-	expiresAt := time.Now().Add(s.ttl)
+	expiresAt := time.Now().Add(s.qerdsTTL)
 	var (
 		t        Transaction
 		recorded bool

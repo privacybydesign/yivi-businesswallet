@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -113,10 +114,22 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (string, error) {
 // whatever the governance layer (#113) provides for any org_selected
 // transaction, regardless of origin. Idempotent on sourceMessageID: a
 // re-delivered message resolves to the row already queued (recorded=false).
-func (s *Service) ReceiveFromQERDS(ctx context.Context, orgID, sourceMessageID uuid.UUID, req StartRequest) (Transaction, bool, error) {
+//
+// sender is the QERDS originalSender. The relying-party certificate must
+// certify it (CertifiedAddresses), so the organization that sent the message
+// is the one that signed the request: a request minted by C and forwarded by A
+// is refused rather than queued looking like A's. The requester is then named
+// by the certificate, not by the client_name the request says about itself.
+func (s *Service) ReceiveFromQERDS(ctx context.Context, orgID, sourceMessageID uuid.UUID, sender string, req StartRequest) (Transaction, bool, error) {
 	method, ro, err := s.validate(ctx, req)
 	if err != nil {
 		return Transaction{}, false, err
+	}
+	if !certifiesSender(ro.CertifiedAddresses, sender) {
+		return Transaction{}, false, fmt.Errorf("%w: relying-party certificate does not certify the QERDS sender", ErrInvalidRequestObject)
+	}
+	if ro.CertifiedName != "" {
+		ro.VerifierIdentity = ro.CertifiedName
 	}
 	return s.store.CreateForOrganization(ctx, orgID, sourceMessageID, NewTransaction{
 		ClientID:         req.ClientID,
@@ -124,6 +137,21 @@ func (s *Service) ReceiveFromQERDS(ctx context.Context, orgID, sourceMessageID u
 		RequestURIMethod: method,
 		Request:          ro,
 	})
+}
+
+// certifiesSender reports whether sender is one of the certificate's addresses.
+// Addresses compare case-insensitively, like the QERDS sender allowlists.
+func certifiesSender(certified []string, sender string) bool {
+	sender = strings.TrimSpace(sender)
+	if sender == "" {
+		return false
+	}
+	for _, a := range certified {
+		if strings.EqualFold(a, sender) {
+			return true
+		}
+	}
+	return false
 }
 
 // validate is the invocation-independent half of Start/ReceiveFromQERDS: reject

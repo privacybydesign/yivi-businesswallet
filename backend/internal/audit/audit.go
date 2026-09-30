@@ -155,6 +155,12 @@ const (
 	// PresentationRequested: the organization is already known from the
 	// receiving digital address, so the row is written org-scoped from the start.
 	PresentationRequestReceived = "presentation.request_received"
+	// Outbound org-to-org requests (#271): this organization, as relying party,
+	// asked another organization for credentials over QERDS. Sent records the
+	// recipient and the credential types asked for; ResponseReceived the outcome
+	// and the types presented, never the disclosed claim values.
+	PresentationRequestSent      = "presentation.request_sent"
+	PresentationResponseReceived = "presentation.response_received"
 )
 
 const (
@@ -209,7 +215,8 @@ const (
 	TargetSigningCredential = "signing_credentials"
 	TargetSigningRequest    = "signing_requests"
 
-	TargetPresentationTransaction = "presentation_transaction"
+	TargetPresentationTransaction     = "presentation_transaction"
+	TargetOutboundPresentationRequest = "outbound_presentation_request"
 )
 
 type Actor struct {
