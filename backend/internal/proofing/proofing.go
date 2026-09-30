@@ -248,8 +248,11 @@ type Request struct {
 	// ProofedName is the name read off a customer's subject's approved document,
 	// until ProofedNameRetention clears it; empty otherwise.
 	ProofedName string
-	FlowID      string
-	FlowName    string
+	// PurgeAt is when the pruner purges the request (Purge): its customer's
+	// retention after it settled; nil while it runs, and for a member's.
+	PurgeAt  *time.Time
+	FlowID   string
+	FlowName string
 	// FlowVersion is the IPS flow version the session pinned; 0 when unknown.
 	FlowVersion int
 	// Method is how the subject took part; "" while no device claimed it.
@@ -549,9 +552,13 @@ var faceProviders = []string{faceProviderRegula, faceProviderEngine, faceProvide
 // flow on one runs in the Idem app only, so the subject gets no app choice.
 var idemOnlyFaceProviders = []string{faceProviderIris}
 
-// YiviAppAvailable reports whether flow f can run in the Yivi app: always,
-// unless its face step is on a provider the Yivi app does not have.
+// YiviAppAvailable reports whether flow f can run in the Yivi app: unless it
+// photographs the document, which only the Idem app does, or its face step is
+// on a provider the Yivi app does not have.
 func YiviAppAvailable(f proofingprovider.Flow) bool {
+	if slices.Contains(f.Steps, stepDocumentPhoto) {
+		return false
+	}
 	return !hasFaceStep(f.Steps) || !slices.Contains(idemOnlyFaceProviders, f.FaceProvider)
 }
 
@@ -602,10 +609,22 @@ func MeetsAssurance(achieved, required string) bool {
 // session, which the wallet does not have.
 const stepNFCRead = "nfc_read"
 
+// stepDocumentPhoto is a photo of the document's printed page, taken in the
+// Idem app.
+const stepDocumentPhoto = "document_photo"
+
+// appPendingSteps are IPS steps the Idem app cannot run yet: a session of a
+// flow with one would never finish.
+var appPendingSteps = []string{stepDocumentPhoto}
+
 // Completable reports whether a recipient can finish flow f with only the
-// vcmrtd app and the wallet's session: a face step must run in the app and
-// have the chip photo to compare against.
+// vcmrtd app and the wallet's session: every step must be one the app runs,
+// and a face step must run in the app and have the chip photo to compare
+// against.
 func Completable(f proofingprovider.Flow) bool {
+	if slices.ContainsFunc(f.Steps, func(step string) bool { return slices.Contains(appPendingSteps, step) }) {
+		return false
+	}
 	if !hasFaceStep(f.Steps) {
 		return true
 	}

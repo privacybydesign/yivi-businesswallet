@@ -177,6 +177,12 @@ describe("yiviAppAvailable", () => {
       yiviAppAvailable({ steps: ["nfc_read"], faceProvider: "Iris" }),
     ).toBe(true);
   });
+
+  it("leaves a flow that photographs the document to the Idem app", () => {
+    expect(yiviAppAvailable({ steps: ["nfc_read", "document_photo"] })).toBe(
+      false,
+    );
+  });
 });
 
 describe("attributeAvailable", () => {
@@ -185,6 +191,15 @@ describe("attributeAvailable", () => {
     expect(attributeAvailable(chipOnly, "dg1")).toBe(true);
     expect(attributeAvailable(chipOnly, "chip_checks")).toBe(true);
     expect(attributeAvailable(chipOnly, "selfie")).toBe(false);
+    expect(attributeAvailable(chipOnly, "document_image")).toBe(false);
+    const withPhoto = draft({ documentPhoto: true });
+    expect(attributeAvailable(withPhoto, "document_image")).toBe(true);
+    expect(draftSteps(withPhoto)).toEqual([
+      "document_capture",
+      "nfc_read",
+      "document_photo",
+      "face_verification",
+    ]);
     expect(
       draftSteps(draft({ documentAndChip: false, faceVerification: false })),
     ).toEqual([]);

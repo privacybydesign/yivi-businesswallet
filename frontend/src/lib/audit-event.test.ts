@@ -199,6 +199,9 @@ describe("auditActorLabel", () => {
     expect(auditActorLabel("hosted_link", t)).toBe(
       t("auditLog.hostedLinkActor"),
     );
+    expect(auditActorLabel("app:idem_app", t)).toBe(
+      t("identityProofing.methods.idemApp"),
+    );
     expect(auditActorLabel(null, t)).toBeNull();
     expect(auditActorLabel(undefined, t)).toBeNull();
   });

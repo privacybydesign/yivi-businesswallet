@@ -3,6 +3,7 @@ package proofingprovider
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -151,15 +153,16 @@ func (c *Client) ActivateFlowVersion(ctx context.Context, apiKey, id string, ver
 func flowPath(id string) string { return "/flows/" + url.PathEscape(id) }
 
 type handoverView struct {
-	DeepLink  string    `json:"deepLink"`
-	ExpiresAt time.Time `json:"expiresAt"`
+	DeepLink    string    `json:"deepLink"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+	SlotClaimed bool      `json:"slotClaimed"`
 }
 
 func (h *handoverView) claim() *Claim {
 	if h == nil || h.DeepLink == "" {
 		return nil
 	}
-	return &Claim{DeepLink: h.DeepLink, ExpiresAt: h.ExpiresAt}
+	return &Claim{DeepLink: h.DeepLink, ExpiresAt: h.ExpiresAt, Handover: h.SlotClaimed}
 }
 
 type claimsView struct {
@@ -243,6 +246,8 @@ func (c *Client) SessionResult(ctx context.Context, apiKey, sessionID, sessionTo
 			Disclosure *struct {
 				Source string `json:"source"`
 			} `json:"disclosure"`
+			Photo  *ipsImage `json:"photo"`
+			Selfie *ipsImage `json:"selfie"`
 		} `json:"result"`
 		// Only each device's role: which app took part, not which device.
 		Devices []struct {
@@ -313,6 +318,9 @@ func (c *Client) SessionIdentity(ctx context.Context, apiKey, sessionID, session
 			Disclosure *struct {
 				Source string `json:"source"`
 			} `json:"disclosure"`
+			Photo         *ipsImage `json:"photo"`
+			Selfie        *ipsImage `json:"selfie"`
+			DocumentImage *ipsImage `json:"documentImage"`
 		} `json:"result"`
 		Devices []struct {
 			Role string `json:"role"`
@@ -356,7 +364,31 @@ func (c *Client) SessionIdentity(ctx context.Context, apiKey, sessionID, session
 		ev.FaceMatch, ev.Liveness = b.FaceMatchScore, b.LivenessResult
 	}
 	id.Evidence = ev
+	id.Photo, id.Selfie, id.DocumentImage = res.Photo.image(), res.Selfie.image(), res.DocumentImage.image()
 	return id, nil
+}
+
+// ipsImage is an image in an IPS result.
+type ipsImage struct {
+	ImageBase64 string `json:"imageBase64"`
+	MimeType    string `json:"mimeType"`
+}
+
+// displayableImageTypes are the formats IPS converts its images to for
+// display. Anything else (a JPEG2000 portrait IPS failed to convert, or a type
+// a browser would run, like SVG) is left out rather than passed on.
+var displayableImageTypes = []string{"image/png", "image/jpeg", "image/webp"}
+
+// image is the Image a result carries, nil when there is none or it is not a
+// well-formed image of a displayable type.
+func (i *ipsImage) image() *Image {
+	if i == nil || i.ImageBase64 == "" || !slices.Contains(displayableImageTypes, i.MimeType) {
+		return nil
+	}
+	if _, err := base64.StdEncoding.DecodeString(i.ImageBase64); err != nil {
+		return nil
+	}
+	return &Image{MimeType: i.MimeType, Base64: i.ImageBase64}
 }
 
 // allTrue is nil when a check did not run, else whether each that ran passed.
@@ -402,10 +434,8 @@ func (c *Client) SessionStatus(ctx context.Context, apiKey, sessionID, sessionTo
 			Level      string `json:"level"`
 			EIDASLevel string `json:"eidasLevel"`
 		} `json:"assurance"`
-		Disclosure bool `json:"disclosure"`
-		Devices    []struct {
-			Role string `json:"role"`
-		} `json:"devices"`
+		Disclosure bool           `json:"disclosure"`
+		Devices    []statusDevice `json:"devices"`
 	}
 	path := sessionPath(sessionID) + "/status"
 	err := c.do(ctx, http.MethodGet, path, sessionHeaders(apiKey, sessionToken), nil, &out)
@@ -423,10 +453,18 @@ func (c *Client) SessionStatus(ctx context.Context, apiKey, sessionID, sessionTo
 		roles = append(roles, d.Role)
 	}
 	res.Method = methodOf(out.Disclosure, roles)
+	res.App = appOf(out.Devices)
 	if out.Assurance != nil {
 		res.AssuranceLevel, res.EIDASLevel = out.Assurance.Level, out.Assurance.EIDASLevel
 	}
 	return res, nil
+}
+
+// statusDevice is one device of IPS's session status view.
+type statusDevice struct {
+	Role    string `json:"role"`
+	Current bool   `json:"current"`
+	Away    bool   `json:"away"`
 }
 
 // DecideReview records a reviewer's decision on a session in needs_review; IPS

@@ -639,7 +639,7 @@ export const nl: Translation<typeof en> = {
       noData: "Niets gevraagd",
       edit: "Flow bewerken",
       title: "Toegewezen flows",
-      hint: "Verzoeken voor deze klant kunnen de hier aangevinkte flows gebruiken, ook als leden ze niet mogen gebruiken; de standaardflow is voorgeselecteerd. Flows maak je onder",
+      hint: "Verzoeken voor deze klant kunnen de hier aangevinkte flows gebruiken, ook als leden ze niet mogen gebruiken; de standaardflow is voorgeselecteerd.",
       empty: "Je organisatie heeft nog geen flows.",
       default: "Standaard",
       save: "Toegewezen flows opslaan",
@@ -702,9 +702,10 @@ export const nl: Translation<typeof en> = {
       },
       attributeDetails: {
         dg1: "Je naam, geboortedatum en nationaliteit, en het nummer en de vervaldatum van het document.",
-        dg11: "Extra gegevens over jou op de chip van het document.",
-        dg2: "De foto op de chip van het document.",
+        dg11: "Je geboorteplaats en persoonsnummer (BSN), als je document die op de chip heeft staan.",
+        dg2: "Je pasfoto op de chip van het document.",
         chip_checks: "Of de chip echt en onveranderd is.",
+        document_image: "Een foto van de bedrukte pagina van je document.",
         selfie: "Een foto van je gezicht tijdens de controle.",
         biometrics:
           "Hoe goed je gezicht overeenkomt met de foto op het document.",
@@ -740,6 +741,13 @@ export const nl: Translation<typeof en> = {
           "Deze controle is in een ander venster gestart: ga daar verder in de app.",
         inProgress: "De sessie is geopend op de telefoon.",
         newCode: "Nieuwe code tonen",
+        connectedHeading: "Verder in de Idem-app",
+        connectedHint:
+          "De sessie is geopend op de telefoon. Wordt de app gesloten, dan verschijnt hier een code om verder te gaan.",
+        awayHeading: "De Idem-app is gesloten",
+        awayHint:
+          "Scan deze code met de Idem-app om verder te gaan waar de sessie was, op dezelfde of een andere telefoon.",
+        newCodeLoading: "Nieuwe code ophalen…",
         newCodeHint:
           "App gesloten, code verlopen of een andere telefoon? Met een nieuwe code ga je verder waar de sessie was.",
       },
@@ -798,9 +806,11 @@ export const nl: Translation<typeof en> = {
       timeline: "Tijdlijn",
       noEvents: "Nog niets vastgelegd.",
       identity: {
-        show: "Geverifieerde identiteit tonen",
-        audited: "Elke weergave wordt vastgelegd in het auditlog.",
-        title: "Geverifieerde identiteit",
+        audited:
+          "Het openen van een afgeronde sessie wordt vastgelegd in het auditlog.",
+        photo: "Documentfoto",
+        selfie: "Selfie",
+        documentImage: "Foto van het document",
         none: "Geen identiteit: de controle is niet goedgekeurd.",
         name: "Naam",
         birthDate: "Geboortedatum",
@@ -826,13 +836,13 @@ export const nl: Translation<typeof en> = {
         expired: "Verlopen {{count}}",
       },
       retention_one:
-        "De naam van een document wordt {{count}} dag na verificatie gewist. Resultaten en het auditspoor blijven.",
+        "Persoonsgegevens worden {{count}} dag na afloop van een sessie gewist. Het resultaat en het auditspoor blijven.",
       retention_other:
-        "De naam van een document wordt {{count}} dagen na verificatie gewist. Resultaten en het auditspoor blijven.",
+        "Persoonsgegevens worden {{count}} dagen na afloop van een sessie gewist. Het resultaat en het auditspoor blijven.",
       retentionOwn_one:
-        "Je ziet de sessies die jij verstuurde. De naam van een document wordt {{count}} dag na verificatie gewist.",
+        "Je ziet de sessies die jij verstuurde. Persoonsgegevens worden {{count}} dag na afloop van een sessie gewist.",
       retentionOwn_other:
-        "Je ziet de sessies die jij verstuurde. De naam van een document wordt {{count}} dagen na verificatie gewist.",
+        "Je ziet de sessies die jij verstuurde. Persoonsgegevens worden {{count}} dagen na afloop van een sessie gewist.",
       viaApiKey: "API-sleutel · {{name}}",
       session: "Sessie",
       result: "Resultaat",
@@ -842,6 +852,9 @@ export const nl: Translation<typeof en> = {
       fullId: "Sessie-id",
       reason: "Reden",
       completed: "Afgerond",
+      purgeAt: "Persoonsgegevens gewist op",
+      purged: "Persoonsgegevens gewist",
+      purgedSubject: "Gewist",
       failedBecause: "{{status}} · {{reason}}",
     },
     settings: {
@@ -853,7 +866,7 @@ export const nl: Translation<typeof en> = {
       minutes_other: "{{count}} min",
       retention: "Bewaartermijn",
       retentionHint:
-        "De naam van een goedgekeurd document wordt na deze periode gewist.",
+        "De persoonsgegevens van een sessie (naam, e-mailadres, de naam van het document) worden zo lang na afloop gewist. Het resultaat en het auditspoor blijven.",
       days_one: "{{count}} dag",
       days_other: "{{count}} dagen",
       nameTitle: "Naam",
@@ -1047,9 +1060,10 @@ export const nl: Translation<typeof en> = {
       activate: "Activeren",
     },
     steps: {
-      document_capture: "Documentscan (MRZ)",
-      nfc_read: "NFC-chipscan",
-      face_verification: "Gezichtsverificatie",
+      document_capture: "Document scannen",
+      nfc_read: "Chip van het document lezen",
+      document_photo: "Document fotograferen",
+      face_verification: "Gezichtscontrole",
     },
     faceProviders: {
       regula: "Regula",
@@ -1057,18 +1071,31 @@ export const nl: Translation<typeof en> = {
       Iris: "Iris SDK",
     },
     checks: {
-      passiveAuth: "Passieve authenticatie",
-      chipAuth: "Chipauthenticatie",
-      faceMatch: "Gezichtsvergelijking",
-      liveness: "Levendheid",
+      passiveAuth: "De gegevens op de chip zijn echt en ongewijzigd",
+      chipAuth: "De chip is geen kopie",
+      faceMatch: "Het gezicht komt overeen met de documentfoto",
+      liveness: "Een levend persoon, geen foto of video",
     },
     attributes: {
-      dg1: "Document en houder",
-      dg11: "Extra houdergegevens (DG11)",
-      dg2: "Documentfoto",
-      chip_checks: "Chipcontroles",
-      selfie: "Vastgelegde selfie",
-      biometrics: "Gezichtsbiometrie",
+      dg1: "Naam en documentgegevens",
+      dg11: "Geboorteplaats en persoonsnummer (BSN)",
+      dg2: "Pasfoto van de chip",
+      chip_checks: "Uitkomst chipcontroles",
+      document_image: "Foto van het document",
+      selfie: "Selfie",
+      biometrics: "Scores gezichtscontrole",
+    },
+    attributeHints: {
+      dg1: "Naam, geboortedatum, nationaliteit, en het type, nummer en de vervaldatum van het document.",
+      dg11: "Alleen als het document ze op de chip heeft staan; veel documenten niet. Het BSN volgt het BSN-beleid hieronder.",
+      dg2: "De pasfoto van de houder op de chip, getoond naast de selfie.",
+      chip_checks: "Of de chip echt bleek en geen kopie.",
+      document_image:
+        "Een foto van de bedrukte pagina van het document, zoals gemaakt: het BSN daarop wordt nog niet vervaagd.",
+      selfie:
+        "De foto van het gezicht die tijdens de gezichtscontrole is gemaakt.",
+      biometrics:
+        "Hoe goed het gezicht overeenkwam met de documentfoto, en of het een levend persoon was.",
     },
     new: {
       title: "Nieuwe flow",
@@ -1082,38 +1109,40 @@ export const nl: Translation<typeof en> = {
       saveVersion: "Opslaan als versie {{version}}",
       stepsTitle: "Stappen",
       documentCaptureHint:
-        "De vcmrtd-app scant de MRZ van het document met de camera om de chip te ontgrendelen. Altijd samen met de NFC-chipscan.",
+        "De persoon fotografeert met de Idem-app de coderegels onderaan het paspoort of de ID-kaart; daarmee gaat de chip open. Altijd samen met het lezen van de chip.",
       nfcReadHint:
-        "De vcmrtd-app leest de chip van het document via NFC. Altijd samen met de documentscan.",
+        "De persoon houdt het document tegen de telefoon en de Idem-app leest de chip. Altijd samen met het scannen van het document.",
+      documentPhotoHint:
+        "De persoon fotografeert in de Idem-app de bedrukte pagina van het paspoort of de ID-kaart. De Idem-app kan dit nog niet: tot die tijd kan een flow met deze stap niet worden verstuurd.",
       faceVerificationHint:
-        "Eén stap: selfie, levendheid en vergelijking met de chipfoto.",
+        "De persoon maakt een selfie; die wordt gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
       stepsOrder: "Wordt in deze volgorde verstuurd: {{steps}}",
       faceLocationNative:
-        "Gezichtsverificatie gebeurt in de vcmrtd-app (native): de persoon heeft geen browserstap.",
-      faceProvider: "Aanbieder gezichtsverificatie",
+        "De gezichtscontrole gebeurt in de app: de persoon heeft geen browserstap.",
+      faceProvider: "Aanbieder gezichtscontrole",
       faceProviderHint:
         "Regula doet de levendheidscontrole in de app en vergelijkt op de server; de ingebouwde engine gebruikt de eigen modellen van de proofing-dienst. Alleen de ingebouwde engine werkt ook in de Yivi-app.",
       faceWithoutChip:
-        "Zonder NFC-chipscan is er geen chipfoto om het gezicht mee te vergelijken, dus deze flow kan niet naar leden worden gestuurd.",
+        "Zonder het lezen van de chip is er geen chipfoto om het gezicht mee te vergelijken, dus deze flow kan niet naar leden worden gestuurd.",
       dataTitle: "Gevraagde resultaatgegevens",
       dataHint:
         "Bepaalt welke resultaatgegevens de verificatiedienst teruggeeft. Alleen gegevens van een stap in deze flow kunnen worden gevraagd. De wallet bewaart zelf alleen de uitkomst en het betrouwbaarheidsniveau.",
       checksTitle: "Vereiste controles",
       checksHint:
-        "Passieve authenticatie is verplicht bij de NFC-chipscan en gezichtsvergelijking bij gezichtsverificatie, dus die staan vast aan; chipauthenticatie en levendheid blijven optioneel.",
+        "De controle van de chipgegevens is verplicht als de chip wordt gelezen, en de gezichtsvergelijking bij de gezichtscontrole, dus die staan vast aan; de kopiecontrole en de controle op een levend persoon blijven optioneel.",
       faceMatchThreshold: "Drempel gezichtsvergelijking",
       faceMatchThresholdHint:
-        "0–1, leeg is alleen geslaagd/gezakt. Alleen bij gezichtsverificatie.",
+        "0–1, leeg is alleen geslaagd/gezakt. Alleen bij de gezichtscontrole.",
       documentsTitle: "Geaccepteerde documenten",
       documentTypes: "Geaccepteerde documenttypen",
       documentTypesHint: "Gescheiden door komma's, leeg accepteert alles.",
       issuingCountries: "Geaccepteerde landen van uitgifte",
       issuingCountriesHint:
-        "ICAO-codes van drie letters, gescheiden door komma's, leeg accepteert alles.",
+        "Landcodes van drie letters zoals NLD, gescheiden door komma's, leeg accepteert alles.",
       policyTitle: "Betrouwbaarheid en privacy",
       assuranceLevel: "Vereist betrouwbaarheidsniveau",
       assuranceLevelHint:
-        "Substantial vereist passieve of chipauthenticatie plus gezichtsvergelijking. High is nog niet haalbaar en wordt door de verificatiedienst geweigerd.",
+        "Substantial vereist een chipcontrole plus de gezichtsvergelijking. High is nog niet haalbaar en wordt door de verificatiedienst geweigerd.",
       none: "(geen)",
       inherit: "(organisatie overnemen)",
       yes: "true",
@@ -1608,6 +1637,8 @@ export const nl: Translation<typeof en> = {
       identityProofingRequested: "Identiteitsverificatieverzoek verstuurd",
       identityProofingSessionCreated: "Identiteitsverificatiesessie aangemaakt",
       identityProofingSessionStarted: "Identiteitsverificatie gestart",
+      identityProofingSessionHandover:
+        "Nieuwe code voor identiteitsverificatie uitgegeven",
       identityProofingSessionEnded:
         "Identiteitsverificatiesessie onafgerond beëindigd",
       identityProofingSessionCancelled:

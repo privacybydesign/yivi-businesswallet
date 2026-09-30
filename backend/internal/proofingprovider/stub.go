@@ -1,11 +1,15 @@
 package proofingprovider
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -343,8 +347,30 @@ func (s *Stub) SessionIdentity(ctx context.Context, apiKey, sessionID, sessionTo
 		if res.Method == MethodYivi {
 			id.Evidence.Type = EvidenceYivi
 		}
+		id.Photo, id.Selfie = stubFaceImage(stubPhotoShade), stubFaceImage(stubSelfieShade)
 	}
 	return id, nil
+}
+
+// The stub's face images: plain grey portraits, a shade apart so the photo
+// and the selfie are told apart on the page.
+const (
+	stubImageWidth  = 90
+	stubImageHeight = 120
+	stubPhotoShade  = 0xb0
+	stubSelfieShade = 0x80
+)
+
+func stubFaceImage(shade uint8) *Image {
+	img := image.NewGray(image.Rect(0, 0, stubImageWidth, stubImageHeight))
+	for i := range img.Pix {
+		img.Pix[i] = shade
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil
+	}
+	return &Image{MimeType: "image/png", Base64: base64.StdEncoding.EncodeToString(buf.Bytes())}
 }
 
 // DecideReview settles a session in needs_review, as IPS's decision route does.
@@ -377,7 +403,8 @@ func (s *Stub) DecideReview(ctx context.Context, apiKey, sessionID, sessionToken
 // SessionStatus is SessionResult without the name, like IPS's status route.
 func (s *Stub) SessionStatus(ctx context.Context, apiKey, sessionID, sessionToken string) (Result, error) {
 	res, err := s.SessionResult(ctx, apiKey, sessionID, sessionToken)
-	res.Name = ""
+	// The stub has no devices, so no phone ever scanned.
+	res.Name, res.App = "", AppWaiting
 	return res, err
 }
 

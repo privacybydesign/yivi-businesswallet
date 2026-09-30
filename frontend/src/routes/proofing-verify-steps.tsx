@@ -5,6 +5,7 @@ import type { TFunction } from "i18next";
 import * as React from "react";
 import {
   useNewProofingClaimLinkMutation,
+  useProofingAppQuery,
   useProofingProgressQuery,
   useProofingYiviDisclosureQuery,
   useStartProofingYiviMutation,
@@ -13,6 +14,7 @@ import {
 import type {
   ProofingCustomer,
   ProofingFaceVerdict,
+  ProofingApp,
   ProofingMethod,
   ProofingProgress,
   VerifyTarget,
@@ -68,6 +70,7 @@ const ATTRIBUTE_ICONS: Record<RequestedAttribute, IconName> = {
   dg11: "personal",
   dg2: "view",
   chip_checks: "lock",
+  document_image: "view",
   selfie: "view",
   biometrics: "valid",
 };
@@ -261,6 +264,7 @@ export function Session({
   target,
   initial,
   deepLink,
+  deepLinkExpiresAt,
   method,
   onRestart,
   outcomeActions,
@@ -269,6 +273,7 @@ export function Session({
   target: VerifyTarget;
   initial: ProofingProgress;
   deepLink?: string;
+  deepLinkExpiresAt?: string;
   method: ProofingMethod;
   onRestart?: () => void;
   outcomeActions?: React.ReactNode;
@@ -320,6 +325,34 @@ export function Session({
     return <Expired onRestart={onRestart} />;
   }
 
+  // The page's own link with the manual "new code": the hosted page's view,
+  // and the on-screen one's when where the phone is cannot be read.
+  const manualIdem = link ? (
+    <>
+      <h2 className="text-ink text-[18px] font-bold">
+        {t("customers.onScreen.scan.idemHeading")}
+      </h2>
+      <QrCode value={link} />
+      <p className={`${HINT} text-center`}>
+        {t("customers.onScreen.scan.idemHint")}
+      </p>
+      <a href={link} className={LINK_BUTTON}>
+        {t("customers.onScreen.scan.openIdem")}
+      </a>
+      <Countdown seconds={secondsLeft} />
+      {newCode}
+    </>
+  ) : (
+    // The link was shown in another window: the app carries on there,
+    // unless it was closed and a new code hands the session over.
+    <>
+      <p className={`${HINT} text-center`}>
+        {t("customers.onScreen.scan.startedElsewhere")}
+      </p>
+      {newCode}
+    </>
+  );
+
   return (
     <div className="flex flex-col items-center gap-4">
       {method === "yivi_app" ? (
@@ -328,36 +361,166 @@ export function Session({
           sessionSecondsLeft={secondsLeft}
           onRestart={onRestart}
         />
-      ) : link ? (
-        <>
-          <h2 className="text-ink text-[18px] font-bold">
-            {t("customers.onScreen.scan.idemHeading")}
-          </h2>
-          <QrCode value={link} />
-          <p className={`${HINT} text-center`}>
-            {t("customers.onScreen.scan.idemHint")}
-          </p>
-          <a href={link} className={LINK_BUTTON}>
-            {t("customers.onScreen.scan.openIdem")}
-          </a>
-          <Countdown seconds={secondsLeft} />
-          {newCode}
-        </>
+      ) : target.kind === "request" ? (
+        <IdemOnScreen
+          target={target}
+          deepLink={deepLink}
+          deepLinkExpiresAt={deepLinkExpiresAt}
+          sessionSecondsLeft={secondsLeft}
+          fallback={manualIdem}
+        />
       ) : (
-        // The link was shown in another window: the app carries on there,
-        // unless it was closed and a new code hands the session over.
-        <>
-          <p className={`${HINT} text-center`}>
-            {t("customers.onScreen.scan.startedElsewhere")}
+        manualIdem
+      )}
+      {current.status === "in_progress" &&
+        method === "idem_app" &&
+        target.kind === "hosted" && (
+          <p className="text-link text-[13px] font-semibold">
+            {t("customers.onScreen.scan.inProgress")}
           </p>
-          {newCode}
-        </>
-      )}
-      {current.status === "in_progress" && method === "idem_app" && (
-        <p className="text-link text-[13px] font-semibold">
-          {t("customers.onScreen.scan.inProgress")}
-        </p>
-      )}
+        )}
+    </div>
+  );
+}
+
+// A code the page shows for the Idem app: a claim while no phone scanned
+// (for "waiting"), a handover once the app left (for "away"); expiresAt is
+// absent when unknown.
+interface IdemCode {
+  deepLink: string;
+  expiresAt?: string;
+  for: ProofingApp;
+}
+
+// The Idem app's part on the member's screen, following the phone: its QR
+// while nobody scanned (renewed as it lapses), hidden while the app holds the
+// session, and a handover QR the moment the app is closed, so whoever is beside
+// the subject scans it without asking. fallback is the manual "new code" for
+// when where the phone is cannot be read.
+function IdemOnScreen({
+  target,
+  deepLink,
+  deepLinkExpiresAt,
+  sessionSecondsLeft,
+  fallback,
+}: {
+  target: Extract<VerifyTarget, { kind: "request" }>;
+  deepLink?: string;
+  deepLinkExpiresAt?: string;
+  sessionSecondsLeft: number;
+  fallback: React.ReactNode;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const app = useProofingAppQuery(target.slug, target.requestId, true);
+  const fresh = useNewProofingClaimLinkMutation(target);
+  const { mutate, isPending } = fresh;
+  const [code, setCode] = useState<IdemCode | undefined>(
+    deepLink
+      ? { deepLink, expiresAt: deepLinkExpiresAt, for: "waiting" }
+      : undefined,
+  );
+  const codeSecondsLeft = useSecondsLeft(code?.expiresAt);
+  const codeLapsed = code?.expiresAt !== undefined && codeSecondsLeft === 0;
+  // Until the first read, the page's own claim is what shows.
+  const state = app.data ?? "waiting";
+  const shown = code?.for === state && !codeLapsed ? code : undefined;
+
+  // Once the app holds the session its claim was used, or its return
+  // cancelled the handover: neither code may show again.
+  const [seen, setSeen] = useState(app.data);
+  if (app.data !== seen) {
+    setSeen(app.data);
+    if (app.data === "connected") setCode(undefined);
+  }
+  // The latest read, for a mint that answers after the app came back.
+  const latest = useRef(app.data);
+  // The poll the last mint was for: a refused one waits for the next poll.
+  const mintedFor = useRef(0);
+  useEffect(() => {
+    latest.current = app.data;
+    if (app.data === undefined || app.data === "connected") return;
+    if (shown || isPending || mintedFor.current === app.dataUpdatedAt) return;
+    mintedFor.current = app.dataUpdatedAt;
+    const wanted = app.data;
+    mutate(undefined, {
+      onSuccess: (claim) => {
+        if (latest.current === wanted) setCode({ ...claim, for: wanted });
+      },
+    });
+  }, [app.data, app.dataUpdatedAt, shown, isPending, mutate]);
+
+  if (app.data === undefined && app.isError) {
+    return <>{fallback}</>;
+  }
+  if (state === "connected") {
+    return (
+      <div className="flex flex-col items-center gap-2 text-center">
+        <span className="bg-surface-3 text-ink rounded-yivi flex h-12 w-12 items-center justify-center">
+          <Icon name="phone" size={24} />
+        </span>
+        <h2 className="text-ink text-[18px] font-bold">
+          {t("customers.onScreen.scan.connectedHeading")}
+        </h2>
+        <p className={HINT}>{t("customers.onScreen.scan.connectedHint")}</p>
+        <Countdown seconds={sessionSecondsLeft} />
+      </div>
+    );
+  }
+  const away = state === "away";
+  const heading = t(
+    away
+      ? "customers.onScreen.scan.awayHeading"
+      : "customers.onScreen.scan.idemHeading",
+  );
+  const hint = t(
+    away
+      ? "customers.onScreen.scan.awayHint"
+      : "customers.onScreen.scan.idemHint",
+  );
+  if (!shown) {
+    return (
+      <div className="flex flex-col items-center gap-4">
+        <h2 className="text-ink text-[18px] font-bold">{heading}</h2>
+        <QrPlaceholder label={t("customers.onScreen.scan.newCodeLoading")} />
+        {fresh.isError && (
+          <p className={`${ERROR} text-center`}>
+            {proofingErrorMessage(fresh.error, t)}
+          </p>
+        )}
+      </div>
+    );
+  }
+  return (
+    <IdemQr
+      heading={heading}
+      hint={hint}
+      code={shown}
+      seconds={sessionSecondsLeft}
+    />
+  );
+}
+
+function IdemQr({
+  heading,
+  hint,
+  code,
+  seconds,
+}: {
+  heading: string;
+  hint: string;
+  code: IdemCode;
+  seconds: number;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <h2 className="text-ink text-[18px] font-bold">{heading}</h2>
+      <QrCode value={code.deepLink} />
+      <p className={`${HINT} text-center`}>{hint}</p>
+      <a href={code.deepLink} className={LINK_BUTTON}>
+        {t("customers.onScreen.scan.openIdem")}
+      </a>
+      <Countdown seconds={seconds} />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { ApiError } from "../api/http";
@@ -11,7 +11,7 @@ import {
   useProofingCustomerQuery,
   useProofingRequestsQuery,
   useProofingRequestEventsQuery,
-  useProofingRequestResultMutation,
+  useProofingRequestResultQuery,
   useProofingStatsQuery,
   useSetProofingCustomerFlowsMutation,
   useUpdateProofingCustomerMutation,
@@ -21,8 +21,11 @@ import type {
   ProofingChannel,
   ProofingCustomerFlow,
   ProofingFlow,
+  ProofingImage,
   ProofingRequest,
+  ProofingResult,
 } from "../api/identity-proofing";
+import type { UseQueryResult } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import type { AuditEvent } from "../api/organization";
 import {
@@ -654,15 +657,7 @@ function AssignedFlowsCard({
       <h2 className="font-display text-[16px] font-bold">
         {t("customers.flows.title")}
       </h2>
-      <p className={`${HINT} mt-1`}>
-        {t("customers.flows.hint")}{" "}
-        <Link
-          to={`/${slug}/identity-proofing/flows`}
-          className="text-link font-semibold underline"
-        >
-          {t("identityProofingFlows.title")}
-        </Link>
-      </p>
+      <p className={`${HINT} mt-1`}>{t("customers.flows.hint")}</p>
       {flows.length === 0 ? (
         <p className="text-ink-soft mt-4 text-[13px]">
           {t("customers.flows.empty")}
@@ -1069,6 +1064,13 @@ function SessionRow({
   const subject = requestSubject(request);
   const duration = sessionDurationSeconds(request);
   const detailsId = `session-details-${request.id}`;
+  const showIdentity =
+    isAdmin && (request.status === "approved" || request.status === "rejected");
+  const result = useProofingRequestResultQuery(
+    slug,
+    request.id,
+    expanded && showIdentity,
+  );
 
   return (
     <>
@@ -1080,9 +1082,18 @@ function SessionRow({
           {shortRequestId(request.id)}
         </Table.Cell>
         <Table.Cell>
-          <div className="max-w-56 truncate font-semibold" title={subject.name}>
-            {subject.name}
-          </div>
+          {subject.name ? (
+            <div
+              className="max-w-56 truncate font-semibold"
+              title={subject.name}
+            >
+              {subject.name}
+            </div>
+          ) : (
+            <div className="text-muted italic">
+              {t("customers.sessions.purgedSubject")}
+            </div>
+          )}
           {subject.verifiedAs && (
             <div className="text-[12px]">
               {t("identityProofing.requests.verifiedAs", {
@@ -1135,67 +1146,94 @@ function SessionRow({
             className="border-line bg-surface-2 border-b px-5 py-4"
           >
             <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-              <dl className="grid content-start gap-x-8 gap-y-2 text-[13px] sm:grid-cols-[auto_1fr]">
-                <dt className="text-muted">{t("customers.sessions.method")}</dt>
-                <dd>{proofingMethodLabel(request.method, t)}</dd>
-                <dt className="text-muted">{t("customers.sessions.fullId")}</dt>
-                <dd className="font-mono text-[12px] break-all">
-                  {request.id}
-                </dd>
-                <dt className="text-muted">{t("customers.send.email")}</dt>
-                <dd>{request.subjectEmail}</dd>
-                {isAdmin && (
-                  <>
-                    <dt className="text-muted">
-                      {t("identityProofing.requests.requestedBy")}
-                    </dt>
-                    <dd>
-                      {request.apiKeyName
-                        ? t("customers.sessions.viaApiKey", {
-                            name: request.apiKeyName,
-                          })
-                        : request.requestedByName || "—"}
-                    </dd>
-                  </>
+              <div className="flex min-w-0 flex-col gap-4">
+                <dl className="grid content-start gap-x-8 gap-y-2 text-[13px] sm:grid-cols-[auto_1fr]">
+                  <dt className="text-muted">
+                    {t("customers.sessions.method")}
+                  </dt>
+                  <dd>{proofingMethodLabel(request.method, t)}</dd>
+                  <dt className="text-muted">
+                    {t("customers.sessions.fullId")}
+                  </dt>
+                  <dd className="font-mono text-[12px] break-all">
+                    {request.id}
+                  </dd>
+                  <dt className="text-muted">{t("customers.send.email")}</dt>
+                  <dd>{request.subjectEmail || "—"}</dd>
+                  {isAdmin && (
+                    <>
+                      <dt className="text-muted">
+                        {t("identityProofing.requests.requestedBy")}
+                      </dt>
+                      <dd>
+                        {request.apiKeyName
+                          ? t("customers.sessions.viaApiKey", {
+                              name: request.apiKeyName,
+                            })
+                          : request.requestedByName || "—"}
+                      </dd>
+                    </>
+                  )}
+                  <dt className="text-muted">
+                    {t("identityProofing.requests.flow")}
+                  </dt>
+                  <dd>
+                    {request.flowName}
+                    {request.flowVersion !== undefined &&
+                      ` ${t("identityProofingFlows.versionShort", {
+                        version: request.flowVersion,
+                      })}`}
+                  </dd>
+                  <dt className="text-muted">
+                    {t("identityProofing.requests.assurance")}
+                  </dt>
+                  <dd>{request.eidasLevel ?? "—"}</dd>
+                  {request.errorCode && (
+                    <>
+                      <dt className="text-muted">
+                        {t("customers.sessions.reason")}
+                      </dt>
+                      <dd>{proofingRejectionReason(request.errorCode, t)}</dd>
+                    </>
+                  )}
+                  {request.completedAt && (
+                    <>
+                      <dt className="text-muted">
+                        {t("customers.sessions.completed")}
+                      </dt>
+                      <dd>{formatWhen(request.completedAt)}</dd>
+                    </>
+                  )}
+                  {request.purgedAt ? (
+                    <>
+                      <dt className="text-muted">
+                        {t("customers.sessions.purged")}
+                      </dt>
+                      <dd>{formatWhen(request.purgedAt)}</dd>
+                    </>
+                  ) : (
+                    request.purgeAt && (
+                      <>
+                        <dt className="text-muted">
+                          {t("customers.sessions.purgeAt")}
+                        </dt>
+                        <dd>{formatWhen(request.purgeAt)}</dd>
+                      </>
+                    )
+                  )}
+                  {showIdentity && <IdentityRows result={result} />}
+                </dl>
+                {showIdentity && result.data && (
+                  <IdentityPhotos result={result.data} />
                 )}
-                <dt className="text-muted">
-                  {t("identityProofing.requests.flow")}
-                </dt>
-                <dd>
-                  {request.flowName}
-                  {request.flowVersion !== undefined &&
-                    ` ${t("identityProofingFlows.versionShort", {
-                      version: request.flowVersion,
-                    })}`}
-                </dd>
-                <dt className="text-muted">
-                  {t("identityProofing.requests.assurance")}
-                </dt>
-                <dd>{request.eidasLevel ?? "—"}</dd>
-                {request.errorCode && (
-                  <>
-                    <dt className="text-muted">
-                      {t("customers.sessions.reason")}
-                    </dt>
-                    <dd>{proofingRejectionReason(request.errorCode, t)}</dd>
-                  </>
+                {showIdentity && (
+                  <p className={HINT}>
+                    {t("customers.sessions.identity.audited")}
+                  </p>
                 )}
-                {request.completedAt && (
-                  <>
-                    <dt className="text-muted">
-                      {t("customers.sessions.completed")}
-                    </dt>
-                    <dd>{formatWhen(request.completedAt)}</dd>
-                  </>
-                )}
-              </dl>
+              </div>
               <SessionTimeline slug={slug} request={request} />
             </div>
-            {isAdmin &&
-              (request.status === "approved" ||
-                request.status === "rejected") && (
-                <IdentityResult slug={slug} requestId={request.id} />
-              )}
             {isAdmin && request.status === "needs_review" && (
               <ReviewDecision slug={slug} requestId={request.id} />
             )}
@@ -1301,17 +1339,14 @@ function isCheckOutcome(
   return (CHECK_OUTCOMES as readonly string[]).includes(value);
 }
 
-// An admin's view of a settled session's verified identity: read from IPS only
-// on this explicit ask, audited each time, and kept in this panel alone.
-function IdentityResult({
-  slug,
-  requestId,
+// A settled session's verified identity, as rows of its detail list: read
+// from IPS when an admin opens the row, audited each time.
+function IdentityRows({
+  result,
 }: {
-  slug: string;
-  requestId: string;
+  result: UseQueryResult<ProofingResult, Error>;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const result = useProofingRequestResultMutation(slug, requestId);
   const check = (value: string | undefined): string =>
     value === undefined || value === ""
       ? "—"
@@ -1319,96 +1354,120 @@ function IdentityResult({
         ? t(`customers.sessions.identity.checks.${value}`)
         : value;
 
-  if (!result.data) {
+  if (result.isPending) {
     return (
-      <div className="border-line mt-5 flex flex-wrap items-center gap-3 border-t pt-4">
-        <Button
-          size="sm"
-          variant="secondary"
-          icon="view"
-          loading={result.isPending}
-          onClick={() => result.mutate()}
-        >
-          {t("customers.sessions.identity.show")}
-        </Button>
-        <span className="text-muted text-[12px]">
-          {t("customers.sessions.identity.audited")}
-        </span>
-        {result.isError && (
-          <p className={ERROR}>{proofingErrorMessage(result.error, t)}</p>
-        )}
-      </div>
+      <>
+        <dt className="text-muted">{t("customers.sessions.identity.name")}</dt>
+        <dd className="text-ink-soft">{t("common.loading")}</dd>
+      </>
+    );
+  }
+  if (result.isError) {
+    return (
+      <dd className={`${ERROR} sm:col-span-2`}>
+        {proofingErrorMessage(result.error, t)}
+      </dd>
     );
   }
   const { identity } = result.data;
   const evidence = result.data.evidence.at(0);
   return (
-    <section
-      aria-labelledby={`identity-${requestId}`}
-      className="border-line mt-5 border-t pt-4"
-    >
-      <h3
-        id={`identity-${requestId}`}
-        className="text-muted mb-3 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase"
-      >
-        {t("customers.sessions.identity.title")}
-      </h3>
-      <dl className="grid gap-x-8 gap-y-2 text-[13px] sm:grid-cols-[auto_1fr]">
-        {identity ? (
-          <>
-            <dt className="text-muted">
-              {t("customers.sessions.identity.name")}
-            </dt>
-            <dd>
-              {[identity.givenName, identity.familyName]
-                .filter(Boolean)
-                .join(" ") || "—"}
-            </dd>
-            <dt className="text-muted">
-              {t("customers.sessions.identity.birthDate")}
-            </dt>
-            <dd>{identity.birthDate || "—"}</dd>
-            <dt className="text-muted">
-              {t("customers.sessions.identity.nationality")}
-            </dt>
-            <dd>{identity.nationality || "—"}</dd>
-          </>
-        ) : (
-          <dd className="text-ink-soft sm:col-span-2">
-            {t("customers.sessions.identity.none")}
+    <>
+      {identity ? (
+        <>
+          <dt className="text-muted">
+            {t("customers.sessions.identity.name")}
+          </dt>
+          <dd>
+            {[identity.givenName, identity.familyName]
+              .filter(Boolean)
+              .join(" ") || "—"}
           </dd>
-        )}
-        {evidence && (
-          <>
-            <dt className="text-muted">
-              {t("customers.sessions.identity.document")}
-            </dt>
-            <dd>
-              {[evidence.documentType, evidence.issuingState]
-                .filter(Boolean)
-                .join(" · ") || evidence.type}
-            </dd>
-            <dt className="text-muted">
-              {t("customers.sessions.identity.passiveAuth")}
-            </dt>
-            <dd>{check(evidence.passiveAuth)}</dd>
-            <dt className="text-muted">
-              {t("customers.sessions.identity.faceMatch")}
-            </dt>
-            <dd>
-              {evidence.faceMatch === undefined
-                ? "—"
-                : `${Math.round(evidence.faceMatch * PERCENT)}%`}
-            </dd>
-            <dt className="text-muted">
-              {t("customers.sessions.identity.liveness")}
-            </dt>
-            <dd>{check(evidence.liveness)}</dd>
-          </>
-        )}
-      </dl>
-    </section>
+          <dt className="text-muted">
+            {t("customers.sessions.identity.birthDate")}
+          </dt>
+          <dd>{identity.birthDate || "—"}</dd>
+          <dt className="text-muted">
+            {t("customers.sessions.identity.nationality")}
+          </dt>
+          <dd>{identity.nationality || "—"}</dd>
+        </>
+      ) : (
+        <dd className="text-ink-soft sm:col-span-2">
+          {t("customers.sessions.identity.none")}
+        </dd>
+      )}
+      {evidence && (
+        <>
+          <dt className="text-muted">
+            {t("customers.sessions.identity.document")}
+          </dt>
+          <dd>
+            {[evidence.documentType, evidence.issuingState]
+              .filter(Boolean)
+              .join(" · ") || evidence.type}
+          </dd>
+          <dt className="text-muted">
+            {t("customers.sessions.identity.passiveAuth")}
+          </dt>
+          <dd>{check(evidence.passiveAuth)}</dd>
+          <dt className="text-muted">
+            {t("customers.sessions.identity.faceMatch")}
+          </dt>
+          <dd>
+            {evidence.faceMatch === undefined
+              ? "—"
+              : `${Math.round(evidence.faceMatch * PERCENT)}%`}
+          </dd>
+          <dt className="text-muted">
+            {t("customers.sessions.identity.liveness")}
+          </dt>
+          <dd>{check(evidence.liveness)}</dd>
+        </>
+      )}
+    </>
   );
+}
+
+// The document's photo (read off the chip over NFC, or the disclosed
+// credential's) beside the live selfie matched against it, and the photo of
+// the document's printed page; only an approval carries them, and only when
+// the flow requested them.
+function IdentityPhotos({
+  result,
+}: {
+  result: ProofingResult;
+}): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const photos = [
+    { key: "photo", image: result.photo },
+    { key: "selfie", image: result.selfie },
+    { key: "documentImage", image: result.documentImage },
+  ] as const;
+  if (photos.every(({ image }) => !image)) return null;
+  return (
+    <div className="flex flex-wrap gap-4">
+      {photos.map(
+        ({ key, image }) =>
+          image && (
+            <figure key={key} className="flex flex-col gap-1.5">
+              <img
+                src={imageSource(image)}
+                alt={t(`customers.sessions.identity.${key}`)}
+                className="border-line h-40 w-auto rounded-md border object-cover"
+              />
+              <figcaption className="text-muted text-[12px]">
+                {t(`customers.sessions.identity.${key}`)}
+              </figcaption>
+            </figure>
+          ),
+      )}
+    </div>
+  );
+}
+
+function imageSource(image: ProofingImage): string {
+  return `data:${image.mimeType};base64,${image.data}`;
 }
 
 // A session's timeline: every audit event about it, oldest first, with who

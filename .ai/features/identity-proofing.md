@@ -94,13 +94,17 @@ service we are a relying party of. It is itself work in progress. Every IPS wire
   in the wallet. The rules copy IPS (`flow.Validate` + the admin page's
   `syncStageDependencies`):
   - Steps: `document_capture` (vcmrtd scans the MRZ to unlock the chip) and
-    `nfc_read` (NFC chip read) toggle as a pair; `face_verification` is one step.
+    `nfc_read` (NFC chip read) toggle as a pair; `document_photo` (a photo of
+    the printed page, IPS `POST /app/{token}/steps/document_photo`) stands
+    alone; `face_verification` is one step.
   - Checks: `nfc.passive_auth` is locked on with `nfc_read`, and `face.match`
     with `face_verification`; `nfc.chip_auth` and `face.liveness` are optional;
     a check without its step is unavailable; the threshold is only for
     `face.match`.
   - Requested data: `dg1` comes from the document scan; `dg11`, `dg2` and
-    `chip_checks` from NFC; `selfie` and `biometrics` from face. Each item is
+    `chip_checks` from NFC; `document_image` from `document_photo`; `selfie`
+    and `biometrics` from face. The editor shows plain labels, never these
+    codes. Each item is
     available only with its step and cleared otherwise. None is forced on (IPS
     forces nothing).
   - Assurance level: none/low/substantial/high, as IPS offers; IPS refuses high
@@ -139,7 +143,9 @@ service we are a relying party of. It is itself work in progress. Every IPS wire
   (`YiviAppAvailable`, mirrored by `yiviAppAvailable`). IPS's Yivi face check
   (bound login) always scores on its own engine, whatever the flow names. A face step without `nfc_read` needs a
   per-session reference photo the wallet does not have, so such a flow is not
-  `completable` and cannot be made available or sent. "Edit" is
+  `completable` and cannot be made available or sent. Neither is a flow with
+  `document_photo` until the Idem app can take it (`appPendingSteps`: drop
+  the step from that list once it ships); it also rules out the Yivi app. "Edit" is
   `POST /flows/{id}/versions`: the new version is active at once, and a session
   pins the version active when it is created, so sent requests keep theirs
   (`flow_version`). Activating an earlier version rolls back. Audited:
@@ -267,7 +273,10 @@ request's timeline: its audit events (target `identity_proofing_request`),
 oldest first, for an admin or the member who sent it. Everything `reconcile`
 records runs under `audit.WithoutActor`: the outcome is the subject's doing,
 not that of whoever's read triggered the check (rows written before this
-still name the reader).
+still name the reader). What the subject's app caused, `session_started` and
+an outcome not decided in review, names that app instead (`subjectAppContext`,
+actor label `app:<method>`, shown as "Idem app"/"Yivi app"); an expiry and a
+post-review outcome stay the system's.
 
 ## 4. Customer API, webhooks, branding
 
@@ -286,19 +295,25 @@ still name the reader).
   mail for a customer's subject names the customer as requester, never the key.
   `POST /proofing/sessions/{id}/cancel` ends a `pending`/`in_progress` session at
   IPS too (`cancelled_at`; status reads `cancelled`; audited `session_cancelled`).
-  `DELETE /proofing/sessions/{id}` erases it at IPS and clears the proofed name
-  (`purged_at`, audited `session_purged`, webhook `session.purged`); the row
-  stays readable with `purgedAt`.
+  `DELETE /proofing/sessions/{id}` erases it at IPS and clears its personal data
+  (subject name and address, proofed name, the subject in its audit events;
+  `purged_at`, audited `session_purged`, webhook `session.purged`); the row
+  stays readable with `purgedAt` and its outcome.
   `GET /proofing/sessions/{id}/result` (scope `results:read`) reads a settled
   session's identity and evidence from IPS on each call (`SessionIdentity`
-  decodes only name, birth date, nationality and the checks; never the document
-  number or an image), audited `result_read`; 404 once erased.
+  decodes only name, birth date, nationality, the checks and the `photo` and
+  `selfie` images; never the document number), audited `result_read`; 404 once
+  erased. The customer API never returns an image.
   An org admin reads the same shape in the wallet at
   `GET /orgs/{slug}/identity-proofing/requests/{id}/result`
   (`AdminRequestResult`, sharing `requestResult`), audited `result_read` with the
-  admin as actor; a member's request is 404. The customer's Sessions tab offers
-  it as "Show verified identity" in an approved or rejected row, admins only:
-  a mutation, so nothing refetches, and the timeline then shows the read.
+  admin as actor; a member's request is 404. For an approval this response adds
+  `photo` (the document's portrait, DG2 or the disclosed credential's) and
+  `selfie`, `{mimeType, data}`, only PNG/JPEG/WebP (anything else, like an
+  unconverted JPEG2000, is dropped in `proofingprovider`). The customer's
+  Sessions tab reads it when an admin opens an approved or rejected row and folds
+  it into the row's detail list with the two photos: one audited read per open
+  (`staleTime: Infinity`), and the timeline then shows it.
   Keys carry `scopes` (`sessions:write`, `sessions:read`, `results:read`,
   `flows:read`); every key gets all four, and only a signed-in org admin
   creates one. A missing scope is 403
@@ -337,12 +352,14 @@ still name the reader).
   health; `test` needs an endpoint of its own. A customer that hosts its own receiver adds one
   endpoint (`identity_proofing_webhooks`, secret
   sealed with the proofing key, `whsec_…`, shown once). Events
-  `session.verified` / `.failed` / `.review_opened` / `.expired` / `.purged` are written to the
+  `session.created` / `.started` / `.handover` / `.verified` / `.failed` /
+  `.review_opened` / `.expired` / `.cancelled` / `.purged` are written to the
   outbox (`identity_proofing_webhook_deliveries`) in the same transaction as the
-  change (`RecordOutcome`, `EndSession`, `LapseLinks`, `Purge`,
-  `PurgeProofedNames`); `test` is sent on
+  change (`AttachSession`, `MarkStarted`, `RecordHandover`, `RecordOutcome`,
+  `EndSession`, `LapseLinks`, `Cancel`, `Purge`); an
+  endpoint saved before an event existed is not subscribed to it. `test` is sent on
   request whatever is subscribed. The payload is the session id, status, flow,
-  `livemode`, assurance and error code: never a name or address (the API has those). Each outbox insert
+  `livemode`, method, assurance and error code: never a name or address (the API has those). Each outbox insert
   `pg_notify`s `identity_proofing_webhooks`, so the deliverer sends as the change
   commits; it then sleeps until the next retry or lapsed lease. It leases due rows (`FOR UPDATE SKIP LOCKED`, 5-minute lease), POSTs
   through `safehttp` (https, public addresses only, dialed IP = vetted IP, no
@@ -381,12 +398,22 @@ the key it is reconciled with.
 
 ## 6. A new Idem code mid-session
 
-The on-screen and hosted pages offer "Show a new code" while an Idem request
-runs: `POST …/requests/{id}/claim-link` and `POST /proof/{token}/claim-link`
-call IPS `POST /sessions/{id}/handover`. An unclaimed slot gets a new claim (the
-first lapsed after 10 minutes); a slot whose app went inactive or silent gets a
-handover, and the phone that scans takes the session over. An app still active
-is 409 `device_active`. A Yivi or test request has none (`wrong_method`).
+`POST …/requests/{id}/claim-link` and `POST /proof/{token}/claim-link` call IPS
+`POST /sessions/{id}/handover`. An unclaimed slot gets a new claim (the first
+lapsed after 10 minutes); a slot whose app went inactive or silent gets a
+handover, and the phone that scans takes the session over. Only a handover (IPS
+answers `slotClaimed`) is audited `identity_proofing.session_handover` (the
+member, or `hosted_link`) and sends `session.handover`; a fresh claim is not. An
+app still active is 409 `device_active`. A Yivi or test request has none
+(`wrong_method`).
+
+The on-screen page follows the phone by itself: `GET …/requests/{id}/app` reads
+IPS's status live (`devices[].current`/`away`) as `waiting`, `connected` or
+`away`, polled every 2 s. It shows the claim QR while `waiting` (renewed once
+`deepLinkExpiresAt` or the last code lapses), hides it while `connected`, and
+mints a handover QR the moment the app is `away`; the app coming back drops that
+code (IPS cancels the grant). If `app` cannot be read it falls back to the
+manual "Show a new code", which the hosted page still uses.
 
 ## 7. Hosted link
 
@@ -492,10 +519,14 @@ only `status/errorCode/completedAt/result.assurance` and the document's name
 The name is the one exception, and only for a **customer's subject** once the
 session is **approved** (the sender may know only an address): it is sealed
 under `IDENTITY_PROOFING_ENCRYPTION_KEY` in `proofed_name_ciphertext`, shown as
-`proofedName`, never audited, and cleared by the `identity_proofing_proofed_names`
-pruner after the customer's `data_retention_days` (§4; default
-`proofing.ProofedNameRetention`, 30 days). A member's request, or a
-rejected or `needs_review` one, keeps no name.
+`proofedName`, never audited. A member's request, or a rejected or
+`needs_review` one, keeps no name.
+
+A customer's session is purged by the `identity_proofing_purge` pruner
+(`Service.PurgeDue`) its customer's `data_retention_days` (§4) after it ends
+(completed, cancelled, expired; not while it awaits review): as `DELETE`
+above, erased at IPS, then its personal data cleared here. The dashboard shows
+the time as `purgeAt`. A member's request is not purged.
 
 ## 11. Known IPS gaps to track
 

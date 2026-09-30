@@ -171,6 +171,7 @@ const (
 	IdentityProofingRequested            = "identity_proofing.requested"
 	IdentityProofingSessionCreated       = "identity_proofing.session_created"
 	IdentityProofingSessionStarted       = "identity_proofing.session_started"
+	IdentityProofingSessionHandover      = "identity_proofing.session_handover"
 	IdentityProofingSessionEnded         = "identity_proofing.session_ended"
 	IdentityProofingSessionCancelled     = "identity_proofing.session_cancelled"
 	IdentityProofingSessionPurged        = "identity_proofing.session_purged"

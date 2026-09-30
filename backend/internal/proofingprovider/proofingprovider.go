@@ -129,6 +129,9 @@ type Session struct {
 type Claim struct {
 	DeepLink  string
 	ExpiresAt time.Time
+	// Handover is set when a phone already held the session, so the link moves
+	// it to another phone; unset, it is a fresh claim nobody has scanned yet.
+	Handover bool
 }
 
 // Status is an IPS session status.
@@ -161,11 +164,23 @@ type Result struct {
 	// when IPS has one, else the MRZ first and last name. Empty when the flow did
 	// not request the document data (dg1) or the session has no result yet.
 	Name string
+	// App is where the Idem app's phone is; SessionStatus only.
+	App App
 }
+
+// App is where an Idem session's phone is: none scanned yet, holding the
+// session, or away (closed or silent), when a claim link hands it over.
+type App string
+
+const (
+	AppWaiting   App = "waiting"
+	AppConnected App = "connected"
+	AppAway      App = "away"
+)
 
 // Identity is a session's outcome with who was proofed and on what evidence,
 // for a customer's result read. Only these fields are decoded from IPS: never
-// the document number, personal number, place of birth or any image.
+// the document number, personal number or place of birth.
 type Identity struct {
 	Result
 	GivenName   string
@@ -174,6 +189,22 @@ type Identity struct {
 	Nationality string
 	// Evidence is what the identity rests on; nil while there is no result.
 	Evidence *Evidence
+	// Photo is the document's portrait (the chip's DG2, or the disclosed
+	// credential's photo) and Selfie the live face matched against it; nil
+	// when the flow did not request them or IPS released none a browser shows.
+	Photo  *Image
+	Selfie *Image
+	// DocumentImage is the photo of the document's printed page (the
+	// document_photo step), its printed BSN blurred under the tenant's policy.
+	DocumentImage *Image
+}
+
+// Image is a face image as IPS releases it: already converted to a format a
+// browser renders, and blurred when the tenant's policy says so. Base64 is
+// the standard-encoded bytes.
+type Image struct {
+	MimeType string
+	Base64   string
 }
 
 // Evidence is the checks behind an Identity. Type is EvidenceEMRTD (the chip,
@@ -233,6 +264,19 @@ const (
 
 // methodOf derives the method from what IPS reports: a Yivi disclosure in the
 // result, else the devices that claimed the session, native before web.
+// appOf is where the native slot's current device is.
+func appOf(devices []statusDevice) App {
+	for _, d := range devices {
+		if d.Current && d.Role == deviceRoleNative {
+			if d.Away {
+				return AppAway
+			}
+			return AppConnected
+		}
+	}
+	return AppWaiting
+}
+
 func methodOf(disclosed bool, roles []string) Method {
 	switch {
 	case disclosed:

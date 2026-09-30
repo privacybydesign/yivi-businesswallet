@@ -796,8 +796,8 @@ func run() error {
 		Pauses:     proofing.NewPauseStore(pool, recorder),
 		FlowHosted: proofing.NewFlowHostedStore(pool, recorder),
 	}, ips, verifier, emailService)
-	// A customer's subject's proofed name is kept for its customer's data retention.
-	startPruner(ctx, "identity_proofing_proofed_names", cfg.SessionPruneEvery, proofingRequests.PurgeProofedNames)
+	// A customer's session keeps its personal data for its customer's data retention.
+	startPruner(ctx, "identity_proofing_purge", cfg.SessionPruneEvery, proofingService.PurgeDue)
 	// IPS pushes every session change to the callback (HandleIPSEvent); a
 	// session nobody finishes is reconciled at its cap. Neither polls.
 	proofingService.SetCallbackURL(cfg.IdentityProofingCallbackURL)

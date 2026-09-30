@@ -87,16 +87,21 @@ export const proofingRequestSchema = z.object({
   linkExpiresAt: z.string(),
   createdAt: z.string(),
   completedAt: z.string().optional(),
+  // When the session's personal data is due to be purged; purgedAt once it was.
+  purgeAt: z.string().optional(),
+  purgedAt: z.string().optional(),
 });
 
 export type ProofingRequest = z.infer<typeof proofingRequestSchema>;
 
 // mailSent is false when the org's mail could not be sent: the request stands,
 // but the recipient never got its link. deepLink is an on-screen Idem session's
-// vcmrtd link, the QR code the page shows; absent for a mailed or Yivi request.
+// vcmrtd link, the QR code the page shows, until deepLinkExpiresAt; absent for
+// a mailed or Yivi request.
 export const proofingSentSchema = proofingRequestSchema.extend({
   mailSent: z.boolean(),
   deepLink: z.string().optional(),
+  deepLinkExpiresAt: z.string().optional(),
 });
 
 export type ProofingSent = z.infer<typeof proofingSentSchema>;
@@ -751,9 +756,18 @@ export function getProofingWebhookDeliveries(
   });
 }
 
+// A face image in a result: its bytes base64, of a type a browser renders.
+const proofingImageSchema = z.object({
+  mimeType: z.string(),
+  data: z.string(),
+});
+
+export type ProofingImage = z.infer<typeof proofingImageSchema>;
+
 // One request's timeline: its audit events, oldest first.
 // A settled customer request's result, as an admin reads it in the wallet:
-// the identity only for an approval. Every read is audited.
+// the identity, the document's photo and the selfie only for an approval.
+// Every read is audited.
 export const proofingResultSchema = z.object({
   status: z.string(),
   assuranceLevel: z.string().optional(),
@@ -780,6 +794,9 @@ export const proofingResultSchema = z.object({
       liveness: z.string().optional(),
     }),
   ),
+  photo: proofingImageSchema.optional(),
+  selfie: proofingImageSchema.optional(),
+  documentImage: proofingImageSchema.optional(),
 });
 
 export type ProofingResult = z.infer<typeof proofingResultSchema>;
@@ -870,6 +887,25 @@ export const proofingClaimLinkSchema = z.object({
 });
 
 export type ProofingClaimLink = z.infer<typeof proofingClaimLinkSchema>;
+
+// Where a running on-screen Idem request's phone is: no phone scanned yet, the
+// app holds the session, or it was closed and a claim link hands it over.
+export const proofingAppSchema = z.object({
+  app: z.enum(["waiting", "connected", "away"]),
+});
+
+export type ProofingApp = z.infer<typeof proofingAppSchema>["app"];
+
+export function getProofingApp(
+  slug: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<z.infer<typeof proofingAppSchema>> {
+  return request(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/app`,
+    { schema: proofingAppSchema, signal },
+  );
+}
 
 export function newProofingClaimLink(
   target: VerifyTarget,

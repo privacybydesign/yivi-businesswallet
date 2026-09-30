@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -31,6 +32,7 @@ import {
   sendProofingWebhookTest,
   getProofingRequestEvents,
   getProofingRequest,
+  getProofingApp,
   getHostedProofing,
   decideProofingReview,
   getHostedProofingStatus,
@@ -67,6 +69,7 @@ import type {
   WebhookDelivery,
   ProofingFaceVerdict,
   ProofingClaimLink,
+  ProofingApp,
   ProofingYiviDisclosure,
   ProofingYiviStart,
   ProofingProgress,
@@ -710,21 +713,30 @@ export function useProofingRequestEventsQuery(
   });
 }
 
-// Reads a request's verified identity on an admin's explicit ask: a mutation,
-// so nothing refetches (every read is audited). The timeline then shows it.
-export function useProofingRequestResultMutation(
+// Reads a settled request's verified identity while an admin has its row
+// open. Every read is audited, so it is never refetched on its own: its key
+// sits outside every prefix the proofing mutations invalidate. The timeline
+// then shows the read.
+export function useProofingRequestResultQuery(
   slug: string,
   requestId: string,
-): UseMutationResult<ProofingResult, Error, void> {
+  enabled: boolean,
+): UseQueryResult<ProofingResult, Error> {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => getProofingRequestResult(slug, requestId),
-    onSuccess: () =>
-      queryClient.invalidateQueries({
-        queryKey: [...proofingRequestsQueryKey(slug), requestId, "events"],
-      }),
-    meta: { suppressErrorToast: true },
+  const query = useQuery({
+    queryKey: ["identity-proofing", "result", slug, requestId],
+    queryFn: ({ signal }) => getProofingRequestResult(slug, requestId, signal),
+    enabled: enabled && slug !== "" && requestId !== "",
+    staleTime: Infinity,
   });
+  const readAt = query.dataUpdatedAt;
+  useEffect(() => {
+    if (readAt === 0) return;
+    void queryClient.invalidateQueries({
+      queryKey: [...proofingRequestsQueryKey(slug), requestId, "events"],
+    });
+  }, [queryClient, slug, requestId, readAt]);
+  return query;
 }
 
 const PROOFING_PAUSES_KEY = ["identity-proofing", "pauses"] as const;
@@ -815,6 +827,22 @@ export function useStartProofingYiviMutation(
   return useMutation({
     mutationFn: () => startProofingYivi(target),
     meta: { suppressErrorToast: true },
+  });
+}
+
+// Where an on-screen Idem request's phone is, polled while its session runs;
+// each read asks IPS live.
+export function useProofingAppQuery(
+  slug: string,
+  requestId: string,
+  enabled: boolean,
+): UseQueryResult<ProofingApp, Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), requestId, "app"],
+    queryFn: async ({ signal }) =>
+      (await getProofingApp(slug, requestId, signal)).app,
+    enabled,
+    refetchInterval: enabled ? ON_SCREEN_POLL_INTERVAL_MS : false,
   });
 }
 

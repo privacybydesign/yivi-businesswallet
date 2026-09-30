@@ -39,7 +39,16 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.customer_id, COALESCE(c.name, ''), r.proofed_name_ciphertext, c.data_retention_days,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.mode, r.link_token_hash IS NOT NULL,
-	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, '')`
+	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''),
+	` + purgeAtExpr
+
+// purgeAtExpr is when a customer's request is purged: its customer's retention
+// after it settled. NULL while it runs or awaits review, and for a member's.
+const purgeAtExpr = `(COALESCE(r.cancelled_at, r.ips_session_ended_at,
+		CASE WHEN r.status IN ('approved', 'rejected') THEN r.completed_at END,
+		CASE WHEN r.status IN ('pending', 'in_progress') AND r.ips_session_expires_at <= now()
+			THEN r.ips_session_expires_at END)
+	+ make_interval(days => c.data_retention_days))`
 
 // requestFrom joins a request to its sender and its customer.
 const requestFrom = ` FROM identity_proofing_requests r
@@ -59,7 +68,8 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &r.SubjectUserID, &r.FlowVersion,
 		&r.CustomerID, &r.CustomerName, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
-		&r.RequiredAssuranceLevel, &r.Mode, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language); err != nil {
+		&r.RequiredAssuranceLevel, &r.Mode, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
+		&r.PurgeAt); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention = ProofedNameRetention
@@ -440,11 +450,15 @@ func (s *RequestStore) AttachSession(ctx context.Context, req Request, sess proo
 		if err := database.Notify(ctx, q, SessionChannel); err != nil {
 			return err
 		}
-		return s.audit.Record(ctx, q, audit.IdentityProofingSessionCreated,
+		if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionCreated,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Created(req.auditFields(map[string]any{
 				"flowId": req.FlowID, "flowVersion": sess.FlowVersion, "sessionExpiresAt": sess.ExpiresAt,
-			})))
+			}))); err != nil {
+			return err
+		}
+		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionCreated, &req.ID,
+			sessionEventData(req, StatusPending))
 	})
 	return attached, err
 }
@@ -480,11 +494,34 @@ func (s *RequestStore) MarkStarted(ctx context.Context, req Request, sessionID s
 		if tag.RowsAffected() == 0 {
 			return nil
 		}
-		return s.audit.Record(ctx, q, audit.IdentityProofingSessionStarted,
+		if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionStarted,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Updated(
 				req.auditFields(map[string]any{"status": string(req.Status)}),
-				req.auditFields(withMethod(map[string]any{"status": string(StatusInProgress)}, method))))
+				req.auditFields(withMethod(map[string]any{"status": string(StatusInProgress)}, method)))); err != nil {
+			return err
+		}
+		started := req
+		started.Method = methodOr(method, req.Method)
+		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionStarted, &req.ID,
+			sessionEventData(started, StatusInProgress))
+	})
+}
+
+// RecordHandover audits identity_proofing.session_handover and sends
+// session.handover: a running Idem session was handed a new code for another
+// phone, once the one holding it left.
+func (s *RequestStore) RecordHandover(ctx context.Context, req Request, expiresAt time.Time) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionHandover,
+			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+			audit.Created(req.auditFields(withMethod(map[string]any{
+				"status": string(req.Status), "claimExpiresAt": expiresAt,
+			}, req.Method)))); err != nil {
+			return err
+		}
+		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionHandover, &req.ID,
+			sessionEventData(req, req.Status))
 	})
 }
 
@@ -539,10 +576,14 @@ func (s *RequestStore) Cancel(ctx context.Context, req Request) (bool, error) {
 		if done = tag.RowsAffected() == 1; !done {
 			return nil
 		}
-		return s.audit.Record(ctx, q, audit.IdentityProofingSessionCancelled,
+		if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionCancelled,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}),
-				req.auditFields(map[string]any{"status": string(StatusCancelled)})))
+				req.auditFields(map[string]any{"status": string(StatusCancelled)}))); err != nil {
+			return err
+		}
+		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionCancelled, &req.ID,
+			sessionEventData(req, StatusCancelled))
 	})
 	return done, err
 }
@@ -555,13 +596,16 @@ func (s *RequestStore) RecordResultRead(ctx context.Context, req Request) error 
 		map[string]any{"status": string(req.Status)})
 }
 
-// Purge erases what the wallet holds of a request's outcome (the proofed name)
-// and marks it purged, audited identity_proofing.session_purged, and sends
-// session.purged. Purging a purged request changes nothing.
+// Purge erases every personal detail the wallet holds of a request (the
+// subject's name and e-mail address, the proofed name, and the subject in its
+// audit events) and marks it purged; its outcome stays. Audited
+// identity_proofing.session_purged, and sends session.purged. Purging a
+// purged request changes nothing.
 func (s *RequestStore) Purge(ctx context.Context, req Request) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
-			SET purged_at = now(), proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL,
+			SET purged_at = now(), subject_name = '', subject_email = '',
+				proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL,
 				ips_session_ended_at = COALESCE(ips_session_ended_at, now()), updated_at = now()
 			WHERE id = $1 AND purged_at IS NULL`, req.ID)
 		if err != nil {
@@ -570,9 +614,16 @@ func (s *RequestStore) Purge(ctx context.Context, req Request) error {
 		if tag.RowsAffected() == 0 {
 			return nil
 		}
+		if _, err := q.Exec(ctx, `UPDATE audit_events
+			SET metadata = metadata #- '{before,subjectName}' #- '{before,subjectEmail}'
+				#- '{after,subjectName}' #- '{after,subjectEmail}'
+			WHERE organization_id = $1 AND target_type = $2 AND target_id = $3`,
+			req.OrganizationID, audit.TargetIdentityProofingRequest, req.ID.String()); err != nil {
+			return fmt.Errorf("proofing: purge audit subject request %s: %w", req.ID, err)
+		}
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionPurged,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			audit.Deleted(req.auditFields(map[string]any{"status": string(req.Status)}))); err != nil {
+			audit.Deleted(map[string]any{"status": string(req.Status)})); err != nil {
 			return err
 		}
 		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionPurged, &req.ID,
@@ -700,42 +751,25 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 	})
 }
 
-// PurgeProofedNames clears every proofed name past its retention, for the
-// pruner, and sends session.purged to the endpoint of each purged request's
-// customer that subscribed to it. The request and its outcome stay. Not
-// audited: nothing was decided.
-func (s *RequestStore) PurgeProofedNames(ctx context.Context) (int64, error) {
-	var n int64
-	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		rows, err := q.Query(ctx, `UPDATE identity_proofing_requests
-			SET proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL, updated_at = now()
-			WHERE proofed_name_purge_after <= now()
-			RETURNING id, organization_id, customer_id, status, flow_id, mode`)
-		if err != nil {
-			return err
-		}
-		purged, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Request, error) {
-			var r Request
-			err := row.Scan(&r.ID, &r.OrganizationID, &r.CustomerID, &r.Status, &r.FlowID, &r.Mode)
-			return r, err
-		})
-		if err != nil {
-			return err
-		}
-		n = int64(len(purged))
-		// The payload is built here, not in SQL, so it carries the ps_ id.
-		for _, r := range purged {
-			if err := enqueueWebhook(ctx, q, r.OrganizationID, r.CustomerID, EventSessionPurged, &r.ID,
-				sessionEventData(r, r.Status)); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+// ListPurgeDue returns up to limit requests past their purge time, the
+// longest overdue first.
+func (s *RequestStore) ListPurgeDue(ctx context.Context, limit int) ([]Request, error) {
+	rows, err := s.db.Query(ctx, `SELECT `+requestColumns+requestFrom+`
+		WHERE r.purged_at IS NULL AND `+purgeAtExpr+` <= now()
+		ORDER BY `+purgeAtExpr+` LIMIT $1`, limit)
 	if err != nil {
-		return 0, fmt.Errorf("proofing: purge proofed names: %w", err)
+		return nil, fmt.Errorf("proofing: list purge due: %w", err)
 	}
-	return n, nil
+	defer rows.Close()
+	var out []Request
+	for rows.Next() {
+		req, err := s.scanRequest(rows)
+		if err != nil {
+			return nil, fmt.Errorf("proofing: scan purge due: %w", err)
+		}
+		out = append(out, req)
+	}
+	return out, rows.Err()
 }
 
 // Stats counts the live customer requests sent since since, per customer and

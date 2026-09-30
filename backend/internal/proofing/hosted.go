@@ -238,7 +238,7 @@ func (s *Service) HostedClaimLink(ctx context.Context, token string) (proofingpr
 	if err != nil {
 		return proofingprovider.Claim{}, err
 	}
-	return s.claimLink(ctx, req)
+	return s.claimLink(audit.ContextWithActor(ctx, hostedSubjectActor), req)
 }
 
 // HostedStartYivi is StartYivi for a hosted request.

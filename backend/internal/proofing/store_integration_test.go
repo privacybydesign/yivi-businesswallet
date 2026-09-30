@@ -505,7 +505,7 @@ func TestRequestStoreRejectionAuditsReason(t *testing.T) {
 }
 
 // A customer's subject is stored without a member; the proofed name is sealed,
-// shown until its retention passes, and then purged.
+// shown until its retention passes, and then purged with the subject.
 func TestRequestStoreCustomerSubjectAndProofedName(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
@@ -555,18 +555,30 @@ func TestRequestStoreCustomerSubjectAndProofedName(t *testing.T) {
 		t.Errorf("List for another customer = %+v, %v; want none", none, err)
 	}
 
-	if n, err := store.PurgeProofedNames(ctx); err != nil || n != 0 {
-		t.Errorf("purge within retention = %d, %v; want nothing purged", n, err)
+	if due, err := store.ListPurgeDue(ctx, 10); err != nil || len(due) != 0 {
+		t.Errorf("purge due within retention = %d, %v; want none", len(due), err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests SET proofed_name_purge_after = now() WHERE id = $1`, req.ID); err != nil {
-		t.Fatalf("age the name: %v", err)
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests SET completed_at = now() - interval '31 days' WHERE id = $1`, req.ID); err != nil {
+		t.Fatalf("age the request: %v", err)
 	}
-	if n, err := store.PurgeProofedNames(ctx); err != nil || n != 1 {
-		t.Errorf("purge past retention = %d, %v; want one", n, err)
+	due, err := store.ListPurgeDue(ctx, 10)
+	if err != nil || len(due) != 1 || due[0].ID != req.ID {
+		t.Fatalf("purge due past retention = %+v, %v; want the request", due, err)
+	}
+	if err := store.Purge(ctx, due[0]); err != nil {
+		t.Fatalf("Purge: %v", err)
 	}
 	after, err := store.List(ctx, orgID, RequestFilter{CustomerID: &customer.ID})
-	if err != nil || len(after) != 1 || after[0].ProofedName != "" || after[0].Status != StatusApproved {
-		t.Errorf("after purge = %+v, %v; want the outcome without the name", after, err)
+	if err != nil || len(after) != 1 || after[0].ProofedName != "" || after[0].SubjectEmail != "" ||
+		after[0].Status != StatusApproved || after[0].PurgedAt == nil {
+		t.Errorf("after purge = %+v, %v; want the outcome without the subject", after, err)
+	}
+	var leaks int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE metadata::text LIKE '%anna@example.org%'`).Scan(&leaks); err != nil || leaks != 0 {
+		t.Errorf("audit events naming the subject after purge = %d, %v; want none", leaks, err)
+	}
+	if due, err := store.ListPurgeDue(ctx, 10); err != nil || len(due) != 0 {
+		t.Errorf("purge due after purge = %d, %v; want none", len(due), err)
 	}
 }
 
@@ -853,7 +865,7 @@ func TestWebhookOutboxDeliversSignedEventsWithBackOff(t *testing.T) {
 	}
 }
 
-func TestPurgeProofedNamesSendsPurgedEvent(t *testing.T) {
+func TestPurgeSendsPurgedEvent(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	customers := NewCustomerStore(pool, audit.NopRecorder{})
@@ -874,11 +886,8 @@ func TestPurgeProofedNamesSendsPurgedEvent(t *testing.T) {
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna"}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests SET proofed_name_purge_after = now() - interval '1 second'`); err != nil {
-		t.Fatalf("age: %v", err)
-	}
-	if n, err := requests.PurgeProofedNames(ctx); err != nil || n != 1 {
-		t.Fatalf("PurgeProofedNames = %d, %v", n, err)
+	if err := requests.Purge(ctx, req); err != nil {
+		t.Fatalf("Purge: %v", err)
 	}
 	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionPurged ||
@@ -911,8 +920,54 @@ func TestNeedsReviewSendsReviewOpenedEvent(t *testing.T) {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
 	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
-	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionReviewOpened {
-		t.Errorf("deliveries = %+v, %v; want only session.review_opened", deliveries, err)
+	// Newest first: the session's creation, then its review.
+	if err != nil || len(deliveries) != 2 || deliveries[0].Event != EventSessionReviewOpened ||
+		deliveries[1].Event != EventSessionCreated {
+		t.Errorf("deliveries = %+v, %v; want session.created then session.review_opened", deliveries, err)
+	}
+}
+
+// A session's states before its outcome reach the customer too: created, the
+// app joining, a new code handed over, and a cancel.
+func TestSessionStatesSendWebhooks(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", WebhookEvents); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	req := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	if err := requests.MarkStarted(ctx, req, "s1", proofingprovider.MethodIdem); err != nil {
+		t.Fatalf("MarkStarted: %v", err)
+	}
+	req = onlyRequest(t, requests, orgID)
+	if err := requests.RecordHandover(ctx, req, time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("RecordHandover: %v", err)
+	}
+	if ok, err := requests.Cancel(ctx, req); err != nil || !ok {
+		t.Fatalf("Cancel = %v, %v", ok, err)
+	}
+	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	if err != nil {
+		t.Fatalf("Deliveries: %v", err)
+	}
+	got := make([]string, 0, len(deliveries))
+	for _, d := range deliveries {
+		got = append(got, d.Event)
+	}
+	// Newest first.
+	want := []string{EventSessionCancelled, EventSessionHandover, EventSessionStarted, EventSessionCreated}
+	if !slices.Equal(got, want) {
+		t.Errorf("events = %v, want %v", got, want)
 	}
 }
 
@@ -956,15 +1011,24 @@ func TestWebhookWithoutEndpointSendsToDefault(t *testing.T) {
 	}
 	// Strict policy: the default endpoint is the deployment's, reachable on loopback anyway.
 	deliverer := NewDeliverer(webhooks, safehttp.Policy{})
-	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
-		t.Fatalf("DeliverDue = %d, %v; want the one failed event", n, err)
+	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 2 {
+		t.Fatalf("DeliverDue = %d, %v; want the created and failed events", n, err)
 	}
-	if r := <-got; r.event != EventSessionFailed || r.err != nil {
-		t.Errorf("received %q, signature %v", r.event, r.err)
+	events := map[string]bool{}
+	for range 2 {
+		r := <-got
+		if r.err != nil {
+			t.Errorf("received %q, signature %v", r.event, r.err)
+		}
+		events[r.event] = true
+	}
+	if !events[EventSessionCreated] || !events[EventSessionFailed] {
+		t.Errorf("received %v, want session.created and session.failed", events)
 	}
 	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
-	if err != nil || len(deliveries) != 1 || deliveries[0].Status != DeliveryDelivered || deliveries[0].EndpointURL != "" ||
-		deliveries[0].Attempts != 1 || deliveries[0].LastStatusCode == nil || *deliveries[0].LastStatusCode != http.StatusNoContent {
+	if err != nil || len(deliveries) != 2 || deliveries[0].Event != EventSessionFailed || deliveries[0].Status != DeliveryDelivered ||
+		deliveries[0].EndpointURL != "" || deliveries[0].Attempts != 1 || deliveries[0].LastStatusCode == nil ||
+		*deliveries[0].LastStatusCode != http.StatusNoContent {
 		t.Fatalf("deliveries = %+v, %v; want session.failed delivered to the default endpoint", deliveries, err)
 	}
 	if err := webhooks.SendTest(ctx, orgID, customer.ID); !errors.Is(err, ErrWebhookNotFound) {
@@ -979,7 +1043,7 @@ func TestWebhookWithoutEndpointSendsToDefault(t *testing.T) {
 		t.Fatalf("Purge: %v", err)
 	}
 	deliveries, err = webhooks.Deliveries(ctx, orgID, customer.ID)
-	if err != nil || len(deliveries) != 2 || deliveries[0].Event != EventSessionPurged ||
+	if err != nil || len(deliveries) != 3 || deliveries[0].Event != EventSessionPurged ||
 		deliveries[0].Status != DeliveryPending || deliveries[0].EndpointURL != "https://hooks.example.org/x" {
 		t.Errorf("deliveries = %+v, %v; want session.purged queued for the endpoint", deliveries, err)
 	}

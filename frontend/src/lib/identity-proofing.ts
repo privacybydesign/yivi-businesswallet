@@ -60,8 +60,9 @@ export function proofingStatusLabel(status: string, t: TFunction): string {
 //
 //   - Steps: document_capture (the document scan: vcmrtd reads the MRZ with the
 //     camera to derive the chip access key) and nfc_read (the NFC chip read) are
-//     always submitted together, so they toggle as a pair; face_verification is
-//     one step covering selfie, liveness and face match.
+//     always submitted together, so they toggle as a pair; document_photo (a
+//     photo of the document's printed page) stands on its own; face_verification
+//     is one step covering selfie, liveness and face match.
 //   - Checks: nfc.passive_auth is mandatory with nfc_read and face.match with
 //     face_verification, so those are locked on; nfc.chip_auth and face.liveness
 //     are optional; a check without its step is unavailable. A threshold exists
@@ -72,6 +73,7 @@ export function proofingStatusLabel(status: string, t: TFunction): string {
 //     face.match; high is always refused today. The service explains a refusal.
 export const STEP_DOCUMENT_CAPTURE = "document_capture";
 export const STEP_NFC_READ = "nfc_read";
+export const STEP_DOCUMENT_PHOTO = "document_photo";
 export const STEP_FACE_VERIFICATION = "face_verification";
 export const CHECK_PASSIVE_AUTH = "nfc.passive_auth";
 export const CHECK_CHIP_AUTH = "nfc.chip_auth";
@@ -87,6 +89,7 @@ export const REQUESTED_ATTRIBUTES = [
   { value: "dg11", step: STEP_NFC_READ },
   { value: "dg2", step: STEP_NFC_READ },
   { value: "chip_checks", step: STEP_NFC_READ },
+  { value: "document_image", step: STEP_DOCUMENT_PHOTO },
   { value: "selfie", step: STEP_FACE_VERIFICATION },
   { value: "biometrics", step: STEP_FACE_VERIFICATION },
 ] as const;
@@ -106,12 +109,16 @@ const FACE_STEPS = ["face_verification", "selfie", "liveness", "face_match"];
 // (proofing.idemOnlyFaceProviders): such a flow runs in the Idem app only.
 const IDEM_ONLY_FACE_PROVIDERS: readonly string[] = ["Iris"];
 
-// Whether the Yivi app can run a flow (proofing.YiviAppAvailable): always,
-// unless its face step is on a provider the Yivi app does not have.
+// Whether the Yivi app can run a flow (proofing.YiviAppAvailable): unless it
+// photographs the document, which only the Idem app does, or its face step is
+// on a provider the Yivi app does not have.
 export function yiviAppAvailable(flow: {
   steps: readonly string[];
   faceProvider?: string;
 }): boolean {
+  if (flow.steps.includes(STEP_DOCUMENT_PHOTO)) {
+    return false;
+  }
   return (
     !flow.steps.some((step) => FACE_STEPS.includes(step)) ||
     !IDEM_ONLY_FACE_PROVIDERS.includes(flow.faceProvider ?? "")
@@ -126,6 +133,7 @@ export interface ProofingFlowDraft {
   name: string;
   // document_capture and nfc_read, always together.
   documentAndChip: boolean;
+  documentPhoto: boolean;
   faceVerification: boolean;
   chipAuthentication: boolean;
   liveness: boolean;
@@ -156,6 +164,9 @@ export function draftSteps(draft: ProofingFlowDraft): string[] {
   if (draft.documentAndChip) {
     steps.push(STEP_DOCUMENT_CAPTURE, STEP_NFC_READ);
   }
+  if (draft.documentPhoto) {
+    steps.push(STEP_DOCUMENT_PHOTO);
+  }
   if (draft.faceVerification) {
     steps.push(STEP_FACE_VERIFICATION);
   }
@@ -171,12 +182,14 @@ export function attributeAvailable(
   return attr !== undefined && draftSteps(draft).includes(attr.step);
 }
 
-// A new flow starts like the service's editor: every step and every requested
-// data item on, the mandatory checks on.
+// A new flow starts like the service's editor: every step the Idem app runs
+// and every requested data item on, the mandatory checks on. The document
+// photo starts off: the app cannot take it yet.
 export function emptyFlowDraft(): ProofingFlowDraft {
   return {
     name: "",
     documentAndChip: true,
+    documentPhoto: false,
     faceVerification: true,
     chipAuthentication: false,
     liveness: false,
@@ -218,6 +231,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     documentAndChip:
       flow.steps.includes(STEP_DOCUMENT_CAPTURE) ||
       flow.steps.includes(STEP_NFC_READ),
+    documentPhoto: flow.steps.includes(STEP_DOCUMENT_PHOTO),
     faceVerification: flow.steps.includes(STEP_FACE_VERIFICATION),
     chipAuthentication: checks.has(CHECK_CHIP_AUTH),
     liveness: checks.has(CHECK_LIVENESS),
@@ -565,11 +579,13 @@ export function isRequestedAttribute(
 export type ProofingStep =
   | typeof STEP_DOCUMENT_CAPTURE
   | typeof STEP_NFC_READ
+  | typeof STEP_DOCUMENT_PHOTO
   | typeof STEP_FACE_VERIFICATION;
 
 const PROOFING_STEPS: readonly string[] = [
   STEP_DOCUMENT_CAPTURE,
   STEP_NFC_READ,
+  STEP_DOCUMENT_PHOTO,
   STEP_FACE_VERIFICATION,
 ];
 

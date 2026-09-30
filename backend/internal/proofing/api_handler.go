@@ -456,7 +456,8 @@ func (h *Handler) apiSessionResult(w http.ResponseWriter, r *http.Request) error
 }
 
 // requestResult is an org admin's view of a customer request's identity in the
-// wallet, in the customer API's shape; each view is audited.
+// wallet, in the customer API's shape plus the face images; each view is
+// audited.
 func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseRequestID(r.PathValue("requestID"))
 	if err != nil {
@@ -466,8 +467,37 @@ func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, newAPIResultResponse(req, identity, time.Now()))
+	out := adminResultResponse{apiResultResponse: newAPIResultResponse(req, identity, time.Now())}
+	if identity.Status == proofingprovider.StatusApproved {
+		out.Photo, out.Selfie = newAdminImage(identity.Photo), newAdminImage(identity.Selfie)
+		out.DocumentImage = newAdminImage(identity.DocumentImage)
+	}
+	respond.JSON(w, r, http.StatusOK, out)
 	return nil
+}
+
+// adminResultResponse is the customer API's result as an admin reads it in the
+// wallet: for an approval, also the document's portrait, the live selfie
+// matched against it and the photo of the document's printed page. The
+// customer API never carries an image.
+type adminResultResponse struct {
+	apiResultResponse
+	Photo         *adminImage `json:"photo,omitempty"`
+	Selfie        *adminImage `json:"selfie,omitempty"`
+	DocumentImage *adminImage `json:"documentImage,omitempty"`
+}
+
+// adminImage is a face image, its bytes standard base64.
+type adminImage struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
+}
+
+func newAdminImage(img *proofingprovider.Image) *adminImage {
+	if img == nil {
+		return nil
+	}
+	return &adminImage{MimeType: img.MimeType, Data: img.Base64}
 }
 
 // newAPIResultResponse is a settled request's result: the identity only for an

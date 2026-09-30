@@ -101,6 +101,17 @@ type fakeRequests struct {
 	started  int
 	ended    int
 	methods  []proofingprovider.Method
+	// handovers counts the new codes recorded.
+	handovers int
+	// actors is the audit actor label of each start and outcome recorded, ""
+	// for the system.
+	actors []string
+}
+
+// actorLabel is the audit actor label ctx carries, "" for none.
+func actorLabel(ctx context.Context) string {
+	a, _ := audit.ActorFromContext(ctx)
+	return a.Label
 }
 
 func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, error) {
@@ -155,10 +166,16 @@ func (f *fakeRequests) List(context.Context, uuid.UUID, RequestFilter) ([]Reques
 	return []Request{*f.stored}, nil
 }
 
-func (f *fakeRequests) MarkStarted(_ context.Context, _ Request, _ string, method proofingprovider.Method) error {
+func (f *fakeRequests) MarkStarted(ctx context.Context, _ Request, _ string, method proofingprovider.Method) error {
+	f.actors = append(f.actors, actorLabel(ctx))
 	f.methods = append(f.methods, method)
 	f.started++
 	f.stored.Status = StatusInProgress
+	return nil
+}
+
+func (f *fakeRequests) RecordHandover(context.Context, Request, time.Time) error {
+	f.handovers++
 	return nil
 }
 
@@ -197,7 +214,15 @@ func (f *fakeRequests) RecordResultRead(context.Context, Request) error {
 func (f *fakeRequests) Purge(context.Context, Request) error {
 	now := time.Now()
 	f.stored.PurgedAt, f.stored.ProofedName = &now, ""
+	f.stored.SubjectName, f.stored.SubjectEmail = "", ""
 	return nil
+}
+
+func (f *fakeRequests) ListPurgeDue(context.Context, int) ([]Request, error) {
+	if f.stored == nil || f.stored.PurgedAt != nil || f.stored.PurgeAt == nil || f.stored.PurgeAt.After(time.Now()) {
+		return nil, nil
+	}
+	return []Request{*f.stored}, nil
 }
 
 func (f *fakeRequests) Member(_ context.Context, _, userID uuid.UUID) (Member, error) {
@@ -208,7 +233,8 @@ func (f *fakeRequests) Member(_ context.Context, _, userID uuid.UUID) (Member, e
 	return m, nil
 }
 
-func (f *fakeRequests) RecordOutcome(_ context.Context, _ Request, _ string, status Status, res proofingprovider.Result) error {
+func (f *fakeRequests) RecordOutcome(ctx context.Context, _ Request, _ string, status Status, res proofingprovider.Result) error {
+	f.actors = append(f.actors, actorLabel(ctx))
 	f.outcomes = append(f.outcomes, status)
 	f.results = append(f.results, res)
 	f.names = append(f.names, res.Name)
@@ -399,12 +425,15 @@ type fakeIPS struct {
 	// references are the Yivi disclosures handed to IPS as face references.
 	references []proofingprovider.Reference
 	// handovers counts fresh claim links asked for; handoverErr fails them.
+	// slotClaimed makes the link a handover from a phone that held the session.
 	handovers   int
 	handoverErr error
+	slotClaimed bool
 	// cancels and deletes count the sessions ended and erased at IPS.
 	cancels   int
 	cancelErr error
 	deletes   int
+	deleteErr error
 }
 
 func (f *fakeIPS) SessionIdentity(_ context.Context, _, _, _ string) (proofingprovider.Identity, error) {
@@ -419,7 +448,7 @@ func (f *fakeIPS) CancelSession(context.Context, string, string, string) error {
 
 func (f *fakeIPS) DeleteSession(context.Context, string, string, string) error {
 	f.deletes++
-	return nil
+	return f.deleteErr
 }
 
 func (f *fakeIPS) SessionHandover(_ context.Context, _, sessionID, _ string) (proofingprovider.Claim, error) {
@@ -427,7 +456,7 @@ func (f *fakeIPS) SessionHandover(_ context.Context, _, sessionID, _ string) (pr
 	if f.handoverErr != nil {
 		return proofingprovider.Claim{}, f.handoverErr
 	}
-	return proofingprovider.Claim{DeepLink: "vcmrtd://verify?handover=fresh-" + sessionID, ExpiresAt: time.Now().Add(time.Minute)}, nil
+	return proofingprovider.Claim{DeepLink: "vcmrtd://verify?handover=fresh-" + sessionID, ExpiresAt: time.Now().Add(time.Minute), Handover: f.slotClaimed}, nil
 }
 
 func (f *fakeIPS) CreateTenant(_ context.Context, id, _ string) (proofingprovider.Tenant, error) {
@@ -997,6 +1026,9 @@ func TestCompletable(t *testing.T) {
 	if Completable(testFlow("c", "c", []string{"face_verification"}, selfieLocationNative)) {
 		t.Error("a face step without the chip needs a reference photo the wallet does not have")
 	}
+	if Completable(testFlow("d", "d", []string{"document_capture", "nfc_read", "document_photo"}, "")) {
+		t.Error("the Idem app cannot photograph the document yet")
+	}
 }
 
 func TestCreateAndEditFlowCaptureFaceInApp(t *testing.T) {
@@ -1153,6 +1185,25 @@ func TestReconcileRecordsTheMethod(t *testing.T) {
 	}
 	if len(f.requests.methods) != 1 || f.requests.methods[0] != proofingprovider.MethodIdem {
 		t.Errorf("stored methods = %v, want the Idem app once", f.requests.methods)
+	}
+}
+
+// What the subject's app causes (joining the session, the outcome its evidence
+// led to) is audited with that app as actor, whoever's read triggered it; an
+// outcome after review is not the app's.
+func TestReconcileAuditsTheAppAsActor(t *testing.T) {
+	f := newFixture(true)
+	f.send(t)
+	ctx := audit.ContextWithActor(context.Background(), audit.Actor{UserID: uuid.New()})
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusInProgress, Method: proofingprovider.MethodIdem}
+	f.svc.SessionChanged(ctx, f.requests.stored.session.ID)
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview, Method: proofingprovider.MethodIdem}
+	f.svc.SessionChanged(ctx, f.requests.stored.session.ID)
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusRejected, Method: proofingprovider.MethodIdem}
+	f.svc.SessionChanged(ctx, f.requests.stored.session.ID)
+	idem := SubjectAppActorPrefix + string(proofingprovider.MethodIdem)
+	if want := []string{idem, idem, ""}; !slices.Equal(f.requests.actors, want) {
+		t.Errorf("actors = %q, want %q", f.requests.actors, want)
 	}
 }
 
@@ -1456,8 +1507,37 @@ func TestCancelAndPurgeRequest(t *testing.T) {
 	}
 }
 
-// A running Idem request gets a fresh app link from IPS; an app still holding
-// the session, a Yivi request and a test request get none.
+// A request past its retention is erased at IPS and here by the pruner; one
+// IPS fails to erase is kept for the next run.
+func TestPurgeDue(t *testing.T) {
+	f := newFixture(true)
+	ctx := context.Background()
+	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()},
+		NewRequest{CustomerID: &initech.ID, SubjectName: "Anna", SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if n, err := f.svc.PurgeDue(ctx); err != nil || n != 0 || f.ips.deletes != 0 {
+		t.Fatalf("PurgeDue before retention = %d, %v (%d deletes); want nothing", n, err, f.ips.deletes)
+	}
+	past := time.Now().Add(-time.Minute)
+	f.requests.stored.PurgeAt = &past
+	f.ips.deleteErr = errors.New("ips down")
+	if n, err := f.svc.PurgeDue(ctx); err != nil || n != 0 || f.requests.stored.PurgedAt != nil {
+		t.Fatalf("PurgeDue with IPS down = %d, %v; want it kept", n, err)
+	}
+	f.ips.deleteErr = nil
+	if n, err := f.svc.PurgeDue(ctx); err != nil || n != 1 || f.requests.stored.PurgedAt == nil {
+		t.Fatalf("PurgeDue = %d, %v; want the request purged", n, err)
+	}
+	if got := f.requests.stored; got.SubjectName != "" || got.SubjectEmail != "" || got.ID != sent.Request.ID {
+		t.Errorf("purged request = %+v; want no subject left", got)
+	}
+}
+
+// A running Idem request gets a fresh app link from IPS, recorded as a handover
+// only once a phone held the session; an app still holding the session, a Yivi
+// request and a test request get none.
 func TestClaimLink(t *testing.T) {
 	f := newFixture(true)
 	ctx := context.Background()
@@ -1469,6 +1549,13 @@ func TestClaimLink(t *testing.T) {
 	claim, err := f.svc.ClaimLink(ctx, testOrg.ID, sent.Request.ID, nil)
 	if err != nil || !strings.Contains(claim.DeepLink, "fresh-") || f.ips.handovers != 1 {
 		t.Fatalf("ClaimLink = %+v, %v (%d calls); want IPS's fresh link", claim, err, f.ips.handovers)
+	}
+	if f.requests.handovers != 0 {
+		t.Errorf("ClaimLink for an unscanned session recorded %d handovers, want 0", f.requests.handovers)
+	}
+	f.ips.slotClaimed = true
+	if _, err := f.svc.ClaimLink(ctx, testOrg.ID, sent.Request.ID, nil); err != nil || f.requests.handovers != 1 {
+		t.Errorf("ClaimLink after the phone left = %v, recorded %d handovers, want 1", err, f.requests.handovers)
 	}
 	f.ips.handoverErr = &proofingprovider.RejectedError{Status: http.StatusConflict, Code: proofingprovider.CodeDeviceActive}
 	if _, err := f.svc.ClaimLink(ctx, testOrg.ID, sent.Request.ID, nil); !errors.Is(err, ErrDeviceActive) {
@@ -1483,6 +1570,37 @@ func TestClaimLink(t *testing.T) {
 	calls := f.ips.handovers
 	if _, err := f.svc.ClaimLink(ctx, testOrg.ID, yivi.Request.ID, nil); !errors.Is(err, ErrWrongMethod) || f.ips.handovers != calls {
 		t.Errorf("ClaimLink(Yivi) = %v, want %v without asking IPS", err, ErrWrongMethod)
+	}
+}
+
+// A running Idem request's phone is read live from IPS, each time; a Yivi
+// request has none.
+func TestApp(t *testing.T) {
+	f := newFixture(true)
+	ctx := context.Background()
+	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
+		NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID, Method: proofingprovider.MethodIdem, Channel: ChannelOnScreen})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusInProgress, App: proofingprovider.AppAway}
+	reads := f.ips.statusReads
+	for range 2 {
+		if app, err := f.svc.App(ctx, testOrg.ID, sent.Request.ID, nil); err != nil || app != proofingprovider.AppAway {
+			t.Fatalf("App = %q, %v; want away", app, err)
+		}
+	}
+	if f.ips.statusReads != reads+2 {
+		t.Errorf("App read IPS %d times, want 2", f.ips.statusReads-reads)
+	}
+	f.ips.resultErr = errors.New("ips down")
+	if _, err := f.svc.App(ctx, testOrg.ID, sent.Request.ID, nil); err == nil {
+		t.Error("App with IPS down = nil error")
+	}
+
+	yivi := f.sendYivi(t)
+	if _, err := f.svc.App(ctx, testOrg.ID, yivi.Request.ID, nil); !errors.Is(err, ErrWrongMethod) {
+		t.Errorf("App(Yivi) = %v, want %v", err, ErrWrongMethod)
 	}
 }
 

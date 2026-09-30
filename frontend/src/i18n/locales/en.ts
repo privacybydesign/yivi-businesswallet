@@ -621,7 +621,7 @@ export const en = {
       noData: "Nothing requested",
       edit: "Edit flow",
       title: "Assigned flows",
-      hint: "Requests for this customer can use the flows ticked here, whether or not members may use them; the default is preselected. Flows are defined under",
+      hint: "Requests for this customer can use the flows ticked here, whether or not members may use them; the default is preselected.",
       empty: "Your organization has no flows yet.",
       default: "Default",
       save: "Save assigned flows",
@@ -683,9 +683,10 @@ export const en = {
       },
       attributeDetails: {
         dg1: "Your name, date of birth and nationality, and the document's number and expiry date.",
-        dg11: "Extra details about you stored on the document's chip.",
-        dg2: "The photo stored on the document's chip.",
+        dg11: "Your place of birth and personal number (BSN), if your document stores them on its chip.",
+        dg2: "Your passport photo stored on the document's chip.",
         chip_checks: "Whether the chip is genuine and unaltered.",
+        document_image: "A photo of the printed page of your document.",
         selfie: "A photo of your face taken during the check.",
         biometrics: "How well your face matches the document photo.",
       },
@@ -720,6 +721,13 @@ export const en = {
           "This check was started in another window: carry on in the app there.",
         inProgress: "The session is open on the phone.",
         newCode: "Show a new code",
+        connectedHeading: "Continuing in the Idem app",
+        connectedHint:
+          "The phone has the session open. If the app is closed, a code to carry on appears here.",
+        awayHeading: "The Idem app was closed",
+        awayHint:
+          "Scan this code with the Idem app to carry on where the session was, on the same phone or another one.",
+        newCodeLoading: "Getting a new code…",
         newCodeHint:
           "App closed, code expired, or another phone? A new code carries on where the session was.",
       },
@@ -777,9 +785,10 @@ export const en = {
       timeline: "Timeline",
       noEvents: "Nothing recorded yet.",
       identity: {
-        show: "Show verified identity",
-        audited: "Each view is recorded in the audit log.",
-        title: "Verified identity",
+        audited: "Opening a settled session is recorded in the audit log.",
+        photo: "Document photo",
+        selfie: "Selfie",
+        documentImage: "Photo of the document",
         none: "No identity: the check did not approve.",
         name: "Name",
         birthDate: "Date of birth",
@@ -805,13 +814,13 @@ export const en = {
         expired: "Expired {{count}}",
       },
       retention_one:
-        "The name read off a document is purged {{count}} day after verification. Results and the audit trail stay.",
+        "Personal data is purged {{count}} day after a session ends. The result and the audit trail stay.",
       retention_other:
-        "The name read off a document is purged {{count}} days after verification. Results and the audit trail stay.",
+        "Personal data is purged {{count}} days after a session ends. The result and the audit trail stay.",
       retentionOwn_one:
-        "You see the sessions you sent. The name read off a document is purged {{count}} day after verification.",
+        "You see the sessions you sent. Personal data is purged {{count}} day after a session ends.",
       retentionOwn_other:
-        "You see the sessions you sent. The name read off a document is purged {{count}} days after verification.",
+        "You see the sessions you sent. Personal data is purged {{count}} days after a session ends.",
       viaApiKey: "API key · {{name}}",
       session: "Session",
       result: "Result",
@@ -821,6 +830,9 @@ export const en = {
       fullId: "Session id",
       reason: "Reason",
       completed: "Finished",
+      purgeAt: "Personal data purged on",
+      purged: "Personal data purged",
+      purgedSubject: "Purged",
       failedBecause: "{{status}} · {{reason}}",
     },
     settings: {
@@ -832,7 +844,7 @@ export const en = {
       minutes_other: "{{count}} min",
       retention: "Data retention",
       retentionHint:
-        "The name read off an approved document is purged after this period.",
+        "A session's personal data (name, e-mail address, the name read off the document) is purged this long after it ends. The result and the audit trail stay.",
       days_one: "{{count}} day",
       days_other: "{{count}} days",
       nameTitle: "Name",
@@ -1022,9 +1034,10 @@ export const en = {
       activate: "Activate",
     },
     steps: {
-      document_capture: "Document scan (MRZ)",
-      nfc_read: "NFC chip scan",
-      face_verification: "Face verification",
+      document_capture: "Scan the document",
+      nfc_read: "Read the document's chip",
+      document_photo: "Photograph the document",
+      face_verification: "Face check",
     },
     faceProviders: {
       regula: "Regula",
@@ -1032,18 +1045,30 @@ export const en = {
       Iris: "Iris SDK",
     },
     checks: {
-      passiveAuth: "Passive authentication",
-      chipAuth: "Chip authentication",
-      faceMatch: "Face match",
-      liveness: "Liveness",
+      passiveAuth: "The chip's data is genuine and unaltered",
+      chipAuth: "The chip is not a copy",
+      faceMatch: "The face matches the document photo",
+      liveness: "A live person, not a photo or video",
     },
     attributes: {
-      dg1: "Document and holder",
-      dg11: "DG11 holder extras",
-      dg2: "Document photo",
-      chip_checks: "Chip checks",
-      selfie: "Captured selfie",
-      biometrics: "Face biometrics",
+      dg1: "Name and document details",
+      dg11: "Place of birth and personal number (BSN)",
+      dg2: "Personal photo from the chip",
+      chip_checks: "Chip check results",
+      document_image: "Photo of the document",
+      selfie: "Selfie",
+      biometrics: "Face check scores",
+    },
+    attributeHints: {
+      dg1: "Name, date of birth, nationality, and the document's type, number and expiry date.",
+      dg11: "Only when the document stores them on its chip; many do not. The BSN follows the BSN policy below.",
+      dg2: "The holder's passport photo stored on the chip, shown next to the selfie.",
+      chip_checks: "Whether the chip proved genuine and not copied.",
+      document_image:
+        "A photo of the document's printed page, as taken: the BSN printed on it is not blurred yet.",
+      selfie: "The photo of the person's face taken during the face check.",
+      biometrics:
+        "How closely the face matched the document photo, and whether it was a live person.",
     },
     new: {
       title: "New flow",
@@ -1057,38 +1082,40 @@ export const en = {
       saveVersion: "Save as version {{version}}",
       stepsTitle: "Flow steps",
       documentCaptureHint:
-        "The vcmrtd app scans the document's MRZ with the camera to unlock the chip. Always together with the NFC chip scan.",
+        "The person photographs the code lines at the bottom of their passport or ID card with the Idem app, which unlocks the chip. Always together with reading the chip.",
       nfcReadHint:
-        "The vcmrtd app reads the document's chip over NFC. Always together with the document scan.",
+        "The person holds the document against their phone and the Idem app reads its chip. Always together with the document scan.",
+      documentPhotoHint:
+        "The person photographs the printed page of their passport or ID card in the Idem app. The Idem app cannot do this yet: until it can, a flow with this step cannot be sent.",
       faceVerificationHint:
-        "One step: selfie capture, liveness and face match against the chip photo.",
+        "The person takes a selfie, which is checked to be a live person and compared with the photo on the chip.",
       stepsOrder: "Will be sent in this order: {{steps}}",
       faceLocationNative:
-        "Face verification runs in the vcmrtd app (native): the person has no browser step.",
-      faceProvider: "Face verification provider",
+        "The face check runs in the app: the person has no browser step.",
+      faceProvider: "Face check provider",
       faceProviderHint:
         "Regula checks liveness in the app and the proofing service matches the face; the built-in engine uses the proofing service's own models. Only the built-in engine also runs in the Yivi app.",
       faceWithoutChip:
-        "Without the NFC chip scan there is no chip photo to compare the face against, so members cannot be sent this flow.",
+        "Without reading the chip there is no chip photo to compare the face against, so members cannot be sent this flow.",
       dataTitle: "Requested result data",
       dataHint:
         "Controls which result data the proofing service returns. Only data from a step in this flow can be requested. The wallet itself keeps only the outcome and assurance level.",
       checksTitle: "Required checks",
       checksHint:
-        "Passive authentication is mandatory with the NFC chip scan and face match with face verification, so they are locked on; chip authentication and liveness stay optional.",
+        "Checking the chip's data is required when the chip is read, and the face match with the face check, so they are locked on; the copy check and the live-person check stay optional.",
       faceMatchThreshold: "Face match threshold",
       faceMatchThresholdHint:
-        "0–1, blank is pass/fail only. Only applies with face verification.",
+        "0–1, blank is pass/fail only. Only applies with the face check.",
       documentsTitle: "Accepted documents",
       documentTypes: "Accepted document types",
       documentTypesHint: "Comma-separated, blank accepts any.",
       issuingCountries: "Accepted issuing countries",
       issuingCountriesHint:
-        "ICAO 3-letter codes, comma-separated, blank accepts any.",
+        "3-letter country codes such as NLD, comma-separated, blank accepts any.",
       policyTitle: "Assurance and privacy",
       assuranceLevel: "Required assurance level",
       assuranceLevelHint:
-        "Substantial needs passive or chip authentication plus face match. High is not achievable yet and is refused by the proofing service.",
+        "Substantial needs a chip check plus the face match. High is not achievable yet and is refused by the proofing service.",
       none: "(none)",
       inherit: "(inherit organization)",
       yes: "true",
@@ -1578,6 +1605,7 @@ export const en = {
       identityProofingRequested: "Sent identity proofing request",
       identityProofingSessionCreated: "Created identity proofing session",
       identityProofingSessionStarted: "Started identity proofing",
+      identityProofingSessionHandover: "Issued a new identity proofing code",
       identityProofingSessionEnded:
         "Identity proofing session ended unfinished",
       identityProofingSessionCancelled: "Identity proofing session cancelled",

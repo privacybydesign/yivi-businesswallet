@@ -83,6 +83,8 @@ type requestStore interface {
 	GetByLinkToken(ctx context.Context, hash []byte) (Request, error)
 	LapseLinks(ctx context.Context, now time.Time, limit int) (int, error)
 	RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode string) error
+	RecordHandover(ctx context.Context, req Request, expiresAt time.Time) error
+	ListPurgeDue(ctx context.Context, limit int) ([]Request, error)
 }
 
 // eventReader reads the audit trail (implemented by *audit.Reader).
@@ -459,8 +461,10 @@ func (r Requester) userID() *uuid.UUID {
 type Sent struct {
 	Request  Request
 	MailSent bool
-	// DeepLink is the session's vcmrtd link, for an API caller to show itself.
-	DeepLink string
+	// DeepLink is the session's vcmrtd link, for an API caller to show itself;
+	// DeepLinkExpiresAt is when it can no longer be scanned.
+	DeepLink          string
+	DeepLinkExpiresAt time.Time
 	// HostedURL is a hosted request's link to its public page.
 	HostedURL string
 }
@@ -551,7 +555,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if sess.Claim == nil {
 		return out, nil
 	}
-	out.DeepLink = sess.Claim.DeepLink
+	out.DeepLink, out.DeepLinkExpiresAt = sess.Claim.DeepLink, sess.Claim.ExpiresAt
 	if s.mailer != nil && !in.SkipMail && in.Channel == ChannelEmail {
 		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, s.proofingMail(ctx, org, customer, subject, by, sess.Claim.DeepLink, ttl, in.Language))
 		if err != nil {
@@ -811,7 +815,7 @@ func (s *Service) tryReconcile(ctx context.Context, apiKey string, req Request) 
 		if req.Status != StatusPending {
 			return req, nil
 		}
-		if err := s.requests.MarkStarted(ctx, req, sess.ID, res.Method); err != nil {
+		if err := s.requests.MarkStarted(subjectAppContext(ctx, methodOr(res.Method, req.Method)), req, sess.ID, res.Method); err != nil {
 			slog.WarnContext(ctx, "identity proofing: mark started failed",
 				slog.String("request_id", req.ID.String()), slog.Any("error", err))
 			return req, err
@@ -857,7 +861,13 @@ func (s *Service) tryReconcile(ctx context.Context, apiKey string, req Request) 
 		}
 		res.Name = full.Name
 	}
-	if err := s.requests.RecordOutcome(ctx, req, sess.ID, next, res); err != nil {
+	// The outcome is the app's doing, from the evidence it sent; one decided
+	// after review is the reviewer's, audited as review_decided.
+	outcomeCtx := ctx
+	if req.Status != StatusNeedsReview {
+		outcomeCtx = subjectAppContext(ctx, methodOr(res.Method, req.Method))
+	}
+	if err := s.requests.RecordOutcome(outcomeCtx, req, sess.ID, next, res); err != nil {
 		slog.WarnContext(ctx, "identity proofing: record outcome failed",
 			slog.String("request_id", req.ID.String()), slog.Any("error", err))
 		return req, err
@@ -887,6 +897,20 @@ func enforceAssurance(req Request, res proofingprovider.Result) (Status, proofin
 	}
 	res.ErrorCode = ErrorAssuranceNotMet
 	return StatusRejected, res
+}
+
+// SubjectAppActorPrefix starts the actor label of the app a subject proofed
+// with (`app:idem_app`, `app:yivi_app`, `app:browser`): what that app caused is
+// audited as its doing, not the system's.
+const SubjectAppActorPrefix = "app:"
+
+// subjectAppContext makes the subject's app the actor of what ctx records
+// next; with no app known it leaves ctx as it is.
+func subjectAppContext(ctx context.Context, method proofingprovider.Method) context.Context {
+	if method == "" {
+		return ctx
+	}
+	return audit.ContextWithActor(ctx, audit.Actor{Label: SubjectAppActorPrefix + string(method)})
 }
 
 // methodOr is the method IPS reported, or the one already known: a later read
@@ -1086,8 +1110,8 @@ func (s *Service) requestResult(ctx context.Context, req Request) (Request, proo
 	return req, identity, nil
 }
 
-// PurgeRequest erases a customer's request at IPS and what the wallet holds
-// of its outcome, whatever its state; the row stays, marked purged.
+// PurgeRequest erases a customer's request at IPS and every personal detail
+// the wallet holds of it, whatever its state; the row stays, marked purged.
 func (s *Service) PurgeRequest(ctx context.Context, orgID, customerID, id uuid.UUID) error {
 	req, err := s.requests.GetForCustomer(ctx, orgID, customerID, id)
 	if err != nil {
@@ -1096,13 +1120,51 @@ func (s *Service) PurgeRequest(ctx context.Context, orgID, customerID, id uuid.U
 	if req.PurgedAt != nil {
 		return nil
 	}
+	return s.purge(ctx, req)
+}
+
+// purgeBatch is how many overdue requests PurgeDue takes at a time.
+const purgeBatch = 100
+
+// PurgeDue purges every request past its customer's retention, for the
+// pruner. One that IPS fails to erase is left for the next run.
+func (s *Service) PurgeDue(ctx context.Context) (int64, error) {
+	var purged int64
+	for {
+		due, err := s.requests.ListPurgeDue(ctx, purgeBatch)
+		if err != nil {
+			return purged, err
+		}
+		failed := 0
+		for _, req := range due {
+			if err := s.purge(ctx, req); err != nil {
+				failed++
+				slog.WarnContext(ctx, "identity proofing: purge failed",
+					slog.String("request_id", req.ID.String()), slog.Any("error", err))
+				continue
+			}
+			purged++
+		}
+		// A full batch of failures would come back as is: wait for the next run.
+		if len(due) < purgeBatch || failed == len(due) {
+			return purged, nil
+		}
+	}
+}
+
+// purge erases req's session at IPS, then what the wallet holds of it.
+func (s *Service) purge(ctx context.Context, req Request) error {
 	if req.session != nil {
 		apiKey, err := s.requestAPIKey(ctx, req)
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrNotProvisioned):
+			// No IPS tenant left, so nothing there to erase.
+		case err != nil:
 			return err
-		}
-		if err := s.ips.DeleteSession(ctx, apiKey, req.session.ID, req.session.Token); err != nil {
-			return fmt.Errorf("proofing: purge request %s: %w", req.ID, err)
+		default:
+			if err := s.ips.DeleteSession(ctx, apiKey, req.session.ID, req.session.Token); err != nil {
+				return fmt.Errorf("proofing: purge request %s: %w", req.ID, err)
+			}
 		}
 	}
 	return s.requests.Purge(ctx, req)
@@ -1167,6 +1229,31 @@ func (s *Service) yiviSessionOf(req Request) (Request, *ipsSession, error) {
 	return req, sess, nil
 }
 
+// App is where a running Idem request's phone is, read live from IPS: what the
+// on-screen page polls to hide its QR once scanned and show one once the app left.
+func (s *Service) App(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (proofingprovider.App, error) {
+	req, err := s.sentRequest(ctx, orgID, id, requestedBy)
+	if err != nil {
+		return "", err
+	}
+	if req.Method != proofingprovider.MethodIdem || req.mode() == ModeTest {
+		return "", ErrWrongMethod
+	}
+	sess := req.liveSession(s.now())
+	if sess == nil || req.Status.Settled() {
+		return "", ErrSessionOver
+	}
+	apiKey, err := s.requestAPIKey(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	res, err := s.ips.SessionStatus(ctx, apiKey, sess.ID, sess.Token)
+	if err != nil {
+		return "", fmt.Errorf("proofing: app of request %s: %w", req.ID, err)
+	}
+	return res.App, nil
+}
+
 // ClaimLink is a fresh vcmrtd link for a sent Idem request: a new claim once
 // the first lapsed unscanned, or a handover to another phone once the app that
 // held the session left. An app still active is ErrDeviceActive.
@@ -1200,6 +1287,12 @@ func (s *Service) claimLink(ctx context.Context, req Request) (proofingprovider.
 		return proofingprovider.Claim{}, ErrSessionOver
 	case err != nil:
 		return proofingprovider.Claim{}, fmt.Errorf("proofing: claim link request %s: %w", req.ID, err)
+	}
+	// A fresh claim for a phone that never scanned is no handover.
+	if claim.Handover {
+		if err := s.requests.RecordHandover(ctx, req, claim.ExpiresAt); err != nil {
+			return proofingprovider.Claim{}, err
+		}
 	}
 	return claim, nil
 }

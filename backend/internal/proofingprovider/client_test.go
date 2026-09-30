@@ -295,6 +295,27 @@ func TestSessionStatusDecodesWithoutPersonalData(t *testing.T) {
 	}
 }
 
+// The native slot's current device tells where the Idem app's phone is.
+func TestSessionStatusReadsWhereTheAppIs(t *testing.T) {
+	for _, tc := range []struct {
+		devices string
+		want    App
+	}{
+		{`[]`, AppWaiting},
+		{`[{"role":"native","current":true}]`, AppConnected},
+		{`[{"role":"native","current":false},{"role":"native","current":true,"away":true}]`, AppAway},
+		{`[{"role":"web","current":true}]`, AppWaiting},
+	} {
+		client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"id":"s1","status":"in_progress","devices":` + tc.devices + `}`))
+		})
+		res, err := client.SessionStatus(context.Background(), testAPIKey, "s1", testSessionToken)
+		if err != nil || res.App != tc.want {
+			t.Errorf("devices %s: app = %q, %v; want %q", tc.devices, res.App, err, tc.want)
+		}
+	}
+}
+
 // An IPS without the status route answers 404 there: the client reads the
 // result instead and drops the name, so wallet and IPS deploy in any order.
 func TestSessionStatusFallsBackToTheResultRoute(t *testing.T) {
@@ -377,10 +398,10 @@ func TestSessionHandover(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":"still active","code":"device_active"}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"handoverToken":"h","role":"native","deepLink":"vcmrtd://verify?handover=h","expiresAt":"2026-09-29T10:00:00Z"}`))
+		_, _ = w.Write([]byte(`{"handoverToken":"h","role":"native","deepLink":"vcmrtd://verify?handover=h","expiresAt":"2026-09-29T10:00:00Z","slotClaimed":true}`))
 	})
 	claim, err := client.SessionHandover(context.Background(), testAPIKey, "s1", testSessionToken)
-	if err != nil || claim.DeepLink != "vcmrtd://verify?handover=h" {
+	if err != nil || claim.DeepLink != "vcmrtd://verify?handover=h" || !claim.Handover {
 		t.Fatalf("SessionHandover = %+v, %v", claim, err)
 	}
 	active = true
@@ -403,7 +424,10 @@ func TestSessionIdentityMapsTheResult(t *testing.T) {
 				"firstName":"Anna","lastName":"Jansen","dateOfBirth":"1990-04-12","dateOfExpiry":"2031-02-01"},
 			"chipChecks":{"passiveAuthentication":{"sodSignatureValid":true,"dataGroupHashesValid":true,"cscaTrustChainValid":false},
 				"activeAuthentication":{"attempted":false}},
-			"biometrics":{"faceMatchScore":0.81,"livenessResult":"passed"}},
+			"biometrics":{"faceMatchScore":0.81,"livenessResult":"passed"},
+			"photo":{"imageBase64":"iVBORw==","mimeType":"image/png"},
+			"selfie":{"imageBase64":"PHN2Zz4=","mimeType":"image/svg+xml"},
+			"documentImage":{"imageBase64":"/9j/","mimeType":"image/jpeg"}},
 			"devices":[{"role":"native"}]}`))
 	})
 	id, err := client.SessionIdentity(context.Background(), testAPIKey, "s1", testSessionToken)
@@ -418,6 +442,15 @@ func TestSessionIdentityMapsTheResult(t *testing.T) {
 	if ev == nil || ev.Type != EvidenceEMRTD || ev.PassiveAuth != CheckInvalid || ev.ActiveAuth != CheckNotPerformed ||
 		ev.FaceMatch == nil || *ev.FaceMatch != 0.81 || ev.Liveness != "passed" || ev.ExpiryDate != "2031-02-01" {
 		t.Errorf("evidence = %+v; want the chip read with a failed trust chain and no active auth", ev)
+	}
+	if id.Photo == nil || id.Photo.MimeType != "image/png" || id.Photo.Base64 != "iVBORw==" {
+		t.Errorf("photo = %+v; want the PNG portrait", id.Photo)
+	}
+	if id.Selfie != nil {
+		t.Errorf("selfie = %+v; want an SVG left out", id.Selfie)
+	}
+	if id.DocumentImage == nil || id.DocumentImage.MimeType != "image/jpeg" {
+		t.Errorf("document image = %+v; want the JPEG", id.DocumentImage)
 	}
 }
 

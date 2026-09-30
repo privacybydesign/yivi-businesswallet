@@ -23,19 +23,30 @@ import (
 // Webhook events a customer can subscribe to. EventTest is sent on request and
 // reaches the endpoint whatever it subscribed to.
 const (
+	// EventSessionCreated is sent when a request's IPS session is created: the
+	// subject can now open it in their app.
+	EventSessionCreated = "session.created"
+	// EventSessionStarted is sent when the subject's app joins the session.
+	EventSessionStarted = "session.started"
+	// EventSessionHandover is sent when a running Idem session is handed to
+	// another phone, once the one holding it left.
+	EventSessionHandover = "session.handover"
 	EventSessionVerified = "session.verified"
 	EventSessionFailed   = "session.failed"
 	// EventSessionReviewOpened is sent when a session goes to manual review;
 	// its decision then sends verified or failed.
 	EventSessionReviewOpened = "session.review_opened"
 	EventSessionExpired      = "session.expired"
+	EventSessionCancelled    = "session.cancelled"
 	EventSessionPurged       = "session.purged"
 	EventTest                = "test"
 )
 
 // WebhookEvents are the events an endpoint may subscribe to, in display order.
 var WebhookEvents = []string{
-	EventSessionVerified, EventSessionFailed, EventSessionReviewOpened, EventSessionExpired, EventSessionPurged,
+	EventSessionCreated, EventSessionStarted, EventSessionHandover,
+	EventSessionVerified, EventSessionFailed, EventSessionReviewOpened, EventSessionExpired,
+	EventSessionCancelled, EventSessionPurged,
 }
 
 // outcomeEvents is the webhook event each recorded outcome sends.
@@ -155,6 +166,7 @@ func sessionEventData(req Request, status Status) map[string]any {
 	}
 	for key, value := range map[string]string{
 		"assuranceLevel": req.AssuranceLevel, "eidasLevel": req.EIDASLevel, "errorCode": req.ErrorCode,
+		"method": string(req.Method),
 	} {
 		if value != "" {
 			data[key] = value

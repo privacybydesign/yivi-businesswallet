@@ -103,6 +103,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "identity_proofing.requested": { icon: "email", tone: "amber" },
   "identity_proofing.session_created": { icon: "time", tone: "blue" },
   "identity_proofing.session_started": { icon: "scan_qrcode", tone: "blue" },
+  "identity_proofing.session_handover": { icon: "scan_qrcode", tone: "slate" },
   "identity_proofing.session_ended": { icon: "time", tone: "amber" },
   "identity_proofing.session_cancelled": { icon: "close", tone: "slate" },
   "identity_proofing.session_purged": { icon: "delete", tone: "red" },
@@ -149,9 +150,13 @@ const API_KEY_ACTOR_PREFIX = "api_key:";
 // hostedSubjectActor in backend/internal/proofing/hosted.go: the subject of a
 // hosted link, who has no account.
 const HOSTED_LINK_ACTOR = "hosted_link";
+// SubjectAppActorPrefix in backend/internal/proofing/service.go: the app a
+// subject proofed with, as the actor of what it caused.
+const SUBJECT_APP_ACTOR_PREFIX = "app:";
 
 // A non-user actor in words: a customer API key by its prefix, a hosted link's
-// subject, or the label as it is; null when the event has none.
+// subject, the app a subject proofed with, or the label as it is; null when
+// the event has none.
 export function auditActorLabel(
   label: string | null | undefined,
   t: TFunction,
@@ -164,6 +169,9 @@ export function auditActorLabel(
   }
   if (label === HOSTED_LINK_ACTOR) {
     return t("auditLog.hostedLinkActor");
+  }
+  if (label.startsWith(SUBJECT_APP_ACTOR_PREFIX)) {
+    return proofingMethodLabel(label.slice(SUBJECT_APP_ACTOR_PREFIX.length), t);
   }
   return label;
 }
@@ -392,6 +400,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingSessionCreated");
     case "identity_proofing.session_started":
       return t("auditLog.actions.identityProofingSessionStarted");
+    case "identity_proofing.session_handover":
+      return t("auditLog.actions.identityProofingSessionHandover");
     case "identity_proofing.session_ended":
       return t("auditLog.actions.identityProofingSessionEnded");
     case "identity_proofing.session_cancelled":

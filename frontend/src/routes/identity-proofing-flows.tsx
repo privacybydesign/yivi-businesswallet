@@ -22,9 +22,6 @@ import {
   CHECK_PASSIVE_AUTH,
   FACE_PROVIDERS,
   REQUESTED_ATTRIBUTES,
-  STEP_DOCUMENT_CAPTURE,
-  STEP_FACE_VERIFICATION,
-  STEP_NFC_READ,
   attributeAvailable,
   draftFromFlow,
   draftSteps,
@@ -32,6 +29,7 @@ import {
   emptyFlowDraft,
   flowDraftError,
   flowSpecFromDraft,
+  isProofingStep,
   proofingErrorMessage,
 } from "../lib/identity-proofing";
 import type {
@@ -294,17 +292,33 @@ function FlowsCard({
   );
 }
 
-// The checks, requested data and privacy settings of one flow version, in a line.
-// A flow version's steps and checks in a line, as the service's own table shows.
+// The label key of each check the flow editor offers; another check the
+// service reports shows as it is.
+const CHECK_LABELS: Record<
+  string,
+  "passiveAuth" | "chipAuth" | "faceMatch" | "liveness"
+> = {
+  [CHECK_PASSIVE_AUTH]: "passiveAuth",
+  [CHECK_CHIP_AUTH]: "chipAuth",
+  [CHECK_FACE_MATCH]: "faceMatch",
+  [CHECK_LIVENESS]: "liveness",
+};
+
+// A flow version's steps and checks in a line, in words.
 function FlowSummary({ flow }: { flow: ProofingFlow }): React.JSX.Element {
-  const parts = [
-    flow.steps.join(" → "),
-    (flow.requiredChecks ?? []).join(", "),
-  ].filter((part) => part !== "");
+  const { t } = useTranslation();
+  const steps = flow.steps.map((step) =>
+    isProofingStep(step) ? t(`identityProofingFlows.steps.${step}`) : step,
+  );
+  const checks = (flow.requiredChecks ?? []).map((check) => {
+    const key = CHECK_LABELS[check];
+    return key ? t(`identityProofingFlows.checks.${key}`) : check;
+  });
+  const parts = [steps.join(" → "), checks.join(", ")].filter(
+    (part) => part !== "",
+  );
   return (
-    <span className="text-ink-soft font-mono text-[12px]">
-      {parts.join("  ·  ")}
-    </span>
+    <span className="text-ink-soft text-[12px]">{parts.join("  ·  ")}</span>
   );
 }
 
@@ -480,7 +494,6 @@ export function FlowEditor({
             id="proofing-flow-step-document"
             checked={draft.documentAndChip}
             label={t("identityProofingFlows.steps.document_capture")}
-            code={STEP_DOCUMENT_CAPTURE}
             hint={t("identityProofingFlows.new.documentCaptureHint")}
             onChange={(checked) => update({ documentAndChip: checked })}
           />
@@ -488,22 +501,30 @@ export function FlowEditor({
             id="proofing-flow-step-nfc"
             checked={draft.documentAndChip}
             label={t("identityProofingFlows.steps.nfc_read")}
-            code={STEP_NFC_READ}
             hint={t("identityProofingFlows.new.nfcReadHint")}
             onChange={(checked) => update({ documentAndChip: checked })}
+          />
+          <Checkbox
+            id="proofing-flow-step-document-photo"
+            checked={draft.documentPhoto}
+            label={t("identityProofingFlows.steps.document_photo")}
+            hint={t("identityProofingFlows.new.documentPhotoHint")}
+            onChange={(checked) => update({ documentPhoto: checked })}
           />
           <Checkbox
             id="proofing-flow-step-face"
             checked={draft.faceVerification}
             label={t("identityProofingFlows.steps.face_verification")}
-            code={STEP_FACE_VERIFICATION}
             hint={t("identityProofingFlows.new.faceVerificationHint")}
             onChange={(checked) => update({ faceVerification: checked })}
           />
           <p className={HINT}>
             {steps.length > 0
               ? t("identityProofingFlows.new.stepsOrder", {
-                  steps: steps.join(" → "),
+                  steps: steps
+                    .filter(isProofingStep)
+                    .map((step) => t(`identityProofingFlows.steps.${step}`))
+                    .join(" → "),
                 })
               : t("identityProofingFlows.new.errors.steps")}
           </p>
@@ -558,7 +579,7 @@ export function FlowEditor({
                   checked={available && draft.requestedAttributes.has(value)}
                   disabled={!available}
                   label={t(`identityProofingFlows.attributes.${value}`)}
-                  code={value}
+                  hint={t(`identityProofingFlows.attributeHints.${value}`)}
                   onChange={(checked) => toggleAttribute(value, checked)}
                 />
               );
@@ -577,7 +598,6 @@ export function FlowEditor({
               checked={draft.documentAndChip}
               disabled
               label={t("identityProofingFlows.checks.passiveAuth")}
-              code={CHECK_PASSIVE_AUTH}
               onChange={() => undefined}
             />
             <Checkbox
@@ -585,7 +605,6 @@ export function FlowEditor({
               checked={draft.documentAndChip && draft.chipAuthentication}
               disabled={!draft.documentAndChip}
               label={t("identityProofingFlows.checks.chipAuth")}
-              code={CHECK_CHIP_AUTH}
               onChange={(checked) => update({ chipAuthentication: checked })}
             />
             <Checkbox
@@ -593,7 +612,6 @@ export function FlowEditor({
               checked={draft.faceVerification}
               disabled
               label={t("identityProofingFlows.checks.faceMatch")}
-              code={CHECK_FACE_MATCH}
               onChange={() => undefined}
             />
             <Checkbox
@@ -601,7 +619,6 @@ export function FlowEditor({
               checked={draft.faceVerification && draft.liveness}
               disabled={!draft.faceVerification}
               label={t("identityProofingFlows.checks.liveness")}
-              code={CHECK_LIVENESS}
               onChange={(checked) => update({ liveness: checked })}
             />
           </div>
@@ -829,7 +846,6 @@ function Checkbox({
   checked,
   disabled = false,
   label,
-  code,
   hint,
   onChange,
 }: {
@@ -837,8 +853,6 @@ function Checkbox({
   checked: boolean;
   disabled?: boolean;
   label: string;
-  // The service's own name for the step, check or data item.
-  code: string;
   hint?: string;
   onChange: (checked: boolean) => void;
 }): React.JSX.Element {
@@ -856,12 +870,7 @@ function Checkbox({
         htmlFor={id}
         className={`flex flex-col ${disabled && !checked ? "opacity-50" : ""}`}
       >
-        <span className="text-[13.5px] font-semibold">
-          {label}{" "}
-          <code className="text-ink-soft font-mono text-[11.5px] font-normal">
-            {code}
-          </code>
-        </span>
+        <span className="text-[13.5px] font-semibold">{label}</span>
         {hint && <span className={HINT}>{hint}</span>}
       </label>
     </div>

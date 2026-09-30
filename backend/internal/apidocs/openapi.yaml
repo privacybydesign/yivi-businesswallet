@@ -4369,7 +4369,8 @@ paths:
         the subject proofs with (`idem_app`, the default, or `yivi_app`) and `channel`
         how the session reaches them (`email`, the default, or `on_screen`). An
         on-screen request mails nothing and needs no `email` for a customer's subject;
-        an on-screen Idem request answers the vcmrtd link as `deepLink`, and a Yivi one
+        an on-screen Idem request answers the vcmrtd link as `deepLink` (scannable until
+        `deepLinkExpiresAt`), and a Yivi one
         must be on-screen, its disclosure started through `yivi/start`. A Yivi request
         needs a flow without a face step or with the `engine` face provider: the Yivi
         app's face check runs on the proofing service's own engine.
@@ -4477,6 +4478,51 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The request does not run in the Idem app or is a test request (`wrong_method`), its session has ended (`session_over`), or the app holding it is still active (`device_active`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/app:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Request (session) id.
+    get:
+      tags: [identity-proofing]
+      summary: Where a running Idem request's phone is
+      description: >-
+        Requires organisation membership, and a live request for the Idem app whose
+        session still runs. Answers `app`, read live from IPS: `waiting` while no
+        phone scanned the code, `connected` while the app holds the session, and
+        `away` once it was backgrounded, closed or went silent, when a `claim-link`
+        hands it over to the phone that scans next.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request does not run in the Idem app or is a test request (`wrong_method`), or its session has ended (`session_over`).
           content:
             application/json:
               schema:
@@ -4714,7 +4760,11 @@ paths:
         Requires an administrator role in the organisation. A settled customer request's
         result, read from the identity-proofing-service on each call, in the shape of the
         customer API's `GET /proofing/sessions/{id}/result`: `identity` only for an
-        approval, and `evidence`. Audited `identity_proofing.result_read` with the
+        approval, and `evidence`. For an approval it also carries `photo` (the document's
+        portrait), `selfie` (the live face matched against it) and `documentImage` (the photo of
+        the document's printed page), each `{mimeType, data}`
+        with `data` base64, when the flow requested them; the customer API never does.
+        Audited `identity_proofing.result_read` with the
         administrator as actor on every read. A member's request, or one erased, is 404.
       responses:
         '2XX':
@@ -5266,7 +5316,8 @@ paths:
       description: >-
         Requires an administrator role in the organisation. `url` (absolute https; it
         must resolve to a public address when an event is sent) and `events`, at least one
-        of `session.verified`, `session.failed`, `session.review_opened`, `session.expired` and `session.purged`. A
+        of `session.created`, `session.started`, `session.handover`, `session.verified`, `session.failed`,
+        `session.review_opened`, `session.expired`, `session.cancelled` and `session.purged`. A
         new endpoint's answer carries its signing `secret` (`whsec_…`), the one time it is
         readable. Each event is a POST of `{id, type, createdAt, data}` (the `ps_` session id,
         outcome and assurance; never the person's name or address) signed in the

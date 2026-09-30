@@ -180,6 +180,7 @@ function VerifyFlow({
           target={{ kind: "request", slug, requestId: sent.id }}
           initial={sent}
           deepLink={sent.deepLink}
+          deepLinkExpiresAt={sent.deepLinkExpiresAt}
           method={method}
           onRestart={restart}
           outcomeActions={

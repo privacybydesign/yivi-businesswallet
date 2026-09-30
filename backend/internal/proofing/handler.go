@@ -76,6 +76,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/events", member(respond.HandlerFunc(h.requestEvents)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/start", member(respond.HandlerFunc(h.startYivi)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/claim-link", member(respond.HandlerFunc(h.claimLink)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/app", member(respond.HandlerFunc(h.app)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure", member(respond.HandlerFunc(h.yiviDisclosure)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/face", member(respond.HandlerFunc(h.faceFrame)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", admin(respond.HandlerFunc(h.decideReview)))
@@ -241,6 +242,10 @@ type requestResponse struct {
 	LinkExpiresAt  time.Time  `json:"linkExpiresAt"`
 	CreatedAt      time.Time  `json:"createdAt"`
 	CompletedAt    *time.Time `json:"completedAt,omitempty"`
+	// PurgeAt is when the session's personal data is due to be purged;
+	// PurgedAt when it was.
+	PurgeAt  *time.Time `json:"purgeAt,omitempty"`
+	PurgedAt *time.Time `json:"purgedAt,omitempty"`
 }
 
 func newRequestResponse(req Request, now time.Time) requestResponse {
@@ -251,6 +256,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Mode: req.mode(), Status: req.EffectiveStatus(now),
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
+		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt,
 	}
 }
 
@@ -371,6 +377,25 @@ func (h *Handler) claimLink(w http.ResponseWriter, r *http.Request) error {
 		return mapError(err)
 	}
 	respond.JSON(w, r, http.StatusOK, claimLinkResponse{DeepLink: claim.DeepLink, ExpiresAt: claim.ExpiresAt})
+	return nil
+}
+
+// appResponse is where a running Idem request's phone is: waiting, connected
+// or away.
+type appResponse struct {
+	App proofingprovider.App `json:"app"`
+}
+
+func (h *Handler) app(w http.ResponseWriter, r *http.Request) error {
+	id, requestedBy, err := sentRequestTarget(r)
+	if err != nil {
+		return err
+	}
+	app, err := h.service.App(r.Context(), orgFromRequest(r).ID, id, requestedBy)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, appResponse{App: app})
 	return nil
 }
 
@@ -523,7 +548,8 @@ type createRequestResponse struct {
 	MailSent bool `json:"mailSent"`
 	// DeepLink is an on-screen Idem session's vcmrtd link, for the page to show
 	// as the QR code; absent for a mailed request and a Yivi one.
-	DeepLink string `json:"deepLink,omitempty"`
+	DeepLink          string     `json:"deepLink,omitempty"`
+	DeepLinkExpiresAt *time.Time `json:"deepLinkExpiresAt,omitempty"`
 }
 
 func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
@@ -542,8 +568,8 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 		return mapError(err)
 	}
 	out := createRequestResponse{requestResponse: newRequestResponse(sent.Request, time.Now()), MailSent: sent.MailSent}
-	if body.Channel == ChannelOnScreen {
-		out.DeepLink = sent.DeepLink
+	if body.Channel == ChannelOnScreen && sent.DeepLink != "" {
+		out.DeepLink, out.DeepLinkExpiresAt = sent.DeepLink, &sent.DeepLinkExpiresAt
 	}
 	respond.JSON(w, r, http.StatusCreated, out)
 	return nil
