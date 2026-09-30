@@ -4,6 +4,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
 )
 
 type proofingFlowResp struct {
@@ -184,6 +186,7 @@ type proofingCustomerResp struct {
 	Name          string   `json:"name"`
 	FlowIDs       []string `json:"flowIds"`
 	DefaultFlowID string   `json:"defaultFlowId"`
+	HasLiveKey    bool     `json:"hasLiveKey"`
 }
 
 type proofingCustomerFlowResp struct {
@@ -234,6 +237,24 @@ func TestIdentityProofingCustomerHTTPFlow(t *testing.T) {
 
 	base := "/api/v1/orgs/acme/customers/" + customer.ID
 	subject := map[string]any{"customerId": customer.ID, "email": "anna@example.org", "flowId": flow.ID}
+	resp = env.postJSON("/api/v1/orgs/acme/identity-proofing/requests", subject)
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("request before a live key = %d, want 409", resp.StatusCode)
+	}
+	if body := decodeJSON[struct {
+		Code string `json:"code"`
+	}](t, resp); body.Code != "customer_no_api_key" {
+		t.Errorf("code = %q, want customer_no_api_key", body.Code)
+	}
+	resp = env.postJSON(base+"/api-keys", map[string]any{"name": "Backend"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create api key = %d, want 201", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	if got := decodeJSON[proofingCustomerResp](t, env.do(http.MethodGet, base, nil)); !got.HasLiveKey {
+		t.Errorf("customer = %+v, want hasLiveKey", got)
+	}
+
 	resp = env.postJSON("/api/v1/orgs/acme/identity-proofing/requests", subject)
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("request on an unassigned flow = %d, want 422", resp.StatusCode)
@@ -317,16 +338,20 @@ type proofingAPIKeyResp struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Prefix    string `json:"prefix"`
+	Mode      string `json:"mode"`
 	Secret    string `json:"secret"`
 	RevokedAt string `json:"revokedAt"`
 }
 
 type proofingAPISessionResp struct {
-	ID       string `json:"id"`
-	Status   string `json:"status"`
-	FlowID   string `json:"flowId"`
-	DeepLink string `json:"deepLink"`
-	MailSent bool   `json:"mailSent"`
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	FlowID    string `json:"flowId"`
+	DeepLink  string `json:"deepLink"`
+	MailSent  bool   `json:"mailSent"`
+	ErrorCode string `json:"errorCode"`
+	Livemode  bool   `json:"livemode"`
+	PurgedAt  string `json:"purgedAt"`
 }
 
 // apiCall calls the public proofing API with a customer key and no cookie.
@@ -401,13 +426,95 @@ func TestIdentityProofingCustomerAPIKeyHTTPFlow(t *testing.T) {
 		t.Errorf("api get session = %+v, want %s", got, session.ID)
 	}
 
+	// The key is the audit actor, not a member.
+	var actorUser *string
+	var actorLabel string
+	if err := env.pool.QueryRow(context.Background(), `SELECT actor_user_id::text, COALESCE(actor_label, '')
+		FROM audit_events WHERE action = $1 ORDER BY occurred_at DESC LIMIT 1`,
+		audit.IdentityProofingRequested).Scan(&actorUser, &actorLabel); err != nil {
+		t.Fatalf("read requested audit: %v", err)
+	}
+	if actorUser != nil || actorLabel != "api_key:"+key.Prefix {
+		t.Errorf("requested actor = %v / %q, want no user and api_key:%s", actorUser, actorLabel, key.Prefix)
+	}
+
+	// A retry with the same Idempotency-Key replays the first answer; the key
+	// with another body is refused.
+	idem := func(email string) *http.Response {
+		req, err := http.NewRequest(http.MethodPost, env.server.URL+"/api/v1/proofing/sessions",
+			strings.NewReader(`{"email":"`+email+`","sendMail":false}`))
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+key.Secret)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "retry-1")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("idempotent create: %v", err)
+		}
+		return resp
+	}
+	first := decodeJSON[proofingAPISessionResp](t, idem("cleo@example.org"))
+	again := idem("cleo@example.org")
+	if again.Header.Get("Idempotent-Replayed") != "true" {
+		t.Errorf("retry not replayed: %v", again.Header)
+	}
+	if replayed := decodeJSON[proofingAPISessionResp](t, again); replayed.ID != first.ID {
+		t.Errorf("retry = %s, want the first session %s", replayed.ID, first.ID)
+	}
+	resp = idem("dave@example.org")
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("key reused with another body = %d, want 422", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	page := decodeJSON[struct {
+		Sessions   []proofingAPISessionResp `json:"sessions"`
+		NextCursor *string                  `json:"nextCursor"`
+	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions?limit=1", key.Secret, nil))
+	if len(page.Sessions) != 1 || page.Sessions[0].ID != first.ID || page.NextCursor == nil {
+		t.Fatalf("first page = %+v; want the newest session and a cursor", page)
+	}
+	rest := decodeJSON[struct {
+		Sessions []proofingAPISessionResp `json:"sessions"`
+	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions?cursor="+*page.NextCursor, key.Secret, nil))
+	if len(rest.Sessions) != 1 || rest.Sessions[0].ID != session.ID {
+		t.Errorf("next page = %+v; want the one session before it", rest.Sessions)
+	}
+
+	// The customer cancels a second session, then erases it.
+	second := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
+		map[string]any{"email": "bob@example.org", "sendMail": false}))
+	cancelURL := "/api/v1/proofing/sessions/" + second.ID + "/cancel"
+	if got := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, cancelURL, key.Secret, nil)); got.Status != "cancelled" {
+		t.Errorf("cancel = %+v, want cancelled", got)
+	}
+	resp = env.apiCall(http.MethodPost, cancelURL, key.Secret, nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("second cancel = %d, want 409", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	resp = env.apiCall(http.MethodDelete, "/api/v1/proofing/sessions/"+second.ID, key.Secret, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("delete = %d, want 204", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	if got := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+second.ID, key.Secret, nil)); got.PurgedAt == "" {
+		t.Errorf("after delete = %+v, want purgedAt", got)
+	}
+	for _, action := range []string{audit.IdentityProofingSessionCancelled, audit.IdentityProofingSessionPurged} {
+		if n := env.auditCount(orgID, action); n != 1 {
+			t.Errorf("%s audits = %d, want 1", action, n)
+		}
+	}
+
 	// The org's list names the key as the sender.
 	list := decodeJSON[[]struct {
 		ID         string `json:"id"`
 		APIKeyName string `json:"apiKeyName"`
 	}](t, env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/requests?customerId="+customer.ID, nil))
-	if len(list) != 1 || list[0].APIKeyName != "Production backend" {
-		t.Errorf("requests = %+v, want the one sent by the key", list)
+	if len(list) != 3 || list[0].APIKeyName != "Production backend" {
+		t.Errorf("requests = %+v, want the three sent by the key", list)
 	}
 
 	resp = env.do(http.MethodPatch, base, strings.NewReader(`{"paused":true}`))
@@ -443,6 +550,300 @@ func TestIdentityProofingCustomerAPIKeyHTTPFlow(t *testing.T) {
 	resp = env.do(http.MethodGet, base, nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("removed customer = %d, want 404", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+}
+
+// A test key's sessions run scripted in the org's sandbox: resolved at once,
+// never mailed, marked livemode false, and only a test key may script one.
+func TestIdentityProofingTestKeyHTTPFlow(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+
+	flow := decodeJSON[proofingFlowResp](t, env.postJSON("/api/v1/orgs/acme/identity-proofing/flows", map[string]any{
+		"name": "Passport only", "steps": []string{"document_capture", "nfc_read"}, "requiredChecks": []string{"nfc.passive_auth"},
+	}))
+	customer := decodeJSON[proofingCustomerResp](t, env.postJSON("/api/v1/orgs/acme/customers", map[string]any{"name": "Initech"}))
+	base := "/api/v1/orgs/acme/customers/" + customer.ID
+	resp := env.putJSON(base+"/flow-selection", map[string]any{"flowIds": []string{flow.ID}, "defaultFlowId": flow.ID})
+	_ = resp.Body.Close()
+
+	testKey := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "CI", "mode": "test"}))
+	if !strings.HasPrefix(testKey.Secret, "yp_test_") || testKey.Mode != "test" {
+		t.Fatalf("test key = %+v; want a yp_test_ secret in test mode", testKey)
+	}
+	liveKey := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "Prod"}))
+
+	for script, want := range map[string]string{"": "approved", "reject:DOC_EXPIRED": "rejected"} {
+		resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", testKey.Secret,
+			map[string]any{"email": "anna@example.org", "scriptedOutcome": script})
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("test session %q = %d, want 201", script, resp.StatusCode)
+		}
+		session := decodeJSON[proofingAPISessionResp](t, resp)
+		if session.Status != want || session.Livemode || session.MailSent {
+			t.Errorf("test session %q = %+v; want %s, livemode false, unmailed", script, session, want)
+		}
+	}
+	// A new key reads the identity; one narrowed in the database without results:read is refused.
+	approved := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", testKey.Secret,
+		map[string]any{"email": "anna@example.org"}))
+	narrowed := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "Status", "mode": "test"}))
+	if _, err := env.pool.Exec(context.Background(),
+		`UPDATE identity_proofing_api_keys SET scopes = ARRAY['sessions:read'] WHERE id = $1`, narrowed.ID); err != nil {
+		t.Fatalf("narrow key: %v", err)
+	}
+	resp = env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+approved.ID+"/result", narrowed.Secret, nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("result without results:read = %d, want 403", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", narrowed.Secret, map[string]any{"email": "anna@example.org"})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("create without sessions:write = %d, want 403", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	result := decodeJSON[struct {
+		ID       string `json:"id"`
+		Status   string `json:"status"`
+		Identity *struct {
+			FamilyName string `json:"familyName"`
+		} `json:"identity"`
+		Evidence []struct {
+			Type        string `json:"type"`
+			PassiveAuth string `json:"passiveAuth"`
+		} `json:"evidence"`
+	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+approved.ID+"/result", testKey.Secret, nil))
+	if result.ID != approved.ID || result.Status != "approved" || result.Identity == nil || result.Identity.FamilyName == "" ||
+		len(result.Evidence) != 1 || result.Evidence[0].PassiveAuth == "" {
+		t.Errorf("result = %+v; want the approved identity with its evidence", result)
+	}
+	if n := env.auditCount(orgID, audit.IdentityProofingResultRead); n != 1 {
+		t.Errorf("result_read audits = %d, want 1", n)
+	}
+
+	resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", liveKey.Secret,
+		map[string]any{"email": "anna@example.org", "scriptedOutcome": "approve"})
+	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("live key with a script = %d, want refused", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	stats := decodeJSON[struct {
+		Rows []struct {
+			Sessions int `json:"sessions"`
+		} `json:"rows"`
+	}](t, env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/stats", nil))
+	if len(stats.Rows) != 0 {
+		t.Errorf("stats rows = %+v, want test sessions left out", stats.Rows)
+	}
+}
+
+// A hosted session is a link: the subject opens the public page without an
+// account, starts once for the app they pick, and the page follows the outcome.
+func TestIdentityProofingHostedLinkHTTPFlow(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+
+	flow := decodeJSON[proofingFlowResp](t, env.postJSON("/api/v1/orgs/acme/identity-proofing/flows", map[string]any{
+		"name": "Passport only", "steps": []string{"document_capture", "nfc_read"}, "requiredChecks": []string{"nfc.passive_auth"},
+	}))
+	customer := decodeJSON[proofingCustomerResp](t, env.postJSON("/api/v1/orgs/acme/customers", map[string]any{"name": "Initech"}))
+	base := "/api/v1/orgs/acme/customers/" + customer.ID
+	resp := env.putJSON(base+"/flow-selection", map[string]any{"flowIds": []string{flow.ID}, "defaultFlowId": flow.ID})
+	_ = resp.Body.Close()
+	key := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "Portal"}))
+
+	resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret, map[string]any{"hosted": true})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create hosted = %d, want 201", resp.StatusCode)
+	}
+	created := decodeJSON[struct {
+		Status    string `json:"status"`
+		HostedURL string `json:"hostedUrl"`
+		DeepLink  string `json:"deepLink"`
+		MailSent  bool   `json:"mailSent"`
+	}](t, resp)
+	_, token, ok := strings.Cut(created.HostedURL, "/p/")
+	if !ok || token == "" || created.Status != "pending" || created.DeepLink != "" || created.MailSent {
+		t.Fatalf("hosted session = %+v; want a pending link to /p/<token>, no deep link, no mail", created)
+	}
+
+	type hostedView struct {
+		Status   string `json:"status"`
+		Started  bool   `json:"started"`
+		DeepLink string `json:"deepLink"`
+		Customer struct {
+			Name string `json:"name"`
+		} `json:"customer"`
+		Flow struct {
+			Name string `json:"name"`
+		} `json:"flow"`
+	}
+	view := decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token, "", nil))
+	if view.Status != "pending" || view.Started || view.Customer.Name != "Initech" || view.Flow.Name != "Passport only" {
+		t.Errorf("hosted page = %+v; want a pending, unstarted Initech page for the flow", view)
+	}
+	resp = env.apiCall(http.MethodGet, "/api/v1/proof/not-a-token", "", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown link = %d, want 404", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	resp = env.apiCall(http.MethodPost, "/api/v1/proof/"+token+"/start", "", map[string]any{"method": "idem_app"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("start = %d, want 201", resp.StatusCode)
+	}
+	if started := decodeJSON[hostedView](t, resp); !started.Started || !strings.HasPrefix(started.DeepLink, "vcmrtd://") {
+		t.Errorf("started = %+v; want started with its vcmrtd deep link", started)
+	}
+	resp = env.apiCall(http.MethodPost, "/api/v1/proof/"+token+"/start", "", map[string]any{"method": "idem_app"})
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("second start = %d, want 409", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	if status := decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token+"/status", "", nil)); !status.Started {
+		t.Errorf("status = %+v, want started", status)
+	}
+}
+
+// A customer with its own UI picks the app of a hosted session over the API and
+// polls it from stored state; a session not created hosted has no such start.
+func TestIdentityProofingHeadlessHTTPFlow(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+	flow := decodeJSON[proofingFlowResp](t, env.postJSON("/api/v1/orgs/acme/identity-proofing/flows", map[string]any{
+		"name": "Passport only", "steps": []string{"document_capture", "nfc_read"}, "requiredChecks": []string{"nfc.passive_auth"},
+	}))
+	customer := decodeJSON[proofingCustomerResp](t, env.postJSON("/api/v1/orgs/acme/customers", map[string]any{"name": "Initech"}))
+	base := "/api/v1/orgs/acme/customers/" + customer.ID
+	resp := env.putJSON(base+"/flow-selection", map[string]any{"flowIds": []string{flow.ID}, "defaultFlowId": flow.ID})
+	_ = resp.Body.Close()
+	key := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "Portal"}))
+
+	hosted := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
+		map[string]any{"hosted": true}))
+	start := "/api/v1/proofing/sessions/" + hosted.ID + "/methods/idem_app"
+	started := decodeJSON[struct {
+		ID      string `json:"id"`
+		AppLink string `json:"appLink"`
+	}](t, env.apiCall(http.MethodPost, start, key.Secret, nil))
+	if started.ID != hosted.ID || !strings.HasPrefix(started.AppLink, "vcmrtd://") {
+		t.Fatalf("headless start = %+v; want the Idem app link", started)
+	}
+	status := decodeJSON[struct {
+		Status string `json:"status"`
+		Done   bool   `json:"done"`
+	}](t, env.apiCall(http.MethodGet, start+"/status", key.Secret, nil))
+	if status.Status != "pending" || status.Done {
+		t.Errorf("headless status = %+v, want pending", status)
+	}
+	resp = env.apiCall(http.MethodPost, start, key.Secret, nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("second start = %d, want 409", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	mailed := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
+		map[string]any{"email": "anna@example.org", "sendMail": false}))
+	resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions/"+mailed.ID+"/methods/idem_app", key.Secret, nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("headless start of a mailed session = %d, want 409", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+}
+
+// An admin decides a session under review; the outcome then lands as any
+// other. A test key's scripted needs_review is how to get one without a subject.
+func TestIdentityProofingReviewDecisionHTTPFlow(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+
+	flow := decodeJSON[proofingFlowResp](t, env.postJSON("/api/v1/orgs/acme/identity-proofing/flows", map[string]any{
+		"name": "Passport only", "steps": []string{"document_capture", "nfc_read"}, "requiredChecks": []string{"nfc.passive_auth"},
+	}))
+	customer := decodeJSON[proofingCustomerResp](t, env.postJSON("/api/v1/orgs/acme/customers", map[string]any{"name": "Initech"}))
+	base := "/api/v1/orgs/acme/customers/" + customer.ID
+	resp := env.putJSON(base+"/flow-selection", map[string]any{"flowIds": []string{flow.ID}, "defaultFlowId": flow.ID})
+	_ = resp.Body.Close()
+	key := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "CI", "mode": "test"}))
+	session := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
+		map[string]any{"email": "anna@example.org", "scriptedOutcome": "needs_review"}))
+	if session.Status != "needs_review" {
+		t.Fatalf("session = %+v, want needs_review", session)
+	}
+
+	review := "/api/v1/orgs/acme/identity-proofing/requests/" + session.ID + "/review"
+	resp = env.postJSON(review, map[string]any{"decision": "approve"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("decision without a reason = %d, want 400", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	resp = env.postJSON(review, map[string]any{"decision": "approve", "reason": "document checked by hand"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("decision = %d, want 200", resp.StatusCode)
+	}
+	if decided := decodeJSON[proofingRequestResp](t, resp); decided.Status != "approved" {
+		t.Errorf("decided = %+v, want approved", decided)
+	}
+	resp = env.postJSON(review, map[string]any{"decision": "reject", "reason": "again"})
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("a second decision = %d, want 409", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	if n := env.auditCount(orgID, audit.IdentityProofingReviewDecided); n != 1 {
+		t.Errorf("review_decided audits = %d, want 1", n)
+	}
+}
+
+// The public API holds each customer to proofing.APISessionLimit sessions,
+// answering 429 with Retry-After past it; reads have their own, larger budget.
+func TestIdentityProofingCustomerAPIRateLimit(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+	flow := decodeJSON[proofingFlowResp](t, env.postJSON("/api/v1/orgs/acme/identity-proofing/flows", map[string]any{
+		"name": "Passport only", "steps": []string{"document_capture", "nfc_read"}, "requiredChecks": []string{"nfc.passive_auth"},
+	}))
+	customer := decodeJSON[proofingCustomerResp](t, env.postJSON("/api/v1/orgs/acme/customers", map[string]any{"name": "Initech"}))
+	base := "/api/v1/orgs/acme/customers/" + customer.ID
+	resp := env.putJSON(base+"/flow-selection", map[string]any{"flowIds": []string{flow.ID}, "defaultFlowId": flow.ID})
+	_ = resp.Body.Close()
+	key := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "Backend"}))
+
+	create := func() *http.Response {
+		return env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
+			map[string]any{"email": "anna@example.org", "sendMail": false})
+	}
+	for i := range proofing.APISessionLimit.Burst {
+		resp := create()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create session %d = %d, want 201 within the limit", i+1, resp.StatusCode)
+		}
+		_ = resp.Body.Close()
+	}
+	resp = create()
+	if resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("Retry-After") == "" {
+		t.Errorf("create past the limit = %d, Retry-After %q; want 429 with Retry-After",
+			resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+	if body := decodeJSON[struct {
+		Code string `json:"code"`
+	}](t, resp); body.Code != "rate_limited" {
+		t.Errorf("code = %q, want rate_limited", body.Code)
+	}
+
+	resp = env.apiCall(http.MethodGet, "/api/v1/proofing/flows", key.Secret, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("read after the session limit = %d, want 200: reads have their own budget", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
 }

@@ -7,6 +7,7 @@ import {
 import { accessMessage } from "../lib/access-message";
 import {
   auditActionLabel,
+  auditActorLabel,
   auditSubject,
   auditTargetLabel,
   auditVisual,
@@ -148,7 +149,8 @@ export default function AuditLog(): React.JSX.Element {
                               <span className="text-ink truncate">
                                 {event.actor
                                   ? fullName(event.actor)
-                                  : t("auditLog.system")}
+                                  : (auditActorLabel(event.actorLabel, t) ??
+                                    t("auditLog.system"))}
                               </span>
                             </div>
                           </Table.Cell>

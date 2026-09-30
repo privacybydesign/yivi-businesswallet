@@ -126,12 +126,18 @@ export function ResultTag({
 export function CustomerStatusTag({
   customer,
 }: {
-  customer: Pick<ProofingCustomer, "status" | "webhook">;
+  customer: Pick<ProofingCustomer, "status" | "webhook" | "hasLiveKey">;
 }): React.JSX.Element {
   const { t } = useTranslation();
   switch (customerDisplayStatus(customer)) {
     case "paused":
       return <Tag dot>{t("customers.status.paused")}</Tag>;
+    case "setup_needed":
+      return (
+        <Tag tone="amber" dot>
+          {t("customers.status.setupNeeded")}
+        </Tag>
+      );
     case "needs_attention":
       return (
         <Tag tone="amber" dot>

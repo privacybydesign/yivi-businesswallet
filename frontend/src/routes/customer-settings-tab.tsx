@@ -13,6 +13,7 @@ import {
   proofingErrorMessage,
   ttlMinutes,
 } from "../lib/identity-proofing";
+import { originLines } from "../lib/hosted-completion";
 import { Button, Card, ConfirmDialog, Input } from "../ui";
 
 const LABEL = "text-ink text-[13px] font-semibold";
@@ -20,7 +21,8 @@ const HINT = "text-muted text-[12px]";
 const ERROR = "text-error text-[12.5px]";
 
 // A customer's settings: how long a mailed session runs, how long an approved
-// subject's name is kept, its name, and removing it.
+// subject's name is kept, where its hosted pages may hand the subject back, its
+// name, and removing it.
 export function SettingsTab({
   slug,
   customer,
@@ -79,6 +81,7 @@ export function SettingsTab({
           </p>
         )}
       </Card>
+      <RedirectOriginsCard slug={slug} customer={customer} />
       <NameCard slug={slug} customer={customer} />
       <RemoveCard slug={slug} customer={customer} />
     </div>
@@ -142,6 +145,72 @@ function Segmented<T extends number>({
         );
       })}
     </div>
+  );
+}
+
+const TEXTAREA =
+  "rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-20 w-full max-w-xl border px-3 py-2 font-mono text-[13px] outline-none focus:ring-3";
+
+// The origins a hosted page may redirect its subject to and be embedded on.
+function RedirectOriginsCard({
+  slug,
+  customer,
+}: {
+  slug: string;
+  customer: ProofingCustomer;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const update = useUpdateProofingCustomerMutation(slug, customer.id);
+  const saved = customer.allowedRedirectOrigins.join("\n");
+  const [text, setText] = useState(saved);
+  const fieldId = `redirect-origins-${customer.id}`;
+
+  function submit(event: React.FormEvent): void {
+    event.preventDefault();
+    update.mutate(
+      { allowedRedirectOrigins: originLines(text) },
+      // Shows the origins as the backend normalised them.
+      { onSuccess: (next) => setText(next.allowedRedirectOrigins.join("\n")) },
+    );
+  }
+
+  return (
+    <Card className="px-5 py-4">
+      <label
+        htmlFor={fieldId}
+        className="font-display block text-[15px] font-bold"
+      >
+        {t("customers.settings.redirectOriginsTitle")}
+      </label>
+      <p className={`${HINT} mt-0.5`}>
+        {t("customers.settings.redirectOriginsHint")}
+      </p>
+      <form className="mt-3 flex flex-col gap-3" onSubmit={submit} noValidate>
+        <textarea
+          id={fieldId}
+          value={text}
+          rows={3}
+          spellCheck={false}
+          placeholder="https://portal.example.com"
+          className={TEXTAREA}
+          onChange={(event) => setText(event.target.value)}
+        />
+        <div>
+          <Button
+            type="submit"
+            loading={update.isPending}
+            disabled={originLines(text).join("\n") === saved}
+          >
+            {t("customers.settings.save")}
+          </Button>
+        </div>
+      </form>
+      {update.isError && (
+        <p className={`${ERROR} mt-2`}>
+          {proofingErrorMessage(update.error, t)}
+        </p>
+      )}
+    </Card>
   );
 }
 

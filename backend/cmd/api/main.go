@@ -78,12 +78,6 @@ const (
 	// One IPS call per request; a session result embeds the document images,
 	// which is what the headroom is for.
 	proofingHTTPTimeout = 30 * time.Second
-	// proofingReconcileEvery is how often live proofing sessions are re-checked
-	// at IPS: every read is audited there, so not faster than an outcome needs.
-	proofingReconcileEvery = time.Minute
-	// proofingWebhookDeliveryEvery is how often due webhook deliveries are sent;
-	// the first attempt of an event waits at most this long.
-	proofingWebhookDeliveryEvery = 10 * time.Second
 	// heldStatusRecheckEvery is how often held credentials' status lists are
 	// re-read: issuers publish revocations on the scale of hours, not seconds.
 	heldStatusRecheckEvery = 6 * time.Hour
@@ -162,24 +156,15 @@ func newVogValidatorProvider(cfg config.Config) (vogValidatorProvider, error) {
 // readiness probe plus what the proofing service drives. Chosen by config.
 type proofingProvider interface {
 	Ping(context.Context) error
-	CreateTenant(ctx context.Context, name string) (proofingprovider.Tenant, error)
-	CreateAPIKey(ctx context.Context, tenantID string, scopes []string) (string, error)
-	ListFlows(ctx context.Context, apiKey string) ([]proofingprovider.Flow, error)
-	CreateFlow(ctx context.Context, apiKey string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error)
-	CreateFlowVersion(ctx context.Context, apiKey, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error)
-	ListFlowVersions(ctx context.Context, apiKey, id string) ([]proofingprovider.Flow, error)
-	ActivateFlowVersion(ctx context.Context, apiKey, id string, version int) (proofingprovider.Flow, error)
-	CreateSession(ctx context.Context, apiKey string, in proofingprovider.SessionInput) (proofingprovider.Session, error)
-	SessionResult(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Result, error)
-	StartYiviDisclosure(ctx context.Context, sessionToken string) (proofingprovider.YiviStart, error)
-	YiviDisclosureResult(ctx context.Context, sessionToken string) (proofingprovider.YiviDisclosure, error)
-	SubmitFaceFrame(ctx context.Context, sessionToken, image string) (proofingprovider.FaceVerdict, error)
+	proofing.Provider
 }
 
 func newProofingProvider(cfg config.Config) (proofingProvider, error) {
 	switch cfg.IdentityProofingProvider {
 	case config.ProviderStub:
-		return proofingprovider.NewStub(), nil
+		stub := proofingprovider.NewStub()
+		stub.Outcome = proofingprovider.Status(cfg.IdentityProofingStubOutcome)
+		return stub, nil
 	case config.ProviderIPS:
 		return proofingprovider.NewClient(cfg.IdentityProofingURL, cfg.IdentityProofingAdminKey,
 			&http.Client{Timeout: proofingHTTPTimeout}), nil
@@ -800,23 +785,37 @@ func run() error {
 	}
 	proofingRequests := proofing.NewRequestStore(pool, recorder, proofingCipher)
 	proofingWebhooks := proofing.NewWebhookStore(pool, recorder, proofingCipher)
+	proofingWebhooks.SetDefaultEndpoint(cfg.IdentityProofingDefaultWebhookURL)
 	proofingService := proofing.NewService(proofing.Stores{
-		Settings:  proofing.NewSettingsStore(pool, recorder, proofingCipher),
-		Requests:  proofingRequests,
-		Customers: proofing.NewCustomerStore(pool, recorder),
-		APIKeys:   proofing.NewAPIKeyStore(pool, recorder),
-		Webhooks:  proofingWebhooks,
-		Events:    audit.NewReader(pool),
-	}, ips, emailService)
+		Settings:   proofing.NewSettingsStore(pool, recorder, proofingCipher),
+		Requests:   proofingRequests,
+		Customers:  proofing.NewCustomerStore(pool, recorder),
+		APIKeys:    proofing.NewAPIKeyStore(pool, recorder),
+		Webhooks:   proofingWebhooks,
+		Events:     audit.NewReader(pool),
+		Pauses:     proofing.NewPauseStore(pool, recorder),
+		FlowHosted: proofing.NewFlowHostedStore(pool, recorder),
+	}, ips, verifier, emailService)
 	// A customer's subject's proofed name is kept for its customer's data retention.
 	startPruner(ctx, "identity_proofing_proofed_names", cfg.SessionPruneEvery, proofingRequests.PurgeProofedNames)
-	// Outcomes and expiries land without anyone reading a list, and each sends
-	// its customer's webhook; the deliverer sends those, https to public
-	// addresses only.
-	startPruner(ctx, "identity_proofing_reconcile", proofingReconcileEvery, proofingService.ReconcileLive)
-	startPruner(ctx, "identity_proofing_webhooks",
-		proofingWebhookDeliveryEvery, proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).DeliverDue)
+	// IPS pushes every session change to the callback (HandleIPSEvent); a
+	// session nobody finishes is reconciled at its cap. Neither polls.
+	proofingService.SetCallbackURL(cfg.IdentityProofingCallbackURL)
+	proofingService.SetHostedBaseURL(strings.TrimSuffix(cfg.AppBaseURL, "/") + "/p/")
+	if stub, ok := ips.(interface{ OnSessionChange(func(string)) }); ok {
+		stub.OnSessionChange(func(sessionID string) { proofingService.SessionChanged(ctx, sessionID) })
+	}
+	database.RunOnNotify(ctx, pool, proofing.SessionChannel, "identity_proofing_deadlines", proofingService.ReconcileDue)
+	// Customer webhooks go out as their change commits, retries at their due
+	// time: to the customer's endpoint (https, public addresses only), or to the
+	// wallet's own default endpoint.
+	database.RunOnNotify(ctx, pool, proofing.WebhookChannel, "identity_proofing_webhooks",
+		proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).Run)
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
+	proofingIdempotency := proofing.NewIdempotencyStore(pool)
+	proofingHandler.SetIdempotencyStore(proofingIdempotency)
+	proofingHandler.SetPlatformAdmins(platformAdmins)
+	startPruner(ctx, "identity_proofing_idempotency_keys", cfg.SessionPruneEvery, proofingIdempotency.Prune)
 
 	handler := server.New(
 		pool,

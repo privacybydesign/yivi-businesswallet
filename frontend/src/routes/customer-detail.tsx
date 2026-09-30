@@ -6,10 +6,12 @@ import { ApiError } from "../api/http";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useCreateProofingRequestMutation,
+  useDecideProofingReviewMutation,
   useProofingCustomerFlowsQuery,
   useProofingCustomerQuery,
   useProofingRequestsQuery,
   useProofingRequestEventsQuery,
+  useProofingRequestResultMutation,
   useProofingStatsQuery,
   useSetProofingCustomerFlowsMutation,
   useUpdateProofingCustomerMutation,
@@ -26,6 +28,7 @@ import type { AuditEvent } from "../api/organization";
 import {
   AUDIT_TONE_CLASSES,
   auditActionLabel,
+  auditActorLabel,
   auditVisual,
 } from "../lib/audit-event";
 import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
@@ -80,9 +83,13 @@ const ERROR = "text-error text-[12.5px]";
 const CAPTION =
   "text-muted font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase";
 const HTTP_NOT_FOUND = 404;
+// The longest reason a reviewer may give, as the backend allows.
+const REVIEW_REASON_MAX = 500;
 const SESSION_COLUMNS = 8;
 const OPEN_ICON_SIZE = 18;
 const TIMELINE_ICON_SIZE = 14;
+// A face match score is 0 to 1; shown as a percentage.
+const PERCENT = 100;
 // Mirrors the Input base so the flow select reads as the same field.
 const SELECT_CLASS =
   "rounded-yivi border-line-strong bg-surface text-ink w-full border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3 h-9 disabled:opacity-60";
@@ -153,6 +160,7 @@ export default function CustomerDetail(): React.JSX.Element {
     customer.error instanceof ApiError &&
     customer.error.status === HTTP_NOT_FOUND;
   const paused = customer.data?.status === "paused";
+  const noLiveKey = customer.data?.hasLiveKey === false;
 
   return (
     <>
@@ -190,7 +198,7 @@ export default function CustomerDetail(): React.JSX.Element {
               )}
               <Button
                 icon="email"
-                disabled={paused}
+                disabled={paused || noLiveKey}
                 onClick={() => setSending(true)}
               >
                 {t("customers.detail.verify")}
@@ -284,6 +292,24 @@ export default function CustomerDetail(): React.JSX.Element {
               <p className="bg-warning-bg text-warning-fg rounded-yivi px-4 py-3 text-[13px]">
                 {t("customers.detail.pausedNotice")}
               </p>
+            )}
+            {!paused && noLiveKey && (
+              <div className="bg-warning-bg text-warning-fg rounded-yivi flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-[13px]">
+                <span>
+                  {isAdmin
+                    ? t("customers.detail.noLiveKeyNotice")
+                    : t("customers.detail.noLiveKeyNoticeMember")}
+                </span>
+                {isAdmin && activeTab !== "apiKeys" && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setTab("apiKeys")}
+                  >
+                    {t("customers.detail.createApiKey")}
+                  </Button>
+                )}
+              </div>
             )}
             {activeTab === "flows" && (
               <FlowsTab
@@ -439,6 +465,7 @@ function FlowsTab({
             key={flow.id}
             flow={flow}
             paused={customer.status === "paused"}
+            noLiveKey={!customer.hasLiveKey}
             sessions={
               (sessionsByFlow.get(flow.id) ?? noProofingSessions()).sessions
             }
@@ -465,11 +492,13 @@ type FlowsView =
 function FlowCard({
   flow,
   paused,
+  noLiveKey,
   sessions,
   onEdit,
 }: {
   flow: ProofingCustomerFlow;
   paused: boolean;
+  noLiveKey: boolean;
   sessions: number;
   onEdit?: () => void;
 }): React.JSX.Element {
@@ -488,6 +517,10 @@ function FlowCard({
           <span className="text-ink text-[14.5px] font-bold">{flow.name}</span>
           {paused ? (
             <Tag dot>{t("customers.status.paused")}</Tag>
+          ) : noLiveKey ? (
+            <Tag tone="amber" dot>
+              {t("customers.status.setupNeeded")}
+            </Tag>
           ) : (
             <Tag tone="green" dot>
               {t("customers.flows.live")}
@@ -1063,7 +1096,10 @@ function SessionRow({
           {proofingMethodLabel(request.method, t)}
         </Table.Cell>
         <Table.Cell>
-          <ResultTag request={request} compact />
+          <ResultTag request={request} compact />{" "}
+          {request.mode === "test" && (
+            <Tag tone="amber">{t("customers.apiKeys.test")}</Tag>
+          )}
         </Table.Cell>
         <Table.Cell className="whitespace-nowrap">
           {formatWhen(request.createdAt)}
@@ -1155,10 +1191,223 @@ function SessionRow({
               </dl>
               <SessionTimeline slug={slug} request={request} />
             </div>
+            {isAdmin &&
+              (request.status === "approved" ||
+                request.status === "rejected") && (
+                <IdentityResult slug={slug} requestId={request.id} />
+              )}
+            {isAdmin && request.status === "needs_review" && (
+              <ReviewDecision slug={slug} requestId={request.id} />
+            )}
           </td>
         </tr>
       )}
     </>
+  );
+}
+
+// An administrator's decision on a session under review: approve or reject,
+// always with a reason, which the audit log keeps.
+function ReviewDecision({
+  slug,
+  requestId,
+}: {
+  slug: string;
+  requestId: string;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const decide = useDecideProofingReviewMutation(slug, requestId);
+  const [reason, setReason] = useState("");
+  const [touched, setTouched] = useState(false);
+  const missing = reason.trim() === "";
+  const fieldId = `review-reason-${requestId}`;
+
+  function submit(decision: "approve" | "reject"): void {
+    setTouched(true);
+    if (missing) return;
+    decide.mutate({ decision, reason: reason.trim() });
+  }
+
+  return (
+    <div className="border-line mt-4 flex flex-col gap-2 border-t pt-4">
+      <h3 className="text-ink text-[14px] font-bold">
+        {t("customers.sessions.review.title")}
+      </h3>
+      <p className="text-ink-soft text-[13px]">
+        {t("customers.sessions.review.hint")}
+      </p>
+      <label
+        htmlFor={fieldId}
+        className="text-ink-soft text-[12px] font-semibold"
+      >
+        {t("customers.sessions.review.reason")}
+      </label>
+      <textarea
+        id={fieldId}
+        value={reason}
+        maxLength={REVIEW_REASON_MAX}
+        aria-invalid={touched && missing}
+        placeholder={t("customers.sessions.review.reasonPlaceholder")}
+        onChange={(event) => setReason(event.target.value)}
+        className="rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-16 w-full border px-3 py-2 text-[13.5px] outline-none focus:ring-3"
+      />
+      {touched && missing && (
+        <p className="text-error text-[12.5px]">
+          {t("customers.sessions.review.reasonRequired")}
+        </p>
+      )}
+      {decide.isError && (
+        <p role="alert" className="text-error text-[12.5px]">
+          {proofingErrorMessage(decide.error, t)}
+        </p>
+      )}
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          icon="valid"
+          loading={decide.isPending && decide.variables?.decision === "approve"}
+          disabled={decide.isPending}
+          onClick={() => submit("approve")}
+        >
+          {t("customers.sessions.review.approve")}
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          icon="invalid"
+          loading={decide.isPending && decide.variables?.decision === "reject"}
+          disabled={decide.isPending}
+          onClick={() => submit("reject")}
+        >
+          {t("customers.sessions.review.reject")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// The checks IPS reports, in words; an unknown value shows as it is.
+const CHECK_OUTCOMES = [
+  "valid",
+  "invalid",
+  "not_performed",
+  "passed",
+  "failed",
+] as const;
+
+function isCheckOutcome(
+  value: string,
+): value is (typeof CHECK_OUTCOMES)[number] {
+  return (CHECK_OUTCOMES as readonly string[]).includes(value);
+}
+
+// An admin's view of a settled session's verified identity: read from IPS only
+// on this explicit ask, audited each time, and kept in this panel alone.
+function IdentityResult({
+  slug,
+  requestId,
+}: {
+  slug: string;
+  requestId: string;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const result = useProofingRequestResultMutation(slug, requestId);
+  const check = (value: string | undefined): string =>
+    value === undefined || value === ""
+      ? "—"
+      : isCheckOutcome(value)
+        ? t(`customers.sessions.identity.checks.${value}`)
+        : value;
+
+  if (!result.data) {
+    return (
+      <div className="border-line mt-5 flex flex-wrap items-center gap-3 border-t pt-4">
+        <Button
+          size="sm"
+          variant="secondary"
+          icon="view"
+          loading={result.isPending}
+          onClick={() => result.mutate()}
+        >
+          {t("customers.sessions.identity.show")}
+        </Button>
+        <span className="text-muted text-[12px]">
+          {t("customers.sessions.identity.audited")}
+        </span>
+        {result.isError && (
+          <p className={ERROR}>{proofingErrorMessage(result.error, t)}</p>
+        )}
+      </div>
+    );
+  }
+  const { identity } = result.data;
+  const evidence = result.data.evidence.at(0);
+  return (
+    <section
+      aria-labelledby={`identity-${requestId}`}
+      className="border-line mt-5 border-t pt-4"
+    >
+      <h3
+        id={`identity-${requestId}`}
+        className="text-muted mb-3 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase"
+      >
+        {t("customers.sessions.identity.title")}
+      </h3>
+      <dl className="grid gap-x-8 gap-y-2 text-[13px] sm:grid-cols-[auto_1fr]">
+        {identity ? (
+          <>
+            <dt className="text-muted">
+              {t("customers.sessions.identity.name")}
+            </dt>
+            <dd>
+              {[identity.givenName, identity.familyName]
+                .filter(Boolean)
+                .join(" ") || "—"}
+            </dd>
+            <dt className="text-muted">
+              {t("customers.sessions.identity.birthDate")}
+            </dt>
+            <dd>{identity.birthDate || "—"}</dd>
+            <dt className="text-muted">
+              {t("customers.sessions.identity.nationality")}
+            </dt>
+            <dd>{identity.nationality || "—"}</dd>
+          </>
+        ) : (
+          <dd className="text-ink-soft sm:col-span-2">
+            {t("customers.sessions.identity.none")}
+          </dd>
+        )}
+        {evidence && (
+          <>
+            <dt className="text-muted">
+              {t("customers.sessions.identity.document")}
+            </dt>
+            <dd>
+              {[evidence.documentType, evidence.issuingState]
+                .filter(Boolean)
+                .join(" · ") || evidence.type}
+            </dd>
+            <dt className="text-muted">
+              {t("customers.sessions.identity.passiveAuth")}
+            </dt>
+            <dd>{check(evidence.passiveAuth)}</dd>
+            <dt className="text-muted">
+              {t("customers.sessions.identity.faceMatch")}
+            </dt>
+            <dd>
+              {evidence.faceMatch === undefined
+                ? "—"
+                : `${Math.round(evidence.faceMatch * PERCENT)}%`}
+            </dd>
+            <dt className="text-muted">
+              {t("customers.sessions.identity.liveness")}
+            </dt>
+            <dd>{check(evidence.liveness)}</dd>
+          </>
+        )}
+      </dl>
+    </section>
   );
 }
 
@@ -1259,5 +1508,7 @@ function timelineActor(
   if (event.action === "identity_proofing.requested" && request.apiKeyName) {
     return t("customers.sessions.viaApiKey", { name: request.apiKeyName });
   }
+  const label = auditActorLabel(event.actorLabel, t);
+  if (label) return label;
   return hasDetail ? null : t("auditLog.system");
 }

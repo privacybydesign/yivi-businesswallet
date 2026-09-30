@@ -8,8 +8,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,19 +25,24 @@ import (
 const (
 	EventSessionVerified = "session.verified"
 	EventSessionFailed   = "session.failed"
-	EventSessionExpired  = "session.expired"
-	EventSessionPurged   = "session.purged"
-	EventTest            = "test"
+	// EventSessionReviewOpened is sent when a session goes to manual review;
+	// its decision then sends verified or failed.
+	EventSessionReviewOpened = "session.review_opened"
+	EventSessionExpired      = "session.expired"
+	EventSessionPurged       = "session.purged"
+	EventTest                = "test"
 )
 
 // WebhookEvents are the events an endpoint may subscribe to, in display order.
-var WebhookEvents = []string{EventSessionVerified, EventSessionFailed, EventSessionExpired, EventSessionPurged}
+var WebhookEvents = []string{
+	EventSessionVerified, EventSessionFailed, EventSessionReviewOpened, EventSessionExpired, EventSessionPurged,
+}
 
-// outcomeEvents is the webhook event each recorded outcome sends; needs_review
-// is not final, so it sends none.
+// outcomeEvents is the webhook event each recorded outcome sends.
 var outcomeEvents = map[Status]string{
-	StatusApproved: EventSessionVerified,
-	StatusRejected: EventSessionFailed,
+	StatusApproved:    EventSessionVerified,
+	StatusRejected:    EventSessionFailed,
+	StatusNeedsReview: EventSessionReviewOpened,
 }
 
 // Delivery states.
@@ -96,6 +104,38 @@ func webhookSignature(secret string, at time.Time, body []byte) string {
 	return "t=" + t + ",v1=" + hex.EncodeToString(mac.Sum(nil))
 }
 
+// webhookMaxSkew is how far a received delivery's timestamp may be from now.
+const webhookMaxSkew = 5 * time.Minute
+
+// verifyWebhookSignature checks a SignatureHeader value against body under
+// secret, as a receiver does: a timestamp within webhookMaxSkew and a matching
+// v1 HMAC.
+func verifyWebhookSignature(secret, header string, body []byte, now time.Time) error {
+	var ts, v1 string
+	for part := range strings.SplitSeq(header, ",") {
+		key, value, _ := strings.Cut(part, "=")
+		switch key {
+		case "t":
+			ts = value
+		case "v1":
+			v1 = value
+		}
+	}
+	unix, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil {
+		return ErrBadSignature
+	}
+	at := time.Unix(unix, 0)
+	if skew := now.Sub(at); skew > webhookMaxSkew || skew < -webhookMaxSkew {
+		return ErrBadSignature
+	}
+	want := webhookSignature(secret, at, body)
+	if !hmac.Equal([]byte(want), []byte("t="+ts+",v1="+v1)) {
+		return ErrBadSignature
+	}
+	return nil
+}
+
 // webhookBody is what a delivery POSTs: the same bytes on every attempt, so a
 // receiver can drop a duplicate by id.
 func webhookBody(id uuid.UUID, event string, createdAt time.Time, data json.RawMessage) ([]byte, error) {
@@ -110,7 +150,9 @@ func webhookBody(id uuid.UUID, event string, createdAt time.Time, data json.RawM
 // sessionEventData is a session event's data: what happened to which session,
 // never who it is about.
 func sessionEventData(req Request, status Status) map[string]any {
-	data := map[string]any{"sessionId": req.ID.String(), "status": string(status), "flowId": req.FlowID}
+	data := map[string]any{
+		"sessionId": PublicSessionID(req.ID), "status": string(status), "flowId": req.FlowID, "livemode": req.mode() == ModeLive,
+	}
 	for key, value := range map[string]string{
 		"assuranceLevel": req.AssuranceLevel, "eidasLevel": req.EIDASLevel, "errorCode": req.ErrorCode,
 	} {
@@ -121,10 +163,10 @@ func sessionEventData(req Request, status Status) map[string]any {
 	return data
 }
 
-// enqueueWebhook writes a delivery of event for the customer's endpoint, if it
-// has one subscribed to the event, in the caller's transaction: the event is
-// sent exactly when the change it reports commits. A member's request (no
-// customer) sends nothing.
+// enqueueWebhook writes a delivery of event in the caller's transaction, so it
+// is sent exactly when the change it reports commits: to the customer's own
+// endpoint if it has one subscribed to the event, else to the wallet's default
+// endpoint (endpoint_url NULL). A member's request (no customer) sends nothing.
 func enqueueWebhook(ctx context.Context, q database.Querier, orgID uuid.UUID, customerID *uuid.UUID,
 	event string, requestID *uuid.UUID, data map[string]any,
 ) error {
@@ -135,12 +177,29 @@ func enqueueWebhook(ctx context.Context, q database.Querier, orgID uuid.UUID, cu
 	if err != nil {
 		return fmt.Errorf("proofing: marshal webhook %s: %w", event, err)
 	}
+	var endpointURL *string
+	hook, err := getWebhook(ctx, q, orgID, *customerID)
+	switch {
+	case errors.Is(err, ErrWebhookNotFound):
+		if event == EventTest {
+			return nil
+		}
+	case err != nil:
+		return err
+	case event != EventTest && !slices.Contains(hook.Events, event):
+		return nil
+	default:
+		endpointURL = &hook.URL
+	}
 	if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_webhook_deliveries
-			(organization_id, customer_id, event, request_id, payload)
-		SELECT $1, w.customer_id, $3, $4, $5 FROM identity_proofing_webhooks w
-		WHERE w.organization_id = $1 AND w.customer_id = $2 AND ($3 = $6 OR $3 = ANY (w.events))`,
-		orgID, *customerID, event, requestID, payload, EventTest); err != nil {
+			(organization_id, customer_id, event, request_id, payload, endpoint_url)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		orgID, *customerID, event, requestID, payload, endpointURL); err != nil {
 		return fmt.Errorf("proofing: enqueue webhook %s customer %s: %w", event, *customerID, err)
 	}
-	return nil
+	// Wakes the deliverer as soon as the change commits.
+	return database.Notify(ctx, q, WebhookChannel)
 }
+
+// WebhookChannel is the Postgres NOTIFY channel a queued delivery signals.
+const WebhookChannel = "identity_proofing_webhooks"

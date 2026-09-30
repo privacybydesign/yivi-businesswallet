@@ -150,6 +150,7 @@ type deliveryResponse struct {
 	ID             uuid.UUID  `json:"id"`
 	Event          string     `json:"event"`
 	SessionID      *uuid.UUID `json:"sessionId,omitempty"`
+	EndpointURL    string     `json:"endpointUrl,omitempty"`
 	Status         string     `json:"status"`
 	Attempts       int        `json:"attempts"`
 	LastStatusCode *int       `json:"lastStatusCode,omitempty"`
@@ -171,7 +172,7 @@ func (h *Handler) listWebhookDeliveries(w http.ResponseWriter, r *http.Request) 
 	out := make([]deliveryResponse, 0, len(deliveries))
 	for _, d := range deliveries {
 		out = append(out, deliveryResponse{
-			ID: d.ID, Event: d.Event, SessionID: d.RequestID, Status: d.Status, Attempts: d.Attempts,
+			ID: d.ID, Event: d.Event, SessionID: d.RequestID, EndpointURL: d.EndpointURL, Status: d.Status, Attempts: d.Attempts,
 			LastStatusCode: d.LastStatusCode, LastError: d.LastError, LastAttemptAt: d.LastAttemptAt,
 			DeliveredAt: d.DeliveredAt, CreatedAt: d.CreatedAt,
 		})

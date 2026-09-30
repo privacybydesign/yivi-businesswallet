@@ -32,7 +32,6 @@ export const en = {
     members: "Members",
     identityProofing: "Identity proofing",
     identityProofingOverview: "Overview",
-    identityProofingFlows: "Flows",
     customers: "Customers",
     qerds: "Secure delivery",
     attestations: "Attestations",
@@ -410,8 +409,27 @@ export const en = {
   },
   identityProofing: {
     title: "Identity proofing",
-    subtitle:
-      "Verify a person's identity with their identity document and face.",
+    pause: {
+      pausedTitle: "Identity proofing is paused",
+      byPlatform:
+        "The platform administrator paused identity proofing for this organisation. Contact them to resume it.",
+      byOrganization:
+        "An administrator of this organisation switched identity proofing off.",
+      whatStops:
+        "While paused, nothing new starts: no requests, no customer API calls and no hosted links. Sessions already running still finish, and their webhooks still go out.",
+      turnOn: "Switch identity proofing on",
+      turnOff: "Switch off",
+      switchTitle: "Switch off identity proofing",
+      switchHint:
+        "Stops identity proofing for this organisation until an administrator switches it back on.",
+      confirmTitle: "Switch off identity proofing?",
+      platformColumn: "Identity proofing",
+      active: "Active",
+      pausedByPlatform: "Paused by you",
+      pausedByOrganization: "Switched off by the organisation",
+      platformPause: "Pause",
+      platformResume: "Resume",
+    },
     overview: {
       apiDocs: "API docs",
       title: "Overview",
@@ -425,6 +443,8 @@ export const en = {
         failed: "Failed",
         failedHint: "Did not pass the checks",
         expired: "Expired",
+        needsReview: "Needs review",
+        needsReviewHint: "Waiting for your decision",
         expiredHint: "Not finished within 10 minutes",
         noSessions: "No sessions yet",
       },
@@ -455,16 +475,11 @@ export const en = {
       },
     },
     requests: {
-      title: "Requests",
-      titleOwn: "Your requests",
       empty: "No requests yet.",
       subject: "Person",
       flow: "Flow",
       requestedBy: "Requested by",
-      status: "Status",
       assurance: "Assurance",
-      created: "Sent",
-      customer: "Customer",
       verifiedAs: "Verified as {{name}}",
     },
     methods: {
@@ -479,6 +494,7 @@ export const en = {
       rejected: "Failed",
       needsReview: "Needs review",
       expired: "Expired",
+      cancelled: "Cancelled",
     },
     rejectionReasons: {
       documentTypeNotAccepted: "document type not accepted by the flow",
@@ -488,6 +504,7 @@ export const en = {
       docTampered: "document chip data was tampered with",
       chipCloneDetected: "cloned document chip detected",
       docExpired: "document expired",
+      assuranceNotMet: "below the flow's required assurance level",
     },
     errors: {
       noEncryptionKey:
@@ -505,7 +522,12 @@ export const en = {
         "That flow is no longer assigned to this customer. Pick another one.",
       customerPaused:
         "Proofing is paused for this customer. An admin can resume it on the customer's page.",
+      proofingPaused: "Identity proofing is paused for this organisation.",
+      customerNoApiKey:
+        "This customer has no live API key yet. An admin can create one on the customer's API keys tab.",
       sessionOver: "This session has ended. Start a new one.",
+      deviceActive:
+        "The Idem app still has this session open: carry on there, or close it first.",
       methodUnavailable:
         "The identity proofing service cannot run Yivi app sessions yet. Choose the Idem app.",
       generic: "Something went wrong. Please try again.",
@@ -520,6 +542,7 @@ export const en = {
       active: "Active",
       paused: "Paused",
       needsAttention: "Needs attention",
+      setupNeeded: "Setup needed",
     },
     list: {
       search: "Search customers",
@@ -554,6 +577,11 @@ export const en = {
       resume: "Resume proofing",
       pausedNotice:
         "Proofing is paused for this customer: no new request can be sent until an admin resumes it.",
+      noLiveKeyNotice:
+        "This customer has no live API key yet: create one before sending requests. Test keys run in the sandbox only.",
+      noLiveKeyNoticeMember:
+        "This customer has no live API key yet, so no request can be sent. Ask an admin to create one.",
+      createApiKey: "Create API key",
       pauseConfirm: {
         title: "Pause proofing for {{name}}?",
         message:
@@ -688,13 +716,15 @@ export const en = {
         expiresIn: "Valid for {{time}}",
         expired: "This code has expired.",
         restart: "Start again",
+        startedElsewhere:
+          "This check was started in another window: carry on in the app there.",
         inProgress: "The session is open on the phone.",
+        newCode: "Show a new code",
+        newCodeHint:
+          "App closed, code expired, or another phone? A new code carries on where the session was.",
       },
       yiviEnded: "The Yivi app session ended: {{reason}}",
       yiviCodes: {
-        cancelled: "it was cancelled in the app.",
-        timeout: "it was not finished in time.",
-        invalidProof: "the shared data could not be verified.",
         photoMissing: "the shared card has no photo.",
         referenceNoFace: "no face was found on the shared photo.",
       },
@@ -720,17 +750,56 @@ export const en = {
           title: "Session ended",
           message: "The check was not finished in time.",
         },
+        review: {
+          title: "Waiting for review",
+          message:
+            "The check is done and needs a manual review before a decision.",
+        },
+        cancelled: {
+          title: "Check stopped",
+          message: "No identity check was done, and nothing was shared.",
+        },
         back: "Back to {{name}}",
         again: "Verify again",
       },
     },
     sessions: {
+      review: {
+        title: "Decide this review",
+        hint: "The checks could not decide on their own. Your decision settles the session and is sent to the customer.",
+        reason: "Reason",
+        reasonPlaceholder: "What you checked, and why you decided so",
+        reasonRequired: "Give a reason: it is kept in the audit log.",
+        approve: "Approve",
+        reject: "Reject",
+      },
       method: "Method",
       timeline: "Timeline",
       noEvents: "Nothing recorded yet.",
+      identity: {
+        show: "Show verified identity",
+        audited: "Each view is recorded in the audit log.",
+        title: "Verified identity",
+        none: "No identity: the check did not approve.",
+        name: "Name",
+        birthDate: "Date of birth",
+        nationality: "Nationality",
+        document: "Document",
+        passiveAuth: "Chip authenticity",
+        faceMatch: "Face match",
+        liveness: "Liveness",
+        checks: {
+          valid: "Valid",
+          invalid: "Invalid",
+          not_performed: "Not performed",
+          passed: "Passed",
+          failed: "Failed",
+        },
+      },
       filterLabel: "Filter sessions",
       filters: {
         all: "All {{count}}",
+        review: "Needs review {{count}}",
         verified: "Verified {{count}}",
         failed: "Failed {{count}}",
         expired: "Expired {{count}}",
@@ -768,6 +837,9 @@ export const en = {
       days_other: "{{count}} days",
       nameTitle: "Name",
       nameHint: "Shown to your members and in the audit log.",
+      redirectOriginsTitle: "Redirect origins",
+      redirectOriginsHint:
+        "One per line, such as https://portal.example.com. A hosted page may send its subject back to these origins and be embedded on them.",
       save: "Save",
       removeTitle: "Remove customer",
       removeHint:
@@ -815,6 +887,7 @@ export const en = {
       supportPlaceholder: "klantenservice@example.nl",
       privacyUrl: "Privacy statement URL",
       privacyPlaceholder: "https://example.nl/privacy",
+      hidePoweredBy: "Leave the “Powered by Yivi” line off the hosted page",
       discard: "Discard",
       save: "Save branding",
       preview: {
@@ -829,7 +902,7 @@ export const en = {
     },
     apiKeys: {
       intro:
-        "The customer's backend uses these keys to create sessions and read their outcome through the proofing API.",
+        "Your backend uses these keys to create sessions and read their outcome through the proofing API. Only active keys work.",
       create: "Create API key",
       name: "Name",
       namePlaceholder: "Production backend",
@@ -839,16 +912,23 @@ export const en = {
       lastUsed: "Last used",
       neverUsed: "Never",
       empty: "No API keys yet.",
+      status: "Status",
+      active: "Active",
       revoked: "Revoked",
       revoke: "Revoke",
+      live: "Live",
+      test: "Test",
+      testLabel: "Test key",
+      testHint:
+        "Sessions made with a test key run in a sandbox: they resolve at once to a scripted outcome (approve by default), send no e-mail and stay out of the counts.",
       revokeConfirm: {
         title: "Revoke {{name}}?",
         message:
-          "The customer's backend can no longer use this key, straight away. This cannot be undone.",
+          "Anything using this key stops working straight away. This cannot be undone.",
       },
       createdTitle: "Your new API key",
       createdHint:
-        "Copy it now and hand it to the customer securely: it is not shown again. Only a hash of it is kept.",
+        "Copy it now and store it somewhere safe, like your backend's secret store: it is not shown again. Only a hash of it is kept.",
       usageTitle: "Using the API",
       usageHint:
         "Send the key as a Bearer token. Without a flowId the customer's default flow is used; with sendMail false the answer's deepLink is yours to show as a QR code.",
@@ -878,7 +958,7 @@ export const en = {
       rotateConfirm: {
         title: "Rotate the signing secret?",
         message:
-          "Events are signed with the new secret from now on, including those waiting for a retry. The customer has to switch to it.",
+          "Events are signed with the new secret from now on, including those waiting for a retry. Switch your receiver to it.",
       },
       removeConfirm: {
         title: "Remove the webhook endpoint?",
@@ -887,9 +967,14 @@ export const en = {
       },
       secretTitle: "Your signing secret",
       secretHint:
-        "Copy it now and hand it to the customer securely: it is not shown again. The customer checks the Yivi-Signature header with it.",
+        "Copy it now and store it with your receiver: it is not shown again. Check the Yivi-Signature header with it.",
       recent: "Recent deliveries",
-      notConfigured: "Set up an endpoint to see its deliveries here.",
+      defaultTag: "Wallet default",
+      defaultBody:
+        "Session results are delivered to the Yivi Business Wallet's own endpoint. They show on the Sessions tab, through the API, and in the audit log under this customer.",
+      defaultHint:
+        "Hosting your own receiver? Add its URL and the wallet also POSTs each signed event there.",
+      useOwn: "Use own endpoint",
       noDeliveries: "No events sent yet.",
       queuedTag: "Queued",
       noAnswer: "No answer",
@@ -913,6 +998,23 @@ export const en = {
       default: "Default",
       save: "Save available flows",
     },
+    hosted: {
+      title: "Hosted page",
+      enabled: "Customers may send links to a hosted page for this flow",
+      locales: "Languages",
+      localesHint:
+        "Tick none to offer every language. The page opens in the session's language, then the subject's browser language.",
+      completion: "When the check ends",
+      completions: {
+        redirect:
+          "Send the subject to the session's redirect URL, or show a thank-you page without one",
+        done: "Always show the thank-you page (sessions may not carry a redirect URL)",
+      },
+      save: "Save hosted page",
+      previewAs: "Preview as customer",
+      preview: "Preview of the hosted page",
+      noCustomer: "Add a customer to preview the page in its branding.",
+    },
     versions: {
       title: "Versions",
       hint: "Requests already sent keep the version they started on. Activate an earlier version to roll back.",
@@ -923,6 +1025,11 @@ export const en = {
       document_capture: "Document scan (MRZ)",
       nfc_read: "NFC chip scan",
       face_verification: "Face verification",
+    },
+    faceProviders: {
+      regula: "Regula",
+      engine: "Built-in engine",
+      Iris: "Iris SDK",
     },
     checks: {
       passiveAuth: "Passive authentication",
@@ -958,6 +1065,9 @@ export const en = {
       stepsOrder: "Will be sent in this order: {{steps}}",
       faceLocationNative:
         "Face verification runs in the vcmrtd app (native): the person has no browser step.",
+      faceProvider: "Face verification provider",
+      faceProviderHint:
+        "Regula checks liveness in the app and the proofing service matches the face; the built-in engine uses the proofing service's own models. Only the built-in engine also runs in the Yivi app.",
       faceWithoutChip:
         "Without the NFC chip scan there is no chip photo to compare the face against, so members cannot be sent this flow.",
       dataTitle: "Requested result data",
@@ -995,6 +1105,12 @@ export const en = {
         retentionSeconds: "Enter a whole number of seconds.",
       },
     },
+  },
+  proofLink: {
+    notFound: "This link does not exist, or it was removed.",
+    decline: "Decline",
+    redirecting: "Taking you back…",
+    poweredBy: "Powered by Yivi",
   },
   vog: {
     title: "Submit your VOG",
@@ -1191,7 +1307,6 @@ export const en = {
     identityProofingWebhookSaved: "Webhook saved",
     identityProofingWebhookRemoved: "Webhook removed",
     identityProofingWebhookTestQueued: "Test event queued",
-    identityProofingCustomerSettingsSaved: "Session settings saved",
     identityProofingCustomerFlowsSaved: "Assigned flows saved",
     notificationSettingsSaved: "Notification settings saved",
     provisioningSettingsSaved: "Directory sync settings saved",
@@ -1291,6 +1406,8 @@ export const en = {
     loadMore: "Load more",
     empty: "No activity has been recorded yet.",
     system: "System",
+    apiKeyActor: "API key {{prefix}}…",
+    hostedLinkActor: "Subject, through a hosted link",
     columns: {
       when: "When",
       actor: "Actor",
@@ -1463,10 +1580,14 @@ export const en = {
       identityProofingSessionStarted: "Started identity proofing",
       identityProofingSessionEnded:
         "Identity proofing session ended unfinished",
+      identityProofingSessionCancelled: "Identity proofing session cancelled",
+      identityProofingSessionPurged: "Identity proofing session erased",
+      identityProofingResultRead: "Read identity proofing result",
       identityProofingCompleted: "Identity proofing completed",
       identityProofingApproved: "Identity verified",
       identityProofingRejected: "Identity verification rejected",
       identityProofingNeedsReview: "Identity verification needs review",
+      identityProofingReviewDecided: "Identity verification review decided",
       identityProofingCustomerCreated: "Added identity proofing customer",
       identityProofingCustomerUpdated: "Updated identity proofing customer",
       identityProofingCustomerFlowsConfigured:
@@ -1477,6 +1598,9 @@ export const en = {
       identityProofingWebhookConfigured: "Configured customer webhook",
       identityProofingWebhookSecretRotated: "Rotated customer webhook secret",
       identityProofingWebhookRemoved: "Removed customer webhook",
+      identityProofingPaused: "Paused identity proofing",
+      identityProofingFlowHostedConfigured: "Changed a flow's hosted page",
+      identityProofingResumed: "Resumed identity proofing",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
     },

@@ -4,11 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,11 +25,9 @@ const (
 	// subject's document.
 	stubProofedName = "Anna Jansen"
 	stubIDBytes     = 8
-	// stubAPIBaseURL stands in for IPS's PUBLIC_BASE_URL in a stub deep link,
-	// stubYiviURL for its Yivi server in a stub session pointer. .invalid never
-	// resolves (RFC 2606).
+	// stubAPIBaseURL stands in for IPS's PUBLIC_BASE_URL in a stub deep link.
+	// .invalid never resolves (RFC 2606).
 	stubAPIBaseURL = "http://ips.stub.invalid"
-	stubYiviURL    = "http://yivi.stub.invalid"
 	// stubStableFrames and stubMaxAttempts mirror IPS's bound-login defaults.
 	stubStableFrames = 3
 	stubMaxAttempts  = 40
@@ -37,12 +36,17 @@ const (
 // Stub is an in-process IPS for dev/CI and tests. Flows and their versions live
 // in memory per API key (a restart empties them). No phone can reach a stub
 // session, so it stays created (pending) until it expires, unless a test sets
-// Outcome to stand in for the subject finishing the vcmrtd flow, or the Yivi
-// disclosure and face check (which stay pending while Outcome is empty).
+// Outcome to stand in for the subject finishing the vcmrtd flow, or the face
+// check after a Yivi disclosure (which stays pending while Outcome is empty).
 type Stub struct {
 	Outcome Status
 
+	// onChange stands in for IPS's push: told a session decided (Outcome).
+	onChange func(sessionID string)
+
 	mu       sync.Mutex
+	tenants  map[string]bool
+	keys     map[string]KeyEnvironment
 	flows    map[string][]Flow
 	sessions map[string]stubSession
 }
@@ -54,29 +58,58 @@ type stubSession struct {
 	flowVersion int
 	method      Method
 	expiresAt   time.Time
+	// scripted is the outcome a ScriptedOutcome session resolved to at once.
+	scripted *Result
 }
+
+// stubDecisionDelay is how long the stub's subject takes to finish, so the
+// session is attached before the change is pushed.
+const stubDecisionDelay = 2 * time.Second
+
+// OnSessionChange registers the listener told when a stub session decides, as
+// IPS would push it. Call before serving.
+func (s *Stub) OnSessionChange(fn func(sessionID string)) { s.onChange = fn }
 
 // NewStub builds an empty Stub whose sessions never decide.
 func NewStub() *Stub {
-	return &Stub{flows: map[string][]Flow{}, sessions: map[string]stubSession{}}
+	return &Stub{tenants: map[string]bool{}, keys: map[string]KeyEnvironment{}, flows: map[string][]Flow{}, sessions: map[string]stubSession{}}
 }
 
 func (*Stub) Ping(context.Context) error { return nil }
 
-func (*Stub) CreateTenant(context.Context, string) (Tenant, error) {
-	id, err := stubID("tenant")
-	if err != nil {
-		return Tenant{}, err
-	}
+func (s *Stub) CreateTenant(_ context.Context, id, _ string) (Tenant, error) {
 	secret, err := stubID("whsec")
 	if err != nil {
 		return Tenant{}, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tenants[id] {
+		return Tenant{}, fmt.Errorf("proofingprovider: create tenant: %w", ErrTenantExists)
+	}
+	s.tenants[id] = true
 	return Tenant{ID: id, WebhookSecret: secret}, nil
 }
 
-func (*Stub) CreateAPIKey(_ context.Context, _ string, _ []string) (string, error) {
-	return stubID("sk_live")
+func (s *Stub) RotateWebhookSecret(_ context.Context, id string) (string, error) {
+	s.mu.Lock()
+	known := s.tenants[id]
+	s.mu.Unlock()
+	if !known {
+		return "", ErrNotFound
+	}
+	return stubID("whsec")
+}
+
+func (s *Stub) CreateAPIKey(_ context.Context, _ string, env KeyEnvironment, _ []string) (string, error) {
+	key, err := stubID("sk_" + string(env))
+	if err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.keys[key] = env
+	return key, nil
 }
 
 func (s *Stub) ListFlows(_ context.Context, apiKey string) ([]Flow, error) {
@@ -173,6 +206,16 @@ func stubValidate(in FlowSpec) error {
 func (s *Stub) CreateSession(_ context.Context, apiKey string, in SessionInput) (Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// As at IPS: a test key only runs scripted outcomes, a live key never.
+	switch env, known := s.keys[apiKey]; {
+	case known && env == KeyTest && in.ScriptedOutcome == "":
+		return Session{}, &RejectedError{Status: http.StatusBadRequest, Message: "a test API key only creates sandbox sessions: set scriptedOutcome"}
+	case known && env == KeyLive && in.ScriptedOutcome != "":
+		return Session{}, &RejectedError{Status: http.StatusBadRequest, Message: "scriptedOutcome is only available for sandbox tenants"}
+	}
+	if in.ScriptedOutcome != "" {
+		return s.createScriptedLocked(apiKey, in)
+	}
 	version := 0
 	for _, f := range s.flows[apiKey] {
 		if f.ID == in.FlowID && f.Active {
@@ -206,16 +249,62 @@ func (s *Stub) createLocked(apiKey, flowID string, version int, ttl time.Duratio
 		apiKey: apiKey, token: token, flowID: flowID, flowVersion: version, method: method, expiresAt: now.Add(ttl),
 	}
 	sess := Session{ID: id, Token: token, ExpiresAt: now.Add(ttl), FlowVersion: version}
+	if s.Outcome != "" && s.onChange != nil {
+		notify := s.onChange
+		time.AfterFunc(stubDecisionDelay, func() { notify(id) })
+	}
 	if method != MethodYivi {
 		sess.Claim = stubClaim(id, now)
 	}
 	return sess, nil
 }
 
+// createScriptedLocked resolves a ScriptedOutcome session at once, as an IPS
+// sandbox tenant does: no flow, no subject, no claim.
+func (s *Stub) createScriptedLocked(apiKey string, in SessionInput) (Session, error) {
+	res, err := scriptedResult(in.ScriptedOutcome)
+	if err != nil {
+		return Session{}, err
+	}
+	id, err := stubID("ses")
+	if err != nil {
+		return Session{}, err
+	}
+	token, err := stubID("tok")
+	if err != nil {
+		return Session{}, err
+	}
+	now := time.Now().UTC()
+	s.sessions[id] = stubSession{apiKey: apiKey, token: token, method: in.Method, expiresAt: now.Add(stubSessionTTL), scripted: &res}
+	return Session{ID: id, Token: token, ExpiresAt: now.Add(stubSessionTTL)}, nil
+}
+
+// scriptedResult is what an IPS sandbox resolves a scripted outcome to.
+func scriptedResult(outcome string) (Result, error) {
+	now := time.Now().UTC()
+	switch {
+	case outcome == "approve":
+		return Result{
+			Status: StatusApproved, CompletedAt: &now, AssuranceLevel: stubAssuranceLevel,
+			EIDASLevel: stubAssuranceLevel, Name: stubProofedName,
+		}, nil
+	case outcome == "needs_review":
+		return Result{Status: StatusNeedsReview, CompletedAt: &now}, nil
+	case outcome == "expire":
+		return Result{Status: StatusExpired}, nil
+	case strings.HasPrefix(outcome, "reject:") && len(outcome) > len("reject:"):
+		return Result{Status: StatusRejected, ErrorCode: strings.TrimPrefix(outcome, "reject:"), CompletedAt: &now}, nil
+	}
+	return Result{}, &RejectedError{Status: http.StatusBadRequest, Message: "invalid scriptedOutcome"}
+}
+
 func (s *Stub) SessionResult(_ context.Context, apiKey, sessionID, sessionToken string) (Result, error) {
 	sess, err := s.session(apiKey, sessionID, sessionToken)
 	if err != nil {
 		return Result{}, err
+	}
+	if sess.scripted != nil {
+		return *sess.scripted, nil
 	}
 	if time.Now().After(sess.expiresAt) {
 		return Result{Status: StatusExpired}, nil
@@ -235,6 +324,61 @@ func (s *Stub) SessionResult(_ context.Context, apiKey, sessionID, sessionToken 
 		res.Name = stubProofedName
 	}
 	return res, nil
+}
+
+// SessionIdentity is SessionResult with the stub subject's identity and a
+// valid chip read, for an approved session.
+func (s *Stub) SessionIdentity(ctx context.Context, apiKey, sessionID, sessionToken string) (Identity, error) {
+	res, err := s.SessionResult(ctx, apiKey, sessionID, sessionToken)
+	if err != nil {
+		return Identity{}, err
+	}
+	id := Identity{Result: res}
+	if res.Status == StatusApproved {
+		id.GivenName, id.FamilyName, id.BirthDate, id.Nationality = "Anna", "Jansen", "1990-04-12", "NLD"
+		id.Evidence = &Evidence{
+			Type: EvidenceEMRTD, DocumentType: "P", IssuingState: "NLD", ExpiryDate: "2031-02-01",
+			PassiveAuth: CheckValid, ActiveAuth: CheckValid, Liveness: "passed",
+		}
+		if res.Method == MethodYivi {
+			id.Evidence.Type = EvidenceYivi
+		}
+	}
+	return id, nil
+}
+
+// DecideReview settles a session in needs_review, as IPS's decision route does.
+func (s *Stub) DecideReview(ctx context.Context, apiKey, sessionID, sessionToken string, d ReviewDecision) error {
+	current, err := s.SessionResult(ctx, apiKey, sessionID, sessionToken)
+	if err != nil {
+		return err
+	}
+	if current.Status != StatusNeedsReview {
+		return &RejectedError{Status: http.StatusConflict, Message: "the session is not under review"}
+	}
+	now := time.Now().UTC()
+	res := Result{Status: StatusRejected, ErrorCode: d.ErrorCode, CompletedAt: &now, Method: current.Method}
+	if d.Approve {
+		res = Result{
+			Status: StatusApproved, CompletedAt: &now, Method: current.Method,
+			AssuranceLevel: stubAssuranceLevel, EIDASLevel: stubAssuranceLevel, Name: stubProofedName,
+		}
+	} else if res.ErrorCode == "" {
+		res.ErrorCode = "MANUAL_REVIEW_REJECTED"
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess := s.sessions[sessionID]
+	sess.scripted = &res
+	s.sessions[sessionID] = sess
+	return nil
+}
+
+// SessionStatus is SessionResult without the name, like IPS's status route.
+func (s *Stub) SessionStatus(ctx context.Context, apiKey, sessionID, sessionToken string) (Result, error) {
+	res, err := s.SessionResult(ctx, apiKey, sessionID, sessionToken)
+	res.Name = ""
+	return res, err
 }
 
 func (s *Stub) session(apiKey, sessionID, sessionToken string) (stubSession, error) {
@@ -264,25 +408,13 @@ func (s *Stub) yiviSession(sessionToken string) (string, error) {
 	return "", ErrNotFound
 }
 
-func (s *Stub) StartYiviDisclosure(_ context.Context, sessionToken string) (YiviStart, error) {
-	id, err := s.yiviSession(sessionToken)
-	if err != nil {
-		return YiviStart{}, err
-	}
-	ptr, err := json.Marshal(map[string]string{"u": stubYiviURL + "/irma/session/" + id, "irmaqr": "disclosing"})
-	if err != nil {
-		return YiviStart{}, fmt.Errorf("proofingprovider: stub session pointer: %w", err)
-	}
-	return YiviStart{SessionPtr: ptr, ExpiresAt: time.Now().UTC().Add(stubSessionTTL)}, nil
-}
-
-// YiviDisclosureResult stays pending until a test sets Outcome.
-func (s *Stub) YiviDisclosureResult(_ context.Context, sessionToken string) (YiviDisclosure, error) {
-	if _, err := s.yiviSession(sessionToken); err != nil {
+// SubmitReference takes any photo: the stub has no face to find in it.
+func (s *Stub) SubmitReference(_ context.Context, apiKey, sessionID, sessionToken string, _ Reference) (YiviDisclosure, error) {
+	if _, err := s.session(apiKey, sessionID, sessionToken); err != nil {
 		return YiviDisclosure{}, err
 	}
-	if s.Outcome == "" {
-		return YiviDisclosure{}, ErrDisclosurePending
+	if _, err := s.yiviSession(sessionToken); err != nil {
+		return YiviDisclosure{}, err
 	}
 	return YiviDisclosure{OK: true, StableFrames: stubStableFrames, MaxAttempts: stubMaxAttempts}, nil
 }
@@ -303,6 +435,51 @@ func (s *Stub) SubmitFaceFrame(_ context.Context, sessionToken, _ string) (FaceV
 		verdict.Decision = FaceDecisionPending
 	}
 	return verdict, nil
+}
+
+// CancelSession ends a stub session that has not decided, as IPS does.
+func (s *Stub) CancelSession(ctx context.Context, apiKey, sessionID, sessionToken string) error {
+	current, err := s.SessionResult(ctx, apiKey, sessionID, sessionToken)
+	if err != nil {
+		return err
+	}
+	if current.Status == StatusApproved || current.Status == StatusRejected {
+		return &RejectedError{Status: http.StatusConflict, Message: "session already finished"}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess := s.sessions[sessionID]
+	sess.expiresAt = time.Now()
+	s.sessions[sessionID] = sess
+	return nil
+}
+
+// DeleteSession forgets a stub session.
+func (s *Stub) DeleteSession(_ context.Context, apiKey, sessionID, sessionToken string) error {
+	if _, err := s.session(apiKey, sessionID, sessionToken); err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, sessionID)
+	return nil
+}
+
+// SessionHandover hands out a fresh claim link while an Idem session runs; the
+// stub has no devices, so its app is never still active.
+func (s *Stub) SessionHandover(_ context.Context, apiKey, sessionID, sessionToken string) (Claim, error) {
+	sess, err := s.session(apiKey, sessionID, sessionToken)
+	if err != nil {
+		return Claim{}, err
+	}
+	now := time.Now()
+	if sess.method != MethodIdem {
+		return Claim{}, &RejectedError{Status: http.StatusConflict, Message: "only nfc_passport sessions have device slots"}
+	}
+	if !now.Before(sess.expiresAt) {
+		return Claim{}, &RejectedError{Status: http.StatusGone, Message: "session expired", Code: "session_expired"}
+	}
+	return *stubClaim(sessionID, now), nil
 }
 
 // stubClaim has IPS's deep link shape (device_access.go grantResponse), the

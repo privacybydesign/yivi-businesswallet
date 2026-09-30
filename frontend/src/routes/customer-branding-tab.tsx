@@ -30,6 +30,7 @@ interface Draft {
   primaryColor: string;
   supportContact: string;
   privacyUrl: string;
+  hidePoweredBy: boolean;
   logo: File | null;
   removeLogo: boolean;
 }
@@ -41,6 +42,7 @@ function draftFrom(customer: ProofingCustomer): Draft {
     primaryColor: b.primaryColor,
     supportContact: b.supportContact,
     privacyUrl: b.privacyUrl,
+    hidePoweredBy: b.hidePoweredBy,
     logo: null,
     removeLogo: false,
   };
@@ -79,7 +81,8 @@ export function BrandingTab({
     draft.displayName !== saved.displayName ||
     draft.primaryColor !== saved.primaryColor ||
     draft.supportContact !== saved.supportContact ||
-    draft.privacyUrl !== saved.privacyUrl;
+    draft.privacyUrl !== saved.privacyUrl ||
+    draft.hidePoweredBy !== saved.hidePoweredBy;
   const colorInvalid =
     draft.primaryColor !== "" && !isHexColor(draft.primaryColor);
   const logoUri =
@@ -101,6 +104,7 @@ export function BrandingTab({
         primaryColor: draft.primaryColor,
         supportContact: draft.supportContact,
         privacyUrl: draft.privacyUrl,
+        hidePoweredBy: draft.hidePoweredBy,
         logo: draft.logo ?? undefined,
         removeLogo: draft.removeLogo,
       },
@@ -284,6 +288,15 @@ export function BrandingTab({
                   onChange={(e) => set("privacyUrl", e.target.value)}
                 />
               </div>
+              <label className="flex items-center gap-2 text-[13px]">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={draft.hidePoweredBy}
+                  onChange={(e) => set("hidePoweredBy", e.target.checked)}
+                />
+                {t("customers.branding.hidePoweredBy")}
+              </label>
             </div>
             {save.isError && (
               <p className={ERROR}>{proofingErrorMessage(save.error, t)}</p>

@@ -30,8 +30,8 @@ const CAPTION =
 // The masked middle of a secret whose last four characters are shown.
 const SECRET_MASK = "••••••••••••••••";
 
-// The customer's webhook endpoint, which the wallet notifies of every session
-// outcome, expiry and purge, and the deliveries it recently made.
+// Where the customer's session results go: the wallet's own endpoint by
+// default, or one the customer hosts, with the deliveries made to it.
 export function WebhooksTab({
   slug,
   customer,
@@ -53,12 +53,14 @@ export function WebhooksTab({
   const hook = webhook.data;
   return (
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-      {!hook.configured || editing ? (
+      {!hook.configured && !editing ? (
+        <DefaultEndpointCard onCustomize={() => setEditing(true)} />
+      ) : editing ? (
         <EndpointForm
           slug={slug}
           customerId={customer.id}
           webhook={hook}
-          onCancel={hook.configured ? () => setEditing(false) : undefined}
+          onCancel={() => setEditing(false)}
           onSaved={(saved) => {
             setEditing(false);
             if (saved.secret) {
@@ -75,11 +77,7 @@ export function WebhooksTab({
           onRotated={setSecret}
         />
       )}
-      <DeliveriesCard
-        slug={slug}
-        customerId={customer.id}
-        enabled={hook.configured}
-      />
+      <DeliveriesCard slug={slug} customerId={customer.id} />
       {secret && (
         <SecretReveal
           title={t("customers.webhooks.secretTitle")}
@@ -193,6 +191,39 @@ function EndpointForm({
   );
 }
 
+// Without its own endpoint a customer's results go to the wallet's endpoint,
+// which IPS pushes every session change to; they show in Sessions and the audit log.
+function DefaultEndpointCard({
+  onCustomize,
+}: {
+  onCustomize: () => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <Card>
+      <div className="border-line flex items-center justify-between gap-3 border-b px-5 py-4">
+        <h2 className="font-display text-[17px] font-bold">
+          {t("customers.webhooks.endpoint")}
+        </h2>
+        <Tag tone="green" dot>
+          {t("customers.webhooks.defaultTag")}
+        </Tag>
+      </div>
+      <div className="flex flex-col gap-3 px-5 py-4">
+        <p className="text-ink text-[13px]">
+          {t("customers.webhooks.defaultBody")}
+        </p>
+        <p className={HINT}>{t("customers.webhooks.defaultHint")}</p>
+        <div>
+          <Button size="sm" variant="secondary" onClick={onCustomize}>
+            {t("customers.webhooks.useOwn")}
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function EndpointCard({
   slug,
   customerId,
@@ -289,7 +320,7 @@ function EndpointCard({
         <Button size="sm" variant="ghost" onClick={() => setConfirm("rotate")}>
           {t("customers.webhooks.rotate")}
         </Button>
-        <Button size="sm" variant="ghost" onClick={onEdit}>
+        <Button size="sm" variant="ghost" className="ml-auto" onClick={onEdit}>
           {t("customers.webhooks.edit")}
         </Button>
         <Button size="sm" variant="ghost" onClick={() => setConfirm("remove")}>
@@ -333,18 +364,12 @@ function EndpointCard({
 function DeliveriesCard({
   slug,
   customerId,
-  enabled,
 }: {
   slug: string;
   customerId: string;
-  enabled: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const deliveries = useProofingWebhookDeliveriesQuery(
-    slug,
-    customerId,
-    enabled,
-  );
+  const deliveries = useProofingWebhookDeliveriesQuery(slug, customerId);
   const formatWhen = useWhenFormatter();
   const rows = deliveries.data ?? [];
 
@@ -353,11 +378,7 @@ function DeliveriesCard({
       <h2 className="font-display border-line border-b px-5 py-4 text-[17px] font-bold">
         {t("customers.webhooks.recent")}
       </h2>
-      {!enabled ? (
-        <p className="text-ink-soft px-5 py-4 text-[13px]">
-          {t("customers.webhooks.notConfigured")}
-        </p>
-      ) : deliveries.isError ? (
+      {deliveries.isError ? (
         <p className={`${ERROR} px-5 py-4`}>
           {proofingErrorMessage(deliveries.error, t)}
         </p>
@@ -374,16 +395,21 @@ function DeliveriesCard({
               key={d.id}
               className="flex items-center gap-4 px-5 py-3 text-[12.5px]"
             >
-              <span className="text-ink w-32 shrink-0 font-mono">
+              <span className="text-ink w-36 shrink-0 font-mono">
                 {d.event}
               </span>
-              <span className="text-ink-soft w-18 shrink-0 font-mono">
+              <span className="text-ink-soft min-w-0 flex-1 truncate font-mono">
                 {d.sessionId ? shortRequestId(d.sessionId) : "—"}
               </span>
-              <span className="min-w-0 flex-1 whitespace-nowrap">
+              {d.endpointUrl === undefined && (
+                <span className="text-muted shrink-0 whitespace-nowrap">
+                  {t("customers.webhooks.defaultTag")}
+                </span>
+              )}
+              <span className="shrink-0 whitespace-nowrap">
                 <DeliveryTag delivery={d} />
               </span>
-              <span className="text-muted shrink-0 whitespace-nowrap">
+              <span className="text-muted w-20 shrink-0 text-right whitespace-nowrap">
                 {formatWhen(d.lastAttemptAt ?? d.createdAt)}
               </span>
             </li>

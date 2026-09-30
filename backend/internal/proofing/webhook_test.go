@@ -55,3 +55,26 @@ func TestNewWebhookSecretIsRecognisableAndUnique(t *testing.T) {
 		t.Errorf("secretLast4 = %q", got)
 	}
 }
+
+func TestVerifyWebhookSignature(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	body := []byte(`{"type":"session.verified"}`)
+	signed := webhookSignature("whsec_a", now, body)
+	for name, tc := range map[string]struct {
+		secret, header string
+		body           []byte
+		ok             bool
+	}{
+		"valid":        {"whsec_a", signed, body, true},
+		"other secret": {"whsec_b", signed, body, false},
+		"other body":   {"whsec_a", signed, []byte(`{}`), false},
+		"stale":        {"whsec_a", webhookSignature("whsec_a", now.Add(-webhookMaxSkew-time.Second), body), body, false},
+		"no v1":        {"whsec_a", "t=1800000000", body, false},
+		"empty":        {"whsec_a", "", body, false},
+	} {
+		err := verifyWebhookSignature(tc.secret, tc.header, tc.body, now)
+		if (err == nil) != tc.ok {
+			t.Errorf("%s: verifyWebhookSignature = %v, want ok %v", name, err, tc.ok)
+		}
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -73,35 +74,73 @@ func auditCount(t *testing.T, pool *pgxpool.Pool, action string) int {
 	return n
 }
 
-func TestSettingsStoreSealsKeyAndSavesOnce(t *testing.T) {
+// testTenant is a provisioned tenant's secrets, for Provision.
+func testTenant(context.Context) (ProvisionedTenant, error) {
+	return ProvisionedTenant{WebhookSecret: "whsec_secret", LiveKey: "sk_live_secret", TestKey: "sk_test_secret"}, nil
+}
+
+func TestSettingsStoreSealsKeysAndProvisionsOnce(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewSettingsStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
 	ctx := context.Background()
 
-	saved, err := store.Save(ctx, orgID, "t1", "sk_live_secret", "whsec_secret")
-	if err != nil || !saved {
-		t.Fatalf("Save = %v, %v; want saved", saved, err)
+	if _, err := store.WebhookSecret(ctx, orgID); !errors.Is(err, ErrNotProvisioned) {
+		t.Errorf("WebhookSecret before provisioning = %v, want ErrNotProvisioned", err)
 	}
-	again, err := store.Save(ctx, orgID, "t2", "sk_live_other", "")
-	if err != nil || again {
-		t.Fatalf("second Save = %v, %v; want not saved", again, err)
+	// Concurrent first uses: the lock lets one create the tenant.
+	var creates atomic.Int32
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			if err := store.Provision(ctx, orgID, func(ctx context.Context) (ProvisionedTenant, error) {
+				creates.Add(1)
+				return testTenant(ctx)
+			}); err != nil {
+				t.Errorf("Provision: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+	if n := creates.Load(); n != 1 {
+		t.Errorf("creates = %d, want 1", n)
 	}
 
 	var stored []byte
-	if err := pool.QueryRow(ctx, `SELECT api_key_ciphertext FROM org_identity_proofing_settings WHERE organization_id = $1`,
-		orgID).Scan(&stored); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT api_key_ciphertext || test_api_key_ciphertext || webhook_secret_ciphertext
+		FROM org_identity_proofing_settings WHERE organization_id = $1`, orgID).Scan(&stored); err != nil {
 		t.Fatalf("read row: %v", err)
 	}
-	if bytes.Contains(stored, []byte("sk_live_secret")) {
-		t.Error("the API key is stored in the clear")
+	if bytes.Contains(stored, []byte("sk_live_secret")) || bytes.Contains(stored, []byte("sk_test_secret")) ||
+		bytes.Contains(stored, []byte("whsec_secret")) {
+		t.Error("a key or the webhook secret is stored in the clear")
 	}
-	key, err := store.APIKey(ctx, orgID)
-	if err != nil || key != "sk_live_secret" {
-		t.Errorf("APIKey = %q, %v; want the first saved key", key, err)
+	for mode, want := range map[Mode]string{ModeLive: "sk_live_secret", ModeTest: "sk_test_secret"} {
+		if key, err := store.APIKey(ctx, orgID, mode); err != nil || key != want {
+			t.Errorf("APIKey(%s) = %q, %v; want %q", mode, key, err, want)
+		}
+	}
+	if secret, err := store.WebhookSecret(ctx, orgID); err != nil || secret != "whsec_secret" {
+		t.Errorf("WebhookSecret = %q, %v", secret, err)
 	}
 	if n := auditCount(t, pool, audit.IdentityProofingProvisioned); n != 1 {
 		t.Errorf("provisioned audits = %d, want 1", n)
+	}
+}
+
+func TestSettingsStoreStoresNothingWhenCreateFails(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewSettingsStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	failed := errors.New("ips down")
+	err := store.Provision(context.Background(), orgID, func(context.Context) (ProvisionedTenant, error) {
+		return ProvisionedTenant{}, failed
+	})
+	if !errors.Is(err, failed) {
+		t.Fatalf("Provision = %v, want the create error", err)
+	}
+	if _, err := store.APIKey(context.Background(), orgID, ModeLive); !errors.Is(err, ErrNotProvisioned) {
+		t.Errorf("APIKey = %v, want ErrNotProvisioned", err)
 	}
 }
 
@@ -110,10 +149,10 @@ func TestSettingsStoreWithoutKeyRefuses(t *testing.T) {
 	store := NewSettingsStore(pool, audit.NopRecorder{}, nil)
 	orgID := makeOrg(t, pool, "acme")
 
-	if _, err := store.Save(context.Background(), orgID, "t1", "sk", ""); !errors.Is(err, ErrNoEncryptionKey) {
-		t.Errorf("Save = %v, want ErrNoEncryptionKey", err)
+	if err := store.Provision(context.Background(), orgID, testTenant); !errors.Is(err, ErrNoEncryptionKey) {
+		t.Errorf("Provision = %v, want ErrNoEncryptionKey", err)
 	}
-	if _, err := store.APIKey(context.Background(), orgID); !errors.Is(err, ErrNotProvisioned) {
+	if _, err := store.APIKey(context.Background(), orgID, ModeLive); !errors.Is(err, ErrNotProvisioned) {
 		t.Errorf("APIKey = %v, want ErrNotProvisioned", err)
 	}
 }
@@ -123,8 +162,8 @@ func TestSettingsStoreReplacesFlowSelection(t *testing.T) {
 	store := NewSettingsStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
 	ctx := context.Background()
-	if _, err := store.Save(ctx, orgID, "t1", "sk", ""); err != nil {
-		t.Fatalf("Save: %v", err)
+	if err := store.Provision(ctx, orgID, testTenant); err != nil {
+		t.Fatalf("Provision: %v", err)
 	}
 
 	empty, err := store.FlowSelection(ctx, orgID)
@@ -163,7 +202,10 @@ func memberSubject(m Member) Subject {
 func newStoredRequest(orgID, requestedBy uuid.UUID, subject Subject) NewStoredRequest {
 	return NewStoredRequest{
 		ID: uuid.New(), OrgID: orgID, RequestedBy: &requestedBy, Subject: subject,
-		Flow:          proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Name: "Passport + face"}, ID: "f1", Version: 3},
+		Flow: proofingprovider.Flow{
+			FlowSpec: proofingprovider.FlowSpec{Name: "Passport + face", RequiredAssuranceLevel: eidasSubstantial},
+			ID:       "f1", Version: 3,
+		},
 		LinkExpiresAt: time.Now().Add(SessionTTL),
 	}
 }
@@ -216,8 +258,9 @@ func TestRequestStoreLifecycle(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	if req.Status != StatusPending || req.RequestedByName != "Sam de Vries" || req.SubjectUserID == nil ||
-		*req.SubjectUserID != subjectID || req.FlowVersion != 3 || req.session != nil {
-		t.Errorf("created = %+v; want a pending request with no session yet", req)
+		*req.SubjectUserID != subjectID || req.FlowVersion != 3 || req.RequiredAssuranceLevel != eidasSubstantial ||
+		req.session != nil {
+		t.Errorf("created = %+v; want a pending request with the flow's level and no session yet", req)
 	}
 
 	// Sending attaches the session once; a second attach is refused.
@@ -302,6 +345,76 @@ func TestRequestStoreEndSessionExpiresTheRequest(t *testing.T) {
 	ended := onlyRequest(t, store, orgID)
 	if ended.needsReconcile() || ended.liveSession(time.Now()) != nil || ended.EffectiveStatus(time.Now()) != StatusExpired {
 		t.Errorf("ended = %+v; want the session over and the request expired", ended)
+	}
+}
+
+func TestRequestStoreEndSessionEndsAReview(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	requester := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+
+	req := createStarted(t, store,
+		newStoredRequest(orgID, requester, memberSubject(Member{UserID: requester, Name: "Sam", Email: "sam@example.org"})), "s1")
+	if err := store.RecordOutcome(ctx, req, "s1", StatusNeedsReview, proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	if !onlyRequest(t, store, orgID).needsReconcile() {
+		t.Fatal("an open review must still be reconciled")
+	}
+	if err := store.EndSession(ctx, onlyRequest(t, store, orgID), "s1", proofingprovider.StatusExpired, ""); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	if onlyRequest(t, store, orgID).needsReconcile() {
+		t.Error("an ended review must no longer be reconciled")
+	}
+	if got := onlyRequest(t, store, orgID).EffectiveStatus(time.Now()); got != StatusExpired {
+		t.Errorf("status = %s, want expired", got)
+	}
+}
+
+func TestRequestStoreSessionDeadlines(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	requester := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+
+	req := createStarted(t, store,
+		newStoredRequest(orgID, requester, memberSubject(Member{UserID: requester, Name: "Sam", Email: "sam@example.org"})), "s1")
+	got, err := store.GetBySession(ctx, "s1")
+	if err != nil || got.ID != req.ID {
+		t.Fatalf("GetBySession = %+v, %v", got, err)
+	}
+	if _, err := store.GetBySession(ctx, "nope"); !errors.Is(err, ErrRequestNotFound) {
+		t.Errorf("GetBySession(unknown) = %v, want ErrRequestNotFound", err)
+	}
+	deadline := got.session.ExpiresAt
+	if next, err := store.NextDeadline(ctx, deadline.Add(-time.Second)); err != nil || !next.Equal(deadline) {
+		t.Errorf("NextDeadline before the cap = %v, %v; want %v", next, err, deadline)
+	}
+	if due, err := store.ListDue(ctx, deadline.Add(-time.Second), 10); err != nil || len(due) != 0 {
+		t.Errorf("ListDue before the cap = %d, %v; want none", len(due), err)
+	}
+	if due, err := store.ListDue(ctx, deadline.Add(time.Second), 10); err != nil || len(due) != 1 {
+		t.Errorf("ListDue past the cap = %d, %v; want the request", len(due), err)
+	}
+	// Leased: another replica's run does not get it until the lease lapses.
+	if due, err := store.ListDue(ctx, deadline.Add(2*time.Second), 10); err != nil || len(due) != 0 {
+		t.Errorf("ListDue while leased = %d, %v; want none", len(due), err)
+	}
+	if due, err := store.ListDue(ctx, deadline.Add(time.Second+deadlineRetry), 10); err != nil || len(due) != 1 {
+		t.Errorf("ListDue after the lease = %d, %v; want the request again", len(due), err)
+	}
+	if err := store.EndSession(ctx, got, "s1", proofingprovider.StatusExpired, ""); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	if due, err := store.ListDue(ctx, deadline.Add(time.Second), 10); err != nil || len(due) != 0 {
+		t.Errorf("ListDue after the end = %d, %v; want none", len(due), err)
+	}
+	if next, err := store.NextDeadline(ctx, deadline.Add(-time.Second)); err != nil || !next.IsZero() {
+		t.Errorf("NextDeadline after the end = %v, %v; want none", next, err)
 	}
 }
 
@@ -521,10 +634,28 @@ func TestRequestStoreStatsCountsCustomerRequestsByOutcome(t *testing.T) {
 	if _, err := store.Create(ctx, newStoredRequest(orgID, kim, subject)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	// Kim: a review still open, and one IPS ended (expired, as EffectiveStatus reads it).
+	for i, sid := range []string{"s3", "s4"} {
+		review, err := store.Create(ctx, newStoredRequest(orgID, kim, subject))
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if ok, err := store.AttachSession(ctx, review, attachedSession(sid)); err != nil || !ok {
+			t.Fatalf("AttachSession = %v, %v", ok, err)
+		}
+		if err := store.RecordOutcome(ctx, review, sid, StatusNeedsReview, proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}); err != nil {
+			t.Fatalf("RecordOutcome: %v", err)
+		}
+		if i == 1 {
+			if err := store.EndSession(ctx, review, sid, proofingprovider.StatusExpired, ""); err != nil {
+				t.Fatalf("EndSession: %v", err)
+			}
+		}
+	}
 
 	since := time.Now().Add(-StatsWindow)
 	rows, err := store.Stats(ctx, orgID, nil, since)
-	want := StatsRow{CustomerID: customer.ID, FlowID: "f1", Sessions: 3, Approved: 1, Expired: 1}
+	want := StatsRow{CustomerID: customer.ID, FlowID: "f1", Sessions: 5, Approved: 1, NeedsReview: 1, Expired: 2}
 	if err != nil || len(rows) != 1 || rows[0] != want {
 		t.Errorf("Stats = %+v, %v; want [%+v]", rows, err, want)
 	}
@@ -589,6 +720,10 @@ func TestCustomerStoreSavesSettingsAndRetainsNamesForThem(t *testing.T) {
 		t.Fatalf("Create = %+v, %v; want the default settings", c, err)
 	}
 	week := CustomerSettings{SessionTTL: 5 * time.Minute, DataRetentionDays: 7}
+	year := CustomerSettings{SessionTTL: SessionTTL, DataRetentionDays: 365}
+	if saved, err := customers.SaveSettings(ctx, orgID, c.ID, year); err != nil || saved.Settings != year {
+		t.Fatalf("SaveSettings(a year) = %+v, %v; the database must allow up to 365 days", saved.Settings, err)
+	}
 	if c, err = customers.SaveSettings(ctx, orgID, c.ID, week); err != nil || c.Settings != week {
 		t.Fatalf("SaveSettings = %+v, %v", c.Settings, err)
 	}
@@ -674,7 +809,7 @@ func TestWebhookOutboxDeliversSignedEventsWithBackOff(t *testing.T) {
 	if bytes.Contains(first.body, []byte("Anna")) || bytes.Contains(first.body, []byte("a@example.org")) {
 		t.Errorf("the event body carries personal data: %s", first.body)
 	}
-	if !bytes.Contains(first.body, []byte(approved.ID.String())) || !bytes.Contains(first.body, []byte("substantial")) {
+	if !bytes.Contains(first.body, []byte(PublicSessionID(approved.ID))) || !bytes.Contains(first.body, []byte("substantial")) {
 		t.Errorf("the event body misses the session or its assurance: %s", first.body)
 	}
 
@@ -749,5 +884,202 @@ func TestPurgeProofedNamesSendsPurgedEvent(t *testing.T) {
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionPurged ||
 		deliveries[0].RequestID == nil || *deliveries[0].RequestID != req.ID {
 		t.Errorf("deliveries = %+v, %v; want only session.purged for the request", deliveries, err)
+	}
+}
+
+// A session going to manual review sends session.review_opened, and its
+// decision then sends the outcome.
+func TestNeedsReviewSendsReviewOpenedEvent(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", WebhookEvents); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	req := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	if err := requests.RecordOutcome(ctx, req, "s1", StatusNeedsReview,
+		proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionReviewOpened {
+		t.Errorf("deliveries = %+v, %v; want only session.review_opened", deliveries, err)
+	}
+}
+
+// A customer without its own endpoint is sent every event at the wallet's
+// default endpoint: signed with the default secret, retried like any other.
+func TestWebhookWithoutEndpointSendsToDefault(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	secret, err := webhooks.DefaultSecret()
+	if err != nil {
+		t.Fatalf("DefaultSecret: %v", err)
+	}
+	type received struct {
+		event string
+		err   error
+	}
+	got := make(chan received, 10)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		err := verifyWebhookSignature(secret, r.Header.Get(SignatureHeader), body, time.Now())
+		got <- received{r.Header.Get(EventHeader), err}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(receiver.Close)
+	webhooks.SetDefaultEndpoint(receiver.URL)
+
+	req := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	if err := requests.RecordOutcome(ctx, req, "s1", StatusRejected,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved, ErrorCode: "ASSURANCE_NOT_MET"}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	// Strict policy: the default endpoint is the deployment's, reachable on loopback anyway.
+	deliverer := NewDeliverer(webhooks, safehttp.Policy{})
+	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
+		t.Fatalf("DeliverDue = %d, %v; want the one failed event", n, err)
+	}
+	if r := <-got; r.event != EventSessionFailed || r.err != nil {
+		t.Errorf("received %q, signature %v", r.event, r.err)
+	}
+	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	if err != nil || len(deliveries) != 1 || deliveries[0].Status != DeliveryDelivered || deliveries[0].EndpointURL != "" ||
+		deliveries[0].Attempts != 1 || deliveries[0].LastStatusCode == nil || *deliveries[0].LastStatusCode != http.StatusNoContent {
+		t.Fatalf("deliveries = %+v, %v; want session.failed delivered to the default endpoint", deliveries, err)
+	}
+	if err := webhooks.SendTest(ctx, orgID, customer.ID); !errors.Is(err, ErrWebhookNotFound) {
+		t.Errorf("SendTest = %v, want ErrWebhookNotFound", err)
+	}
+
+	// Its own endpoint takes over from then on; the default's deliveries leave its health alone.
+	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", WebhookEvents); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := requests.Purge(ctx, req); err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	deliveries, err = webhooks.Deliveries(ctx, orgID, customer.ID)
+	if err != nil || len(deliveries) != 2 || deliveries[0].Event != EventSessionPurged ||
+		deliveries[0].Status != DeliveryPending || deliveries[0].EndpointURL != "https://hooks.example.org/x" {
+		t.Errorf("deliveries = %+v, %v; want session.purged queued for the endpoint", deliveries, err)
+	}
+	health, err := webhooks.Health(ctx, orgID)
+	if h := health[customer.ID]; err != nil || h.State != WebhookDelivering || h.LastStatusCode != nil || h.PendingRetries != 0 {
+		t.Errorf("health = %+v, %v", h, err)
+	}
+}
+
+// A hosted request is found by its link token's hash and, until its link
+// lapses, counts as pending rather than expired, though it has no session.
+func TestRequestStoreHostedLink(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	_, hash, err := newLinkToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID})
+	in.LinkTokenHash, in.LinkExpiresAt = hash, time.Now().Add(HostedLinkTTL)
+	if _, err := store.Create(ctx, in); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	req, err := store.GetByLinkToken(ctx, hash)
+	if err != nil || req.ID != in.ID || !req.Hosted || req.EffectiveStatus(time.Now()) != StatusPending {
+		t.Fatalf("GetByLinkToken = %+v, %v; want the hosted, pending request", req, err)
+	}
+	if _, err := store.GetByLinkToken(ctx, []byte("other")); !errors.Is(err, ErrRequestNotFound) {
+		t.Errorf("unknown link = %v, want ErrRequestNotFound", err)
+	}
+	rows, err := store.Stats(ctx, orgID, nil, time.Now().Add(-StatsWindow))
+	if err != nil || len(rows) != 1 || rows[0].Expired != 0 {
+		t.Errorf("Stats = %+v, %v; want the unstarted link not counted as expired", rows, err)
+	}
+	req.Method = proofingprovider.MethodYivi
+	if ok, err := store.AttachSession(ctx, req, attachedSession("s1")); err != nil || !ok {
+		t.Fatalf("AttachSession = %v, %v", ok, err)
+	}
+	if started, _ := store.GetByLinkToken(ctx, hash); started.Method != proofingprovider.MethodYivi {
+		t.Errorf("method after start = %q, want the app the subject picked", started.Method)
+	}
+}
+
+// A hosted link that lapses unstarted is ended once by the deadline job, with
+// session_ended and a session.expired webhook, and wakes the job at its lapse.
+func TestRequestStoreLapsesUnstartedLinks(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	store := NewRequestStore(pool, audit.NewDBRecorder(), cipher)
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/proofing", []string{EventSessionExpired}); err != nil {
+		t.Fatalf("save webhook: %v", err)
+	}
+	_, hash, err := newLinkToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lapse := time.Now().Add(time.Hour)
+	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID})
+	in.LinkTokenHash, in.LinkExpiresAt = hash, lapse
+	if _, err := store.Create(ctx, in); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if next, err := store.NextDeadline(ctx, time.Now()); err != nil || !next.Equal(lapse.Truncate(time.Microsecond)) {
+		t.Errorf("NextDeadline = %v, %v; want the link's lapse %v", next, err, lapse)
+	}
+	if n, err := store.LapseLinks(ctx, time.Now(), 10); err != nil || n != 0 {
+		t.Errorf("LapseLinks before the lapse = %d, %v; want none", n, err)
+	}
+	for want := range []int{1, 0} {
+		n, err := store.LapseLinks(ctx, lapse.Add(time.Second), 10)
+		if err != nil || n != 1-want {
+			t.Errorf("LapseLinks run %d = %d, %v; want %d", want+1, n, err, 1-want)
+		}
+	}
+	req, err := store.GetByLinkToken(ctx, hash)
+	if err != nil || req.EffectiveStatus(lapse.Add(time.Second)) != StatusExpired {
+		t.Errorf("lapsed link = %+v, %v; want expired", req, err)
+	}
+	if n := auditCount(t, pool, audit.IdentityProofingSessionEnded); n != 1 {
+		t.Errorf("session_ended audits = %d, want 1", n)
+	}
+	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionExpired {
+		t.Errorf("deliveries = %+v, %v; want one session.expired", deliveries, err)
 	}
 }

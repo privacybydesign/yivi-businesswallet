@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,8 +14,10 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
@@ -22,26 +25,47 @@ import (
 // Handler serves identity proofing: the org routes (any member reads the flows
 // made available to them and the org's customers, and sends requests; defining
 // flows, choosing which members may use, and managing customers and the flows
-// assigned to them is admin-only) and the public routes a recipient's proofing
-// link opens. The org's IPS tenant is provisioned by whichever route uses it first.
+// assigned to them is admin-only), the customer API and IPS's event push. The
+// org's IPS tenant is provisioned by whichever route uses it first.
 type Handler struct {
 	service     *Service
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
+	// apiCalls and apiSessions rate-limit the public API per customer,
+	// hostedCalls the hosted page per link.
+	apiCalls    *ratelimit.Limiter
+	apiSessions *ratelimit.Limiter
+	hostedCalls *ratelimit.Limiter
+	// idempotency keeps customer-API POST answers by Idempotency-Key; nil
+	// runs every call.
+	idempotency *IdempotencyStore
+	// platformAdmins may pause any org's proofing.
+	platformAdmins auth.PlatformAdmins
 }
 
+// SetIdempotencyStore turns on Idempotency-Key handling for the customer API.
+func (h *Handler) SetIdempotencyStore(s *IdempotencyStore) { h.idempotency = s }
+
 func NewHandler(service *Service, requireUser, authorize func(http.Handler) http.Handler) *Handler {
-	return &Handler{service: service, requireUser: requireUser, authorize: authorize}
+	return &Handler{
+		service: service, requireUser: requireUser, authorize: authorize,
+		apiCalls: ratelimit.New(APICallLimit), apiSessions: ratelimit.New(APISessionLimit),
+		hostedCalls: ratelimit.New(HostedCallLimit),
+	}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	member := func(next http.Handler) http.Handler { return h.requireUser(h.authorize(next)) }
+	// Every org route refuses while the org's proofing is paused; the pause
+	// routes themselves are registerPause's.
+	member := func(next http.Handler) http.Handler { return h.requireUser(h.authorize(h.active(next))) }
 	admin := func(next http.Handler) http.Handler {
-		return h.requireUser(h.authorize(organization.RequireOrgAdmin(next)))
+		return h.requireUser(h.authorize(organization.RequireOrgAdmin(h.active(next))))
 	}
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows", member(respond.HandlerFunc(h.listFlows)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows", admin(respond.HandlerFunc(h.createFlow)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/versions", admin(respond.HandlerFunc(h.listFlowVersions)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/hosted", admin(respond.HandlerFunc(h.getFlowHosted)))
+	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/hosted", admin(respond.HandlerFunc(h.saveFlowHosted)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions", admin(respond.HandlerFunc(h.editFlow)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions/{version}/activate", admin(respond.HandlerFunc(h.activateFlowVersion)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flow-selection", admin(respond.HandlerFunc(h.configureFlows)))
@@ -51,8 +75,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}", member(respond.HandlerFunc(h.getRequest)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/events", member(respond.HandlerFunc(h.requestEvents)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/start", member(respond.HandlerFunc(h.startYivi)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/claim-link", member(respond.HandlerFunc(h.claimLink)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure", member(respond.HandlerFunc(h.yiviDisclosure)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/face", member(respond.HandlerFunc(h.faceFrame)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", admin(respond.HandlerFunc(h.decideReview)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", admin(respond.HandlerFunc(h.requestResult)))
 	mux.Handle("GET /orgs/{slug}/customers", member(respond.HandlerFunc(h.listCustomers)))
 	mux.Handle("POST /orgs/{slug}/customers", admin(respond.HandlerFunc(h.createCustomer)))
 	mux.Handle("GET /orgs/{slug}/customers/{customerID}", member(respond.HandlerFunc(h.getCustomer)))
@@ -70,6 +97,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/customers/{customerID}/webhook/test", admin(respond.HandlerFunc(h.testWebhook)))
 	mux.Handle("GET /orgs/{slug}/customers/{customerID}/webhook/deliveries", admin(respond.HandlerFunc(h.listWebhookDeliveries)))
 	h.registerPublicAPI(mux)
+	h.registerHosted(mux)
+	h.registerPause(mux)
+	// IPS pushes session changes here, signed per tenant; no user session.
+	mux.Handle("POST /identity-proofing/ips-events", respond.HandlerFunc(h.ipsEvent))
+	mux.Handle("POST /identity-proofing/default-webhook", respond.HandlerFunc(h.defaultWebhook))
 	mux.Handle("GET /orgs/{slug}/customers/{customerID}/flows", member(respond.HandlerFunc(h.listCustomerFlows)))
 	mux.Handle("PUT /orgs/{slug}/customers/{customerID}/flow-selection", admin(respond.HandlerFunc(h.assignCustomerFlows)))
 }
@@ -199,7 +231,9 @@ type requestResponse struct {
 	FlowVersion int    `json:"flowVersion,omitempty"`
 	// Method is the app the session was created for, then the one IPS reports
 	// the subject used; absent on a request from before the choice existed.
-	Method         string     `json:"method,omitempty"`
+	Method string `json:"method,omitempty"`
+	// Mode is test for a test key's scripted request, else live.
+	Mode           Mode       `json:"mode"`
 	Status         Status     `json:"status"`
 	AssuranceLevel string     `json:"assuranceLevel,omitempty"`
 	EIDASLevel     string     `json:"eidasLevel,omitempty"`
@@ -214,7 +248,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		ID: req.ID, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		CustomerID: req.CustomerID, CustomerName: req.CustomerName,
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
-		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Status: req.EffectiveStatus(now),
+		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Mode: req.mode(), Status: req.EffectiveStatus(now),
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 	}
@@ -252,11 +286,20 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 // requestEvents is one request's timeline, oldest first: every audit event
 // about it (sent, session created and started, outcome, expiry). An admin sees
 // any request's, a member only one they sent.
+// parseRequestID reads a request id as the dashboard has it (a UUID) or as the
+// customer API and webhooks show it (a ps_ id), so either can be looked up.
+func parseRequestID(s string) (uuid.UUID, error) {
+	if id, ok := parsePublicSessionID(s); ok {
+		return id, nil
+	}
+	return uuid.Parse(s)
+}
+
 // sentRequestTarget is the request a per-request route names, and the caller
 // it is scoped to: nil for an admin, who reaches every request of the org, else
 // the member, who reaches only the ones they sent.
 func sentRequestTarget(r *http.Request) (uuid.UUID, *uuid.UUID, error) {
-	id, err := uuid.Parse(r.PathValue("requestID"))
+	id, err := parseRequestID(r.PathValue("requestID"))
 	if err != nil {
 		return uuid.Nil, nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
 	}
@@ -281,10 +324,60 @@ func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// reviewDecisionRequest is an admin's decision on a request under review:
+// decision "approve" or "reject", a required reason, and for a rejection an
+// optional errorCode.
+type reviewDecisionRequest struct {
+	Decision  string `json:"decision"`
+	Reason    string `json:"reason"`
+	ErrorCode string `json:"errorCode"`
+}
+
+func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseRequestID(r.PathValue("requestID"))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+	}
+	var body reviewDecisionRequest
+	if err := decode(r, &body); err != nil {
+		return err
+	}
+	if body.Decision != "approve" && body.Decision != "reject" {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "decision is approve or reject"}
+	}
+	req, err := h.service.DecideReview(r.Context(), orgFromRequest(r).ID, id,
+		string(auth.UserFromContext(r.Context()).Email),
+		ReviewInput{Approve: body.Decision == "approve", ErrorCode: body.ErrorCode, Reason: body.Reason})
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, newRequestResponse(req, time.Now()))
+	return nil
+}
+
+// claimLinkResponse is a fresh vcmrtd link for the Idem app, shown as a QR.
+type claimLinkResponse struct {
+	DeepLink  string    `json:"deepLink"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+func (h *Handler) claimLink(w http.ResponseWriter, r *http.Request) error {
+	id, requestedBy, err := sentRequestTarget(r)
+	if err != nil {
+		return err
+	}
+	claim, err := h.service.ClaimLink(r.Context(), orgFromRequest(r).ID, id, requestedBy)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, claimLinkResponse{DeepLink: claim.DeepLink, ExpiresAt: claim.ExpiresAt})
+	return nil
+}
+
 type yiviStartResponse struct {
-	// SessionPtr is what the subject's Yivi app scans: the QR carries it as JSON.
-	SessionPtr json.RawMessage `json:"sessionPtr"`
-	ExpiresAt  time.Time       `json:"expiresAt"`
+	// WalletLink is the openid4vp:// request the subject's Yivi app opens.
+	WalletLink string    `json:"walletLink"`
+	ExpiresAt  time.Time `json:"expiresAt"`
 }
 
 func (h *Handler) startYivi(w http.ResponseWriter, r *http.Request) error {
@@ -296,7 +389,7 @@ func (h *Handler) startYivi(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, yiviStartResponse{SessionPtr: started.SessionPtr, ExpiresAt: started.ExpiresAt})
+	respond.JSON(w, r, http.StatusOK, yiviStartResponse(started))
 	return nil
 }
 
@@ -317,7 +410,12 @@ func (h *Handler) yiviDisclosure(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	disclosure, err := h.service.YiviDisclosure(r.Context(), orgFromRequest(r).ID, id, requestedBy)
-	if errors.Is(err, proofingprovider.ErrDisclosurePending) {
+	return writeYiviDisclosure(w, r, disclosure, err)
+}
+
+// writeYiviDisclosure answers a Yivi disclosure poll: not done while pending.
+func writeYiviDisclosure(w http.ResponseWriter, r *http.Request, disclosure proofingprovider.YiviDisclosure, err error) error {
+	if errors.Is(err, ErrDisclosurePending) {
 		respond.JSON(w, r, http.StatusOK, yiviDisclosureResponse{})
 		return nil
 	}
@@ -354,24 +452,37 @@ func (h *Handler) faceFrame(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxFaceFrameBytes)
-	var body faceFrameRequest
-	if err := decode(r, &body); err != nil {
+	image, err := decodeFaceFrame(w, r)
+	if err != nil {
 		return err
 	}
-	if body.Image == "" {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "a frame needs an image"}
-	}
-	verdict, err := h.service.FaceFrame(r.Context(), orgFromRequest(r).ID, id, requestedBy, body.Image)
+	verdict, err := h.service.FaceFrame(r.Context(), orgFromRequest(r).ID, id, requestedBy, image)
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, faceFrameResponse{
+	respond.JSON(w, r, http.StatusOK, newFaceVerdictResponse(verdict))
+	return nil
+}
+
+// decodeFaceFrame reads one camera frame, capped at maxFaceFrameBytes.
+func decodeFaceFrame(w http.ResponseWriter, r *http.Request) (string, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFaceFrameBytes)
+	var body faceFrameRequest
+	if err := decode(r, &body); err != nil {
+		return "", err
+	}
+	if body.Image == "" {
+		return "", &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "a frame needs an image"}
+	}
+	return body.Image, nil
+}
+
+func newFaceVerdictResponse(verdict proofingprovider.FaceVerdict) faceFrameResponse {
+	return faceFrameResponse{
 		FaceDetected: verdict.FaceDetected, Matched: verdict.Matched, Consecutive: verdict.Consecutive,
 		StableFrames: verdict.StableFrames, Attempts: verdict.Attempts, MaxAttempts: verdict.MaxAttempts,
 		Decision: string(verdict.Decision),
-	})
-	return nil
+	}
 }
 
 func (h *Handler) requestEvents(w http.ResponseWriter, r *http.Request) error {
@@ -401,6 +512,8 @@ type createRequestRequest struct {
 	FlowID     string                  `json:"flowId"`
 	Method     proofingprovider.Method `json:"method"`
 	Channel    Channel                 `json:"channel"`
+	// Language is the sender's wallet language (en/nl).
+	Language email.Locale `json:"language"`
 }
 
 type createRequestResponse struct {
@@ -423,7 +536,7 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 		Requester{UserID: caller.ID, Name: displayName(caller)}, NewRequest{
 			SubjectUserID: body.UserID, CustomerID: body.CustomerID,
 			SubjectEmail: body.Email, SubjectName: body.Name, FlowID: body.FlowID,
-			Method: body.Method, Channel: body.Channel,
+			Method: body.Method, Channel: body.Channel, Language: body.Language,
 		})
 	if err != nil {
 		return mapError(err)
@@ -459,8 +572,12 @@ type customerResponse struct {
 	DataRetentionDays int                   `json:"dataRetentionDays"`
 	Webhook           webhookHealthResponse `json:"webhook"`
 	Branding          brandingResponse      `json:"branding"`
-	CreatedAt         time.Time             `json:"createdAt"`
-	UpdatedAt         time.Time             `json:"updatedAt"`
+	// AllowedRedirectOrigins are where a hosted page may send its subject back
+	// to and be embedded on.
+	AllowedRedirectOrigins []string  `json:"allowedRedirectOrigins"`
+	HasLiveKey             bool      `json:"hasLiveKey"`
+	CreatedAt              time.Time `json:"createdAt"`
+	UpdatedAt              time.Time `json:"updatedAt"`
 }
 
 // newCustomerResponse shows a customer with its endpoint's health; a customer
@@ -477,8 +594,11 @@ func newCustomerResponse(slug string, c Customer, health map[uuid.UUID]WebhookHe
 		DataRetentionDays: c.Settings.DataRetentionDays,
 		Webhook:           newWebhookHealthResponse(health[c.ID]),
 		Branding:          newBrandingResponse(slug, c),
-		CreatedAt:         c.CreatedAt,
-		UpdatedAt:         c.UpdatedAt,
+		HasLiveKey:        c.HasLiveKey,
+		// Never null: the admin UI edits it as a list.
+		AllowedRedirectOrigins: append([]string{}, c.RedirectOrigins...),
+		CreatedAt:              c.CreatedAt,
+		UpdatedAt:              c.UpdatedAt,
 	}
 }
 
@@ -556,6 +676,8 @@ type updateCustomerRequest struct {
 	Paused            *bool   `json:"paused"`
 	SessionTTLSeconds *int    `json:"sessionTtlSeconds"`
 	DataRetentionDays *int    `json:"dataRetentionDays"`
+	// AllowedRedirectOrigins replaces the list; absent leaves it.
+	AllowedRedirectOrigins *[]string `json:"allowedRedirectOrigins"`
 }
 
 func (h *Handler) updateCustomer(w http.ResponseWriter, r *http.Request) error {
@@ -567,7 +689,8 @@ func (h *Handler) updateCustomer(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &body); err != nil {
 		return err
 	}
-	if body.Name == nil && body.Paused == nil && body.SessionTTLSeconds == nil && body.DataRetentionDays == nil {
+	if body.Name == nil && body.Paused == nil && body.SessionTTLSeconds == nil && body.DataRetentionDays == nil &&
+		body.AllowedRedirectOrigins == nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "nothing to update"}
 	}
 	orgID := orgFromRequest(r).ID
@@ -595,6 +718,11 @@ func (h *Handler) updateCustomer(w http.ResponseWriter, r *http.Request) error {
 			settings.DataRetentionDays = *body.DataRetentionDays
 		}
 		if c, err = h.service.SaveCustomerSettings(r.Context(), orgID, id, settings); err != nil {
+			return mapError(err)
+		}
+	}
+	if body.AllowedRedirectOrigins != nil {
+		if c, err = h.service.SaveCustomerRedirectOrigins(r.Context(), orgID, id, *body.AllowedRedirectOrigins); err != nil {
 			return mapError(err)
 		}
 	}
@@ -705,6 +833,50 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
+// maxIPSEventBytes bounds an IPS event body: a notify-only notice is tiny.
+const maxIPSEventBytes = 16 << 10
+
+// maxDefaultWebhookBytes bounds a delivery to the default endpoint: its data
+// is ids, a status and levels.
+const maxDefaultWebhookBytes = 16 << 10
+
+func (h *Handler) ipsEvent(w http.ResponseWriter, r *http.Request) error {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxIPSEventBytes))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "invalid request body"}
+	}
+	err = h.service.HandleIPSEvent(r.Context(), body, r.Header.Get("X-Webhook-Timestamp"), r.Header.Get("X-Signature"))
+	if errors.Is(err, ErrBadSignature) {
+		return &respond.APIError{Status: http.StatusUnauthorized, Code: "bad_signature", Message: "invalid event signature"}
+	}
+	if errors.Is(err, ErrEventTooEarly) {
+		return &respond.APIError{Status: http.StatusServiceUnavailable, Code: "retry_later", Message: "session not stored yet"}
+	}
+	if err != nil {
+		return mapError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// defaultWebhook is the wallet's own webhook endpoint, where a customer
+// without one is sent its events; the deliverer is its only caller.
+func (h *Handler) defaultWebhook(w http.ResponseWriter, r *http.Request) error {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDefaultWebhookBytes))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "invalid request body"}
+	}
+	err = h.service.ReceiveDefaultWebhook(body, r.Header.Get(SignatureHeader))
+	if errors.Is(err, ErrBadSignature) {
+		return &respond.APIError{Status: http.StatusUnauthorized, Code: "bad_signature", Message: "invalid webhook signature"}
+	}
+	if err != nil {
+		return mapError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 func mapError(err error) error {
 	var rejected *proofingprovider.RejectedError
 	switch {
@@ -728,6 +900,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_assigned", Message: "this flow is not assigned to the customer"}
 	case errors.Is(err, ErrCustomerPaused):
 		return &respond.APIError{Status: http.StatusConflict, Code: "customer_paused", Message: "proofing is paused for this customer"}
+	case errors.Is(err, ErrCustomerNoAPIKey):
+		return &respond.APIError{Status: http.StatusConflict, Code: "customer_no_api_key", Message: "create a live API key for this customer first"}
 	case errors.Is(err, ErrAPIKeyNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "api_key_not_found", Message: "this API key does not exist"}
 	case errors.Is(err, ErrRequestNotFound):
@@ -739,11 +913,29 @@ func mapError(err error) error {
 	case errors.Is(err, ErrFlowNotAllowed):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_allowed", Message: "your organization's admin has not made this flow available"}
 	case errors.Is(err, ErrWrongMethod):
-		return &respond.APIError{Status: http.StatusConflict, Code: "wrong_method", Message: "this session does not run in the Yivi app"}
+		return &respond.APIError{Status: http.StatusConflict, Code: "wrong_method", Message: "this session does not run in that app"}
+	case errors.Is(err, ErrNotHosted):
+		return &respond.APIError{Status: http.StatusConflict, Code: "not_hosted", Message: "create the session with hosted: true to pick its app from your own UI"}
+	case errors.Is(err, ErrResultNotReady):
+		return &respond.APIError{Status: http.StatusConflict, Code: "result_not_ready", Message: "this session has no outcome yet"}
+	case errors.Is(err, ErrDeviceActive):
+		return &respond.APIError{Status: http.StatusConflict, Code: "device_active", Message: "the Idem app still has this session open; carry on there"}
 	case errors.Is(err, ErrSessionOver):
 		return &respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}
+	case errors.Is(err, ErrNotUnderReview):
+		return &respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}
+	case errors.Is(err, ErrLinkStarted):
+		return &respond.APIError{Status: http.StatusConflict, Code: "link_started", Message: "this link was started already"}
+	case errors.Is(err, ErrHostedDisabled):
+		return &respond.APIError{Status: http.StatusConflict, Code: "hosted_disabled", Message: "this flow's hosted page is switched off"}
+	case errors.Is(err, ErrProofingPaused):
+		return &respond.APIError{Status: http.StatusForbidden, Code: "proofing_paused", Message: "identity proofing is paused for this organisation"}
+	case errors.Is(err, ErrOrgNotFound):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "organization_not_found", Message: "organisation not found"}
+	case errors.Is(err, ErrRedirectNotAllowed):
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "redirect_not_allowed", Message: "redirectUrl must be on one of the customer's allowed redirect origins"}
 	case errors.Is(err, proofingprovider.ErrMethodUnavailable):
-		return &respond.APIError{Status: http.StatusConflict, Code: "method_unavailable", Message: "the identity proofing service cannot run Yivi app sessions: it has no Yivi server configured"}
+		return &respond.APIError{Status: http.StatusConflict, Code: "method_unavailable", Message: "the identity proofing service cannot run Yivi app sessions: it does not take the wallet's disclosure (BOUND_LOGIN_RELYING_PARTY_REFERENCE)"}
 	case errors.As(err, &rejected):
 		// IPS's own validation message (e.g. which check a step requires) is what
 		// the admin needs to fix the flow.

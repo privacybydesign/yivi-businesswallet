@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 )
 
@@ -115,6 +116,38 @@ func TestQueryForScope(t *testing.T) {
 	last := combined.Credentials[len(combined.Credentials)-1]
 	if last.ID != credIDVog || len(last.Claims) != 7 {
 		t.Errorf("ScopeIdentityVog's last credential = %+v, want vog with 7 claims", last)
+	}
+}
+
+// Proofing asks for the passport or id-card with its photo, and no email or
+// phone.
+func TestProofingQueryAsksForTheDocumentPhoto(t *testing.T) {
+	q := queryFor(ScopeProofing, nil)
+	if len(q.Credentials) != 2 || len(q.CredentialSets) != 1 || len(q.CredentialSets[0].Options) != 2 {
+		t.Fatalf("proofing query = %+v, want passport OR idcard only", q)
+	}
+	for _, c := range q.Credentials {
+		if !slices.ContainsFunc(c.Claims, func(cl dcqlClaim) bool { return cl.Path[0] == ClaimPhoto }) {
+			t.Errorf("%s does not ask for the photo: %+v", c.ID, c.Claims)
+		}
+	}
+}
+
+func TestPresentationDocumentPrefersThePassport(t *testing.T) {
+	p := Presentation{ByCredential: map[string]map[string]string{
+		credIDIDCard:   {ClaimGivenNames: "Card"},
+		credIDPassport: {ClaimGivenNames: "Passport"},
+	}}
+	doc, ok := p.Document()
+	if !ok || doc.Credential != vctPassport || doc.Claims[ClaimGivenNames] != "Passport" {
+		t.Fatalf("Document() = %+v, %v", doc, ok)
+	}
+	idcard, ok := Presentation{ByCredential: map[string]map[string]string{credIDIDCard: {}}}.Document()
+	if !ok || idcard.Credential != vctIDCard {
+		t.Fatalf("id-card Document() = %+v, %v", idcard, ok)
+	}
+	if _, ok := (Presentation{ByCredential: map[string]map[string]string{credIDEmail: {}}}).Document(); ok {
+		t.Fatal("an email-only presentation has no document")
 	}
 }
 

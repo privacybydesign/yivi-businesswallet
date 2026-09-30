@@ -1,7 +1,7 @@
 import { exec as execCallback, spawn } from "child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
-import { copyFileSync, existsSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync } from "node:fs";
 
 const execAsync = promisify(execCallback)
 
@@ -15,6 +15,12 @@ const REPO_ROOT_PATH = join(__dirname, '..');
 const BACKEND_PATH = join(REPO_ROOT_PATH, 'backend');
 const FRONTEND_PATH = join(REPO_ROOT_PATH, 'frontend');
 const TIMING_THRESHOLD_MS = 2000;
+// The identity-proofing-service (IPS) checkout, next to this repo unless
+// IDENTITY_PROOFING_SERVICE_PATH says otherwise.
+const IPS_PATH = process.env.IDENTITY_PROOFING_SERVICE_PATH ?? join(REPO_ROOT_PATH, '..', 'identity-proofing-service');
+// Its own compose project name, so the existing IPS containers and volumes are reused.
+const IPS_COMPOSE_PROJECT = 'identity-proofing-service';
+const IPS_COMPOSE_SERVICE = 'passport-issuer';
 
 async function withTiming<T>(label: string, fn: () => T | Promise<T>): Promise<T> {
     const start = performance.now();
@@ -92,6 +98,35 @@ async function checkDocker(): Promise<void> {
     }
 }
 
+// IDENTITY_PROOFING_PROVIDER from the root .env; the backend reads the same value.
+function identityProofingProvider(): string | undefined {
+    const rootEnvPath = join(REPO_ROOT_PATH, '.env');
+    if (!existsSync(rootEnvPath)) {
+        return undefined;
+    }
+    const line = readFileSync(rootEnvPath, 'utf8').split('\n').find(l => l.startsWith('IDENTITY_PROOFING_PROVIDER='));
+    return line?.slice('IDENTITY_PROOFING_PROVIDER='.length).trim();
+}
+
+// With IDENTITY_PROOFING_PROVIDER=ips the backend calls a separately running
+// IPS; start (and rebuild) it from its own repo so one command runs both.
+// It keeps running after CTRL-C, like before.
+async function startIdentityProofingService(): Promise<void> {
+    if (identityProofingProvider() !== 'ips') {
+        return;
+    }
+    if (!existsSync(join(IPS_PATH, 'docker-compose.yaml'))) {
+        console.warn(`IDENTITY_PROOFING_PROVIDER=ips but no identity-proofing-service at ${IPS_PATH}; start it yourself or set IDENTITY_PROOFING_SERVICE_PATH`);
+        return;
+    }
+    console.log(`Starting identity-proofing-service from ${IPS_PATH}`);
+    await spawnAsync(
+        "docker",
+        ["compose", "-p", IPS_COMPOSE_PROJECT, "--project-directory", IPS_PATH, "up", "-d", "--build", IPS_COMPOSE_SERVICE],
+        IPS_PATH
+    );
+}
+
 async function ensureDockerRunning(): Promise<void> {
     console.log("Checking that docker is running");
     await checkDocker();
@@ -135,6 +170,8 @@ async function main() {
     });
 
     await withTiming("Ensure Docker is available", () => ensureDockerRunning());
+
+    await withTiming("Start identity-proofing-service", () => startIdentityProofingService());
 
     if (debug) {
         const elapsed = ((performance.now() - totalStart) / 1000).toFixed(1);

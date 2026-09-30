@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { DEFAULT_LANGUAGE, isSupportedLanguage } from "../i18n/language";
 import {
   activateProofingFlowVersion,
   createProofingCustomer,
@@ -30,7 +31,20 @@ import {
   sendProofingWebhookTest,
   getProofingRequestEvents,
   getProofingRequest,
+  getHostedProofing,
+  decideProofingReview,
+  getHostedProofingStatus,
+  startHostedProofing,
+  declineHostedProofing,
+  getProofingFlowHosted,
+  saveProofingFlowHosted,
+  getProofingPause,
+  listProofingPauses,
+  setPlatformProofingPause,
+  setProofingPause,
+  getProofingRequestResult,
   getProofingYiviDisclosure,
+  newProofingClaimLink,
   startProofingYivi,
   submitProofingFaceFrame,
 } from "./identity-proofing";
@@ -48,11 +62,23 @@ import type {
   CreatedProofingApiKey,
   ProofingApiKey,
   ProofingBrandingInput,
+  ProofingMode,
   ProofingWebhook,
   WebhookDelivery,
   ProofingFaceVerdict,
+  ProofingClaimLink,
   ProofingYiviDisclosure,
   ProofingYiviStart,
+  ProofingProgress,
+  ProofingMethod,
+  HostedProofing,
+  HostedProgress,
+  HostedStart,
+  VerifyTarget,
+  ProofingReviewInput,
+  ProofingResult,
+  ProofingPause,
+  ProofingFlowHosted,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
@@ -158,6 +184,36 @@ export function useProofingFlowVersionsQuery(
   });
 }
 
+function proofingFlowHostedQueryKey(
+  slug: string,
+  flowId: string,
+): readonly string[] {
+  return [...proofingFlowsQueryKey(slug), flowId, "hosted"];
+}
+
+export function useProofingFlowHostedQuery(
+  slug: string,
+  flowId: string,
+): UseQueryResult<ProofingFlowHosted, Error> {
+  return useQuery({
+    queryKey: proofingFlowHostedQueryKey(slug, flowId),
+    queryFn: ({ signal }) => getProofingFlowHosted(slug, flowId, signal),
+    enabled: slug !== "" && flowId !== "",
+  });
+}
+
+export function useSaveProofingFlowHostedMutation(
+  slug: string,
+  flowId: string,
+): UseMutationResult<ProofingFlowHosted, Error, ProofingFlowHosted> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (settings) => saveProofingFlowHosted(slug, flowId, settings),
+    onSuccess: (saved) =>
+      queryClient.setQueryData(proofingFlowHostedQueryKey(slug, flowId), saved),
+  });
+}
+
 // Both change which version of a flow is active, so the flow list and the
 // flow's version history are refetched.
 function invalidateFlow(
@@ -259,9 +315,17 @@ export function useCreateProofingRequestMutation(
   slug: string,
 ): UseMutationResult<ProofingSent, Error, ProofingRequestInput> {
   const queryClient = useQueryClient();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   return useMutation({
-    mutationFn: (input) => createProofingRequest(slug, input),
+    // The request follows the language the sender has the wallet in.
+    mutationFn: (input) =>
+      createProofingRequest(
+        slug,
+        input,
+        isSupportedLanguage(i18n.resolvedLanguage)
+          ? i18n.resolvedLanguage
+          : DEFAULT_LANGUAGE,
+      ),
     meta: { suppressErrorToast: true },
     onSuccess: (sent, input) => {
       void queryClient.invalidateQueries({
@@ -475,14 +539,23 @@ export function useProofingApiKeysQuery(
 export function useCreateProofingApiKeyMutation(
   slug: string,
   customerId: string,
-): UseMutationResult<CreatedProofingApiKey, Error, string> {
+): UseMutationResult<
+  CreatedProofingApiKey,
+  Error,
+  { name: string; mode: ProofingMode }
+> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (name) => createProofingApiKey(slug, customerId, name),
+    mutationFn: ({ name, mode }) =>
+      createProofingApiKey(slug, customerId, name, mode),
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: proofingApiKeysQueryKey(slug, customerId),
+      });
+      // A customer's hasLiveKey follows its keys.
+      void queryClient.invalidateQueries({
+        queryKey: proofingCustomersQueryKey(slug),
       });
     },
   });
@@ -502,6 +575,10 @@ export function useRevokeProofingApiKeyMutation(
       void queryClient.invalidateQueries({
         queryKey: proofingApiKeysQueryKey(slug, customerId),
       });
+      // A customer's hasLiveKey follows its keys.
+      void queryClient.invalidateQueries({
+        queryKey: proofingCustomersQueryKey(slug),
+      });
     },
   });
 }
@@ -520,13 +597,12 @@ export function useProofingWebhookQuery(
 export function useProofingWebhookDeliveriesQuery(
   slug: string,
   customerId: string,
-  enabled: boolean,
 ): UseQueryResult<WebhookDelivery[], Error> {
   return useQuery({
     queryKey: [...proofingWebhookQueryKey(slug, customerId), "deliveries"],
     queryFn: ({ signal }) =>
       getProofingWebhookDeliveries(slug, customerId, signal),
-    enabled: enabled && slug !== "" && customerId !== "",
+    enabled: slug !== "" && customerId !== "",
     refetchInterval: (query) =>
       query.state.data?.some((d) => d.status === "pending")
         ? DELIVERIES_POLL_INTERVAL_MS
@@ -634,16 +710,98 @@ export function useProofingRequestEventsQuery(
   });
 }
 
-// One request, re-checked at the proofing service on every read: what the
-// on-screen page polls while the subject is busy on their phone.
-export function useProofingRequestQuery(
+// Reads a request's verified identity on an admin's explicit ask: a mutation,
+// so nothing refetches (every read is audited). The timeline then shows it.
+export function useProofingRequestResultMutation(
   slug: string,
   requestId: string,
-): UseQueryResult<ProofingRequest, Error> {
+): UseMutationResult<ProofingResult, Error, void> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => getProofingRequestResult(slug, requestId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: [...proofingRequestsQueryKey(slug), requestId, "events"],
+      }),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+const PROOFING_PAUSES_KEY = ["identity-proofing", "pauses"] as const;
+
+function proofingPauseQueryKey(slug: string): readonly string[] {
+  return [...proofingQueryKey(slug), "pause"];
+}
+
+export function useProofingPauseQuery(
+  slug: string,
+): UseQueryResult<ProofingPause, Error> {
   return useQuery({
-    queryKey: [...proofingRequestsQueryKey(slug), requestId],
-    queryFn: ({ signal }) => getProofingRequest(slug, requestId, signal),
-    enabled: slug !== "" && requestId !== "",
+    queryKey: proofingPauseQueryKey(slug),
+    queryFn: ({ signal }) => getProofingPause(slug, signal),
+    enabled: slug !== "",
+  });
+}
+
+// Switches the org's proofing off or on; everything proofing refetches, as
+// its routes answer again (or stop).
+export function useSetProofingPauseMutation(
+  slug: string,
+): UseMutationResult<ProofingPause, Error, boolean> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (paused) => setProofingPause(slug, paused),
+    onSuccess: (pause) => {
+      queryClient.setQueryData(proofingPauseQueryKey(slug), pause);
+      void queryClient.invalidateQueries({ queryKey: proofingQueryKey(slug) });
+    },
+  });
+}
+
+export function useProofingPausesQuery(): UseQueryResult<
+  ProofingPause[],
+  Error
+> {
+  return useQuery({
+    queryKey: PROOFING_PAUSES_KEY,
+    queryFn: ({ signal }) => listProofingPauses(signal),
+  });
+}
+
+export function useSetPlatformProofingPauseMutation(): UseMutationResult<
+  ProofingPause,
+  Error,
+  { orgId: string; paused: boolean }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orgId, paused }) => setPlatformProofingPause(orgId, paused),
+    // The list, and any org's proofing a platform admin has open.
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: PROOFING_PAUSES_KEY });
+      await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+    },
+  });
+}
+
+// A verify target's cache key: an org request's sits under the org's requests,
+// so whatever refreshes those refreshes it.
+function verifyQueryKey(target: VerifyTarget): readonly unknown[] {
+  return target.kind === "request"
+    ? [...proofingRequestsQueryKey(target.slug), target.requestId]
+    : ["identity-proofing", "hosted", target.token];
+}
+
+// The progress a verify page follows, polled while the subject can still act.
+export function useProofingProgressQuery(
+  target: VerifyTarget,
+): UseQueryResult<ProofingProgress, Error> {
+  return useQuery<ProofingProgress>({
+    queryKey: [...verifyQueryKey(target), "progress"],
+    queryFn: ({ signal }) =>
+      target.kind === "request"
+        ? getProofingRequest(target.slug, target.requestId, signal)
+        : getHostedProofingStatus(target.token, signal),
     refetchInterval: (query) =>
       query.state.data === undefined || isProofingLive(query.state.data.status)
         ? ON_SCREEN_POLL_INTERVAL_MS
@@ -652,10 +810,19 @@ export function useProofingRequestQuery(
 }
 
 export function useStartProofingYiviMutation(
-  slug: string,
-): UseMutationResult<ProofingYiviStart, Error, string> {
+  target: VerifyTarget,
+): UseMutationResult<ProofingYiviStart, Error, void> {
   return useMutation({
-    mutationFn: (requestId) => startProofingYivi(slug, requestId),
+    mutationFn: () => startProofingYivi(target),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+export function useNewProofingClaimLinkMutation(
+  target: VerifyTarget,
+): UseMutationResult<ProofingClaimLink, Error, void> {
+  return useMutation({
+    mutationFn: () => newProofingClaimLink(target),
     meta: { suppressErrorToast: true },
   });
 }
@@ -663,25 +830,78 @@ export function useStartProofingYiviMutation(
 // Polled until the subject has finished in the Yivi app; enabled only while
 // the page shows the Yivi QR.
 export function useProofingYiviDisclosureQuery(
-  slug: string,
-  requestId: string,
+  target: VerifyTarget,
   enabled: boolean,
 ): UseQueryResult<ProofingYiviDisclosure, Error> {
   return useQuery({
-    queryKey: [...proofingRequestsQueryKey(slug), requestId, "yivi"],
-    queryFn: ({ signal }) => getProofingYiviDisclosure(slug, requestId, signal),
-    enabled: enabled && slug !== "" && requestId !== "",
+    queryKey: [...verifyQueryKey(target), "yivi"],
+    queryFn: ({ signal }) => getProofingYiviDisclosure(target, signal),
+    enabled,
     refetchInterval: (query) =>
       query.state.data?.done ? false : ON_SCREEN_POLL_INTERVAL_MS,
   });
 }
 
 export function useSubmitProofingFaceFrameMutation(
-  slug: string,
-  requestId: string,
+  target: VerifyTarget,
 ): UseMutationResult<ProofingFaceVerdict, Error, string> {
   return useMutation({
-    mutationFn: (image) => submitProofingFaceFrame(slug, requestId, image),
+    mutationFn: (image) => submitProofingFaceFrame(target, image),
     meta: { suppressErrorToast: true },
+  });
+}
+
+// The hosted page a link opens, read once; its progress is polled apart.
+export function useHostedProofingQuery(
+  token: string,
+): UseQueryResult<HostedProofing, Error> {
+  return useQuery({
+    queryKey: [...verifyQueryKey({ kind: "hosted", token }), "page"],
+    queryFn: ({ signal }) => getHostedProofing(token, signal),
+    enabled: token !== "",
+    retry: false,
+  });
+}
+
+export function useStartHostedProofingMutation(
+  token: string,
+): UseMutationResult<HostedStart, Error, ProofingMethod> {
+  return useMutation({
+    mutationFn: (method) => startHostedProofing(token, method),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+// Declines a hosted link; the page's progress follows.
+export function useDeclineHostedProofingMutation(
+  token: string,
+): UseMutationResult<HostedProgress, Error, void> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => declineHostedProofing(token),
+    onSuccess: (progress) => {
+      queryClient.setQueryData(
+        [...verifyQueryKey({ kind: "hosted", token }), "progress"],
+        progress,
+      );
+    },
+    meta: { suppressErrorToast: true },
+  });
+}
+
+// Decides a request under review; the lists (and counts) follow.
+export function useDecideProofingReviewMutation(
+  slug: string,
+  requestId: string,
+): UseMutationResult<ProofingRequest, Error, ProofingReviewInput> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input) => decideProofingReview(slug, requestId, input),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: proofingRequestsQueryKey(slug),
+      });
+    },
   });
 }

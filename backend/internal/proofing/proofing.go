@@ -18,9 +18,9 @@
 // vcmrtd deep link, as a QR code and a button: there is no page in between, so
 // the mail is the session. The link's claim is single use, and IPS keeps it
 // claimable as long as the session (ClaimTokenTTL). Nothing restarts a session:
-// once it ends, a new request means a new mail. Outcomes are reconciled on read
-// (the request list re-checks live requests). The IPS webhook is not used:
-// it goes to a per-session URL and carries the full personal-data result.
+// once it ends, a new request means a new mail. IPS pushes every session change
+// as a notice without personal data (HandleIPSEvent); the wallet then reads the
+// outcome with the org's key. The deadline job covers a push that never came.
 //
 // Data minimisation: only the outcome is kept (status, achieved assurance levels,
 // IPS error code). For a customer's subject, the name read off an approved
@@ -37,17 +37,32 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
 )
+
+// Mode is whether a request runs for real or as a test: a test request runs
+// on the org's sandbox IPS tenant with a scripted outcome, never on a subject.
+type Mode string
+
+const (
+	ModeLive Mode = "live"
+	ModeTest Mode = "test"
+)
+
+// HostedLinkTTL is how long a hosted request's link can be started from; the
+// session it starts then runs its own SessionTTL.
+const HostedLinkTTL = 72 * time.Hour
 
 // SessionTTL is how long a mailed session runs, counted from the send: IPS's own
 // default session lifetime (SessionCreateTTL), within its hard cap. The mail
 // states it in minutes, so it is whole minutes.
 const SessionTTL = 10 * time.Minute
 
-// maxReconcilePerList bounds how many live requests one list read re-checks at
-// IPS, so a list stays one bounded round of calls however many are open.
-const maxReconcilePerList = 10
+// readReconcileEvery is how often a single-request read may re-check that
+// request at IPS; IPS pushes every change, so this only covers a missed push.
+const readReconcileEvery = 10 * time.Second
 
 // maxReconcilePerRound bounds how many live requests the background reconciler
 // re-checks at IPS per round, across every org.
@@ -69,8 +84,8 @@ const hoursPerDay = 24
 var SessionTTLOptions = []time.Duration{2 * time.Minute, 5 * time.Minute, SessionTTL}
 
 // DataRetentionDayOptions are the proofed-name retentions, in days, an admin
-// may pick for a customer; ProofedNameRetention is the default.
-var DataRetentionDayOptions = []int{7, 30, 90}
+// may pick for a customer: up to a year; ProofedNameRetention (30) is the default.
+var DataRetentionDayOptions = []int{7, 30, 90, 180, 365}
 
 // CustomerBranding is how the proofing mail to a customer's subjects looks:
 // DisplayName signs it ("" is the customer's name), PrimaryColor colours it
@@ -82,6 +97,8 @@ type CustomerBranding struct {
 	SupportContact string
 	PrivacyURL     string
 	HasLogo        bool
+	// HidePoweredBy leaves the "powered by" line off the customer's hosted pages.
+	HidePoweredBy bool
 }
 
 // CustomerLogo is a customer's logo image, sniffed at upload.
@@ -101,6 +118,7 @@ func (b CustomerBranding) auditFields() map[string]any {
 	return map[string]any{
 		"displayName": b.DisplayName, "primaryColor": b.PrimaryColor,
 		"supportContact": b.SupportContact, "privacyUrl": b.PrivacyURL, "hasLogo": b.HasLogo,
+		"hidePoweredBy": b.HidePoweredBy,
 	}
 }
 
@@ -155,16 +173,27 @@ var (
 	ErrCustomerExists     = errors.New("proofing: a customer with this name already exists")
 	ErrFlowNotAssigned    = errors.New("proofing: flow is not assigned to the customer")
 	ErrCustomerPaused     = errors.New("proofing: proofing is paused for the customer")
-	ErrAPIKeyNotFound     = errors.New("proofing: api key not found")
-	ErrAPIKeyInvalid      = errors.New("proofing: invalid api key")
-	ErrRequestNotFound    = errors.New("proofing: request not found")
-	ErrWebhookNotFound    = errors.New("proofing: webhook not configured")
-	ErrNoCustomerLogo     = errors.New("proofing: customer has no logo")
-	ErrInvalidInput       = errors.New("proofing: invalid input")
+	ErrCustomerNoAPIKey   = errors.New("proofing: the customer has no live api key")
+	// ErrDeviceActive is a new claim link refused while the Idem app holding
+	// the session is still active.
+	ErrDeviceActive = errors.New("proofing: the app holding the session is still active")
+	// ErrResultNotReady is a result read before the session has an outcome.
+	ErrResultNotReady = errors.New("proofing: the session has no outcome yet")
+	// ErrNotHosted is a headless start of a request not created hosted.
+	ErrNotHosted       = errors.New("proofing: the request was not created hosted")
+	ErrAPIKeyNotFound  = errors.New("proofing: api key not found")
+	ErrAPIKeyInvalid   = errors.New("proofing: invalid api key")
+	ErrRequestNotFound = errors.New("proofing: request not found")
+	ErrWebhookNotFound = errors.New("proofing: webhook not configured")
+	ErrNoCustomerLogo  = errors.New("proofing: customer has no logo")
+	ErrInvalidInput    = errors.New("proofing: invalid input")
 	// ErrWrongMethod is a Yivi-only call on a request that runs in the Idem app.
 	ErrWrongMethod = errors.New("proofing: the request does not run in the Yivi app")
 	// ErrSessionOver is a call on a request whose session can no longer run.
 	ErrSessionOver = errors.New("proofing: the request's session is over")
+	// ErrDisclosurePending is a Yivi request whose subject has not finished the
+	// OpenID4VP disclosure in the Yivi app yet.
+	ErrDisclosurePending = errors.New("proofing: the Yivi disclosure is not finished")
 )
 
 // Status is a request's lifecycle state. Expired is derived (see Request.EffectiveStatus).
@@ -177,6 +206,8 @@ const (
 	StatusRejected    Status = "rejected"
 	StatusNeedsReview Status = "needs_review"
 	StatusExpired     Status = "expired"
+	// StatusCancelled is derived from Request.CancelledAt: the customer ended it.
+	StatusCancelled Status = "cancelled"
 )
 
 // Settled reports an outcome IPS has already decided at least once. needs_review
@@ -187,8 +218,17 @@ func (s Status) Settled() bool {
 
 // Request is one proofing request, without its link token.
 type Request struct {
-	ID              uuid.UUID
-	OrganizationID  uuid.UUID
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	// Mode is ModeTest for a sandbox request, run on the org's sandbox tenant.
+	Mode Mode
+	// Hosted is a request its subject opens from a link (ChannelHosted): its
+	// IPS session is created only when the subject starts.
+	Hosted bool
+	// CancelledAt is when the customer cancelled it; PurgedAt when its data was
+	// erased at IPS and here (the row stays for the audit trail).
+	CancelledAt     *time.Time
+	PurgedAt        *time.Time
 	RequestedBy     *uuid.UUID
 	RequestedByName string
 	// APIKeyID is the customer key that created the request through the API,
@@ -222,13 +262,25 @@ type Request struct {
 	LinkExpiresAt  time.Time
 	AssuranceLevel string
 	EIDASLevel     string
-	ErrorCode      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	CompletedAt    *time.Time
+	// RequiredAssuranceLevel is the eIDAS level the flow demanded at send; ""
+	// for none. An approval below it is recorded as a rejection.
+	RequiredAssuranceLevel string
+	ErrorCode              string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	CompletedAt            *time.Time
+	// RedirectURL is where a hosted request's page sends its subject once it
+	// settles; empty for none. Language is the page's language; empty leaves
+	// the subject's browser to decide.
+	RedirectURL string
+	Language    email.Locale
 
 	// session is the live IPS session, decrypted; nil when none is attached.
 	session *ipsSession
+	// yiviTransactionID is the verifier's transaction of a Yivi request's
+	// latest OpenID4VP disclosure; empty before one is started. Server-side
+	// only: it reads the disclosed claims.
+	yiviTransactionID string
 }
 
 type ipsSession struct {
@@ -252,7 +304,17 @@ func (r Request) liveSession(now time.Time) *ipsSession {
 // EffectiveStatus is Status with an unfinished request whose session is over
 // reading as expired: the mail was the session, so nothing can start again.
 func (r Request) EffectiveStatus(now time.Time) Status {
+	if r.CancelledAt != nil {
+		return StatusCancelled
+	}
+	if r.awaitingStart(now) {
+		return r.Status
+	}
 	if !r.Status.Settled() && r.liveSession(now) == nil {
+		return StatusExpired
+	}
+	// A review IPS gave up on (it expired or was cancelled there) is over too.
+	if r.Status == StatusNeedsReview && r.session != nil && r.session.EndedAt != nil {
 		return StatusExpired
 	}
 	return r.Status
@@ -269,6 +331,20 @@ func (r Request) SessionExpiresAt(now time.Time) *time.Time {
 	return &at
 }
 
+// awaitingStart reports a hosted request its subject has not started yet,
+// whose link still can be.
+func (r Request) awaitingStart(now time.Time) bool {
+	return r.Hosted && r.session == nil && r.Status == StatusPending && now.Before(r.LinkExpiresAt)
+}
+
+// mode is the request's Mode, ModeLive when unset.
+func (r Request) mode() Mode {
+	if r.Mode == "" {
+		return ModeLive
+	}
+	return r.Mode
+}
+
 // needsReconcile reports whether IPS may hold a newer state than the row: an
 // attached session not yet seen to end (running, or past its cap with its end or
 // a last-moment outcome still unread), or an outcome still under review.
@@ -277,7 +353,7 @@ func (r Request) needsReconcile() bool {
 	case r.session == nil:
 		return false
 	case r.Status == StatusNeedsReview:
-		return true
+		return r.session.EndedAt == nil
 	default:
 		return (r.Status == StatusPending || r.Status == StatusInProgress) && r.session.EndedAt == nil
 	}
@@ -341,7 +417,25 @@ type NewRequest struct {
 	// Channel is how the subject gets the session: mailed (the default when
 	// empty), or shown on the sender's screen, where the subject scans it.
 	Channel Channel
+	// Language is the sender's wallet language: the mail's, and the one IPS
+	// hands the Idem app. Empty leaves the deployment default and the phone's.
+	Language email.Locale
+	// Mode is ModeTest for a test key's request: it runs on the org's sandbox
+	// tenant, resolves to ScriptedOutcome (defaultScriptedOutcome when empty)
+	// at once, and mails nothing. Empty is ModeLive.
+	Mode            Mode
+	ScriptedOutcome string
+	// RedirectURL is where a hosted page sends its subject once the session
+	// settles; its origin must be one of the customer's RedirectOrigins. Empty
+	// shows the page's own done screen.
+	RedirectURL string
 }
+
+// defaultScriptedOutcome is a test request's outcome when it names none.
+const defaultScriptedOutcome = "approve"
+
+// scriptedOutcomePattern is the scripted outcomes IPS's sandbox accepts.
+var scriptedOutcomePattern = regexp.MustCompile(`^(approve|needs_review|expire|reject:[A-Z0-9_]{1,64})$`)
 
 // Channel is how a request reaches its subject.
 type Channel string
@@ -349,6 +443,10 @@ type Channel string
 const (
 	// ChannelEmail mails the session's QR code and link: the mail is the session.
 	ChannelEmail Channel = "email"
+	// ChannelHosted hands the caller a link to the public page, where the
+	// subject, on their own device, reads what is collected, picks the app and
+	// starts: the IPS session is created then. Nothing is mailed.
+	ChannelHosted Channel = "hosted"
 	// ChannelOnScreen shows the session on the sender's screen once the subject
 	// accepted what will be collected: nothing is mailed, and a customer's
 	// subject needs no address. The Yivi app's face check runs on that screen,
@@ -373,11 +471,17 @@ type Customer struct {
 	Flows          FlowSelection
 	// PausedAt is when an admin paused proofing for the customer; nil while it
 	// is active.
-	PausedAt  *time.Time
-	Settings  CustomerSettings
-	Branding  CustomerBranding
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	PausedAt *time.Time
+	Settings CustomerSettings
+	Branding CustomerBranding
+	// RedirectOrigins are the origins (scheme://host[:port]) a hosted page of
+	// the customer may send its subject back to and be embedded on.
+	RedirectOrigins []string
+	// HasLiveKey is whether the customer holds an unrevoked live API key: live
+	// requests need one.
+	HasLiveKey bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // CustomerStatus is whether new requests can be sent for a customer.
@@ -429,6 +533,69 @@ const (
 	selfieLocationBrowser = "browser"
 	selfieLocationNative  = "native"
 )
+
+const (
+	faceProviderRegula = "regula"
+	faceProviderEngine = "engine"
+	faceProviderIris   = "Iris"
+)
+
+// faceProviders are the values the wallet sets on a flow's face provider. It
+// always names one: IPS's empty deployment default silently falls back to its
+// engine when Regula is not configured there.
+var faceProviders = []string{faceProviderRegula, faceProviderEngine, faceProviderIris}
+
+// idemOnlyFaceProviders are the face providers the Yivi app does not have: a
+// flow on one runs in the Idem app only, so the subject gets no app choice.
+var idemOnlyFaceProviders = []string{faceProviderIris}
+
+// YiviAppAvailable reports whether flow f can run in the Yivi app: always,
+// unless its face step is on a provider the Yivi app does not have.
+func YiviAppAvailable(f proofingprovider.Flow) bool {
+	return !hasFaceStep(f.Steps) || !slices.Contains(idemOnlyFaceProviders, f.FaceProvider)
+}
+
+// Public API rate limits, per customer and per API replica: APICallLimit for
+// every call, APISessionLimit also for creating a session. IPS limits session
+// creation per client IP (30 a minute), which every customer of a deployment
+// shares, so one customer must not be able to spend all of it.
+var (
+	APICallLimit    = ratelimit.Limit{Burst: 120, Per: time.Minute}
+	APISessionLimit = ratelimit.Limit{Burst: 10, Per: time.Minute}
+)
+
+// eIDAS levels of assurance, lowest first: a flow's required level and the
+// level IPS reports a session achieved.
+const (
+	eidasLow         = "low"
+	eidasSubstantial = "substantial"
+	eidasHigh        = "high"
+)
+
+var eidasLevels = []string{eidasLow, eidasSubstantial, eidasHigh}
+
+// yiviEIDASLevel is what an approved Yivi session achieved, for an IPS that
+// does not report it (IPS sets it itself since 2026-09-28): the credential was issued off a verified chip read and the live face
+// matched its photo, but the face check has no liveness, and IPS's own rule
+// (computeEIDASAssuranceLevel) gives a face match without liveness low.
+const yiviEIDASLevel = eidasLow
+
+// ErrorAssuranceNotMet is the error code the wallet records when IPS approved
+// a session below its flow's required level: the request is rejected, never
+// recorded as a pass at the lower level.
+const ErrorAssuranceNotMet = "ASSURANCE_NOT_MET"
+
+// MeetsAssurance reports whether an achieved eIDAS level satisfies a required
+// one. No requirement is always met; an unknown or absent achieved level
+// meets none, and an unknown requirement is never met (fail closed).
+func MeetsAssurance(achieved, required string) bool {
+	if required == "" {
+		return true
+	}
+	want := slices.Index(eidasLevels, required)
+	got := slices.Index(eidasLevels, achieved)
+	return want >= 0 && got >= want
+}
 
 // stepNFCRead is the chip read. A face step compares the selfie against the
 // chip's photo; without the chip, IPS needs a reference photo supplied per

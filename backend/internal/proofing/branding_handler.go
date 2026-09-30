@@ -31,12 +31,15 @@ type brandingResponse struct {
 	SupportContact string `json:"supportContact"`
 	PrivacyURL     string `json:"privacyUrl"`
 	LogoURI        string `json:"logoUri"`
+	// HidePoweredBy leaves the "powered by" line off the hosted page.
+	HidePoweredBy bool `json:"hidePoweredBy"`
 }
 
 func newBrandingResponse(slug string, c Customer) brandingResponse {
 	b := brandingResponse{
 		DisplayName: c.Branding.DisplayName, PrimaryColor: c.Branding.PrimaryColor,
 		SupportContact: c.Branding.SupportContact, PrivacyURL: c.Branding.PrivacyURL,
+		HidePoweredBy: c.Branding.HidePoweredBy,
 	}
 	if c.Branding.HasLogo {
 		b.LogoURI = fmt.Sprintf("/api/v1/orgs/%s/customers/%s/logo?v=%d",
@@ -69,6 +72,7 @@ func (h *Handler) saveBranding(w http.ResponseWriter, r *http.Request) error {
 		PrimaryColor:   r.FormValue("primaryColor"),
 		SupportContact: r.FormValue("supportContact"),
 		PrivacyURL:     r.FormValue("privacyUrl"),
+		HidePoweredBy:  r.FormValue("hidePoweredBy") == "true",
 	}, logo)
 	if err != nil {
 		return mapError(err)

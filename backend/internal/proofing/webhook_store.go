@@ -2,9 +2,11 @@ package proofing
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +25,9 @@ const (
 	deliveryLease = 5 * time.Minute
 	// maxDeliveryError bounds the error kept on a delivery.
 	maxDeliveryError = 300
+	// defaultSecretPurpose derives the default endpoint's signing secret from
+	// the proofing key, so every replica signs and verifies alike.
+	defaultSecretPurpose = "identity-proofing default webhook"
 )
 
 // Webhook is a customer's endpoint, without its secret.
@@ -55,10 +60,12 @@ const (
 )
 
 // Delivery is one webhook event sent, or to be sent, to a customer's endpoint.
+// EndpointURL is the customer's own endpoint; "" is the wallet's default one.
 type Delivery struct {
 	ID             uuid.UUID
 	Event          string
 	RequestID      *uuid.UUID
+	EndpointURL    string
 	Status         string
 	Attempts       int
 	LastStatusCode *int
@@ -68,7 +75,8 @@ type Delivery struct {
 	CreatedAt      time.Time
 }
 
-// dueDelivery is a claimed delivery with what sending it needs.
+// dueDelivery is a claimed delivery with what sending it needs. Default is a
+// delivery to the wallet's own endpoint, not one a customer supplied.
 type dueDelivery struct {
 	ID        uuid.UUID
 	Event     string
@@ -77,19 +85,37 @@ type dueDelivery struct {
 	CreatedAt time.Time
 	URL       string
 	Secret    string
+	Default   bool
 }
 
 // WebhookStore persists customer webhook endpoints and their delivery outbox.
 // Configuring an endpoint is audited; deliveries are not (they are the
 // consequence of an audited change).
 type WebhookStore struct {
-	db     database.DB
-	audit  audit.Recorder
-	cipher *crypto.Cipher
+	db         database.DB
+	audit      audit.Recorder
+	cipher     *crypto.Cipher
+	defaultURL string
 }
 
 func NewWebhookStore(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher) *WebhookStore {
 	return &WebhookStore{db: db, audit: recorder, cipher: cipher}
+}
+
+// SetDefaultEndpoint sets the wallet's own endpoint, where a customer without
+// one of its own is sent its events.
+func (s *WebhookStore) SetDefaultEndpoint(url string) { s.defaultURL = url }
+
+// DefaultSecret is the default endpoint's signing secret.
+func (s *WebhookStore) DefaultSecret() (string, error) {
+	if s.cipher == nil {
+		return "", ErrNoEncryptionKey
+	}
+	secret, err := s.cipher.DeriveSecret(defaultSecretPurpose)
+	if err != nil {
+		return "", err
+	}
+	return webhookSecretPrefix + hex.EncodeToString(secret), nil
 }
 
 func (w Webhook) auditFields() map[string]any {
@@ -196,7 +222,7 @@ func (s *WebhookStore) RotateSecret(ctx context.Context, orgID, customerID uuid.
 }
 
 // Remove deletes a customer's endpoint and every delivery still waiting for
-// it. Audited identity_proofing.webhook_removed.
+// it; ones queued for the default endpoint stay. Audited identity_proofing.webhook_removed.
 func (s *WebhookStore) Remove(ctx context.Context, orgID, customerID uuid.UUID) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		before, err := getWebhook(ctx, q, orgID, customerID)
@@ -204,7 +230,8 @@ func (s *WebhookStore) Remove(ctx context.Context, orgID, customerID uuid.UUID) 
 			return err
 		}
 		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_webhook_deliveries
-			WHERE organization_id = $1 AND customer_id = $2 AND status = $3`, orgID, customerID, DeliveryPending); err != nil {
+			WHERE organization_id = $1 AND customer_id = $2 AND status = $3 AND endpoint_url IS NOT NULL`,
+			orgID, customerID, DeliveryPending); err != nil {
 			return fmt.Errorf("proofing: drop pending deliveries customer %s: %w", customerID, err)
 		}
 		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_webhooks
@@ -229,7 +256,7 @@ func (s *WebhookStore) SendTest(ctx context.Context, orgID, customerID uuid.UUID
 
 // Deliveries returns a customer's most recent deliveries, newest first.
 func (s *WebhookStore) Deliveries(ctx context.Context, orgID, customerID uuid.UUID) ([]Delivery, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, event, request_id, status, attempts, last_status_code,
+	rows, err := s.db.Query(ctx, `SELECT id, event, request_id, COALESCE(endpoint_url, ''), status, attempts, last_status_code,
 			COALESCE(last_error, ''), last_attempt_at, delivered_at, created_at
 		FROM identity_proofing_webhook_deliveries
 		WHERE organization_id = $1 AND customer_id = $2
@@ -239,7 +266,7 @@ func (s *WebhookStore) Deliveries(ctx context.Context, orgID, customerID uuid.UU
 	}
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Delivery, error) {
 		var d Delivery
-		err := row.Scan(&d.ID, &d.Event, &d.RequestID, &d.Status, &d.Attempts, &d.LastStatusCode,
+		err := row.Scan(&d.ID, &d.Event, &d.RequestID, &d.EndpointURL, &d.Status, &d.Attempts, &d.LastStatusCode,
 			&d.LastError, &d.LastAttemptAt, &d.DeliveredAt, &d.CreatedAt)
 		return d, err
 	})
@@ -253,18 +280,19 @@ func (s *WebhookStore) Deliveries(ctx context.Context, orgID, customerID uuid.UU
 // answering, keyed by customer; a customer without an endpoint is absent.
 func (s *WebhookStore) Health(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]WebhookHealth, error) {
 	// The last attempt decides the state. The failing streak runs back from it
-	// to the first attempt after the last success.
+	// to the first attempt after the last success. Only the customer's own
+	// endpoint counts: the default one is the wallet's.
 	rows, err := s.db.Query(ctx, `SELECT w.customer_id, last.status, last.last_status_code,
 			(SELECT min(d.last_attempt_at) FROM identity_proofing_webhook_deliveries d
-			 WHERE d.customer_id = w.customer_id AND d.status <> $2 AND d.last_attempt_at IS NOT NULL
+			 WHERE d.customer_id = w.customer_id AND d.endpoint_url IS NOT NULL AND d.status <> $2 AND d.last_attempt_at IS NOT NULL
 				AND d.last_attempt_at > COALESCE((SELECT max(ok.delivered_at) FROM identity_proofing_webhook_deliveries ok
-					WHERE ok.customer_id = w.customer_id AND ok.status = $2), '-infinity')),
+					WHERE ok.customer_id = w.customer_id AND ok.status = $2 AND ok.endpoint_url IS NOT NULL), '-infinity')),
 			(SELECT count(*) FROM identity_proofing_webhook_deliveries d
-			 WHERE d.customer_id = w.customer_id AND d.status = $3 AND d.attempts > 0)
+			 WHERE d.customer_id = w.customer_id AND d.endpoint_url IS NOT NULL AND d.status = $3 AND d.attempts > 0)
 		FROM identity_proofing_webhooks w
 		LEFT JOIN LATERAL (
 			SELECT d.status, d.last_status_code FROM identity_proofing_webhook_deliveries d
-			WHERE d.customer_id = w.customer_id AND d.last_attempt_at IS NOT NULL
+			WHERE d.customer_id = w.customer_id AND d.endpoint_url IS NOT NULL AND d.last_attempt_at IS NOT NULL
 			ORDER BY d.last_attempt_at DESC LIMIT 1
 		) last ON true
 		WHERE w.organization_id = $1`, orgID, DeliveryDelivered, DeliveryPending)
@@ -295,21 +323,31 @@ func (s *WebhookStore) Health(ctx context.Context, orgID uuid.UUID) (map[uuid.UU
 }
 
 // claimDue leases up to limit due deliveries, across every org, and returns
-// them with their endpoint's URL and secret. The lease keeps another worker
+// them with their endpoint's URL and secret: the customer's own, or the
+// default one's for a delivery without one. The lease keeps another worker
 // from sending the same delivery while this one does.
 func (s *WebhookStore) claimDue(ctx context.Context, limit int) ([]dueDelivery, error) {
 	if s.cipher == nil {
 		return nil, ErrNoEncryptionKey
 	}
+	defaultSecret, err := s.DefaultSecret()
+	if err != nil {
+		return nil, err
+	}
+	// A delivery for a customer endpoint that is gone is never sent to the default.
 	rows, err := s.db.Query(ctx, `WITH due AS (
-			SELECT d.id FROM identity_proofing_webhook_deliveries d
+			SELECT d.id, w.url, w.secret_ciphertext FROM identity_proofing_webhook_deliveries d
+			LEFT JOIN identity_proofing_webhooks w ON w.customer_id = d.customer_id
 			WHERE d.status = $1 AND d.next_attempt_at <= now()
-			ORDER BY d.next_attempt_at LIMIT $2 FOR UPDATE SKIP LOCKED
+				AND (d.endpoint_url IS NULL OR w.customer_id IS NOT NULL)
+			ORDER BY d.next_attempt_at LIMIT $2 FOR UPDATE OF d SKIP LOCKED
 		)
-		UPDATE identity_proofing_webhook_deliveries d SET next_attempt_at = now() + make_interval(secs => $3)
-		FROM due, identity_proofing_webhooks w
-		WHERE d.id = due.id AND w.customer_id = d.customer_id
-		RETURNING d.id, d.event, d.payload, d.attempts, d.created_at, w.url, w.secret_ciphertext`,
+		UPDATE identity_proofing_webhook_deliveries d
+		SET next_attempt_at = now() + make_interval(secs => $3),
+			endpoint_url = CASE WHEN d.endpoint_url IS NULL THEN NULL ELSE due.url END
+		FROM due
+		WHERE d.id = due.id
+		RETURNING d.id, d.event, d.payload, d.attempts, d.created_at, d.endpoint_url IS NULL, due.url, due.secret_ciphertext`,
 		DeliveryPending, limit, deliveryLease.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("proofing: claim deliveries: %w", err)
@@ -318,21 +356,45 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit int) ([]dueDelivery, 
 	var out []dueDelivery
 	for rows.Next() {
 		var d dueDelivery
+		var url *string
 		var sealed []byte
-		if err := rows.Scan(&d.ID, &d.Event, &d.Payload, &d.Attempts, &d.CreatedAt, &d.URL, &sealed); err != nil {
+		if err := rows.Scan(&d.ID, &d.Event, &d.Payload, &d.Attempts, &d.CreatedAt, &d.Default, &url, &sealed); err != nil {
 			return nil, fmt.Errorf("proofing: scan delivery: %w", err)
+		}
+		if d.Default {
+			d.URL, d.Secret = s.defaultURL, defaultSecret
+			out = append(out, d)
+			continue
 		}
 		secret, err := s.cipher.Decrypt(sealed)
 		if err != nil {
-			return nil, fmt.Errorf("proofing: open webhook secret delivery %s: %w", d.ID, err)
+			// Skip only this one; its lease lapses and it is retried, e.g. after a key fix.
+			slog.ErrorContext(ctx, "identity proofing: cannot open webhook secret",
+				slog.String("delivery_id", d.ID.String()), slog.Any("error", err))
+			continue
 		}
-		d.Secret = string(secret)
+		d.URL, d.Secret = *url, string(secret)
 		out = append(out, d)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("proofing: claim deliveries: %w", err)
 	}
 	return out, nil
+}
+
+// nextDue is when the earliest pending delivery falls due; zero when none is.
+func (s *WebhookStore) nextDue(ctx context.Context) (time.Time, error) {
+	var next *time.Time
+	// Joined like claimDue: a delivery it cannot claim must not wake the job at once, forever.
+	if err := s.db.QueryRow(ctx, `SELECT min(d.next_attempt_at) FROM identity_proofing_webhook_deliveries d
+		LEFT JOIN identity_proofing_webhooks w ON w.customer_id = d.customer_id
+		WHERE d.status = $1 AND (d.endpoint_url IS NULL OR w.customer_id IS NOT NULL)`, DeliveryPending).Scan(&next); err != nil {
+		return time.Time{}, fmt.Errorf("proofing: next delivery: %w", err)
+	}
+	if next == nil {
+		return time.Time{}, nil
+	}
+	return *next, nil
 }
 
 // recordAttempt stores one attempt's outcome: delivered on a 2xx, else another

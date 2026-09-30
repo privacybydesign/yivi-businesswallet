@@ -18,9 +18,11 @@ import (
 )
 
 const (
-	// apiKeyPrefix starts every customer API key, so a leaked one is
-	// recognisable (and scannable) as ours.
-	apiKeyPrefix = "yp_live_"
+	// apiKeyPrefix and testAPIKeyPrefix start every live and test customer API
+	// key, so a leaked one is recognisable (and scannable) as ours, and a test
+	// key as harmless. Both are the same length.
+	apiKeyPrefix     = "yp_live_"
+	testAPIKeyPrefix = "yp_test_"
 	// apiKeySecretBytes is the random part of a key.
 	apiKeySecretBytes = 32
 	// apiKeyShownPrefix is how much of a key stays visible after creation.
@@ -29,6 +31,17 @@ const (
 	maxAPIKeyNameLength = 100
 )
 
+// API key scopes: what a customer key may call.
+const (
+	ScopeSessionsWrite = "sessions:write"
+	ScopeSessionsRead  = "sessions:read"
+	ScopeResultsRead   = "results:read"
+	ScopeFlowsRead     = "flows:read"
+)
+
+// APIKeyScopes are every scope, in display order; every new key gets them all.
+var APIKeyScopes = []string{ScopeSessionsWrite, ScopeSessionsRead, ScopeResultsRead, ScopeFlowsRead}
+
 // APIKey is one of a customer's API keys, without its secret.
 type APIKey struct {
 	ID             uuid.UUID
@@ -36,16 +49,26 @@ type APIKey struct {
 	CustomerID     uuid.UUID
 	Name           string
 	Prefix         string
-	CreatedAt      time.Time
-	LastUsedAt     *time.Time
-	RevokedAt      *time.Time
+	// Mode is ModeTest for a key whose requests run in the sandbox.
+	Mode       Mode
+	Scopes     []string
+	CreatedAt  time.Time
+	LastUsedAt *time.Time
+	RevokedAt  *time.Time
 }
+
+// APIKeyActorPrefix starts the audit actor label of an API-key caller, which
+// the key's prefix follows.
+const APIKeyActorPrefix = "api_key:"
 
 // APIKeyCaller is who an authenticated API key acts for: the key, its customer
 // and the customer's org.
 type APIKeyCaller struct {
 	KeyID      uuid.UUID
 	KeyName    string
+	KeyPrefix  string
+	Mode       Mode
+	Scopes     []string
 	CustomerID uuid.UUID
 	Org        Org
 }
@@ -61,25 +84,30 @@ func NewAPIKeyStore(db database.DB, recorder audit.Recorder) *APIKeyStore {
 	return &APIKeyStore{db: db, audit: recorder}
 }
 
-func newAPIKeySecret() (raw string, hash [sha256.Size]byte) {
+func newAPIKeySecret(mode Mode) (raw string, hash [sha256.Size]byte) {
 	b := make([]byte, apiKeySecretBytes)
 	_, _ = rand.Read(b)
-	raw = apiKeyPrefix + base64.RawURLEncoding.EncodeToString(b)
+	prefix := apiKeyPrefix
+	if mode == ModeTest {
+		prefix = testAPIKeyPrefix
+	}
+	raw = prefix + base64.RawURLEncoding.EncodeToString(b)
 	return raw, sha256.Sum256([]byte(raw))
 }
 
-const apiKeyColumns = `id, organization_id, customer_id, name, prefix, created_at, last_used_at, revoked_at`
+const apiKeyColumns = `id, organization_id, customer_id, name, prefix, mode, scopes, created_at, last_used_at, revoked_at`
 
 func scanAPIKey(row pgx.CollectableRow) (APIKey, error) {
 	var k APIKey
-	err := row.Scan(&k.ID, &k.OrganizationID, &k.CustomerID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt)
+	err := row.Scan(&k.ID, &k.OrganizationID, &k.CustomerID, &k.Name, &k.Prefix, &k.Mode, &k.Scopes,
+		&k.CreatedAt, &k.LastUsedAt, &k.RevokedAt)
 	return k, err
 }
 
 // Create stores a new key for a customer and returns it with its secret, which
 // is never readable again. Audited identity_proofing.api_key_created.
-func (s *APIKeyStore) Create(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string) (APIKey, string, error) {
-	raw, hash := newAPIKeySecret()
+func (s *APIKeyStore) Create(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string, mode Mode, scopes []string) (APIKey, string, error) {
+	raw, hash := newAPIKeySecret(mode)
 	prefix := raw[:apiKeyShownPrefix]
 	var id uuid.UUID
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
@@ -87,14 +115,16 @@ func (s *APIKeyStore) Create(ctx context.Context, orgID, customerID, createdBy u
 			return err
 		}
 		if err := q.QueryRow(ctx, `INSERT INTO identity_proofing_api_keys
-			(organization_id, customer_id, name, prefix, secret_hash, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-			orgID, customerID, name, prefix, hash[:], createdBy).Scan(&id); err != nil {
+			(organization_id, customer_id, name, prefix, secret_hash, created_by, mode, scopes)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+			orgID, customerID, name, prefix, hash[:], createdBy, string(mode), scopes).Scan(&id); err != nil {
 			return fmt.Errorf("proofing: create api key customer %s: %w", customerID, err)
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingAPIKeyCreated,
 			audit.Target{Type: audit.TargetIdentityProofingCustomer, ID: customerID.String(), OrgID: &orgID},
-			audit.Created(map[string]any{"apiKeyId": id.String(), "name": name, "prefix": prefix}))
+			audit.Created(map[string]any{
+				"apiKeyId": id.String(), "name": name, "prefix": prefix, "mode": string(mode), "scopes": scopes,
+			}))
 	})
 	if err != nil {
 		return APIKey{}, "", err
@@ -160,7 +190,7 @@ func (s *APIKeyStore) Revoke(ctx context.Context, orgID, customerID, id uuid.UUI
 // Authenticate resolves a raw key to the key, its customer and org, and stamps
 // its last use. An unknown, malformed or revoked key is ErrAPIKeyInvalid.
 func (s *APIKeyStore) Authenticate(ctx context.Context, raw string) (APIKeyCaller, error) {
-	if !strings.HasPrefix(raw, apiKeyPrefix) {
+	if !strings.HasPrefix(raw, apiKeyPrefix) && !strings.HasPrefix(raw, testAPIKeyPrefix) {
 		return APIKeyCaller{}, ErrAPIKeyInvalid
 	}
 	hash := sha256.Sum256([]byte(raw))
@@ -168,8 +198,8 @@ func (s *APIKeyStore) Authenticate(ctx context.Context, raw string) (APIKeyCalle
 	err := s.db.QueryRow(ctx, `UPDATE identity_proofing_api_keys k SET last_used_at = now()
 		FROM organizations o
 		WHERE k.secret_hash = $1 AND k.revoked_at IS NULL AND o.id = k.organization_id
-		RETURNING k.id, k.name, k.customer_id, o.id, o.name`, hash[:]).
-		Scan(&c.KeyID, &c.KeyName, &c.CustomerID, &c.Org.ID, &c.Org.Name)
+		RETURNING k.id, k.name, k.prefix, k.mode, k.scopes, k.customer_id, o.id, o.name`, hash[:]).
+		Scan(&c.KeyID, &c.KeyName, &c.KeyPrefix, &c.Mode, &c.Scopes, &c.CustomerID, &c.Org.ID, &c.Org.Name)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return APIKeyCaller{}, ErrAPIKeyInvalid
 	}

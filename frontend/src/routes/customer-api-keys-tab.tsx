@@ -18,7 +18,7 @@ import { SecretReveal } from "./proofing-customer-ui";
 
 const ERROR = "text-error text-[12.5px]";
 const HINT = "text-ink-soft text-[12.5px]";
-const KEY_COLUMNS = 5;
+const KEY_COLUMNS = 6;
 const NEW_KEY_FORM = "proofing-new-api-key";
 // The API reference the backend serves (internal/apidocs).
 const API_DOCS_PATH = "/api/docs";
@@ -65,6 +65,7 @@ export function ApiKeysTab({
           <Table.Head>
             <Table.HeaderCell>{t("customers.apiKeys.name")}</Table.HeaderCell>
             <Table.HeaderCell>{t("customers.apiKeys.key")}</Table.HeaderCell>
+            <Table.HeaderCell>{t("customers.apiKeys.status")}</Table.HeaderCell>
             <Table.HeaderCell>
               {t("customers.apiKeys.created")}
             </Table.HeaderCell>
@@ -89,9 +90,25 @@ export function ApiKeysTab({
             ) : (
               keys.data.map((key) => (
                 <Table.Row key={key.id}>
-                  <Table.Cell className="font-semibold">{key.name}</Table.Cell>
+                  <Table.Cell className="font-semibold">
+                    {key.name}{" "}
+                    {key.mode === "test" ? (
+                      <Tag tone="amber">{t("customers.apiKeys.test")}</Tag>
+                    ) : (
+                      <Tag tone="blue">{t("customers.apiKeys.live")}</Tag>
+                    )}
+                  </Table.Cell>
                   <Table.Cell className="text-ink-soft font-mono text-[12.5px]">
                     {t("customers.apiKeys.prefix", { prefix: key.prefix })}
+                  </Table.Cell>
+                  <Table.Cell>
+                    {key.revokedAt ? (
+                      <Tag dot>{t("customers.apiKeys.revoked")}</Tag>
+                    ) : (
+                      <Tag tone="green" dot>
+                        {t("customers.apiKeys.active")}
+                      </Tag>
+                    )}
                   </Table.Cell>
                   <Table.Cell>{formatDate(key.createdAt)}</Table.Cell>
                   <Table.Cell className="text-ink-soft">
@@ -100,9 +117,7 @@ export function ApiKeysTab({
                       : t("customers.apiKeys.neverUsed")}
                   </Table.Cell>
                   <Table.Cell className="text-right">
-                    {key.revokedAt ? (
-                      <Tag>{t("customers.apiKeys.revoked")}</Tag>
-                    ) : (
+                    {!key.revokedAt && (
                       <button
                         type="button"
                         className="text-error text-[12.5px] font-semibold hover:underline"
@@ -169,6 +184,7 @@ function NewKeyModal({
   const { t } = useTranslation();
   const create = useCreateProofingApiKeyMutation(slug, customerId);
   const [name, setName] = useState("");
+  const [test, setTest] = useState(false);
   const [touched, setTouched] = useState(false);
   const missing = name.trim() === "";
 
@@ -178,7 +194,10 @@ function NewKeyModal({
     if (missing) {
       return;
     }
-    create.mutate(name.trim(), { onSuccess: (key) => onCreated(key.secret) });
+    create.mutate(
+      { name: name.trim(), mode: test ? "test" : "live" },
+      { onSuccess: (key) => onCreated(key.secret) },
+    );
   }
 
   return (
@@ -224,6 +243,21 @@ function NewKeyModal({
         {touched && missing && (
           <p className={ERROR}>{t("customers.new.nameRequired")}</p>
         )}
+        <div className="mt-3 flex items-start gap-2.5">
+          <input
+            id="proofing-api-key-test"
+            type="checkbox"
+            className="mt-0.5 h-4 w-4"
+            checked={test}
+            onChange={(e) => setTest(e.target.checked)}
+          />
+          <label htmlFor="proofing-api-key-test" className="flex flex-col">
+            <span className="text-[13px] font-semibold">
+              {t("customers.apiKeys.testLabel")}
+            </span>
+            <span className={HINT}>{t("customers.apiKeys.testHint")}</span>
+          </label>
+        </div>
         {create.isError && (
           <p className={ERROR}>{proofingErrorMessage(create.error, t)}</p>
         )}

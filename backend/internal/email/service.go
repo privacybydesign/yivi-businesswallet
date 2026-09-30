@@ -261,6 +261,8 @@ type ProofingMail struct {
 	SupportContact string
 	PrivacyURL     string
 	Brand          *CustomerBrand
+	// Locale is the mail's language; empty is the deployment default.
+	Locale Locale
 }
 
 // CustomerBrand is a proofing customer's mail look: its primary colour ("" is
@@ -283,7 +285,7 @@ func (s *Service) SendIdentityProofingRequested(ctx context.Context, orgID uuid.
 		varSupportContact: m.SupportContact,
 		varPrivacyURL:     m.PrivacyURL,
 	}
-	cfg, msg, err := s.composeBranded(ctx, orgID, KindIdentityProofingRequested, s.locale(""), vars, m.Brand)
+	cfg, msg, err := s.composeBranded(ctx, orgID, KindIdentityProofingRequested, s.locale(m.Locale), vars, m.Brand)
 	if err != nil {
 		return err
 	}

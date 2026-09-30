@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,7 +31,9 @@ func NewCustomerStore(db database.DB, recorder audit.Recorder) *CustomerStore {
 
 const customerColumns = `id, organization_id, name, paused_at, session_ttl_seconds, data_retention_days,
 	COALESCE(display_name, ''), COALESCE(primary_color, ''), COALESCE(support_contact, ''), COALESCE(privacy_url, ''),
-	logo_bytes IS NOT NULL, created_at, updated_at`
+	logo_bytes IS NOT NULL, hide_powered_by, created_at, updated_at, allowed_redirect_origins,
+	EXISTS (SELECT 1 FROM identity_proofing_api_keys k WHERE k.customer_id = identity_proofing_customers.id
+		AND k.mode = 'live' AND k.revoked_at IS NULL)`
 
 // List returns the org's customers by name, each with its assigned flows.
 func (s *CustomerStore) List(ctx context.Context, orgID uuid.UUID) ([]Customer, error) {
@@ -84,7 +87,7 @@ func scanCustomer(row pgx.CollectableRow) (Customer, error) {
 	var ttlSeconds int
 	b := &c.Branding
 	err := row.Scan(&c.ID, &c.OrganizationID, &c.Name, &c.PausedAt, &ttlSeconds, &c.Settings.DataRetentionDays,
-		&b.DisplayName, &b.PrimaryColor, &b.SupportContact, &b.PrivacyURL, &b.HasLogo, &c.CreatedAt, &c.UpdatedAt)
+		&b.DisplayName, &b.PrimaryColor, &b.SupportContact, &b.PrivacyURL, &b.HasLogo, &b.HidePoweredBy, &c.CreatedAt, &c.UpdatedAt, &c.RedirectOrigins, &c.HasLiveKey)
 	c.Settings.SessionTTL = time.Duration(ttlSeconds) * time.Second
 	return c, err
 }
@@ -200,6 +203,34 @@ func (s *CustomerStore) SaveSettings(ctx context.Context, orgID, id uuid.UUID, s
 	return s.Get(ctx, orgID, id)
 }
 
+// SaveRedirectOrigins replaces the origins a customer's hosted pages may
+// redirect to and be embedded on, and audits identity_proofing.customer_updated
+// with before and after. Saving the origins it already has changes nothing.
+func (s *CustomerStore) SaveRedirectOrigins(ctx context.Context, orgID, id uuid.UUID, origins []string) (Customer, error) {
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		before, err := getCustomer(ctx, q, orgID, id)
+		if err != nil {
+			return err
+		}
+		if slices.Equal(before.RedirectOrigins, origins) {
+			return nil
+		}
+		if _, err := q.Exec(ctx, `UPDATE identity_proofing_customers
+			SET allowed_redirect_origins = $3, updated_at = now()
+			WHERE organization_id = $1 AND id = $2`, orgID, id, origins); err != nil {
+			return fmt.Errorf("proofing: save customer redirect origins %s: %w", id, err)
+		}
+		return s.audit.Record(ctx, q, audit.IdentityProofingCustomerUpdated,
+			audit.Target{Type: audit.TargetIdentityProofingCustomer, ID: id.String(), OrgID: &orgID},
+			audit.Updated(map[string]any{"allowedRedirectOrigins": before.RedirectOrigins},
+				map[string]any{"allowedRedirectOrigins": origins}))
+	})
+	if err != nil {
+		return Customer{}, err
+	}
+	return s.Get(ctx, orgID, id)
+}
+
 // SaveBranding replaces a customer's branding, and its logo as logo says, and
 // audits identity_proofing.customer_updated with before and after (whether a
 // logo is set, never its bytes).
@@ -222,10 +253,10 @@ func (s *CustomerStore) SaveBranding(ctx context.Context, orgID, id uuid.UUID, b
 				support_contact = NULLIF($5, ''), privacy_url = NULLIF($6, ''),
 				logo_bytes = CASE WHEN $7 THEN $8 ELSE logo_bytes END,
 				logo_content_type = CASE WHEN $7 THEN NULLIF($9, '') ELSE logo_content_type END,
-				updated_at = now()
+				hide_powered_by = $10, updated_at = now()
 			WHERE organization_id = $1 AND id = $2`,
 			orgID, id, b.DisplayName, b.PrimaryColor, b.SupportContact, b.PrivacyURL,
-			logo.Replace, nilIfEmpty(logo.Logo.Bytes), logo.Logo.ContentType); err != nil {
+			logo.Replace, nilIfEmpty(logo.Logo.Bytes), logo.Logo.ContentType, b.HidePoweredBy); err != nil {
 			return fmt.Errorf("proofing: save customer branding %s: %w", id, err)
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingCustomerUpdated,

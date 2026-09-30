@@ -20,6 +20,7 @@ import {
   CHECK_FACE_MATCH,
   CHECK_LIVENESS,
   CHECK_PASSIVE_AUTH,
+  FACE_PROVIDERS,
   REQUESTED_ATTRIBUTES,
   STEP_DOCUMENT_CAPTURE,
   STEP_FACE_VERIFICATION,
@@ -39,6 +40,7 @@ import type {
   Tristate,
 } from "../lib/identity-proofing";
 import { Button, Card, Input, Tag, TopBar } from "../ui";
+import { FlowHostedSettings } from "./flow-hosted-settings";
 
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
@@ -135,6 +137,7 @@ function FlowsCard({
     () => flows.find((f) => f.default)?.id ?? "",
   );
   const [historyOf, setHistoryOf] = useState<string | null>(null);
+  const [hostedOf, setHostedOf] = useState<string | null>(null);
 
   // A default the admin unticked falls to the first flow still ticked.
   const { selection, dirty } = editedFlowSelection(flows, allowed, defaultId, {
@@ -251,10 +254,27 @@ function FlowsCard({
                       >
                         {t("identityProofingFlows.versions.title")}
                       </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        icon="settings"
+                        aria-expanded={hostedOf === flow.id}
+                        onClick={() =>
+                          setHostedOf((current) =>
+                            current === flow.id ? null : flow.id,
+                          )
+                        }
+                      >
+                        {t("identityProofingFlows.hosted.title")}
+                      </Button>
                     </div>
                   </div>
                   {historyOf === flow.id && (
                     <VersionHistory slug={slug} flowId={flow.id} />
+                  )}
+                  {hostedOf === flow.id && (
+                    <FlowHostedSettings slug={slug} flow={flow} />
                   )}
                 </li>
               );
@@ -491,6 +511,31 @@ export function FlowEditor({
             <p className={HINT}>
               {t("identityProofingFlows.new.faceLocationNative")}
             </p>
+          )}
+          {draft.faceVerification && (
+            <Field
+              id="proofing-flow-face-provider"
+              label={t("identityProofingFlows.new.faceProvider")}
+              hint={t("identityProofingFlows.new.faceProviderHint")}
+            >
+              <select
+                id="proofing-flow-face-provider"
+                className={SELECT_CLASS}
+                value={draft.faceProvider}
+                onChange={(event) =>
+                  update({
+                    faceProvider: event.target
+                      .value as ProofingFlowDraft["faceProvider"],
+                  })
+                }
+              >
+                {FACE_PROVIDERS.map((provider) => (
+                  <option key={provider} value={provider}>
+                    {t(`identityProofingFlows.faceProviders.${provider}`)}
+                  </option>
+                ))}
+              </select>
+            </Field>
           )}
           {draft.faceVerification && !draft.documentAndChip && (
             <p className="text-warning-fg text-[12.5px]">

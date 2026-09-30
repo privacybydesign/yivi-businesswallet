@@ -54,6 +54,64 @@ tags:
   - name: identity-proofing
     description: Identity document and face verification through the identity-proofing-service.
 paths:
+  /api/v1/admin/identity-proofing/pauses:
+    get:
+      tags: [identity-proofing]
+      summary: List orgs whose identity proofing is paused (platform admin)
+      description: >-
+        Requires the platform administrator role. `pauses` holds one entry per paused org
+        (`organizationId`). `paused` is whether identity proofing is stopped for the org; `platformPausedAt` and `orgPausedAt` say who paused it.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/admin/organizations/{id}/identity-proofing/pause:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Organisation id.
+    put:
+      tags: [identity-proofing]
+      summary: Pause or resume an org's identity proofing (platform admin)
+      description: >-
+        Requires the platform administrator role. Body `{paused}`. While paused, the org's
+        identity-proofing routes, its customers' API keys and its hosted links answer 403
+        `proofing_paused`; sessions already running still settle and their webhooks still go
+        out. The org's admin cannot lift a platform pause. Audited `identity_proofing.paused`
+        or `identity_proofing.resumed` with `by: platform`. `paused` is whether identity proofing is stopped for the org; `platformPausedAt` and `orgPausedAt` say who paused it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/admin/identity-reviews:
     get:
       tags: [organizations]
@@ -4312,7 +4370,9 @@ paths:
         how the session reaches them (`email`, the default, or `on_screen`). An
         on-screen request mails nothing and needs no `email` for a customer's subject;
         an on-screen Idem request answers the vcmrtd link as `deepLink`, and a Yivi one
-        must be on-screen, its disclosure started through `yivi/start`.
+        must be on-screen, its disclosure started through `yivi/start`. A Yivi request
+        needs a flow without a face step or with the `engine` face provider: the Yivi
+        app's face check runs on the proofing service's own engine.
       responses:
         '2XX':
           description: Successful response.
@@ -4327,7 +4387,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned, or proofing is paused for the customer (`customer_paused`).
+          description: The deployment has no identity proofing encryption key, so the organisation's tenant cannot be provisioned, proofing is paused for the customer (`customer_paused`), or a live request is for a customer without a live API key (`customer_no_api_key`).
           content:
             application/json:
               schema:
@@ -4375,6 +4435,52 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/claim-link:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Request (session) id.
+    post:
+      tags: [identity-proofing]
+      summary: Get a fresh Idem app link for a running request
+      description: >-
+        Requires organisation membership, and a live request for the Idem app whose
+        session still runs. Answers a new `deepLink` (the `vcmrtd://` claim link,
+        shown as a QR code) with its `expiresAt`: a new claim when the first
+        lapsed unscanned, or a handover to another phone when the app that held
+        the session left it (backgrounded, closed or silent). IPS keeps the rest
+        of the session; the phone that scans takes it over.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request does not run in the Idem app or is a test request (`wrong_method`), its session has ended (`session_over`), or the app holding it is still active (`device_active`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/yivi/start:
     parameters:
       - name: slug
@@ -4395,10 +4501,12 @@ paths:
       summary: Start an on-screen request's Yivi disclosure
       description: >-
         Requires organisation membership, and a request sent on-screen for the Yivi
-        app. Starts (or, after a cancel in the app, restarts) the disclosure of the
-        subject's passport or ID-card credential and answers its `sessionPtr`, the
-        JSON the Yivi app scans as a QR code, with `expiresAt`. The Yivi requestor
-        token stays at the identity-proofing-service.
+        app. Starts (or, after a cancel in the app, restarts) the OpenID4VP
+        disclosure of the subject's passport or ID-card credential with its photo,
+        at the wallet's EUDI verifier, and answers its `walletLink` (the
+        `openid4vp://` request the Yivi app opens; shown as a QR code and a
+        universal link) with `expiresAt`, the session's cap. The verifier's
+        transaction id stays on the server.
       responses:
         '2XX':
           description: Successful response.
@@ -4415,7 +4523,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The request does not run in the Yivi app, its session has ended (`session_over`), or the identity-proofing-service has no Yivi server configured (`method_unavailable`).
+          description: The request does not run in the Yivi app, or its session has ended (`session_over`).
           content:
             application/json:
               schema:
@@ -4440,11 +4548,12 @@ paths:
       summary: Redeem an on-screen request's Yivi disclosure
       description: >-
         Requires organisation membership. `done` is false while the subject has not
-        finished in the Yivi app. Once done, `ok` true moves the session on to the face
-        check (`stableFrames` matching frames approve it, `maxAttempts` without them
-        reject it); `ok` false ended the session and `code` says why (cancelled,
-        timeout, invalid_proof, photo_missing, reference_no_face). No disclosed value
-        is returned.
+        finished the OpenID4VP presentation in the Yivi app. Once done, the
+        credential's photo is handed to the identity-proofing-service as the face
+        check's reference: `ok` true moves the session on to the face check
+        (`stableFrames` matching frames approve it, `maxAttempts` without them
+        reject it); `ok` false ended the session and `code` says why (photo_missing,
+        reference_no_face). No disclosed value is returned or kept.
       responses:
         '2XX':
           description: Successful response.
@@ -4461,7 +4570,212 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The request does not run in the Yivi app, or its session has ended (`session_over`).
+          description: The request does not run in the Yivi app, its session has ended (`session_over`), or the identity-proofing-service does not take the wallet's disclosure (`method_unavailable`; BOUND_LOGIN_RELYING_PARTY_REFERENCE).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/hosted:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id at the identity-proofing-service.
+    get:
+      tags: [identity-proofing]
+      summary: Read a flow's hosted page settings
+      description: >-
+        Requires an administrator role in the organisation. `enabled` (hosted links may be made
+        for the flow), `locales` (`en`/`nl` the page offers; empty is every one) and
+        `completion`: `redirect` (the session's `redirectUrl` when it has one, else the page's
+        own thank-you screen) or `done` (always the thank-you screen). A flow never set reads
+        `enabled: true, locales: [], completion: redirect`.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [identity-proofing]
+      summary: Save a flow's hosted page settings
+      description: >-
+        Requires an administrator role in the organisation. Body `{enabled, locales, completion}`
+        as read. A hosted session on a flow with its page off is 409 `hosted_disabled`; one with
+        a `redirectUrl` on a `done` flow, or a `language` the flow does not offer, is 400.
+        Audited `identity_proofing.flow_hosted_configured` with before and after.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/identity-proofing/pause:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: Read whether the org's identity proofing is paused
+      description: >-
+        Any member; reachable while paused, unlike the other identity-proofing routes. `paused` is whether identity proofing is stopped for the org; `platformPausedAt` and `orgPausedAt` say who paused it.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      tags: [identity-proofing]
+      summary: Switch the org's identity proofing off or on
+      description: >-
+        Requires an administrator role in the organisation. Body `{paused}`: the org's own
+        switch, beside a platform admin's pause, which it cannot lift. Audited
+        `identity_proofing.paused` or `identity_proofing.resumed` with `by: organization`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/result:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Request (session) id.
+    get:
+      tags: [identity-proofing]
+      summary: Read a customer request's verified identity
+      description: >-
+        Requires an administrator role in the organisation. A settled customer request's
+        result, read from the identity-proofing-service on each call, in the shape of the
+        customer API's `GET /proofing/sessions/{id}/result`: `identity` only for an
+        approval, and `evidence`. Audited `identity_proofing.result_read` with the
+        administrator as actor on every read. A member's request, or one erased, is 404.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request has no outcome yet (`result_not_ready`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/review:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Request (session) id.
+    post:
+      tags: [identity-proofing]
+      summary: Decide a request under review
+      description: >-
+        Requires an administrator role in the organisation. `decision` is `approve` or
+        `reject`, `reason` (required, at most 500 characters) says why, and a rejection
+        may name an `errorCode` (A-Z, 0-9 and _; `MANUAL_REVIEW_REJECTED` when absent).
+        The identity-proofing-service settles the session and the outcome lands as any
+        other: an approval still has to meet the flow's assurance level, and the
+        customer's webhook is sent. Audited `identity_proofing.review_decided` with the
+        administrator as actor. The answer is the request.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request is not under review (decided already, or its session ended).
           content:
             application/json:
               schema:
@@ -4671,8 +4985,9 @@ paths:
         and/or `paused`: while a customer is paused (`status` `paused`), no request can
         be sent for it; requests already sent run out as usual. An absent field is left
         as it is. `sessionTtlSeconds` (120, 300 or 600) is how long a mailed session
-        runs; `dataRetentionDays` (7, 30 or 90) how long an approved subject's name is
-        kept.
+        runs; `dataRetentionDays` (7, 30, 90, 180 or 365; default 30) how long an approved subject's name is
+        kept. `allowedRedirectOrigins` replaces the origins (`https://host[:port]`, or `http` on a
+        loopback host; at most 10) a hosted page may send its subject back to and be embedded on.
       responses:
         '2XX':
           description: Successful response.
@@ -4755,10 +5070,15 @@ paths:
       tags: [identity-proofing]
       summary: Create a customer API key
       description: >-
-        Requires an administrator role in the organisation. `name` labels the key. The
-        answer carries the key's `secret` (`yp_live_…`), the one time it is readable: only
-        its SHA-256 is kept. The customer's backend sends it as a Bearer token to the
-        public `/api/v1/proofing` routes.
+        Requires an administrator role in the organisation. `name` labels the key and
+        `mode` is `live` (the default) or `test`. The answer carries the key's `secret`
+        (`yp_live_…` or `yp_test_…`), the one time it is readable: only its SHA-256 is
+        kept. The customer's backend sends it as a Bearer token to the public
+        `/api/v1/proofing` routes. A test key's sessions run in the org's sandbox: see
+        `POST /api/v1/proofing/sessions`. A key gets every scope: `sessions:write`
+        (create, cancel, erase), `sessions:read`, `results:read` (the verified
+        identity) and `flows:read`. A route the key lacks the scope for answers 403
+        `insufficient_scope`.
       responses:
         '2XX':
           description: Successful response.
@@ -4842,7 +5162,8 @@ paths:
         name), `primaryColor` (`#rrggbb`; empty is the organisation's), `supportContact`
         and `privacyUrl` (an https URL), each added to the mail and left out when empty,
         and a `logo` file (PNG, JPEG, GIF or WebP, at most 512 KiB; mail clients do not
-        render SVG) or `removeLogo=true`. Returns the customer.
+        render SVG) or `removeLogo=true`. `hidePoweredBy=true` leaves the "powered by" line off
+        the customer's hosted pages, whose accent colour is `primaryColor`. Returns the customer.
       responses:
         '2XX':
           description: Successful response.
@@ -4945,9 +5266,9 @@ paths:
       description: >-
         Requires an administrator role in the organisation. `url` (absolute https; it
         must resolve to a public address when an event is sent) and `events`, at least one
-        of `session.verified`, `session.failed`, `session.expired` and `session.purged`. A
+        of `session.verified`, `session.failed`, `session.review_opened`, `session.expired` and `session.purged`. A
         new endpoint's answer carries its signing `secret` (`whsec_…`), the one time it is
-        readable. Each event is a POST of `{id, type, createdAt, data}` (the session id,
+        readable. Each event is a POST of `{id, type, createdAt, data}` (the `ps_` session id,
         outcome and assurance; never the person's name or address) signed in the
         `Yivi-Signature` header as `t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`, with
         `Yivi-Event` and `Yivi-Delivery`. A non-2xx answer is retried with exponential
@@ -5086,8 +5407,9 @@ paths:
       summary: List a customer's recent webhook deliveries
       description: >-
         Requires an administrator role in the organisation. The 20 most recent, newest
-        first: the event, the session it is about, its state (`pending`, `delivered` or
-        `failed`), attempts, and the last status code or error.
+        first: the event, the session it is about, the customer's endpoint it goes to
+        (`endpointUrl`, absent for the wallet's default endpoint), its state (`pending`,
+        `delivered` or `failed`), attempts, and the last status code or error.
       responses:
         '2XX':
           description: Successful response.
@@ -5122,16 +5444,333 @@ paths:
                 description: Response payload; shape depends on the endpoint.
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/proof/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    get:
+      tags: [identity-proofing]
+      summary: Open a hosted proofing link
+      security: []
+      description: >-
+        The hosted page, unauthenticated: the token is the whole authorization, and every route is rate-limited per link. The customer's `name` and `branding` (its `logoUri` is this link's logo route), what the flow collects (`requestedAttributes`, `requiredAssuranceLevel`, `yiviAvailable`), and the progress: `status`, `started`, and `linkExpiresAt` (the link's end until started, then the session's). `sessionId` is the customer's id for the session; `redirectUrl` (absent for the page's own done screen) where the page sends the subject once settled; `embedOrigins` the customer's allowed redirect origins, the only ones the page posts its `proofing.completed` message to; `language` (`en` or `nl`, absent for the browser's) the page's language, and `locales` the languages the flow's page offers (empty: every one). No personal data.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/proof/{token}/status:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    get:
+      tags: [identity-proofing]
+      summary: Poll a hosted proofing link
+      security: []
+      description: >-
+        The progress part of `GET /api/v1/proof/{token}`, for the page to poll.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/proof/{token}/start:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    post:
+      tags: [identity-proofing]
+      summary: Start a hosted proofing link
+      security: []
+      description: >-
+        Body `{method}`: `idem_app` or `yivi_app` (only when the flow's `yiviAvailable`). Creates the session once; an Idem session answers its vcmrtd `deepLink`.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: The link was started already, its session ended, or the customer is paused.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/decline:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    post:
+      tags: [identity-proofing]
+      summary: Decline a hosted proofing link
+      security: []
+      description: >-
+        The subject declined what the flow collects: cancels the link before it was started, audited as
+        `identity_proofing.session_cancelled` by `hosted_link`. Answers the progress, `status` `cancelled`.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: The link was started already or its session ended.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/logo:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    get:
+      tags: [identity-proofing]
+      summary: A hosted link's customer logo
+      security: []
+      description: >-
+        The customer's logo image, for the hosted page.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/proof/{token}/claim-link:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    post:
+      tags: [identity-proofing]
+      summary: Get a fresh Idem app link for a hosted link
+      security: []
+      description: >-
+        As the org route of the same name, for a hosted link started with `idem_app`.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: The link does not run in the Idem app (`wrong_method`), its session has ended (`session_over`), or the app holding it is still active (`device_active`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/yivi/start:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    post:
+      tags: [identity-proofing]
+      summary: Start the Yivi disclosure of a hosted link
+      security: []
+      description: >-
+        As the org route of the same name, for a hosted link started with `yivi_app`.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: The link was started already, its session ended, or the customer is paused.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/yivi/disclosure:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    get:
+      tags: [identity-proofing]
+      summary: Poll the Yivi disclosure of a hosted link
+      security: []
+      description: >-
+        As the org route of the same name, for a hosted link.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: The link was started already, its session ended, or the customer is paused.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/yivi/face:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    post:
+      tags: [identity-proofing]
+      summary: Send a face frame of a hosted link
+      security: []
+      description: >-
+        As the org route of the same name, for a hosted link: body `{image}`, one camera frame.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: The link was started already, its session ended, or the customer is paused.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/proofing/sessions:
+    get:
+      tags: [identity-proofing]
+      summary: List proofing sessions (public API)
+      description: >-
+        Authenticated with a customer API key with `sessions:read`. The customer's
+        sessions, newest first, as stored (no re-check at the identity-proofing-service),
+        `limit` per page (default 50, at most 100): `{sessions, nextCursor}`. Pass
+        `nextCursor` back as `cursor` for the next page; it is null on the last.
+      security:
+        - customerApiKey: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
     post:
       tags: [identity-proofing]
       summary: Create a proofing session (public API)
       description: >-
+        Send an `Idempotency-Key` header to make a retry safe: the same key and body
+        within 24 hours get the first answer again (`Idempotent-Replayed: true`), the
+        key with another body is 422 `idempotency_key_reused`, and while the first call
+        still runs 409 `idempotency_in_flight`. `cancel` takes the header too.
         Authenticated with a customer API key as a Bearer token. `email` and an optional
         `name` of the subject, `flowId` (absent is the customer's default flow) and
-        `sendMail` (absent or true mails the subject as a member's request would). The
-        answer carries the session's vcmrtd `deepLink`, for a caller that shows the QR code
-        itself, and `mailSent`. Refused while the customer is paused.
+        `sendMail` (absent or true mails the subject as a member's request would), and
+        `language` (`en` or `nl`: the mail's and the Idem app's; absent is the deployment
+        default for the mail and the phone's language in the app). The answer carries the session's vcmrtd `deepLink`, for a caller that shows the QR code
+        itself, and `mailSent`. Refused while the customer is paused. With a test key
+        the session runs in the org's sandbox and resolves at once to `scriptedOutcome`
+        (`approve`, the default; `reject:<CODE>`; `needs_review`; or `expire`): it is not
+        mailed, has no `deepLink`, is left out of the stats, and carries `livemode:
+        false`, as do its webhooks. A live key may not set `scriptedOutcome` (400).
+        With `hosted: true` no session is created yet: the answer carries `hostedUrl`,
+        a link to the public page the subject opens on their own device (valid 72 hours)
+        and starts once from; nothing is mailed. Not with a test key. `redirectUrl`, only with
+        `hosted: true`, is where the page sends the subject once the session settles, with
+        `?session=<id>&status=<status>` added; its origin must be one of the customer's
+        `allowedRedirectOrigins` (else 400 `redirect_not_allowed`).
       security:
         - customerApiKey: []
       responses:
@@ -5145,6 +5784,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '409':
           description: Proofing is paused for the customer, or the deployment has no encryption key.
           content:
@@ -5164,8 +5805,8 @@ paths:
         required: true
         schema:
           type: string
-          format: uuid
-        description: Session id, as the create answer gave it.
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
     get:
       tags: [identity-proofing]
       summary: Get a proofing session (public API)
@@ -5186,8 +5827,303 @@ paths:
                 description: Response payload; shape depends on the endpoint.
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '404':
           $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [identity-proofing]
+      summary: Erase a proofing session (public API)
+      description: >-
+        Authenticated with a customer API key as a Bearer token. Erases the session at
+        the identity-proofing-service and what the wallet holds of its outcome (the
+        proofed name), whatever its state, and sends `session.purged`. The session stays
+        readable with `purgedAt` set, for the audit trail. Audited
+        `identity_proofing.session_purged`; erasing it again changes nothing.
+      security:
+        - customerApiKey: []
+      responses:
+        '204':
+          description: Erased.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/proofing/sessions/{sessionID}/result:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+    get:
+      tags: [identity-proofing]
+      summary: Get a proofing session's verified identity (public API)
+      description: >-
+        Authenticated with a customer API key with the `results:read` scope. A settled
+        session's result, read from the identity-proofing-service on each call (the
+        wallet stores no identity): `status`, `method`, assurance, `verifiedAt`, for an
+        approved session `identity` (`givenName`, `familyName`, `birthDate`,
+        `nationality`), and `evidence` (`type` `emrtd` or `yivi_disclosure`, the
+        document's type, issuing state and expiry, `passiveAuth` and `activeAuth`
+        `valid`/`invalid`/`not_performed`, `faceMatch`, `liveness`). Never the document
+        number or an image. Every read is audited `identity_proofing.result_read`.
+      security:
+        - customerApiKey: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session has no outcome yet (`result_not_ready`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/sessions/{sessionID}/methods/{method}:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+      - name: method
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [idem_app, yivi_app]
+        description: The app the subject proofs with.
+    post:
+      tags: [identity-proofing]
+      summary: Start a hosted session in an app, headless (public API)
+      description: >-
+        Authenticated with a customer API key with `sessions:write`, for a customer
+        building its own UI: starts a session created with `hosted: true` in the app, as
+        the subject picking it on the hosted page would, and answers the link to show:
+        `appLink` (the Idem app's `vcmrtd://` link) or `walletLink` (the Yivi app's
+        `openid4vp://` request, its disclosure started already), with `expiresAt`. The
+        Yivi face check then runs through `/api/v1/proof/{token}/yivi/…` with the token
+        of the `hostedUrl`, which also serves `claim-link` for a new Idem code. Takes an
+        `Idempotency-Key`.
+      security:
+        - customerApiKey: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session was not created hosted (`not_hosted`), was started already, or ended.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/sessions/{sessionID}/methods/{method}/status:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+      - name: method
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [idem_app, yivi_app]
+        description: The app the subject proofs with.
+    get:
+      tags: [identity-proofing]
+      summary: Poll a headless session (public API)
+      description: >-
+        Authenticated with a customer API key with `sessions:read`. The session's
+        `status` as stored (no re-check at the identity-proofing-service), and `done`
+        once it has an outcome or ended.
+      security:
+        - customerApiKey: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session does not run in that app (`wrong_method`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/sessions/{sessionID}/cancel:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+    post:
+      tags: [identity-proofing]
+      summary: Cancel a proofing session (public API)
+      description: >-
+        Authenticated with a customer API key as a Bearer token. Ends a session that is
+        still `pending` or `in_progress`, at the identity-proofing-service too, and
+        answers it with `status` `cancelled` and `cancelledAt`. Audited
+        `identity_proofing.session_cancelled`.
+      security:
+        - customerApiKey: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session already has an outcome, ended, or was erased (`session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/identity-proofing/ips-events:
+    post:
+      tags: [identity-proofing]
+      summary: Receive a session change pushed by the identity-proofing-service
+      description: >-
+        Called by the identity-proofing-service, not by users: a notify-only event
+        (`event`, `tenantId`, `sessionId`, `status`, no personal data) signed with the
+        org's IPS tenant webhook secret in `X-Signature` over `X-Webhook-Timestamp`.
+        The wallet then reads that one session's result with its own key. An event for
+        an unknown session is acknowledged.
+      security: []
+      parameters:
+        - name: X-Webhook-Timestamp
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Unix seconds; refused when more than 5 minutes off.
+        - name: X-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: '`sha256=` + hex HMAC-SHA256 of `<timestamp>.<body>`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event, tenantId, sessionId]
+              properties:
+                event:
+                  type: string
+                tenantId:
+                  type: string
+                sessionId:
+                  type: string
+                status:
+                  type: string
+      responses:
+        '204':
+          description: Accepted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/identity-proofing/default-webhook:
+    post:
+      tags: [identity-proofing]
+      summary: Receive a customer webhook at the wallet's default endpoint
+      description: >-
+        Called by the wallet's own webhook deliverer, not by users: where a customer
+        without an endpoint of its own is sent its session events
+        (`IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL`). Signed like every customer webhook,
+        with the deployment's default secret; the result is already stored, so a valid
+        delivery is acknowledged.
+      security: []
+      parameters:
+        - name: Yivi-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: >-
+            `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">`; refused when `t` is
+            more than 5 minutes off.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, type, createdAt, data]
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                type:
+                  type: string
+                createdAt:
+                  type: string
+                  format: date-time
+                data:
+                  type: object
+      responses:
+        '204':
+          description: Accepted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/v1/orgs/{slug}/customers/{customerID}/flows:
     parameters:
       - name: slug
@@ -6927,6 +7863,20 @@ components:
             $ref: '#/components/schemas/Error'
     NotFound:
       description: The referenced resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: >-
+        The customer spent its public API budget (code `rate_limited`): 120 calls a
+        minute, and of those 10 session creations. `Retry-After` says in how many
+        seconds to try again.
+      headers:
+        Retry-After:
+          description: Seconds until the next call is allowed.
+          schema:
+            type: integer
       content:
         application/json:
           schema:

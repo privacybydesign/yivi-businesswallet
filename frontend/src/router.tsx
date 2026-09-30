@@ -51,6 +51,7 @@ import OpenID4VPTransaction from "./routes/openid4vp-transaction";
 import Settings from "./routes/settings";
 import Signing from "./routes/signing";
 import SigningExternal from "./routes/signing-external";
+import Proof from "./routes/proof";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
 import NotFound from "./routes/not-found";
@@ -185,6 +186,9 @@ export const router = createBrowserRouter([
       // An external signee has no account, so their signing page is public and keyed
       // by the one-time token from their invitation mail.
       { path: "/sign/:token", Component: SigningExternal },
+      // A customer's subject verifying from a hosted link: public, keyed by
+      // the link's token, on the subject's own device.
+      { path: "/p/:token", Component: Proof },
       { path: "*", Component: NotFound },
       {
         Component: ProtectedRoute,

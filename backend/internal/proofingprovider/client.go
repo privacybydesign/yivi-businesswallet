@@ -19,10 +19,6 @@ const (
 	headerAdminKey = "X-Admin-Key"
 	headerAPIKey   = "X-Api-Key"
 
-	// The IPS API key environment. IPS gives it no runtime meaning today (a
-	// sandbox is a tenant flag, not a key kind), so the wallet always mints live.
-	keyEnvironment = "live"
-
 	// maxResponseBytes caps any IPS answer. A session result embeds the document
 	// and face images, which is what sets the size; everything else is small.
 	maxResponseBytes = 32 << 20
@@ -50,29 +46,50 @@ func (c *Client) Ping(ctx context.Context) error {
 	return c.do(ctx, http.MethodGet, "/health", nil, nil, nil)
 }
 
-// CreateTenant creates an IPS tenant named name.
-func (c *Client) CreateTenant(ctx context.Context, name string) (Tenant, error) {
+// CreateTenant creates the IPS tenant id (the org's own id) named name. An id
+// IPS already has is ErrTenantExists.
+func (c *Client) CreateTenant(ctx context.Context, id, name string) (Tenant, error) {
 	var out struct {
 		ID            string `json:"id"`
 		WebhookSecret string `json:"webhookSecret"`
 	}
-	body := map[string]any{"name": name}
-	if err := c.do(ctx, http.MethodPost, "/admin/tenants", c.adminHeaders(), body, &out); err != nil {
+	body := map[string]any{"id": id, "name": name}
+	err := c.do(ctx, http.MethodPost, "/admin/tenants", c.adminHeaders(), body, &out)
+	if rejected := (*RejectedError)(nil); errors.As(err, &rejected) && rejected.Status == http.StatusConflict {
+		err = ErrTenantExists
+	}
+	if err != nil {
 		return Tenant{}, fmt.Errorf("proofingprovider: create tenant: %w", err)
 	}
-	if out.ID == "" {
-		return Tenant{}, errors.New("proofingprovider: create tenant: answer carries no tenant id")
+	if out.ID != id {
+		return Tenant{}, errors.New("proofingprovider: create tenant: answer carries another tenant id")
 	}
 	return Tenant{ID: out.ID, WebhookSecret: out.WebhookSecret}, nil
 }
 
-// CreateAPIKey mints an API key for tenantID with scopes and returns its
+// RotateWebhookSecret issues tenantID a fresh webhook secret and returns it:
+// how a tenant whose create answer was lost gets one the wallet holds.
+func (c *Client) RotateWebhookSecret(ctx context.Context, tenantID string) (string, error) {
+	var out struct {
+		WebhookSecret string `json:"webhookSecret"`
+	}
+	path := "/admin/tenants/" + url.PathEscape(tenantID) + "/webhook-secret"
+	if err := c.do(ctx, http.MethodPost, path, c.adminHeaders(), map[string]any{}, &out); err != nil {
+		return "", fmt.Errorf("proofingprovider: rotate webhook secret: %w", err)
+	}
+	if out.WebhookSecret == "" {
+		return "", errors.New("proofingprovider: rotate webhook secret: answer carries no secret")
+	}
+	return out.WebhookSecret, nil
+}
+
+// CreateAPIKey mints an env API key for tenantID with scopes and returns its
 // plaintext, which IPS shows only this once.
-func (c *Client) CreateAPIKey(ctx context.Context, tenantID string, scopes []string) (string, error) {
+func (c *Client) CreateAPIKey(ctx context.Context, tenantID string, env KeyEnvironment, scopes []string) (string, error) {
 	var out struct {
 		Plaintext string `json:"plaintext"`
 	}
-	body := map[string]any{"environment": keyEnvironment, "scopes": scopes}
+	body := map[string]any{"environment": env, "scopes": scopes}
 	path := "/admin/tenants/" + url.PathEscape(tenantID) + "/keys"
 	if err := c.do(ctx, http.MethodPost, path, c.adminHeaders(), body, &out); err != nil {
 		return "", fmt.Errorf("proofingprovider: create api key: %w", err)
@@ -162,6 +179,12 @@ func (c *Client) CreateSession(ctx context.Context, apiKey string, in SessionInp
 	if in.TTL > 0 {
 		body["ttlSeconds"] = int(in.TTL / time.Second)
 	}
+	if in.CallbackURL != "" {
+		body["callbackUrl"], body["callbackPayload"] = in.CallbackURL, "minimal"
+	}
+	if in.ScriptedOutcome != "" {
+		body["scriptedOutcome"] = in.ScriptedOutcome
+	}
 	var out createdSessionView
 	if err := c.do(ctx, http.MethodPost, "/sessions", tenantHeaders(apiKey), body, &out); err != nil {
 		if errors.Is(err, errUnavailable) && in.Method == MethodYivi {
@@ -177,7 +200,7 @@ func (c *Client) CreateSession(ctx context.Context, apiKey string, in SessionInp
 	return sess, nil
 }
 
-// createdSessionView is IPS's answer to creating and to restarting a session.
+// createdSessionView is IPS's answer to creating a session.
 type createdSessionView struct {
 	ID          string     `json:"id"`
 	Token       string     `json:"token"`
@@ -250,54 +273,250 @@ func (c *Client) SessionResult(ctx context.Context, apiKey, sessionID, sessionTo
 	return res, nil
 }
 
+// SessionIdentity reads a session's result for a customer's result read: the
+// Result plus the Identity's name, birth date, nationality and Evidence. IPS
+// audits it as a personal-data read.
+func (c *Client) SessionIdentity(ctx context.Context, apiKey, sessionID, sessionToken string) (Identity, error) {
+	var out struct {
+		Status      Status     `json:"status"`
+		ErrorCode   string     `json:"errorCode"`
+		CompletedAt *time.Time `json:"completedAt"`
+		Result      *struct {
+			Assurance *struct {
+				Level      string `json:"level"`
+				EIDASLevel string `json:"eidasLevel"`
+			} `json:"assurance"`
+			Document *struct {
+				Type         string `json:"type"`
+				IssuingState string `json:"issuingState"`
+				Nationality  string `json:"nationality"`
+				FirstName    string `json:"firstName"`
+				LastName     string `json:"lastName"`
+				DateOfBirth  string `json:"dateOfBirth"`
+				DateOfExpiry string `json:"dateOfExpiry"`
+			} `json:"document"`
+			ChipChecks *struct {
+				Passive *struct {
+					SODSignatureValid    *bool `json:"sodSignatureValid"`
+					DataGroupHashesValid *bool `json:"dataGroupHashesValid"`
+					CSCATrustChainValid  *bool `json:"cscaTrustChainValid"`
+				} `json:"passiveAuthentication"`
+				Active *struct {
+					Attempted *bool `json:"attempted"`
+					Passed    *bool `json:"passed"`
+				} `json:"activeAuthentication"`
+			} `json:"chipChecks"`
+			Biometrics *struct {
+				FaceMatchScore *float64 `json:"faceMatchScore"`
+				LivenessResult string   `json:"livenessResult"`
+			} `json:"biometrics"`
+			Disclosure *struct {
+				Source string `json:"source"`
+			} `json:"disclosure"`
+		} `json:"result"`
+		Devices []struct {
+			Role string `json:"role"`
+		} `json:"devices"`
+	}
+	path := sessionPath(sessionID) + "/result"
+	if err := c.do(ctx, http.MethodGet, path, sessionHeaders(apiKey, sessionToken), nil, &out); err != nil {
+		return Identity{}, fmt.Errorf("proofingprovider: session identity: %w", err)
+	}
+	id := Identity{Result: Result{Status: out.Status, ErrorCode: out.ErrorCode, CompletedAt: out.CompletedAt}}
+	roles := make([]string, 0, len(out.Devices))
+	for _, d := range out.Devices {
+		roles = append(roles, d.Role)
+	}
+	res := out.Result
+	id.Method = methodOf(res != nil && res.Disclosure != nil, roles)
+	if res == nil {
+		return id, nil
+	}
+	if res.Assurance != nil {
+		id.AssuranceLevel, id.EIDASLevel = res.Assurance.Level, res.Assurance.EIDASLevel
+	}
+	ev := &Evidence{Type: EvidenceEMRTD, PassiveAuth: CheckNotPerformed, ActiveAuth: CheckNotPerformed}
+	if res.Disclosure != nil {
+		ev.Type = EvidenceYivi
+	}
+	if doc := res.Document; doc != nil {
+		id.GivenName, id.FamilyName = strings.TrimSpace(doc.FirstName), strings.TrimSpace(doc.LastName)
+		id.BirthDate, id.Nationality = doc.DateOfBirth, doc.Nationality
+		ev.DocumentType, ev.IssuingState, ev.ExpiryDate = doc.Type, doc.IssuingState, doc.DateOfExpiry
+	}
+	if chip := res.ChipChecks; chip != nil {
+		if p := chip.Passive; p != nil {
+			ev.PassiveAuth = checkOf(allTrue(p.SODSignatureValid, p.DataGroupHashesValid, p.CSCATrustChainValid))
+		}
+		if a := chip.Active; a != nil && a.Attempted != nil && *a.Attempted {
+			ev.ActiveAuth = checkOf(a.Passed)
+		}
+	}
+	if b := res.Biometrics; b != nil {
+		ev.FaceMatch, ev.Liveness = b.FaceMatchScore, b.LivenessResult
+	}
+	id.Evidence = ev
+	return id, nil
+}
+
+// allTrue is nil when a check did not run, else whether each that ran passed.
+func allTrue(checks ...*bool) *bool {
+	var ran, ok bool
+	for _, c := range checks {
+		if c == nil {
+			continue
+		}
+		if !ran {
+			ran, ok = true, true
+		}
+		ok = ok && *c
+	}
+	if !ran {
+		return nil
+	}
+	return &ok
+}
+
+func checkOf(passed *bool) string {
+	switch {
+	case passed == nil:
+		return CheckNotPerformed
+	case *passed:
+		return CheckValid
+	default:
+		return CheckInvalid
+	}
+}
+
+// SessionStatus reads a session's status and assurance summary, without the
+// document or images and without IPS auditing it as a personal-data read: the
+// read to reconcile on. Name is always empty; SessionResult carries it. An IPS
+// without the status route (404 while the session exists) is read through
+// SessionResult instead, so the two can be deployed in either order.
+func (c *Client) SessionStatus(ctx context.Context, apiKey, sessionID, sessionToken string) (Result, error) {
+	var out struct {
+		Status      Status     `json:"status"`
+		ErrorCode   string     `json:"errorCode"`
+		CompletedAt *time.Time `json:"completedAt"`
+		Assurance   *struct {
+			Level      string `json:"level"`
+			EIDASLevel string `json:"eidasLevel"`
+		} `json:"assurance"`
+		Disclosure bool `json:"disclosure"`
+		Devices    []struct {
+			Role string `json:"role"`
+		} `json:"devices"`
+	}
+	path := sessionPath(sessionID) + "/status"
+	err := c.do(ctx, http.MethodGet, path, sessionHeaders(apiKey, sessionToken), nil, &out)
+	if errors.Is(err, ErrNotFound) {
+		res, err := c.SessionResult(ctx, apiKey, sessionID, sessionToken)
+		res.Name = ""
+		return res, err
+	}
+	if err != nil {
+		return Result{}, fmt.Errorf("proofingprovider: session status: %w", err)
+	}
+	res := Result{Status: out.Status, ErrorCode: out.ErrorCode, CompletedAt: out.CompletedAt}
+	roles := make([]string, 0, len(out.Devices))
+	for _, d := range out.Devices {
+		roles = append(roles, d.Role)
+	}
+	res.Method = methodOf(out.Disclosure, roles)
+	if out.Assurance != nil {
+		res.AssuranceLevel, res.EIDASLevel = out.Assurance.Level, out.Assurance.EIDASLevel
+	}
+	return res, nil
+}
+
+// DecideReview records a reviewer's decision on a session in needs_review; IPS
+// then settles it and pushes the outcome. A session not under review is a
+// *RejectedError (409).
+func (c *Client) DecideReview(ctx context.Context, apiKey, sessionID, sessionToken string, d ReviewDecision) error {
+	body := map[string]any{"status": StatusRejected, "reason": d.Reason, "reviewer": d.Reviewer}
+	if d.Approve {
+		body["status"] = StatusApproved
+	} else if d.ErrorCode != "" {
+		body["errorCode"] = d.ErrorCode
+	}
+	path := sessionPath(sessionID) + "/decision"
+	if err := c.do(ctx, http.MethodPost, path, sessionHeaders(apiKey, sessionToken), body, nil); err != nil {
+		return fmt.Errorf("proofingprovider: decide review: %w", err)
+	}
+	return nil
+}
+
+// CancelSession ends a session that has no outcome yet; one that has is a
+// RejectedError (409).
+func (c *Client) CancelSession(ctx context.Context, apiKey, sessionID, sessionToken string) error {
+	path := sessionPath(sessionID) + "/cancel"
+	if err := c.do(ctx, http.MethodPost, path, sessionHeaders(apiKey, sessionToken), map[string]any{}, nil); err != nil {
+		return fmt.Errorf("proofingprovider: cancel session: %w", err)
+	}
+	return nil
+}
+
+// DeleteSession erases a session and its data at IPS; one IPS no longer has
+// is erased already.
+func (c *Client) DeleteSession(ctx context.Context, apiKey, sessionID, sessionToken string) error {
+	err := c.do(ctx, http.MethodDelete, sessionPath(sessionID), sessionHeaders(apiKey, sessionToken), nil, nil)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("proofingprovider: delete session: %w", err)
+	}
+	return nil
+}
+
+// SessionHandover gets a fresh vcmrtd claim link for an Idem session: a new
+// claim once the first lapsed unscanned, or a handover when the app holding the
+// session left it. An app still active is a RejectedError with CodeDeviceActive.
+func (c *Client) SessionHandover(ctx context.Context, apiKey, sessionID, sessionToken string) (Claim, error) {
+	var out handoverView
+	body := map[string]any{"role": deviceRoleNative}
+	path := sessionPath(sessionID) + "/handover"
+	if err := c.do(ctx, http.MethodPost, path, sessionHeaders(apiKey, sessionToken), body, &out); err != nil {
+		return Claim{}, fmt.Errorf("proofingprovider: session handover: %w", err)
+	}
+	claim := out.claim()
+	if claim == nil {
+		return Claim{}, errors.New("proofingprovider: session handover: IPS offered no vcmrtd link")
+	}
+	return *claim, nil
+}
+
 // appPath is a MethodYivi session's subject-facing IPS route. The session token
 // in the path is the credential: IPS gives such a session no device slots.
 func appPath(sessionToken, route string) string {
 	return "/app/" + url.PathEscape(sessionToken) + route
 }
 
-// StartYiviDisclosure starts (or, after a cancel in the app, restarts) the Yivi
-// disclosure of a MethodYivi session, which IPS then reports opened.
-func (c *Client) StartYiviDisclosure(ctx context.Context, sessionToken string) (YiviStart, error) {
-	var out struct {
-		SessionPtr json.RawMessage `json:"sessionPtr"`
-		ExpiresAt  time.Time       `json:"expiresAt"`
-	}
-	if err := c.do(ctx, http.MethodPost, appPath(sessionToken, "/yivi/start"), nil, map[string]any{}, &out); err != nil {
-		if errors.Is(err, errUnavailable) {
-			err = ErrMethodUnavailable
-		}
-		return YiviStart{}, fmt.Errorf("proofingprovider: start yivi disclosure: %w", err)
-	}
-	if len(out.SessionPtr) == 0 {
-		return YiviStart{}, errors.New("proofingprovider: start yivi disclosure: answer carries no session pointer")
-	}
-	return YiviStart{SessionPtr: out.SessionPtr, ExpiresAt: out.ExpiresAt}, nil
-}
+// referenceSourceOpenID4VP is how IPS records a reference the wallet verified
+// over OpenID4VP (bound_login_reference.go).
+const referenceSourceOpenID4VP = "openid4vp"
 
-// YiviDisclosureResult redeems a MethodYivi session's finished disclosure, or
-// answers ErrDisclosurePending while the subject has not finished it.
-func (c *Client) YiviDisclosureResult(ctx context.Context, sessionToken string) (YiviDisclosure, error) {
+// SubmitReference hands IPS the photo and identity claims of the subject's
+// verified OpenID4VP disclosure as a MethodYivi session's reference, after
+// which the face check runs at IPS. IPS answering OK false ended the session.
+func (c *Client) SubmitReference(ctx context.Context, apiKey, sessionID, sessionToken string, ref Reference) (YiviDisclosure, error) {
 	var out struct {
 		OK           bool   `json:"ok"`
 		Code         string `json:"code"`
 		StableFrames int    `json:"stableFrames"`
 		MaxAttempts  int    `json:"maxAttempts"`
 	}
-	err := c.do(ctx, http.MethodGet, appPath(sessionToken, "/yivi/result"), nil, nil, &out)
-	if rejected := (*RejectedError)(nil); errors.As(err, &rejected) && rejected.Status == http.StatusConflict &&
-		strings.Contains(rejected.Message, ipsDisclosurePendingMessage) {
-		return YiviDisclosure{}, ErrDisclosurePending
+	body := map[string]any{
+		"source": referenceSourceOpenID4VP, "credential": ref.Credential,
+		"image": ref.Photo, "attributes": ref.Attributes,
 	}
-	if err != nil {
-		return YiviDisclosure{}, fmt.Errorf("proofingprovider: yivi disclosure result: %w", err)
+	path := sessionPath(sessionID) + "/reference"
+	if err := c.do(ctx, http.MethodPost, path, sessionHeaders(apiKey, sessionToken), body, &out); err != nil {
+		if errors.Is(err, errUnavailable) {
+			// IPS takes a wallet's reference only with that option switched on.
+			err = ErrMethodUnavailable
+		}
+		return YiviDisclosure{}, fmt.Errorf("proofingprovider: submit reference: %w", err)
 	}
 	return YiviDisclosure{OK: out.OK, Code: out.Code, StableFrames: out.StableFrames, MaxAttempts: out.MaxAttempts}, nil
 }
-
-// ipsDisclosurePendingMessage is the part of IPS's 409 that tells a Yivi
-// session still running from one that is over (bound_login.go).
-const ipsDisclosurePendingMessage = "not finished yet"
 
 // SubmitFaceFrame scores one live camera frame (a JPEG data URL or base64) of a
 // MethodYivi session against the disclosed photo.
@@ -371,7 +590,8 @@ func (c *Client) do(ctx context.Context, method, path string, headers http.Heade
 		return ErrNotFound
 	case resp.StatusCode == http.StatusBadRequest, resp.StatusCode == http.StatusConflict,
 		resp.StatusCode == http.StatusGone, resp.StatusCode == http.StatusUnprocessableEntity:
-		return &RejectedError{Status: resp.StatusCode, Message: rejectionMessage(limited)}
+		msg, code := rejection(limited)
+		return &RejectedError{Status: resp.StatusCode, Message: msg, Code: code}
 	case resp.StatusCode == http.StatusServiceUnavailable:
 		return errUnavailable
 	case resp.StatusCode/100 != 2:
@@ -390,13 +610,14 @@ func (c *Client) do(ctx context.Context, method, path string, headers http.Heade
 // unable to serve. The callers that can tell which say so.
 var errUnavailable = fmt.Errorf("status %d", http.StatusServiceUnavailable)
 
-// rejectionMessage reads IPS's {"error": "..."} body, capped.
-func rejectionMessage(r io.Reader) string {
+// rejection reads IPS's {"error": "...", "code": "..."} body, capped.
+func rejection(r io.Reader) (message, code string) {
 	var body struct {
 		Error string `json:"error"`
+		Code  string `json:"code"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r, maxErrorMessageBytes)).Decode(&body); err != nil || body.Error == "" {
-		return "the identity proofing service rejected the request"
+		return "the identity proofing service rejected the request", body.Code
 	}
-	return body.Error
+	return body.Error, body.Code
 }

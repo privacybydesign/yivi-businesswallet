@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -14,32 +15,47 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
-// provider is the IPS surface the service drives (implemented by
+// Provider is the IPS surface the service drives (implemented by
 // *proofingprovider.Client and *proofingprovider.Stub).
-type provider interface {
-	CreateTenant(ctx context.Context, name string) (proofingprovider.Tenant, error)
-	CreateAPIKey(ctx context.Context, tenantID string, scopes []string) (string, error)
+type Provider interface {
+	CreateTenant(ctx context.Context, id, name string) (proofingprovider.Tenant, error)
+	RotateWebhookSecret(ctx context.Context, tenantID string) (string, error)
+	CreateAPIKey(ctx context.Context, tenantID string, env proofingprovider.KeyEnvironment, scopes []string) (string, error)
 	ListFlows(ctx context.Context, apiKey string) ([]proofingprovider.Flow, error)
 	CreateFlow(ctx context.Context, apiKey string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error)
 	CreateFlowVersion(ctx context.Context, apiKey, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error)
 	ListFlowVersions(ctx context.Context, apiKey, id string) ([]proofingprovider.Flow, error)
 	ActivateFlowVersion(ctx context.Context, apiKey, id string, version int) (proofingprovider.Flow, error)
 	CreateSession(ctx context.Context, apiKey string, in proofingprovider.SessionInput) (proofingprovider.Session, error)
+	SessionStatus(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Result, error)
 	SessionResult(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Result, error)
-	StartYiviDisclosure(ctx context.Context, sessionToken string) (proofingprovider.YiviStart, error)
-	YiviDisclosureResult(ctx context.Context, sessionToken string) (proofingprovider.YiviDisclosure, error)
+	SubmitReference(ctx context.Context, apiKey, sessionID, sessionToken string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error)
 	SubmitFaceFrame(ctx context.Context, sessionToken, image string) (proofingprovider.FaceVerdict, error)
+	DecideReview(ctx context.Context, apiKey, sessionID, sessionToken string, d proofingprovider.ReviewDecision) error
+	SessionHandover(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Claim, error)
+	SessionIdentity(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Identity, error)
+	CancelSession(ctx context.Context, apiKey, sessionID, sessionToken string) error
+	DeleteSession(ctx context.Context, apiKey, sessionID, sessionToken string) error
+}
+
+// verifier is the OpenID4VP verifier a Yivi request's disclosure runs at
+// (implemented by *openid4vpverifier.Client), the one auth uses.
+type verifier interface {
+	StartPresentation(ctx context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error)
+	Result(ctx context.Context, transactionID string) (openid4vpverifier.Presentation, error)
 }
 
 type settingsStore interface {
 	CanStoreSecrets() bool
-	APIKey(ctx context.Context, orgID uuid.UUID) (string, error)
-	Save(ctx context.Context, orgID uuid.UUID, tenantID, apiKey, webhookSecret string) (bool, error)
+	APIKey(ctx context.Context, orgID uuid.UUID, mode Mode) (string, error)
+	WebhookSecret(ctx context.Context, orgID uuid.UUID) (string, error)
+	Provision(ctx context.Context, orgID uuid.UUID, create func(context.Context) (ProvisionedTenant, error)) error
 	FlowSelection(ctx context.Context, orgID uuid.UUID) (FlowSelection, error)
 	SaveFlowSelection(ctx context.Context, orgID uuid.UUID, sel FlowSelection) error
 	RecordFlowEvent(ctx context.Context, orgID uuid.UUID, action string, flow proofingprovider.Flow) error
@@ -51,12 +67,22 @@ type requestStore interface {
 	List(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error)
 	MarkStarted(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error
 	EndSession(ctx context.Context, req Request, sessionID string, ipsStatus proofingprovider.Status, method proofingprovider.Method) error
+	ListPage(ctx context.Context, orgID, customerID uuid.UUID, after *RequestCursor, limit int) ([]Request, error)
+	Cancel(ctx context.Context, req Request) (bool, error)
+	RecordResultRead(ctx context.Context, req Request) error
+	Purge(ctx context.Context, req Request) error
 	Member(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
 	RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
+	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
 	GetForCustomer(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, error)
 	Get(ctx context.Context, orgID, id uuid.UUID) (Request, error)
-	ListLive(ctx context.Context, limit int) ([]Request, error)
+	ListDue(ctx context.Context, now time.Time, limit int) ([]Request, error)
+	NextDeadline(ctx context.Context, now time.Time) (time.Time, error)
+	GetBySession(ctx context.Context, sessionID string) (Request, error)
+	GetByLinkToken(ctx context.Context, hash []byte) (Request, error)
+	LapseLinks(ctx context.Context, now time.Time, limit int) (int, error)
+	RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode string) error
 }
 
 // eventReader reads the audit trail (implemented by *audit.Reader).
@@ -72,10 +98,11 @@ type webhookStore interface {
 	SendTest(ctx context.Context, orgID, customerID uuid.UUID) error
 	Deliveries(ctx context.Context, orgID, customerID uuid.UUID) ([]Delivery, error)
 	Health(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]WebhookHealth, error)
+	DefaultSecret() (string, error)
 }
 
 type apiKeyStore interface {
-	Create(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string) (APIKey, string, error)
+	Create(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string, mode Mode, scopes []string) (APIKey, string, error)
 	List(ctx context.Context, orgID, customerID uuid.UUID) ([]APIKey, error)
 	Revoke(ctx context.Context, orgID, customerID, id uuid.UUID) (APIKey, error)
 	Authenticate(ctx context.Context, raw string) (APIKeyCaller, error)
@@ -90,11 +117,23 @@ type customerStore interface {
 	SetPaused(ctx context.Context, orgID, id uuid.UUID, paused bool) (Customer, error)
 	SaveSettings(ctx context.Context, orgID, id uuid.UUID, settings CustomerSettings) (Customer, error)
 	SaveBranding(ctx context.Context, orgID, id uuid.UUID, b CustomerBranding, logo LogoChange) (Customer, error)
+	SaveRedirectOrigins(ctx context.Context, orgID, id uuid.UUID, origins []string) (Customer, error)
 	Logo(ctx context.Context, orgID, id uuid.UUID) (CustomerLogo, error)
 	Remove(ctx context.Context, orgID, id uuid.UUID) error
 }
 
 // Mailer sends the proofing-request e-mail (implemented by *email.Service).
+type pauseStore interface {
+	Get(ctx context.Context, orgID uuid.UUID) (OrgPause, error)
+	List(ctx context.Context) ([]OrgPause, error)
+	Set(ctx context.Context, orgID uuid.UUID, level PauseLevel, paused bool) (OrgPause, error)
+}
+
+type flowHostedStore interface {
+	Get(ctx context.Context, orgID uuid.UUID, flowID string) (FlowHosted, error)
+	Save(ctx context.Context, orgID uuid.UUID, flowID string, f FlowHosted) (FlowHosted, error)
+}
+
 type Mailer interface {
 	SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, m email.ProofingMail) error
 }
@@ -107,10 +146,24 @@ type Service struct {
 	apiKeys   apiKeyStore
 	webhooks  webhookStore
 	events    eventReader
-	ips       provider
-	mailer    Mailer
-	now       func() time.Time
+	pauses    pauseStore
+	// flowHostedSettings is each flow's hosted page settings; nil the defaults.
+	flowHostedSettings flowHostedStore
+	ips                Provider
+	verifier           verifier
+	mailer             Mailer
+	now                func() time.Time
+	// readChecks throttles the IPS re-check of a single-request read.
+	readChecks *readThrottle
+	// callbackURL is where IPS pushes session changes (HandleIPSEvent); empty
+	// leaves a session to its deadline and to reads.
+	callbackURL string
+	// hostedBaseURL is the public page a hosted link's token is appended to.
+	hostedBaseURL string
 }
+
+// SetCallbackURL sets where IPS pushes session changes; call before serving.
+func (s *Service) SetCallbackURL(u string) { s.callbackURL = u }
 
 // NewService builds the proofing service. A nil mailer skips the e-mail (tests).
 // Stores are the service's persistence, one store per concern.
@@ -121,53 +174,72 @@ type Stores struct {
 	APIKeys   apiKeyStore
 	Webhooks  webhookStore
 	Events    eventReader
+	// Pauses holds who paused an org's proofing; nil never pauses.
+	Pauses pauseStore
+	// FlowHosted holds each flow's hosted page settings; nil is the defaults.
+	FlowHosted flowHostedStore
 }
 
-func NewService(stores Stores, ips provider, mailer Mailer) *Service {
+func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *Service {
 	return &Service{
 		settings: stores.Settings, requests: stores.Requests, customers: stores.Customers, apiKeys: stores.APIKeys,
-		webhooks: stores.Webhooks, events: stores.Events, ips: ips, mailer: mailer, now: time.Now,
+		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted, ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
+		readChecks: newReadThrottle(readReconcileEvery),
 	}
 }
 
-// orgAPIKey returns the org's IPS API key, provisioning the org's own IPS tenant
-// and key on its first use: an org needs no enable step before it can proof.
+// orgAPIKey returns the org's live IPS API key, provisioning the org's IPS
+// tenant on its first use: an org needs no enable step before it can proof.
 func (s *Service) orgAPIKey(ctx context.Context, org Org) (string, error) {
-	apiKey, err := s.settings.APIKey(ctx, org.ID)
+	return s.orgKey(ctx, org, ModeLive)
+}
+
+// orgKey is orgAPIKey for mode: the test key runs the org's test requests,
+// scripted at IPS, on the same tenant.
+func (s *Service) orgKey(ctx context.Context, org Org, mode Mode) (string, error) {
+	apiKey, err := s.settings.APIKey(ctx, org.ID, mode)
 	if !errors.Is(err, ErrNotProvisioned) {
 		return apiKey, err
 	}
 	if err := s.provision(ctx, org); err != nil {
 		return "", err
 	}
-	return s.settings.APIKey(ctx, org.ID)
+	return s.settings.APIKey(ctx, org.ID, mode)
 }
 
-// provision creates the org's IPS tenant and a scoped API key and stores them.
-// The encryption key is checked first, so a deployment without one never leaves
-// an orphaned tenant at IPS. Concurrent first uses may each create a tenant; one
-// is stored and the others are left unused at IPS (logged, not prevented).
+// requestAPIKey is the IPS key req's session runs under.
+func (s *Service) requestAPIKey(ctx context.Context, req Request) (string, error) {
+	return s.settings.APIKey(ctx, req.OrganizationID, req.mode())
+}
+
+// provision creates the org's IPS tenant under the org's own id, with a live
+// and a test key, and stores them. The encryption key is checked first, so a
+// deployment without one never leaves an orphaned tenant at IPS. A tenant IPS
+// already has (a first use whose save was lost) is taken over with a fresh
+// webhook secret and fresh keys.
 func (s *Service) provision(ctx context.Context, org Org) error {
 	if !s.settings.CanStoreSecrets() {
 		return ErrNoEncryptionKey
 	}
-	tenant, err := s.ips.CreateTenant(ctx, org.Name)
-	if err != nil {
-		return fmt.Errorf("proofing: provision tenant org %s: %w", org.ID, err)
-	}
-	apiKey, err := s.ips.CreateAPIKey(ctx, tenant.ID, proofingprovider.TenantKeyScopes)
-	if err != nil {
-		return fmt.Errorf("proofing: provision api key org %s: %w", org.ID, err)
-	}
-	saved, err := s.settings.Save(ctx, org.ID, tenant.ID, apiKey, tenant.WebhookSecret)
-	if err != nil {
-		return err
-	}
-	if !saved {
-		slog.WarnContext(ctx, "identity proofing: concurrent provisioning left an unused IPS tenant",
-			slog.String("org_id", org.ID.String()), slog.String("ips_tenant_id", tenant.ID))
-	}
-	return nil
+	id := org.ID.String()
+	return s.settings.Provision(ctx, org.ID, func(ctx context.Context) (ProvisionedTenant, error) {
+		var out ProvisionedTenant
+		tenant, err := s.ips.CreateTenant(ctx, id, org.Name)
+		out.WebhookSecret = tenant.WebhookSecret
+		if errors.Is(err, proofingprovider.ErrTenantExists) {
+			out.WebhookSecret, err = s.ips.RotateWebhookSecret(ctx, id)
+		}
+		if err != nil {
+			return out, fmt.Errorf("proofing: provision tenant org %s: %w", org.ID, err)
+		}
+		if out.LiveKey, err = s.ips.CreateAPIKey(ctx, id, proofingprovider.KeyLive, proofingprovider.TenantKeyScopes); err != nil {
+			return out, fmt.Errorf("proofing: provision live api key org %s: %w", org.ID, err)
+		}
+		if out.TestKey, err = s.ips.CreateAPIKey(ctx, id, proofingprovider.KeyTest, proofingprovider.TenantKeyScopes); err != nil {
+			return out, fmt.Errorf("proofing: provision test api key org %s: %w", org.ID, err)
+		}
+		return out, nil
+	})
 }
 
 // Flows returns the org's active IPS flows with the admin's selection applied.
@@ -178,6 +250,11 @@ func (s *Service) Flows(ctx context.Context, org Org, all bool) ([]OrgFlow, erro
 	if err != nil {
 		return nil, err
 	}
+	return s.orgFlows(ctx, org, apiKey, all)
+}
+
+// orgFlows is Flows with the org's IPS key already resolved.
+func (s *Service) orgFlows(ctx context.Context, org Org, apiKey string, all bool) ([]OrgFlow, error) {
 	flows, err := s.ips.ListFlows(ctx, apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
@@ -331,10 +408,33 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 		return in, fmt.Errorf("%w: a flow needs a name and at least one step", ErrInvalidInput)
 	}
 	in.SelfieLocation = ""
-	if hasFaceStep(in.Steps) {
-		in.SelfieLocation = selfieLocationNative
+	if !hasFaceStep(in.Steps) {
+		in.FaceProvider = ""
+		return in, checkReachable(in)
 	}
-	return in, nil
+	in.SelfieLocation = selfieLocationNative
+	if in.FaceProvider == "" {
+		in.FaceProvider = faceProviderRegula
+	}
+	if !slices.Contains(faceProviders, in.FaceProvider) {
+		return in, fmt.Errorf("%w: unknown face provider %q", ErrInvalidInput, in.FaceProvider)
+	}
+	return in, checkReachable(in)
+}
+
+// checkReachable refuses a flow whose required level its steps can never
+// reach, which would fail every request with ErrorAssuranceNotMet. IPS
+// (computeEIDASAssuranceLevel) reports substantial only for a chip read plus a
+// Regula face check against the chip's portrait; Validate at IPS accepts
+// weaker flows, as it checks the declared checks and not the face provider.
+func checkReachable(in proofingprovider.FlowSpec) error {
+	if in.RequiredAssuranceLevel != eidasSubstantial {
+		return nil
+	}
+	if !slices.Contains(in.Steps, stepNFCRead) || !hasFaceStep(in.Steps) || in.FaceProvider != faceProviderRegula {
+		return fmt.Errorf("%w: substantial needs the chip read and a face step verified by Regula", ErrInvalidInput)
+	}
+	return nil
 }
 
 // Requester is the member sending a request.
@@ -361,6 +461,8 @@ type Sent struct {
 	MailSent bool
 	// DeepLink is the session's vcmrtd link, for an API caller to show itself.
 	DeepLink string
+	// HostedURL is a hosted request's link to its public page.
+	HostedURL string
 }
 
 // CreateRequest sends a proofing request: to a member, on one of the flows the
@@ -384,29 +486,45 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if customer != nil && customer.Settings.SessionTTL != 0 {
 		ttl = customer.Settings.SessionTTL
 	}
-	flow, err := s.sendableFlow(ctx, org, in)
-	if err != nil {
-		return Sent{}, err
-	}
 	apiKey, err := s.orgAPIKey(ctx, org)
 	if err != nil {
 		return Sent{}, err
 	}
+	flow, err := s.sendableFlow(ctx, org, apiKey, in.FlowID, customer)
+	if err != nil {
+		return Sent{}, err
+	}
+	if in.Method == proofingprovider.MethodYivi && !YiviAppAvailable(flow) {
+		return Sent{}, fmt.Errorf("%w: this flow's face provider only runs in the Idem app", ErrInvalidInput)
+	}
+	if in.Channel == ChannelHosted {
+		return s.createHosted(ctx, org, by, in, subject, *customer, flow)
+	}
 
 	id := uuid.New()
-	sess, err := s.ips.CreateSession(ctx, apiKey, proofingprovider.SessionInput{
-		FlowID: flow.ID, ClientReference: id.String(), TTL: ttl, Method: in.Method,
-	})
+	sessionKey, input := apiKey, proofingprovider.SessionInput{
+		FlowID: flow.ID, ClientReference: id.String(), TTL: ttl, Method: in.Method, CallbackURL: s.callbackURL,
+		Language: string(in.Language),
+	}
+	if in.Mode == ModeTest {
+		// A test key's session runs no flow: its outcome is scripted at IPS.
+		if sessionKey, err = s.orgKey(ctx, org, ModeTest); err != nil {
+			return Sent{}, err
+		}
+		input.FlowID, input.ScriptedOutcome = "", in.ScriptedOutcome
+	}
+	sess, err := s.ips.CreateSession(ctx, sessionKey, input)
 	if err != nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", id, err)
 	}
 	// An Idem session is the vcmrtd link; a Yivi one is started from the screen.
-	if in.Method == proofingprovider.MethodIdem && sess.Claim == nil {
+	// A scripted one is resolved already and has neither.
+	if in.Mode == ModeLive && in.Method == proofingprovider.MethodIdem && sess.Claim == nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: IPS offered no vcmrtd link", id)
 	}
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: id, OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
-		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: in.Method, Channel: in.Channel,
+		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: in.Method, Channel: in.Channel, Mode: in.Mode,
 	})
 	if err != nil {
 		return Sent{}, err
@@ -422,6 +540,12 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 		req.FlowVersion = sess.FlowVersion
 	}
 	req.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt}
+	if in.Mode == ModeTest {
+		// Record the scripted outcome now rather than on IPS's push; a failure
+		// is logged and the push or the deadline job records it instead.
+		req, _ = s.tryReconcile(ctx, sessionKey, req)
+		return Sent{Request: req}, nil
+	}
 
 	out := Sent{Request: req}
 	if sess.Claim == nil {
@@ -429,7 +553,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	}
 	out.DeepLink = sess.Claim.DeepLink
 	if s.mailer != nil && !in.SkipMail && in.Channel == ChannelEmail {
-		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, s.proofingMail(ctx, org, customer, subject, by, sess.Claim.DeepLink, ttl))
+		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, s.proofingMail(ctx, org, customer, subject, by, sess.Claim.DeepLink, ttl, in.Language))
 		if err != nil {
 			slog.WarnContext(ctx, "identity proofing: request e-mail not sent",
 				slog.String("org_id", org.ID.String()), slog.String("request_id", req.ID.String()), slog.Any("error", err))
@@ -439,6 +563,48 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	return out, nil
 }
 
+// createHosted stores a hosted request with its link and no IPS session yet:
+// the subject starts one from the page (StartHosted) until HostedLinkTTL. Its
+// redirect must be on one of the customer's allowed origins.
+func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in NewRequest, subject Subject,
+	customer Customer, flow proofingprovider.Flow,
+) (Sent, error) {
+	if s.hostedBaseURL == "" {
+		return Sent{}, errors.New("proofing: no hosted page URL configured")
+	}
+	hosted, err := s.flowHosted(ctx, org.ID, flow.ID)
+	if err != nil {
+		return Sent{}, err
+	}
+	if !hosted.Enabled {
+		return Sent{}, ErrHostedDisabled
+	}
+	if in.Language != "" && !hosted.Offers(in.Language) {
+		return Sent{}, fmt.Errorf("%w: this flow's hosted page is not offered in %q", ErrInvalidInput, in.Language)
+	}
+	if in.RedirectURL != "" {
+		if hosted.Completion == CompletionDone {
+			return Sent{}, fmt.Errorf("%w: this flow's hosted page ends on its own thank-you page, without a redirect", ErrInvalidInput)
+		}
+		if err := checkRedirect(in.RedirectURL, customer); err != nil {
+			return Sent{}, err
+		}
+	}
+	token, hash, err := newLinkToken()
+	if err != nil {
+		return Sent{}, err
+	}
+	req, err := s.requests.Create(ctx, NewStoredRequest{
+		ID: uuid.New(), OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
+		Flow: flow, LinkExpiresAt: s.now().Add(HostedLinkTTL), Method: in.Method, Channel: in.Channel,
+		Mode: in.Mode, LinkTokenHash: hash, RedirectURL: in.RedirectURL, Language: in.Language,
+	})
+	if err != nil {
+		return Sent{}, err
+	}
+	return Sent{Request: req, HostedURL: s.hostedBaseURL + token}, nil
+}
+
 // normalizeRequest fills in the default app and delivery and refuses a
 // combination that cannot run: the Yivi app's face check runs in the browser
 // that shows its QR, and a mailed subject has no such page.
@@ -446,16 +612,40 @@ func normalizeRequest(in NewRequest) (NewRequest, error) {
 	if in.Method == "" {
 		in.Method = proofingprovider.MethodIdem
 	}
+	if in.Mode == "" {
+		in.Mode = ModeLive
+	}
+	switch {
+	case in.Mode == ModeTest && in.ScriptedOutcome == "":
+		in.ScriptedOutcome = defaultScriptedOutcome
+	case in.Mode == ModeTest && !scriptedOutcomePattern.MatchString(in.ScriptedOutcome):
+		return NewRequest{}, fmt.Errorf("%w: scriptedOutcome is approve, reject:<CODE>, needs_review or expire", ErrInvalidInput)
+	case in.Mode != ModeTest && in.ScriptedOutcome != "":
+		return NewRequest{}, fmt.Errorf("%w: only a test key can script an outcome", ErrInvalidInput)
+	}
 	if in.Channel == "" {
 		in.Channel = ChannelEmail
+	}
+	if in.Language != "" {
+		locale, ok := email.ParseLocale(string(in.Language))
+		if !ok {
+			return NewRequest{}, fmt.Errorf("%w: unsupported language %q", ErrInvalidInput, in.Language)
+		}
+		in.Language = locale
 	}
 	switch {
 	case in.Method != proofingprovider.MethodIdem && in.Method != proofingprovider.MethodYivi:
 		return NewRequest{}, fmt.Errorf("%w: choose the Idem app or the Yivi app", ErrInvalidInput)
-	case in.Channel != ChannelEmail && in.Channel != ChannelOnScreen:
-		return NewRequest{}, fmt.Errorf("%w: send the request by e-mail or show it on screen", ErrInvalidInput)
-	case in.Method == proofingprovider.MethodYivi && in.Channel != ChannelOnScreen:
+	case in.Channel != ChannelEmail && in.Channel != ChannelOnScreen && in.Channel != ChannelHosted:
+		return NewRequest{}, fmt.Errorf("%w: send the request by e-mail, show it on screen or as a link", ErrInvalidInput)
+	case in.Method == proofingprovider.MethodYivi && in.Channel == ChannelEmail:
 		return NewRequest{}, fmt.Errorf("%w: a Yivi app session runs on this screen and cannot be e-mailed", ErrInvalidInput)
+	case in.Channel == ChannelHosted && in.CustomerID == nil:
+		return NewRequest{}, fmt.Errorf("%w: a link goes to a customer's subject", ErrInvalidInput)
+	case in.Channel == ChannelHosted && in.Mode == ModeTest:
+		return NewRequest{}, fmt.Errorf("%w: a test session resolves at once and has no link", ErrInvalidInput)
+	case in.RedirectURL != "" && in.Channel != ChannelHosted:
+		return NewRequest{}, fmt.Errorf("%w: only a hosted session redirects its subject", ErrInvalidInput)
 	}
 	return in, nil
 }
@@ -481,11 +671,14 @@ func (s *Service) subject(ctx context.Context, org Org, in NewRequest) (Subject,
 	if customer.Paused() {
 		return Subject{}, nil, ErrCustomerPaused
 	}
+	if in.Mode == ModeLive && !customer.HasLiveKey {
+		return Subject{}, nil, ErrCustomerNoAPIKey
+	}
 	name := strings.TrimSpace(in.SubjectName)
 	if len(name) > maxSubjectNameLength {
 		return Subject{}, nil, fmt.Errorf("%w: the name is too long", ErrInvalidInput)
 	}
-	if in.Channel == ChannelOnScreen && strings.TrimSpace(in.SubjectEmail) == "" {
+	if in.Channel != ChannelEmail && strings.TrimSpace(in.SubjectEmail) == "" {
 		return Subject{CustomerID: in.CustomerID, Name: name}, &customer, nil
 	}
 	email, err := user.ParseEmail(in.SubjectEmail)
@@ -500,10 +693,10 @@ func (s *Service) subject(ctx context.Context, org Org, in NewRequest) (Subject,
 // support contact and privacy statement. A logo that cannot be read is left
 // out (the wordmark shows): a cosmetic loss must not block the send.
 func (s *Service) proofingMail(ctx context.Context, org Org, customer *Customer, subject Subject, by Requester,
-	deepLink string, ttl time.Duration,
+	deepLink string, ttl time.Duration, locale email.Locale,
 ) email.ProofingMail {
 	m := email.ProofingMail{
-		To: subject.Email, OrgName: org.Name, RequesterName: by.Name, DeepLink: deepLink, ValidFor: ttl,
+		To: subject.Email, OrgName: org.Name, RequesterName: by.Name, DeepLink: deepLink, ValidFor: ttl, Locale: locale,
 	}
 	if customer == nil {
 		return m
@@ -524,68 +717,60 @@ func (s *Service) proofingMail(ctx context.Context, org Org, customer *Customer,
 }
 
 // sendableFlow is the flow a new request runs, if the sender may use it: for a
-// member, a flow the admin made available to members; for a customer's subject,
-// one assigned to that customer. Either way it must be one a recipient can finish.
-func (s *Service) sendableFlow(ctx context.Context, org Org, in NewRequest) (proofingprovider.Flow, error) {
-	if in.FlowID == "" && in.CustomerID != nil {
-		// An API caller that names no flow gets the customer's default.
-		customer, err := s.customers.Get(ctx, org.ID, *in.CustomerID)
+// member (customer nil), a flow the admin made available to members; for a
+// customer's subject, one assigned to that customer, its default when flowID is
+// empty. Either way it must be one a recipient can finish.
+func (s *Service) sendableFlow(ctx context.Context, org Org, apiKey, flowID string, customer *Customer) (proofingprovider.Flow, error) {
+	if customer == nil {
+		flows, err := s.orgFlows(ctx, org, apiKey, true)
 		if err != nil {
 			return proofingprovider.Flow{}, err
 		}
-		if in.FlowID = customer.Flows.DefaultFlowID; in.FlowID == "" {
-			return proofingprovider.Flow{}, ErrFlowNotAssigned
+		i := slices.IndexFunc(flows, func(f OrgFlow) bool { return f.ID == flowID })
+		if i < 0 {
+			return proofingprovider.Flow{}, ErrFlowNotFound
 		}
-	}
-	flows, err := s.Flows(ctx, org, true)
-	if err != nil {
-		return proofingprovider.Flow{}, err
-	}
-	i := slices.IndexFunc(flows, func(f OrgFlow) bool { return f.ID == in.FlowID })
-	switch {
-	case i < 0:
-		return proofingprovider.Flow{}, ErrFlowNotFound
-	case !Completable(flows[i].Flow):
-		return proofingprovider.Flow{}, ErrFlowNotCompletable
-	}
-	if in.CustomerID == nil {
-		if !flows[i].Allowed {
-			return proofingprovider.Flow{}, ErrFlowNotAllowed
+		if err := sendable(flows[i].Flow, flows[i].Allowed, ErrFlowNotAllowed); err != nil {
+			return proofingprovider.Flow{}, err
 		}
 		return flows[i].Flow, nil
 	}
-	customer, err := s.customers.Get(ctx, org.ID, *in.CustomerID)
+	if flowID == "" {
+		// An API caller that names no flow gets the customer's default.
+		if flowID = customer.Flows.DefaultFlowID; flowID == "" {
+			return proofingprovider.Flow{}, ErrFlowNotAssigned
+		}
+	}
+	flows, err := s.ips.ListFlows(ctx, apiKey)
 	if err != nil {
+		return proofingprovider.Flow{}, fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
+	}
+	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
+	if i < 0 {
+		return proofingprovider.Flow{}, ErrFlowNotFound
+	}
+	if err := sendable(flows[i], slices.Contains(customer.Flows.FlowIDs, flowID), ErrFlowNotAssigned); err != nil {
 		return proofingprovider.Flow{}, err
 	}
-	if !slices.Contains(customer.Flows.FlowIDs, in.FlowID) {
-		return proofingprovider.Flow{}, ErrFlowNotAssigned
-	}
-	return flows[i].Flow, nil
+	return flows[i], nil
 }
 
-// Requests lists the org's requests narrowed by filter, re-checking a bounded
-// number of live ones at IPS first: this read is how an outcome lands here.
+// sendable refuses a flow no recipient can finish, then one the sender may not
+// use (notPermitted).
+func sendable(flow proofingprovider.Flow, permitted bool, notPermitted error) error {
+	if !Completable(flow) {
+		return ErrFlowNotCompletable
+	}
+	if !permitted {
+		return notPermitted
+	}
+	return nil
+}
+
+// Requests lists the org's requests narrowed by filter, as stored: outcomes
+// land by IPS's push and the deadline job, so a list read never calls IPS.
 func (s *Service) Requests(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error) {
-	reqs, err := s.requests.List(ctx, orgID, filter)
-	if err != nil {
-		return nil, err
-	}
-	var apiKey string
-	checked := 0
-	for i := range reqs {
-		if !reqs[i].needsReconcile() || checked == maxReconcilePerList {
-			continue
-		}
-		if apiKey == "" {
-			if apiKey, err = s.settings.APIKey(ctx, orgID); err != nil {
-				return nil, err
-			}
-		}
-		checked++
-		reqs[i] = s.reconcile(ctx, apiKey, reqs[i])
-	}
-	return reqs, nil
+	return s.requests.List(ctx, orgID, filter)
 }
 
 // reconcile reads the request's IPS session and records what IPS decided,
@@ -593,11 +778,17 @@ func (s *Service) Requests(ctx context.Context, orgID uuid.UUID, filter RequestF
 // failure is logged and the row is shown as last known: a read must not fail
 // because IPS is briefly away.
 func (s *Service) reconcile(ctx context.Context, apiKey string, req Request) Request {
+	req, _ = s.tryReconcile(ctx, apiKey, req)
+	return req
+}
+
+// tryReconcile is reconcile that also returns the (already logged) failure.
+func (s *Service) tryReconcile(ctx context.Context, apiKey string, req Request) (Request, error) {
 	// What IPS reports is the subject's doing and the wallet's record of it, not
 	// that of whoever's read happened to trigger the check.
 	ctx = audit.WithoutActor(ctx)
 	sess := req.session
-	res, err := s.ips.SessionResult(ctx, apiKey, sess.ID, sess.Token)
+	res, err := s.ips.SessionStatus(ctx, apiKey, sess.ID, sess.Token)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
 		// IPS purged or erased the session: treat it like a lapsed one.
 		res, err = proofingprovider.Result{Status: proofingprovider.StatusExpired}, nil
@@ -605,7 +796,7 @@ func (s *Service) reconcile(ctx context.Context, apiKey string, req Request) Req
 	if err != nil {
 		slog.WarnContext(ctx, "identity proofing: reconcile failed",
 			slog.String("request_id", req.ID.String()), slog.Any("error", err))
-		return req
+		return req, err
 	}
 
 	var next Status
@@ -618,47 +809,58 @@ func (s *Service) reconcile(ctx context.Context, apiKey string, req Request) Req
 		next = StatusNeedsReview
 	case proofingprovider.StatusOpened, proofingprovider.StatusInProgress:
 		if req.Status != StatusPending {
-			return req
+			return req, nil
 		}
 		if err := s.requests.MarkStarted(ctx, req, sess.ID, res.Method); err != nil {
 			slog.WarnContext(ctx, "identity proofing: mark started failed",
 				slog.String("request_id", req.ID.String()), slog.Any("error", err))
-			return req
+			return req, err
 		}
 		req.Status = StatusInProgress
 		req.Method = methodOr(res.Method, req.Method)
-		return req
+		return req, nil
 	case proofingprovider.StatusExpired, proofingprovider.StatusCancelled:
-		if req.Status.Settled() {
-			return req
+		// needs_review is still open at IPS, so it can end there too.
+		if req.Status == StatusApproved || req.Status == StatusRejected {
+			return req, nil
 		}
 		// The session ended undecided, and with it the request: a new one means
 		// a new mail.
 		if err := s.requests.EndSession(ctx, req, sess.ID, res.Status, res.Method); err != nil {
 			slog.WarnContext(ctx, "identity proofing: end session failed",
 				slog.String("request_id", req.ID.String()), slog.Any("error", err))
-			return req
+			return req, err
 		}
 		ended, now := *sess, s.now()
 		ended.EndedAt = &now
 		req.session = &ended
 		req.Method = methodOr(res.Method, req.Method)
-		return req
+		return req, nil
 	default:
-		return req
+		return req, nil
+	}
+	if next == StatusApproved {
+		next, res = enforceAssurance(req, res)
 	}
 	if next == req.Status {
-		return req
+		return req, nil
 	}
 	// The name read off the document is kept only for a customer's subject the
-	// sender may know only by address, and only once the document is approved.
-	if req.CustomerID == nil || next != StatusApproved {
-		res.Name = ""
+	// sender may know only by address, and only once the document is approved:
+	// only then is the full result, with its personal data, read at all.
+	if req.CustomerID != nil && next == StatusApproved {
+		full, err := s.ips.SessionResult(ctx, apiKey, sess.ID, sess.Token)
+		if err != nil {
+			slog.WarnContext(ctx, "identity proofing: read the approved result failed",
+				slog.String("request_id", req.ID.String()), slog.Any("error", err))
+			return req, err
+		}
+		res.Name = full.Name
 	}
 	if err := s.requests.RecordOutcome(ctx, req, sess.ID, next, res); err != nil {
 		slog.WarnContext(ctx, "identity proofing: record outcome failed",
 			slog.String("request_id", req.ID.String()), slog.Any("error", err))
-		return req
+		return req, err
 	}
 	req.Status, req.AssuranceLevel, req.EIDASLevel, req.ErrorCode = next, res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
 	req.ProofedName = res.Name
@@ -668,7 +870,23 @@ func (s *Service) reconcile(ctx context.Context, apiKey string, req Request) Req
 		completedAt = *res.CompletedAt
 	}
 	req.CompletedAt = &completedAt
-	return req
+	return req, nil
+}
+
+// enforceAssurance holds an approval IPS reported to the level the request's
+// flow demanded: IPS approves on its checks alone and never compares the level
+// achieved with the required one. An approval that falls short is a rejection
+// with ErrorAssuranceNotMet. A Yivi session an older IPS did not score counts
+// as yiviEIDASLevel.
+func enforceAssurance(req Request, res proofingprovider.Result) (Status, proofingprovider.Result) {
+	if res.EIDASLevel == "" && methodOr(res.Method, req.Method) == proofingprovider.MethodYivi {
+		res.EIDASLevel = yiviEIDASLevel
+	}
+	if MeetsAssurance(res.EIDASLevel, req.RequiredAssuranceLevel) {
+		return StatusApproved, res
+	}
+	res.ErrorCode = ErrorAssuranceNotMet
+	return StatusRejected, res
 }
 
 // methodOr is the method IPS reported, or the one already known: a later read
@@ -740,59 +958,175 @@ func (s *Service) SetCustomerPaused(ctx context.Context, orgID, id uuid.UUID, pa
 	return s.customers.SetPaused(ctx, orgID, id, paused)
 }
 
-// CustomerRequest is one of a customer's requests, re-checked at IPS first
-// while IPS may hold a newer state: an API caller polling it is how its outcome
-// lands.
+// CustomerRequest is one of a customer's requests; see readReconciled.
 func (s *Service) CustomerRequest(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, error) {
 	req, err := s.requests.GetForCustomer(ctx, orgID, customerID, id)
-	if err != nil || !req.needsReconcile() {
-		return req, err
-	}
-	apiKey, err := s.settings.APIKey(ctx, orgID)
 	if err != nil {
 		return Request{}, err
 	}
-	return s.reconcile(ctx, apiKey, req), nil
+	return s.readReconciled(ctx, req)
 }
 
-// ReconcileLive re-checks live requests at IPS, across every org, so an
-// outcome or an expiry (and the webhook it sends) lands without anyone reading
-// a list. It reports how many it re-checked; an org whose key cannot be read is
-// logged and skipped.
-func (s *Service) ReconcileLive(ctx context.Context) (int64, error) {
-	reqs, err := s.requests.ListLive(ctx, maxReconcilePerRound)
-	if err != nil {
-		return 0, err
+// StoredCustomerRequest is one of a customer's requests as stored, without
+// re-checking IPS: what a headless poll answers from.
+func (s *Service) StoredCustomerRequest(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, error) {
+	return s.requests.GetForCustomer(ctx, orgID, customerID, id)
+}
+
+// CustomerRequestPage is a page of a customer's requests, newest first, from
+// stored state (no IPS call), and the cursor of the next page ("" at the end).
+// A cursor that does not decode is ErrInvalidInput.
+func (s *Service) CustomerRequestPage(ctx context.Context, orgID, customerID uuid.UUID, cursor string, limit int) ([]Request, string, error) {
+	if limit <= 0 {
+		limit = DefaultPageSize
 	}
-	keys := map[uuid.UUID]string{}
-	var checked int64
-	for _, req := range reqs {
-		apiKey, ok := keys[req.OrganizationID]
+	limit = min(limit, MaxPageSize)
+	var after *RequestCursor
+	if cursor != "" {
+		c, ok := decodeRequestCursor(cursor)
 		if !ok {
-			if apiKey, err = s.settings.APIKey(ctx, req.OrganizationID); err != nil {
-				slog.WarnContext(ctx, "identity proofing: reconcile skipped an org",
-					slog.String("org_id", req.OrganizationID.String()), slog.Any("error", err))
-			}
-			keys[req.OrganizationID] = apiKey
+			return nil, "", fmt.Errorf("%w: the cursor is not one this API gave", ErrInvalidInput)
 		}
-		if apiKey == "" {
-			continue
-		}
-		s.reconcile(ctx, apiKey, req)
-		checked++
+		after = &c
 	}
-	return checked, nil
+	// One extra row tells whether a next page exists.
+	reqs, err := s.requests.ListPage(ctx, orgID, customerID, after, limit+1)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(reqs) <= limit {
+		return reqs, "", nil
+	}
+	reqs = reqs[:limit]
+	last := reqs[limit-1]
+	return reqs, encodeRequestCursor(RequestCursor{CreatedAt: last.CreatedAt, ID: last.ID}), nil
 }
 
-// Request is one of the org's requests, re-checked at IPS while it may have
-// moved on: what an on-screen session's page polls. A member sees only a
-// request they sent (requestedBy set), as in the list.
+// CancelRequest ends a customer's request that has no outcome yet, at IPS too,
+// and marks it cancelled. One that has an outcome or ended is ErrSessionOver.
+func (s *Service) CancelRequest(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, error) {
+	req, err := s.CustomerRequest(ctx, orgID, customerID, id)
+	if err != nil {
+		return Request{}, err
+	}
+	if st := req.EffectiveStatus(s.now()); st != StatusPending && st != StatusInProgress || req.PurgedAt != nil {
+		return Request{}, ErrSessionOver
+	}
+	if sess := req.liveSession(s.now()); sess != nil {
+		apiKey, err := s.requestAPIKey(ctx, req)
+		if err != nil {
+			return Request{}, err
+		}
+		if err := s.ips.CancelSession(ctx, apiKey, sess.ID, sess.Token); err != nil {
+			var rejected *proofingprovider.RejectedError
+			if errors.As(err, &rejected) {
+				// IPS decided it first; the pushed outcome records that.
+				return Request{}, ErrSessionOver
+			}
+			return Request{}, fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
+		}
+	}
+	cancelled, err := s.requests.Cancel(ctx, req)
+	if err != nil {
+		return Request{}, err
+	}
+	if !cancelled {
+		return Request{}, ErrSessionOver
+	}
+	return s.requests.GetForCustomer(ctx, orgID, customerID, id)
+}
+
+// RequestResult reads a settled customer request's result from IPS, the
+// wallet storing no identity, and audits identity_proofing.result_read. One
+// not settled yet is ErrResultNotReady; one erased or gone at IPS is not found.
+func (s *Service) RequestResult(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, proofingprovider.Identity, error) {
+	req, err := s.CustomerRequest(ctx, orgID, customerID, id)
+	if err != nil {
+		return Request{}, proofingprovider.Identity{}, err
+	}
+	return s.requestResult(ctx, req)
+}
+
+// AdminRequestResult is RequestResult for an org admin reading one of the org's
+// customer requests in the wallet: audited identity_proofing.result_read with
+// the admin as actor. A member's request is not found: its subject is a
+// colleague, whose identity the wallet shows nowhere.
+func (s *Service) AdminRequestResult(ctx context.Context, orgID, id uuid.UUID) (Request, proofingprovider.Identity, error) {
+	req, err := s.Request(ctx, orgID, id, nil)
+	if err != nil {
+		return Request{}, proofingprovider.Identity{}, err
+	}
+	if req.CustomerID == nil {
+		return Request{}, proofingprovider.Identity{}, ErrRequestNotFound
+	}
+	return s.requestResult(ctx, req)
+}
+
+func (s *Service) requestResult(ctx context.Context, req Request) (Request, proofingprovider.Identity, error) {
+	if req.PurgedAt != nil || req.session == nil {
+		return Request{}, proofingprovider.Identity{}, ErrRequestNotFound
+	}
+	if !req.Status.Settled() {
+		return Request{}, proofingprovider.Identity{}, ErrResultNotReady
+	}
+	apiKey, err := s.requestAPIKey(ctx, req)
+	if err != nil {
+		return Request{}, proofingprovider.Identity{}, err
+	}
+	identity, err := s.ips.SessionIdentity(ctx, apiKey, req.session.ID, req.session.Token)
+	if errors.Is(err, proofingprovider.ErrNotFound) {
+		return Request{}, proofingprovider.Identity{}, ErrRequestNotFound
+	}
+	if err != nil {
+		return Request{}, proofingprovider.Identity{}, fmt.Errorf("proofing: result request %s: %w", req.ID, err)
+	}
+	if err := s.requests.RecordResultRead(ctx, req); err != nil {
+		return Request{}, proofingprovider.Identity{}, err
+	}
+	return req, identity, nil
+}
+
+// PurgeRequest erases a customer's request at IPS and what the wallet holds
+// of its outcome, whatever its state; the row stays, marked purged.
+func (s *Service) PurgeRequest(ctx context.Context, orgID, customerID, id uuid.UUID) error {
+	req, err := s.requests.GetForCustomer(ctx, orgID, customerID, id)
+	if err != nil {
+		return err
+	}
+	if req.PurgedAt != nil {
+		return nil
+	}
+	if req.session != nil {
+		apiKey, err := s.requestAPIKey(ctx, req)
+		if err != nil {
+			return err
+		}
+		if err := s.ips.DeleteSession(ctx, apiKey, req.session.ID, req.session.Token); err != nil {
+			return fmt.Errorf("proofing: purge request %s: %w", req.ID, err)
+		}
+	}
+	return s.requests.Purge(ctx, req)
+}
+
+// Request is one of the org's requests, what an on-screen session's page
+// polls; see readReconciled. A member sees only a request they sent
+// (requestedBy set), as in the list.
 func (s *Service) Request(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (Request, error) {
 	req, err := s.sentRequest(ctx, orgID, id, requestedBy)
-	if err != nil || !req.needsReconcile() {
-		return req, err
+	if err != nil {
+		return Request{}, err
 	}
-	apiKey, err := s.settings.APIKey(ctx, orgID)
+	return s.readReconciled(ctx, req)
+}
+
+// readReconciled re-checks a request that may have moved on at IPS, at most
+// once per readReconcileEvery: a fallback for a missed push, so a poller
+// never turns into one IPS read per poll.
+func (s *Service) readReconciled(ctx context.Context, req Request) (Request, error) {
+	if !req.needsReconcile() || !s.readChecks.allow(req.ID, s.now()) {
+		return req, nil
+	}
+	apiKey, err := s.requestAPIKey(ctx, req)
 	if err != nil {
 		return Request{}, err
 	}
@@ -818,6 +1152,11 @@ func (s *Service) yiviSession(ctx context.Context, orgID, id uuid.UUID, requeste
 	if err != nil {
 		return Request{}, nil, err
 	}
+	return s.yiviSessionOf(req)
+}
+
+// yiviSessionOf is req's running IPS session, if req is for the Yivi app.
+func (s *Service) yiviSessionOf(req Request) (Request, *ipsSession, error) {
 	if req.Method != proofingprovider.MethodYivi {
 		return Request{}, nil, ErrWrongMethod
 	}
@@ -828,31 +1167,114 @@ func (s *Service) yiviSession(ctx context.Context, orgID, id uuid.UUID, requeste
 	return req, sess, nil
 }
 
-// StartYivi starts (or, after a cancel in the app, restarts) the Yivi
-// disclosure of an on-screen Yivi request: its session pointer is the QR the
-// subject scans with the Yivi app.
-func (s *Service) StartYivi(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (proofingprovider.YiviStart, error) {
-	_, sess, err := s.yiviSession(ctx, orgID, id, requestedBy)
+// ClaimLink is a fresh vcmrtd link for a sent Idem request: a new claim once
+// the first lapsed unscanned, or a handover to another phone once the app that
+// held the session left. An app still active is ErrDeviceActive.
+func (s *Service) ClaimLink(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (proofingprovider.Claim, error) {
+	req, err := s.sentRequest(ctx, orgID, id, requestedBy)
 	if err != nil {
-		return proofingprovider.YiviStart{}, err
+		return proofingprovider.Claim{}, err
 	}
-	started, err := s.ips.StartYiviDisclosure(ctx, sess.Token)
-	return started, yiviStepError(err)
+	return s.claimLink(ctx, req)
 }
 
-// YiviDisclosure redeems the subject's finished Yivi disclosure, or answers
-// proofingprovider.ErrDisclosurePending while it is not done. A disclosure
-// that ended the session (cancelled, or no usable photo) is recorded at once.
+func (s *Service) claimLink(ctx context.Context, req Request) (proofingprovider.Claim, error) {
+	// A test request resolved at once and never had a link.
+	if req.Method != proofingprovider.MethodIdem || req.mode() == ModeTest {
+		return proofingprovider.Claim{}, ErrWrongMethod
+	}
+	sess := req.liveSession(s.now())
+	if sess == nil || req.Status.Settled() {
+		return proofingprovider.Claim{}, ErrSessionOver
+	}
+	apiKey, err := s.requestAPIKey(ctx, req)
+	if err != nil {
+		return proofingprovider.Claim{}, err
+	}
+	claim, err := s.ips.SessionHandover(ctx, apiKey, sess.ID, sess.Token)
+	var rejected *proofingprovider.RejectedError
+	switch {
+	case errors.As(err, &rejected) && rejected.Code == proofingprovider.CodeDeviceActive:
+		return proofingprovider.Claim{}, ErrDeviceActive
+	case errors.As(err, &rejected):
+		return proofingprovider.Claim{}, ErrSessionOver
+	case err != nil:
+		return proofingprovider.Claim{}, fmt.Errorf("proofing: claim link request %s: %w", req.ID, err)
+	}
+	return claim, nil
+}
+
+// YiviStart is the OpenID4VP presentation an on-screen Yivi request asks for.
+// WalletLink is the openid4vp:// request the subject's Yivi app opens (the
+// page shows it as a QR and a universal link); ExpiresAt the session's cap.
+type YiviStart struct {
+	WalletLink string
+	ExpiresAt  time.Time
+}
+
+// StartYivi starts (or, after a cancel in the app, restarts) the OpenID4VP
+// disclosure of an on-screen Yivi request's passport or id-card and its photo.
+// The verifier's transaction stays on the request, server-side.
+func (s *Service) StartYivi(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (YiviStart, error) {
+	req, sess, err := s.yiviSession(ctx, orgID, id, requestedBy)
+	if err != nil {
+		return YiviStart{}, err
+	}
+	return s.startYivi(ctx, req, sess)
+}
+
+func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) (YiviStart, error) {
+	started, err := s.verifier.StartPresentation(ctx, openid4vpverifier.ScopeProofing)
+	if err != nil {
+		return YiviStart{}, err
+	}
+	if err := s.requests.SetYiviTransaction(ctx, req, sess.ID, started.TransactionID); err != nil {
+		return YiviStart{}, err
+	}
+	return YiviStart{WalletLink: started.WalletLink, ExpiresAt: sess.ExpiresAt}, nil
+}
+
+// YiviDisclosure hands the subject's finished disclosure to IPS as the face
+// check's reference, or answers ErrDisclosurePending while the subject has not
+// finished in the Yivi app. A disclosure IPS cannot use (no photo, no face in
+// it) ends the session, which is recorded at once. The photo and claims pass
+// through and are not kept.
 func (s *Service) YiviDisclosure(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (proofingprovider.YiviDisclosure, error) {
 	req, sess, err := s.yiviSession(ctx, orgID, id, requestedBy)
 	if err != nil {
 		return proofingprovider.YiviDisclosure{}, err
 	}
-	disclosure, err := s.ips.YiviDisclosureResult(ctx, sess.Token)
+	return s.yiviDisclosure(ctx, req, sess)
+}
+
+func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSession) (proofingprovider.YiviDisclosure, error) {
+	if req.yiviTransactionID == "" {
+		return proofingprovider.YiviDisclosure{}, ErrDisclosurePending
+	}
+	presentation, err := s.verifier.Result(ctx, req.yiviTransactionID)
+	if errors.Is(err, openid4vpverifier.ErrPending) {
+		return proofingprovider.YiviDisclosure{}, ErrDisclosurePending
+	}
+	if err != nil {
+		return proofingprovider.YiviDisclosure{}, err
+	}
+	doc, ok := presentation.Document()
+	if !ok {
+		return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no passport or id-card")
+	}
+	apiKey, err := s.requestAPIKey(ctx, req)
+	if err != nil {
+		return proofingprovider.YiviDisclosure{}, err
+	}
+	attributes := maps.Clone(doc.Claims)
+	delete(attributes, openid4vpverifier.ClaimPhoto)
+	disclosure, err := s.ips.SubmitReference(ctx, apiKey, sess.ID, sess.Token, proofingprovider.Reference{
+		Credential: doc.Credential, Photo: doc.Claims[openid4vpverifier.ClaimPhoto], Attributes: attributes,
+	})
 	if err != nil {
 		return proofingprovider.YiviDisclosure{}, yiviStepError(err)
 	}
-	s.reconcileNow(ctx, req)
+	s.reconcile(ctx, apiKey, req)
 	return disclosure, nil
 }
 
@@ -864,6 +1286,10 @@ func (s *Service) FaceFrame(ctx context.Context, orgID, id uuid.UUID, requestedB
 	if err != nil {
 		return proofingprovider.FaceVerdict{}, err
 	}
+	return s.faceFrame(ctx, req, sess, image)
+}
+
+func (s *Service) faceFrame(ctx context.Context, req Request, sess *ipsSession, image string) (proofingprovider.FaceVerdict, error) {
 	verdict, err := s.ips.SubmitFaceFrame(ctx, sess.Token, image)
 	if err != nil {
 		return proofingprovider.FaceVerdict{}, yiviStepError(err)
@@ -888,7 +1314,7 @@ func yiviStepError(err error) error {
 // reconcileNow records what IPS decided for req. A failure is logged: the
 // background reconciler picks the outcome up later.
 func (s *Service) reconcileNow(ctx context.Context, req Request) {
-	apiKey, err := s.settings.APIKey(ctx, req.OrganizationID)
+	apiKey, err := s.requestAPIKey(ctx, req)
 	if err != nil {
 		slog.WarnContext(ctx, "identity proofing: reconcile after the Yivi step skipped",
 			slog.String("request_id", req.ID.String()), slog.Any("error", err))
@@ -911,13 +1337,20 @@ func (s *Service) RequestEvents(ctx context.Context, orgID, id uuid.UUID, reques
 	return page.Events, nil
 }
 
-// CreateAPIKey adds a key to a customer; the returned secret is shown once.
-func (s *Service) CreateAPIKey(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string) (APIKey, string, error) {
+// CreateAPIKey adds a live or test key (mode empty is live) with every scope to
+// a customer; the returned secret is shown once.
+func (s *Service) CreateAPIKey(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string, mode Mode) (APIKey, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > maxAPIKeyNameLength {
 		return APIKey{}, "", fmt.Errorf("%w: an API key needs a name of at most %d characters", ErrInvalidInput, maxAPIKeyNameLength)
 	}
-	return s.apiKeys.Create(ctx, orgID, customerID, createdBy, name)
+	if mode == "" {
+		mode = ModeLive
+	}
+	if mode != ModeLive && mode != ModeTest {
+		return APIKey{}, "", fmt.Errorf("%w: an API key is live or test", ErrInvalidInput)
+	}
+	return s.apiKeys.Create(ctx, orgID, customerID, createdBy, name, mode, slices.Clone(APIKeyScopes))
 }
 
 // APIKeys lists a customer's keys, revoked ones included.
@@ -994,6 +1427,18 @@ func (s *Service) WebhookDeliveries(ctx context.Context, orgID, customerID uuid.
 	return s.webhooks.Deliveries(ctx, orgID, customerID)
 }
 
+// ReceiveDefaultWebhook takes a delivery at the wallet's own endpoint: the
+// default for a customer without one. Its result is already stored where the
+// event came from, so a delivery signed with the default secret is only
+// acknowledged; any other is ErrBadSignature.
+func (s *Service) ReceiveDefaultWebhook(body []byte, signature string) error {
+	secret, err := s.webhooks.DefaultSecret()
+	if err != nil {
+		return err
+	}
+	return verifyWebhookSignature(secret, signature, body, s.now())
+}
+
 // WebhookHealth reports how each of the org's customers' endpoints answers.
 func (s *Service) WebhookHealth(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]WebhookHealth, error) {
 	return s.webhooks.Health(ctx, orgID)
@@ -1041,7 +1486,7 @@ func (s *Service) SaveCustomerSettings(ctx context.Context, orgID, id uuid.UUID,
 		return Customer{}, fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)
 	}
 	if !slices.Contains(DataRetentionDayOptions, settings.DataRetentionDays) {
-		return Customer{}, fmt.Errorf("%w: the data retention must be 7, 30 or 90 days", ErrInvalidInput)
+		return Customer{}, fmt.Errorf("%w: the data retention must be 7, 30, 90, 180 or 365 days", ErrInvalidInput)
 	}
 	return s.customers.SaveSettings(ctx, orgID, id, settings)
 }

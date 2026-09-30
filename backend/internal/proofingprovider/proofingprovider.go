@@ -1,7 +1,7 @@
 // Package proofingprovider is the leaf client seam for the identity-proofing
 // service (privacybydesign/identity-proofing-service, "IPS"): document + face
 // verification run on the subject's phone in the vcmrtd app. The business wallet
-// is an IPS relying party, one IPS tenant per organization.
+// is an IPS relying party; an org is an IPS tenant under the org's own id.
 //
 // This package imports no other internal/* package (leaf level, like
 // signingprovider). It exports value types, a concrete net/http Client and an
@@ -16,7 +16,6 @@
 package proofingprovider
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -28,11 +27,20 @@ import (
 var TenantKeyScopes = []string{"sessions:read", "sessions:write", "flows:read", "flows:manage"}
 
 // Tenant is a freshly created IPS tenant. WebhookSecret is only ever returned by
-// the create call.
+// the create call (and RotateWebhookSecret).
 type Tenant struct {
 	ID            string
 	WebhookSecret string
 }
+
+// KeyEnvironment is an IPS API key's environment. A test key is its tenant's
+// sandbox: IPS lets it create scripted-outcome sessions only.
+type KeyEnvironment string
+
+const (
+	KeyLive KeyEnvironment = "live"
+	KeyTest KeyEnvironment = "test"
+)
 
 // FlowSpec is everything an org admin sets on a flow: the body of both a new
 // flow and a new version of one. IPS validates the combination (which steps need
@@ -47,7 +55,10 @@ type FlowSpec struct {
 	RequestedAttributes []string `json:"requestedAttributes,omitempty"`
 	// SelfieLocation is which client captures the face: "native" (the vcmrtd
 	// app) or "browser". IPS defaults an empty value to browser.
-	SelfieLocation           string             `json:"selfieLocation,omitempty"`
+	SelfieLocation string `json:"selfieLocation,omitempty"`
+	// FaceProvider verifies the face step: "regula", "engine", or empty for
+	// IPS's deployment default.
+	FaceProvider             string             `json:"faceProvider,omitempty"`
 	AcceptedDocumentTypes    []string           `json:"acceptedDocumentTypes,omitempty"`
 	AcceptedIssuingCountries []string           `json:"acceptedIssuingCountries,omitempty"`
 	RequiredChecks           []string           `json:"requiredChecks,omitempty"`
@@ -92,6 +103,12 @@ type SessionInput struct {
 	// Method is the app the subject proofs with: MethodIdem (the default when
 	// empty) or MethodYivi. MethodBrowser cannot be asked for.
 	Method Method
+	// CallbackURL, when set, is where IPS pushes each change of the session:
+	// a signed notice with no personal data (callbackPayload "minimal").
+	CallbackURL string
+	// ScriptedOutcome resolves the session at once, without a subject: approve,
+	// reject:<code>, needs_review or expire. Only a sandbox tenant accepts it.
+	ScriptedOutcome string
 }
 
 // Session is a created IPS session. Token is the relying-party bearer token every
@@ -146,6 +163,53 @@ type Result struct {
 	Name string
 }
 
+// Identity is a session's outcome with who was proofed and on what evidence,
+// for a customer's result read. Only these fields are decoded from IPS: never
+// the document number, personal number, place of birth or any image.
+type Identity struct {
+	Result
+	GivenName   string
+	FamilyName  string
+	BirthDate   string
+	Nationality string
+	// Evidence is what the identity rests on; nil while there is no result.
+	Evidence *Evidence
+}
+
+// Evidence is the checks behind an Identity. Type is EvidenceEMRTD (the chip,
+// read by the Idem app) or EvidenceYivi (a Yivi disclosure). PassiveAuth and
+// ActiveAuth are CheckValid, CheckInvalid or CheckNotPerformed.
+type Evidence struct {
+	Type         string
+	DocumentType string
+	IssuingState string
+	ExpiryDate   string
+	PassiveAuth  string
+	ActiveAuth   string
+	FaceMatch    *float64
+	// Liveness is IPS's passed, failed or not_performed.
+	Liveness string
+}
+
+const (
+	EvidenceEMRTD = "emrtd"
+	EvidenceYivi  = "yivi_disclosure"
+
+	CheckValid        = "valid"
+	CheckInvalid      = "invalid"
+	CheckNotPerformed = "not_performed"
+)
+
+// ReviewDecision is a reviewer's decision on a session in needs_review:
+// Approve, or a rejection with ErrorCode (IPS's MANUAL_REVIEW_REJECTED when
+// empty). Reason and Reviewer are recorded in IPS's audit trail.
+type ReviewDecision struct {
+	Approve   bool
+	ErrorCode string
+	Reason    string
+	Reviewer  string
+}
+
 // Method is the app a subject proofed with, as the wallet shows it.
 type Method string
 
@@ -154,7 +218,8 @@ const (
 	// document's chip over NFC.
 	MethodIdem Method = "idem_app"
 	// MethodYivi is a disclosure of existing identity credentials from the Yivi
-	// app (IPS's biometric_bound_login).
+	// app, over OpenID4VP at the wallet's verifier, whose photo IPS then checks
+	// the live face against (IPS's biometric_bound_login).
 	MethodYivi Method = "yivi_app"
 	// MethodBrowser is IPS's web device alone, with no app involved.
 	MethodBrowser Method = "browser"
@@ -200,16 +265,18 @@ const (
 	ipsMethodBoundLogin  = "biometric_bound_login"
 )
 
-// YiviStart is the Yivi disclosure a MethodYivi session asks for. SessionPtr
-// is the pointer the Yivi app scans, as IPS gave it: the QR carries it as JSON.
-type YiviStart struct {
-	SessionPtr json.RawMessage
-	ExpiresAt  time.Time
+// Reference is what the subject's verified OpenID4VP disclosure gives a
+// MethodYivi session to check the face against. Credential is the credential's
+// vct (e.g. pbdf-staging.pbdf.passport), Photo its photo claim as base64,
+// Attributes the identity claims disclosed with it, by claim name.
+type Reference struct {
+	Credential string
+	Photo      string
+	Attributes map[string]string
 }
 
-// YiviDisclosure is a redeemed Yivi disclosure. OK false ended the session
-// (Code says why: cancelled, timeout, invalid_proof, photo_missing,
-// reference_no_face); OK true moves on to the face check, which approves after
+// YiviDisclosure is IPS taking a Reference. OK false ended the session
+// (Code says why: photo_missing, reference_no_face); OK true moves on to the face check, which approves after
 // StableFrames matching frames and rejects after MaxAttempts without them.
 type YiviDisclosure struct {
 	OK           bool
@@ -239,16 +306,16 @@ type FaceVerdict struct {
 	Decision     FaceDecision
 }
 
-// ErrDisclosurePending is IPS answering that the Yivi disclosure is not
-// finished yet: the subject has not scanned the QR or not confirmed in the app.
-var ErrDisclosurePending = errors.New("proofingprovider: disclosure not finished")
-
 // ErrMethodUnavailable is IPS refusing a session for a method it cannot run:
-// MethodYivi on an IPS without a Yivi server.
+// MethodYivi on an IPS that takes no wallet reference
+// (BOUND_LOGIN_RELYING_PARTY_REFERENCE off).
 var ErrMethodUnavailable = errors.New("proofingprovider: method unavailable")
 
 // ErrNotFound is IPS answering 404: an unknown session, or a tenant it no longer has.
 var ErrNotFound = errors.New("proofingprovider: not found")
+
+// ErrTenantExists is IPS refusing to create a tenant under an id it already has.
+var ErrTenantExists = errors.New("proofingprovider: tenant exists")
 
 // RejectedError is IPS refusing a request as invalid (400/409/422), or a
 // subject-facing call on a session that is over (410). Message is
@@ -257,7 +324,13 @@ var ErrNotFound = errors.New("proofingprovider: not found")
 type RejectedError struct {
 	Status  int
 	Message string
+	// Code is IPS's machine-readable reason, when it sent one.
+	Code string
 }
+
+// CodeDeviceActive is IPS refusing a handover while the app holding the
+// session is still active: the subject carries on there.
+const CodeDeviceActive = "device_active"
 
 func (e *RejectedError) Error() string {
 	return fmt.Sprintf("proofingprovider: rejected (status %d): %s", e.Status, e.Message)

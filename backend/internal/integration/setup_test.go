@@ -230,14 +230,17 @@ func setup(t *testing.T, platformAdmins ...string) *testEnv {
 	if err != nil {
 		t.Fatalf("proofing cipher: %v", err)
 	}
-	proofingHandler := proofing.NewHandler(proofing.NewService(proofing.Stores{
+	proofingService := proofing.NewService(proofing.Stores{
 		Settings:  proofing.NewSettingsStore(pool, audit.NewDBRecorder(), proofingCipher),
 		Requests:  proofing.NewRequestStore(pool, audit.NewDBRecorder(), proofingCipher),
 		Customers: proofing.NewCustomerStore(pool, audit.NewDBRecorder()),
 		APIKeys:   proofing.NewAPIKeyStore(pool, audit.NewDBRecorder()),
 		Webhooks:  proofing.NewWebhookStore(pool, audit.NewDBRecorder(), proofingCipher),
 		Events:    audit.NewReader(pool),
-	}, proofingprovider.NewStub(), nil), requireUser, orgHandler.Authorize)
+	}, proofingprovider.NewStub(), fake, nil)
+	proofingService.SetHostedBaseURL("http://wallet.test/p/")
+	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
+	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool))
 
 	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler, proofingHandler))
 	t.Cleanup(srv.Close)

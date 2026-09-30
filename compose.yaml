@@ -110,6 +110,10 @@ services:
       IDENTITY_PROOFING_URL: ${IDENTITY_PROOFING_URL:-}
       IDENTITY_PROOFING_ADMIN_KEY: ${IDENTITY_PROOFING_ADMIN_KEY:-}
       IDENTITY_PROOFING_ENCRYPTION_KEY: ${IDENTITY_PROOFING_ENCRYPTION_KEY:-}
+      # Where IPS pushes session changes; empty derives it from APP_BASE_URL.
+      IDENTITY_PROOFING_CALLBACK_URL: ${IDENTITY_PROOFING_CALLBACK_URL:-}
+      # The wallet's own webhook endpoint; empty derives it from APP_BASE_URL.
+      IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL: ${IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL:-}
     depends_on:
       db:
         condition: service_healthy

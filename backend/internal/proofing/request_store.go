@@ -12,6 +12,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
@@ -36,7 +37,9 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.ips_session_id, r.ips_session_token_ciphertext, r.ips_session_expires_at, r.ips_session_ended_at,
 	r.subject_user_id, COALESCE(r.flow_version, 0),
 	r.customer_id, COALESCE(c.name, ''), r.proofed_name_ciphertext, c.data_retention_days,
-	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, '')`
+	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
+	COALESCE(r.required_assurance_level, ''), r.mode, r.link_token_hash IS NOT NULL,
+	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, '')`
 
 // requestFrom joins a request to its sender and its customer.
 const requestFrom = ` FROM identity_proofing_requests r
@@ -55,7 +58,8 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.SubjectName, &r.SubjectEmail, &r.FlowID, &r.FlowName, &r.Status, &r.LinkExpiresAt,
 		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &r.SubjectUserID, &r.FlowVersion,
-		&r.CustomerID, &r.CustomerName, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method); err != nil {
+		&r.CustomerID, &r.CustomerName, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
+		&r.RequiredAssuranceLevel, &r.Mode, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention = ProofedNameRetention
@@ -88,8 +92,8 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	return r, nil
 }
 
-// NewStoredRequest is a request about to be mailed. It has no IPS session yet:
-// that is created when the recipient starts (AttachSession).
+// NewStoredRequest is a request about to be stored. Its IPS session is already
+// created and is attached right after (AttachSession).
 type NewStoredRequest struct {
 	ID    uuid.UUID
 	OrgID uuid.UUID
@@ -104,6 +108,13 @@ type NewStoredRequest struct {
 	// the app the subject used replaces it.
 	Method  proofingprovider.Method
 	Channel Channel
+	// Mode is ModeTest for a sandbox request; empty is ModeLive.
+	Mode Mode
+	// LinkTokenHash is set for a hosted request: the SHA-256 of its link's token.
+	LinkTokenHash []byte
+	// RedirectURL and Language are a hosted request's; empty for none.
+	RedirectURL string
+	Language    email.Locale
 }
 
 // Create stores a new request and audits identity_proofing.requested in the same
@@ -112,11 +123,14 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `INSERT INTO identity_proofing_requests
 			(id, organization_id, requested_by, subject_user_id, customer_id, subject_name, subject_email,
-			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''))`
+			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method, required_assurance_level, mode,
+			 link_token_hash, redirect_url, language)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
+				COALESCE(NULLIF($15, ''), 'live'), $16, NULLIF($17, ''), NULLIF($18, ''))`
 		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, in.Subject.CustomerID,
 			in.Subject.Name, in.Subject.Email, in.Flow.ID, in.Flow.Name, in.Flow.Version, in.LinkExpiresAt,
-			in.APIKeyID, string(in.Method)); err != nil {
+			in.APIKeyID, string(in.Method), in.Flow.RequiredAssuranceLevel, string(in.Mode), in.LinkTokenHash,
+			in.RedirectURL, string(in.Language)); err != nil {
 			return fmt.Errorf("proofing: create request org %s: %w", in.OrgID, err)
 		}
 		fields := withAuditSubject(map[string]any{
@@ -133,6 +147,12 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 		if in.APIKeyID != nil {
 			fields["apiKeyId"] = in.APIKeyID.String()
 		}
+		// A hosted link lapses unstarted at link_expires_at: wake the deadline job.
+		if in.LinkTokenHash != nil {
+			if err := database.Notify(ctx, q, SessionChannel); err != nil {
+				return err
+			}
+		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingRequested,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: in.ID.String(), OrgID: &in.OrgID},
 			audit.Created(fields))
@@ -143,31 +163,159 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 	return s.get(ctx, in.ID)
 }
 
-// ListLive returns up to limit requests, across every org, whose IPS session
-// may hold a newer state than the row (see Request.needsReconcile), the least
-// recently updated first: the background reconciler's work list.
-func (s *RequestStore) ListLive(ctx context.Context, limit int) ([]Request, error) {
-	query := `SELECT ` + requestColumns + requestFrom + `
-		WHERE r.ips_session_id IS NOT NULL AND (r.status = 'needs_review'
-			OR (r.status IN ('pending', 'in_progress') AND r.ips_session_ended_at IS NULL))
-		ORDER BY r.updated_at LIMIT $1`
-	rows, err := s.db.Query(ctx, query, limit)
+// liveSessionWhere is a request whose IPS session is attached, not seen to
+// end, and still waiting on the subject (a review has no deadline).
+const liveSessionWhere = `r.ips_session_id IS NOT NULL AND r.ips_session_ended_at IS NULL
+	AND r.status IN ('pending', 'in_progress')`
+
+// ListDue leases and returns up to limit requests, across every org, whose
+// session's cap has passed without the wallet seeing it end: the deadline job's
+// work list. A leased request is not offered again for deadlineRetry, so
+// replicas running the job never re-check the same session at once.
+func (s *RequestStore) ListDue(ctx context.Context, now time.Time, limit int) ([]Request, error) {
+	query := `WITH due AS (
+			SELECT r.id FROM identity_proofing_requests r
+			WHERE ` + liveSessionWhere + ` AND r.ips_session_expires_at <= $1
+				AND (r.ips_reconcile_leased_until IS NULL OR r.ips_reconcile_leased_until <= $1)
+			ORDER BY r.ips_session_expires_at LIMIT $2 FOR UPDATE SKIP LOCKED
+		), leased AS (
+			UPDATE identity_proofing_requests l SET ips_reconcile_leased_until = $1 + make_interval(secs => $3)
+			FROM due WHERE l.id = due.id RETURNING l.id
+		)
+		SELECT ` + requestColumns + requestFrom + `
+		WHERE r.id IN (SELECT id FROM leased)
+		ORDER BY r.ips_session_expires_at`
+	rows, err := s.db.Query(ctx, query, now, limit, deadlineRetry.Seconds())
 	if err != nil {
-		return nil, fmt.Errorf("proofing: list live requests: %w", err)
+		return nil, fmt.Errorf("proofing: list due requests: %w", err)
 	}
 	defer rows.Close()
 	out := []Request{}
 	for rows.Next() {
 		req, err := s.scanRequest(rows)
 		if err != nil {
-			return nil, fmt.Errorf("proofing: scan live request: %w", err)
+			return nil, fmt.Errorf("proofing: scan due request: %w", err)
 		}
 		out = append(out, req)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("proofing: list live requests: %w", err)
+		return nil, fmt.Errorf("proofing: list due requests: %w", err)
 	}
 	return out, nil
+}
+
+// openLinkWhere is a hosted request whose link was never started and is not
+// yet seen to lapse.
+const openLinkWhere = `r.link_token_hash IS NOT NULL AND r.ips_session_id IS NULL
+	AND r.ips_session_ended_at IS NULL AND r.status = 'pending'`
+
+// LapseLinks ends up to limit hosted requests whose link lapsed unstarted, as
+// EndSession ends a session: audited identity_proofing.session_ended and sent
+// as session.expired, in one transaction. Rows another replica is ending are
+// skipped. It reports how many it ended.
+func (s *RequestStore) LapseLinks(ctx context.Context, now time.Time, limit int) (int, error) {
+	ended := 0
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		rows, err := q.Query(ctx, `WITH lapsed AS (
+				SELECT r.id FROM identity_proofing_requests r
+				WHERE `+openLinkWhere+` AND r.link_expires_at <= $1
+				ORDER BY r.link_expires_at LIMIT $2 FOR UPDATE SKIP LOCKED
+			), ended AS (
+				UPDATE identity_proofing_requests e SET ips_session_ended_at = now(), updated_at = now()
+				FROM lapsed WHERE e.id = lapsed.id RETURNING e.id
+			)
+			SELECT `+requestColumns+requestFrom+` WHERE r.id IN (SELECT id FROM ended)`, now, limit)
+		if err != nil {
+			return fmt.Errorf("proofing: lapse links: %w", err)
+		}
+		var reqs []Request
+		for rows.Next() {
+			req, err := s.scanRequest(rows)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("proofing: scan lapsed link: %w", err)
+			}
+			reqs = append(reqs, req)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("proofing: lapse links: %w", err)
+		}
+		for _, req := range reqs {
+			if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionEnded,
+				audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+				audit.Updated(
+					req.auditFields(map[string]any{"status": string(req.Status)}),
+					req.auditFields(map[string]any{"status": string(StatusExpired), "reason": "link_lapsed"}))); err != nil {
+				return err
+			}
+			if err := enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionExpired, &req.ID,
+				sessionEventData(req, StatusExpired)); err != nil {
+				return err
+			}
+		}
+		ended = len(reqs)
+		return nil
+	})
+	return ended, err
+}
+
+// NextDeadline is the earliest session cap or open link's lapse after now;
+// zero when there is none.
+func (s *RequestStore) NextDeadline(ctx context.Context, now time.Time) (time.Time, error) {
+	var next *time.Time
+	if err := s.db.QueryRow(ctx, `SELECT least(
+			(SELECT min(r.ips_session_expires_at) FROM identity_proofing_requests r
+				WHERE `+liveSessionWhere+` AND r.ips_session_expires_at > $1),
+			(SELECT min(r.link_expires_at) FROM identity_proofing_requests r
+				WHERE `+openLinkWhere+` AND r.link_expires_at > $1))`, now).Scan(&next); err != nil {
+		return time.Time{}, fmt.Errorf("proofing: next session deadline: %w", err)
+	}
+	if next == nil {
+		return time.Time{}, nil
+	}
+	return *next, nil
+}
+
+// RecordReviewDecision audits identity_proofing.review_decided: a member's
+// decision on a request under review, by the actor in ctx, with its reason.
+// The outcome itself lands as any other (RecordOutcome), once IPS settled it.
+func (s *RequestStore) RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode string) error {
+	fields := map[string]any{"decision": string(decided), "reason": reason}
+	if errorCode != "" {
+		fields["errorCode"] = errorCode
+	}
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		return s.audit.Record(ctx, q, audit.IdentityProofingReviewDecided,
+			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+			audit.Created(req.auditFields(fields)))
+	})
+}
+
+// GetByLinkToken returns the hosted request whose link token hashes to hash.
+func (s *RequestStore) GetByLinkToken(ctx context.Context, hash []byte) (Request, error) {
+	req, err := s.scanRequest(s.db.QueryRow(ctx, `SELECT `+requestColumns+requestFrom+`
+		WHERE r.link_token_hash = $1`, hash))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Request{}, ErrRequestNotFound
+	}
+	if err != nil {
+		return Request{}, fmt.Errorf("proofing: request by link: %w", err)
+	}
+	return req, nil
+}
+
+// GetBySession returns the request an IPS session belongs to.
+func (s *RequestStore) GetBySession(ctx context.Context, sessionID string) (Request, error) {
+	req, err := s.scanRequest(s.db.QueryRow(ctx, `SELECT `+requestColumns+requestFrom+`
+		WHERE r.ips_session_id = $1`, sessionID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Request{}, ErrRequestNotFound
+	}
+	if err != nil {
+		return Request{}, fmt.Errorf("proofing: request for session %s: %w", sessionID, err)
+	}
+	return req, nil
 }
 
 // Get returns one of the org's requests, or ErrRequestNotFound.
@@ -231,6 +379,36 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 	return out, nil
 }
 
+// ListPage returns up to limit of a customer's requests, newest first, after
+// the cursor when one is given: the customer API's paged list.
+func (s *RequestStore) ListPage(ctx context.Context, orgID, customerID uuid.UUID, after *RequestCursor, limit int) ([]Request, error) {
+	var afterAt *time.Time
+	var afterID *uuid.UUID
+	if after != nil {
+		afterAt, afterID = &after.CreatedAt, &after.ID
+	}
+	rows, err := s.db.Query(ctx, `SELECT `+requestColumns+requestFrom+`
+		WHERE r.organization_id = $1 AND r.customer_id = $2
+			AND ($3::timestamptz IS NULL OR (r.created_at, r.id) < ($3, $4::uuid))
+		ORDER BY r.created_at DESC, r.id DESC LIMIT $5`, orgID, customerID, afterAt, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: page requests customer %s: %w", customerID, err)
+	}
+	defer rows.Close()
+	out := []Request{}
+	for rows.Next() {
+		req, err := s.scanRequest(rows)
+		if err != nil {
+			return nil, fmt.Errorf("proofing: scan request customer %s: %w", customerID, err)
+		}
+		out = append(out, req)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("proofing: page requests customer %s: %w", customerID, err)
+	}
+	return out, nil
+}
+
 // AttachSession stores the IPS session a request was sent with, and audits
 // identity_proofing.session_created in the same transaction; the flow version
 // becomes the one the session pinned. It reports false, storing nothing, when
@@ -247,9 +425,10 @@ func (s *RequestStore) AttachSession(ctx context.Context, req Request, sess proo
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE identity_proofing_requests SET
 				ips_session_id = $2, ips_session_token_ciphertext = $3, ips_session_expires_at = $4,
-				flow_version = COALESCE(NULLIF($5, 0), flow_version), updated_at = now()
+				flow_version = COALESCE(NULLIF($5, 0), flow_version), method = COALESCE(NULLIF($6, ''), method),
+				updated_at = now()
 			WHERE id = $1 AND ips_session_id IS NULL AND status = 'pending'`
-		tag, err := q.Exec(ctx, update, req.ID, sess.ID, tokenCT, sess.ExpiresAt, sess.FlowVersion)
+		tag, err := q.Exec(ctx, update, req.ID, sess.ID, tokenCT, sess.ExpiresAt, sess.FlowVersion, string(req.Method))
 		if err != nil {
 			return fmt.Errorf("proofing: attach session request %s: %w", req.ID, err)
 		}
@@ -257,6 +436,10 @@ func (s *RequestStore) AttachSession(ctx context.Context, req Request, sess proo
 			return nil
 		}
 		attached = true
+		// Wakes the deadline job for this session's cap.
+		if err := database.Notify(ctx, q, SessionChannel); err != nil {
+			return err
+		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingSessionCreated,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Created(req.auditFields(map[string]any{
@@ -264,6 +447,22 @@ func (s *RequestStore) AttachSession(ctx context.Context, req Request, sess proo
 			})))
 	})
 	return attached, err
+}
+
+// SetYiviTransaction keeps the verifier transaction of a Yivi request's
+// disclosure, replacing a previous one (a restart). ErrSessionOver once the
+// request moved to another session or settled.
+func (s *RequestStore) SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error {
+	const update = `UPDATE identity_proofing_requests SET yivi_transaction_id = $3, updated_at = now()
+		WHERE id = $1 AND ips_session_id = $2 AND status IN ('pending', 'in_progress')`
+	tag, err := s.db.Exec(ctx, update, req.ID, sessionID, transactionID)
+	if err != nil {
+		return fmt.Errorf("proofing: set yivi transaction request %s: %w", req.ID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrSessionOver
+	}
+	return nil
 }
 
 // MarkStarted records that the subject's phone joined the session (IPS reports
@@ -306,7 +505,7 @@ func (s *RequestStore) EndSession(ctx context.Context, req Request, sessionID st
 		const update = `UPDATE identity_proofing_requests
 			SET ips_session_ended_at = now(), method = COALESCE(NULLIF($3, ''), method), updated_at = now()
 			WHERE id = $1 AND ips_session_id = $2 AND ips_session_ended_at IS NULL
-				AND status IN ('pending', 'in_progress')`
+				AND status IN ('pending', 'in_progress', 'needs_review')`
 		tag, err := q.Exec(ctx, update, req.ID, sessionID, string(method))
 		if err != nil {
 			return fmt.Errorf("proofing: end session request %s: %w", req.ID, err)
@@ -323,6 +522,61 @@ func (s *RequestStore) EndSession(ctx context.Context, req Request, sessionID st
 		}
 		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionExpired, &req.ID,
 			sessionEventData(req, StatusExpired))
+	})
+}
+
+// Cancel marks a request without an outcome cancelled and its session ended,
+// audited identity_proofing.session_cancelled. False when it moved on first.
+func (s *RequestStore) Cancel(ctx context.Context, req Request) (bool, error) {
+	var done bool
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
+			SET cancelled_at = now(), ips_session_ended_at = COALESCE(ips_session_ended_at, now()), updated_at = now()
+			WHERE id = $1 AND cancelled_at IS NULL AND purged_at IS NULL AND status IN ('pending', 'in_progress')`, req.ID)
+		if err != nil {
+			return fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
+		}
+		if done = tag.RowsAffected() == 1; !done {
+			return nil
+		}
+		return s.audit.Record(ctx, q, audit.IdentityProofingSessionCancelled,
+			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}),
+				req.auditFields(map[string]any{"status": string(StatusCancelled)})))
+	})
+	return done, err
+}
+
+// RecordResultRead audits identity_proofing.result_read: who read a request's
+// identity result, never what it said.
+func (s *RequestStore) RecordResultRead(ctx context.Context, req Request) error {
+	return s.audit.Record(ctx, s.db, audit.IdentityProofingResultRead,
+		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+		map[string]any{"status": string(req.Status)})
+}
+
+// Purge erases what the wallet holds of a request's outcome (the proofed name)
+// and marks it purged, audited identity_proofing.session_purged, and sends
+// session.purged. Purging a purged request changes nothing.
+func (s *RequestStore) Purge(ctx context.Context, req Request) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
+			SET purged_at = now(), proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL,
+				ips_session_ended_at = COALESCE(ips_session_ended_at, now()), updated_at = now()
+			WHERE id = $1 AND purged_at IS NULL`, req.ID)
+		if err != nil {
+			return fmt.Errorf("proofing: purge request %s: %w", req.ID, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil
+		}
+		if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionPurged,
+			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+			audit.Deleted(req.auditFields(map[string]any{"status": string(req.Status)}))); err != nil {
+			return err
+		}
+		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionPurged, &req.ID,
+			sessionEventData(req, req.Status))
 	})
 }
 
@@ -390,7 +644,8 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 		return fmt.Errorf("proofing: record outcome request %s: %q is not an outcome", req.ID, status)
 	}
 	var nameCT []byte
-	var purgeAfter *time.Time
+	// retainSecs is how long the proofed name is kept, from the database's now().
+	var retainSecs *float64
 	if res.Name != "" {
 		if s.cipher == nil {
 			return ErrNoEncryptionKey
@@ -403,19 +658,19 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 		if retention == 0 {
 			retention = ProofedNameRetention
 		}
-		at := time.Now().Add(retention)
-		purgeAfter = &at
+		secs := retention.Seconds()
+		retainSecs = &secs
 	}
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE identity_proofing_requests SET
 				status = $3, assurance_level = NULLIF($4, ''), eidas_level = NULLIF($5, ''),
 				error_code = NULLIF($6, ''), completed_at = COALESCE($7, now()), updated_at = now(),
-				proofed_name_ciphertext = $8, proofed_name_purge_after = $9,
+				proofed_name_ciphertext = $8, proofed_name_purge_after = now() + make_interval(secs => $9),
 				method = COALESCE(NULLIF($10, ''), method)
 			WHERE id = $1 AND ips_session_id = $2
 				AND status IN ('pending', 'in_progress', 'needs_review') AND status <> $3`
 		tag, err := q.Exec(ctx, update, req.ID, sessionID, string(status),
-			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, purgeAfter, string(res.Method))
+			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method))
 		if err != nil {
 			return fmt.Errorf("proofing: record outcome request %s: %w", req.ID, err)
 		}
@@ -451,27 +706,40 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 // audited: nothing was decided.
 func (s *RequestStore) PurgeProofedNames(ctx context.Context) (int64, error) {
 	var n int64
-	err := s.db.QueryRow(ctx, `WITH purged AS (
-			UPDATE identity_proofing_requests
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		rows, err := q.Query(ctx, `UPDATE identity_proofing_requests
 			SET proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL, updated_at = now()
 			WHERE proofed_name_purge_after <= now()
-			RETURNING id, organization_id, customer_id, status, flow_id
-		), enqueued AS (
-			INSERT INTO identity_proofing_webhook_deliveries (organization_id, customer_id, event, request_id, payload)
-			SELECT p.organization_id, p.customer_id, $1, p.id,
-				jsonb_build_object('sessionId', p.id, 'status', p.status, 'flowId', p.flow_id)
-			FROM purged p JOIN identity_proofing_webhooks w ON w.customer_id = p.customer_id
-			WHERE $1 = ANY (w.events)
-		)
-		SELECT count(*) FROM purged`, EventSessionPurged).Scan(&n)
+			RETURNING id, organization_id, customer_id, status, flow_id, mode`)
+		if err != nil {
+			return err
+		}
+		purged, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Request, error) {
+			var r Request
+			err := row.Scan(&r.ID, &r.OrganizationID, &r.CustomerID, &r.Status, &r.FlowID, &r.Mode)
+			return r, err
+		})
+		if err != nil {
+			return err
+		}
+		n = int64(len(purged))
+		// The payload is built here, not in SQL, so it carries the ps_ id.
+		for _, r := range purged {
+			if err := enqueueWebhook(ctx, q, r.OrganizationID, r.CustomerID, EventSessionPurged, &r.ID,
+				sessionEventData(r, r.Status)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return 0, fmt.Errorf("proofing: purge proofed names: %w", err)
 	}
 	return n, nil
 }
 
-// Stats counts the customer requests sent since since, per customer and flow,
-// by outcome; requestedBy narrows them to the requests one member sent. A row
+// Stats counts the live customer requests sent since since, per customer and
+// flow, by outcome (test requests are left out); requestedBy narrows them to the requests one member sent. A row
 // counts as expired exactly when Request.EffectiveStatus reads it so, and as
 // last reconciled: an outcome IPS holds but no list read picked up yet is not in
 // it.
@@ -479,12 +747,14 @@ func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *
 	const query = `SELECT customer_id, flow_id, count(*),
 			count(*) FILTER (WHERE status = $4),
 			count(*) FILTER (WHERE status = $5),
-			count(*) FILTER (WHERE status = $6),
-			count(*) FILTER (WHERE status NOT IN ($4, $5, $6) AND (ips_session_id IS NULL
-				OR ips_session_ended_at IS NOT NULL OR ips_session_expires_at IS NULL
-				OR ips_session_expires_at <= now()))
+			count(*) FILTER (WHERE status = $6 AND ips_session_ended_at IS NULL),
+			count(*) FILTER (WHERE status NOT IN ($4, $5) AND (ips_session_ended_at IS NOT NULL
+				OR (status <> $6 AND ((ips_session_id IS NULL
+						AND (link_token_hash IS NULL OR link_expires_at <= now()))
+					OR (ips_session_id IS NOT NULL
+						AND (ips_session_expires_at IS NULL OR ips_session_expires_at <= now()))))))
 		FROM identity_proofing_requests
-		WHERE organization_id = $1 AND customer_id IS NOT NULL
+		WHERE organization_id = $1 AND customer_id IS NOT NULL AND mode = 'live'
 			AND ($2::uuid IS NULL OR requested_by = $2) AND created_at >= $3
 		GROUP BY customer_id, flow_id
 		ORDER BY customer_id, flow_id`

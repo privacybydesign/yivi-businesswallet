@@ -39,6 +39,15 @@ that invokes the business wallet as a holder (see
 `devverifier` image the Delivery workflow publishes); `signer`, `domibus` and `verid` are
 the signing and QERDS benches.
 
+Identity proofing runs on a separate product, the
+[identity-proofing-service](https://github.com/privacybydesign/identity-proofing-service)
+(IPS). With `IDENTITY_PROOFING_PROVIDER=ips` in `.env`, `npm run dev` also starts and
+rebuilds it from `../identity-proofing-service` (override with
+`IDENTITY_PROOFING_SERVICE_PATH`), under its own compose project so its data is kept.
+Plain `docker compose up` here does not; start IPS from its repo with
+`docker compose up -d --build passport-issuer`. Without the setting, a built-in stub is
+used and no IPS is needed.
+
 On first run `npm run dev` creates a root `.env` from `.env.example` if one does
 not exist. Compose **requires** `POSTGRES_PASSWORD` (there is no weak default), so
 without this file it would abort with `required variable POSTGRES_PASSWORD is

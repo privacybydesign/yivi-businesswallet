@@ -21,9 +21,9 @@ const TONES: Record<string, ProofingStatusTone> = {
   expired: "default",
 };
 
-// Statuses the proofing service may still change: the recipient is somewhere in
-// the flow, or a reviewer at the service has not decided yet.
-const LIVE_STATUSES = new Set(["pending", "in_progress", "needs_review"]);
+// Statuses the recipient may still change by acting: worth polling and keeping a
+// session on screen for. needs_review waits on a reviewer, not on the recipient.
+const LIVE_STATUSES = new Set(["pending", "in_progress"]);
 
 export function isProofingLive(status: string): boolean {
   return LIVE_STATUSES.has(status);
@@ -47,6 +47,8 @@ export function proofingStatusLabel(status: string, t: TFunction): string {
       return t("identityProofing.status.needsReview");
     case "expired":
       return t("identityProofing.status.expired");
+    case "cancelled":
+      return t("identityProofing.status.cancelled");
     default:
       return status;
   }
@@ -93,6 +95,29 @@ export const ASSURANCE_LEVELS = ["low", "substantial", "high"] as const;
 
 export const BSN_POLICIES = ["retrieve", "mask", "omit"] as const;
 
+// What verifies the face step; a new flow starts on the first, Regula.
+export const FACE_PROVIDERS = ["regula", "engine", "Iris"] as const;
+export type FaceProvider = (typeof FACE_PROVIDERS)[number];
+
+// The service's steps that capture the face (proofing.faceSteps).
+const FACE_STEPS = ["face_verification", "selfie", "liveness", "face_match"];
+
+// The face providers the Yivi app does not have
+// (proofing.idemOnlyFaceProviders): such a flow runs in the Idem app only.
+const IDEM_ONLY_FACE_PROVIDERS: readonly string[] = ["Iris"];
+
+// Whether the Yivi app can run a flow (proofing.YiviAppAvailable): always,
+// unless its face step is on a provider the Yivi app does not have.
+export function yiviAppAvailable(flow: {
+  steps: readonly string[];
+  faceProvider?: string;
+}): boolean {
+  return (
+    !flow.steps.some((step) => FACE_STEPS.includes(step)) ||
+    !IDEM_ONLY_FACE_PROVIDERS.includes(flow.faceProvider ?? "")
+  );
+}
+
 // "" inherits the tenant's policy at the proofing service.
 export type Inherit<T extends string> = "" | T;
 export type Tristate = "" | "true" | "false";
@@ -104,6 +129,7 @@ export interface ProofingFlowDraft {
   faceVerification: boolean;
   chipAuthentication: boolean;
   liveness: boolean;
+  faceProvider: FaceProvider;
   // A decimal 0..1 as typed; "" is pass/fail only.
   faceMatchThreshold: string;
   requestedAttributes: ReadonlySet<string>;
@@ -154,6 +180,7 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     faceVerification: true,
     chipAuthentication: false,
     liveness: false,
+    faceProvider: FACE_PROVIDERS[0],
     faceMatchThreshold: "",
     requestedAttributes: new Set(REQUESTED_ATTRIBUTES.map((a) => a.value)),
     acceptedDocumentTypes: "",
@@ -194,6 +221,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     faceVerification: flow.steps.includes(STEP_FACE_VERIFICATION),
     chipAuthentication: checks.has(CHECK_CHIP_AUTH),
     liveness: checks.has(CHECK_LIVENESS),
+    faceProvider: oneOf(FACE_PROVIDERS, flow.faceProvider) || FACE_PROVIDERS[0],
     faceMatchThreshold: threshold === undefined ? "" : String(threshold),
     requestedAttributes: new Set(flow.requestedAttributes ?? []),
     acceptedDocumentTypes: (flow.acceptedDocumentTypes ?? []).join(", "),
@@ -283,6 +311,9 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
       (country) => country.toUpperCase(),
     ),
   };
+  if (draft.faceVerification) {
+    spec.faceProvider = draft.faceProvider;
+  }
   if (draft.faceVerification && draft.faceMatchThreshold.trim() !== "") {
     spec.checkThresholds = {
       [CHECK_FACE_MATCH]: Number(draft.faceMatchThreshold),
@@ -407,6 +438,8 @@ export function proofingRejectionReason(code: string, t: TFunction): string {
       return t("identityProofing.rejectionReasons.chipCloneDetected");
     case "DOC_EXPIRED":
       return t("identityProofing.rejectionReasons.docExpired");
+    case "ASSURANCE_NOT_MET":
+      return t("identityProofing.rejectionReasons.assuranceNotMet");
     default:
       return code;
   }
@@ -433,8 +466,14 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.flowNotAssigned");
     case "customer_paused":
       return t("identityProofing.errors.customerPaused");
+    case "proofing_paused":
+      return t("identityProofing.errors.proofingPaused");
+    case "customer_no_api_key":
+      return t("identityProofing.errors.customerNoApiKey");
     case "session_over":
       return t("identityProofing.errors.sessionOver");
+    case "device_active":
+      return t("identityProofing.errors.deviceActive");
     case "method_unavailable":
       return t("identityProofing.errors.methodUnavailable");
     case "invalid_input":
@@ -538,10 +577,11 @@ export function isProofingStep(value: string): value is ProofingStep {
   return PROOFING_STEPS.includes(value);
 }
 
-// The Sessions tab's filters: every session, or one outcome. Pending, in
-// progress and under review show under "all" only.
+// The Sessions tab's filters: every session, or one outcome; "review" is the
+// review queue. Pending and in progress show under "all" only.
 export const SESSION_FILTERS = [
   "all",
+  "review",
   "verified",
   "failed",
   "expired",
@@ -549,6 +589,7 @@ export const SESSION_FILTERS = [
 export type SessionFilter = (typeof SESSION_FILTERS)[number];
 
 const FILTER_STATUS: Record<Exclude<SessionFilter, "all">, string> = {
+  review: "needs_review",
   verified: "approved",
   failed: "rejected",
   expired: "expired",
@@ -568,6 +609,7 @@ export function sessionFilterCounts(
     requests.filter((r) => matchesSessionFilter(r.status, filter)).length;
   return {
     all: requests.length,
+    review: count("review"),
     verified: count("verified"),
     failed: count("failed"),
     expired: count("expired"),
@@ -612,19 +654,6 @@ export function secondsUntil(expiresAt: string, nowMs: number): number {
   return Number.isFinite(ms) ? Math.max(0, Math.ceil(ms / MS_PER_SECOND)) : 0;
 }
 
-// The Yivi app's universal link for a session pointer: it opens the app on
-// this device, as @privacybydesign/yivi-client builds it for mobile. The QR
-// carries the pointer itself as JSON.
-const YIVI_SESSION_LINK_PREFIX = "https://irma.app/-/session#";
-
-export function yiviSessionQrPayload(sessionPtr: unknown): string {
-  return JSON.stringify(sessionPtr);
-}
-
-export function yiviSessionLink(sessionPtr: unknown): string {
-  return `${YIVI_SESSION_LINK_PREFIX}${encodeURIComponent(yiviSessionQrPayload(sessionPtr))}`;
-}
-
 // The short form of a request id shown in tables: enough to tell rows apart
 // and to find the full id in the audit log.
 const SHORT_ID_LENGTH = 8;
@@ -637,7 +666,7 @@ export function shortRequestId(id: string): string {
 // SessionTTLOptions and DataRetentionDayOptions in backend/internal/proofing
 // (identity-proofing.test.ts holds the two together).
 export const SESSION_TTL_OPTIONS_SECONDS = [120, 300, 600] as const;
-export const DATA_RETENTION_DAY_OPTIONS = [7, 30, 90] as const;
+export const DATA_RETENTION_DAY_OPTIONS = [7, 30, 90, 180, 365] as const;
 
 const SECONDS_IN_MINUTE = 60;
 
@@ -646,15 +675,24 @@ export function ttlMinutes(seconds: number): number {
 }
 
 // How a customer reads in the lists: paused, or active and needing attention
-// because its webhook endpoint is failing, or plainly active.
-export type CustomerDisplayStatus = "active" | "paused" | "needs_attention";
+// because its webhook endpoint is failing, not set up without a live API key,
+// or plainly active.
+export type CustomerDisplayStatus =
+  | "active"
+  | "paused"
+  | "needs_attention"
+  | "setup_needed";
 
 export function customerDisplayStatus(customer: {
   status: string;
   webhook: { state: string };
+  hasLiveKey: boolean;
 }): CustomerDisplayStatus {
   if (customer.status === "paused") {
     return "paused";
+  }
+  if (!customer.hasLiveKey) {
+    return "setup_needed";
   }
   return customer.webhook.state === "failing" ? "needs_attention" : "active";
 }

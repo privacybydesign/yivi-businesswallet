@@ -77,6 +77,18 @@ const (
 	envIdentityProofingURL           = "IDENTITY_PROOFING_URL"
 	envIdentityProofingAdminKey      = "IDENTITY_PROOFING_ADMIN_KEY"
 	envIdentityProofingEncryptionKey = "IDENTITY_PROOFING_ENCRYPTION_KEY"
+	// envIdentityProofingStubOutcome makes every stub session decide (approved,
+	// rejected or needs_review), so dev can see outcomes and their webhooks.
+	envIdentityProofingStubOutcome = "IDENTITY_PROOFING_STUB_OUTCOME"
+	// envIdentityProofingCallbackURL is where IPS pushes session changes;
+	// defaults to APP_BASE_URL + /api/v1/identity-proofing/ips-events. Set it
+	// when IPS reaches the wallet by another address (e.g. inside Docker).
+	envIdentityProofingCallbackURL = "IDENTITY_PROOFING_CALLBACK_URL"
+	// envIdentityProofingDefaultWebhookURL is the wallet's own webhook
+	// endpoint, where a customer without one is sent its events; defaults to
+	// APP_BASE_URL + /api/v1/identity-proofing/default-webhook. Set it when the
+	// backend reaches itself by another address (e.g. inside Docker).
+	envIdentityProofingDefaultWebhookURL = "IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL"
 
 	// Attestation issuance (OpenID4VCI). The hosted Veramo issuer is addressed per
 	// instance and authenticated with a Bearer admin token; the ping credential is
@@ -340,6 +352,13 @@ type Config struct {
 
 	IdentityProofingProvider string
 	IdentityProofingURL      string
+	// IdentityProofingStubOutcome is what every stub session decides; empty
+	// leaves them undecided until they expire.
+	IdentityProofingStubOutcome string
+	// IdentityProofingCallbackURL is where IPS pushes session changes.
+	IdentityProofingCallbackURL string
+	// IdentityProofingDefaultWebhookURL is the wallet's own webhook endpoint.
+	IdentityProofingDefaultWebhookURL string
 	// IdentityProofingAdminKey is the IPS X-Admin-Key the wallet provisions org
 	// tenants with. Required with the ips provider.
 	IdentityProofingAdminKey string
@@ -503,6 +522,12 @@ func Load() (Config, error) {
 	if identityProofingProvider == ProviderIPS && (identityProofingURL == "" || identityProofingAdminKey == "") {
 		return Config{}, fmt.Errorf("config: %s and %s must be set when %s is %q", envIdentityProofingURL, envIdentityProofingAdminKey, envIdentityProofingProvider, ProviderIPS)
 	}
+	identityProofingStubOutcome := os.Getenv(envIdentityProofingStubOutcome)
+	switch identityProofingStubOutcome {
+	case "", "approved", "rejected", "needs_review":
+	default:
+		return Config{}, fmt.Errorf("config: %s must be approved, rejected or needs_review", envIdentityProofingStubOutcome)
+	}
 
 	attestationIssuer := envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
 	attestationIssuerURL := os.Getenv(envAttestationIssuerURL)
@@ -539,6 +564,16 @@ func Load() (Config, error) {
 	// then fails every credential offer and invitation at send time.
 	appBaseURL := envOrDefault(envAppBaseURL, defaultAppBaseURL)
 	if err := requireAbsoluteHTTPURL(envAppBaseURL, appBaseURL); err != nil {
+		return Config{}, err
+	}
+	identityProofingCallbackURL := envOrDefault(envIdentityProofingCallbackURL,
+		strings.TrimSuffix(appBaseURL, "/")+"/api/v1/identity-proofing/ips-events")
+	if err := requireAbsoluteHTTPURL(envIdentityProofingCallbackURL, identityProofingCallbackURL); err != nil {
+		return Config{}, err
+	}
+	identityProofingDefaultWebhookURL := envOrDefault(envIdentityProofingDefaultWebhookURL,
+		strings.TrimSuffix(appBaseURL, "/")+"/api/v1/identity-proofing/default-webhook")
+	if err := requireAbsoluteHTTPURL(envIdentityProofingDefaultWebhookURL, identityProofingDefaultWebhookURL); err != nil {
 		return Config{}, err
 	}
 
@@ -598,10 +633,13 @@ func Load() (Config, error) {
 		VogValidatorURL:      vogValidatorURL,
 		VogReferenceHashKey:  os.Getenv(envVogReferenceHashKey),
 
-		IdentityProofingProvider:      identityProofingProvider,
-		IdentityProofingURL:           identityProofingURL,
-		IdentityProofingAdminKey:      identityProofingAdminKey,
-		IdentityProofingEncryptionKey: os.Getenv(envIdentityProofingEncryptionKey),
+		IdentityProofingProvider:          identityProofingProvider,
+		IdentityProofingStubOutcome:       identityProofingStubOutcome,
+		IdentityProofingCallbackURL:       identityProofingCallbackURL,
+		IdentityProofingDefaultWebhookURL: identityProofingDefaultWebhookURL,
+		IdentityProofingURL:               identityProofingURL,
+		IdentityProofingAdminKey:          identityProofingAdminKey,
+		IdentityProofingEncryptionKey:     os.Getenv(envIdentityProofingEncryptionKey),
 
 		AttestationIssuer:         attestationIssuer,
 		AttestationIssuerURL:      attestationIssuerURL,

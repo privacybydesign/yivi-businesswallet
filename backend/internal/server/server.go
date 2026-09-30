@@ -36,6 +36,15 @@ type RootRegisterer interface {
 	RegisterRoot(*http.ServeMux)
 }
 
+// PageHeaderer is implemented by a feature that sets response headers on the
+// SPA's index document for the client-side routes it owns, such as a
+// Content-Security-Policy that depends on the page (a hosted page framed only
+// by its customer). It is called for every index fallback; it sets nothing
+// for a path that is not its own.
+type PageHeaderer interface {
+	PageHeaders(r *http.Request, h http.Header)
+}
+
 // New builds the root handler. When staticDir is non-empty the built frontend
 // is served from it as a single-page application on "/", so one container can
 // serve both the API and the SPA; when empty (e.g. dev, where Vite serves the
@@ -52,10 +61,14 @@ func New(db Pinger, staticDir string, features ...Registerer) http.Handler {
 	apidocs.Register(root)
 
 	v1 := http.NewServeMux()
+	var pageHeaderers []PageHeaderer
 	for _, f := range features {
 		f.Register(v1)
 		if rr, ok := f.(RootRegisterer); ok {
 			rr.RegisterRoot(root)
+		}
+		if ph, ok := f.(PageHeaderer); ok {
+			pageHeaderers = append(pageHeaderers, ph)
 		}
 	}
 
@@ -67,7 +80,7 @@ func New(db Pinger, staticDir string, features ...Registerer) http.Handler {
 	// The SPA catches every path not matched by a more specific pattern above.
 	// ServeMux precedence guarantees /api/v1/, /livez and /readyz still win.
 	if staticDir != "" {
-		root.Handle(rootPath, spaHandler{staticPath: staticDir, indexPath: spaIndex})
+		root.Handle(rootPath, spaHandler{staticPath: staticDir, indexPath: spaIndex, pageHeaderers: pageHeaderers})
 	}
 
 	return root

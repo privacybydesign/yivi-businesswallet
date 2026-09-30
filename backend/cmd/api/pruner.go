@@ -7,9 +7,8 @@ import (
 )
 
 // startPruner runs prune on a ticker until ctx is cancelled, logging failures.
-// It backs the expired-row cleanup of the session and presentation stores, and
-// the other periodic jobs that report a count: the identity proofing
-// reconciler and webhook deliveries.
+// It backs the expired-row cleanup of the session and presentation stores and
+// other retention sweeps that report a count.
 func startPruner(ctx context.Context, name string, every time.Duration, prune func(context.Context) (int64, error)) {
 	ticker := time.NewTicker(every)
 	go func() {

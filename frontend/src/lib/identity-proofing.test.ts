@@ -15,8 +15,6 @@ import {
   flowSpecFromDraft,
   formatDuration,
   secondsUntil,
-  yiviSessionLink,
-  yiviSessionQrPayload,
   isProofingLive,
   isProofingStep,
   isRequestedAttribute,
@@ -37,6 +35,7 @@ import {
   isHexColor,
   isSuccessStatus,
   proofingMethodLabel,
+  yiviAppAvailable,
   sessionEventDetail,
   readableTextOn,
   SESSION_TTL_OPTIONS_SECONDS,
@@ -127,6 +126,56 @@ describe("flowSpecFromDraft", () => {
       flowSpecFromDraft(draft({ retentionSeconds: "0" }))
         .retentionOverrideSeconds,
     ).toBeUndefined();
+  });
+});
+
+describe("face provider", () => {
+  it("sends the provider only with the face step, Regula by default", () => {
+    expect(flowSpecFromDraft(draft({})).faceProvider).toBe("regula");
+    expect(
+      flowSpecFromDraft(draft({ faceProvider: "engine" })).faceProvider,
+    ).toBe("engine");
+    expect(
+      flowSpecFromDraft(
+        draft({ faceProvider: "regula", faceVerification: false }),
+      ).faceProvider,
+    ).toBeUndefined();
+  });
+
+  it("round-trips from a stored version, Regula for none or unknown", () => {
+    const stored = {
+      id: "f",
+      version: 1,
+      active: true,
+      name: "F",
+      steps: ["face_verification"],
+      createdAt: "2026-09-28T00:00:00Z",
+      completable: false,
+    };
+    expect(
+      draftFromFlow({ ...stored, faceProvider: "regula" }).faceProvider,
+    ).toBe("regula");
+    expect(
+      draftFromFlow({ ...stored, faceProvider: "iris" }).faceProvider,
+    ).toBe("regula");
+    expect(draftFromFlow(stored).faceProvider).toBe("regula");
+  });
+});
+
+describe("yiviAppAvailable", () => {
+  it("leaves only a face provider the Yivi app lacks to the Idem app", () => {
+    const face = ["document_capture", "nfc_read", "face_verification"];
+    expect(yiviAppAvailable({ steps: face, faceProvider: "engine" })).toBe(
+      true,
+    );
+    expect(yiviAppAvailable({ steps: face, faceProvider: "regula" })).toBe(
+      true,
+    );
+    expect(yiviAppAvailable({ steps: face })).toBe(true);
+    expect(yiviAppAvailable({ steps: face, faceProvider: "Iris" })).toBe(false);
+    expect(
+      yiviAppAvailable({ steps: ["nfc_read"], faceProvider: "Iris" }),
+    ).toBe(true);
   });
 });
 
@@ -323,7 +372,7 @@ describe("requestSubject", () => {
 describe("proofing status", () => {
   it("keeps polling only statuses the service may still change", () => {
     expect(isProofingLive("in_progress")).toBe(true);
-    expect(isProofingLive("needs_review")).toBe(true);
+    expect(isProofingLive("needs_review")).toBe(false);
     expect(isProofingLive("approved")).toBe(false);
     expect(isProofingLive("expired")).toBe(false);
   });
@@ -344,6 +393,12 @@ describe("proofingErrorMessage", () => {
     expect(proofingErrorMessage(err, t)).toBe(
       "flow: nfc_read requires nfc.passive_auth",
     );
+  });
+
+  it("says the Idem app still holds the session", () => {
+    expect(
+      proofingErrorMessage(apiError(409, "device_active", "internal"), t),
+    ).toBe(t("identityProofing.errors.deviceActive"));
   });
 
   it("says a paused customer takes no request", () => {
@@ -447,10 +502,18 @@ describe("sessions tab", () => {
   const expires = "2026-09-25T10:10:00Z";
 
   it("counts each filter", () => {
-    const statuses = ["approved", "approved", "rejected", "expired", "pending"];
+    const statuses = [
+      "approved",
+      "approved",
+      "rejected",
+      "expired",
+      "pending",
+      "needs_review",
+    ];
     expect(sessionFilterCounts(statuses.map((status) => ({ status })))).toEqual(
       {
-        all: 5,
+        all: 6,
+        review: 1,
         verified: 2,
         failed: 1,
         expired: 1,
@@ -528,20 +591,40 @@ describe("customerDisplayStatus", () => {
       customerDisplayStatus({
         status: "active",
         webhook: { state: "failing" },
+        hasLiveKey: true,
       }),
     ).toBe("needs_attention");
     expect(
       customerDisplayStatus({
         status: "paused",
         webhook: { state: "failing" },
+        hasLiveKey: true,
       }),
     ).toBe("paused");
     expect(
       customerDisplayStatus({
         status: "active",
         webhook: { state: "delivering" },
+        hasLiveKey: true,
       }),
     ).toBe("active");
+  });
+
+  it("asks for a live API key before anything but a pause", () => {
+    expect(
+      customerDisplayStatus({
+        status: "active",
+        webhook: { state: "failing" },
+        hasLiveKey: false,
+      }),
+    ).toBe("setup_needed");
+    expect(
+      customerDisplayStatus({
+        status: "paused",
+        webhook: { state: "delivering" },
+        hasLiveKey: false,
+      }),
+    ).toBe("paused");
   });
 
   it("tells a 2xx from the rest", () => {
@@ -612,23 +695,5 @@ describe("secondsUntil", () => {
   it("never goes below zero, also for an unreadable time", () => {
     expect(secondsUntil("2026-09-28T09:59:00Z", now)).toBe(0);
     expect(secondsUntil("not a time", now)).toBe(0);
-  });
-});
-
-describe("Yivi session pointer", () => {
-  const ptr = {
-    u: "https://yivi.example/irma/session/abc",
-    irmaqr: "disclosing",
-  };
-
-  it("puts the pointer itself in the QR code", () => {
-    expect(JSON.parse(yiviSessionQrPayload(ptr))).toEqual(ptr);
-  });
-
-  it("opens the Yivi app with the pointer in the link's fragment", () => {
-    const link = yiviSessionLink(ptr);
-    const [prefix, fragment] = link.split("#");
-    expect(prefix).toBe("https://irma.app/-/session");
-    expect(JSON.parse(decodeURIComponent(fragment ?? ""))).toEqual(ptr);
   });
 });

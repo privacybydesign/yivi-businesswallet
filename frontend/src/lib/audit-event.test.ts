@@ -5,6 +5,7 @@ import type { AuditEvent } from "../api/organization";
 import i18n from "../i18n";
 import {
   auditActionLabel,
+  auditActorLabel,
   auditSubject,
   auditTargetLabel,
 } from "./audit-event";
@@ -187,5 +188,18 @@ describe("auditSubject", () => {
         t,
       ),
     ).toBe("anna@example.test");
+  });
+});
+
+describe("auditActorLabel", () => {
+  it("names a customer API key by its prefix", () => {
+    expect(auditActorLabel("api_key:yp_live_ab12", t)).toBe(
+      t("auditLog.apiKeyActor", { prefix: "yp_live_ab12" }),
+    );
+    expect(auditActorLabel("hosted_link", t)).toBe(
+      t("auditLog.hostedLinkActor"),
+    );
+    expect(auditActorLabel(null, t)).toBeNull();
+    expect(auditActorLabel(undefined, t)).toBeNull();
   });
 });

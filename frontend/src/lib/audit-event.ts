@@ -104,11 +104,15 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "identity_proofing.session_created": { icon: "time", tone: "blue" },
   "identity_proofing.session_started": { icon: "scan_qrcode", tone: "blue" },
   "identity_proofing.session_ended": { icon: "time", tone: "amber" },
+  "identity_proofing.session_cancelled": { icon: "close", tone: "slate" },
+  "identity_proofing.session_purged": { icon: "delete", tone: "red" },
+  "identity_proofing.result_read": { icon: "view", tone: "slate" },
   // Written before outcomes had their own actions; its status says which.
   "identity_proofing.completed": { icon: "valid", tone: "blue" },
   "identity_proofing.approved": { icon: "valid", tone: "green" },
   "identity_proofing.rejected": { icon: "close", tone: "red" },
   "identity_proofing.needs_review": { icon: "warning", tone: "amber" },
+  "identity_proofing.review_decided": { icon: "valid", tone: "blue" },
   "identity_proofing.customer_created": { icon: "add", tone: "green" },
   "identity_proofing.customer_updated": { icon: "edit", tone: "blue" },
   "identity_proofing.customer_flows_configured": {
@@ -121,6 +125,12 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "identity_proofing.webhook_configured": { icon: "settings", tone: "blue" },
   "identity_proofing.webhook_secret_rotated": { icon: "lock", tone: "amber" },
   "identity_proofing.webhook_removed": { icon: "delete", tone: "red" },
+  "identity_proofing.paused": { icon: "warning", tone: "amber" },
+  "identity_proofing.flow_hosted_configured": {
+    icon: "settings",
+    tone: "blue",
+  },
+  "identity_proofing.resumed": { icon: "valid", tone: "green" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -133,6 +143,29 @@ export function auditVisual(action: string): {
   tone: AuditTone;
 } {
   return ACTION_VISUAL[action] ?? DEFAULT_VISUAL;
+}
+
+const API_KEY_ACTOR_PREFIX = "api_key:";
+// hostedSubjectActor in backend/internal/proofing/hosted.go: the subject of a
+// hosted link, who has no account.
+const HOSTED_LINK_ACTOR = "hosted_link";
+
+// A non-user actor in words: a customer API key by its prefix, a hosted link's
+// subject, or the label as it is; null when the event has none.
+export function auditActorLabel(
+  label: string | null | undefined,
+  t: TFunction,
+): string | null {
+  if (!label) return null;
+  if (label.startsWith(API_KEY_ACTOR_PREFIX)) {
+    return t("auditLog.apiKeyActor", {
+      prefix: label.slice(API_KEY_ACTOR_PREFIX.length),
+    });
+  }
+  if (label === HOSTED_LINK_ACTOR) {
+    return t("auditLog.hostedLinkActor");
+  }
+  return label;
 }
 
 export function auditActionLabel(action: string, t: TFunction): string {
@@ -361,6 +394,12 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingSessionStarted");
     case "identity_proofing.session_ended":
       return t("auditLog.actions.identityProofingSessionEnded");
+    case "identity_proofing.session_cancelled":
+      return t("auditLog.actions.identityProofingSessionCancelled");
+    case "identity_proofing.session_purged":
+      return t("auditLog.actions.identityProofingSessionPurged");
+    case "identity_proofing.result_read":
+      return t("auditLog.actions.identityProofingResultRead");
     case "identity_proofing.completed":
       return t("auditLog.actions.identityProofingCompleted");
     case "identity_proofing.approved":
@@ -369,6 +408,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingRejected");
     case "identity_proofing.needs_review":
       return t("auditLog.actions.identityProofingNeedsReview");
+    case "identity_proofing.review_decided":
+      return t("auditLog.actions.identityProofingReviewDecided");
     case "identity_proofing.customer_created":
       return t("auditLog.actions.identityProofingCustomerCreated");
     case "identity_proofing.customer_updated":
@@ -387,6 +428,12 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingWebhookSecretRotated");
     case "identity_proofing.webhook_removed":
       return t("auditLog.actions.identityProofingWebhookRemoved");
+    case "identity_proofing.flow_hosted_configured":
+      return t("auditLog.actions.identityProofingFlowHostedConfigured");
+    case "identity_proofing.paused":
+      return t("auditLog.actions.identityProofingPaused");
+    case "identity_proofing.resumed":
+      return t("auditLog.actions.identityProofingResumed");
     default:
       return action;
   }

@@ -5,6 +5,7 @@ import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useProofingCustomersQuery,
+  useProofingPauseQuery,
   useProofingRequestsQuery,
   useProofingStatsQuery,
 } from "../api/identity-proofing.queries";
@@ -28,6 +29,7 @@ import {
   ResultTag,
 } from "./proofing-customer-ui";
 import { absoluteApiUrl } from "../api/http";
+import { ProofingPauseCard, ProofingPausedNotice } from "./proofing-pause";
 
 const ERROR = "text-error text-[12.5px]";
 // The recent sessions table shows the newest few; the rest are on each
@@ -40,7 +42,8 @@ const API_DOCS_PATH = "/api/docs";
 
 // Identity proofing at a glance: the last 30 days' sessions across every
 // customer, the newest of them, and the customers themselves. An admin sees the
-// whole org's, a member the sessions they sent.
+// whole org's, a member the sessions they sent. While the org's proofing is
+// paused, only why.
 export default function IdentityProofingOverview(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug } = useParams();
@@ -48,6 +51,36 @@ export default function IdentityProofingOverview(): React.JSX.Element {
   const slug = orgSlug!;
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
+  const pause = useProofingPauseQuery(slug);
+
+  if (pause.data?.paused) {
+    return (
+      <>
+        <TopBar
+          title={t("identityProofing.overview.title")}
+          subtitle={t("identityProofing.overview.subtitle")}
+        />
+        <div className="p-4 sm:p-8">
+          <ProofingPausedNotice
+            slug={slug}
+            pause={pause.data}
+            isAdmin={isAdmin}
+          />
+        </div>
+      </>
+    );
+  }
+  return <ActiveOverview slug={slug} isAdmin={isAdmin} />;
+}
+
+function ActiveOverview({
+  slug,
+  isAdmin,
+}: {
+  slug: string;
+  isAdmin: boolean;
+}): React.JSX.Element {
+  const { t } = useTranslation();
   const stats = useProofingStatsQuery(slug);
   const customers = useProofingCustomersQuery(slug);
   const [adding, setAdding] = useState(false);
@@ -88,6 +121,7 @@ export default function IdentityProofingOverview(): React.JSX.Element {
           <RecentSessions slug={slug} isAdmin={isAdmin} />
           <CustomersCard slug={slug} customers={customers} stats={stats.data} />
         </div>
+        {isAdmin && <ProofingPauseCard slug={slug} />}
       </div>
     </>
   );
@@ -107,7 +141,7 @@ function StatsRow({
   const value = (n: number): string => (stats ? String(n) : "—");
 
   return (
-    <Card className="divide-line grid grid-cols-2 divide-x lg:grid-cols-4">
+    <Card className="divide-line grid grid-cols-2 divide-x lg:grid-cols-5">
       <StatCell
         label={t("identityProofing.overview.stats.sessions")}
         value={value(totals.sessions)}
@@ -130,6 +164,11 @@ function StatsRow({
         label={t("identityProofing.overview.stats.failed")}
         value={value(totals.rejected)}
         hint={t("identityProofing.overview.stats.failedHint")}
+      />
+      <StatCell
+        label={t("identityProofing.overview.stats.needsReview")}
+        value={value(totals.needsReview)}
+        hint={t("identityProofing.overview.stats.needsReviewHint")}
       />
       <StatCell
         label={t("identityProofing.overview.stats.expired")}

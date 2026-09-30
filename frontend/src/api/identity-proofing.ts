@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Language } from "../i18n/language";
 import { request } from "./http";
 import { auditEventSchema } from "./organization";
 import type { AuditEvent } from "./organization";
@@ -31,6 +32,8 @@ export const proofingFlowSchema = z.object({
   steps: z.array(z.string()),
   requestedAttributes: z.array(z.string()).optional(),
   selfieLocation: z.string().optional(),
+  // "regula", "engine", or absent for the proofing service's default.
+  faceProvider: z.string().optional(),
   acceptedDocumentTypes: z.array(z.string()).optional(),
   acceptedIssuingCountries: z.array(z.string()).optional(),
   requiredChecks: z.array(z.string()).optional(),
@@ -54,11 +57,17 @@ export const proofingFlowSchema = z.object({
 
 export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
 
+// A test key's sessions run scripted in the org's sandbox.
+export const proofingModeSchema = z.enum(["live", "test"]);
+
+export type ProofingMode = z.infer<typeof proofingModeSchema>;
+
 export const proofingRequestSchema = z.object({
   id: z.string(),
   requestedByName: z.string(),
   // Set for a request the customer's backend created with one of its keys.
   apiKeyName: z.string().optional(),
+  mode: proofingModeSchema,
   subjectUserId: z.string().optional(),
   customerId: z.string().optional(),
   customerName: z.string().optional(),
@@ -98,6 +107,7 @@ export interface ProofingFlowSpec {
   name: string;
   steps: string[];
   requestedAttributes?: string[];
+  faceProvider?: string;
   acceptedDocumentTypes?: string[];
   acceptedIssuingCountries?: string[];
   requiredChecks?: string[];
@@ -156,6 +166,8 @@ export const proofingCustomerBrandingSchema = z.object({
   supportContact: z.string(),
   privacyUrl: z.string(),
   logoUri: z.string(),
+  // Leaves the "powered by" line off the customer's hosted pages.
+  hidePoweredBy: z.boolean(),
 });
 
 export type ProofingCustomerBranding = z.infer<
@@ -173,6 +185,10 @@ export const proofingCustomerSchema = z.object({
   dataRetentionDays: z.number(),
   webhook: webhookHealthSchema,
   branding: proofingCustomerBrandingSchema,
+  // Where a hosted page may send its subject back to and be embedded on.
+  allowedRedirectOrigins: z.array(z.string()),
+  // Live requests need an unrevoked live API key.
+  hasLiveKey: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -207,12 +223,16 @@ export interface ProofingCustomerUpdate {
   paused?: boolean;
   sessionTtlSeconds?: number;
   dataRetentionDays?: number;
+  allowedRedirectOrigins?: string[];
 }
 
 export const proofingApiKeySchema = z.object({
   id: z.string(),
   name: z.string(),
   prefix: z.string(),
+  mode: proofingModeSchema,
+  // What the key may call; results:read reads verified identities.
+  scopes: z.array(z.string()),
   createdAt: z.string(),
   lastUsedAt: z.string().optional(),
   revokedAt: z.string().optional(),
@@ -246,6 +266,8 @@ export const webhookDeliverySchema = z.object({
   id: z.string(),
   event: z.string(),
   sessionId: z.string().optional(),
+  // The customer's own endpoint it went to; absent for the wallet's default.
+  endpointUrl: z.string().optional(),
   status: z.string(),
   attempts: z.number(),
   lastStatusCode: z.number().optional(),
@@ -264,6 +286,7 @@ export interface ProofingBrandingInput {
   primaryColor: string;
   supportContact: string;
   privacyUrl: string;
+  hidePoweredBy: boolean;
   logo?: File;
   removeLogo?: boolean;
 }
@@ -273,6 +296,65 @@ export const proofingCustomerFlowSchema = proofingFlowSchema
   .extend({ assigned: z.boolean(), default: z.boolean() });
 
 export type ProofingCustomerFlow = z.infer<typeof proofingCustomerFlowSchema>;
+
+// Whether an org's identity proofing is paused, and by whom: a platform
+// admin's pause the org's admin cannot lift.
+export const proofingPauseSchema = z.object({
+  organizationId: z.string(),
+  paused: z.boolean(),
+  platformPausedAt: z.string().optional(),
+  orgPausedAt: z.string().optional(),
+});
+
+export type ProofingPause = z.infer<typeof proofingPauseSchema>;
+
+export function getProofingPause(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ProofingPause> {
+  return request(`${base(slug)}/pause`, {
+    schema: proofingPauseSchema,
+    signal,
+  });
+}
+
+// The org admin's own switch.
+export function setProofingPause(
+  slug: string,
+  paused: boolean,
+  signal?: AbortSignal,
+): Promise<ProofingPause> {
+  return request(`${base(slug)}/pause`, {
+    schema: proofingPauseSchema,
+    method: "PUT",
+    body: { paused },
+    signal,
+  });
+}
+
+// Every paused org, for the platform admin.
+export function listProofingPauses(
+  signal?: AbortSignal,
+): Promise<ProofingPause[]> {
+  return request("/api/v1/admin/identity-proofing/pauses", {
+    schema: z
+      .object({ pauses: z.array(proofingPauseSchema) })
+      .transform((page) => page.pauses),
+    signal,
+  });
+}
+
+// The platform admin's pause of one org.
+export function setPlatformProofingPause(
+  orgId: string,
+  paused: boolean,
+  signal?: AbortSignal,
+): Promise<ProofingPause> {
+  return request(
+    `/api/v1/admin/organizations/${encodeURIComponent(orgId)}/identity-proofing/pause`,
+    { schema: proofingPauseSchema, method: "PUT", body: { paused }, signal },
+  );
+}
 
 function base(slug: string): string {
   return `/api/v1/orgs/${encodeURIComponent(slug)}/identity-proofing`;
@@ -308,6 +390,41 @@ export function createProofingFlow(
 
 function flowBase(slug: string, flowId: string): string {
   return `${base(slug)}/flows/${encodeURIComponent(flowId)}`;
+}
+
+// How a flow's hosted page behaves: whether links may be made for it, the
+// languages it offers (empty: every one), and how it ends.
+export const proofingFlowHostedSchema = z.object({
+  enabled: z.boolean(),
+  locales: z.array(z.string()),
+  completion: z.enum(["redirect", "done"]),
+});
+
+export type ProofingFlowHosted = z.infer<typeof proofingFlowHostedSchema>;
+
+export function getProofingFlowHosted(
+  slug: string,
+  flowId: string,
+  signal?: AbortSignal,
+): Promise<ProofingFlowHosted> {
+  return request(`${flowBase(slug, flowId)}/hosted`, {
+    schema: proofingFlowHostedSchema,
+    signal,
+  });
+}
+
+export function saveProofingFlowHosted(
+  slug: string,
+  flowId: string,
+  settings: ProofingFlowHosted,
+  signal?: AbortSignal,
+): Promise<ProofingFlowHosted> {
+  return request(`${flowBase(slug, flowId)}/hosted`, {
+    schema: proofingFlowHostedSchema,
+    method: "PUT",
+    body: settings,
+    signal,
+  });
 }
 
 export function getProofingFlowVersions(
@@ -389,15 +506,17 @@ export function getProofingRequests(
   });
 }
 
+// language is the sender's wallet language: the mail's, and the Idem app's.
 export function createProofingRequest(
   slug: string,
   input: ProofingRequestInput,
+  language: Language,
   signal?: AbortSignal,
 ): Promise<ProofingSent> {
   return request(`${base(slug)}/requests`, {
     schema: proofingSentSchema,
     method: "POST",
-    body: input,
+    body: { ...input, language },
     signal,
   });
 }
@@ -502,6 +621,7 @@ export function saveProofingCustomerBranding(
   form.set("primaryColor", input.primaryColor);
   form.set("supportContact", input.supportContact);
   form.set("privacyUrl", input.privacyUrl);
+  form.set("hidePoweredBy", String(input.hidePoweredBy));
   if (input.logo) {
     form.set("logo", input.logo);
   } else if (input.removeLogo) {
@@ -530,12 +650,13 @@ export function createProofingApiKey(
   slug: string,
   customerId: string,
   name: string,
+  mode: ProofingMode,
   signal?: AbortSignal,
 ): Promise<CreatedProofingApiKey> {
   return request(`${customerBase(slug, customerId)}/api-keys`, {
     schema: createdProofingApiKeySchema,
     method: "POST",
-    body: { name },
+    body: { name, mode },
     signal,
   });
 }
@@ -631,6 +752,49 @@ export function getProofingWebhookDeliveries(
 }
 
 // One request's timeline: its audit events, oldest first.
+// A settled customer request's result, as an admin reads it in the wallet:
+// the identity only for an approval. Every read is audited.
+export const proofingResultSchema = z.object({
+  status: z.string(),
+  assuranceLevel: z.string().optional(),
+  eidasLevel: z.string().optional(),
+  errorCode: z.string().optional(),
+  verifiedAt: z.string().optional(),
+  identity: z
+    .object({
+      givenName: z.string().optional(),
+      familyName: z.string().optional(),
+      birthDate: z.string().optional(),
+      nationality: z.string().optional(),
+    })
+    .optional(),
+  evidence: z.array(
+    z.object({
+      type: z.string(),
+      documentType: z.string().optional(),
+      issuingState: z.string().optional(),
+      expiryDate: z.string().optional(),
+      passiveAuth: z.string().optional(),
+      activeAuth: z.string().optional(),
+      faceMatch: z.number().optional(),
+      liveness: z.string().optional(),
+    }),
+  ),
+});
+
+export type ProofingResult = z.infer<typeof proofingResultSchema>;
+
+export function getProofingRequestResult(
+  slug: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<ProofingResult> {
+  return request(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/result`,
+    { schema: proofingResultSchema, signal },
+  );
+}
+
 export function getProofingRequestEvents(
   slug: string,
   requestId: string,
@@ -658,24 +822,64 @@ export function getProofingRequest(
   });
 }
 
-// The Yivi disclosure an on-screen Yivi request asks for. sessionPtr is what
-// the Yivi app scans: the QR carries it as JSON.
+// The OpenID4VP disclosure an on-screen Yivi request asks for. walletLink is
+// the openid4vp:// request the Yivi app opens.
 export const proofingYiviStartSchema = z.object({
-  sessionPtr: z.unknown(),
+  walletLink: z.string(),
   expiresAt: z.string(),
 });
 
 export type ProofingYiviStart = z.infer<typeof proofingYiviStartSchema>;
 
+// Where a verify page's session lives: an org's request a member shows on
+// screen, or a hosted link its subject opened (no login: the token is it).
+export type VerifyTarget =
+  | { kind: "request"; slug: string; requestId: string }
+  | { kind: "hosted"; token: string };
+
+function verifyPath(target: VerifyTarget): string {
+  return target.kind === "request"
+    ? `${base(target.slug)}/requests/${encodeURIComponent(target.requestId)}`
+    : `/api/v1/proof/${encodeURIComponent(target.token)}`;
+}
+
+// How far a verify page's session got: the part of a request, or of a hosted
+// link, the page follows. linkExpiresAt is when it can no longer go on.
+export interface ProofingProgress {
+  status: string;
+  errorCode?: string;
+  linkExpiresAt: string;
+}
+
 export function startProofingYivi(
-  slug: string,
-  requestId: string,
+  target: VerifyTarget,
   signal?: AbortSignal,
 ): Promise<ProofingYiviStart> {
-  return request(
-    `${base(slug)}/requests/${encodeURIComponent(requestId)}/yivi/start`,
-    { schema: proofingYiviStartSchema, method: "POST", signal },
-  );
+  return request(`${verifyPath(target)}/yivi/start`, {
+    schema: proofingYiviStartSchema,
+    method: "POST",
+    signal,
+  });
+}
+
+// A fresh Idem app link for a running session: a new claim once the first
+// lapsed, or a handover once the app that held the session left.
+export const proofingClaimLinkSchema = z.object({
+  deepLink: z.string(),
+  expiresAt: z.string(),
+});
+
+export type ProofingClaimLink = z.infer<typeof proofingClaimLinkSchema>;
+
+export function newProofingClaimLink(
+  target: VerifyTarget,
+  signal?: AbortSignal,
+): Promise<ProofingClaimLink> {
+  return request(`${verifyPath(target)}/claim-link`, {
+    schema: proofingClaimLinkSchema,
+    method: "POST",
+    signal,
+  });
 }
 
 // done is false while the subject has not finished in the Yivi app; ok false
@@ -693,14 +897,13 @@ export type ProofingYiviDisclosure = z.infer<
 >;
 
 export function getProofingYiviDisclosure(
-  slug: string,
-  requestId: string,
+  target: VerifyTarget,
   signal?: AbortSignal,
 ): Promise<ProofingYiviDisclosure> {
-  return request(
-    `${base(slug)}/requests/${encodeURIComponent(requestId)}/yivi/disclosure`,
-    { schema: proofingYiviDisclosureSchema, signal },
-  );
+  return request(`${verifyPath(target)}/yivi/disclosure`, {
+    schema: proofingYiviDisclosureSchema,
+    signal,
+  });
 }
 
 // One live camera frame scored against the disclosed photo. decision is
@@ -718,18 +921,123 @@ export const proofingFaceVerdictSchema = z.object({
 export type ProofingFaceVerdict = z.infer<typeof proofingFaceVerdictSchema>;
 
 export function submitProofingFaceFrame(
-  slug: string,
-  requestId: string,
+  target: VerifyTarget,
   image: string,
   signal?: AbortSignal,
 ): Promise<ProofingFaceVerdict> {
+  return request(`${verifyPath(target)}/yivi/face`, {
+    schema: proofingFaceVerdictSchema,
+    method: "POST",
+    body: { image },
+    signal,
+  });
+}
+
+// A hosted link's progress: its status and, until it settles, when the link
+// (not started) or its session (started) ends.
+export const hostedProgressSchema = z.object({
+  status: z.string(),
+  errorCode: z.string().optional(),
+  method: z.string().optional(),
+  linkExpiresAt: z.string(),
+  started: z.boolean(),
+});
+
+export type HostedProgress = z.infer<typeof hostedProgressSchema>;
+
+// The hosted page: who asks, what the flow collects, the progress, and how
+// the page hands its subject back once settled.
+export const hostedProofingSchema = hostedProgressSchema.extend({
+  // The customer's id for the session, handed back on completion.
+  sessionId: z.string(),
+  // Absent shows the page's own done screen.
+  redirectUrl: z.string().optional(),
+  // The only origins the page posts its completion message to.
+  embedOrigins: z.array(z.string()),
+  // en or nl; absent leaves the browser's.
+  language: z.string().optional(),
+  // The languages the flow's page offers; empty is every one.
+  locales: z.array(z.string()),
+  customer: z.object({
+    name: z.string(),
+    branding: proofingCustomerBrandingSchema,
+    dataRetentionDays: z.number(),
+  }),
+  flow: z.object({
+    name: z.string(),
+    requiredAssuranceLevel: z.string().optional(),
+    requestedAttributes: z.array(z.string()),
+    yiviAvailable: z.boolean(),
+  }),
+});
+
+export type HostedProofing = z.infer<typeof hostedProofingSchema>;
+
+export const hostedStartSchema = hostedProgressSchema.extend({
+  deepLink: z.string().optional(),
+});
+
+export type HostedStart = z.infer<typeof hostedStartSchema>;
+
+export function getHostedProofing(
+  token: string,
+  signal?: AbortSignal,
+): Promise<HostedProofing> {
+  return request(verifyPath({ kind: "hosted", token }), {
+    schema: hostedProofingSchema,
+    signal,
+  });
+}
+
+export function getHostedProofingStatus(
+  token: string,
+  signal?: AbortSignal,
+): Promise<HostedProgress> {
+  return request(`${verifyPath({ kind: "hosted", token })}/status`, {
+    schema: hostedProgressSchema,
+    signal,
+  });
+}
+
+export function startHostedProofing(
+  token: string,
+  method: ProofingMethod,
+  signal?: AbortSignal,
+): Promise<HostedStart> {
+  return request(`${verifyPath({ kind: "hosted", token })}/start`, {
+    schema: hostedStartSchema,
+    method: "POST",
+    body: { method },
+    signal,
+  });
+}
+
+// The subject declined what is collected: cancels the link before it started.
+export function declineHostedProofing(
+  token: string,
+  signal?: AbortSignal,
+): Promise<HostedProgress> {
+  return request(`${verifyPath({ kind: "hosted", token })}/decline`, {
+    schema: hostedProgressSchema,
+    method: "POST",
+    signal,
+  });
+}
+
+// An administrator's decision on a request under review; reason is required.
+export interface ProofingReviewInput {
+  decision: "approve" | "reject";
+  reason: string;
+}
+
+export function decideProofingReview(
+  slug: string,
+  requestId: string,
+  input: ProofingReviewInput,
+  signal?: AbortSignal,
+): Promise<ProofingRequest> {
   return request(
-    `${base(slug)}/requests/${encodeURIComponent(requestId)}/yivi/face`,
-    {
-      schema: proofingFaceVerdictSchema,
-      method: "POST",
-      body: { image },
-      signal,
-    },
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/review`,
+    { schema: proofingRequestSchema, method: "POST", body: input, signal },
   );
 }

@@ -43,7 +43,6 @@ export const nl: Translation<typeof en> = {
     members: "Leden",
     identityProofing: "Identiteitsverificatie",
     identityProofingOverview: "Overzicht",
-    identityProofingFlows: "Flows",
     customers: "Klanten",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
@@ -426,8 +425,27 @@ export const nl: Translation<typeof en> = {
   },
   identityProofing: {
     title: "Identiteitsverificatie",
-    subtitle:
-      "Verifieer iemands identiteit met een identiteitsdocument en gezicht.",
+    pause: {
+      pausedTitle: "Identiteitsverificatie is gepauzeerd",
+      byPlatform:
+        "De platformbeheerder heeft identiteitsverificatie voor deze organisatie gepauzeerd. Neem contact met hen op om het te hervatten.",
+      byOrganization:
+        "Een beheerder van deze organisatie heeft identiteitsverificatie uitgezet.",
+      whatStops:
+        "Zolang het gepauzeerd is, start er niets nieuws: geen verzoeken, geen API-aanroepen van klanten en geen gehoste links. Sessies die al lopen worden afgerond en hun webhooks gaan nog uit.",
+      turnOn: "Identiteitsverificatie aanzetten",
+      turnOff: "Uitzetten",
+      switchTitle: "Identiteitsverificatie uitzetten",
+      switchHint:
+        "Stopt identiteitsverificatie voor deze organisatie totdat een beheerder het weer aanzet.",
+      confirmTitle: "Identiteitsverificatie uitzetten?",
+      platformColumn: "Identiteitsverificatie",
+      active: "Actief",
+      pausedByPlatform: "Door jou gepauzeerd",
+      pausedByOrganization: "Uitgezet door de organisatie",
+      platformPause: "Pauzeren",
+      platformResume: "Hervatten",
+    },
     overview: {
       apiDocs: "API-documentatie",
       title: "Overzicht",
@@ -442,6 +460,8 @@ export const nl: Translation<typeof en> = {
         failed: "Mislukt",
         failedHint: "Niet door de controles gekomen",
         expired: "Verlopen",
+        needsReview: "Te beoordelen",
+        needsReviewHint: "Wacht op jouw besluit",
         expiredHint: "Niet binnen 10 minuten afgerond",
         noSessions: "Nog geen sessies",
       },
@@ -472,16 +492,11 @@ export const nl: Translation<typeof en> = {
       },
     },
     requests: {
-      title: "Verzoeken",
-      titleOwn: "Jouw verzoeken",
       empty: "Nog geen verzoeken.",
       subject: "Persoon",
       flow: "Flow",
       requestedBy: "Aangevraagd door",
-      status: "Status",
       assurance: "Betrouwbaarheid",
-      created: "Verstuurd",
-      customer: "Klant",
       verifiedAs: "Geverifieerd als {{name}}",
     },
     methods: {
@@ -496,6 +511,7 @@ export const nl: Translation<typeof en> = {
       rejected: "Mislukt",
       needsReview: "Wordt beoordeeld",
       expired: "Verlopen",
+      cancelled: "Geannuleerd",
     },
     rejectionReasons: {
       documentTypeNotAccepted: "documenttype niet toegestaan in de flow",
@@ -506,6 +522,7 @@ export const nl: Translation<typeof en> = {
       docTampered: "chipgegevens van het document zijn gemanipuleerd",
       chipCloneDetected: "gekloonde documentchip gedetecteerd",
       docExpired: "document verlopen",
+      assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",
     },
     errors: {
       noEncryptionKey:
@@ -522,7 +539,13 @@ export const nl: Translation<typeof en> = {
         "Die flow is niet meer aan deze klant toegewezen. Kies een andere.",
       customerPaused:
         "Verificatie is gepauzeerd voor deze klant. Een beheerder kan het hervatten op de pagina van de klant.",
+      proofingPaused:
+        "Identiteitsverificatie is gepauzeerd voor deze organisatie.",
+      customerNoApiKey:
+        "Deze klant heeft nog geen live API-sleutel. Een beheerder kan er een aanmaken op het tabblad API-sleutels van de klant.",
       sessionOver: "Deze sessie is afgelopen. Start een nieuwe.",
+      deviceActive:
+        "De Idem-app heeft deze sessie nog open: ga daar verder, of sluit hem eerst.",
       methodUnavailable:
         "De verificatiedienst kan nog geen sessies met de Yivi-app uitvoeren. Kies de Idem-app.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
@@ -537,6 +560,7 @@ export const nl: Translation<typeof en> = {
       active: "Actief",
       paused: "Gepauzeerd",
       needsAttention: "Aandacht nodig",
+      setupNeeded: "Inrichting nodig",
     },
     list: {
       search: "Klanten zoeken",
@@ -571,6 +595,11 @@ export const nl: Translation<typeof en> = {
       resume: "Verificatie hervatten",
       pausedNotice:
         "Verificatie is gepauzeerd voor deze klant: er kan geen nieuw verzoek worden verstuurd totdat een beheerder het hervat.",
+      noLiveKeyNotice:
+        "Deze klant heeft nog geen live API-sleutel: maak er een aan voordat je verzoeken verstuurt. Testsleutels werken alleen in de sandbox.",
+      noLiveKeyNoticeMember:
+        "Deze klant heeft nog geen live API-sleutel, dus er kan geen verzoek worden verstuurd. Vraag een beheerder er een aan te maken.",
+      createApiKey: "API-sleutel aanmaken",
       pauseConfirm: {
         title: "Verificatie pauzeren voor {{name}}?",
         message:
@@ -707,13 +736,15 @@ export const nl: Translation<typeof en> = {
         expiresIn: "Geldig voor {{time}}",
         expired: "Deze code is verlopen.",
         restart: "Opnieuw beginnen",
+        startedElsewhere:
+          "Deze controle is in een ander venster gestart: ga daar verder in de app.",
         inProgress: "De sessie is geopend op de telefoon.",
+        newCode: "Nieuwe code tonen",
+        newCodeHint:
+          "App gesloten, code verlopen of een andere telefoon? Met een nieuwe code ga je verder waar de sessie was.",
       },
       yiviEnded: "De sessie in de Yivi-app is beëindigd: {{reason}}",
       yiviCodes: {
-        cancelled: "hij is in de app geannuleerd.",
-        timeout: "hij is niet op tijd afgerond.",
-        invalidProof: "de gedeelde gegevens konden niet worden gecontroleerd.",
         photoMissing: "de gedeelde kaart heeft geen foto.",
         referenceNoFace: "op de gedeelde foto is geen gezicht gevonden.",
       },
@@ -739,17 +770,57 @@ export const nl: Translation<typeof en> = {
           title: "Sessie beëindigd",
           message: "De controle is niet op tijd afgerond.",
         },
+        review: {
+          title: "Wacht op beoordeling",
+          message:
+            "De controle is klaar en wordt handmatig beoordeeld voordat er een besluit is.",
+        },
+        cancelled: {
+          title: "Controle gestopt",
+          message:
+            "Er is geen identiteitscontrole gedaan en er is niets gedeeld.",
+        },
         back: "Terug naar {{name}}",
         again: "Opnieuw verifiëren",
       },
     },
     sessions: {
+      review: {
+        title: "Beoordeling afronden",
+        hint: "De controles konden niet zelf beslissen. Jouw besluit rondt de sessie af en gaat naar de klant.",
+        reason: "Reden",
+        reasonPlaceholder: "Wat je hebt gecontroleerd, en waarom je zo besluit",
+        reasonRequired: "Geef een reden: die wordt bewaard in het auditlog.",
+        approve: "Goedkeuren",
+        reject: "Afwijzen",
+      },
       method: "Methode",
       timeline: "Tijdlijn",
       noEvents: "Nog niets vastgelegd.",
+      identity: {
+        show: "Geverifieerde identiteit tonen",
+        audited: "Elke weergave wordt vastgelegd in het auditlog.",
+        title: "Geverifieerde identiteit",
+        none: "Geen identiteit: de controle is niet goedgekeurd.",
+        name: "Naam",
+        birthDate: "Geboortedatum",
+        nationality: "Nationaliteit",
+        document: "Document",
+        passiveAuth: "Echtheid chip",
+        faceMatch: "Gezichtsvergelijking",
+        liveness: "Echtheid persoon",
+        checks: {
+          valid: "Geldig",
+          invalid: "Ongeldig",
+          not_performed: "Niet uitgevoerd",
+          passed: "Geslaagd",
+          failed: "Mislukt",
+        },
+      },
       filterLabel: "Sessies filteren",
       filters: {
         all: "Alle {{count}}",
+        review: "Te beoordelen {{count}}",
         verified: "Geverifieerd {{count}}",
         failed: "Mislukt {{count}}",
         expired: "Verlopen {{count}}",
@@ -787,6 +858,9 @@ export const nl: Translation<typeof en> = {
       days_other: "{{count}} dagen",
       nameTitle: "Naam",
       nameHint: "Zichtbaar voor je leden en in het auditlog.",
+      redirectOriginsTitle: "Terugstuur-origins",
+      redirectOriginsHint:
+        "Eén per regel, zoals https://portal.example.com. Een gehoste pagina mag de persoon naar deze origins terugsturen en daarop worden ingesloten.",
       save: "Opslaan",
       removeTitle: "Klant verwijderen",
       removeHint:
@@ -834,6 +908,8 @@ export const nl: Translation<typeof en> = {
       supportPlaceholder: "klantenservice@example.nl",
       privacyUrl: "URL van de privacyverklaring",
       privacyPlaceholder: "https://example.nl/privacy",
+      hidePoweredBy:
+        "Laat de regel “Mogelijk gemaakt door Yivi” weg op de gehoste pagina",
       discard: "Verwerpen",
       save: "Huisstijl opslaan",
       preview: {
@@ -848,7 +924,7 @@ export const nl: Translation<typeof en> = {
     },
     apiKeys: {
       intro:
-        "De backend van de klant maakt met deze sleutels sessies aan en leest de uitkomst via de verificatie-API.",
+        "Je backend maakt met deze sleutels sessies aan en leest de uitkomst via de verificatie-API. Alleen actieve sleutels werken.",
       create: "API-sleutel aanmaken",
       name: "Naam",
       namePlaceholder: "Productiebackend",
@@ -858,16 +934,23 @@ export const nl: Translation<typeof en> = {
       lastUsed: "Laatst gebruikt",
       neverUsed: "Nooit",
       empty: "Nog geen API-sleutels.",
+      status: "Status",
+      active: "Actief",
       revoked: "Ingetrokken",
       revoke: "Intrekken",
+      live: "Live",
+      test: "Test",
+      testLabel: "Testsleutel",
+      testHint:
+        "Sessies met een testsleutel draaien in een sandbox: ze krijgen meteen een gescripte uitkomst (standaard goedgekeurd), sturen geen e-mail en tellen niet mee.",
       revokeConfirm: {
         title: "{{name}} intrekken?",
         message:
-          "De backend van de klant kan deze sleutel meteen niet meer gebruiken. Dit kan niet ongedaan worden gemaakt.",
+          "Alles wat deze sleutel gebruikt, werkt meteen niet meer. Dit kan niet ongedaan worden gemaakt.",
       },
       createdTitle: "Je nieuwe API-sleutel",
       createdHint:
-        "Kopieer hem nu en geef hem veilig aan de klant: hij wordt niet opnieuw getoond. Alleen een hash ervan wordt bewaard.",
+        "Kopieer hem nu en bewaar hem veilig, bijvoorbeeld in de geheimenopslag van je backend: hij wordt niet opnieuw getoond. Alleen een hash ervan wordt bewaard.",
       usageTitle: "De API gebruiken",
       usageHint:
         "Stuur de sleutel mee als Bearer-token. Zonder flowId wordt de standaardflow van de klant gebruikt; met sendMail false toon je de deepLink uit het antwoord zelf als QR-code.",
@@ -897,7 +980,7 @@ export const nl: Translation<typeof en> = {
       rotateConfirm: {
         title: "Ondertekeningsgeheim vernieuwen?",
         message:
-          "Berichten worden vanaf nu met het nieuwe geheim ondertekend, ook de berichten die op een nieuwe poging wachten. De klant moet overstappen.",
+          "Berichten worden vanaf nu met het nieuwe geheim ondertekend, ook de berichten die op een nieuwe poging wachten. Stel je ontvanger in op het nieuwe geheim.",
       },
       removeConfirm: {
         title: "Webhook-endpoint verwijderen?",
@@ -906,9 +989,14 @@ export const nl: Translation<typeof en> = {
       },
       secretTitle: "Je ondertekeningsgeheim",
       secretHint:
-        "Kopieer het nu en geef het veilig aan de klant: het wordt niet opnieuw getoond. De klant controleert er de Yivi-Signature-header mee.",
+        "Kopieer het nu en bewaar het bij je ontvanger: het wordt niet opnieuw getoond. Controleer er de Yivi-Signature-header mee.",
       recent: "Recente afleveringen",
-      notConfigured: "Stel een endpoint in om de afleveringen hier te zien.",
+      defaultTag: "Wallet-standaard",
+      defaultBody:
+        "Sessieresultaten worden afgeleverd bij het eigen endpoint van de Yivi Business Wallet. Ze staan op het tabblad Sessies, zijn op te vragen via de API en staan in de auditlog onder deze klant.",
+      defaultHint:
+        "Host je een eigen ontvanger? Voeg de URL toe en de wallet POST elk ondertekend event ook daarheen.",
+      useOwn: "Eigen endpoint gebruiken",
       noDeliveries: "Nog geen berichten verstuurd.",
       queuedTag: "In de wachtrij",
       noAnswer: "Geen antwoord",
@@ -933,6 +1021,25 @@ export const nl: Translation<typeof en> = {
       default: "Standaard",
       save: "Beschikbare flows opslaan",
     },
+    hosted: {
+      title: "Gehoste pagina",
+      enabled:
+        "Klanten mogen links naar een gehoste pagina voor deze flow versturen",
+      locales: "Talen",
+      localesHint:
+        "Vink niets aan om alle talen aan te bieden. De pagina opent in de taal van de sessie, anders in de browsertaal van de persoon.",
+      completion: "Als de controle klaar is",
+      completions: {
+        redirect:
+          "Stuur de persoon naar de redirect-URL van de sessie, of toon een bedankpagina als die er niet is",
+        done: "Toon altijd de bedankpagina (sessies mogen geen redirect-URL hebben)",
+      },
+      save: "Gehoste pagina opslaan",
+      previewAs: "Voorbeeld als klant",
+      preview: "Voorbeeld van de gehoste pagina",
+      noCustomer:
+        "Voeg een klant toe om de pagina in diens huisstijl te bekijken.",
+    },
     versions: {
       title: "Versies",
       hint: "Verzoeken die al verstuurd zijn houden de versie waarmee ze begonnen. Activeer een eerdere versie om terug te gaan.",
@@ -943,6 +1050,11 @@ export const nl: Translation<typeof en> = {
       document_capture: "Documentscan (MRZ)",
       nfc_read: "NFC-chipscan",
       face_verification: "Gezichtsverificatie",
+    },
+    faceProviders: {
+      regula: "Regula",
+      engine: "Ingebouwde engine",
+      Iris: "Iris SDK",
     },
     checks: {
       passiveAuth: "Passieve authenticatie",
@@ -978,6 +1090,9 @@ export const nl: Translation<typeof en> = {
       stepsOrder: "Wordt in deze volgorde verstuurd: {{steps}}",
       faceLocationNative:
         "Gezichtsverificatie gebeurt in de vcmrtd-app (native): de persoon heeft geen browserstap.",
+      faceProvider: "Aanbieder gezichtsverificatie",
+      faceProviderHint:
+        "Regula doet de levendheidscontrole in de app en vergelijkt op de server; de ingebouwde engine gebruikt de eigen modellen van de proofing-dienst. Alleen de ingebouwde engine werkt ook in de Yivi-app.",
       faceWithoutChip:
         "Zonder NFC-chipscan is er geen chipfoto om het gezicht mee te vergelijken, dus deze flow kan niet naar leden worden gestuurd.",
       dataTitle: "Gevraagde resultaatgegevens",
@@ -1015,6 +1130,12 @@ export const nl: Translation<typeof en> = {
         retentionSeconds: "Vul een heel aantal seconden in.",
       },
     },
+  },
+  proofLink: {
+    notFound: "Deze link bestaat niet, of is verwijderd.",
+    decline: "Weigeren",
+    redirecting: "Je wordt teruggestuurd…",
+    poweredBy: "Mogelijk gemaakt door Yivi",
   },
   vog: {
     title: "Dien je VOG in",
@@ -1213,7 +1334,6 @@ export const nl: Translation<typeof en> = {
     identityProofingWebhookSaved: "Webhook opgeslagen",
     identityProofingWebhookRemoved: "Webhook verwijderd",
     identityProofingWebhookTestQueued: "Testbericht in de wachtrij",
-    identityProofingCustomerSettingsSaved: "Sessie-instellingen opgeslagen",
     identityProofingCustomerFlowsSaved: "Toegewezen flows opgeslagen",
     notificationSettingsSaved: "Notificatie-instellingen opgeslagen",
     provisioningSettingsSaved:
@@ -1314,6 +1434,8 @@ export const nl: Translation<typeof en> = {
     loadMore: "Meer laden",
     empty: "Er is nog geen activiteit vastgelegd.",
     system: "Systeem",
+    apiKeyActor: "API-sleutel {{prefix}}…",
+    hostedLinkActor: "Persoon, via een gehoste link",
     columns: {
       when: "Wanneer",
       actor: "Actor",
@@ -1488,11 +1610,17 @@ export const nl: Translation<typeof en> = {
       identityProofingSessionStarted: "Identiteitsverificatie gestart",
       identityProofingSessionEnded:
         "Identiteitsverificatiesessie onafgerond beëindigd",
+      identityProofingSessionCancelled:
+        "Identiteitsverificatiesessie geannuleerd",
+      identityProofingSessionPurged: "Identiteitsverificatiesessie gewist",
+      identityProofingResultRead: "Resultaat identiteitsverificatie gelezen",
       identityProofingCompleted: "Identiteitsverificatie afgerond",
       identityProofingApproved: "Identiteit geverifieerd",
       identityProofingRejected: "Identiteitsverificatie afgewezen",
       identityProofingNeedsReview:
         "Identiteitsverificatie moet beoordeeld worden",
+      identityProofingReviewDecided:
+        "Beoordeling identiteitsverificatie genomen",
       identityProofingCustomerCreated: "Identiteitsverificatieklant toegevoegd",
       identityProofingCustomerUpdated: "Identiteitsverificatieklant bijgewerkt",
       identityProofingCustomerFlowsConfigured:
@@ -1503,6 +1631,10 @@ export const nl: Translation<typeof en> = {
       identityProofingWebhookConfigured: "Webhook van klant ingesteld",
       identityProofingWebhookSecretRotated: "Webhookgeheim van klant vernieuwd",
       identityProofingWebhookRemoved: "Webhook van klant verwijderd",
+      identityProofingPaused: "Identiteitsverificatie gepauzeerd",
+      identityProofingFlowHostedConfigured:
+        "Gehoste pagina van een flow gewijzigd",
+      identityProofingResumed: "Identiteitsverificatie hervat",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
     },

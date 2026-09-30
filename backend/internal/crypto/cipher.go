@@ -6,7 +6,9 @@ package crypto
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hkdf"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 )
@@ -18,6 +20,7 @@ const keyBytes = 32
 // Cipher wraps AES-256-GCM.
 type Cipher struct {
 	aead cipher.AEAD
+	key  []byte
 }
 
 // NewCipher builds a Cipher from a hex-encoded 32-byte key. An empty key returns
@@ -42,7 +45,17 @@ func NewCipher(hexKey string) (*Cipher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("crypto: init gcm: %w", err)
 	}
-	return &Cipher{aead: aead}, nil
+	return &Cipher{aead: aead, key: key}, nil
+}
+
+// DeriveSecret returns a 32-byte secret for purpose, derived from the key with
+// HKDF-SHA256: the same on every replica, and never the key itself.
+func (c *Cipher) DeriveSecret(purpose string) ([]byte, error) {
+	secret, err := hkdf.Key(sha256.New, c.key, nil, purpose, keyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("crypto: derive %s: %w", purpose, err)
+	}
+	return secret, nil
 }
 
 // Encrypt seals plaintext, returning nonce || ciphertext.
