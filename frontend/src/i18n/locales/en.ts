@@ -829,6 +829,7 @@ export const en = {
       presentationRequestSent: "Requested credentials from an organization",
       presentationResponseReceived:
         "Received an answer to a credential request",
+      presentationRequestFailed: "Credential request failed",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
     },

@@ -25,6 +25,8 @@ const (
 	maxResponseBody = 4 << 20
 	// requestObjectType is the JAR media type (RFC 9101).
 	requestObjectType = "application/oauth-authz-req+jwt"
+	// msgRequestNotFound answers an unknown or malformed request id alike.
+	msgRequestNotFound = "unknown presentation request"
 )
 
 // Handler serves two audiences. An organization's admins send and read their
@@ -187,7 +189,7 @@ func (h *Handler) response(w http.ResponseWriter, r *http.Request) error {
 func pathID(r *http.Request) (uuid.UUID, error) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		return uuid.Nil, &respond.APIError{Status: http.StatusNotFound, Code: "request_not_found", Message: "unknown presentation request"}
+		return uuid.Nil, &respond.APIError{Status: http.StatusNotFound, Code: ErrNotFound.Error(), Message: msgRequestNotFound}
 	}
 	return id, nil
 }
@@ -203,7 +205,7 @@ func mapError(err error) error {
 	case errors.Is(err, ErrDeliveryFailed):
 		return &respond.APIError{Status: http.StatusBadGateway, Code: ErrDeliveryFailed.Error(), Message: "the request could not be sent to the recipient"}
 	case errors.Is(err, ErrNotFound):
-		return &respond.APIError{Status: http.StatusNotFound, Code: ErrNotFound.Error(), Message: "unknown presentation request"}
+		return &respond.APIError{Status: http.StatusNotFound, Code: ErrNotFound.Error(), Message: msgRequestNotFound}
 	case errors.Is(err, ErrNotPending):
 		return &respond.APIError{Status: http.StatusConflict, Code: ErrNotPending.Error(), Message: "this presentation request has already been answered or has expired"}
 	case errors.Is(err, ErrInvalidResponse):

@@ -91,6 +91,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "presentation.request_received": { icon: "scan_qrcode", tone: "amber" },
   "presentation.request_sent": { icon: "email", tone: "blue" },
   "presentation.response_received": { icon: "valid", tone: "green" },
+  "presentation.request_failed": { icon: "warning", tone: "red" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -313,6 +314,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.presentationRequestSent");
     case "presentation.response_received":
       return t("auditLog.actions.presentationResponseReceived");
+    case "presentation.request_failed":
+      return t("auditLog.actions.presentationRequestFailed");
     default:
       return action;
   }

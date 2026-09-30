@@ -112,6 +112,24 @@ func TestStoreLifecycle(t *testing.T) {
 	}
 }
 
+// A failed request is audited as a failure, never as a received answer.
+func TestStoreFailIsAuditedAsAFailure(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+	store := openid4vprequester.NewStore(pool, audit.NewDBRecorder())
+	r, err := store.Create(ctx, newRequest(createOrg(t, pool, "acme"), time.Now().Add(time.Hour)))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := store.Fail(ctx, r.ID, openid4vprequester.ReasonVerificationFailed); err != nil {
+		t.Fatalf("Fail: %v", err)
+	}
+	actions := auditActions(t, pool, r.ID)
+	if len(actions) != 2 || actions[1] != audit.PresentationRequestFailed {
+		t.Errorf("audit trail = %v, want it to end in %s", actions, audit.PresentationRequestFailed)
+	}
+}
+
 // An expired request serves nothing and settles nothing.
 func TestStoreExpiredRequestIsClosed(t *testing.T) {
 	pool, _ := testdb.Fresh(t)

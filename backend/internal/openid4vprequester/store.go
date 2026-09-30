@@ -205,16 +205,19 @@ func (s *Store) Complete(ctx context.Context, id uuid.UUID, disclosed []Disclose
 	for _, d := range disclosed {
 		presented = append(presented, d.VCT)
 	}
-	return s.settle(ctx, id, StatusCompleted, nil, body, map[string]any{"status": StatusCompleted, "credentials": presented})
+	return s.settle(ctx, id, StatusCompleted, nil, body, audit.PresentationResponseReceived,
+		map[string]any{"status": StatusCompleted, "credentials": presented})
 }
 
 // Fail consumes an open request whose answer could not be accepted, or whose
 // invocation could not be delivered.
 func (s *Store) Fail(ctx context.Context, id uuid.UUID, reason string) error {
-	return s.settle(ctx, id, StatusFailed, &reason, nil, map[string]any{"status": StatusFailed, "reason": reason})
+	return s.settle(ctx, id, StatusFailed, &reason, nil, audit.PresentationRequestFailed,
+		map[string]any{"status": StatusFailed, "reason": reason})
 }
 
-func (s *Store) settle(ctx context.Context, id uuid.UUID, status string, reason *string, disclosed []byte, after map[string]any) error {
+// settle moves an open request to its terminal status and records action.
+func (s *Store) settle(ctx context.Context, id uuid.UUID, status string, reason *string, disclosed []byte, action string, after map[string]any) error {
 	const q = `
 		UPDATE openid4vp_outbound_requests
 		SET status = $2, failure_reason = $3, disclosed = $4, responded_at = now()
@@ -229,7 +232,7 @@ func (s *Store) settle(ctx context.Context, id uuid.UUID, status string, reason 
 		if err != nil {
 			return fmt.Errorf("openid4vprequester: settle %s: %w", status, err)
 		}
-		return s.audit.Record(ctx, tx, audit.PresentationResponseReceived,
+		return s.audit.Record(ctx, tx, action,
 			audit.Target{Type: audit.TargetOutboundPresentationRequest, ID: id.String(), OrgID: &orgID},
 			audit.Updated(map[string]any{"status": StatusSent}, after))
 	})

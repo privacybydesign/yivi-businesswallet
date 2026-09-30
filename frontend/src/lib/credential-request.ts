@@ -51,6 +51,7 @@ export function validateCredentialRequest(
   const to = recipient.trim();
   if (to === "") errors.recipient = "recipientRequired";
   else if (!ADDRESS_PATTERN.test(to)) errors.recipient = "recipientInvalid";
+
   errors.rows = rows.map((row) => {
     const vct = row.vct.trim();
     if (vct === "") return "vctRequired";

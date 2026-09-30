@@ -43,7 +43,7 @@ org-to-org:
 | Sender binding at receipt | `RequestObject.CertifiedName` / `CertifiedAddresses` (set by `VerifyingValidator` from the verified leaf), checked in `ReceiveFromQERDS` |
 | Approval | the #113 queue, unchanged: `GET/POST /orgs/{slug}/openid4vp/requests…` |
 | Idempotency | `openid4vp_transactions.source_message_id`, unique per organization |
-| Audit | receive: `presentation.request_received`; send: `presentation.request_sent`, `presentation.response_received` (target `outbound_presentation_request`) — types and outcome only, never claim values |
+| Audit | receive: `presentation.request_received`; send: `presentation.request_sent`, `presentation.response_received` (verified answer), `presentation.request_failed` (refused answer or undelivered request) (target `outbound_presentation_request`) — types and outcome only, never claim values |
 | Console | `/:orgSlug/credential-requests` (`frontend/src/routes/credential-requests.tsx`): incoming inbox (approve/decline), sent list with the verified disclosure, request form. Admin-only; the sidebar item shows for admins |
 
 Routes of the sender slice:

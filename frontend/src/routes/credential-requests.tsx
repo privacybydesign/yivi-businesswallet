@@ -44,8 +44,14 @@ const CONTROL =
 const CONTROL_OK = "border-line-strong focus:border-ink focus:ring-ink/10";
 const CONTROL_ERR = "border-error focus:border-error focus:ring-error/10";
 
-function control(hasError: boolean): string {
-  return [CONTROL, hasError ? CONTROL_ERR : CONTROL_OK].join(" ");
+type ControlState = "ok" | "error";
+
+function control(state: ControlState): string {
+  return [CONTROL, state === "error" ? CONTROL_ERR : CONTROL_OK].join(" ");
+}
+
+function controlState(error: unknown): ControlState {
+  return error ? "error" : "ok";
 }
 
 type Tab = "incoming" | "sent";
@@ -523,7 +529,7 @@ function RequestForm({
             </label>
             <select
               id="credential-request-from"
-              className={`${control(false)} h-9`}
+              className={`${control("ok")} h-9`}
               value={from}
               onChange={(event) => setFrom(event.target.value)}
             >
@@ -548,7 +554,7 @@ function RequestForm({
           </label>
           <input
             id="credential-request-recipient"
-            className={`${control(Boolean(errors.recipient))} h-9`}
+            className={`${control(controlState(errors.recipient))} h-9`}
             value={recipient}
             onChange={(event) => setRecipient(event.target.value)}
             placeholder={t("credentialRequests.form.recipientPlaceholder")}
@@ -582,7 +588,7 @@ function RequestForm({
             >
               <div className="flex items-center gap-2">
                 <input
-                  className={`${control(Boolean(errors.rows[index]))} h-9 font-mono`}
+                  className={`${control(controlState(errors.rows[index]))} h-9 font-mono`}
                   value={row.vct}
                   onChange={(event) =>
                     updateRow(index, { vct: event.target.value })
@@ -604,7 +610,7 @@ function RequestForm({
                 )}
               </div>
               <input
-                className={`${control(false)} h-9`}
+                className={`${control("ok")} h-9`}
                 value={row.claims}
                 onChange={(event) =>
                   updateRow(index, { claims: event.target.value })

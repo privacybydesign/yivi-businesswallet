@@ -150,7 +150,7 @@ query is `denied` with reason `no_matching_credential` and 422 to the browser. `
 same terminal `denied` state, without ever calling the holder.
 
 The queue list (`pendingRequestView`) carries the transaction's row id, the verifier identity,
-its expiry and a summary of what an approval would share (`RequestedCredentials`: per
+its expiry and a summary of what an approval would share (`requestedCredentials`: per
 credential query the acceptable vcts and the claim paths, `requested.go`) — never the raw DCQL
 query, nonce or response material. The summary is admin-only; the public `status` stays as
 minimal as before.

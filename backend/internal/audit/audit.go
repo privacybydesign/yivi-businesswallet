@@ -157,10 +157,14 @@ const (
 	PresentationRequestReceived = "presentation.request_received"
 	// Outbound org-to-org requests (#271): this organization, as relying party,
 	// asked another organization for credentials over QERDS. Sent records the
-	// recipient and the credential types asked for; ResponseReceived the outcome
-	// and the types presented, never the disclosed claim values.
+	// recipient and the credential types asked for; ResponseReceived a verified
+	// answer and the types presented, never the disclosed claim values;
+	// RequestFailed a request that ended without one — an answer refused at
+	// verification, or an invocation that could not be delivered — with the
+	// reason. Kept distinct so a refused answer never reads as a disclosure.
 	PresentationRequestSent      = "presentation.request_sent"
 	PresentationResponseReceived = "presentation.response_received"
+	PresentationRequestFailed    = "presentation.request_failed"
 )
 
 const (

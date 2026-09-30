@@ -847,6 +847,7 @@ export const nl: Translation<typeof en> = {
       presentationRequestReceived: "Presentatieverzoek via QERDS ontvangen",
       presentationRequestSent: "Gegevens bij een organisatie opgevraagd",
       presentationResponseReceived: "Antwoord op een gegevensverzoek ontvangen",
+      presentationRequestFailed: "Gegevensverzoek mislukt",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
     },

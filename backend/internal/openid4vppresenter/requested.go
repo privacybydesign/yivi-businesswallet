@@ -9,11 +9,11 @@ import (
 // claimPathSeparator joins a DCQL claim path for display.
 const claimPathSeparator = "."
 
-// RequestedCredential is what an admin is shown of one DCQL credential query
+// requestedCredential is what an admin is shown of one DCQL credential query
 // before approving: the acceptable credential types and the claim paths the
 // answer would disclose. Claims is empty when the query asks for the
 // credential without any selectively disclosable claim.
-type RequestedCredential struct {
+type requestedCredential struct {
 	VCTs   []string `json:"vcts"`
 	Claims []string `json:"claims"`
 }
@@ -29,18 +29,18 @@ type dcqlSummary struct {
 	} `json:"credentials"`
 }
 
-// RequestedCredentials summarizes a validated DCQL query for the approval
+// requestedCredentials summarizes a validated DCQL query for the approval
 // queue. The query was checked when it was queued, so a query that no longer
 // decodes yields no summary rather than an error: the queue still lists the
 // request, and the admin can decline it.
-func RequestedCredentials(raw json.RawMessage) []RequestedCredential {
+func requestedCredentials(raw json.RawMessage) []requestedCredential {
 	var q dcqlSummary
 	if err := json.Unmarshal(raw, &q); err != nil {
-		return []RequestedCredential{}
+		return []requestedCredential{}
 	}
-	out := make([]RequestedCredential, 0, len(q.Credentials))
+	out := make([]requestedCredential, 0, len(q.Credentials))
 	for _, c := range q.Credentials {
-		rc := RequestedCredential{VCTs: c.Meta.VCTValues, Claims: make([]string, 0, len(c.Claims))}
+		rc := requestedCredential{VCTs: c.Meta.VCTValues, Claims: make([]string, 0, len(c.Claims))}
 		if rc.VCTs == nil {
 			rc.VCTs = []string{}
 		}
