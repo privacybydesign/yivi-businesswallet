@@ -23,9 +23,7 @@ jobs:
     # not built here; the development Dockerfiles are live-reload dev tooling and
     # are not published. Each component sets its own build context: the
     # business-wallet image uses the repo root (to bundle the built frontend with
-    # the Go API), postguard-sidecar uses its own directory, devverifier — the
-    # staging-only OpenID4VP relying party that drives the wallet's inbound
-    # presentation flow — builds one Go command from backend/.
+    # the Go API), postguard-sidecar uses its own directory.
     strategy:
       # Scan each image independently: a vulnerability in one must not hide the
       # build/scan status of the other.
@@ -40,9 +38,6 @@ jobs:
           - component: postguard-sidecar
             context: postguard-sidecar
             dockerfile: postguard-sidecar/Dockerfile
-          - component: devverifier
-            context: backend
-            dockerfile: backend/docker/devverifier/Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -82,15 +77,15 @@ jobs:
           file: ${{ matrix.dockerfile }}
           load: true
           tags: local/${{ matrix.component }}:scan
-          # Per-component cache scope so the matrix builds don't overwrite each
-          # other's GitHub Actions cache.
+          # Per-component cache scope so the two matrix builds don't overwrite
+          # each other's GitHub Actions cache.
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
           # The business-wallet image builds the API with -tags wsca, which needs
           # a clone of the private wallet-provider repo. Passed by env-var NAME
           # (not value) so the multi-line SSH key is not newline-split into bogus
           # secret entries. Consumed only by that Dockerfile; harmlessly ignored
-          # by the postguard-sidecar and devverifier builds.
+          # by the postguard-sidecar build.
           secret-envs: |
             wallet_provider_key=WALLET_PROVIDER_DEPLOY_KEY
 
@@ -140,8 +135,6 @@ jobs:
             target: business-wallet
           - component: postguard-sidecar
             target: postguard-sidecar
-          - component: devverifier
-            target: devverifier
     env:
       SOURCE_IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.component }}:edge
       TARGET_IMAGE: rg.nl-ams.scw.cloud/yivi-containter-registry/${{ matrix.target }}:edge

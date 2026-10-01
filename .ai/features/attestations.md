@@ -674,11 +674,11 @@ All org-scoped (`auth.RequireUser` → `organization.Handler.Authorize`, org via
 **Held** (member read; admin delete): `GET .../attestations/held`, `DELETE .../attestations/held/{id}`
 **Inbound offers** (member read; admin decides, §9.6): `GET .../attestations/offers`,
 `POST .../attestations/offers/{id}/accept` → `200` the held row, `POST .../attestations/offers/{id}/decline` → `204`
-**Export** (Art 5(1)(l)): `GET .../attestations/export` — structured, machine-readable
-(issued + held), admin. The bundle contract (manifest schema, format profile,
-container, versioning) is [`export.md`](./export.md); the unified org-scoped endpoint
-is `GET /api/v1/orgs/{slug}/export`, and whether this per-slice route survives
-alongside it is an open decision there (§8).
+**Export** (Art 5(1)(l)): there is **no** per-slice `attestations/export` route. The
+issued + held ledger is a section of the one org-scoped bundle,
+`GET /api/v1/orgs/{slug}/export?sections=attestations` — same ZIP, same manifest,
+fewer writers run. The bundle contract (manifest schema, format profile, container,
+versioning) is [`export.md`](./export.md).
 
 The recipient wallet's OpenID4VCI callbacks hit the **hosted issuer**, not our routes.
 

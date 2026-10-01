@@ -24,6 +24,12 @@ func sampleVars(kind Kind) map[string]string {
 		}
 	case KindSMTPTest:
 		return map[string]string{varOrgName: "Acme BV"}
+	case KindExportReady:
+		return map[string]string{
+			varOrgName:      "Acme BV",
+			varExportExpiry: "24 hours",
+			varExportURL:    "https://wallet.example.org/api/v1/export/download/abc",
+		}
 	case KindEventNotification:
 		return map[string]string{
 			varOrgName:      "Acme BV",
@@ -329,6 +335,8 @@ func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
 		varAuditURL:       "https://wallet.example.org/acme/audit-log",
 		varDocumentName:   "Contract.pdf",
 		varSigningURL:     "https://wallet.example.org/acme/signing",
+		varExportExpiry:   "24 hours",
+		varExportURL:      "https://wallet.example.org/api/v1/export/download/sample",
 		varReidentifyURL:  "https://wallet.example.org/reidentify/sample",
 		varDueDate:        "2026-08-01",
 		varReason:         "Your last identity check has expired.",

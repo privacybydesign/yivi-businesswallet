@@ -94,6 +94,10 @@ services:
       # built-in localhost default; a hosted deploy sets its own public callback.
       # Declared here so Compose forwards a root .env value into the container.
       SIGNING_REDIRECT_URI: ${SIGNING_REDIRECT_URI:-}
+      # Caps a data-portability bundle (bytes). A payload over the cap is recorded
+      # in the manifest as an omission with its size and hash, never dropped in
+      # silence. Empty keeps the Go-side default.
+      EXPORT_MAX_BUNDLE_BYTES: ${EXPORT_MAX_BUNDLE_BYTES:-}
       # Attestation issuer (OpenID4VCI). Defaults to the in-process stub; set to
       # `veramo` with a URL/instance/token to issue real credentials.
       ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}
