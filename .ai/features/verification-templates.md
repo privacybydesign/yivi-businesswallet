@@ -50,7 +50,7 @@ used for a natural person's login disclosure.
   by session id, as the login flow does. `wallet_link` is stored so a reloaded
   page redraws the QR.
 - **Expiry is derived on read** (`Session.EffectiveStatus`, TTL
-  `PRESENTATION_SESSION_TTL`); no pruner, the rows are the check history.
+  `VERIFICATION_SESSION_TTL`); no pruner, the rows are the check history.
 - **Grading** happens on the first poll that finds the disclosure and is
   stored with the session: `verified` (the verifier returned something under
   the query credential id; it verified signature, chain and key binding),

@@ -682,7 +682,7 @@ func run() error {
 	// login flow uses and the disclosure is graded against the org's own issuance
 	// ledger, so it reuses the attestation store rather than a status list.
 	verificationStore := verification.NewStore(pool, recorder)
-	verificationService := verification.NewService(verificationStore, verificationStore, verifier, attestationStore, cfg.AppBaseURL, cfg.PresentationTTL)
+	verificationService := verification.NewService(verificationStore, verificationStore, verifier, attestationStore, cfg.AppBaseURL, cfg.VerificationSessionTTL)
 	verificationHandler := verification.NewHandler(verificationStore, verificationService, requireUser, orgHandler.Authorize)
 
 	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
