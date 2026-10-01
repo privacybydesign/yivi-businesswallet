@@ -50,7 +50,7 @@ org-to-org:
 catalogue: every active or deprecated credential schema any issuing
 organisation on this deployment designed (`attestation.Store.ListSchemaCatalog`,
 drafts excluded), grouped by issuer, with the schema's attributes as
-checkboxes — none ticked asks only that the credential is held. An *Other
+checkboxes: none ticked asks only that the credential is held. An *Other
 credential type* row keeps a typed vct and claim names for issuers outside the
 deployment (e.g. the KVK registration). The API itself still takes any vct.
 
