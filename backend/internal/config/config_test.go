@@ -281,3 +281,31 @@ func TestLoadAcceptsDisabledPollerWithWebhookPush(t *testing.T) {
 		t.Errorf("webhook secret = %q, want the configured value", cfg.QerdsWebhookSecret)
 	}
 }
+
+func TestLoadOrgRequestDefaults(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{envAppBaseURL: "https://wallet.example.org"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OpenID4VPRequesterPublicURL != "https://wallet.example.org" {
+		t.Errorf("requester public URL = %q, want it to default to APP_BASE_URL", cfg.OpenID4VPRequesterPublicURL)
+	}
+	if cfg.OpenID4VPOrgRequestTTL.Hours() != 168 {
+		t.Errorf("org request TTL = %v, want a week", cfg.OpenID4VPOrgRequestTTL)
+	}
+}
+
+// A CA certificate without its key (or the reverse) is a half-done setup, not
+// a request for the ephemeral CA.
+func TestLoadRejectsHalfConfiguredRequesterCA(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"cert only": {envOpenID4VPRequesterCACert: "cert"},
+		"key only":  {envOpenID4VPRequesterCAKey: "key"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := loadWith(t, env); err == nil {
+				t.Errorf("Load(%v) succeeded, want an error", env)
+			}
+		})
+	}
+}

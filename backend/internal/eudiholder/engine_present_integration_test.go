@@ -28,8 +28,8 @@ import (
 	"github.com/privacybydesign/irmago/eudi/storage/db/models"
 	"gorm.io/datatypes"
 
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/devverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/relyingparty"
 )
 
 const (
@@ -129,7 +129,7 @@ func TestEnginePresentSelectivelyDisclosesWithKeyBinding(t *testing.T) {
 	holderPriv, holderPub := seedHolderKey(t, eng, org)
 	issueTestCredential(t, eng, org, holderPub)
 
-	dcql, err := devverifier.SimpleDCQL("kvk", presentVCT, []string{"company_name"})
+	dcql, err := relyingparty.SimpleDCQL("kvk", presentVCT, []string{"company_name"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestEnginePresentRefusesWhenNothingMatches(t *testing.T) {
 	_, holderPub := seedHolderKey(t, eng, org)
 	issueTestCredential(t, eng, org, holderPub)
 
-	dcql, err := devverifier.SimpleDCQL("other", "nl.other.type", nil)
+	dcql, err := relyingparty.SimpleDCQL("other", "nl.other.type", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

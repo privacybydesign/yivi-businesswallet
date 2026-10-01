@@ -7,6 +7,7 @@ import (
 	"github.com/privacybydesign/irmago/eudi/openid4vp"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/devverifier"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/relyingparty"
 )
 
 func TestResponderDirectPostForm(t *testing.T) {
@@ -34,15 +35,15 @@ func TestResponderDirectPostJWTEncryptsToVerifierKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := devverifier.NewEncryptionKey()
+	key, err := relyingparty.NewEncryptionKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	dcql, err := devverifier.SimpleDCQL("kvk", "nl.kvk.registration", nil)
+	dcql, err := relyingparty.SimpleDCQL("kvk", "nl.kvk.registration", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	jar, err := devverifier.SignRequestObject(id, devverifier.Request{
+	jar, err := relyingparty.SignRequestObject(id.Signer(), relyingparty.Request{
 		Nonce: "nonce", State: "s2", ResponseURI: "https://verifier.test/r", ResponseMode: "direct_post.jwt",
 		DCQLQuery: dcql, EncryptionKey: &key.PublicKey,
 	})
@@ -57,18 +58,18 @@ func TestResponderDirectPostJWTEncryptsToVerifierKey(t *testing.T) {
 	if form.Has("vp_token") || form.Has("state") {
 		t.Error("encrypted mode must not carry plaintext parameters")
 	}
-	token, state, err := devverifier.DecryptResponse(form.Get("response"), key)
+	token, state, err := relyingparty.DecryptResponse(form.Get("response"), key)
 	if err != nil {
 		t.Fatalf("decrypt: %v", err)
 	}
 	if state != "s2" || token["kvk"][0] != "a~b~" {
 		t.Errorf("decrypted = %v / %q", token, state)
 	}
-	other, err := devverifier.NewEncryptionKey()
+	other, err := relyingparty.NewEncryptionKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := devverifier.DecryptResponse(form.Get("response"), other); err == nil {
+	if _, _, err := relyingparty.DecryptResponse(form.Get("response"), other); err == nil {
 		t.Error("another key opened the response")
 	}
 }

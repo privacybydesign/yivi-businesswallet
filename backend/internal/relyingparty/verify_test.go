@@ -1,4 +1,4 @@
-package devverifier
+package relyingparty
 
 import (
 	"crypto/ecdsa"

@@ -33,6 +33,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/notifications"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vppresenter"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vprequester"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/postguard"
@@ -44,6 +45,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/relyingparty"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
@@ -319,14 +321,18 @@ func main() {
 // UnverifiedDecoder (structural checks only) is the explicit dev / CI opt-out. The
 // service is returned alongside the handler because it is also the QERDS receive
 // path's collaborator (openid4vppresenter.Receiver, wired into qerdsService below).
-func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit.Recorder, orgStore *organization.Store, holder eudiholder.Holder, requireUser, authorize func(http.Handler) http.Handler) (*openid4vppresenter.Handler, *openid4vppresenter.Service, error) {
+// requesterRoot is this deployment's own requester CA (newRequesterCA): its
+// organizations' requests to each other verify without configuration.
+func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit.Recorder, orgStore *organization.Store, holder eudiholder.Holder, requesterRoot []byte, requireUser, authorize func(http.Handler) http.Handler) (*openid4vppresenter.Handler, *openid4vppresenter.Service, error) {
 	policy := openid4vppresenter.Policy{AllowInsecureHTTP: cfg.OpenID4VPPresenterAllowInsecureHTTP}
 	var validator openid4vppresenter.Validator
 	if cfg.OpenID4VPPresenterAllowUnverifiedRequests {
-		slog.Warn("OpenID4VP request objects are accepted WITHOUT signature verification (dev only)")
+		slog.Warn("OpenID4VP request objects are accepted WITHOUT signature verification (dev only); " +
+			"requests arriving over QERDS are refused, since only a verified certificate can certify their sender")
 		validator = openid4vppresenter.NewUnverifiedDecoder(policy)
 	} else {
-		trust, err := eudiholder.NewVerifierTrust([]byte(cfg.OpenID4VPVerifierTrustChain), cfg.AttestationHolderStagingAnchors)
+		trustPEM := append([]byte(cfg.OpenID4VPVerifierTrustChain+"\n"), requesterRoot...)
+		trust, err := eudiholder.NewVerifierTrust(trustPEM, cfg.AttestationHolderStagingAnchors)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", "OPENID4VP_VERIFIER_TRUST_CHAIN", err)
 		}
@@ -335,7 +341,7 @@ func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit
 	if cfg.OpenID4VPPresenterAutoPresent {
 		slog.Warn("OpenID4VP presentations complete immediately after organization selection (dev only; no consent layer)")
 	}
-	store := openid4vppresenter.NewStore(pool, recorder, cfg.OpenID4VPTransactionTTL)
+	store := openid4vppresenter.NewStore(pool, recorder, cfg.OpenID4VPTransactionTTL, cfg.OpenID4VPOrgRequestTTL)
 	svc := openid4vppresenter.NewService(
 		store, orgStore, holder,
 		openid4vppresenter.NewFetcher(policy), validator, openid4vppresenter.NewResponder(policy),
@@ -347,6 +353,23 @@ func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit
 		return nil, nil, err
 	}
 	return openid4vppresenter.NewHandler(svc, metadata, requireUser, authorize), svc, nil
+}
+
+// newRequesterCA loads the CA that certifies this deployment's organizations as
+// OpenID4VP relying parties, or mints an ephemeral one. An ephemeral root
+// changes on every start: only this deployment trusts it, and a request signed
+// before a restart no longer verifies after it.
+func newRequesterCA(cfg config.Config) (*relyingparty.CA, error) {
+	if cfg.OpenID4VPRequesterCACert != "" {
+		ca, err := relyingparty.LoadCA([]byte(cfg.OpenID4VPRequesterCACert), []byte(cfg.OpenID4VPRequesterCAKey))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", "OPENID4VP_REQUESTER_CA_CERT", err)
+		}
+		return ca, nil
+	}
+	slog.Warn("OPENID4VP_REQUESTER_CA_CERT not set; organizations request credentials under an ephemeral CA " +
+		"that no other deployment trusts and that changes on restart")
+	return relyingparty.NewCA("Yivi Business Wallet ephemeral requester CA")
 }
 
 // chainedInboundConsumer notifies each QERDS inbound consumer in turn. Every
@@ -430,7 +453,7 @@ func run() error {
 
 	startPruner(ctx, "sessions", cfg.SessionPruneEvery, sessionStore.DeleteExpired)
 	startPruner(ctx, "presentation_sessions", cfg.SessionPruneEvery, presentationStore.DeleteExpired)
-	startPruner(ctx, "openid4vp_transactions", cfg.SessionPruneEvery, openid4vppresenter.NewStore(pool, recorder, cfg.OpenID4VPTransactionTTL).Prune)
+	startPruner(ctx, "openid4vp_transactions", cfg.SessionPruneEvery, openid4vppresenter.NewStore(pool, recorder, cfg.OpenID4VPTransactionTTL, cfg.OpenID4VPOrgRequestTTL).Prune)
 
 	requireUser := auth.RequireUser(sessionStore)
 	orgService := organization.NewService(userStore, orgStore, authService)
@@ -602,10 +625,27 @@ func run() error {
 	// stand-in for the consent layer (#113). Built ahead of the QERDS wiring
 	// below because presenterService is its Receiver's collaborator. See
 	// .ai/features/openid4vp-inbound.md and .ai/features/oid4vp-over-qerds.md.
-	presenterHandler, presenterService, err := newOpenID4VPPresenter(cfg, pool, recorder, orgStore, attHolder, requireUser, orgHandler.Authorize)
+	requesterCA, err := newRequesterCA(cfg)
 	if err != nil {
 		return err
 	}
+	presenterHandler, presenterService, err := newOpenID4VPPresenter(cfg, pool, recorder, orgStore, attHolder, requesterCA.RootPEM(), requireUser, orgHandler.Authorize)
+	if err != nil {
+		return err
+	}
+	// The other direction (#271): an organization asks another for credentials
+	// under a certificate from requesterCA, sends the invocation over QERDS and
+	// verifies the answer against the same issuers its own holder trusts.
+	requesterIssuerTrust, err := eudiholder.NewIssuerTrust([]byte(cfg.AttestationHolderTrustChain), cfg.AttestationHolderStagingAnchors)
+	if err != nil {
+		return fmt.Errorf("%s: %w", "ATTESTATION_HOLDER_TRUST_CHAIN", err)
+	}
+	requesterHandler := openid4vprequester.NewHandler(
+		openid4vprequester.NewService(
+			openid4vprequester.NewStore(pool, recorder), qerdsService, requesterCA,
+			relyingparty.NewTokenVerifier(requesterIssuerTrust),
+			cfg.OpenID4VPRequesterPublicURL, cfg.OpenID4VPOrgRequestTTL),
+		requireUser, orgHandler.Authorize)
 
 	attestationStore := attestation.NewStore(pool, recorder)
 	// The QERDS message screen renders a credential-offer body as a parsed
@@ -821,6 +861,7 @@ func run() error {
 		pool,
 		cfg.StaticDir,
 		presenterHandler,
+		requesterHandler,
 		authHandler,
 		orgHandler,
 		qerdsHandler,

@@ -50,6 +50,7 @@ import OpenID4VP from "./routes/openid4vp";
 import OpenID4VPTransaction from "./routes/openid4vp-transaction";
 import Settings from "./routes/settings";
 import Signing from "./routes/signing";
+import CredentialRequests from "./routes/credential-requests";
 import SigningExternal from "./routes/signing-external";
 import Proof from "./routes/proof";
 import AdminDashboard from "./routes/admin-dashboard";
@@ -153,6 +154,9 @@ const postguardSendCrumb: RouteHandle = {
 };
 const settingsCrumb: RouteHandle = { crumb: ({ t }) => t("settings.title") };
 const signingCrumb: RouteHandle = { crumb: ({ t }) => t("signing.title") };
+const credentialRequestsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("credentialRequests.title"),
+};
 const invitationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("myInvitations.title"),
 };
@@ -327,6 +331,11 @@ export const router = createBrowserRouter([
                     path: "signing",
                     Component: Signing,
                     handle: signingCrumb,
+                  },
+                  {
+                    path: "credential-requests",
+                    Component: CredentialRequests,
+                    handle: credentialRequestsCrumb,
                   },
                   {
                     path: "audit-log",

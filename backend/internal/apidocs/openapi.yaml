@@ -2672,6 +2672,329 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/openid4vp/requests:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [openid4vp]
+      summary: List presentation requests awaiting an approval decision
+      description: >-
+        Transactions a member selected this organisation for, or that arrived
+        over QERDS (status org_selected), that have not yet been approved or
+        denied. Requires an administrator role. Each row names the requester
+        and summarizes what an approval would share (credential types and
+        claim paths); the raw DCQL query, nonce and response material are not
+        returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/openid4vp/requests/{id}/approve:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [openid4vp]
+      summary: Approve a pending presentation request
+      description: >-
+        The governance-layer counterpart to the dev-only auto-present flag:
+        builds the presentation from the organisation's held credentials and
+        delivers it to the verifier. Requires an administrator role. Returns 409
+        when the request does not belong to this organisation or is not
+        awaiting approval (already decided, or expired) — the same conflict
+        select uses for a transaction that has moved on.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  redirectUri:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The request does not belong to this organisation, or is not awaiting approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The organisation holds no credential that satisfies the request; the transaction is consumed as denied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: The presentation could not be built or delivered; the transaction is consumed as denied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/openid4vp/requests/{id}/decline:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [openid4vp]
+      summary: Decline a pending presentation request
+      description: >-
+        Nothing is built or sent to the verifier. Requires an administrator
+        role. Returns 409 when the request does not belong to this organisation
+        or is not awaiting approval.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The request does not belong to this organisation, or is not awaiting approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/openid4vp/outbound:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [openid4vp]
+      summary: Request credentials from another organisation over QERDS
+      description: >-
+        Certifies this organisation as OpenID4VP relying party for one request
+        (a certificate naming the organisation and the sending QERDS address),
+        signs an Authorization Request asking for the given credential types
+        and claims, and sends the invocation to the recipient's QERDS address.
+        The recipient's administrator approves or declines it; the answer
+        arrives at the request's response endpoint. Requires an administrator
+        role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipient, credentials]
+              properties:
+                from:
+                  type: string
+                  description: One of this organisation's QERDS addresses; empty uses the default.
+                recipient:
+                  type: string
+                  description: The other organisation's QERDS address.
+                credentials:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: object
+                    required: [vct]
+                    properties:
+                      vct:
+                        type: string
+                      claims:
+                        type: array
+                        maxItems: 50
+                        items:
+                          type: string
+      responses:
+        '201':
+          description: The request was signed and sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboundPresentationRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The organisation has no default QERDS address.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: The QERDS message could not be sent; the request is marked failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      tags: [openid4vp]
+      summary: List the organisation's outbound credential requests
+      description: Newest first, at most 100. Requires an administrator role.
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OutboundPresentationRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/openid4vp/outbound/{id}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    get:
+      tags: [openid4vp]
+      summary: Get one outbound credential request and what was disclosed
+      description: Requires an administrator role.
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboundPresentationRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/openid4vp/outbound/{id}/request-object:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    get:
+      tags: [openid4vp]
+      summary: Fetch the signed Request Object (request_uri)
+      description: >-
+        Fetched by the receiving business wallet when the QERDS invocation
+        arrives. Unauthenticated; served once, while the request is open.
+        Anything else — unknown, already fetched, answered or expired — is 404.
+      security: []
+      responses:
+        '200':
+          description: The Request Object as a compact JWS.
+          content:
+            application/oauth-authz-req+jwt:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/openid4vp/outbound/{id}/response:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    post:
+      tags: [openid4vp]
+      summary: Receive the Authorization Response (response_uri, direct_post)
+      description: >-
+        Unauthenticated; the request's state authenticates the post. A post
+        with the wrong state is refused without changing the request. With the
+        right state, the request completes only when every credential asked
+        for is presented and verifies (issuer signature, key binding over the
+        request's nonce and client_id, requested type); otherwise it is marked
+        failed.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [vp_token, state]
+              properties:
+                vp_token:
+                  type: string
+                state:
+                  type: string
+      responses:
+        '200':
+          description: The answer was accepted. An empty object; there is no redirect_uri.
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request was already answered or has expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/issuer/settings:
     parameters:
       - name: slug
@@ -7831,6 +8154,59 @@ components:
       in: cookie
       name: ybw_session
   schemas:
+    OutboundPresentationRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        sender:
+          type: string
+        recipient:
+          type: string
+        status:
+          type: string
+          enum: [sent, completed, failed, expired]
+        failureReason:
+          type: string
+        fetched:
+          type: boolean
+          description: Whether the recipient's wallet has fetched the Request Object.
+        credentials:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              vct:
+                type: string
+              claims:
+                type: array
+                items:
+                  type: string
+        disclosed:
+          type: array
+          items:
+            type: object
+            properties:
+              queryId:
+                type: string
+              vct:
+                type: string
+              issuer:
+                type: string
+              claims:
+                type: object
+                additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        respondedAt:
+          type: string
+          format: date-time
     Error:
       type: object
       description: Error response body returned by respond.Error.
