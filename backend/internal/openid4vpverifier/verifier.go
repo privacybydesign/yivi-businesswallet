@@ -82,6 +82,9 @@ type Presentation struct {
 	// the member-reidentification feature); zero when the presentation carried no
 	// identity credential or its `iat` could not be read.
 	IdentityIssuedAt time.Time
+	// ExpiresAt is, per DCQL credential id, the `exp` claim of that credential's
+	// issuer-signed JWT; a credential that carries none is absent from the map.
+	ExpiresAt map[string]time.Time
 }
 
 // identityCredentialIDs are the credentials an identity disclosure draws on.
@@ -100,6 +103,18 @@ func (p Presentation) IdentityClaims() map[string]string {
 // VogClaims returns the pbdf.vog credential's disclosed claims; see IdentityClaims.
 func (p Presentation) VogClaims() map[string]string {
 	return p.claimsOf(credIDVog)
+}
+
+// QueryClaims returns the claims disclosed for a StartQuery presentation (the
+// single credential under QueryCredentialID); see IdentityClaims.
+func (p Presentation) QueryClaims() map[string]string {
+	return p.claimsOf(QueryCredentialID)
+}
+
+// QueryExpiresAt returns the issuer-set expiry of the StartQuery credential, zero
+// when the credential carries no `exp`.
+func (p Presentation) QueryExpiresAt() time.Time {
+	return p.ExpiresAt[QueryCredentialID]
 }
 
 func (p Presentation) claimsOf(ids ...string) map[string]string {
@@ -191,6 +206,21 @@ func identityIssuedAt(vp map[string][]string) time.Time {
 	return time.Time{}
 }
 
+// expiresAtByCredential reads each credential's issuer-set `exp` (first token per
+// credential id), leaving out credentials that carry none.
+func expiresAtByCredential(vp map[string][]string) map[string]time.Time {
+	out := map[string]time.Time{}
+	for id, tokens := range vp {
+		if len(tokens) == 0 {
+			continue
+		}
+		if t, ok := issuerExpiresAt(tokens[0]); ok {
+			out[id] = t
+		}
+	}
+	return out
+}
+
 // issuerIssuedAt reads the `iat` claim from an SD-JWT VC's issuer-signed JWT (the
 // first `~`-separated segment: header.payload.signature). This is the moment the
 // wallet obtained the credential from its issuer — a registered top-level claim
@@ -198,25 +228,46 @@ func identityIssuedAt(vp map[string][]string) time.Time {
 // Decoding the payload here is not signature verification (the hosted verifier
 // already did that; see the package doc); it only reads an already-trusted claim.
 func issuerIssuedAt(sdjwt string) (time.Time, bool) {
+	payload, ok := issuerPayload(sdjwt)
+	if !ok || payload.IssuedAt <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(payload.IssuedAt, 0).UTC(), true
+}
+
+// issuerExpiresAt reads the `exp` claim the same way issuerIssuedAt reads `iat`.
+func issuerExpiresAt(sdjwt string) (time.Time, bool) {
+	payload, ok := issuerPayload(sdjwt)
+	if !ok || payload.ExpiresAt <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(payload.ExpiresAt, 0).UTC(), true
+}
+
+// issuerTimes are the registered time claims of an issuer-signed JWT.
+type issuerTimes struct {
+	IssuedAt  int64 `json:"iat"`
+	ExpiresAt int64 `json:"exp"`
+}
+
+func issuerPayload(sdjwt string) (issuerTimes, bool) {
 	jwt := sdjwt
 	if i := strings.IndexByte(sdjwt, '~'); i >= 0 {
 		jwt = sdjwt[:i]
 	}
 	segments := strings.Split(jwt, ".")
 	if len(segments) < 2 {
-		return time.Time{}, false
+		return issuerTimes{}, false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(segments[1])
 	if err != nil {
-		return time.Time{}, false
+		return issuerTimes{}, false
 	}
-	var payload struct {
-		IssuedAt int64 `json:"iat"`
+	var payload issuerTimes
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return issuerTimes{}, false
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil || payload.IssuedAt <= 0 {
-		return time.Time{}, false
-	}
-	return time.Unix(payload.IssuedAt, 0).UTC(), true
+	return payload, true
 }
 
 func stringify(v any) string {

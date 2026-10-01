@@ -22,6 +22,10 @@ const (
 	envSessionTTL                  = "SESSION_TTL"
 	envSessionPruneEvery           = "SESSION_PRUNE_INTERVAL"
 	envPresentationTTL             = "PRESENTATION_SESSION_TTL"
+	// Verification sessions (#245): how long an organisation's own check on
+	// another business wallet waits for the holder to answer. Separate from
+	// envPresentationTTL so tuning the login flow's timeout does not retune this.
+	envVerificationSessionTTL = "VERIFICATION_SESSION_TTL"
 
 	// Inbound OpenID4VP (the business wallet as holder/presenter toward an
 	// external verifier, #188). The transaction TTL bounds the interactive
@@ -208,6 +212,9 @@ const (
 	// A login/disclosure flow (scan QR, present in the wallet, claim) completes in
 	// minutes; the presentation-session mapping only needs to outlive that window.
 	defaultPresentationTTL = "15m"
+	// A verification session (#245) is the same kind of interactive scan-and-
+	// present wait as a login presentation.
+	defaultVerificationSessionTTL = "15m"
 	// Shorter than the outbound default: an inbound transaction spans an
 	// interactive multi-step flow (login, org picker) but must not outlive a
 	// plausible browser session, and the verifier's own request is short-lived.
@@ -274,6 +281,10 @@ type Config struct {
 	SessionTTL                  time.Duration
 	SessionPruneEvery           time.Duration
 	PresentationTTL             time.Duration
+	// VerificationSessionTTL bounds an organisation's own check on another
+	// business wallet (#245), the requester side of OpenID4VP. Separate from
+	// PresentationTTL so tuning the login flow's timeout does not retune this.
+	VerificationSessionTTL time.Duration
 	// OpenID4VPTransactionTTL bounds an inbound presentation transaction from
 	// the verifier's invocation to the org's response.
 	OpenID4VPTransactionTTL time.Duration
@@ -466,6 +477,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	verificationSessionTTL, err := parseDuration(envVerificationSessionTTL, defaultVerificationSessionTTL)
+	if err != nil {
+		return Config{}, err
+	}
+
 	openid4vpTransactionTTL, err := parseDuration(envOpenID4VPTransactionTTL, defaultOpenID4VPTransactionTTL)
 	if err != nil {
 		return Config{}, err
@@ -571,6 +587,7 @@ func Load() (Config, error) {
 		SessionTTL:                  sessionTTL,
 		SessionPruneEvery:           sessionPruneEvery,
 		PresentationTTL:             presentationTTL,
+		VerificationSessionTTL:      verificationSessionTTL,
 		OpenID4VPTransactionTTL:     openid4vpTransactionTTL,
 		OpenID4VPPresenterAllowInsecureHTTP: strings.EqualFold(
 			os.Getenv(envOpenID4VPPresenterAllowInsecureHTTP), "true"),

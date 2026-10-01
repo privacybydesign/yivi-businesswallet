@@ -52,6 +52,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/teamschannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/verification"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/vog"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
@@ -676,6 +677,14 @@ func run() error {
 	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
 	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, orgStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
 
+	// Verifications (#245): an organisation asking another business wallet to
+	// present a credential. The request is minted at the same hosted verifier the
+	// login flow uses and the disclosure is graded against the org's own issuance
+	// ledger, so it reuses the attestation store rather than a status list.
+	verificationStore := verification.NewStore(pool, recorder)
+	verificationService := verification.NewService(verificationStore, verificationStore, verifier, attestationStore, cfg.AppBaseURL, cfg.VerificationSessionTTL)
+	verificationHandler := verification.NewHandler(verificationStore, verificationService, requireUser, orgHandler.Authorize)
+
 	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
 	// sealed-secret store + keystore layout with the holder redeem path so a wallet
 	// activated here is the one the redeem path signs with. Enabled (Configured())
@@ -786,6 +795,7 @@ func run() error {
 		issuerSettingsHandler,
 		themeSettingsHandler,
 		attestationHandler,
+		verificationHandler,
 		wscaWalletHandler,
 		notificationsHandler,
 		slackHandler,

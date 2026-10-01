@@ -22,7 +22,20 @@ const (
 	credIDEmail    = "email"
 	credIDPhone    = "phone"
 	credIDVog      = "vog"
+
+	// QueryCredentialID is the DCQL credential id StartQuery uses for the one
+	// credential a template-built query asks for; Presentation.QueryClaims reads
+	// the disclosure back under it.
+	QueryCredentialID = "credential"
 )
+
+// Query is a single-credential presentation request built at runtime from an
+// organisation's verification template (issue #245): the credential type to
+// ask for and the claims to disclose, all required.
+type Query struct {
+	VCT    string
+	Claims []string
+}
 
 // DCQL types (OpenID4VP Digital Credentials Query Language).
 type dcqlQuery struct {
@@ -88,6 +101,19 @@ func queryFor(scope Scope, claims []string) dcqlQuery {
 		return identityVogQuery(claims)
 	default:
 		return loginQuery()
+	}
+}
+
+// customQuery builds the DCQL for a Query: one dc+sd-jwt credential of the given
+// vct, all listed claims, in one required credential set.
+func customQuery(q Query) dcqlQuery {
+	return dcqlQuery{
+		Credentials: []dcqlCredential{
+			{ID: QueryCredentialID, Format: formatSDJWT, Meta: dcqlMeta{[]string{q.VCT}}, Claims: claimPaths(q.Claims...)},
+		},
+		CredentialSets: []dcqlCredentialSet{
+			{Options: [][]string{{QueryCredentialID}}},
+		},
 	}
 }
 
