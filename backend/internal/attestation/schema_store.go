@@ -70,6 +70,55 @@ func (s *Store) ListSchemas(ctx context.Context, orgID uuid.UUID) ([]Schema, err
 	return schemas, nil
 }
 
+// CatalogEntry is a credential type an issuer on this deployment designed,
+// with the name of the organization that issues it: the trust scheme's
+// catalogue another organization picks from when it requests credentials.
+type CatalogEntry struct {
+	Schema
+	IssuerName string
+}
+
+// withExtra appends destinations to a row scan, so scanSchema can read a
+// schema followed by joined columns.
+type withExtra struct {
+	row   rowScanner
+	extra []any
+}
+
+func (w withExtra) Scan(dest ...any) error {
+	return w.row.Scan(append(dest, w.extra...)...)
+}
+
+// ListSchemaCatalog returns every issuable credential type on the deployment,
+// across organizations: active schemas, and deprecated ones because
+// credentials issued from them are still held. Drafts never issued anything.
+func (s *Store) ListSchemaCatalog(ctx context.Context) ([]CatalogEntry, error) {
+	const query = `SELECT ` + schemaColumns + `, issuer_name FROM (
+		SELECT sc.*, o.name AS issuer_name
+		FROM attestation_schemas sc JOIN organizations o ON o.id = sc.organization_id
+		WHERE sc.status IN ($1, $2)) catalog
+		ORDER BY issuer_name, display_name`
+	rows, err := s.db.Query(ctx, query, SchemaActive, SchemaDeprecated)
+	if err != nil {
+		return nil, fmt.Errorf("attestation: list schema catalog: %w", err)
+	}
+	defer rows.Close()
+
+	entries := []CatalogEntry{}
+	for rows.Next() {
+		var e CatalogEntry
+		e.Schema, err = scanSchema(withExtra{row: rows, extra: []any{&e.IssuerName}})
+		if err != nil {
+			return nil, fmt.Errorf("attestation: list schema catalog scan: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("attestation: list schema catalog rows: %w", err)
+	}
+	return entries, nil
+}
+
 // GetSchema returns one org-scoped schema.
 func (s *Store) GetSchema(ctx context.Context, orgID, id uuid.UUID) (Schema, error) {
 	const query = `SELECT ` + schemaColumns + ` FROM attestation_schemas WHERE organization_id = $1 AND id = $2`

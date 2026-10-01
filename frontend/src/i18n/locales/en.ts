@@ -1996,6 +1996,10 @@ export const en = {
       credentials: "Credentials",
       vct: "Credential type",
       vctPlaceholder: "Credential type, e.g. nl.kvk.registration",
+      chooseType: "Choose a credential",
+      otherType: "Other credential type…",
+      pickAttributes:
+        "Tick the attributes you need. With none ticked, the answer only proves the organization holds this credential.",
       claims: "Claims",
       claimsPlaceholder: "Claims, comma separated (optional)",
       addCredential: "Add credential",
@@ -2005,7 +2009,7 @@ export const en = {
       errors: {
         recipientRequired: "Enter the recipient's address.",
         recipientInvalid: "Enter a valid address.",
-        vctRequired: "Enter a credential type.",
+        vctRequired: "Choose a credential, or enter a credential type.",
         vctInvalid: "A credential type cannot contain spaces.",
         claimInvalid: "A claim name cannot contain spaces.",
         tooManyClaims: "Ask for at most 50 claims per credential.",

@@ -46,12 +46,21 @@ org-to-org:
 | Audit | receive: `presentation.request_received`; send: `presentation.request_sent`, `presentation.response_received` (verified answer), `presentation.request_failed` (refused answer or undelivered request) (target `outbound_presentation_request`) — types and outcome only, never claim values |
 | Console | `/:orgSlug/credential-requests` (`frontend/src/routes/credential-requests.tsx`): incoming inbox (approve/decline), sent list with the verified disclosure, request form. Admin-only; the sidebar item shows for admins |
 
+**What can be asked for.** The request form picks from the trust scheme's
+catalogue: every active or deprecated credential schema any issuing
+organisation on this deployment designed (`attestation.Store.ListSchemaCatalog`,
+drafts excluded), grouped by issuer, with the schema's attributes as
+checkboxes: none ticked asks only that the credential is held. An *Other
+credential type* row keeps a typed vct and claim names for issuers outside the
+deployment (e.g. the KVK registration). The API itself still takes any vct.
+
 Routes of the sender slice:
 
 | Route | Who |
 |---|---|
 | `POST /orgs/{slug}/openid4vp/outbound` `{from?, recipient, credentials:[{vct, claims}]}` | admin |
 | `GET /orgs/{slug}/openid4vp/outbound`, `GET …/outbound/{id}` | admin |
+| `GET /orgs/{slug}/openid4vp/credential-types` (the trust scheme's catalogue) | admin |
 | `GET /openid4vp/outbound/{id}/request-object` (request_uri) | public — the receiving wallet |
 | `POST /openid4vp/outbound/{id}/response` (response_uri, `direct_post`) | public — the receiving wallet |
 

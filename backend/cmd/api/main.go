@@ -613,7 +613,7 @@ func run() error {
 			openid4vprequester.NewStore(pool, recorder), qerdsService, requesterCA,
 			relyingparty.NewTokenVerifier(requesterIssuerTrust),
 			cfg.OpenID4VPRequesterPublicURL, cfg.OpenID4VPOrgRequestTTL),
-		requireUser, orgHandler.Authorize)
+		attestation.NewStore(pool, recorder), requireUser, orgHandler.Authorize)
 
 	attestationStore := attestation.NewStore(pool, recorder)
 	// The QERDS message screen renders a credential-offer body as a parsed
