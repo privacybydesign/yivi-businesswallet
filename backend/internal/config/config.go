@@ -36,6 +36,15 @@ const (
 	// added to irmago's pinned Yivi verifier anchors (the verifier analogue of
 	// ATTESTATION_HOLDER_TRUST_CHAIN; the value is the PEM, not a path).
 	envOpenID4VPVerifierTrustChain = "OPENID4VP_VERIFIER_TRUST_CHAIN"
+	// Org-to-org presentation requests over QERDS (#271): how long one stays
+	// open on either side, the CA that certifies each requesting organization
+	// (PEM content; unset mints an ephemeral one at boot), and the base URL
+	// another wallet reaches this backend's request_uri/response_uri on. See
+	// .ai/features/oid4vp-over-qerds.md.
+	envOpenID4VPOrgRequestTTL      = "OPENID4VP_ORG_REQUEST_TTL"
+	envOpenID4VPRequesterCACert    = "OPENID4VP_REQUESTER_CA_CERT"
+	envOpenID4VPRequesterCAKey     = "OPENID4VP_REQUESTER_CA_KEY"
+	envOpenID4VPRequesterPublicURL = "OPENID4VP_REQUESTER_PUBLIC_URL"
 
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
@@ -212,6 +221,9 @@ const (
 	// interactive multi-step flow (login, org picker) but must not outlive a
 	// plausible browser session, and the verifier's own request is short-lived.
 	defaultOpenID4VPTransactionTTL = "5m"
+	// An org-to-org request waits for an admin on the receiving side, who may
+	// not look for days; a week covers a weekend and a busy week.
+	defaultOpenID4VPOrgRequestTTL = "168h"
 
 	// ProviderStub selects the in-process StubProvider (local dev / CI).
 	ProviderStub = "stub"
@@ -294,6 +306,19 @@ type Config struct {
 	// organization selection. It stands in for the consent/approval layer (#113)
 	// in dev / CI only; off, a selected transaction waits for that layer.
 	OpenID4VPPresenterAutoPresent bool
+	// OpenID4VPOrgRequestTTL bounds an org-to-org presentation request: on the
+	// sending side the request, its certificate and the response window; on the
+	// receiving side how long a QERDS-delivered request waits for approval.
+	OpenID4VPOrgRequestTTL time.Duration
+	// OpenID4VPRequesterCACert / Key are the PEM CA that certifies this
+	// deployment's organizations as relying parties. Both empty mints an
+	// ephemeral CA at boot, which only this deployment trusts.
+	OpenID4VPRequesterCACert string
+	OpenID4VPRequesterCAKey  string
+	// OpenID4VPRequesterPublicURL is the base URL (no /api/v1) a receiving
+	// wallet fetches request_uri from and posts the response to. Defaults to
+	// AppBaseURL.
+	OpenID4VPRequesterPublicURL string
 
 	QerdsProvider             string
 	QerdsProviderURL          string
@@ -460,6 +485,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	openid4vpOrgRequestTTL, err := parseDuration(envOpenID4VPOrgRequestTTL, defaultOpenID4VPOrgRequestTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	requesterCACert, requesterCAKey := os.Getenv(envOpenID4VPRequesterCACert), os.Getenv(envOpenID4VPRequesterCAKey)
+	if (requesterCACert == "") != (requesterCAKey == "") {
+		return Config{}, fmt.Errorf("config: %s and %s must be set together", envOpenID4VPRequesterCACert, envOpenID4VPRequesterCAKey)
+	}
 
 	// "0" (or "0s") disables the background inbound poller. With the webhook
 	// also unconfigured no mechanism delivers inbound messages automatically,
@@ -523,6 +556,10 @@ func Load() (Config, error) {
 	if err := requireAbsoluteHTTPURL(envAppBaseURL, appBaseURL); err != nil {
 		return Config{}, err
 	}
+	requesterPublicURL := envOrDefault(envOpenID4VPRequesterPublicURL, appBaseURL)
+	if err := requireAbsoluteHTTPURL(envOpenID4VPRequesterPublicURL, requesterPublicURL); err != nil {
+		return Config{}, err
+	}
 
 	// SIGNING_REDIRECT_URI is optional (empty keeps the built-in localhost default),
 	// but a set value is concatenated into the QTSP authorize URL and the token
@@ -562,6 +599,10 @@ func Load() (Config, error) {
 		OpenID4VPPresenterAutoPresent: strings.EqualFold(
 			os.Getenv(envOpenID4VPPresenterAutoPresent), "true"),
 		OpenID4VPVerifierTrustChain: os.Getenv(envOpenID4VPVerifierTrustChain),
+		OpenID4VPOrgRequestTTL:      openid4vpOrgRequestTTL,
+		OpenID4VPRequesterCACert:    requesterCACert,
+		OpenID4VPRequesterCAKey:     requesterCAKey,
+		OpenID4VPRequesterPublicURL: requesterPublicURL,
 
 		QerdsProvider:             qerdsProvider,
 		QerdsProviderURL:          qerdsProviderURL,

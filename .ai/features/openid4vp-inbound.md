@@ -6,15 +6,19 @@ cryptography of the OpenID4VP-holder epic
 ([#112](https://github.com/privacybydesign/yivi-businesswallet/issues/112)): signed
 Request Object verification, DCQL matching over the org's held credentials, selective
 disclosure with a key-bound SD-JWT VC presentation, `direct_post` and encrypted
-`direct_post.jwt` responses. The consent/approval policy
-([#113](https://github.com/privacybydesign/yivi-businesswallet/issues/113)) remains a seam.
+`direct_post.jwt` responses. The consent/approval decision itself
+([#113](https://github.com/privacybydesign/yivi-businesswallet/issues/113)) is now built as an
+admin approval queue (§5), with its inbox in the console (*Credential requests → Incoming*,
+`frontend/src/routes/credential-requests.tsx`); a fine-grained permission model is not (§9).
 Design of record: `.ai/plans/openid4vp-invocation.md`. Local end-to-end testing: §8.
 **Counterpart:** `.ai/features/auth-openid4vp.md` is the *outbound* role — this backend as a
 requestor asking a natural person's device wallet for a login disclosure. This file is the
 opposite role: an **external verifier** invoking the **business wallet itself** to present an
 **organization's** credentials. `.ai/features/oid4vp-over-qerds.md` (#271) is a second invocation
 seam into the same crypto (§1, §2's `Present`/`Responder`): the request travels over QERDS instead
-of a browser, and the organization is bound at receipt instead of picked by a logged-in user.
+of a browser, and the organization is bound at receipt instead of picked by a logged-in user. That
+file also covers the sending side, where an organization is the relying party
+(`internal/openid4vprequester`).
 
 ---
 
@@ -26,8 +30,10 @@ of a browser, and the organization is bound at receipt instead of picked by a lo
 | Transaction table | `openid4vp_transactions` (migration `20260909090000`) |
 | `Present` on the holder engine (DCQL match, selective disclosure, KB-JWT) | `eudiholder.Engine.Present` (`engine_present.go`), `eudiholder.Formats()` |
 | Verifier / issuer trust without per-org storage | `eudiholder.NewVerifierTrust`, `eudiholder.NewIssuerTrust` (`verifiertrust.go`) |
-| Local relying party for dev and tests | `internal/devverifier` (identity, JAR signing, response verification), `cmd/devverifier` (HTTP), `dev-setup/devverifier/` (checked-in dev chain) |
+| Relying-party crypto (JAR signing, response verification), shared with the org-to-org sender | `internal/relyingparty` |
+| Local relying party for dev and tests | `internal/devverifier` (identity), `cmd/devverifier` (HTTP), `dev-setup/devverifier/` (checked-in dev chain) |
 | Audit vocabulary | `audit.Presentation*`, `audit.TargetPresentationTransaction` |
+| Admin approval queue (#113) | `Service.PendingApprovals` / `Approve` / `Deny`, `GET\|POST /orgs/{slug}/openid4vp/requests…` |
 | Wallet metadata | `GET /.well-known/oauth-authorization-server` (root mux, via `server.RootRegisterer`) |
 | Browser entry point | SPA routes `/openid4vp` and `/openid4vp/:id` (`frontend/src/routes/openid4vp*.tsx`) |
 | Login return target | `frontend/src/lib/return-to.ts` (`safeReturnTo`, `loginPathFor`) |
@@ -47,6 +53,11 @@ of a browser, and the organization is bound at receipt instead of picked by a lo
     │                                │                                      [AUTO_PRESENT] Present →
     │◀──────── direct_post (vp_token, state) ─────────────────────────────  direct_post → completed
     │──────── {redirect_uri} ───────▶ "Return to verifier"
+
+                                       admin console (org-scoped, no browser above)
+                                       │──GET …/openid4vp/requests──────────▶ list org_selected
+                                       │──POST …/requests/{id}/approve─────▶ Present → direct_post → completed
+                                       │──POST …/requests/{id}/decline─────▶ denied, nothing sent
 ```
 
 - **Only the opaque id leaves the backend.** `client_id`, `request_uri`, the Request Object,
@@ -110,15 +121,44 @@ their URL before they can reach a log line.
 not supporting the post method will send a GET request"); anything else →
 `invalid_request_uri_method`. A by-value `request`, both, or neither → `invalid_request`.
 
-## 5. Completion is gated, and the gate is not built
+## 5. Completion is gated: an admin decides
 
-`POST …/select` records `org_selected` and stops. That is where #113's consent/approval layer
-decides who may let the presentation go out. `OPENID4VP_PRESENTER_AUTO_PRESENT=true` (dev /
-CI) skips the wait: `Holder.Present(orgID, dcql, nonce, audience=client_id)` → response →
+`POST …/select` records `org_selected` and stops there — nothing is built or sent to the
+verifier yet. `Service.PendingApprovals(orgID)` lists an organization's `org_selected`
+transactions (`GET /orgs/{slug}/openid4vp/requests`, admin-gated, member-invisible); an
+admin decides with `Approve` (`POST …/requests/{id}/approve`) or `Deny`
+(`POST …/requests/{id}/decline`). Both re-check the transaction still belongs to `orgID` and
+is still `org_selected` before acting, so an admin cannot approve another organization's
+queue or a transaction someone else already decided — that call fails with
+`transaction_not_pending` (409), the same conflict `select` itself returns for a reused id.
+`Approve` does that check as an atomic claim (`Store.ClaimPendingForOrg`, `org_selected` →
+the internal `approving` status `EffectiveStatus` folds back to `org_selected`) rather than a
+plain read, so two concurrent Approve calls on the same transaction cannot both pass it and
+both reach the verifier. `Deny` claims and denies in the same single write
+(`Store.DenyPendingForOrg`, scoped to `org_selected` only): a plain read-then-act let a
+concurrent `Approve` claim the row between Deny's check and its write, so Deny still marked it
+denied after the verifier had already received the response. Scoping the write to
+`org_selected` means it never matches a row `Approve` has already claimed.
+
+`Approve` runs the identical `present` step `OPENID4VP_PRESENTER_AUTO_PRESENT=true` (dev / CI)
+takes right after selection, just gated behind the admin's click instead of running
+automatically: `Holder.Present(orgID, dcql, nonce, audience=client_id)` → response →
 `completed`, returning the verifier's `redirect_uri` (validated absolute http(s)) for the
 "return to verifier" button. A failure consumes the row as `denied` with the failing step as
 reason — one nonce, one attempt. An org that holds nothing satisfying a required part of the
-query is `denied` with reason `no_matching_credential` and 422 to the browser.
+query is `denied` with reason `no_matching_credential` and 422 to the browser. `Deny` is the
+same terminal `denied` state, without ever calling the holder.
+
+The queue list (`pendingRequestView`) carries the transaction's row id, the verifier identity,
+its expiry and a summary of what an approval would share (`requestedCredentials`: per
+credential query the acceptable vcts and the claim paths, `requested.go`) — never the raw DCQL
+query, nonce or response material. The summary is admin-only; the public `status` stays as
+minimal as before.
+
+What this is **not**: a fine-grained permission (any `admin`, not a distinct `approvals`
+role), a policy engine (no auto-approve/auto-decline rules), or four-eyes/dual-control — see
+§9. A transaction that arrived over QERDS expires after `OPENID4VP_ORG_REQUEST_TTL` (default a
+week), not `OPENID4VP_TRANSACTION_TTL`: it waits for an admin, not for an open browser.
 
 **`Engine.Present`** (`eudiholder/engine_present.go`) is irmago's holder pipeline driven
 headlessly: `eudi_sdjwt_dcql.SdJwtVcDcqlHandler` over the org's storage finds candidates
@@ -149,7 +189,7 @@ signs with, which is what `vp_formats_supported` publishes.
 | `OPENID4VP_TRANSACTION_TTL` | `5m` | Invocation → response; shorter than the outbound 15 m on purpose |
 | `OPENID4VP_PRESENTER_ALLOW_INSECURE_HTTP` | `false` | Dev: http + private-network verifier URLs |
 | `OPENID4VP_PRESENTER_ALLOW_UNVERIFIED_REQUEST_OBJECTS` | `false` | Dev: `UnverifiedDecoder` instead of `RefusingValidator` |
-| `OPENID4VP_PRESENTER_AUTO_PRESENT` | `false` | Dev: complete right after selection (stands in for #113) |
+| `OPENID4VP_PRESENTER_AUTO_PRESENT` | `false` | Dev: complete right after selection, skipping even the admin approval queue (#113, §5) |
 | `OPENID4VP_VERIFIER_TRUST_CHAIN` | empty | Extra relying-party root(s), PEM content, on top of the pinned Yivi anchors |
 
 `compose.override.yaml` turns on insecure-http and auto-present for the dev stack, keeps
@@ -227,13 +267,20 @@ dev flag is needed there. `cmd/devverifier` loads the identity from
   the **verifying** validator and a fake relying party signing real JARs: pre-auth
   start/status, 401 on orgs, membership-only picker, 403 for a non-member org, delivered
   `vp_token` + `state`, 409 on reuse, audit trail without query/response material, user
-  binding, rejection matrix with no rows persisted, well-known on the root mux.
+  binding, rejection matrix with no rows persisted, well-known on the root mux. The approval
+  queue (§5) runs under `setupManualApproval` (`OPENID4VP_PRESENTER_AUTO_PRESENT` off): a
+  member cannot see or decide the queue (403), an admin's approve delivers exactly what
+  auto-present would have and a second approve/decline finds nothing pending (409), and
+  decline delivers nothing to the verifier.
 - Frontend: `return-to.test.ts`, `openid4vp-invocation.test.ts`.
 
 ## 9. Open
 
-- **#113**: replace `OPENID4VP_PRESENTER_AUTO_PRESENT` with the consent layer's decision at
-  `org_selected`; the `PresentationDenied` audit action is already there for its refusals.
+- **#113 remainder**: the approval decision itself is built (§5), gated on `admin` — the
+  finer `approvals` permission the RBAC design (`.ai/plans/rbac-model.md`, #115) sketches is
+  not in `main` (`RequirePermission` doesn't exist yet), so this reuses `RequireOrgAdmin`
+  like every other admin-only route; a policy engine (auto-approve/auto-decline rules) and
+  four-eyes/dual-control are not built.
 - Presenting to the hosted Yivi verifier needs a relying-party certificate that authorizes
   organization credential types; today its certificate lists `pbdf-staging.*` only.
 - A `wallet_nonce`-driven `post` fetch (sending `wallet_metadata`) if a verifier ever

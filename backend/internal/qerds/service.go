@@ -147,7 +147,7 @@ func (s *Service) notifyConsumer(ctx context.Context, orgID uuid.UUID, in qerdsp
 // organization's default". A non-empty from must be one of the org's own
 // addresses (ErrSenderNotOwned otherwise).
 func (s *Service) Send(ctx context.Context, orgID uuid.UUID, from, recipient, subject, body string, attachments []qerdsprovider.Attachment) (Message, error) {
-	sender, err := s.resolveSender(ctx, orgID, from)
+	sender, err := s.ResolveSender(ctx, orgID, from)
 	if err != nil {
 		return Message{}, err
 	}
@@ -193,9 +193,11 @@ func (s *Service) Send(ctx context.Context, orgID uuid.UUID, from, recipient, su
 	return msg, nil
 }
 
-// resolveSender picks the address a message is sent from: the org default when
+// ResolveSender picks the address a message is sent from: the org default when
 // from is empty, otherwise the chosen address — which must be one the org owns.
-func (s *Service) resolveSender(ctx context.Context, orgID uuid.UUID, from string) (Address, error) {
+// Exported for a caller that must know the sending address before it builds
+// the body, such as a presentation request whose certificate names it.
+func (s *Service) ResolveSender(ctx context.Context, orgID uuid.UUID, from string) (Address, error) {
 	if from == "" {
 		return s.addresses.DefaultAddress(ctx, orgID)
 	}

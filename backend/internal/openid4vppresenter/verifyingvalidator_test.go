@@ -5,18 +5,20 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/devverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/relyingparty"
 )
 
-func signedRequest(t *testing.T, id devverifier.Identity, mutate func(*devverifier.Request)) []byte {
+func signedRequest(t *testing.T, id devverifier.Identity, mutate func(*relyingparty.Request)) []byte {
 	t.Helper()
-	dcql, err := devverifier.SimpleDCQL("kvk", "nl.kvk.registration", []string{"company_name"})
+	dcql, err := relyingparty.SimpleDCQL("kvk", "nl.kvk.registration", []string{"company_name"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := devverifier.Request{
+	req := relyingparty.Request{
 		Nonce:        "n-0S6_WzA2Mj",
 		State:        "abc",
 		ResponseURI:  "https://verifier.test/response",
@@ -26,7 +28,7 @@ func signedRequest(t *testing.T, id devverifier.Identity, mutate func(*devverifi
 	if mutate != nil {
 		mutate(&req)
 	}
-	jar, err := devverifier.SignRequestObject(id, req)
+	jar, err := relyingparty.SignRequestObject(id.Signer(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +65,7 @@ func TestVerifyingValidatorAcceptsTrustedChain(t *testing.T) {
 		t.Errorf("DCQLQuery not carried over: %s", ro.DCQLQuery)
 	}
 
-	named, err := v.Validate(context.Background(), id.ClientID(), signedRequest(t, id, func(r *devverifier.Request) { r.ClientName = "Acme Verifier" }))
+	named, err := v.Validate(context.Background(), id.ClientID(), signedRequest(t, id, func(r *relyingparty.Request) { r.ClientName = "Acme Verifier" }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,8 +96,8 @@ func TestVerifyingValidatorRejects(t *testing.T) {
 		{"client_id names another host than the SAN", "x509_san_dns:impostor.test", good},
 		{"chain ends in an untrusted root", other.ClientID(), signedRequest(t, other, nil)},
 		{"tampered payload", id.ClientID(), tampered},
-		{"structural rule still applies (http response_uri)", id.ClientID(), signedRequest(t, id, func(r *devverifier.Request) { r.ResponseURI = "http://verifier.test/r" })},
-		{"direct_post.jwt without keys", id.ClientID(), signedRequest(t, id, func(r *devverifier.Request) { r.ResponseMode = "direct_post.jwt" })},
+		{"structural rule still applies (http response_uri)", id.ClientID(), signedRequest(t, id, func(r *relyingparty.Request) { r.ResponseURI = "http://verifier.test/r" })},
+		{"direct_post.jwt without keys", id.ClientID(), signedRequest(t, id, func(r *relyingparty.Request) { r.ResponseMode = "direct_post.jwt" })},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,11 +113,11 @@ func TestVerifyingValidatorAcceptsEncryptedResponseMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := devverifier.NewEncryptionKey()
+	key, err := relyingparty.NewEncryptionKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ro, err := newVerifying(t, id).Validate(context.Background(), id.ClientID(), signedRequest(t, id, func(r *devverifier.Request) {
+	ro, err := newVerifying(t, id).Validate(context.Background(), id.ClientID(), signedRequest(t, id, func(r *relyingparty.Request) {
 		r.ResponseMode = "direct_post.jwt"
 		r.EncryptionKey = &key.PublicKey
 	}))
@@ -124,5 +126,68 @@ func TestVerifyingValidatorAcceptsEncryptedResponseMode(t *testing.T) {
 	}
 	if ro.ResponseMode != "direct_post.jwt" {
 		t.Errorf("ResponseMode = %q", ro.ResponseMode)
+	}
+}
+
+// An organization identity minted by a requester CA (x509_hash, no DNS name)
+// verifies against that CA's root, and the certificate's own statements — the
+// organization and the QERDS address it may send from — come out as the
+// certified fields ReceiveFromQERDS binds on, whatever client_name the request
+// claims for itself.
+func TestVerifyingValidatorCertifiesOrganizationIdentity(t *testing.T) {
+	ca, err := relyingparty.NewCA("Test Requester CA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ca.IssueOrganization("Acme B.V.", "acme@qerds.localhost", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(signer.ClientID, "x509_hash:") {
+		t.Fatalf("client_id = %q, want an x509_hash identifier", signer.ClientID)
+	}
+	trust, err := eudiholder.NewVerifierTrust(ca.RootPEM(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dcql, err := relyingparty.SimpleDCQL("kvk", "nl.kvk.registration", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar, err := relyingparty.SignRequestObject(signer, relyingparty.Request{
+		Nonce: "n-1", State: "s", ResponseURI: "https://acme.test/response", ResponseMode: "direct_post",
+		DCQLQuery: dcql, ClientName: "Someone Else",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ro, err := NewVerifyingValidator(trust, Policy{}).Validate(context.Background(), signer.ClientID, []byte(jar))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if ro.CertifiedName != "Acme B.V." {
+		t.Errorf("CertifiedName = %q, want the certificate's organization", ro.CertifiedName)
+	}
+	if len(ro.CertifiedAddresses) != 1 || ro.CertifiedAddresses[0] != "acme@qerds.localhost" {
+		t.Errorf("CertifiedAddresses = %v, want the sending address", ro.CertifiedAddresses)
+	}
+
+	// Another CA's identity for the same organization is not trusted.
+	other, err := relyingparty.NewCA("Other CA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged, err := other.IssueOrganization("Acme B.V.", "acme@qerds.localhost", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forgedJAR, err := relyingparty.SignRequestObject(forged, relyingparty.Request{
+		Nonce: "n-1", State: "s", ResponseURI: "https://acme.test/response", ResponseMode: "direct_post", DCQLQuery: dcql,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewVerifyingValidator(trust, Policy{}).Validate(context.Background(), forged.ClientID, []byte(forgedJAR)); !errors.Is(err, ErrInvalidRequestObject) {
+		t.Errorf("untrusted CA: err = %v, want %v", err, ErrInvalidRequestObject)
 	}
 }
