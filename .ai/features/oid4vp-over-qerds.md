@@ -60,7 +60,7 @@ Routes of the sender slice:
 |---|---|
 | `POST /orgs/{slug}/openid4vp/outbound` `{from?, recipient, credentials:[{vct, claims}]}` | admin |
 | `GET /orgs/{slug}/openid4vp/outbound`, `GET …/outbound/{id}` | admin |
-| `GET /orgs/{slug}/openid4vp/credential-types` — the trust scheme's catalogue | admin |
+| `GET /orgs/{slug}/openid4vp/credential-types` (the trust scheme's catalogue) | admin |
 | `GET /openid4vp/outbound/{id}/request-object` (request_uri) | public — the receiving wallet |
 | `POST /openid4vp/outbound/{id}/response` (response_uri, `direct_post`) | public — the receiving wallet |
 
