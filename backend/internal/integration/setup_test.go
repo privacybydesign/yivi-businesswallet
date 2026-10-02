@@ -24,6 +24,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/devverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
@@ -32,6 +33,8 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
@@ -40,6 +43,10 @@ import (
 )
 
 const sessionTTL = time.Hour
+
+// proofingTestEncryptionKey is a throwaway AES-256 key (hex 32 bytes) sealing the
+// test orgs' IPS API keys.
+const proofingTestEncryptionKey = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
 
 // disclosureToken is the client-facing presentation id used across these tests.
 // setup seeds a presentation_sessions row mapping it to a verifier transaction id
@@ -242,7 +249,25 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 	}
 	presenterHandler := openid4vppresenter.NewHandler(presenterService, presenterMetadata, requireUser, orgHandler.Authorize)
 
-	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler))
+	// Identity proofing against the in-process IPS stub; nil mailer, like the org
+	// handler's (request e-mail delivery is best-effort and not exercised here).
+	proofingCipher, err := crypto.NewCipher(proofingTestEncryptionKey)
+	if err != nil {
+		t.Fatalf("proofing cipher: %v", err)
+	}
+	proofingService := proofing.NewService(proofing.Stores{
+		Settings:  proofing.NewSettingsStore(pool, audit.NewDBRecorder()),
+		Requests:  proofing.NewRequestStore(pool, audit.NewDBRecorder(), proofingCipher),
+		Customers: proofing.NewCustomerStore(pool, audit.NewDBRecorder()),
+		APIKeys:   proofing.NewAPIKeyStore(pool, audit.NewDBRecorder()),
+		Webhooks:  proofing.NewWebhookStore(pool, audit.NewDBRecorder(), proofingCipher),
+		Events:    audit.NewReader(pool),
+	}, proofingprovider.NewStub(), fake, nil)
+	proofingService.SetHostedBaseURL("http://wallet.test/p/")
+	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
+	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool))
+
+	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler, proofingHandler))
 	t.Cleanup(srv.Close)
 
 	jar, err := cookiejar.New(nil)

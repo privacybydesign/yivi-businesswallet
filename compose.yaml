@@ -101,6 +101,20 @@ services:
       ATTESTATION_ISSUER_INSTANCE: ${ATTESTATION_ISSUER_INSTANCE:-}
       ATTESTATION_ISSUER_ADMIN_TOKEN: ${ATTESTATION_ISSUER_ADMIN_TOKEN:-}
       ATTESTATION_ISSUER_PING_CREDENTIAL: ${ATTESTATION_ISSUER_PING_CREDENTIAL:-}
+      # Identity proofing runs in the backend's own engine (`engine`, the
+      # default) or the in-memory `stub`. The encryption key (hex 32 bytes)
+      # seals the sessions' evidence and the customer secrets at rest.
+      IDENTITY_PROOFING_PROVIDER: ${IDENTITY_PROOFING_PROVIDER:-}
+      IDENTITY_PROOFING_ENCRYPTION_KEY: ${IDENTITY_PROOFING_ENCRYPTION_KEY:-}
+      # Where the Idem app reaches /api/v1/app; empty is APP_BASE_URL. A phone
+      # needs an address it can reach, e.g. http://<LAN-IP>:8080.
+      IDENTITY_PROOFING_PUBLIC_URL: ${IDENTITY_PROOFING_PUBLIC_URL:-}
+      # The Regula Face API for face verification; empty disables it.
+      REGULA_FACE_API_URL: ${REGULA_FACE_API_URL:-}
+      REGULA_FACE_API_PUBLIC_URL: ${REGULA_FACE_API_PUBLIC_URL:-}
+      REGULA_FACE_MATCH_THRESHOLD: ${REGULA_FACE_MATCH_THRESHOLD:-}
+      # The wallet's own webhook endpoint; empty derives it from APP_BASE_URL.
+      IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL: ${IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL:-}
     depends_on:
       db:
         condition: service_healthy

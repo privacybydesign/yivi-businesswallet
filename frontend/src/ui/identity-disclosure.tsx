@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import QRCode from "qrcode";
 import * as React from "react";
 import { getSessionStatus, startDisclosureSession } from "../api/auth";
+import { yiviUniversalLink } from "../lib/yivi-universal-link";
 import { Button } from "./button";
 import { Icon } from "./icon";
 
@@ -13,20 +14,12 @@ const POLL_INTERVAL_MS = 1000;
 // than spinning indefinitely against a QR the wallet no longer accepts.
 const SESSION_TIMEOUT_MS = 120_000;
 const QR_SIZE = 240;
-const UNIVERSAL_LINK_PREFIX = "https://open.yivi.app/-/openid4vp?";
 const DONE_STATUS = "DONE";
 
 // The disclosure lifecycle as far as this component can observe it: starting the
 // session, waiting for the holder to complete it, or expired (bounded by our own
 // timeout). A hard start/poll failure is reported to the caller via onAborted.
 type DisclosurePhase = "starting" | "waiting" | "expired";
-
-// universalLink rewrites the openid4vp:// deeplink into a Yivi universal link,
-// which opens the wallet on this device and is scannable as a QR from another.
-function universalLink(walletLink: string): string {
-  const query = walletLink.split("?")[1] ?? "";
-  return `${UNIVERSAL_LINK_PREFIX}${query}`;
-}
 
 interface Props {
   // Backend endpoint that starts the OpenID4VP session and returns { id, walletLink }.
@@ -103,7 +96,7 @@ export function IdentityDisclosure({
       }
       if (cancelled) return;
 
-      const link = universalLink(session.walletLink);
+      const link = yiviUniversalLink(session.walletLink);
       setWalletUrl(link);
       try {
         setQrDataUrl(

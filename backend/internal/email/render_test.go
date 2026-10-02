@@ -1,6 +1,7 @@
 package email
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -500,5 +501,69 @@ func TestDefaultTemplateReturnsACopy(t *testing.T) {
 	fresh, _ := DefaultTemplate(KindInvitation, LocaleEN)
 	if got := fresh.Blocks[blockIndex(t, fresh, BlockHeading)].Text; got != original {
 		t.Fatalf("mutating a returned template changed the shipped default: %q", got)
+	}
+}
+
+func TestRenderQRBlockEmbedsTheLinkAsAnInlineImage(t *testing.T) {
+	tpl, _ := DefaultTemplate(KindIdentityProofingRequested, LocaleEN)
+	const link = "vcmrtd://verify?handover=abc&api=https%3A%2F%2Fproofing.example.org"
+	body, err := Render(KindIdentityProofingRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
+		varOrgName: "Acme BV", varRequesterName: "Sam", varProofingURL: link, varValidMinutes: "10",
+		varSupportContact: "", varPrivacyURL: "",
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if len(body.InlineQR) != 1 || body.InlineQR[0].ContentType != qrContentType ||
+		!bytes.HasPrefix(body.InlineQR[0].Bytes, []byte("\x89PNG")) {
+		t.Fatalf("InlineQR = %+v, want one PNG", body.InlineQR)
+	}
+	if !strings.Contains(body.HTMLBody, `src="cid:`+body.InlineQR[0].ContentID+`"`) {
+		t.Errorf("the HTML does not reference the QR image:\n%s", body.HTMLBody)
+	}
+	if !strings.Contains(body.TextBody, link) {
+		t.Errorf("the text part does not carry the link the QR encodes:\n%s", body.TextBody)
+	}
+
+	preview := inlinePreviewLogo(body)
+	if preview.InlineQR != nil || !strings.Contains(preview.HTMLBody, `src="data:image/png;base64,`) {
+		t.Errorf("the preview does not inline the QR image")
+	}
+}
+
+// The proofing link is a vcmrtd deep link and nothing else: an http(s) URL or
+// another scheme in its place is refused, not delivered.
+func TestRenderHoldsAnAppLinkVariableToItsScheme(t *testing.T) {
+	tpl, _ := DefaultTemplate(KindIdentityProofingRequested, LocaleEN)
+	for _, link := range []string{"https://wallet.example.org/proof/abc", "javascript:alert(1)", "vcmrtd:verify"} {
+		_, err := Render(KindIdentityProofingRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
+			varOrgName: "Acme BV", varRequesterName: "Sam", varProofingURL: link, varValidMinutes: "10",
+			varSupportContact: "", varPrivacyURL: "",
+		})
+		if err == nil {
+			t.Errorf("Render accepted %q as the proofing link", link)
+		}
+	}
+}
+
+// Only the variable that declares the scheme may carry it: an http(s) variable
+// holding a vcmrtd link still fails.
+func TestRenderRefusesAnAppLinkInAnHTTPVariable(t *testing.T) {
+	tpl, _ := DefaultTemplate(KindVogRequested, LocaleEN)
+	_, err := Render(KindVogRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
+		varOrgName: "Acme BV", varVogURL: "vcmrtd://verify?handover=abc", varReason: "Expired.",
+	})
+	if err == nil {
+		t.Error("Render accepted a vcmrtd link as an http(s) URL variable")
+	}
+}
+
+func TestValidateTemplateRejectsAQRBlockWithoutAURLVariable(t *testing.T) {
+	tpl := Template{Subject: "x", Blocks: []Block{
+		{Type: BlockParagraph, Text: "Hello"},
+		{Type: BlockQR, URL: "{{requesterName}}"},
+	}}
+	if err := ValidateTemplate(KindIdentityProofingRequested, tpl); err == nil {
+		t.Error("a QR block on a non-URL variable was accepted")
 	}
 }

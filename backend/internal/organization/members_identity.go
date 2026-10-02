@@ -71,6 +71,17 @@ func (h *Handler) requestIdentification(w http.ResponseWriter, r *http.Request) 
 	return h.requestIdentificationFor(w, r, []uuid.UUID{userID}, req.Reason)
 }
 
+// TODO implement for members identity proofing, instaed of new pae for it
+
+// func (h *Handler) requestIdentityProofing(w http.ResponseWriter, r *http.Request) error {
+// 	userID, err := uuid.Parse(r.PathValue("userId"))
+// 	if err != nil {
+// 		return badRequest("invalid_id", "invalid user id")
+// 	}
+// 	// TODO: Implement identity proofing request logic, still need to choose a flow somewhere then this for members of org
+// 	return nil
+// }
+
 type requestIdentificationBulkRequest struct {
 	UserIDs []string `json:"userIds"`
 	Reason  string   `json:"reason"`

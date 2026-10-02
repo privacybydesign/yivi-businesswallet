@@ -139,3 +139,30 @@ func TestSPA_DisabledWhenNoStaticDir(t *testing.T) {
 		t.Fatalf("expected 404 with static serving disabled, got %d", rec.Code)
 	}
 }
+
+// framePolicy sets a CSP on /framed only, as a feature owning that route would.
+type framePolicy struct{ registered bool }
+
+func (f *framePolicy) Register(*http.ServeMux) { f.registered = true }
+
+func (*framePolicy) PageHeaders(r *http.Request, h http.Header) {
+	if r.URL.Path == "/framed" {
+		h.Set("Content-Security-Policy", "frame-ancestors https://portal.example")
+	}
+}
+
+func TestSPA_AppliesAFeaturesPageHeadersToItsRoutesOnly(t *testing.T) {
+	h := New(stubPinger{}, writeStaticSite(t), &framePolicy{})
+
+	for path, want := range map[string]string{
+		"/framed":        "frame-ancestors https://portal.example",
+		"/elsewhere":     "",
+		"/assets/app.js": "",
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := rec.Header().Get("Content-Security-Policy"); got != want {
+			t.Errorf("%s: CSP = %q, want %q", path, got, want)
+		}
+	}
+}

@@ -55,7 +55,7 @@ export default function OpenID4VPTransaction(): React.JSX.Element | null {
         <LanguageSwitcher />
       </div>
       <div className="mx-auto w-full max-w-md px-6 py-12">
-        <Card className="w-full p-8">
+        <Card className="w-full p-6 sm:p-8">
           <div className="flex justify-center">
             <Logo />
           </div>

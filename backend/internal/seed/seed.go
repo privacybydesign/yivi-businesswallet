@@ -390,6 +390,10 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 	if err := seedHeldAttestations(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
+	// The identity proofing use cases the demo org runs for its customers.
+	if err := seedProofing(ctx, pool, demoOrg.ID, usersByEmail["admin@yivi.app"].ID); err != nil {
+		return err
+	}
 
 	// Gemeente Nijmegen is the first tenant whose attestation catalogue is a
 	// public-sector permit rather than an HR/supplier credential (issue #245): the

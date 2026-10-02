@@ -5,14 +5,26 @@ import {
   useDeleteOrganizationMutation,
   useOrganizationsQuery,
 } from "../api/organization.queries";
-import { Avatar, Button, Card, Input, Table, TopBar } from "../ui";
+import {
+  useProofingPausesQuery,
+  useSetPlatformProofingPauseMutation,
+} from "../api/identity-proofing.queries";
+import type { ProofingPause } from "../api/identity-proofing";
+import { Avatar, Button, Card, Input, Table, Tag, TopBar } from "../ui";
 import * as React from "react";
+
+const COLUMNS = 5;
 
 export default function AllOrganizations(): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data, isPending, isError, error } = useOrganizationsQuery();
   const del = useDeleteOrganizationMutation();
+  const pauses = useProofingPausesQuery();
+  const pauseOf = useMemo(
+    () => new Map((pauses.data ?? []).map((p) => [p.organizationId, p])),
+    [pauses.data],
+  );
   const [query, setQuery] = useState("");
 
   function handleDelete(
@@ -60,7 +72,7 @@ export default function AllOrganizations(): React.JSX.Element {
         }
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
@@ -78,15 +90,20 @@ export default function AllOrganizations(): React.JSX.Element {
                   {t("allOrganizations.columnKvk")}
                 </Table.HeaderCell>
                 <Table.HeaderCell>{t("common.slug")}</Table.HeaderCell>
+                <Table.HeaderCell>
+                  {t("identityProofing.pause.platformColumn")}
+                </Table.HeaderCell>
                 <Table.HeaderCell className="text-right">
                   {t("allOrganizations.columnActions")}
                 </Table.HeaderCell>
               </Table.Head>
               <Table.Body>
                 {isPending ? (
-                  <Table.State colSpan={4}>{t("common.loading")}</Table.State>
+                  <Table.State colSpan={COLUMNS}>
+                    {t("common.loading")}
+                  </Table.State>
                 ) : filtered.length === 0 ? (
-                  <Table.State colSpan={4}>
+                  <Table.State colSpan={COLUMNS}>
                     {data && data.length > 0
                       ? t("allOrganizations.noMatch")
                       : t("allOrganizations.none")}
@@ -120,6 +137,12 @@ export default function AllOrganizations(): React.JSX.Element {
                       <Table.Cell className="text-ink-soft font-mono text-[12px]">
                         {org.slug}
                       </Table.Cell>
+                      <Table.Cell>
+                        <ProofingPauseCell
+                          orgId={org.id}
+                          pause={pauseOf.get(org.id)}
+                        />
+                      </Table.Cell>
                       <Table.Cell className="text-right">
                         <Button
                           variant="dangerGhost"
@@ -139,5 +162,48 @@ export default function AllOrganizations(): React.JSX.Element {
         )}
       </div>
     </>
+  );
+}
+
+// An org's identity proofing as the platform admin sees it, with their pause.
+// The org's own switch shows but is theirs to lift.
+function ProofingPauseCell({
+  orgId,
+  pause,
+}: {
+  orgId: string;
+  pause: ProofingPause | undefined;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const set = useSetPlatformProofingPauseMutation();
+  const byPlatform = pause?.platformPausedAt !== undefined;
+  const byOrganization = pause?.orgPausedAt !== undefined;
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2"
+      // The row opens the org; this cell's button must not.
+      onClick={(event) => event.stopPropagation()}
+    >
+      {byPlatform ? (
+        <Tag tone="amber">{t("identityProofing.pause.pausedByPlatform")}</Tag>
+      ) : byOrganization ? (
+        <Tag tone="default">
+          {t("identityProofing.pause.pausedByOrganization")}
+        </Tag>
+      ) : (
+        <Tag tone="green">{t("identityProofing.pause.active")}</Tag>
+      )}
+      <Button
+        size="sm"
+        variant="secondary"
+        loading={set.isPending}
+        onClick={() => set.mutate({ orgId, paused: !byPlatform })}
+      >
+        {byPlatform
+          ? t("identityProofing.pause.platformResume")
+          : t("identityProofing.pause.platformPause")}
+      </Button>
+    </div>
   );
 }

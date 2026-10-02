@@ -23,6 +23,8 @@ services:
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-admin@yivi.app}
       # Claim links in dev point at the local frontend.
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
+      # The backend delivers default-endpoint webhooks to itself, inside its container.
+      IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL: ${IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL:-http://localhost:8080/api/v1/identity-proofing/default-webhook}
       # Attestation issuer: stub by default. Set ATTESTATION_ISSUER=veramo (+ token)
       # in .env to issue against the hosted Veramo staging issuer.
       ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}

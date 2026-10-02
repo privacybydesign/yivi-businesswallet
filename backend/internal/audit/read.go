@@ -42,6 +42,8 @@ type Event struct {
 	TargetID   string          `json:"targetId"`
 	Metadata   json.RawMessage `json:"metadata"`
 	Actor      *EventActor     `json:"actor"`
+	// ActorLabel names a non-user actor, e.g. `api_key:<prefix>`.
+	ActorLabel *string `json:"actorLabel"`
 }
 
 type Page struct {
@@ -104,6 +106,13 @@ func (r *Reader) ListForMember(ctx context.Context, orgID, userID uuid.UUID, aft
 	return r.page(ctx, filter, []any{orgID, userID.String(), userID}, after, limit)
 }
 
+// ListForTarget returns the org's events about one target (e.g. one identity
+// proofing request), newest first.
+func (r *Reader) ListForTarget(ctx context.Context, orgID uuid.UUID, targetType, targetID string, after *Cursor, limit int) (Page, error) {
+	filter := `a.organization_id = $1 AND a.target_type = $2 AND a.target_id = $3`
+	return r.page(ctx, filter, []any{orgID, targetType, targetID}, after, limit)
+}
+
 func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, after *Cursor, limit int) (Page, error) {
 	switch {
 	case limit <= 0:
@@ -126,7 +135,7 @@ func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, afte
 	q := fmt.Sprintf(`
 		SELECT a.id, a.occurred_at, a.action, a.target_type, a.target_id, a.metadata,
 		       u.id, u.preferred_name, u.given_names, u.last_name,
-		       u.avatar_bytes IS NOT NULL, u.avatar_updated_at
+		       u.avatar_bytes IS NOT NULL, u.avatar_updated_at, a.actor_label
 		FROM audit_events a
 		LEFT JOIN users u ON u.id = a.actor_user_id
 		WHERE %s
@@ -152,7 +161,7 @@ func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, afte
 			avatarUpdate *time.Time
 		)
 		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.Action, &e.TargetType, &e.TargetID, &meta,
-			&actorID, &preferred, &given, &last, &hasAvatar, &avatarUpdate); err != nil {
+			&actorID, &preferred, &given, &last, &hasAvatar, &avatarUpdate, &e.ActorLabel); err != nil {
 			return Page{}, fmt.Errorf("audit: list events scan: %w", err)
 		}
 		e.Metadata = meta

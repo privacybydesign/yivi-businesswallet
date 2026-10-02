@@ -145,6 +145,25 @@ func TestSendUsesTheDeploymentDefaultLocale(t *testing.T) {
 	}
 }
 
+func TestSendIdentityProofingRequestedUsesTheSendersLocale(t *testing.T) {
+	for _, tc := range []struct {
+		locale Locale
+		want   string
+	}{{LocaleNL, `<html lang="nl"`}, {LocaleEN, `<html lang="en"`}, {"", `<html lang="nl"`}} {
+		sender := &recordingSender{}
+		svc := newTestService(sender, nil, LocaleNL)
+		if err := svc.SendIdentityProofingRequested(context.Background(), uuid.New(), ProofingMail{
+			To: "person@example.org", OrgName: "Acme BV", RequesterName: "Sam",
+			DeepLink: "vcmrtd://verify?handover=abc", ValidFor: time.Minute, Locale: tc.locale,
+		}); err != nil {
+			t.Fatalf("locale %q: %v", tc.locale, err)
+		}
+		if !strings.Contains(sender.sent[0].HTMLBody, tc.want) {
+			t.Errorf("locale %q: mail not marked %s", tc.locale, tc.want)
+		}
+	}
+}
+
 // An unset locale must still produce a message rather than an empty template
 // lookup, so the zero-value service behaves like an English one.
 func TestSendWithoutADefaultLocaleFallsBackToEnglish(t *testing.T) {

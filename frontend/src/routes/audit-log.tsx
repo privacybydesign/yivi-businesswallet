@@ -7,6 +7,7 @@ import {
 import { accessMessage } from "../lib/access-message";
 import {
   auditActionLabel,
+  auditActorLabel,
   auditSubject,
   auditTargetLabel,
   auditVisual,
@@ -68,7 +69,7 @@ export default function AuditLog(): React.JSX.Element {
         }
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {org.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
@@ -120,7 +121,7 @@ export default function AuditLog(): React.JSX.Element {
                   ) : (
                     events.map((event) => {
                       const visual = auditVisual(event.action);
-                      const subject = auditSubject(event, dateFormatter);
+                      const subject = auditSubject(event, dateFormatter, t);
                       return (
                         <Table.Row key={event.id}>
                           <Table.Cell>
@@ -148,7 +149,8 @@ export default function AuditLog(): React.JSX.Element {
                               <span className="text-ink truncate">
                                 {event.actor
                                   ? fullName(event.actor)
-                                  : t("auditLog.system")}
+                                  : (auditActorLabel(event.actorLabel, t) ??
+                                    t("auditLog.system"))}
                               </span>
                             </div>
                           </Table.Cell>
