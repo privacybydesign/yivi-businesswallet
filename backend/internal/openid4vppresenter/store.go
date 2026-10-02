@@ -24,10 +24,14 @@ type Store struct {
 	db    database.DB
 	audit audit.Recorder
 	ttl   time.Duration
+	// qerdsTTL bounds a request that arrived over QERDS. It waits in the approval
+	// queue until an admin looks at it, not for a browser that is already open,
+	// so it outlives ttl by hours or days.
+	qerdsTTL time.Duration
 }
 
-func NewStore(db database.DB, recorder audit.Recorder, ttl time.Duration) *Store {
-	return &Store{db: db, audit: recorder, ttl: ttl}
+func NewStore(db database.DB, recorder audit.Recorder, ttl, qerdsTTL time.Duration) *Store {
+	return &Store{db: db, audit: recorder, ttl: ttl, qerdsTTL: qerdsTTL}
 }
 
 const transactionColumns = `
@@ -107,7 +111,7 @@ func (s *Store) CreateForOrganization(ctx context.Context, orgID, sourceMessageI
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT (organization_id, source_message_id) WHERE source_message_id IS NOT NULL DO NOTHING
 		RETURNING ` + transactionColumns
-	expiresAt := time.Now().Add(s.ttl)
+	expiresAt := time.Now().Add(s.qerdsTTL)
 	var (
 		t        Transaction
 		recorded bool
@@ -203,26 +207,117 @@ func (s *Store) SelectOrganization(ctx context.Context, id, orgID uuid.UUID, org
 	return t, nil
 }
 
-// Complete consumes an org_selected transaction as completed: the Authorization
-// Response has been delivered.
+// DenyPendingForOrg atomically denies an org-scoped, org_selected presentation
+// transaction for orgID, in the same one UPDATE that used to be a separate
+// read-then-act check: a plain read let a concurrent Approve claim the row into
+// statusApproving after Deny's check passed but before Deny's write landed, so
+// Deny still marked it denied+consumed after Approve had already started
+// delivering it to the verifier. Scoping this write to org_selected only closes
+// that: it does not match a row Approve has already claimed, so whichever of
+// the two lands first wins and the other gets ErrNotPending. That also covers
+// a transaction that belongs to a different organization, was never selected,
+// or has already been decided or expired — the same answer for all, so an
+// admin cannot use it to probe another organization's queue or learn a decided
+// transaction's outcome this way.
+func (s *Store) DenyPendingForOrg(ctx context.Context, orgID, id uuid.UUID, reason string) error {
+	const q = `
+		UPDATE openid4vp_transactions
+		SET status = $3, consumed_at = now()
+		WHERE id = $1 AND organization_id = $2 AND status = $4 AND consumed_at IS NULL AND expires_at > now()
+		RETURNING ` + transactionColumns
+	return database.InTx(ctx, s.db, func(tx database.Querier) error {
+		t, err := scanTransaction(tx.QueryRow(ctx, q, id, orgID, StatusDenied, StatusOrgSelected))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotPending
+		}
+		if err != nil {
+			return fmt.Errorf("openid4vppresenter: deny %s org %s: %w", id, orgID, err)
+		}
+		return s.audit.Record(ctx, tx, audit.PresentationDenied,
+			audit.Target{Type: audit.TargetPresentationTransaction, ID: t.ID.String(), OrgID: &orgID},
+			audit.Created(map[string]any{"verifier": t.VerifierIdentity, "reason": reason}))
+	})
+}
+
+// ClaimPendingForOrg atomically moves an org-scoped, org_selected transaction to
+// statusApproving for orgID — the same one-time-use guard SelectOrganization
+// uses, so only one caller's UPDATE can match the row. Approve claims with this
+// before it ever reaches the verifier: a plain read let two concurrent Approve
+// calls on the same transaction both pass the check and both deliver the
+// presentation before either terminal write landed. ErrNotPending covers a
+// transaction that belongs to a different organization, was never selected, has
+// already been decided or expired, or was just claimed by a concurrent Approve.
+func (s *Store) ClaimPendingForOrg(ctx context.Context, orgID, id uuid.UUID) (Transaction, error) {
+	const q = `
+		UPDATE openid4vp_transactions
+		SET status = $3
+		WHERE id = $1 AND organization_id = $2 AND status = $4 AND consumed_at IS NULL AND expires_at > now()
+		RETURNING ` + transactionColumns
+	t, err := scanTransaction(s.db.QueryRow(ctx, q, id, orgID, statusApproving, StatusOrgSelected))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Transaction{}, ErrNotPending
+	}
+	if err != nil {
+		return Transaction{}, fmt.Errorf("openid4vppresenter: claim %s org %s: %w", id, orgID, err)
+	}
+	return t, nil
+}
+
+// ListPendingForOrg returns the organization's presentation transactions
+// waiting on the governance layer: a member selected this org, and now an admin
+// must approve or deny before anything reaches the verifier.
+func (s *Store) ListPendingForOrg(ctx context.Context, orgID uuid.UUID) ([]Transaction, error) {
+	const q = `SELECT ` + transactionColumns + ` FROM openid4vp_transactions
+		WHERE organization_id = $1 AND status = $2 AND consumed_at IS NULL AND expires_at > now()
+		ORDER BY expires_at ASC`
+	rows, err := s.db.Query(ctx, q, orgID, StatusOrgSelected)
+	if err != nil {
+		return nil, fmt.Errorf("openid4vppresenter: list pending org %s: %w", orgID, err)
+	}
+	defer rows.Close()
+
+	out := []Transaction{}
+	for rows.Next() {
+		t, err := scanTransaction(rows)
+		if err != nil {
+			return nil, fmt.Errorf("openid4vppresenter: list pending scan: %w", err)
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("openid4vppresenter: list pending rows: %w", err)
+	}
+	return out, nil
+}
+
+// Complete consumes a pending transaction (org_selected, or approving mid an
+// admin's Approve) as completed: the Authorization Response has been delivered.
 func (s *Store) Complete(ctx context.Context, id uuid.UUID) error {
 	return s.consume(ctx, id, StatusCompleted, audit.PresentationCompleted, nil)
 }
 
-// Deny consumes an org_selected transaction as denied, recording why (a short,
-// code-like reason — never response material).
+// Deny consumes a pending transaction (org_selected under Select's auto-present
+// shortcut, or approving mid an admin's Approve) as denied on present()'s own
+// failure paths, recording why (a short, code-like reason — never response
+// material). An admin's direct decision goes through DenyPendingForOrg instead,
+// which is org-scoped and does not match a row Approve has already claimed.
 func (s *Store) Deny(ctx context.Context, id uuid.UUID, reason string) error {
 	return s.consume(ctx, id, StatusDenied, audit.PresentationDenied, map[string]any{"reason": reason})
 }
+
+// consumableFrom lists the pre-terminal statuses consume() (Complete, and
+// present()'s own Deny calls) may act from: org_selected (Select's auto-present
+// shortcut) and approving (Approve's atomic claim, present() resolving it).
+var consumableFrom = []string{StatusOrgSelected, statusApproving}
 
 func (s *Store) consume(ctx context.Context, id uuid.UUID, status, action string, extra map[string]any) error {
 	const q = `
 		UPDATE openid4vp_transactions
 		SET status = $2, consumed_at = now()
-		WHERE id = $1 AND status = $3 AND consumed_at IS NULL
+		WHERE id = $1 AND status = ANY($3) AND consumed_at IS NULL
 		RETURNING ` + transactionColumns
 	return database.InTx(ctx, s.db, func(tx database.Querier) error {
-		t, err := scanTransaction(tx.QueryRow(ctx, q, id, status, StatusOrgSelected))
+		t, err := scanTransaction(tx.QueryRow(ctx, q, id, status, consumableFrom))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotPending
 		}

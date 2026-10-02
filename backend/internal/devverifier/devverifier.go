@@ -1,11 +1,10 @@
-// Package devverifier is the relying-party side of OpenID4VP for local
-// development and tests: it mints an x509_san_dns identity, signs Authorization
-// Request Objects the business wallet's inbound flow fetches, decrypts and
-// verifies the Authorization Response the wallet posts back, and reports what was
-// disclosed. cmd/devverifier wraps it in a small HTTP server for the Compose dev
-// stack; the wallet's own tests use the same helpers to drive its verifying
-// validator against a chain they generated. Nothing here is for production: the
-// hosted Yivi verifier is the real counterpart.
+// Package devverifier is the relying-party identity for local development and
+// tests: it mints or loads an x509_san_dns identity whose Signer signs
+// Authorization Request Objects through internal/relyingparty, which also
+// verifies what the wallet posts back. cmd/devverifier wraps it in a small HTTP
+// server for the Compose dev stack; the wallet's own tests use the same identity
+// to drive its verifying validator against a chain they generated. Nothing here
+// is for production.
 package devverifier
 
 import (
@@ -14,13 +13,14 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
 	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/relyingparty"
 )
 
 const (
@@ -66,14 +66,9 @@ func (id Identity) KeyPEM() ([]byte, error) {
 	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil
 }
 
-// x5c is the chain in the JWS x5c header form: base64 (standard, not URL) DER,
-// leaf first.
-func (id Identity) x5c() []string {
-	out := make([]string, len(id.Chain))
-	for i, c := range id.Chain {
-		out[i] = base64.StdEncoding.EncodeToString(c.Raw)
-	}
-	return out
+// Signer is the identity in the form relyingparty.SignRequestObject signs with.
+func (id Identity) Signer() relyingparty.Signer {
+	return relyingparty.Signer{Key: id.Key, Chain: id.Chain, ClientID: id.ClientID()}
 }
 
 // NewIdentity mints a fresh CA and a relying-party leaf for dnsName under it.

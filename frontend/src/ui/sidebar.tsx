@@ -22,6 +22,7 @@ type NavLabelKey =
   | "nav.attestations"
   | "nav.postguard"
   | "nav.signing"
+  | "nav.credentialRequests"
   | "nav.auditLog"
   | "nav.settings"
   | "nav.adminDashboard"
@@ -39,9 +40,16 @@ interface NavItem {
 
 type NavChild = Omit<NavItem, "icon" | "children">;
 
-// showSigning gates the "Sign documents" item on the org having a CSC signing
-// provider configured (see the sidebar body); it is a plugin, absent otherwise.
-function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
+// Which optional items the org nav shows. signing gates "Sign documents" on the
+// org having a CSC signing provider configured (see the sidebar body); it is a
+// plugin, absent otherwise. admin adds the items only an organization admin can
+// use.
+interface OrgNavVisibility {
+  signing: boolean;
+  admin: boolean;
+}
+
+function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
   const items: NavItem[] = [
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
@@ -67,11 +75,18 @@ function orgNavItems(slug: string, showSigning: boolean): NavItem[] {
     },
     { to: `/${slug}/postguard`, labelKey: "nav.postguard", icon: "lock" },
   );
-  if (showSigning) {
+  if (visible.signing) {
     items.push({
       to: `/${slug}/signing`,
       labelKey: "nav.signing",
       icon: "edit",
+    });
+  }
+  if (visible.admin) {
+    items.push({
+      to: `/${slug}/credential-requests`,
+      labelKey: "nav.credentialRequests",
+      icon: "scan_qrcode",
     });
   }
   items.push(
@@ -96,6 +111,7 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
 ];
 
 const NAV_ICON_SIZE = 16;
+const ORG_ADMIN_ROLE = "admin";
 
 // Whether pathname is the section at base or one of its pages.
 function isWithin(pathname: string, base: string): boolean {
@@ -147,15 +163,18 @@ export function Sidebar({
   );
   const showSigning = Boolean(signing.data?.available);
 
+  // Platform admins outrank any single org; otherwise show the membership role
+  // for the org currently in the URL.
+  const activeOrg = useOrganizationQuery(activeSlug ?? "");
   const navItems = activeSlug
-    ? orgNavItems(activeSlug, showSigning)
+    ? orgNavItems(activeSlug, {
+        signing: showSigning,
+        admin: activeOrg.data?.role === ORG_ADMIN_ROLE,
+      })
     : me.isPlatformAdmin
       ? ADMIN_NAV_ITEMS
       : [];
 
-  // Platform admins outrank any single org; otherwise show the membership role
-  // for the org currently in the URL.
-  const activeOrg = useOrganizationQuery(activeSlug ?? "");
   const roleLabel = me.isPlatformAdmin
     ? t("nav.platformAdmin")
     : activeOrg.data?.role;

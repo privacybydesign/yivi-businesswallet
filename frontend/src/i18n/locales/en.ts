@@ -37,6 +37,7 @@ export const en = {
     attestations: "Attestations",
     postguard: "PostGuard files",
     signing: "Sign documents",
+    credentialRequests: "Credential requests",
     auditLog: "Audit log",
     adminDashboard: "Overview",
     allOrganizations: "Organizations",
@@ -1315,6 +1316,9 @@ export const en = {
     attestationOfferCancelled: "Offer cancelled",
     credentialOfferAccepted: "Credential added to the wallet",
     credentialOfferDeclined: "Offer declined",
+    credentialRequestSent: "Credential request sent",
+    credentialRequestApproved: "Credentials shared",
+    credentialRequestDeclined: "Request declined",
     emailSettingsSaved: "E-mail settings saved",
     emailTestSent: "Test e-mail sent",
     slackSettingsSaved: "Slack settings saved",
@@ -1492,6 +1496,7 @@ export const en = {
       signingCredentials: "Signing credential",
       signingRequests: "Signing request",
       presentationTransaction: "Presentation request",
+      outboundPresentationRequest: "Credential request",
       orgIdentityProofingSettings: "Identity proofing settings",
       identityProofingFlow: "Identity proofing flow",
       identityProofingRequest: "Identity proofing request",
@@ -1599,6 +1604,10 @@ export const en = {
       presentationDenied: "Declined a presentation request",
       presentationExpired: "Presentation request expired",
       presentationRequestReceived: "Received a presentation request over QERDS",
+      presentationRequestSent: "Requested credentials from an organization",
+      presentationResponseReceived:
+        "Received an answer to a credential request",
+      presentationRequestFailed: "Credential request failed",
       identityProofingProvisioned: "Set up identity proofing",
       identityProofingFlowCreated: "Created identity proofing flow",
       identityProofingFlowsConfigured:
@@ -2760,6 +2769,79 @@ export const en = {
   rootEmpty: {
     title: "No organizations yet",
     body: "You are not a member of any organization. Contact your administrator to get access.",
+  },
+  credentialRequests: {
+    title: "Credential requests",
+    subtitle:
+      "Ask other organizations for credentials over secure delivery, and decide on what they ask of you.",
+    newRequest: "Request credentials",
+    adminOnly: "Only administrators can see and decide on credential requests.",
+    loadError: "Could not load credential requests: {{message}}",
+    tabs: {
+      incoming: "Incoming",
+      sent: "Sent",
+    },
+    incoming: {
+      description:
+        "Other organizations asking your organization for credentials. Approving shares exactly what they asked for, from the credentials your organization holds. The requester is named by its certificate.",
+      empty: "No requests are waiting for a decision.",
+      pending: "Awaiting decision",
+      expires: "Expires {{when}}",
+      shares: "Shares: {{claims}}",
+      sharesNoClaims: "Shares that your organization holds this credential",
+      approve: "Approve and share",
+      decline: "Decline",
+      confirmApprove:
+        "Share the requested credentials with {{verifier}}? This cannot be undone.",
+      confirmDecline:
+        "Decline the request from {{verifier}}? Nothing is shared.",
+    },
+    sent: {
+      empty: "Your organization has not requested any credentials yet.",
+      to: "To {{recipient}}",
+      fetched: "opened by the recipient's wallet",
+      notFetched: "not yet received",
+      asked: "Asked for: {{claims}}",
+      noClaims: "Asked for the credential itself, no claims",
+      issuer: "Issuer",
+      status: {
+        sent: "Waiting for answer",
+        completed: "Answered",
+        failed: "Failed",
+        expired: "Expired",
+      },
+      failure: {
+        qerdsSendFailed: "The request could not be delivered.",
+        verificationFailed:
+          "The answer could not be verified, so nothing was kept.",
+        incompleteResponse:
+          "The answer did not contain every requested credential.",
+      },
+    },
+    form: {
+      title: "Request credentials",
+      from: "From",
+      fromDefault: "Default address",
+      recipient: "Recipient address",
+      recipientPlaceholder: "organization@qerds.example",
+      credentials: "Credentials",
+      vct: "Credential type",
+      vctPlaceholder: "Credential type, e.g. nl.kvk.registration",
+      claims: "Claims",
+      claimsPlaceholder: "Claims, comma separated (optional)",
+      addCredential: "Add credential",
+      removeCredential: "Remove credential",
+      send: "Send request",
+      note: "The request is signed as {{org}} and sent over secure delivery. The recipient's administrator decides whether to share.",
+      errors: {
+        recipientRequired: "Enter the recipient's address.",
+        recipientInvalid: "Enter a valid address.",
+        vctRequired: "Enter a credential type.",
+        vctInvalid: "A credential type cannot contain spaces.",
+        claimInvalid: "A claim name cannot contain spaces.",
+        tooManyClaims: "Ask for at most 50 claims per credential.",
+      },
+    },
   },
   qerds: {
     title: "Secure delivery",
