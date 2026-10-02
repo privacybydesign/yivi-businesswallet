@@ -61,7 +61,7 @@ export default function Enroll(): React.JSX.Element {
     return (
       <>
         <TopBar title={t("enroll.title")} />
-        <div className="p-8">
+        <div className="p-4 sm:p-8">
           <Card className="max-w-lg p-8">
             <Outcome
               tone="success"
@@ -92,7 +92,7 @@ export default function Enroll(): React.JSX.Element {
     <>
       <TopBar title={t("enroll.title")} subtitle={t("enroll.subtitle")} />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <Card className="max-w-lg p-6">
           <p className="text-ink-soft mb-5 text-[13.5px] leading-relaxed">
             {t("enroll.intro")}

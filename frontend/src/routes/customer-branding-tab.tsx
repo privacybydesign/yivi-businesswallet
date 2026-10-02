@@ -115,7 +115,7 @@ export function BrandingTab({
   }
 
   return (
-    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+    <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
       <Card>
         <form onSubmit={submit} noValidate>
           <div className="border-line border-b px-6 py-4">

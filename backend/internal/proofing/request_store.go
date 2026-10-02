@@ -40,7 +40,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.mode, r.link_token_hash IS NOT NULL,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
-	r.expects_subject, r.expected_birth_date_ciphertext, ` + purgeAtExpr
+	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, ` + purgeAtExpr
 
 // purgeAtExpr is when a customer's request is purged: its customer's retention
 // after it settled. NULL while it runs or awaits review, and for a member's.
@@ -69,7 +69,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &r.SubjectUserID, &r.FlowVersion,
 		&r.CustomerID, &r.CustomerName, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
 		&r.RequiredAssuranceLevel, &r.Mode, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
-		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.PurgeAt); err != nil {
+		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention = ProofedNameRetention
@@ -140,6 +140,8 @@ type NewStoredRequest struct {
 	// ReferencePhoto is a hosted request's reference photo, held sealed until
 	// its subject starts the session (ReferencePhoto); nil for none.
 	ReferencePhoto *proofingprovider.Image
+	// FlowKind is the flow's kind at send; empty is FlowIdentity.
+	FlowKind FlowKind
 }
 
 // Create stores a new request and audits identity_proofing.requested in the same
@@ -174,15 +176,15 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 			(id, organization_id, requested_by, subject_user_id, customer_id, subject_name, subject_email,
 			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method, required_assurance_level, mode,
 			 link_token_hash, redirect_url, language, diplomas, expects_subject, expected_birth_date_ciphertext,
-			 reference_photo_ciphertext, reference_photo_mime)
+			 reference_photo_ciphertext, reference_photo_mime, flow_kind)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
 				COALESCE(NULLIF($15, ''), 'live'), $16, NULLIF($17, ''), NULLIF($18, ''), COALESCE(NULLIF($19, ''), 'off'),
-				$20, $21, $22, $23)`
+				$20, $21, $22, $23, COALESCE(NULLIF($24, ''), 'identity'))`
 		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, in.Subject.CustomerID,
 			in.Subject.Name, in.Subject.Email, in.Flow.ID, in.Flow.Name, in.Flow.Version, in.LinkExpiresAt,
 			in.APIKeyID, string(in.Method), in.Flow.RequiredAssuranceLevel, string(in.Mode), in.LinkTokenHash,
 			in.RedirectURL, string(in.Language), string(in.Diplomas), birthDateCT != nil, birthDateCT,
-			photoCT, photoMime); err != nil {
+			photoCT, photoMime, string(in.FlowKind)); err != nil {
 			return fmt.Errorf("proofing: create request org %s: %w", in.OrgID, err)
 		}
 		fields := withAuditSubject(map[string]any{

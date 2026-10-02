@@ -120,7 +120,7 @@ function ActiveOverview({
         ) : (
           <StatsRow stats={stats.data} />
         )}
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <RecentSessions
             slug={slug}
             isAdmin={isAdmin}
@@ -148,7 +148,7 @@ function StatsRow({
   const value = (n: number): string => (stats ? String(n) : "—");
 
   return (
-    <Card className="divide-line grid grid-cols-2 divide-x lg:grid-cols-5">
+    <Card className="divide-line grid grid-cols-2 lg:grid-cols-5 lg:divide-x">
       <StatCell
         label={t("identityProofing.overview.stats.sessions")}
         value={value(totals.sessions)}
@@ -315,7 +315,7 @@ function RecentSessions({
                       {request.customerName}
                     </Link>
                   </Table.Cell>
-                  <Table.Cell className="text-ink-soft">
+                  <Table.Cell className="text-ink-soft min-w-40">
                     {request.flowName}
                   </Table.Cell>
                   <Table.Cell className="text-ink-soft whitespace-nowrap">

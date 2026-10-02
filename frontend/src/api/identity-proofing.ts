@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Language } from "../i18n/language";
-import { request } from "./http";
+import { absoluteApiUrl, request } from "./http";
 import { auditEventSchema } from "./organization";
 import type { AuditEvent } from "./organization";
 
@@ -27,6 +27,18 @@ export type ProofingAssuranceTier = z.infer<typeof assuranceTierSchema>;
 // checked by the wallet.
 export const DIPLOMA_MODES = ["off", "required"] as const;
 export const diplomaModeSchema = z.enum(DIPLOMA_MODES);
+
+// What a flow's sessions are for: an identity check, or a customer's subject
+// asking for the data held of them ("see my data") or for its erasure
+// ("delete my data"). A data request goes to review once the person is
+// proven, with the customer's sessions of that person.
+export const FLOW_KINDS = ["identity", "data_access", "data_erasure"] as const;
+export const flowKindSchema = z.enum(FLOW_KINDS);
+export type FlowKind = z.infer<typeof flowKindSchema>;
+
+export function isDataRequest(kind: FlowKind | undefined): boolean {
+  return kind === "data_access" || kind === "data_erasure";
+}
 export type DiplomaMode = z.infer<typeof diplomaModeSchema>;
 
 // A DUO diploma extract a session holds: what DUO printed about the
@@ -86,6 +98,8 @@ export const proofingFlowSchema = z.object({
   // Absent on a single version (created, edited, a version list): the flow
   // list carries it.
   diplomaMode: diplomaModeSchema.optional(),
+  // Absent on a single version, as diplomaMode.
+  kind: flowKindSchema.optional(),
 });
 
 export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
@@ -131,6 +145,10 @@ export const proofingRequestSchema = z.object({
   // A request for one known person: only subjectName, born on the date it
   // was sent with, is approved (IDENTITY_MISMATCH otherwise).
   expectedSubject: z.boolean(),
+  // A data request goes to review once the person is proven; an approved
+  // "see my data" request's data downloads until dataExportUntil.
+  flowKind: flowKindSchema,
+  dataExportUntil: z.string().optional(),
 });
 
 export type ProofingRequest = z.infer<typeof proofingRequestSchema>;
@@ -494,6 +512,22 @@ export function saveProofingFlowDiplomas(
     body: { diplomaMode },
     signal,
   }).then((r) => r.diplomaMode);
+}
+
+export const proofingFlowKindSchema = z.object({ kind: flowKindSchema });
+
+export function saveProofingFlowKind(
+  slug: string,
+  flowId: string,
+  kind: FlowKind,
+  signal?: AbortSignal,
+): Promise<FlowKind> {
+  return request(`${flowBase(slug, flowId)}/kind`, {
+    schema: proofingFlowKindSchema,
+    method: "PUT",
+    body: { kind },
+    signal,
+  }).then((r) => r.kind);
 }
 
 export function getProofingFlowVersions(
@@ -880,6 +914,54 @@ export function getProofingRequestResult(
   );
 }
 
+// A data request's matches: the customer's sessions whose proofed identity is
+// the person's, strong when proven with the same document, probable on name
+// and date of birth alone. approved is the reviewer's choice, once decided.
+export const proofingDataMatchSchema = z.object({
+  requestId: z.string(),
+  sessionId: z.string(),
+  flowName: z.string(),
+  status: z.string(),
+  method: z.string().optional(),
+  assuranceLevel: z.string().optional(),
+  eidasLevel: z.string().optional(),
+  createdAt: z.string(),
+  completedAt: z.string().optional(),
+  purgedAt: z.string().optional(),
+  level: z.enum(["strong", "probable"]),
+  approved: z.boolean().optional(),
+});
+
+export type ProofingDataMatch = z.infer<typeof proofingDataMatchSchema>;
+
+export const proofingDataMatchesSchema = z.object({
+  flowKind: flowKindSchema,
+  matches: z.array(proofingDataMatchSchema),
+});
+
+export function getProofingDataMatches(
+  slug: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<ProofingDataMatch[]> {
+  return request(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/data-matches`,
+    { schema: proofingDataMatchesSchema, signal },
+  ).then((r) => r.matches);
+}
+
+// An approved "see my data" request's data, as a JSON attachment the browser
+// downloads: for an admin to hand the person, or for the person on their link.
+export function proofingDataExportUrl(slug: string, requestId: string): string {
+  return absoluteApiUrl(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/data-export`,
+  );
+}
+
+export function hostedDataExportUrl(token: string): string {
+  return absoluteApiUrl(`${verifyPath({ kind: "hosted", token })}/data-export`);
+}
+
 export function getProofingRequestEvents(
   slug: string,
   requestId: string,
@@ -1049,6 +1131,8 @@ export const hostedProgressSchema = z.object({
   started: z.boolean(),
   // Until when the subject can add a diploma extract; absent while they cannot.
   diplomasUntil: z.string().optional(),
+  // Until when an approved "see my data" request's data downloads.
+  dataExportUntil: z.string().optional(),
 });
 
 export type HostedProgress = z.infer<typeof hostedProgressSchema>;
@@ -1077,6 +1161,7 @@ export const hostedProofingSchema = hostedProgressSchema.extend({
     requestedAttributes: z.array(z.string()),
     yiviAvailable: z.boolean(),
     diplomaMode: diplomaModeSchema,
+    kind: flowKindSchema,
   }),
   // The diploma extracts the subject added.
   diplomas: z.array(proofingDiplomaSchema),
@@ -1170,9 +1255,12 @@ export function uploadProofingDiplomas(
 }
 
 // An administrator's decision on a request under review; reason is required.
+// requestIds are a data request's matched sessions an approval takes (every
+// match when absent).
 export interface ProofingReviewInput {
   decision: "approve" | "reject";
   reason: string;
+  requestIds?: string[];
 }
 
 export function decideProofingReview(

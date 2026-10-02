@@ -52,7 +52,7 @@ export function WebhooksTab({
   }
   const hook = webhook.data;
   return (
-    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+    <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
       {!hook.configured && !editing ? (
         <DefaultEndpointCard onCustomize={() => setEditing(true)} />
       ) : editing ? (
@@ -393,12 +393,12 @@ function DeliveriesCard({
           {rows.map((d) => (
             <li
               key={d.id}
-              className="flex items-center gap-4 px-5 py-3 text-[12.5px]"
+              className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-5 py-3 text-[12.5px]"
             >
               <span className="text-ink w-36 shrink-0 font-mono">
                 {d.event}
               </span>
-              <span className="text-ink-soft min-w-0 flex-1 truncate font-mono">
+              <span className="text-ink-soft min-w-0 flex-1 basis-20 truncate font-mono">
                 {d.sessionId ? shortRequestId(d.sessionId) : "—"}
               </span>
               {d.endpointUrl === undefined && (
@@ -409,7 +409,7 @@ function DeliveriesCard({
               <span className="shrink-0 whitespace-nowrap">
                 <DeliveryTag delivery={d} />
               </span>
-              <span className="text-muted w-20 shrink-0 text-right whitespace-nowrap">
+              <span className="text-muted ml-auto min-w-20 shrink-0 text-right whitespace-nowrap">
                 {formatWhen(d.lastAttemptAt ?? d.createdAt)}
               </span>
             </li>

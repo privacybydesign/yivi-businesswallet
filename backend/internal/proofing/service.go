@@ -161,6 +161,9 @@ type Service struct {
 	readChecks *readThrottle
 	// hostedBaseURL is the public page a hosted link's token is appended to.
 	hostedBaseURL string
+	// dataRequests holds each flow's kind and a data request's matches; nil
+	// makes every flow an identity check.
+	dataRequests dataRequestStore
 }
 
 // NewService builds the proofing service. A nil mailer skips the e-mail (tests).
@@ -180,13 +183,17 @@ type Stores struct {
 	// requests hold; nil asks for none.
 	FlowDiplomas flowDiplomaStore
 	Diplomas     diplomaStore
+	// DataRequests holds each flow's kind and a data request's matches; nil
+	// makes every flow an identity check.
+	DataRequests dataRequestStore
 }
 
 func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *Service {
 	return &Service{
 		settings: stores.Settings, requests: stores.Requests, customers: stores.Customers, apiKeys: stores.APIKeys,
 		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
-		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
+		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, dataRequests: stores.DataRequests,
+		ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
 		readChecks: newReadThrottle(readReconcileEvery),
 	}
 }
@@ -240,11 +247,18 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	if err != nil {
 		return nil, err
 	}
+	kinds, err := s.allFlowKinds(ctx, org.ID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]OrgFlow, 0, len(flows))
 	for _, f := range flows {
 		of := OrgFlow{
 			Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && Completable(f), Default: f.ID == sel.DefaultFlowID,
-			Diplomas: DiplomasOff,
+			Diplomas: DiplomasOff, Kind: FlowIdentity,
+		}
+		if kind, ok := kinds[f.ID]; ok {
+			of.Kind = kind
 		}
 		if mode, ok := diplomas[f.ID]; ok {
 			of.Diplomas = mode
@@ -262,6 +276,9 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 func (s *Service) ConfigureFlows(ctx context.Context, org Org, sel FlowSelection) error {
 	sel, err := s.validSelection(ctx, org, sel, Completable)
 	if err != nil {
+		return err
+	}
+	if err := s.checkMemberFlowKinds(ctx, org.ID, sel.FlowIDs); err != nil {
 		return err
 	}
 	return s.settings.SaveFlowSelection(ctx, org.ID, sel)
@@ -465,6 +482,18 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, err
 	}
+	kind, err := s.flowKind(ctx, org.ID, flow.ID)
+	if err != nil {
+		return Sent{}, err
+	}
+	// A data request is a customer's subject asking for their data; it
+	// collects no diplomas.
+	if kind.dataRequest() {
+		if customer == nil {
+			return Sent{}, ErrDataFlowForMember
+		}
+		diplomas = DiplomasOff
+	}
 	// The extracts are uploaded on the page that ran the session; a test
 	// request runs none and asks for none.
 	if in.Mode == ModeTest {
@@ -474,7 +503,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 		return Sent{}, ErrDiplomasNeedPage
 	}
 	if in.Channel == ChannelHosted {
-		return s.createHosted(ctx, org, by, in, subject, *customer, flow, diplomas, photo)
+		return s.createHosted(ctx, org, by, in, subject, *customer, flow, diplomas, kind, photo)
 	}
 
 	id := uuid.New()
@@ -501,7 +530,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: id, OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
 		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: in.Method, Channel: in.Channel, Mode: in.Mode,
-		Diplomas: diplomas,
+		Diplomas: diplomas, FlowKind: kind,
 	})
 	if err != nil {
 		return Sent{}, err
@@ -544,7 +573,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 // the subject starts one from the page (StartHosted) until HostedLinkTTL. Its
 // redirect must be on one of the customer's allowed origins.
 func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in NewRequest, subject Subject,
-	customer Customer, flow proofingprovider.Flow, diplomas DiplomaMode, photo *proofingprovider.Image,
+	customer Customer, flow proofingprovider.Flow, diplomas DiplomaMode, kind FlowKind, photo *proofingprovider.Image,
 ) (Sent, error) {
 	if s.hostedBaseURL == "" {
 		return Sent{}, errors.New("proofing: no hosted page URL configured")
@@ -575,7 +604,7 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 		ID: uuid.New(), OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
 		Flow: flow, LinkExpiresAt: s.now().Add(HostedLinkTTL), Method: in.Method, Channel: in.Channel,
 		Mode: in.Mode, LinkTokenHash: hash, RedirectURL: in.RedirectURL, Language: in.Language,
-		Diplomas: diplomas, ReferencePhoto: photo,
+		Diplomas: diplomas, FlowKind: kind, ReferencePhoto: photo,
 	})
 	if err != nil {
 		return Sent{}, err
@@ -834,6 +863,12 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	sess := req.session
 	res, err := s.ips.SessionStatus(ctx, tenant, sess.ID, sess.Token)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
+		// A data request the wallet holds in review, or decided, outlives
+		// the engine's copy: the person was proven, and the review is the
+		// wallet's own.
+		if req.FlowKind.dataRequest() && req.Status.Settled() {
+			return req, nil
+		}
 		// IPS purged or erased the session: treat it like a lapsed one.
 		res, err = proofingprovider.Result{Status: proofingprovider.StatusExpired}, nil
 	}
@@ -893,13 +928,33 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 			return req, err
 		}
 	}
+	if req.FlowKind.dataRequest() {
+		// A data request's decision is the wallet reviewer's alone, whatever
+		// the engine reports after it.
+		if req.Status == StatusApproved || req.Status == StatusRejected {
+			return req, nil
+		}
+		// A proven person's data request goes to review with the customer's
+		// sessions of that person, found once.
+		if next == StatusApproved || next == StatusNeedsReview {
+			if req.Status != StatusNeedsReview {
+				if err := s.findDataMatches(ctx, tenant, req); err != nil {
+					slog.WarnContext(ctx, "identity proofing: find data request matches failed",
+						slog.String("request_id", req.ID.String()), slog.Any("error", err))
+					return req, err
+				}
+			}
+			next = StatusNeedsReview
+		}
+	}
 	if next == req.Status {
 		return req, nil
 	}
 	// The name read off the document is kept only for a customer's subject the
-	// sender may know only by address, and only once the document is approved:
-	// only then is the full result, with its personal data, read at all.
-	if req.CustomerID != nil && next == StatusApproved {
+	// sender may know only by address, and only once the document is approved
+	// (or, for a data request, the person is proven): only then is the full
+	// result, with its personal data, read at all.
+	if req.CustomerID != nil && (next == StatusApproved || (req.FlowKind.dataRequest() && next == StatusNeedsReview)) {
 		full, err := s.ips.SessionResult(ctx, tenant, sess.ID, sess.Token)
 		if err != nil {
 			slog.WarnContext(ctx, "identity proofing: read the approved result failed",
@@ -1019,6 +1074,7 @@ func (s *Service) CustomerFlows(ctx context.Context, org Org, id uuid.UUID, all 
 			Assigned: slices.Contains(customer.Flows.FlowIDs, f.ID) && CustomerCompletable(f.Flow),
 			Default:  f.ID == customer.Flows.DefaultFlowID,
 			Diplomas: f.Diplomas,
+			Kind:     f.Kind,
 		}
 		if all || cf.Assigned {
 			out = append(out, cf)
@@ -1178,7 +1234,8 @@ func (s *Service) requestResult(ctx context.Context, req Request) (Request, proo
 // is read as that rejection, without the person or their images. A mismatch
 // is someone other than the expected person, whose identity is never shown.
 func heldToVerdict(req Request, identity proofingprovider.Identity) proofingprovider.Identity {
-	if identity.Status != proofingprovider.StatusApproved || req.Status == StatusApproved {
+	if identity.Status != proofingprovider.StatusApproved || req.Status == StatusApproved ||
+		(req.FlowKind.dataRequest() && req.Status == StatusNeedsReview) {
 		return identity
 	}
 	return proofingprovider.Identity{

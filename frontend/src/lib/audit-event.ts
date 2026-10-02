@@ -117,6 +117,8 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "identity_proofing.rejected": { icon: "close", tone: "red" },
   "identity_proofing.needs_review": { icon: "warning", tone: "amber" },
   "identity_proofing.review_decided": { icon: "valid", tone: "blue" },
+  "identity_proofing.data_exported": { icon: "view", tone: "slate" },
+  "identity_proofing.flow_kind_configured": { icon: "edit", tone: "blue" },
   "identity_proofing.customer_created": { icon: "add", tone: "green" },
   "identity_proofing.customer_updated": { icon: "edit", tone: "blue" },
   "identity_proofing.customer_flows_configured": {
@@ -435,6 +437,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingNeedsReview");
     case "identity_proofing.review_decided":
       return t("auditLog.actions.identityProofingReviewDecided");
+    case "identity_proofing.data_exported":
+      return t("auditLog.actions.identityProofingDataExported");
+    case "identity_proofing.flow_kind_configured":
+      return t("auditLog.actions.identityProofingFlowKindConfigured");
     case "identity_proofing.customer_created":
       return t("auditLog.actions.identityProofingCustomerCreated");
     case "identity_proofing.customer_updated":

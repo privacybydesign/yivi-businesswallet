@@ -192,6 +192,11 @@ const (
 	IdentityProofingNeedsReview = "identity_proofing.needs_review"
 	// a member's decision on a request under review, before its outcome lands
 	IdentityProofingReviewDecided = "identity_proofing.review_decided"
+	// the data an approved "see my data" request found, downloaded by the
+	// person, an admin or the customer
+	IdentityProofingDataExported = "identity_proofing.data_exported"
+	// a flow's kind set: an identity check, or "see my data" / "delete my data"
+	IdentityProofingFlowKindConfigured = "identity_proofing.flow_kind_configured"
 
 	// the org's customers and the flows assigned to each
 	IdentityProofingCustomerCreated         = "identity_proofing.customer_created"

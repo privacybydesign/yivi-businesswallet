@@ -7,13 +7,16 @@ import {
   useHostedProofingQuery,
   useStartHostedProofingMutation,
 } from "../api/identity-proofing.queries";
+import { hostedDataExportUrl, isDataRequest } from "../api/identity-proofing";
 import type {
+  FlowKind,
   HostedProofing,
   HostedStart,
   ProofingMethod,
 } from "../api/identity-proofing";
 import i18n from "../i18n";
 import { errorCode } from "../lib/api-error";
+import { useWhenFormatter } from "../lib/format-when";
 import {
   completedMessage,
   completionRedirect,
@@ -41,7 +44,10 @@ type Step = "overview" | "method" | "session";
 // app's session. Public like /vog/:token; the token in the link is the whole
 // authorization, and a link starts one session. Once settled, the page posts
 // the outcome to an embedding page on one of the customer's origins, and
-// redirects to the session's redirect when it has one.
+// redirects to the session's redirect when it has one. A session on a data
+// request flow is the person asking the customer for their data or its
+// erasure: the page says so, and an approved "see my data" request's data
+// downloads from it.
 export default function Proof(): React.JSX.Element {
   const { t } = useTranslation();
   // Guaranteed by the "/p/:token" route this mounts under.
@@ -85,6 +91,7 @@ function HostedFlow({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const { customer, flow } = page;
+  const dataRequest = isDataRequest(flow.kind);
   const choice = flow.yiviAvailable;
   const stages = verifyStages(choice, flow.diplomaMode === "required");
   const [inDiplomas, setInDiplomas] = useState(false);
@@ -120,8 +127,10 @@ function HostedFlow({
   // Handed back once, however often the outcome is rendered.
   const handedBack = useRef(false);
   const [redirecting, setRedirecting] = useState(false);
+  const [settledStatus, setSettledStatus] = useState<string>();
   const settle = useCallback(
     (status: string) => {
+      setSettledStatus(status);
       if (handedBack.current) {
         return;
       }
@@ -161,6 +170,13 @@ function HostedFlow({
         <CustomerMark customer={customer} size="lg" />
         <span className="text-ink text-[16px] font-bold">{customer.name}</span>
       </div>
+      {dataRequest && (
+        <p className="text-ink text-[13.5px]">
+          {t(`proofLink.dataRequest.${flow.kind as DataKind}.intro`, {
+            customer: customer.name,
+          })}
+        </p>
+      )}
       <Stepper
         steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
         current={stages.indexOf(inDiplomas ? "diplomas" : step)}
@@ -213,10 +229,72 @@ function HostedFlow({
               <p role="status" className={HINT}>
                 {t("proofLink.redirecting")}
               </p>
+            ) : dataRequest ? (
+              <DataRequestOutcome
+                token={token}
+                customer={customer.name}
+                kind={flow.kind as DataKind}
+                status={settledStatus ?? page.status}
+                exportUntil={page.dataExportUntil}
+              />
             ) : undefined
           }
         />
       )}
     </Card>
   );
+}
+
+type DataKind = Exclude<FlowKind, "identity">;
+
+// What a data request's person sees once their identity check settled: that
+// the request awaits the customer's review, its outcome, and an approved "see
+// my data" request's download while it lasts.
+function DataRequestOutcome({
+  token,
+  customer,
+  kind,
+  status,
+  exportUntil,
+}: {
+  token: string;
+  customer: string;
+  kind: DataKind;
+  status: string;
+  exportUntil: string | undefined;
+}): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const formatWhen = useWhenFormatter();
+  switch (status) {
+    case "needs_review":
+      return (
+        <p className={HINT}>
+          {t(`proofLink.dataRequest.${kind}.inReview`, { customer })}
+        </p>
+      );
+    case "approved":
+      if (kind === "data_erasure") {
+        return <p className={HINT}>{t("proofLink.dataRequest.erased")}</p>;
+      }
+      return exportUntil ? (
+        <div className="flex flex-col items-center gap-2">
+          <a
+            href={hostedDataExportUrl(token)}
+            download
+            className="bg-ink text-surface inline-flex h-9 items-center rounded-md px-3.5 text-[13.5px] font-semibold transition-opacity hover:opacity-90"
+          >
+            {t("proofLink.dataRequest.download")}
+          </a>
+          <p className={HINT}>
+            {t("proofLink.dataRequest.downloadUntil", {
+              date: formatWhen(exportUntil),
+            })}
+          </p>
+        </div>
+      ) : (
+        <p className={HINT}>{t("proofLink.dataRequest.downloadExpired")}</p>
+      );
+    default:
+      return null;
+  }
 }

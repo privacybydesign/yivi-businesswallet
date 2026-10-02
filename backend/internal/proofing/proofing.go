@@ -228,6 +228,13 @@ type Request struct {
 	// Hosted is a request its subject opens from a link (ChannelHosted): its
 	// IPS session is created only when the subject starts.
 	Hosted bool
+	// FlowKind is what the session is for: an identity check, or a person
+	// asking for their data (FlowDataAccess) or its erasure (FlowDataErasure),
+	// which goes to review once the person is proven (see data_request.go).
+	FlowKind FlowKind
+	// DataExportUntil is until when an approved FlowDataAccess request's data
+	// can be downloaded; nil otherwise.
+	DataExportUntil *time.Time
 	// CancelledAt is when the customer cancelled it; PurgedAt when its data was
 	// erased at IPS and here (the row stays for the audit trail).
 	CancelledAt     *time.Time
@@ -407,6 +414,8 @@ type OrgFlow struct {
 	Default bool
 	// Diplomas is whether the flow asks for DUO diploma extracts.
 	Diplomas DiplomaMode
+	// Kind is what the flow's sessions are for.
+	Kind FlowKind
 }
 
 // RequestFilter narrows a request list: to the requests one member sent, and/or
@@ -550,6 +559,7 @@ type CustomerFlow struct {
 	Assigned bool
 	Default  bool
 	Diplomas DiplomaMode
+	Kind     FlowKind
 }
 
 // faceSteps are the IPS flow steps that capture the subject's face. With the

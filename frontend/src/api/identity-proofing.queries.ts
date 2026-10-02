@@ -35,6 +35,8 @@ import {
   getProofingApp,
   getHostedProofing,
   decideProofingReview,
+  getProofingDataMatches,
+  saveProofingFlowKind,
   getHostedProofingStatus,
   startHostedProofing,
   declineHostedProofing,
@@ -86,6 +88,8 @@ import type {
   ProofingFlowHosted,
   DiplomaMode,
   DiplomaVerdict,
+  FlowKind,
+  ProofingDataMatch,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
@@ -246,6 +250,17 @@ export function useSaveProofingFlowDiplomasMutation(
   return useMutation({
     mutationFn: ({ flowId, mode }) =>
       saveProofingFlowDiplomas(slug, flowId, mode),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => invalidateFlow(queryClient, slug),
+  });
+}
+
+export function useSaveProofingFlowKindMutation(
+  slug: string,
+): UseMutationResult<FlowKind, Error, { flowId: string; kind: FlowKind }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ flowId, kind }) => saveProofingFlowKind(slug, flowId, kind),
     meta: { suppressErrorToast: true },
     onSuccess: () => invalidateFlow(queryClient, slug),
   });
@@ -738,6 +753,20 @@ export function useProofingRequestEventsQuery(
 // open. Every read is audited, so it is never refetched on its own: its key
 // sits outside every prefix the proofing mutations invalidate. The timeline
 // then shows the read.
+// A data request's matched sessions, for its review and, once decided, what
+// the reviewer approved.
+export function useProofingDataMatchesQuery(
+  slug: string,
+  requestId: string,
+  enabled: boolean,
+): UseQueryResult<ProofingDataMatch[], Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), requestId, "data-matches"],
+    queryFn: ({ signal }) => getProofingDataMatches(slug, requestId, signal),
+    enabled: enabled && slug !== "" && requestId !== "",
+  });
+}
+
 export function useProofingRequestResultQuery(
   slug: string,
   requestId: string,

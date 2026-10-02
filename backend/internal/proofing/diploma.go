@@ -156,7 +156,7 @@ func (s *FlowDiplomaStore) Get(ctx context.Context, orgID uuid.UUID, flowID stri
 
 func getFlowDiplomas(ctx context.Context, q database.Querier, orgID uuid.UUID, flowID string) (DiplomaMode, error) {
 	var mode DiplomaMode
-	err := q.QueryRow(ctx, `SELECT diplomas FROM identity_proofing_flow_diploma_settings
+	err := q.QueryRow(ctx, `SELECT diplomas FROM identity_proofing_flow_settings
 		WHERE organization_id = $1 AND flow_id = $2`, orgID, flowID).Scan(&mode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DiplomasOff, nil
@@ -167,10 +167,11 @@ func getFlowDiplomas(ctx context.Context, q database.Querier, orgID uuid.UUID, f
 	return mode, nil
 }
 
-// All returns every flow of the org that was set; a flow missing is off.
+// All returns every flow of the org that asks for diplomas; a flow missing is
+// off.
 func (s *FlowDiplomaStore) All(ctx context.Context, orgID uuid.UUID) (map[string]DiplomaMode, error) {
-	rows, err := s.db.Query(ctx, `SELECT flow_id, diplomas FROM identity_proofing_flow_diploma_settings
-		WHERE organization_id = $1`, orgID)
+	rows, err := s.db.Query(ctx, `SELECT flow_id, diplomas FROM identity_proofing_flow_settings
+		WHERE organization_id = $1 AND diplomas <> 'off'`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list diploma settings org %s: %w", orgID, err)
 	}
@@ -197,7 +198,7 @@ func (s *FlowDiplomaStore) Save(ctx context.Context, orgID uuid.UUID, flowID str
 		if before == mode {
 			return nil
 		}
-		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_flow_diploma_settings (organization_id, flow_id, diplomas)
+		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_flow_settings (organization_id, flow_id, diplomas)
 			VALUES ($1, $2, $3)
 			ON CONFLICT (organization_id, flow_id) DO UPDATE SET diplomas = EXCLUDED.diplomas, updated_at = now()`,
 			orgID, flowID, string(mode)); err != nil {

@@ -865,6 +865,7 @@ func run() error {
 		FlowHosted:   proofing.NewFlowHostedStore(pool, recorder),
 		FlowDiplomas: proofing.NewFlowDiplomaStore(pool, recorder),
 		Diplomas:     proofing.NewDiplomaStore(pool, recorder),
+		DataRequests: proofing.NewDataRequestStore(pool, recorder, proofingCipher),
 	}, ips, verifier, emailService)
 	// A diploma extract is parsed on the VOG parser's PDFium pool.
 	diplomaValidator, err := newDiplomaValidator(ctx, cfg)

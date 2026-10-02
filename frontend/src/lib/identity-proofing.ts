@@ -616,6 +616,12 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.diplomasClosed");
     case "diplomas_not_asked":
       return t("identityProofing.errors.diplomasNotAsked");
+    case "flow_no_identity":
+      return t("identityProofing.errors.flowNoIdentity");
+    case "data_flow_for_member":
+      return t("identityProofing.errors.dataFlowForMember");
+    case "export_unavailable":
+      return t("identityProofing.errors.exportUnavailable");
     case "too_large":
       return t("identityProofing.errors.tooLarge");
     case "too_many_files":

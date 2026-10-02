@@ -70,7 +70,7 @@ export function ProofingPauseCard({
 
   return (
     <Card className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-64">
         <h2 className="font-display text-[15px] font-bold">
           {t("identityProofing.pause.switchTitle")}
         </h2>

@@ -11,8 +11,14 @@ import {
   useProofingFlowsQuery,
   useSetProofingFlowSelectionMutation,
   useSaveProofingFlowDiplomasMutation,
+  useSaveProofingFlowKindMutation,
 } from "../api/identity-proofing.queries";
-import type { DiplomaMode, ProofingFlow } from "../api/identity-proofing";
+import { FLOW_KINDS, isDataRequest } from "../api/identity-proofing";
+import type {
+  DiplomaMode,
+  FlowKind,
+  ProofingFlow,
+} from "../api/identity-proofing";
 import { useWhenFormatter } from "../lib/format-when";
 import {
   ASSURANCE_LEVELS,
@@ -81,7 +87,7 @@ export default function IdentityProofingFlows(): React.JSX.Element {
           )
         }
       />
-      <div className="flex flex-col gap-6 p-8">
+      <div className="flex flex-col gap-6 p-4 sm:p-8">
         {org.isPending ? (
           <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
         ) : !isAdmin ? (
@@ -186,13 +192,13 @@ function FlowsCard({
               return (
                 <li key={flow.id} className="flex flex-col gap-3 px-4 py-3">
                   <div className="flex flex-wrap items-start gap-x-6 gap-y-2">
-                    <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                    <div className="flex min-w-0 flex-1 basis-64 items-start gap-2.5">
                       <input
                         id={checkboxId}
                         type="checkbox"
                         className="mt-0.5 h-4 w-4"
                         checked={on}
-                        disabled={!flow.completable}
+                        disabled={!flow.completable || isDataRequest(flow.kind)}
                         onChange={(event) =>
                           toggle(flow.id, event.target.checked)
                         }
@@ -210,6 +216,13 @@ function FlowsCard({
                           </Tag>
                           {flow.requiredAssuranceLevel && (
                             <Tag tone="blue">{flow.requiredAssuranceLevel}</Tag>
+                          )}
+                          {flow.kind && isDataRequest(flow.kind) && (
+                            <Tag tone="amber">
+                              {t(
+                                `identityProofingFlows.kinds.${flow.kind}.title`,
+                              )}
+                            </Tag>
                           )}
                           {!flow.completable && (
                             <Tag tone="amber">
@@ -231,7 +244,7 @@ function FlowsCard({
                       />
                       {t("identityProofingFlows.selection.default")}
                     </label>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Button
                         type="button"
                         variant="secondary"
@@ -422,6 +435,9 @@ export function FlowEditor({
   const saveDiplomas = useSaveProofingFlowDiplomasMutation(slug);
   const savedDiplomas: DiplomaMode = editing?.diplomaMode ?? "off";
   const [diplomaMode, setDiplomaMode] = useState<DiplomaMode>(savedDiplomas);
+  const saveKind = useSaveProofingFlowKindMutation(slug);
+  const savedKind: FlowKind = editing?.kind ?? "identity";
+  const [flowKind, setFlowKind] = useState<FlowKind>(savedKind);
   const [draft, setDraft] = useState<ProofingFlowDraft>(() =>
     editing ? draftFromFlow(editing) : emptyFlowDraft(),
   );
@@ -457,13 +473,25 @@ export function FlowEditor({
           onSaved?.(flow);
           onDone();
         };
-        if (diplomaMode === savedDiplomas) {
-          finish();
+        const kindThenFinish = (): void => {
+          if (flowKind === savedKind) {
+            finish();
+            return;
+          }
+          saveKind.mutate(
+            { flowId: flow.id, kind: flowKind },
+            { onSuccess: finish },
+          );
+        };
+        // A data request asks for no diplomas.
+        const diplomas = isDataRequest(flowKind) ? "off" : diplomaMode;
+        if (diplomas === savedDiplomas) {
+          kindThenFinish();
           return;
         }
         saveDiplomas.mutate(
-          { flowId: flow.id, mode: diplomaMode },
-          { onSuccess: finish },
+          { flowId: flow.id, mode: diplomas },
+          { onSuccess: kindThenFinish },
         );
       },
     });
@@ -509,6 +537,28 @@ export function FlowEditor({
           />
         </Field>
 
+        <Field
+          id="proofing-flow-kind"
+          label={t("identityProofingFlows.new.kind")}
+          hint={t(`identityProofingFlows.kinds.${flowKind}.hint`)}
+        >
+          <select
+            id="proofing-flow-kind"
+            className={SELECT_CLASS}
+            value={flowKind}
+            onChange={(event) => setFlowKind(event.target.value as FlowKind)}
+          >
+            {FLOW_KINDS.map((kind) => (
+              <option key={kind} value={kind}>
+                {t(`identityProofingFlows.kinds.${kind}.title`)}
+              </option>
+            ))}
+          </select>
+          {saveKind.isError && (
+            <p className={ERROR}>{proofingErrorMessage(saveKind.error, t)}</p>
+          )}
+        </Field>
+
         <fieldset className="flex flex-col gap-3">
           <legend className={SECTION}>
             {t("identityProofingFlows.new.stepsTitle")}
@@ -546,7 +596,8 @@ export function FlowEditor({
           />
           <Checkbox
             id="proofing-flow-step-diplomas"
-            checked={diplomaMode !== "off"}
+            checked={diplomaMode !== "off" && !isDataRequest(flowKind)}
+            disabled={isDataRequest(flowKind)}
             label={t("identityProofingFlows.steps.diploma_upload")}
             hint={t("identityProofingFlows.new.diplomaUploadHint")}
             onChange={(checked) => setDiplomaMode(checked ? "required" : "off")}

@@ -177,6 +177,7 @@ func (h *Handler) registerPublicAPI(mux *http.ServeMux) {
 	mux.Handle("GET /proofing/sessions", h.requireAPIKey(ScopeSessionsRead, h.apiListSessions))
 	mux.Handle("GET /proofing/sessions/{sessionID}", h.requireAPIKey(ScopeSessionsRead, h.apiGetSession))
 	mux.Handle("GET /proofing/sessions/{sessionID}/result", h.requireAPIKey(ScopeResultsRead, h.apiSessionResult))
+	mux.Handle("GET /proofing/sessions/{sessionID}/data-export", h.requireAPIKey(ScopeResultsRead, h.apiDataExport))
 	mux.Handle("POST /proofing/sessions/{sessionID}/cancel", h.requireAPIKey(ScopeSessionsWrite, h.idempotent(h.apiCancelSession)))
 	mux.Handle("DELETE /proofing/sessions/{sessionID}", h.requireAPIKey(ScopeSessionsWrite, h.apiPurgeSession))
 	mux.Handle("POST /proofing/sessions/{sessionID}/methods/{method}", h.requireAPIKey(ScopeSessionsWrite, h.idempotent(h.apiStartMethod)))
@@ -245,6 +246,12 @@ type apiSessionResponse struct {
 	// birthDate: only that name and birth date are approved (IDENTITY_MISMATCH
 	// otherwise).
 	ExpectedSubject bool `json:"expectedSubject"`
+	// FlowKind is what the session is for: identity, or data_access /
+	// data_erasure, which goes to the org's review once the person is proven.
+	// DataExportUntil is until when an approved data_access session's data
+	// downloads (GET .../data-export).
+	FlowKind        FlowKind   `json:"flowKind"`
+	DataExportUntil *time.Time `json:"dataExportUntil,omitempty"`
 }
 
 func newAPISessionResponse(req Request, now time.Time) apiSessionResponse {
@@ -254,7 +261,7 @@ func newAPISessionResponse(req Request, now time.Time) apiSessionResponse {
 		ProofedName: req.ProofedName, AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel,
 		ErrorCode: req.ErrorCode, ExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		CancelledAt: req.CancelledAt, PurgedAt: req.PurgedAt, Livemode: req.mode() == ModeLive,
-		ExpectedSubject: req.ExpectsSubject,
+		ExpectedSubject: req.ExpectsSubject, FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
 	}
 }
 

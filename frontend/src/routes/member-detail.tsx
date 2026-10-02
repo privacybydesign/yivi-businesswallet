@@ -157,7 +157,7 @@ export default function MemberDetail(): React.JSX.Element {
   const shell = (body: React.ReactNode): React.JSX.Element => (
     <>
       <TopBar title={t("memberDetail.title")} />
-      <div className="p-8">{body}</div>
+      <div className="p-4 sm:p-8">{body}</div>
     </>
   );
   const message = (text: string, isError = false): React.JSX.Element => (
@@ -214,7 +214,7 @@ export default function MemberDetail(): React.JSX.Element {
         }
       />
 
-      <div className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-5 p-4 sm:p-8 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-4">
           <Card className="p-6">
             <h2 className="text-[16px] font-semibold">

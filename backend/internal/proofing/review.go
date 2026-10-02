@@ -28,6 +28,9 @@ type ReviewInput struct {
 	Approve   bool
 	ErrorCode string
 	Reason    string
+	// RequestIDs are the matched sessions approving a data request takes;
+	// nil takes them all. Only for a data request.
+	RequestIDs []uuid.UUID
 }
 
 func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewer string, in ReviewInput) (Request, error) {
@@ -46,6 +49,12 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 	}
 	if req.Status != StatusNeedsReview || req.session == nil || req.session.EndedAt != nil {
 		return Request{}, ErrNotUnderReview
+	}
+	if req.FlowKind.dataRequest() && s.dataRequests != nil {
+		return s.decideDataRequest(ctx, req, reviewer, in)
+	}
+	if in.RequestIDs != nil {
+		return Request{}, fmt.Errorf("%w: sessions are chosen only on a data request", ErrInvalidInput)
 	}
 	tenant := requestTenant(req)
 	decision := proofingprovider.ReviewDecision{

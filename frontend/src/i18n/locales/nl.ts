@@ -561,6 +561,11 @@ export const nl: Translation<typeof en> = {
       diplomasClosed:
         "Diploma's kunnen alleen kort na een geslaagde identiteitscontrole worden toegevoegd.",
       diplomasNotAsked: "Deze controle vraagt niet om diploma's.",
+      flowNoIdentity:
+        "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
+      dataFlowForMember:
+        "Een flow voor gegevensverzoeken is voor de mensen van een klant. Haal hem eerst uit de flows voor leden.",
+      exportUnavailable: "Deze gegevens kunnen niet meer worden gedownload.",
       tooLarge: "Het bestand is te groot.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
     },
@@ -870,6 +875,38 @@ export const nl: Translation<typeof en> = {
         reasonRequired: "Geef een reden: die wordt bewaard in het auditlog.",
         approve: "Goedkeuren",
         reject: "Afwijzen",
+      },
+      dataRequest: {
+        data_access: {
+          title: "Deze persoon vraagt welke gegevens er van hem of haar zijn",
+          hint: "De persoon heeft met deze sessie bewezen wie hij of zij is. Controleer de identiteit en keur de sessies goed die je deelt: de persoon kan die gegevens 7 dagen downloaden via de eigen link, en jij kunt ze hier downloaden om te versturen.",
+          approve_one: "Goedkeuren: {{count}} sessie delen",
+          approve_other: "Goedkeuren: {{count}} sessies delen",
+        },
+        data_erasure: {
+          title:
+            "Deze persoon vraagt om verwijdering van zijn of haar gegevens",
+          hint: "De persoon heeft met deze sessie bewezen wie hij of zij is. Controleer de identiteit en keur de sessies goed die je verwijdert: de persoonsgegevens worden direct gewist, de sessies blijven als registratie staan en de klant krijgt per sessie bericht.",
+          approve_one: "Goedkeuren: {{count}} sessie verwijderen",
+          approve_other: "Goedkeuren: {{count}} sessies verwijderen",
+        },
+        reasonPlaceholder:
+          "Wat je hebt gecontroleerd, en waarom, bv. een wettelijke bewaarplicht",
+        noMatches:
+          "Er zijn geen andere sessies van deze persoon gevonden bij deze klant.",
+        matches_one: "{{count}} sessie van deze persoon gevonden",
+        matches_other: "{{count}} sessies van deze persoon gevonden",
+        levels: {
+          strong: "Zelfde document",
+          probable: "Naam en geboortedatum",
+        },
+        untickHint:
+          "Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
+        erased: "Verwijderd",
+        approved: "Goedgekeurd",
+        kept: "Bewaard",
+        download: "Gegevens downloaden",
+        downloadUntil: "Beschikbaar tot {{date}}",
       },
       method: "Methode",
       timeline: "Tijdlijn",
@@ -1185,7 +1222,22 @@ export const nl: Translation<typeof en> = {
       biometrics:
         "Hoe goed het gezicht overeenkwam met de documentfoto, en of het een levend persoon was.",
     },
+    kinds: {
+      identity: {
+        title: "Identiteitscontrole",
+        hint: "De persoon bewijst wie hij of zij is; de klant krijgt de uitkomst.",
+      },
+      data_access: {
+        title: "Mijn gegevens inzien",
+        hint: "Iemand vraagt de klant welke gegevens er van hem of haar zijn. Na de identiteitscontrole gaat de sessie ter beoordeling, met de andere sessies van die persoon; goedkeuren laat de persoon die gegevens downloaden.",
+      },
+      data_erasure: {
+        title: "Mijn gegevens verwijderen",
+        hint: "Iemand vraagt de klant om zijn of haar gegevens te verwijderen. Na de identiteitscontrole gaat de sessie ter beoordeling, met de andere sessies van die persoon; goedkeuren verwijdert ze.",
+      },
+    },
     new: {
+      kind: "Type",
       title: "Nieuwe flow",
       editTitle: "{{name}} bewerken",
       hint: "Een flow bepaalt de stappen van een sessie, de resultaatgegevens die de verificatiedienst teruggeeft en de controles die de betrouwbaarheid bepalen.",
@@ -1260,6 +1312,24 @@ export const nl: Translation<typeof en> = {
     decline: "Weigeren",
     redirecting: "Je wordt teruggestuurd…",
     poweredBy: "Mogelijk gemaakt door Yivi",
+    dataRequest: {
+      data_access: {
+        intro:
+          "Je vraagt {{customer}} welke gegevens er van je zijn. Bevestig eerst wie je bent.",
+        inReview:
+          "Je verzoek is ter beoordeling naar {{customer}} gestuurd. Open deze link later opnieuw om de uitkomst te zien.",
+      },
+      data_erasure: {
+        intro:
+          "Je vraagt {{customer}} om je gegevens te verwijderen. Bevestig eerst wie je bent.",
+        inReview:
+          "Je verzoek is ter beoordeling naar {{customer}} gestuurd. Open deze link later opnieuw om de uitkomst te zien.",
+      },
+      erased: "Je gegevens zijn verwijderd.",
+      download: "Mijn gegevens downloaden",
+      downloadUntil: "Beschikbaar tot {{date}}.",
+      downloadExpired: "De download is niet meer beschikbaar.",
+    },
   },
   vog: {
     title: "Dien je VOG in",
@@ -1754,6 +1824,8 @@ export const nl: Translation<typeof en> = {
         "Identiteitsverificatie moet beoordeeld worden",
       identityProofingReviewDecided:
         "Beoordeling identiteitsverificatie genomen",
+      identityProofingDataExported: "Gegevens van verzoek gedownload",
+      identityProofingFlowKindConfigured: "Type verificatieflow ingesteld",
       identityProofingCustomerCreated: "Identiteitsverificatieklant toegevoegd",
       identityProofingCustomerUpdated: "Identiteitsverificatieklant bijgewerkt",
       identityProofingCustomerFlowsConfigured:

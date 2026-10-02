@@ -13,6 +13,10 @@ CREATE TABLE identity_proofing_api_keys
     name            TEXT        NOT NULL CHECK (btrim(name) <> ''),
     prefix          TEXT        NOT NULL,
     secret_hash     BYTEA       NOT NULL UNIQUE,
+    -- A live key runs real sessions; a test key runs scripted outcomes.
+    mode            TEXT        NOT NULL DEFAULT 'live' CHECK (mode IN ('live', 'test')),
+    -- What the key may do; a key created without scopes gets every one.
+    scopes          TEXT[]      NOT NULL DEFAULT ARRAY ['sessions:write', 'sessions:read', 'results:read', 'flows:read'],
     created_by      UUID        REFERENCES users (id) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_used_at    TIMESTAMPTZ,
@@ -24,12 +28,5 @@ CREATE TABLE identity_proofing_api_keys
 CREATE INDEX identity_proofing_api_keys_customer_idx
     ON identity_proofing_api_keys (customer_id, created_at);
 
--- A request created through the API names the key instead of a member
--- (requested_by stays NULL).
-ALTER TABLE identity_proofing_requests
-    ADD COLUMN api_key_id UUID REFERENCES identity_proofing_api_keys (id) ON DELETE SET NULL;
-
 -- +goose Down
-ALTER TABLE identity_proofing_requests
-    DROP COLUMN api_key_id;
 DROP TABLE identity_proofing_api_keys;

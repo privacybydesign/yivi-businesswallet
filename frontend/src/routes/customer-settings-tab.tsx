@@ -122,7 +122,7 @@ function Segmented<T extends number>({
   onChange: (value: T) => void;
 }): React.JSX.Element {
   return (
-    <div role="radiogroup" aria-label={label} className="flex gap-2">
+    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-2">
       {options.map((option) => {
         const active = option.value === value;
         return (
@@ -134,7 +134,7 @@ function Segmented<T extends number>({
             disabled={disabled}
             onClick={() => !active && onChange(option.value)}
             className={[
-              "h-9 rounded-md border px-3.5 text-[13px] font-semibold transition-colors disabled:opacity-60",
+              "h-9 rounded-md border px-3.5 text-[13px] font-semibold whitespace-nowrap transition-colors disabled:opacity-60",
               active
                 ? "border-ink bg-ink text-surface"
                 : "border-line-strong bg-surface text-ink-soft hover:text-ink",
@@ -281,7 +281,7 @@ function RemoveCard({
 
   return (
     <Card className="border-error/40 flex flex-wrap items-center justify-between gap-4 px-5 py-4">
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-64">
         <h2 className="font-display text-[15px] font-bold">
           {t("customers.settings.removeTitle")}
         </h2>

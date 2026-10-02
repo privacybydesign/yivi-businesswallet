@@ -75,3 +75,44 @@ func TestFlowHostedStore(t *testing.T) {
 		t.Errorf("another flow = %+v, want the defaults", other)
 	}
 }
+
+// A flow's member, hosted and diploma settings share one row: saving one
+// leaves the others as they were.
+func TestFlowSettingsAreIndependent(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	selection := NewSettingsStore(pool, audit.NopRecorder{})
+	hosted := NewFlowHostedStore(pool, audit.NopRecorder{})
+	diplomas := NewFlowDiplomaStore(pool, audit.NopRecorder{})
+	orgID := makeOrg(t, pool, "acme")
+	ctx := context.Background()
+
+	custom := FlowHosted{Enabled: false, Locales: []email.Locale{email.LocaleNL}, Completion: CompletionDone}
+	if _, err := hosted.Save(ctx, orgID, "flow-1", custom); err != nil {
+		t.Fatalf("save hosted: %v", err)
+	}
+	if _, err := diplomas.Save(ctx, orgID, "flow-1", DiplomasRequired); err != nil {
+		t.Fatalf("save diplomas: %v", err)
+	}
+	if sel, err := selection.FlowSelection(ctx, orgID); err != nil || len(sel.FlowIDs) != 0 {
+		t.Fatalf("selection after hosted and diploma settings = %+v, %v; want none offered to members", sel, err)
+	}
+
+	if err := selection.SaveFlowSelection(ctx, orgID, FlowSelection{FlowIDs: []string{"flow-1", "flow-2"}, DefaultFlowID: "flow-1"}); err != nil {
+		t.Fatalf("offer flows: %v", err)
+	}
+	if err := selection.SaveFlowSelection(ctx, orgID, FlowSelection{FlowIDs: []string{"flow-2"}, DefaultFlowID: "flow-2"}); err != nil {
+		t.Fatalf("take flow-1 off: %v", err)
+	}
+	if sel, err := selection.FlowSelection(ctx, orgID); err != nil || !slices.Equal(sel.FlowIDs, []string{"flow-2"}) || sel.DefaultFlowID != "flow-2" {
+		t.Errorf("selection = %+v, %v; want flow-2 only, as default", sel, err)
+	}
+	if got, err := hosted.Get(ctx, orgID, "flow-1"); err != nil || got.Enabled || got.Completion != CompletionDone || !slices.Equal(got.Locales, custom.Locales) {
+		t.Errorf("hosted after the selection changed = %+v, %v; want %+v", got, err, custom)
+	}
+	if got, err := diplomas.Get(ctx, orgID, "flow-1"); err != nil || got != DiplomasRequired {
+		t.Errorf("diplomas after the selection changed = %q, %v; want required", got, err)
+	}
+	if all, err := diplomas.All(ctx, orgID); err != nil || len(all) != 1 || all["flow-1"] != DiplomasRequired {
+		t.Errorf("All = %v, %v; want only flow-1, required", all, err)
+	}
+}

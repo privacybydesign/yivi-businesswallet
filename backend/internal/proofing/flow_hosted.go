@@ -70,7 +70,7 @@ func (s *FlowHostedStore) Get(ctx context.Context, orgID uuid.UUID, flowID strin
 func getFlowHosted(ctx context.Context, q database.Querier, orgID uuid.UUID, flowID string) (FlowHosted, error) {
 	var f FlowHosted
 	var completion string
-	err := q.QueryRow(ctx, `SELECT enabled, locales, completion FROM identity_proofing_flow_hosted_settings
+	err := q.QueryRow(ctx, `SELECT hosted_enabled, hosted_locales, hosted_completion FROM identity_proofing_flow_settings
 		WHERE organization_id = $1 AND flow_id = $2`, orgID, flowID).Scan(&f.Enabled, &f.Locales, &completion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DefaultFlowHosted(), nil
@@ -94,12 +94,12 @@ func (s *FlowHostedStore) Save(ctx context.Context, orgID uuid.UUID, flowID stri
 		if before.Enabled == f.Enabled && before.Completion == f.Completion && slices.Equal(before.Locales, f.Locales) {
 			return nil
 		}
-		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_flow_hosted_settings
-				(organization_id, flow_id, enabled, locales, completion)
+		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_flow_settings
+				(organization_id, flow_id, hosted_enabled, hosted_locales, hosted_completion)
 			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (organization_id, flow_id) DO UPDATE SET
-				enabled = EXCLUDED.enabled, locales = EXCLUDED.locales, completion = EXCLUDED.completion,
-				updated_at = now()`,
+				hosted_enabled = EXCLUDED.hosted_enabled, hosted_locales = EXCLUDED.hosted_locales,
+				hosted_completion = EXCLUDED.hosted_completion, updated_at = now()`,
 			orgID, flowID, f.Enabled, f.Locales, string(f.Completion)); err != nil {
 			return fmt.Errorf("proofing: save hosted settings flow %s: %w", flowID, err)
 		}

@@ -10,8 +10,8 @@ info:
     by the login flow; endpoints that do not require it are marked with no security.
   version: "1.0.0"
 servers:
-  - url: /api/v1
-    description: Versioned API root
+  - url: /
+    description: Same origin; every path carries the versioned /api/v1 prefix
 tags:
   - name: auth
     description: Login sessions and the current user.
@@ -108,12 +108,20 @@ paths:
         Requires the platform administrator role. `pauses` holds one entry per paused org
         (`organizationId`). `paused` is whether identity proofing is stopped for the org; `platformPausedAt` and `orgPausedAt` say who paused it.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: Every paused org.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingPauseList'
+              examples:
+                pauses:
+                  summary: One org paused by the platform
+                  value:
+                    pauses:
+                      - organizationId: 1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d
+                        paused: true
+                        platformPausedAt: "2026-10-01T22:15:00Z"
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -141,15 +149,26 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              description: JSON request payload; see the endpoint description.
+              $ref: '#/components/schemas/ProofingSetPause'
+            examples:
+              pause:
+                summary: Pause
+                value:
+                  paused: true
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The pause after the change.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingPause'
+              examples:
+                paused:
+                  summary: Paused by the platform
+                  value:
+                    organizationId: 1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d
+                    paused: true
+                    platformPausedAt: "2026-10-02T09:30:00Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4460,12 +4479,31 @@ paths:
         for DUO diploma extracts. The organisation is the proofing engine's tenant under its own
         id: nothing is provisioned first.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The flows.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFlowList'
+              examples:
+                flows:
+                  summary: One flow, made available and preselected
+                  value:
+                    - id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                      name: Onboarding
+                      steps: [document_capture, nfc_read, face_verification]
+                      requestedAttributes: [dg1, dg2, selfie]
+                      faceProvider: regula
+                      requiredAssuranceLevel: substantial
+                      version: 3
+                      active: true
+                      createdAt: "2026-09-14T08:12:00Z"
+                      completable: true
+
+                      allowed: true
+                      default: true
+                      diplomaMode: "off"
+                      needsReferencePhoto: false
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4485,13 +4523,44 @@ paths:
         `invalid_input`. The proofing engine validates the combination (including `regula` on a
         deployment without Regula) and its refusal is returned as 422 `rejected_by_provider`.
         Creates version 1; the answer is the flow with `completable` and `needsReferencePhoto`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowSpec'
+            examples:
+              onboarding:
+                summary: Chip read with a face match
+                value:
+                  name: Onboarding
+                  steps: [document_capture, nfc_read, face_verification]
+                  requiredAssuranceLevel: substantial
       responses:
-        '2XX':
-          description: Successful response.
+        '201':
+          description: Created as version 1.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFlow'
+              examples:
+                created:
+                  summary: The new flow
+                  value:
+                    id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    name: Onboarding
+                    steps: [document_capture, nfc_read, face_verification]
+                    requestedAttributes: [dg1, dg2, selfie]
+                    faceProvider: regula
+                    requiredAssuranceLevel: substantial
+                    version: 1
+                    active: true
+                    createdAt: "2026-09-14T08:12:00Z"
+                    completable: true
+
+                    allowed: false
+                    default: false
+                    needsReferencePhoto: false
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4525,12 +4594,44 @@ paths:
         Requires an administrator role in the organisation. Oldest first; exactly one
         is `active`, the version new requests run.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: Every version, oldest first.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFlowList'
+              examples:
+                versions:
+                  summary: Two versions, the second active
+                  value:
+                    - id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                      name: Onboarding
+                      steps: [document_capture, nfc_read, face_verification]
+                      requestedAttributes: [dg1, dg2, selfie]
+                      faceProvider: regula
+                      requiredAssuranceLevel: substantial
+                      version: 1
+                      active: false
+                      createdAt: "2026-09-14T08:12:00Z"
+                      completable: true
+
+                      allowed: false
+                      default: false
+                      needsReferencePhoto: false
+                    - id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                      name: Onboarding
+                      steps: [document_capture, nfc_read, face_verification]
+                      requestedAttributes: [dg1, dg2, selfie]
+                      faceProvider: regula
+                      requiredAssuranceLevel: substantial
+                      version: 2
+                      active: true
+                      createdAt: "2026-09-14T08:12:00Z"
+                      completable: true
+
+                      allowed: false
+                      default: false
+                      needsReferencePhoto: false
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4549,13 +4650,44 @@ paths:
         stored as the next version and made the active one. Requests already sent keep the
         version their session pinned. An empty `name` or `steps`, or an unknown `faceProvider`,
         is 400 `invalid_input`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowSpec'
+            examples:
+              edit:
+                summary: Add a document photo
+                value:
+                  name: Onboarding
+                  steps: [document_capture, nfc_read, document_photo, face_verification]
+                  requiredAssuranceLevel: substantial
       responses:
-        '2XX':
-          description: Successful response.
+        '201':
+          description: Saved as the next version, now active.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFlow'
+              examples:
+                saved:
+                  summary: Version 4
+                  value:
+                    id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    name: Onboarding
+                    steps: [document_capture, nfc_read, document_photo, face_verification]
+                    requestedAttributes: [dg1, dg2, selfie]
+                    faceProvider: regula
+                    requiredAssuranceLevel: substantial
+                    version: 4
+                    active: true
+                    createdAt: "2026-09-14T08:12:00Z"
+                    completable: true
+
+                    allowed: false
+                    default: false
+                    needsReferencePhoto: false
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4596,12 +4728,30 @@ paths:
         Requires an administrator role in the organisation. Makes the version the only
         active one (a rollback or roll-forward); new requests run it from then on.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The version, now the active one.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFlow'
+              examples:
+                activated:
+                  summary: Rolled back to version 2
+                  value:
+                    id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    name: Onboarding
+                    steps: [document_capture, nfc_read, face_verification]
+                    requestedAttributes: [dg1, dg2, selfie]
+                    faceProvider: regula
+                    requiredAssuranceLevel: substantial
+                    version: 2
+                    active: true
+                    createdAt: "2026-09-14T08:12:00Z"
+                    completable: true
+
+                    allowed: false
+                    default: false
+                    needsReferencePhoto: false
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4630,13 +4780,25 @@ paths:
         (each an active flow a recipient can finish in the app) and `defaultFlowId` (one of
         them, or empty when the list is). Returns the org's flows as the list endpoint does for
         an administrator. A default outside the list is 400 `invalid_input`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowSelection'
+            examples:
+              one:
+                summary: One flow, preselected
+                value:
+                  flowIds: [6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10]
+                  defaultFlowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The org's flows, as the list shows them to an administrator.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFlowList'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4677,12 +4839,38 @@ paths:
             format: uuid
           description: Only the requests sent for this customer.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The requests, newest first.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingRequestList'
+              examples:
+                requests:
+                  summary: A customer's approved request
+                  value:
+                    - id: 3f6b44a0-9d6b-4b18-a57a-2b7e4a0a9c11
+                      requestedByName: Sanne de Vries
+                      customerId: 8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f
+                      customerName: Acme Verzekeringen
+                      subjectName: Anna Jansen
+                      subjectEmail: anna@example.org
+                      proofedName: Anna Jansen
+                      flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                      flowName: Onboarding
+                      flowVersion: 3
+                      method: idem_app
+                      mode: live
+                      status: approved
+                      assuranceLevel: substantial
+                      eidasLevel: substantial
+                      linkExpiresAt: "2026-10-02T09:40:00Z"
+                      createdAt: "2026-10-02T09:30:00Z"
+                      completedAt: "2026-10-02T09:34:12Z"
+                      purgeAt: "2026-11-01T09:34:12Z"
+                      diplomaMode: "off"
+                      diplomas: []
+                      expectedSubject: false
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4729,13 +4917,90 @@ paths:
         the document data (dg1), and a member's request cannot carry `birthDate`. Other 400
         `invalid_input` causes are an unknown `method`, `channel` or `language`, both `userId`
         and `customerId`, and an invalid `email`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingCreateRequest'
+            examples:
+              member:
+                summary: Proof a colleague by mail
+                value:
+                  userId: 2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d
+                  flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+              customer:
+                summary: Mail a customer's subject
+                value:
+                  customerId: 8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f
+                  email: anna@example.org
+                  name: Anna Jansen
+                  language: nl
+              onScreen:
+                summary: Show the QR code on screen
+                value:
+                  customerId: 8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f
+                  name: Anna Jansen
+                  channel: on_screen
+              hosted:
+                summary: Hand the person a link
+                value:
+                  customerId: 8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f
+                  email: anna@example.org
+                  name: Anna Jansen
+                  channel: hosted
       responses:
-        '2XX':
-          description: Successful response.
+        '201':
+          description: Sent.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingCreatedRequest'
+              examples:
+                mailed:
+                  summary: Mailed
+                  value:
+                    id: 3f6b44a0-9d6b-4b18-a57a-2b7e4a0a9c11
+                    requestedByName: Sanne de Vries
+                    customerId: 8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f
+                    customerName: Acme Verzekeringen
+                    subjectName: Anna Jansen
+                    subjectEmail: anna@example.org
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowName: Onboarding
+                    flowVersion: 3
+                    method: idem_app
+                    mode: live
+                    status: pending
+                    linkExpiresAt: "2026-10-02T09:40:00Z"
+                    createdAt: "2026-10-02T09:30:00Z"
+                    diplomaMode: "off"
+                    diplomas: []
+                    expectedSubject: false
+                    mailSent: true
+                onScreen:
+                  summary: On screen
+                  value:
+                    id: 3f6b44a0-9d6b-4b18-a57a-2b7e4a0a9c11
+                    requestedByName: Sanne de Vries
+                    customerId: 8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f
+                    customerName: Acme Verzekeringen
+                    subjectName: Anna Jansen
+                    subjectEmail: ""
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowName: Onboarding
+                    flowVersion: 3
+                    method: idem_app
+                    mode: live
+                    status: pending
+                    linkExpiresAt: "2026-10-02T09:40:00Z"
+                    createdAt: "2026-10-02T09:30:00Z"
+                    diplomaMode: "off"
+                    diplomas: []
+                    expectedSubject: false
+                    mailSent: false
+                    deepLink: vcmrtd://verify?handover=hv_3m8x2kq7&api=https%3A%2F%2Fwallet.example.nl
+                    deepLinkExpiresAt: "2026-10-02T09:35:00Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4776,12 +5041,38 @@ paths:
         (at most every 10 seconds) while it is live: what an on-screen session's page
         polls. An administrator sees any request, a member only one they sent.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The request.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingRequest'
+              examples:
+                approved:
+                  summary: Approved
+                  value:
+                    id: 3f6b44a0-9d6b-4b18-a57a-2b7e4a0a9c11
+                    requestedByName: Sanne de Vries
+                    customerId: 8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f
+                    customerName: Acme Verzekeringen
+                    subjectName: Anna Jansen
+                    subjectEmail: anna@example.org
+                    proofedName: Anna Jansen
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowName: Onboarding
+                    flowVersion: 3
+                    method: idem_app
+                    mode: live
+                    status: approved
+                    assuranceLevel: substantial
+                    eidasLevel: substantial
+                    linkExpiresAt: "2026-10-02T09:40:00Z"
+                    createdAt: "2026-10-02T09:30:00Z"
+                    completedAt: "2026-10-02T09:34:12Z"
+                    purgeAt: "2026-11-01T09:34:12Z"
+                    diplomaMode: "off"
+                    diplomas: []
+                    expectedSubject: false
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4815,12 +5106,18 @@ paths:
         the session left it (backgrounded, closed or silent). The session keeps
         what was done so far; the phone that scans takes it over.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: A new link for the Idem app.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingClaimLink'
+              examples:
+                link:
+                  summary: A new code
+                  value:
+                    deepLink: vcmrtd://verify?handover=hv_3m8x2kq7&api=https%3A%2F%2Fwallet.example.nl
+                    expiresAt: "2026-10-02T09:36:00Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4859,12 +5156,17 @@ paths:
         `away` once it was backgrounded, closed or went silent, when a `claim-link`
         hands it over to the phone that scans next.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: Where the request's phone is.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingAppState'
+              examples:
+                connected:
+                  summary: The app holds the session
+                  value:
+                    app: connected
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4905,12 +5207,18 @@ paths:
         universal link) with `expiresAt`, the session's cap. The verifier's
         transaction id stays on the server.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The disclosure request for the Yivi app.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingYiviStart'
+              examples:
+                started:
+                  summary: Started
+                  value:
+                    walletLink: openid4vp://?client_id=verifier.example.nl&request_uri=https%3A%2F%2Fverifier.example.nl%2Fr%2F8f3k
+                    expiresAt: "2026-10-02T09:40:00Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4952,12 +5260,31 @@ paths:
         photo, when the flow requested it) as the session's result, readable through `result`,
         until its retention.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The disclosure's state.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingYiviDisclosure'
+              examples:
+                pending:
+                  summary: Not finished in the app yet
+                  value:
+                    done: false
+                    ok: false
+                ready:
+                  summary: On to the face check
+                  value:
+                    done: true
+                    ok: true
+                    stableFrames: 3
+                    maxAttempts: 30
+                noPhoto:
+                  summary: The credential had no photo
+                  value:
+                    done: true
+                    ok: false
+                    code: photo_missing
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5002,12 +5329,19 @@ paths:
         own thank-you screen) or `done` (always the thank-you screen). A flow never set reads
         `enabled: true, locales: [], completion: redirect`.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The flow's hosted page settings.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFlowHosted'
+              examples:
+                default:
+                  summary: A flow never set
+                  value:
+                    enabled: true
+                    locales: []
+                    completion: redirect
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -5033,15 +5367,28 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              description: JSON request payload; see the endpoint description.
+              $ref: '#/components/schemas/ProofingFlowHostedUpdate'
+            examples:
+              dutchOnly:
+                summary: Dutch only, always the thank-you screen
+                value:
+                  enabled: true
+                  locales: [nl]
+                  completion: done
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The saved settings.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFlowHosted'
+              examples:
+                saved:
+                  summary: Dutch only
+                  value:
+                    enabled: true
+                    locales: [nl]
+                    completion: done
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5050,6 +5397,82 @@ paths:
           $ref: '#/components/responses/ProofingForbidden'
         '422':
           description: The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/kind:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id.
+    get:
+      tags: [identity-proofing]
+      summary: Read a flow's kind
+      description: >-
+        Requires an administrator role in the organisation. `{kind}`: `identity` (an identity
+        check), `data_access` ("see my data") or `data_erasure` ("delete my data"). A flow never
+        set reads `identity`.
+      responses:
+        '200':
+          description: The flow's kind.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowKind'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '422':
+          description: The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [identity-proofing]
+      summary: Set a flow's kind
+      description: >-
+        Requires an administrator role in the organisation. Body `{kind}`. A customer sends a
+        session on a data request flow like any other; once the person is proven the session
+        goes to review (`needs_review`) with the customer's sessions of that person, and the
+        reviewer's approval erases them or opens their data for download. A data request flow
+        must read the name and date of birth (422 `flow_no_identity`) and cannot be offered to
+        members (422 `data_flow_for_member`). Sessions already sent keep the kind they were
+        sent with. Audited `identity_proofing.flow_kind_configured`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowKind'
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowKind'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '422':
+          description: >-
+            The flow is not one of the organisation's (`flow_not_found`), reads no name and date of
+            birth (`flow_no_identity`), or is offered to members (`data_flow_for_member`).
           content:
             application/json:
               schema:
@@ -5077,12 +5500,17 @@ paths:
         approved the subject must upload their DUO diploma extracts (the PDFs from
         mijn.duo.nl) on the page that ran the session. A flow never set reads `off`.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The flow's diploma mode.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFlowDiplomas'
+              examples:
+                off:
+                  summary: No diplomas
+                  value:
+                    diplomaMode: "off"
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -5107,15 +5535,24 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              description: JSON request payload; see the endpoint description.
+              $ref: '#/components/schemas/ProofingFlowDiplomas'
+            examples:
+              required:
+                summary: Ask for diploma extracts
+                value:
+                  diplomaMode: required
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The saved mode.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFlowDiplomas'
+              examples:
+                required:
+                  summary: Diplomas asked
+                  value:
+                    diplomaMode: required
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5142,12 +5579,24 @@ paths:
       description: >-
         Any member; reachable while paused, unlike the other identity-proofing routes. `paused` is whether identity proofing is stopped for the org; `platformPausedAt` and `orgPausedAt` say who paused it.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: Whether proofing is paused.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingPause'
+              examples:
+                paused:
+                  summary: Paused by the org's admin
+                  value:
+                    organizationId: 1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d
+                    paused: true
+                    orgPausedAt: "2026-10-02T08:00:00Z"
+                running:
+                  summary: Not paused
+                  value:
+                    organizationId: 1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d
+                    paused: false
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -5164,15 +5613,26 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              description: JSON request payload; see the endpoint description.
+              $ref: '#/components/schemas/ProofingSetPause'
+            examples:
+              pause:
+                summary: Pause
+                value:
+                  paused: true
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The pause after the change.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingPause'
+              examples:
+                paused:
+                  summary: Paused
+                  value:
+                    organizationId: 1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d
+                    paused: true
+                    orgPausedAt: "2026-10-02T08:00:00Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5208,12 +5668,44 @@ paths:
         with the administrator as actor on every read. A member's request, one erased, or a
         hosted one never started is 404.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The verified identity, with the images for an approval.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingAdminResult'
+              examples:
+                approved:
+                  summary: Approved, with the chip photo and the selfie
+                  value:
+                    id: ps_q4r7tz2mxk3vbn6hw5jc2dfa7e
+                    status: approved
+                    method: idem_app
+                    assuranceLevel: substantial
+                    eidasLevel: substantial
+                    verifiedAt: "2026-10-02T09:34:12Z"
+                    identity:
+                      givenName: Anna
+                      familyName: Jansen
+                      birthDate: "1991-03-14"
+                      nationality: NLD
+                    evidence:
+                      - type: emrtd
+                        documentType: P
+                        issuingState: NLD
+                        expiryDate: "2031-05-02"
+                        passiveAuth: valid
+                        activeAuth: valid
+                        faceMatch: 0.97
+                        liveness: passed
+                    livemode: true
+                    diplomas: []
+                    photo:
+                      mimeType: image/jpeg
+                      data: /9j/4AAQSkZJRgABAQAAAQABAAD
+                    selfie:
+                      mimeType: image/jpeg
+                      data: /9j/4AAQSkZJRgABAQAAAQABAAD
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5254,13 +5746,31 @@ paths:
         `identity_proofing.review_decided` with the administrator as actor. The answer is the
         request. An `errorCode` with an approval, or one not 1-64 of A-Z, 0-9 and _, is 400
         `invalid_input`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingReviewDecision'
+            examples:
+              approve:
+                summary: Approve
+                value:
+                  decision: approve
+                  reason: Document checked by hand against the original
+              reject:
+                summary: Reject with a code
+                value:
+                  decision: reject
+                  reason: Photo on the document is damaged
+                  errorCode: DOCUMENT_DAMAGED
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The request after the decision.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingRequest'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5310,15 +5820,35 @@ paths:
         content:
           multipart/form-data:
             schema:
-              type: object
-              description: One or more `file` parts.
+              $ref: '#/components/schemas/ProofingDiplomaUpload'
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: A verdict per file.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingDiplomaVerdictList'
+              examples:
+                verdicts:
+                  summary: One accepted, one refused
+                  value:
+                    - fileName: diploma.pdf
+                      accepted: true
+                      diploma:
+                        documentType: Diploma
+                        qualification: HBO Bachelor Verpleegkunde
+                        profiles: []
+                        institution: Hogeschool van Amsterdam
+                        placeOfIssue: Amsterdam
+                        dateAwarded: "2019-07-05"
+                        nlqfLevel: "6"
+                        eqfLevel: "6"
+                        documentNumber: "2019-0042137"
+                        signedAt: "2026-10-02T09:36:40Z"
+                        addedAt: "2026-10-02T09:37:02Z"
+                    - fileName: cijferlijst.pdf
+                      accepted: false
+                      reason: not_a_diploma
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5355,13 +5885,45 @@ paths:
         progress (`faceDetected`, `matched`, `consecutive`, `stableFrames`, `attempts`,
         `maxAttempts`) and the `decision` (pending, approved, rejected), which is recorded on
         the request at once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFaceFrame'
+            examples:
+              frame:
+                summary: One camera frame
+                value:
+                  image: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The face check's progress.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFaceVerdict'
+              examples:
+                matching:
+                  summary: A matching frame
+                  value:
+                    faceDetected: true
+                    matched: true
+                    consecutive: 2
+                    stableFrames: 3
+                    attempts: 5
+                    maxAttempts: 30
+                    decision: pending
+                approved:
+                  summary: Approved
+                  value:
+                    faceDetected: true
+                    matched: true
+                    consecutive: 3
+                    stableFrames: 3
+                    attempts: 6
+                    maxAttempts: 30
+                    decision: approved
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5378,6 +5940,81 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           description: The proofing engine refused the step (`rejected_by_provider`), e.g. the disclosure is not complete or the image cannot be read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/data-matches:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the customer API and webhooks show.
+    get:
+      tags: [identity-proofing]
+      summary: Read a data request's matched sessions
+      description: >-
+        Requires an administrator role in the organisation. What a data request's review shows
+        beside the person's identity (`GET .../result`): its `flowKind` and the customer's
+        sessions whose proofed identity is the person's (`strong` on the same document,
+        `probable` on name and date of birth alone). Empty for any other request.
+      responses:
+        '200':
+          description: The matches.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingDataMatches'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/data-export:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the customer API and webhooks show.
+    get:
+      tags: [identity-proofing]
+      summary: Download an approved data request's data
+      description: >-
+        Requires an administrator role in the organisation. An approved `data_access` session's
+        data, as a JSON attachment, for 7 days after the decision, to hand the person who asked.
+        Audited `identity_proofing.data_exported`.
+      responses:
+        '200':
+          description: The data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingDataExport'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: No data to download (`export_unavailable`).
           content:
             application/json:
               schema:
@@ -5404,12 +6041,40 @@ paths:
         first: sent, session created and started, the outcome or expiry. An
         administrator sees any request's, a member only one they sent.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The request's timeline, oldest first.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingRequestEvents'
+              examples:
+                events:
+                  summary: Sent, then approved
+                  value:
+                    events:
+                      - id: 7d6c5b4a-3928-4170-8e6d-5c4b3a291807
+                        occurredAt: "2026-10-02T09:30:00Z"
+                        action: identity_proofing.request_sent
+                        targetType: identity_proofing_request
+                        targetId: 3f6b44a0-9d6b-4b18-a57a-2b7e4a0a9c11
+                        metadata:
+                          flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                        actor:
+                          userId: 2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d
+                          preferredName: null
+                          givenNames: Sanne
+                          lastName: de Vries
+                          avatarUri: ""
+                        actorLabel: null
+                      - id: 8e7d6c5b-4a39-4281-9f7e-6d5c4b3a2918
+                        occurredAt: "2026-10-02T09:34:12Z"
+                        action: identity_proofing.session_approved
+                        targetType: identity_proofing_request
+                        targetId: 3f6b44a0-9d6b-4b18-a57a-2b7e4a0a9c11
+                        metadata:
+                          status: approved
+                        actor: null
+                        actorLabel: null
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5436,12 +6101,25 @@ paths:
         pending or in progress. An administrator's counts cover every request of the
         organisation, a member's the requests they sent. The counts are of the outcomes stored.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The counts per customer and flow.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingStats'
+              examples:
+                stats:
+                  summary: One customer, one flow
+                  value:
+                    since: "2026-09-02T09:30:00Z"
+                    rows:
+                      - customerId: 8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f
+                        flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                        sessions: 42
+                        approved: 35
+                        rejected: 3
+                        needsReview: 1
+                        expired: 2
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -5466,12 +6144,38 @@ paths:
         `allowedRedirectOrigins`, `hasLiveKey`, `createdAt` and `updatedAt`. A customer has no
         login; members send requests for it.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The customers, by name.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingCustomerList'
+              examples:
+                customers:
+                  summary: One customer
+                  value:
+                    - id: 8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f
+                      name: Acme Verzekeringen
+                      flowIds: [6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10]
+                      defaultFlowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                      status: active
+                      sessionTtlSeconds: 600
+                      dataRetentionDays: 30
+                      webhook:
+                        state: delivering
+                        lastStatusCode: 200
+                        pendingRetries: 0
+                      branding:
+                        displayName: Acme Verzekeringen
+                        primaryColor: "#1f6feb"
+                        supportContact: support@acme.example
+                        privacyUrl: https://acme.example/privacy
+                        logoUri: /api/v1/orgs/acme/customers/8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f/logo?v=1759397400
+                        hidePoweredBy: false
+                      allowedRedirectOrigins: [https://portal.acme.example]
+                      hasLiveKey: true
+                      createdAt: "2026-09-01T10:00:00Z"
+                      updatedAt: "2026-10-02T09:30:00Z"
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -5482,13 +6186,48 @@ paths:
       description: >-
         Requires an administrator role in the organisation. `name` (unique within the
         organisation, ignoring case). The customer starts with no flows assigned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingCreateCustomer'
+            examples:
+              create:
+                summary: A new customer
+                value:
+                  name: Acme Verzekeringen
       responses:
-        '2XX':
-          description: Successful response.
+        '201':
+          description: Created.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingCustomer'
+              examples:
+                created:
+                  summary: The new customer
+                  value:
+                    id: 8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f
+                    name: Acme Verzekeringen
+                    flowIds: []
+                    status: active
+                    sessionTtlSeconds: 600
+                    dataRetentionDays: 30
+                    webhook:
+                      state: not_configured
+                      pendingRetries: 0
+                    branding:
+                      displayName: ""
+                      primaryColor: ""
+                      supportContact: ""
+                      privacyUrl: ""
+                      logoUri: ""
+                      hidePoweredBy: false
+                    allowedRedirectOrigins: []
+                    hasLiveKey: false
+                    createdAt: "2026-10-02T09:30:00Z"
+                    updatedAt: "2026-10-02T09:30:00Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5522,12 +6261,38 @@ paths:
       description: >-
         Requires organisation membership. One customer, with the fields the list shows.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The customer.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingCustomer'
+              examples:
+                customer:
+                  summary: A configured customer
+                  value:
+                    id: 8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f
+                    name: Acme Verzekeringen
+                    flowIds: [6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10]
+                    defaultFlowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    status: active
+                    sessionTtlSeconds: 600
+                    dataRetentionDays: 30
+                    webhook:
+                      state: delivering
+                      lastStatusCode: 200
+                      pendingRetries: 0
+                    branding:
+                      displayName: Acme Verzekeringen
+                      primaryColor: "#1f6feb"
+                      supportContact: support@acme.example
+                      privacyUrl: https://acme.example/privacy
+                      logoUri: /api/v1/orgs/acme/customers/8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f/logo?v=1759397400
+                      hidePoweredBy: false
+                    allowedRedirectOrigins: [https://portal.acme.example]
+                    hasLiveKey: true
+                    createdAt: "2026-09-01T10:00:00Z"
+                    updatedAt: "2026-10-02T09:30:00Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5548,13 +6313,30 @@ paths:
         how long an approved subject's name is kept. `allowedRedirectOrigins` replaces the
         origins (`https://host[:port]`, or `http` on a loopback host; at most 10) a hosted page
         may send its subject back to and be embedded on.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingUpdateCustomer'
+            examples:
+              pause:
+                summary: Pause the customer
+                value:
+                  paused: true
+              settings:
+                summary: Shorter sessions, longer retention, a return origin
+                value:
+                  sessionTtlSeconds: 300
+                  dataRetentionDays: 90
+                  allowedRedirectOrigins: [https://portal.acme.example]
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The customer after the change.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingCustomer'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5578,12 +6360,8 @@ paths:
         webhook endpoint. The audit trail stays. Only the wallet's records go; the engine's
         copies of the sessions are left to their retention.
       responses:
-        '2XX':
-          description: Successful response.
-          content:
-            application/json:
-              schema:
-                description: Response payload; shape depends on the endpoint.
+        '204':
+          description: Deleted.
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5615,12 +6393,23 @@ paths:
         ones included, oldest first: its `id`, name, `mode`, `scopes`, its public `prefix`, when
         it was created and last used, and `revokedAt` once revoked. Never a secret.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The keys, oldest first.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingApiKeyList'
+              examples:
+                keys:
+                  summary: One live key
+                  value:
+                    - id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
+                      name: Production backend
+                      prefix: yp_live_3kq7
+                      mode: live
+                      scopes: [sessions:write, sessions:read, results:read, flows:read]
+                      createdAt: "2026-09-01T10:05:00Z"
+                      lastUsedAt: "2026-10-02T09:30:00Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5642,13 +6431,40 @@ paths:
         (the verified identity) and `flows:read`. A route the key lacks the scope for answers
         403 `insufficient_scope`. An empty `name` or one over 100 characters, or a `mode` other
         than `live` or `test`, is 400 `invalid_input`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingCreateApiKey'
+            examples:
+              live:
+                summary: A live key
+                value:
+                  name: Production backend
+              test:
+                summary: A test key
+                value:
+                  name: Staging
+                  mode: test
       responses:
-        '2XX':
-          description: Successful response.
+        '201':
+          description: Created; the only answer that carries the secret.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingCreatedApiKey'
+              examples:
+                created:
+                  summary: A new live key
+                  value:
+                    id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
+                    name: Production backend
+                    prefix: yp_live_3kq7
+                    mode: live
+                    scopes: [sessions:write, sessions:read, results:read, flows:read]
+                    createdAt: "2026-09-01T10:05:00Z"
+                    secret: yp_live_3kq7Vb9xR2mT8nW4cZ6hJ1pL5sD0fG7a
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5687,12 +6503,24 @@ paths:
         authenticating at once and stays listed with `revokedAt`. Revoking it again changes
         nothing.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The revoked key.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingApiKey'
+              examples:
+                revoked:
+                  summary: Revoked
+                  value:
+                    id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
+                    name: Production backend
+                    prefix: yp_live_3kq7
+                    mode: live
+                    scopes: [sessions:write, sessions:read, results:read, flows:read]
+                    createdAt: "2026-09-01T10:05:00Z"
+                    lastUsedAt: "2026-10-02T09:30:00Z"
+                    revokedAt: "2026-10-02T10:00:00Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5727,13 +6555,19 @@ paths:
         and a `logo` file (PNG, JPEG, GIF or WebP, at most 512 KiB; mail clients do not
         render SVG) or `removeLogo=true`. `hidePoweredBy=true` leaves the "powered by" line off
         the customer's hosted pages, whose accent colour is `primaryColor`. Returns the customer.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProofingBrandingForm'
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The customer with the new branding.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingCustomer'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5770,12 +6604,13 @@ paths:
         Requires organisation membership. The logo image, served with a locked-down
         content security policy.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The logo image.
           content:
-            application/json:
+            'image/*':
               schema:
-                description: Response payload; shape depends on the endpoint.
+                type: string
+                format: binary
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5809,12 +6644,36 @@ paths:
         `pendingRetries`, or `not_configured`, and the `lastStatusCode`), the `availableEvents`
         and `maxAttempts`.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The customer's endpoint.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingWebhookEndpoint'
+              examples:
+                configured:
+                  summary: An endpoint that delivers
+                  value:
+                    configured: true
+                    url: https://portal.acme.example/hooks/yivi
+                    events: [session.verified, session.failed, session.review_opened, session.expired]
+                    secretLast4: x9Qa
+                    health:
+                      state: delivering
+                      lastStatusCode: 200
+                      pendingRetries: 0
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added]
+                    maxAttempts: 8
+                none:
+                  summary: No endpoint
+                  value:
+                    configured: false
+                    events: []
+                    health:
+                      state: not_configured
+                      pendingRetries: 0
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added]
+                    maxAttempts: 8
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5840,13 +6699,40 @@ paths:
         `Yivi-Signature` header as `t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`, with
         `Yivi-Event` and `Yivi-Delivery`. A non-2xx answer is retried with exponential
         back-off, up to 8 attempts over about 24 hours.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingSaveWebhook'
+            examples:
+              outcomes:
+                summary: The outcomes only
+                value:
+                  url: https://portal.acme.example/hooks/yivi
+                  events: [session.verified, session.failed, session.review_opened, session.expired]
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The endpoint; a new one carries its secret, once.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingWebhookEndpoint'
+              examples:
+                created:
+                  summary: A new endpoint
+                  value:
+                    configured: true
+                    url: https://portal.acme.example/hooks/yivi
+                    events: [session.verified, session.failed, session.review_opened, session.expired]
+                    secretLast4: x9Qa
+                    health:
+                      state: delivering
+                      lastStatusCode: 200
+                      pendingRetries: 0
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added]
+                    maxAttempts: 8
+                    secret: whsec_4tY8mK2qN6vB1xC9zR3wP7sL5dF0gH8jA2eU6iO4x9Qa
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5868,12 +6754,8 @@ paths:
         Requires an administrator role in the organisation. Deliveries still waiting for it are
         dropped. A customer without one is 404 `webhook_not_found`.
       responses:
-        '2XX':
-          description: Successful response.
-          content:
-            application/json:
-              schema:
-                description: Response payload; shape depends on the endpoint.
+        '204':
+          description: Removed.
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5905,12 +6787,12 @@ paths:
         the one time it is readable; deliveries still waiting are signed with it. A customer
         without an endpoint is 404 `webhook_not_found`.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The endpoint with its new secret, shown once.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingWebhookEndpoint'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5948,12 +6830,8 @@ paths:
         endpoint, whatever it subscribed to; it is sent within seconds. A customer without an
         endpoint is 404 `webhook_not_found`.
       responses:
-        '2XX':
-          description: Successful response.
-          content:
-            application/json:
-              schema:
-                description: Response payload; shape depends on the endpoint.
+        '204':
+          description: Queued.
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5986,12 +6864,35 @@ paths:
         (`endpointUrl`, absent for the wallet's default endpoint), its state (`pending`,
         `delivered` or `failed`), attempts, and the last status code or error.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The 20 most recent deliveries, newest first.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingWebhookDeliveryList'
+              examples:
+                deliveries:
+                  summary: One delivered, one retrying
+                  value:
+                    - id: 0b9d3c1e-7f2a-4e6b-9c8d-5a4f3e2d1c0b
+                      event: session.verified
+                      sessionId: 3f6b44a0-9d6b-4b18-a57a-2b7e4a0a9c11
+                      endpointUrl: https://portal.acme.example/hooks/yivi
+                      status: delivered
+                      attempts: 1
+                      lastStatusCode: 200
+                      lastAttemptAt: "2026-10-02T09:34:13Z"
+                      deliveredAt: "2026-10-02T09:34:13Z"
+                      createdAt: "2026-10-02T09:34:13Z"
+                    - id: 1c0e4d2f-8a3b-4f7c-8d9e-6b5a4f3e2d1c
+                      event: session.created
+                      sessionId: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+                      endpointUrl: https://portal.acme.example/hooks/yivi
+                      status: pending
+                      attempts: 2
+                      lastStatusCode: 503
+                      lastAttemptAt: "2026-10-02T09:36:00Z"
+                      createdAt: "2026-10-02T09:30:01Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -6012,14 +6913,33 @@ paths:
       security:
         - customerApiKey: []
       responses:
-        '2XX':
+        '200':
           description: Successful response.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProofingApiFlowList'
+              examples:
+                flows:
+                  summary: A default flow and a face-only flow
+                  value:
+                    - id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                      name: Onboarding
+                      version: 3
+                      requiredAssuranceLevel: substantial
+                      requestedAttributes: [dg1, dg2, selfie]
+                      default: true
+                      needsReferencePhoto: false
+                    - id: 9a2b4c6d-1e3f-4a5b-8c7d-0e1f2a3b4c5d
+                      name: Bank account change
+                      version: 1
+                      requestedAttributes: [selfie]
+                      default: false
+                      needsReferencePhoto: true
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
   /api/v1/proof/{token}:
@@ -6048,12 +6968,41 @@ paths:
         page's language, and `locales` the languages the flow's page offers (empty is every
         one). No personal data. A flow no longer in the organisation is 422 `flow_not_found`.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: What the page shows.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingHostedView'
+              examples:
+                unstarted:
+                  summary: Not started yet
+                  value:
+                    status: pending
+                    linkExpiresAt: "2026-10-05T09:30:00Z"
+                    started: false
+                    sessionId: ps_b7k2mq4xz6rt3vnw5hc2jd7fae
+                    redirectUrl: https://portal.acme.example/reset/return
+                    embedOrigins: [https://portal.acme.example]
+                    language: nl
+                    locales: []
+                    customer:
+                      name: Acme Verzekeringen
+                      branding:
+                        displayName: Acme Verzekeringen
+                        primaryColor: "#1f6feb"
+                        supportContact: support@acme.example
+                        privacyUrl: https://acme.example/privacy
+                        logoUri: /api/v1/proof/BwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSY/logo?v=1759397400
+                        hidePoweredBy: false
+                      dataRetentionDays: 30
+                    flow:
+                      name: Onboarding
+                      requiredAssuranceLevel: substantial
+                      requestedAttributes: [dg1, dg2, selfie]
+                      yiviAvailable: true
+                      diplomaMode: "off"
+                    diplomas: []
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '404':
@@ -6081,12 +7030,28 @@ paths:
       description: >-
         The progress part of `GET /api/v1/proof/{token}`, for the page to poll.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The progress.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingHostedProgress'
+              examples:
+                running:
+                  summary: Running in the Idem app
+                  value:
+                    status: in_progress
+                    method: idem_app
+                    linkExpiresAt: "2026-10-02T09:40:00Z"
+                    started: true
+                approved:
+                  summary: Approved
+                  value:
+                    status: approved
+                    method: idem_app
+                    linkExpiresAt: "2026-10-02T09:40:00Z"
+                    started: true
+                    completedAt: "2026-10-02T09:34:12Z"
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '404':
@@ -6109,13 +7074,33 @@ paths:
         Body `{method}`: `idem_app` or `yivi_app` (only when the flow's `yiviAvailable`;
         otherwise, or for another method, 400 `invalid_input`). Creates the session once and
         answers 201 with the progress, plus the vcmrtd `deepLink` for an Idem session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingHostedStart'
+            examples:
+              idem:
+                summary: The Idem app
+                value:
+                  method: idem_app
       responses:
-        '2XX':
-          description: Successful response.
+        '201':
+          description: Started.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingHostedStarted'
+              examples:
+                idem:
+                  summary: Started in the Idem app
+                  value:
+                    status: pending
+                    method: idem_app
+                    linkExpiresAt: "2026-10-02T09:40:00Z"
+                    started: true
+                    deepLink: vcmrtd://verify?handover=hv_3m8x2kq7&api=https%3A%2F%2Fwallet.example.nl
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -6152,12 +7137,19 @@ paths:
         The subject declined what the flow collects: cancels the link before it was started, audited as
         `identity_proofing.session_cancelled` by `hosted_link`. Answers the progress, `status` `cancelled`.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The progress, cancelled.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingHostedProgress'
+              examples:
+                declined:
+                  summary: Declined
+                  value:
+                    status: cancelled
+                    linkExpiresAt: "2026-10-05T09:30:00Z"
+                    started: false
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '404':
@@ -6185,12 +7177,13 @@ paths:
       description: >-
         The customer's logo image, for the hosted page.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The logo image.
           content:
-            application/json:
+            'image/*':
               schema:
-                description: Response payload; shape depends on the endpoint.
+                type: string
+                format: binary
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '404':
@@ -6212,12 +7205,18 @@ paths:
       description: >-
         As the org route of the same name, for a hosted link started with `idem_app`.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: A new link for the Idem app.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingClaimLink'
+              examples:
+                link:
+                  summary: A new code
+                  value:
+                    deepLink: vcmrtd://verify?handover=hv_3m8x2kq7&api=https%3A%2F%2Fwallet.example.nl
+                    expiresAt: "2026-10-02T09:36:00Z"
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '404':
@@ -6245,12 +7244,18 @@ paths:
       description: >-
         As the org route of the same name, for a hosted link started with `yivi_app`.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The disclosure request for the Yivi app.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingYiviStart'
+              examples:
+                started:
+                  summary: Started
+                  value:
+                    walletLink: openid4vp://?client_id=verifier.example.nl&request_uri=https%3A%2F%2Fverifier.example.nl%2Fr%2F8f3k
+                    expiresAt: "2026-10-02T09:40:00Z"
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '404':
@@ -6278,12 +7283,20 @@ paths:
       description: >-
         As the org route of the same name, for a hosted link.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The disclosure's state.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingYiviDisclosure'
+              examples:
+                ready:
+                  summary: On to the face check
+                  value:
+                    done: true
+                    ok: true
+                    stableFrames: 3
+                    maxAttempts: 30
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '404':
@@ -6316,13 +7329,35 @@ paths:
       security: []
       description: >-
         As the org route of the same name, for a hosted link: body `{image}`, one camera frame.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFaceFrame'
+            examples:
+              frame:
+                summary: One camera frame
+                value:
+                  image: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The face check's progress.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingFaceVerdict'
+              examples:
+                matching:
+                  summary: A matching frame
+                  value:
+                    faceDetected: true
+                    matched: true
+                    consecutive: 2
+                    stableFrames: 3
+                    attempts: 5
+                    maxAttempts: 30
+                    decision: pending
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -6343,6 +7378,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/data-export:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    get:
+      tags: [identity-proofing]
+      summary: Download an approved data request's data on its hosted link
+      security: []
+      description: >-
+        For the person who asked: an approved `data_access` session's data, as a JSON
+        attachment, while `dataExportUntil` (in the link's progress) has not passed. Audited
+        `identity_proofing.data_exported`.
+      responses:
+        '200':
+          description: The data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingDataExport'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: No data to download (`export_unavailable`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /api/v1/proof/{token}/diplomas:
     parameters:
       - name: token
@@ -6363,15 +7433,32 @@ paths:
         content:
           multipart/form-data:
             schema:
-              type: object
-              description: One or more `file` parts.
+              $ref: '#/components/schemas/ProofingDiplomaUpload'
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: A verdict per file.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingDiplomaVerdictList'
+              examples:
+                accepted:
+                  summary: Accepted
+                  value:
+                    - fileName: diploma.pdf
+                      accepted: true
+                      diploma:
+                        documentType: Diploma
+                        qualification: HBO Bachelor Verpleegkunde
+                        profiles: []
+                        institution: Hogeschool van Amsterdam
+                        placeOfIssue: Amsterdam
+                        dateAwarded: "2019-07-05"
+                        nlqfLevel: "6"
+                        eqfLevel: "6"
+                        documentNumber: "2019-0042137"
+                        signedAt: "2026-10-02T09:36:40Z"
+                        addedAt: "2026-10-02T09:37:02Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -6413,18 +7500,44 @@ paths:
           schema:
             type: string
       responses:
-        '2XX':
+        '200':
           description: Successful response.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProofingApiSessionPage'
+              examples:
+                page:
+                  summary: A page with a next one
+                  value:
+                    sessions:
+                      - id: ps_q4r7tz2mxk3vbn6hw5jc2dfa7e
+                        status: approved
+                        flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                        flowName: Onboarding
+                        flowVersion: 3
+                        method: idem_app
+                        subjectEmail: anna@example.org
+                        subjectName: Anna Jansen
+                        proofedName: Anna Jansen
+                        assuranceLevel: substantial
+                        eidasLevel: substantial
+                        expiresAt: "2026-10-02T09:40:00Z"
+                        createdAt: "2026-10-02T09:30:00Z"
+                        completedAt: "2026-10-02T09:34:12Z"
+                        livemode: true
+                        expectedSubject: false
+                    nextCursor: MjAyNi0xMC0wMlQwOTozMDowMFp8M2Y2YjQ0YTAtOWQ2Yi00YjE4LWE1N2EtMmI3ZTRhMGE5YzEx
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: '`limit` is not a positive number, or `cursor` is not one this API gave (`invalid_input`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
     post:
@@ -6463,7 +7576,8 @@ paths:
         and its liveness are checked against in the Idem app. It is refused on any other
         flow, such a session runs in the Idem app only and reaches no assurance level,
         and the photo is deleted once the face check can no longer run. A body over
-        1 MiB is 413 `body_too_large`.
+        1 MiB is 400 `invalid_body`, or 413 `body_too_large` when an `Idempotency-Key`
+        is sent. Unknown fields are refused (400 `invalid_body`).
       security:
         - customerApiKey: []
       parameters:
@@ -6516,14 +7630,81 @@ paths:
                   birthDate: "1984-07-21"
                   scriptedOutcome: approve
       responses:
-        '2XX':
-          description: Successful response.
+        '201':
+          description: Created.
+          headers:
+            Idempotent-Replayed:
+              description: '`true` when this is the stored answer to an earlier call with the same `Idempotency-Key`.'
+              schema:
+                type: string
+                enum: ['true']
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProofingApiCreatedSession'
+              examples:
+                mailed:
+                  summary: Mailed session (the onboarding request)
+                  value:
+                    id: ps_q4r7tz2mxk3vbn6hw5jc2dfa7e
+                    status: pending
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowName: Onboarding
+                    flowVersion: 3
+                    subjectEmail: anna@example.org
+                    subjectName: Anna Jansen
+                    expiresAt: "2026-10-02T09:40:00Z"
+                    createdAt: "2026-10-02T09:30:00Z"
+                    livemode: true
+                    expectedSubject: false
+                    deepLink: vcmrtd://verify?handover=hv_3m8x2kq7&api=https%3A%2F%2Fwallet.example.nl
+                    mailSent: true
+                hosted:
+                  summary: Hosted link (the password reset request)
+                  value:
+                    id: ps_b7k2mq4xz6rt3vnw5hc2jd7fae
+                    status: pending
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowName: Onboarding
+                    subjectEmail: ""
+                    subjectName: Dibran Mulder
+                    expiresAt: "2026-10-05T09:30:00Z"
+                    createdAt: "2026-10-02T09:30:00Z"
+                    livemode: true
+                    expectedSubject: true
+                    deepLink: ""
+                    mailSent: false
+                    hostedUrl: https://wallet.example.nl/p/BwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSY
+                test:
+                  summary: Test key, resolved at once
+                  value:
+                    id: ps_t3st7z2mxk3vbn6hw5jc2dfa7e
+                    status: approved
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowName: Onboarding
+                    subjectEmail: test@example.org
+                    proofedName: Sandbox Testperson
+                    assuranceLevel: substantial
+                    eidasLevel: substantial
+                    expiresAt: "2026-10-02T09:40:00Z"
+                    createdAt: "2026-10-02T09:30:00Z"
+                    completedAt: "2026-10-02T09:30:00Z"
+                    livemode: false
+                    expectedSubject: false
+                    deepLink: ""
+                    mailSent: false
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >-
+            The body is not valid JSON or has an unknown field (`invalid_body`), a field
+            is invalid (`invalid_input`, the message says which), or `redirectUrl` is not on
+            an allowed origin (`redirect_not_allowed`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: enter the person's email address
+                code: invalid_input
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
         '429':
@@ -6534,7 +7715,8 @@ paths:
           description: >-
             The customer is paused (`customer_paused`), a live key's customer has no live
             key (`customer_no_api_key`), the flow's hosted page is off (`hosted_disabled`),
-            or the deployment has no encryption key (`no_encryption_key`).
+            the deployment has no encryption key (`no_encryption_key`), or a call with this
+            `Idempotency-Key` is still running (`idempotency_in_flight`).
           content:
             application/json:
               schema:
@@ -6550,7 +7732,8 @@ paths:
             The flow does not exist (`flow_not_found`), cannot be finished
             (`flow_not_completable`), is not assigned to the customer (`flow_not_assigned`), needs a
             `referencePhoto` (`reference_photo_required`), or asks for diplomas and so needs
-            `hosted: true` (`diplomas_need_page`).
+            `hosted: true` (`diplomas_need_page`); or the `Idempotency-Key` was used with
+            another body (`idempotency_key_reused`).
           content:
             application/json:
               schema:
@@ -6579,14 +7762,53 @@ paths:
       security:
         - customerApiKey: []
       responses:
-        '2XX':
+        '200':
           description: Successful response.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProofingApiSession'
+              examples:
+                approved:
+                  summary: An approved session
+                  value:
+                    id: ps_q4r7tz2mxk3vbn6hw5jc2dfa7e
+                    status: approved
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowName: Onboarding
+                    flowVersion: 3
+                    method: idem_app
+                    subjectEmail: anna@example.org
+                    subjectName: Anna Jansen
+                    proofedName: Anna Jansen
+                    assuranceLevel: substantial
+                    eidasLevel: substantial
+                    expiresAt: "2026-10-02T09:40:00Z"
+                    createdAt: "2026-10-02T09:30:00Z"
+                    completedAt: "2026-10-02T09:34:12Z"
+                    livemode: true
+                    expectedSubject: false
+                mismatch:
+                  summary: Someone else's document on a session for one person
+                  value:
+                    id: ps_b7k2mq4xz6rt3vnw5hc2jd7fae
+                    status: rejected
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowName: Onboarding
+                    flowVersion: 3
+                    method: idem_app
+                    subjectEmail: ""
+                    subjectName: Dibran Mulder
+                    errorCode: IDENTITY_MISMATCH
+                    expiresAt: "2026-10-02T09:40:00Z"
+                    createdAt: "2026-10-02T09:30:00Z"
+                    completedAt: "2026-10-02T09:33:05Z"
+                    livemode: true
+                    expectedSubject: true
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '404':
@@ -6607,10 +7829,53 @@ paths:
           description: Erased.
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/proofing/sessions/{sessionID}/data-export:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+    get:
+      tags: [identity-proofing-api]
+      summary: Download an approved data request's data (public API)
+      description: >-
+        Authenticated with a customer API key with the `results:read` scope. An approved
+        `data_access` session's data, for 7 days after the organisation's decision: each of
+        your sessions of the person that the reviewer approved, with what the check read
+        (`identity`, `evidence`), the contact you gave and its diplomas. Images are named in
+        `imagesHeld`, never included. Audited `identity_proofing.data_exported`.
+      security:
+        - customerApiKey: []
+      responses:
+        '200':
+          description: The data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingDataExport'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: No data to download (`export_unavailable`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /api/v1/proofing/sessions/{sessionID}/result:
     parameters:
       - name: sessionID
@@ -6635,16 +7900,71 @@ paths:
       security:
         - customerApiKey: []
       responses:
-        '2XX':
+        '200':
           description: Successful response.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProofingApiResult'
+              examples:
+                approved:
+                  summary: Approved on the passport chip, with a diploma
+                  value:
+                    id: ps_q4r7tz2mxk3vbn6hw5jc2dfa7e
+                    status: approved
+                    method: idem_app
+                    assuranceLevel: substantial
+                    eidasLevel: substantial
+                    verifiedAt: "2026-10-02T09:34:12Z"
+                    identity:
+                      givenName: Anna
+                      familyName: Jansen
+                      birthDate: "1991-03-14"
+                      nationality: NLD
+                    evidence:
+                      - type: emrtd
+                        documentType: P
+                        issuingState: NLD
+                        expiryDate: "2031-05-02"
+                        passiveAuth: valid
+                        activeAuth: valid
+                        faceMatch: 0.97
+                        liveness: passed
+                    livemode: true
+                    diplomas:
+                      - documentType: Diploma
+                        qualification: Master Computer Science
+                        profiles: []
+                        institution: Radboud Universiteit
+                        placeOfIssue: Nijmegen
+                        dateAwarded: "2016-08-31"
+                        nlqfLevel: "7"
+                        eqfLevel: "7"
+                        documentNumber: "1234567890"
+                        signedAt: "2026-10-02T09:36:40Z"
+                        addedAt: "2026-10-02T09:37:02Z"
+                rejected:
+                  summary: Rejected, no identity
+                  value:
+                    id: ps_b7k2mq4xz6rt3vnw5hc2jd7fae
+                    status: rejected
+                    method: idem_app
+                    errorCode: FACE_NO_MATCH
+                    evidence:
+                      - type: emrtd
+                        documentType: I
+                        issuingState: NLD
+                        expiryDate: "2029-11-20"
+                        passiveAuth: valid
+                        activeAuth: valid
+                        faceMatch: 0.21
+                        liveness: passed
+                    livemode: true
+                    diplomas: []
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '404':
@@ -6685,25 +8005,67 @@ paths:
         `Idempotency-Key`.
       security:
         - customerApiKey: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Makes a retry safe; the same key and body within 24 hours get the first answer again.
+          schema:
+            type: string
+            maxLength: 255
       responses:
-        '2XX':
+        '200':
           description: Successful response.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProofingApiMethodStart'
+              examples:
+                idem:
+                  summary: Idem app
+                  value:
+                    id: ps_b7k2mq4xz6rt3vnw5hc2jd7fae
+                    method: idem_app
+                    appLink: vcmrtd://verify?handover=hv_3m8x2kq7&api=https%3A%2F%2Fwallet.example.nl
+                    expiresAt: "2026-10-02T09:40:00Z"
+                yivi:
+                  summary: Yivi app
+                  value:
+                    id: ps_b7k2mq4xz6rt3vnw5hc2jd7fae
+                    method: yivi_app
+                    walletLink: openid4vp://?client_id=verifier.example.nl&request_uri=https%3A%2F%2Fverifier.example.nl%2Fr%2F8f3k
+                    expiresAt: "2026-10-02T09:40:00Z"
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >-
+            `method` is not `idem_app` or `yivi_app`, or the flow's face check only runs in
+            the Idem app (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The session was not created hosted (`not_hosted`), was started already, or ended.
+          description: >-
+            The session was not created hosted (`not_hosted`), was started already
+            (`link_started`), or ended (`session_over`); the customer is paused
+            (`customer_paused`); the deployment has no Regula face check for the Yivi app
+            (`method_unavailable`); or a call with this `Idempotency-Key` is still running
+            (`idempotency_in_flight`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: >-
+            The session's flow can no longer be finished (`flow_not_completable`), or the
+            `Idempotency-Key` was used with another body (`idempotency_key_reused`).
           content:
             application/json:
               schema:
@@ -6734,16 +8096,31 @@ paths:
       security:
         - customerApiKey: []
       responses:
-        '2XX':
+        '200':
           description: Successful response.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProofingApiMethodStatus'
+              examples:
+                running:
+                  summary: Still running
+                  value:
+                    id: ps_b7k2mq4xz6rt3vnw5hc2jd7fae
+                    method: idem_app
+                    status: in_progress
+                    done: false
+                done:
+                  summary: Settled
+                  value:
+                    id: ps_b7k2mq4xz6rt3vnw5hc2jd7fae
+                    method: idem_app
+                    status: approved
+                    done: true
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '404':
@@ -6770,24 +8147,58 @@ paths:
         Authenticated with a customer API key as a Bearer token. Ends a session that is
         still `pending` or `in_progress`, in the engine too, and
         answers it with `status` `cancelled` and `cancelledAt`. Audited
-        `identity_proofing.session_cancelled`.
+        `identity_proofing.session_cancelled`. Takes an `Idempotency-Key`.
       security:
         - customerApiKey: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Makes a retry safe; the same key and body within 24 hours get the first answer again.
+          schema:
+            type: string
+            maxLength: 255
       responses:
-        '2XX':
+        '200':
           description: Successful response.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProofingApiSession'
+              examples:
+                cancelled:
+                  summary: Cancelled before the person finished
+                  value:
+                    id: ps_q4r7tz2mxk3vbn6hw5jc2dfa7e
+                    status: cancelled
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowName: Onboarding
+                    flowVersion: 3
+                    subjectEmail: anna@example.org
+                    subjectName: Anna Jansen
+                    expiresAt: "2026-10-02T09:40:00Z"
+                    createdAt: "2026-10-02T09:30:00Z"
+                    cancelledAt: "2026-10-02T09:31:45Z"
+                    livemode: true
+                    expectedSubject: false
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The session already has an outcome, ended, or was erased (`session_over`).
+          description: >-
+            The session already has an outcome, ended, or was erased (`session_over`), or
+            a call with this `Idempotency-Key` is still running (`idempotency_in_flight`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The `Idempotency-Key` was used with another body (`idempotency_key_reused`).
           content:
             application/json:
               schema:
@@ -6868,12 +8279,30 @@ paths:
         recipient can finish. Each also carries `completable`, `needsReferencePhoto` and
         `diplomaMode`.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The flows, with the customer's assignment.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingCustomerFlowList'
+              examples:
+                flows:
+                  summary: One assigned flow
+                  value:
+                    - id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                      name: Onboarding
+                      steps: [document_capture, nfc_read, face_verification]
+                      requestedAttributes: [dg1, dg2, selfie]
+                      faceProvider: regula
+                      requiredAssuranceLevel: substantial
+                      version: 3
+                      active: true
+                      createdAt: "2026-09-14T08:12:00Z"
+                      completable: true
+                      assigned: true
+                      default: true
+                      diplomaMode: "off"
+                      needsReferencePhoto: false
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -6907,13 +8336,25 @@ paths:
         may use it) and `defaultFlowId` (one of them, or empty when the list is; a default
         outside the list is 400 `invalid_input`). Returns the customer's flows as the list
         endpoint does for an administrator.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowSelection'
+            examples:
+              one:
+                summary: One flow, preselected
+                value:
+                  flowIds: [6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10]
+                  defaultFlowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The customer's flows, as the list shows them to an administrator.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/ProofingCustomerFlowList'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -8758,6 +10199,17 @@ components:
         expectedSubject:
           type: boolean
           description: Created for one known person (`name` with `birthDate`).
+        flowKind:
+          type: string
+          enum: [identity, data_access, data_erasure]
+          description: >-
+            A data request (`data_access`, `data_erasure`) goes to the organisation's review
+            (`needs_review`) once the person is proven; its approval erases the person's sessions
+            (each sends `session.purged`) or opens their data at `GET .../data-export`.
+        dataExportUntil:
+          type: string
+          format: date-time
+          description: Until when an approved `data_access` session's data downloads.
       required: [id, status, flowId, flowName, subjectEmail, expiresAt, createdAt, livemode, expectedSubject]
     ProofingApiCreatedSession:
       allOf:
@@ -8792,19 +10244,25 @@ components:
       properties:
         id:
           type: string
+          pattern: '^ps_[a-z2-7]{26}$'
         status:
           type: string
+          enum: [approved, rejected, needs_review, expired, cancelled]
         method:
           type: string
+          enum: [idem_app, yivi_app, browser]
         assuranceLevel:
           type: string
         eidasLevel:
           type: string
+          enum: [low, substantial, high]
         errorCode:
           type: string
+          description: Why the session was rejected; see `ProofingApiSession.errorCode`.
         verifiedAt:
           type: string
           format: date-time
+          description: When an approved session was verified.
         identity:
           type: object
           description: Only for an approved session.
@@ -8842,49 +10300,25 @@ components:
                 enum: [valid, invalid, not_performed]
               faceMatch:
                 type: number
+                description: The face match score, 0 to 1; absent when no face was matched.
               liveness:
                 type: string
+                enum: [passed, failed, not_performed]
+            required: [type, passiveAuth, activeAuth]
         livemode:
           type: boolean
         diplomas:
           type: array
           description: The DUO diploma extracts the person added, each checked against DUO's signature and the proofed identity.
           items:
-            type: object
-            properties:
-              documentType:
-                type: string
-              qualification:
-                type: string
-              profiles:
-                type: array
-                items:
-                  type: string
-              institution:
-                type: string
-              placeOfIssue:
-                type: string
-              dateAwarded:
-                type: string
-                format: date
-              nlqfLevel:
-                type: string
-              eqfLevel:
-                type: string
-              documentNumber:
-                type: string
-              signedAt:
-                type: string
-                format: date-time
-              addedAt:
-                type: string
-                format: date-time
+            $ref: '#/components/schemas/ProofingDiploma'
       required: [id, status, evidence, livemode, diplomas]
     ProofingApiMethodStart:
       type: object
       properties:
         id:
           type: string
+          pattern: '^ps_[a-z2-7]{26}$'
         method:
           type: string
           enum: [idem_app, yivi_app]
@@ -8903,10 +10337,13 @@ components:
       properties:
         id:
           type: string
+          pattern: '^ps_[a-z2-7]{26}$'
         method:
           type: string
+          enum: [idem_app, yivi_app]
         status:
           type: string
+          enum: [pending, in_progress, approved, rejected, needs_review, expired, cancelled]
         done:
           type: boolean
           description: True once the session has an outcome or ended.
@@ -8931,12 +10368,16 @@ components:
           format: date-time
         data:
           type: object
-          description: Never the person's name, address or photo.
+          description: >-
+            Never the person's name, address or photo. A `test` event's data is only
+            `message`.
           properties:
             sessionId:
               type: string
+              pattern: '^ps_[a-z2-7]{26}$'
             status:
               type: string
+              enum: [pending, in_progress, approved, rejected, needs_review, expired, cancelled]
             flowId:
               type: string
             livemode:
@@ -8952,7 +10393,1160 @@ components:
               example: IDENTITY_MISMATCH
             expectedSubject:
               type: boolean
+              description: Only present, as true, on a session created for one person.
+            diploma:
+              type: object
+              description: Only on `session.diploma_added`.
+              properties:
+                qualification:
+                  type: string
+                institution:
+                  type: string
+                dateAwarded:
+                  type: string
+                  format: date
+                nlqfLevel:
+                  type: string
+                eqfLevel:
+                  type: string
+            message:
+              type: string
+              description: Only on `test`.
       required: [id, type, createdAt, data]
+      example:
+        id: 0b9d3c1e-7f2a-4e6b-9c8d-5a4f3e2d1c0b
+        type: session.verified
+        createdAt: "2026-10-02T09:34:13Z"
+        data:
+          sessionId: ps_q4r7tz2mxk3vbn6hw5jc2dfa7e
+          status: approved
+          flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+          livemode: true
+          method: idem_app
+          assuranceLevel: substantial
+          eidasLevel: substantial
+    ProofingDiploma:
+      type: object
+      description: A DUO diploma extract the person added, as DUO printed it. Never the PDF, the name or the date of birth.
+      properties:
+        documentType:
+          type: string
+        qualification:
+          type: string
+        profiles:
+          type: array
+          items:
+            type: string
+        institution:
+          type: string
+        placeOfIssue:
+          type: string
+        dateAwarded:
+          type: string
+          format: date
+        nlqfLevel:
+          type: string
+        eqfLevel:
+          type: string
+        documentNumber:
+          type: string
+        signedAt:
+          type: string
+          format: date-time
+        addedAt:
+          type: string
+          format: date-time
+      required: [documentType, qualification, profiles, institution, placeOfIssue, dateAwarded, documentNumber, addedAt]
+    ProofingDiplomaVerdictList:
+      type: array
+      description: What became of each uploaded file, in upload order.
+      items:
+        type: object
+        properties:
+          fileName:
+            type: string
+          accepted:
+            type: boolean
+          diploma:
+            $ref: '#/components/schemas/ProofingDiploma'
+          reason:
+            type: string
+            enum: [not_a_diploma, signature_invalid, holder_mismatch, duplicate]
+            description: Why a file was refused.
+          failedCheck:
+            type: string
+            description: Which signature or holder check failed, for a refused file.
+        required: [fileName, accepted]
+    ProofingDiplomaUpload:
+      type: object
+      properties:
+        file:
+          type: array
+          maxItems: 10
+          description: The DUO diploma extract PDFs, each at most 5 MiB, sent as repeated `file` parts.
+          items:
+            type: string
+            format: binary
+      required: [file]
+    ProofingFlowSpec:
+      type: object
+      description: A flow's configuration, as sent to create a flow or save a new version. Unknown fields are refused (400 `invalid_body`).
+      properties:
+        name:
+          type: string
+        steps:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [document_capture, nfc_read, document_photo, face_verification, selfie, liveness, face_match]
+        requestedAttributes:
+          type: array
+          items:
+            type: string
+            enum: [dg1, dg11, dg2, selfie, chip_checks, biometrics, document_image]
+          description: What a session's result may carry; absent lets the engine derive it from the steps.
+        selfieLocation:
+          type: string
+          description: Ignored; the wallet always sets the face capture to the app.
+        faceProvider:
+          type: string
+          enum: [regula, Iris]
+          description: What verifies the face step; absent is `regula`. `Iris` runs only in the Idem app.
+        acceptedDocumentTypes:
+          type: array
+          items:
+            type: string
+        acceptedIssuingCountries:
+          type: array
+          items:
+            type: string
+        requiredChecks:
+          type: array
+          items:
+            type: string
+        checkThresholds:
+          type: object
+          additionalProperties:
+            type: number
+        requiredAssuranceLevel:
+          type: string
+          enum: [low, substantial, high]
+        bsnPolicy:
+          type: string
+          enum: [retrieve, mask, omit]
+          description: Absent inherits the organisation's.
+        blurFace:
+          type: boolean
+          description: Absent inherits the organisation's redaction policy.
+        blurBsn:
+          type: boolean
+          description: Absent inherits the organisation's redaction policy.
+        retentionOverrideSeconds:
+          type: integer
+        assuranceTiers:
+          type: array
+          items:
+            type: object
+            properties:
+              level:
+                type: string
+              minPercent:
+                type: number
+            required: [level, minPercent]
+        legalBasis:
+          type: string
+        processingPurpose:
+          type: string
+      required: [name, steps]
+    ProofingFlow:
+      description: >-
+        A flow version as the organisation sees it. `allowed`, `default` and `diplomaMode`
+        are only meaningful in the flow list; a single version (create, edit, versions,
+        activate) reads them false and leaves `diplomaMode` out.
+      allOf:
+        - $ref: '#/components/schemas/ProofingFlowSpec'
+        - type: object
+          properties:
+            id:
+              type: string
+              description: Stable across versions.
+            version:
+              type: integer
+            active:
+              type: boolean
+              description: The version new requests run.
+            createdAt:
+              type: string
+              format: date-time
+            completable:
+              type: boolean
+              description: False for a flow a recipient cannot finish with only the Idem app; it cannot be made available to members.
+            allowed:
+              type: boolean
+              description: An administrator made the flow available to members.
+            default:
+              type: boolean
+              description: The flow the request form preselects.
+            diplomaMode:
+              type: string
+              enum: ['off', required]
+            needsReferencePhoto:
+              type: boolean
+              description: The face is matched against a reference photo; only a customer's API can send such a flow.
+            kind:
+              type: string
+              enum: [identity, data_access, data_erasure]
+              description: >-
+                What the flow's sessions are for: an identity check, or a person asking for their
+                data (`data_access`) or its erasure (`data_erasure`); absent on a single version.
+          required: [id, version, active, createdAt, completable, allowed, default, needsReferencePhoto]
+    ProofingFlowList:
+      type: array
+      items:
+        $ref: '#/components/schemas/ProofingFlow'
+    ProofingCustomerFlow:
+      allOf:
+        - $ref: '#/components/schemas/ProofingFlowSpec'
+        - type: object
+          properties:
+            id:
+              type: string
+            version:
+              type: integer
+            active:
+              type: boolean
+            createdAt:
+              type: string
+              format: date-time
+            completable:
+              type: boolean
+              description: The flow can be finished by the customer's subject, counting a reference-photo flow sent through the customer API.
+            assigned:
+              type: boolean
+              description: An administrator assigned the flow to this customer.
+            default:
+              type: boolean
+              description: The flow the request form preselects for this customer.
+            diplomaMode:
+              type: string
+              enum: ['off', required]
+            needsReferencePhoto:
+              type: boolean
+            kind:
+              type: string
+              enum: [identity, data_access, data_erasure]
+          required: [id, version, active, createdAt, completable, assigned, default, diplomaMode, needsReferencePhoto]
+    ProofingCustomerFlowList:
+      type: array
+      items:
+        $ref: '#/components/schemas/ProofingCustomerFlow'
+    ProofingFlowSelection:
+      type: object
+      additionalProperties: false
+      properties:
+        flowIds:
+          type: array
+          items:
+            type: string
+        defaultFlowId:
+          type: string
+          description: One of `flowIds`, or empty when the list is.
+      required: [flowIds]
+    ProofingFlowHosted:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Hosted links may be made for the flow.
+        locales:
+          type: array
+          description: The languages the page offers; empty is every one.
+          items:
+            type: string
+            enum: [en, nl]
+        completion:
+          type: string
+          enum: [redirect, done]
+      required: [enabled, locales, completion]
+    ProofingFlowHostedUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        enabled:
+          type: boolean
+        locales:
+          type: array
+          description: Empty or absent is every language.
+          items:
+            type: string
+            enum: [en, nl]
+        completion:
+          type: string
+          enum: [redirect, done]
+      required: [enabled, completion]
+    ProofingFlowKind:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [identity, data_access, data_erasure]
+      required: [kind]
+    ProofingDataMatches:
+      type: object
+      properties:
+        flowKind:
+          type: string
+          enum: [identity, data_access, data_erasure]
+        matches:
+          type: array
+          items:
+            type: object
+            properties:
+              requestId:
+                type: string
+                format: uuid
+              sessionId:
+                type: string
+                pattern: '^ps_[a-z2-7]{26}$'
+              flowName:
+                type: string
+              status:
+                type: string
+              method:
+                type: string
+              assuranceLevel:
+                type: string
+              eidasLevel:
+                type: string
+              createdAt:
+                type: string
+                format: date-time
+              completedAt:
+                type: string
+                format: date-time
+              purgedAt:
+                type: string
+                format: date-time
+              level:
+                type: string
+                enum: [strong, probable]
+                description: strong when proven with the same document, probable on name and date of birth alone.
+              approved:
+                type: boolean
+                description: The reviewer's choice; absent until the decision.
+            required: [requestId, sessionId, flowName, status, createdAt, level]
+      required: [flowKind, matches]
+    ProofingDataExport:
+      type: object
+      description: >-
+        An approved `data_access` session's data: each session the reviewer approved, with what
+        the check read. Images are named in `imagesHeld`, never included.
+      properties:
+        sessionId:
+          type: string
+          description: The data request's own session.
+        exportedAt:
+          type: string
+          format: date-time
+        sessions:
+          type: array
+          items:
+            type: object
+            properties:
+              sessionId:
+                type: string
+              flow:
+                type: string
+              status:
+                type: string
+              method:
+                type: string
+              assuranceLevel:
+                type: string
+              eidasLevel:
+                type: string
+              createdAt:
+                type: string
+                format: date-time
+              completedAt:
+                type: string
+                format: date-time
+              purgeAt:
+                type: string
+                format: date-time
+              purgedAt:
+                type: string
+                format: date-time
+              contact:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  email:
+                    type: string
+              identity:
+                type: object
+                properties:
+                  givenName:
+                    type: string
+                  familyName:
+                    type: string
+                  birthDate:
+                    type: string
+                  nationality:
+                    type: string
+                  evidence:
+                    type: object
+                  imagesHeld:
+                    type: array
+                    items:
+                      type: string
+                      enum: [documentPortrait, selfie, referencePhoto, documentFront, documentBack]
+              diplomas:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProofingDiploma'
+      required: [sessionId, exportedAt, sessions]
+    ProofingFlowDiplomas:
+      type: object
+      additionalProperties: false
+      properties:
+        diplomaMode:
+          type: string
+          enum: ['off', required]
+      required: [diplomaMode]
+    ProofingRequest:
+      type: object
+      description: A proofing request as the organisation sees it.
+      properties:
+        id:
+          type: string
+          format: uuid
+        requestedByName:
+          type: string
+          description: The member who sent it, or the API key's name.
+        apiKeyName:
+          type: string
+          description: The customer API key it was sent with.
+        subjectUserId:
+          type: string
+          format: uuid
+          description: The member being proofed, for a member's request.
+        customerId:
+          type: string
+          format: uuid
+        customerName:
+          type: string
+        subjectName:
+          type: string
+        subjectEmail:
+          type: string
+        proofedName:
+          type: string
+          description: The name read off a customer's subject's approved document, until its retention clears it.
+        flowId:
+          type: string
+        flowName:
+          type: string
+        flowVersion:
+          type: integer
+        method:
+          type: string
+          enum: [idem_app, yivi_app, browser]
+        mode:
+          type: string
+          enum: [live, test]
+        status:
+          type: string
+          enum: [pending, in_progress, approved, rejected, needs_review, expired, cancelled]
+        assuranceLevel:
+          type: string
+        eidasLevel:
+          type: string
+          enum: [low, substantial, high]
+        errorCode:
+          type: string
+          example: IDENTITY_MISMATCH
+        linkExpiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        purgeAt:
+          type: string
+          format: date-time
+          description: When its personal data is due to be erased.
+        purgedAt:
+          type: string
+          format: date-time
+        diplomaMode:
+          type: string
+          enum: ['off', required]
+        diplomas:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProofingDiploma'
+        diplomasUntil:
+          type: string
+          format: date-time
+          description: When the person can last add a diploma extract; absent until the identity is approved.
+        expectedSubject:
+          type: boolean
+        flowKind:
+          type: string
+          enum: [identity, data_access, data_erasure]
+          description: A data request (`data_access`, `data_erasure`) goes to review once the person is proven.
+        dataExportUntil:
+          type: string
+          format: date-time
+          description: Until when an approved `data_access` session's data downloads.
+      required: [id, requestedByName, subjectName, subjectEmail, flowId, flowName, mode, status, linkExpiresAt, createdAt, diplomaMode, diplomas, expectedSubject]
+    ProofingRequestList:
+      type: array
+      items:
+        $ref: '#/components/schemas/ProofingRequest'
+    ProofingCreateRequest:
+      type: object
+      additionalProperties: false
+      description: A member (`userId`) or a customer's subject (`customerId` with `email` and `name`).
+      properties:
+        userId:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+          maxLength: 200
+        flowId:
+          type: string
+        method:
+          type: string
+          enum: [idem_app, yivi_app]
+          default: idem_app
+        channel:
+          type: string
+          enum: [email, on_screen, hosted]
+          default: email
+        language:
+          type: string
+          enum: [en, nl]
+        birthDate:
+          type: string
+          format: date
+    ProofingCreatedRequest:
+      allOf:
+        - $ref: '#/components/schemas/ProofingRequest'
+        - type: object
+          properties:
+            mailSent:
+              type: boolean
+              description: False when the mail could not be sent; the request stands.
+            deepLink:
+              type: string
+              description: An on-screen Idem request's `vcmrtd://` link, to show as a QR code.
+            deepLinkExpiresAt:
+              type: string
+              format: date-time
+            hostedUrl:
+              type: string
+              format: uri
+              description: A hosted request's link, valid 72 hours.
+          required: [mailSent]
+    ProofingReviewDecision:
+      type: object
+      additionalProperties: false
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        reason:
+          type: string
+          maxLength: 500
+        errorCode:
+          type: string
+          pattern: '^[A-Z0-9_]{1,64}$'
+          description: Only with `reject`; absent is `MANUAL_REVIEW_REJECTED`.
+        requestIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Only on a data request: the matched sessions an approval takes (absent takes them
+            all). An erasure purges them; an access request opens their data for download.
+      required: [decision, reason]
+    ProofingClaimLink:
+      type: object
+      properties:
+        deepLink:
+          type: string
+          description: The Idem app's `vcmrtd://` link, to show as a QR code.
+        expiresAt:
+          type: string
+          format: date-time
+      required: [deepLink, expiresAt]
+    ProofingAppState:
+      type: object
+      properties:
+        app:
+          type: string
+          enum: [waiting, connected, away]
+      required: [app]
+    ProofingYiviStart:
+      type: object
+      properties:
+        walletLink:
+          type: string
+          description: The `openid4vp://` request the Yivi app opens.
+        expiresAt:
+          type: string
+          format: date-time
+      required: [walletLink, expiresAt]
+    ProofingYiviDisclosure:
+      type: object
+      properties:
+        done:
+          type: boolean
+          description: False while the person has not finished in the Yivi app.
+        ok:
+          type: boolean
+          description: The disclosure gave a photo to check the face against; false ended the session.
+        code:
+          type: string
+          enum: [photo_missing, reference_no_face]
+        stableFrames:
+          type: integer
+        maxAttempts:
+          type: integer
+      required: [done, ok]
+    ProofingFaceFrame:
+      type: object
+      additionalProperties: false
+      properties:
+        image:
+          type: string
+          description: One camera frame as a JPEG data URL, at most 2 MiB.
+      required: [image]
+    ProofingFaceVerdict:
+      type: object
+      properties:
+        faceDetected:
+          type: boolean
+        matched:
+          type: boolean
+        consecutive:
+          type: integer
+        stableFrames:
+          type: integer
+        attempts:
+          type: integer
+        maxAttempts:
+          type: integer
+        decision:
+          type: string
+          enum: [pending, approved, rejected]
+      required: [faceDetected, matched, consecutive, stableFrames, attempts, maxAttempts, decision]
+    ProofingRequestEvents:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              occurredAt:
+                type: string
+                format: date-time
+              action:
+                type: string
+                example: identity_proofing.request_sent
+              targetType:
+                type: string
+              targetId:
+                type: string
+              metadata:
+                type: object
+              actor:
+                type: object
+                nullable: true
+                properties:
+                  userId:
+                    type: string
+                    format: uuid
+                  preferredName:
+                    type: string
+                    nullable: true
+                  givenNames:
+                    type: string
+                  lastName:
+                    type: string
+                  avatarUri:
+                    type: string
+              actorLabel:
+                type: string
+                nullable: true
+                description: A non-user actor, such as `api_key:<prefix>`.
+            required: [id, occurredAt, action, targetType, targetId, metadata, actor, actorLabel]
+      required: [events]
+    ProofingStats:
+      type: object
+      properties:
+        since:
+          type: string
+          format: date-time
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              customerId:
+                type: string
+                format: uuid
+              flowId:
+                type: string
+              sessions:
+                type: integer
+              approved:
+                type: integer
+              rejected:
+                type: integer
+              needsReview:
+                type: integer
+              expired:
+                type: integer
+            required: [customerId, flowId, sessions, approved, rejected, needsReview, expired]
+      required: [since, rows]
+    ProofingImage:
+      type: object
+      properties:
+        mimeType:
+          type: string
+        data:
+          type: string
+          format: byte
+          description: The image, standard base64.
+      required: [mimeType, data]
+    ProofingAdminResult:
+      description: The customer API's result plus, for an approval, the images the flow requested.
+      allOf:
+        - $ref: '#/components/schemas/ProofingApiResult'
+        - type: object
+          properties:
+            photo:
+              $ref: '#/components/schemas/ProofingImage'
+            selfie:
+              $ref: '#/components/schemas/ProofingImage'
+            referencePhoto:
+              $ref: '#/components/schemas/ProofingImage'
+            documentImage:
+              $ref: '#/components/schemas/ProofingImage'
+            documentImageBack:
+              $ref: '#/components/schemas/ProofingImage'
+    ProofingPause:
+      type: object
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        paused:
+          type: boolean
+        platformPausedAt:
+          type: string
+          format: date-time
+          description: Set while a platform administrator paused it.
+        orgPausedAt:
+          type: string
+          format: date-time
+          description: Set while the organisation's administrator paused it.
+      required: [organizationId, paused]
+    ProofingPauseList:
+      type: object
+      properties:
+        pauses:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProofingPause'
+      required: [pauses]
+    ProofingSetPause:
+      type: object
+      additionalProperties: false
+      properties:
+        paused:
+          type: boolean
+      required: [paused]
+    ProofingWebhookHealth:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [not_configured, delivering, failing]
+        lastStatusCode:
+          type: integer
+        failingSince:
+          type: string
+          format: date-time
+        pendingRetries:
+          type: integer
+      required: [state, pendingRetries]
+    ProofingBranding:
+      type: object
+      properties:
+        displayName:
+          type: string
+        primaryColor:
+          type: string
+          example: '#1f6feb'
+        supportContact:
+          type: string
+        privacyUrl:
+          type: string
+        logoUri:
+          type: string
+          description: Empty without a logo; carries a version so a replaced logo is fetched again.
+        hidePoweredBy:
+          type: boolean
+      required: [displayName, primaryColor, supportContact, privacyUrl, logoUri, hidePoweredBy]
+    ProofingCustomer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        flowIds:
+          type: array
+          items:
+            type: string
+        defaultFlowId:
+          type: string
+        status:
+          type: string
+          enum: [active, paused]
+        pausedAt:
+          type: string
+          format: date-time
+        sessionTtlSeconds:
+          type: integer
+        dataRetentionDays:
+          type: integer
+        webhook:
+          $ref: '#/components/schemas/ProofingWebhookHealth'
+        branding:
+          $ref: '#/components/schemas/ProofingBranding'
+        allowedRedirectOrigins:
+          type: array
+          items:
+            type: string
+        hasLiveKey:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, flowIds, status, sessionTtlSeconds, dataRetentionDays, webhook, branding, allowedRedirectOrigins, hasLiveKey, createdAt, updatedAt]
+    ProofingCustomerList:
+      type: array
+      items:
+        $ref: '#/components/schemas/ProofingCustomer'
+    ProofingCreateCustomer:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+      required: [name]
+    ProofingUpdateCustomer:
+      type: object
+      additionalProperties: false
+      description: At least one field; an absent one is left as it is.
+      minProperties: 1
+      properties:
+        name:
+          type: string
+        paused:
+          type: boolean
+        sessionTtlSeconds:
+          type: integer
+          enum: [120, 300, 600]
+        dataRetentionDays:
+          type: integer
+          enum: [7, 30, 90, 180, 365]
+        allowedRedirectOrigins:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+    ProofingBrandingForm:
+      type: object
+      properties:
+        displayName:
+          type: string
+        primaryColor:
+          type: string
+          description: '`#rrggbb`; empty is the organisation''s.'
+        supportContact:
+          type: string
+        privacyUrl:
+          type: string
+          description: An https URL.
+        logo:
+          type: string
+          format: binary
+          description: PNG, JPEG, GIF or WebP, at most 512 KiB.
+        removeLogo:
+          type: string
+          enum: ['true']
+        hidePoweredBy:
+          type: string
+          enum: ['true', 'false']
+    ProofingApiKey:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+          description: The key's public start, to recognise it by.
+        mode:
+          type: string
+          enum: [live, test]
+        scopes:
+          type: array
+          items:
+            type: string
+            enum: [sessions:write, sessions:read, results:read, flows:read]
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+      required: [id, name, prefix, mode, scopes, createdAt]
+    ProofingApiKeyList:
+      type: array
+      items:
+        $ref: '#/components/schemas/ProofingApiKey'
+    ProofingCreateApiKey:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        mode:
+          type: string
+          enum: [live, test]
+          default: live
+      required: [name]
+    ProofingCreatedApiKey:
+      allOf:
+        - $ref: '#/components/schemas/ProofingApiKey'
+        - type: object
+          properties:
+            secret:
+              type: string
+              description: The key itself, the one time it is readable.
+          required: [secret]
+    ProofingWebhookEndpoint:
+      type: object
+      properties:
+        configured:
+          type: boolean
+          description: False, with the rest empty, for a customer without an endpoint.
+        url:
+          type: string
+        events:
+          type: array
+          items:
+            type: string
+        secretLast4:
+          type: string
+        secret:
+          type: string
+          description: Only in the answer that created the endpoint or rotated its secret.
+        health:
+          $ref: '#/components/schemas/ProofingWebhookHealth'
+        availableEvents:
+          type: array
+          items:
+            type: string
+        maxAttempts:
+          type: integer
+      required: [configured, events, health, availableEvents, maxAttempts]
+    ProofingSaveWebhook:
+      type: object
+      additionalProperties: false
+      properties:
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added]
+      required: [url, events]
+    ProofingWebhookDeliveryList:
+      type: array
+      items:
+        type: object
+        properties:
+          id:
+            type: string
+            format: uuid
+          event:
+            type: string
+          sessionId:
+            type: string
+            format: uuid
+            description: The request's UUID; absent for a `test` event.
+          endpointUrl:
+            type: string
+            description: Absent for the wallet's default endpoint.
+          status:
+            type: string
+            enum: [pending, delivered, failed]
+          attempts:
+            type: integer
+          lastStatusCode:
+            type: integer
+          lastError:
+            type: string
+          lastAttemptAt:
+            type: string
+            format: date-time
+          deliveredAt:
+            type: string
+            format: date-time
+          createdAt:
+            type: string
+            format: date-time
+        required: [id, event, status, attempts, createdAt]
+    ProofingHostedProgress:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, in_progress, approved, rejected, needs_review, expired, cancelled]
+        errorCode:
+          type: string
+        method:
+          type: string
+          enum: [idem_app, yivi_app]
+        linkExpiresAt:
+          type: string
+          format: date-time
+          description: The link's end until it is started, then the session's.
+        started:
+          type: boolean
+        completedAt:
+          type: string
+          format: date-time
+        diplomasUntil:
+          type: string
+          format: date-time
+        dataExportUntil:
+          type: string
+          format: date-time
+          description: Until when an approved "see my data" session's data downloads (`GET /api/v1/proof/{token}/data-export`).
+      required: [status, linkExpiresAt, started]
+    ProofingHostedView:
+      allOf:
+        - $ref: '#/components/schemas/ProofingHostedProgress'
+        - type: object
+          properties:
+            sessionId:
+              type: string
+              pattern: '^ps_[a-z2-7]{26}$'
+            redirectUrl:
+              type: string
+            embedOrigins:
+              type: array
+              items:
+                type: string
+            language:
+              type: string
+              enum: [en, nl]
+            locales:
+              type: array
+              items:
+                type: string
+                enum: [en, nl]
+            customer:
+              type: object
+              properties:
+                name:
+                  type: string
+                branding:
+                  $ref: '#/components/schemas/ProofingBranding'
+                dataRetentionDays:
+                  type: integer
+              required: [name, branding, dataRetentionDays]
+            flow:
+              type: object
+              properties:
+                name:
+                  type: string
+                requiredAssuranceLevel:
+                  type: string
+                requestedAttributes:
+                  type: array
+                  items:
+                    type: string
+                yiviAvailable:
+                  type: boolean
+                diplomaMode:
+                  type: string
+                  enum: ['off', required]
+                kind:
+                  type: string
+                  enum: [identity, data_access, data_erasure]
+              required: [name, requestedAttributes, yiviAvailable, diplomaMode]
+            diplomas:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProofingDiploma'
+          required: [sessionId, embedOrigins, locales, customer, flow, diplomas]
+    ProofingHostedStart:
+      type: object
+      additionalProperties: false
+      properties:
+        method:
+          type: string
+          enum: [idem_app, yivi_app]
+      required: [method]
+    ProofingHostedStarted:
+      allOf:
+        - $ref: '#/components/schemas/ProofingHostedProgress'
+        - type: object
+          properties:
+            deepLink:
+              type: string
+              description: An Idem session's `vcmrtd://` link.
   responses:
     ApiUnauthorized:
       description: No API key was sent as a Bearer token (`unauthorized`), or it is unknown or revoked (`invalid_api_key`).

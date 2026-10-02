@@ -185,7 +185,7 @@ export default function AttestationHeldDetail(): React.JSX.Element {
           now={now}
           formatDate={formatDate}
         />
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+        <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
           <div className="flex flex-col gap-5">
             <AttributesCard credential={credential} />
             <HistoryCard slug={slug} credential={credential} />

@@ -70,6 +70,7 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("GET /proof/{token}/yivi/disclosure", h.limitHosted(h.hostedYiviDisclosure))
 	mux.Handle("POST /proof/{token}/yivi/face", h.limitHosted(h.hostedFaceFrame))
 	mux.Handle("POST /proof/{token}/diplomas", h.limitHosted(h.hostedAddDiplomas))
+	mux.Handle("GET /proof/{token}/data-export", h.limitHosted(h.hostedDataExport))
 }
 
 func (h *Handler) limitHosted(next respond.HandlerFunc) respond.HandlerFunc {
@@ -93,6 +94,9 @@ type hostedProgressResponse struct {
 	// DiplomasUntil is when the subject can last add a diploma extract;
 	// absent while they cannot.
 	DiplomasUntil *time.Time `json:"diplomasUntil,omitempty"`
+	// DataExportUntil is until when an approved "see my data" request's data
+	// downloads (GET /proof/{token}/data-export); absent otherwise.
+	DataExportUntil *time.Time `json:"dataExportUntil,omitempty"`
 }
 
 func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
@@ -103,8 +107,16 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 	return hostedProgressResponse{
 		Status: req.EffectiveStatus(now), ErrorCode: req.ErrorCode, Method: string(req.Method),
 		LinkExpiresAt: expires, Started: req.session != nil, CompletedAt: req.CompletedAt,
-		DiplomasUntil: diplomasUntil(req),
+		DiplomasUntil: diplomasUntil(req), DataExportUntil: openExport(req, now),
 	}
+}
+
+// openExport is until when req's data downloads, or nil when it does not.
+func openExport(req Request, now time.Time) *time.Time {
+	if req.Status != StatusApproved || req.DataExportUntil == nil || !now.Before(*req.DataExportUntil) {
+		return nil
+	}
+	return req.DataExportUntil
 }
 
 type hostedViewResponse struct {
@@ -132,6 +144,9 @@ type hostedViewResponse struct {
 		YiviAvailable          bool     `json:"yiviAvailable"`
 		// DiplomaMode is whether the session asks for DUO diploma extracts.
 		DiplomaMode DiplomaMode `json:"diplomaMode"`
+		// Kind is what the session is for: an identity check, or the person
+		// asking for their data or its erasure.
+		Kind FlowKind `json:"kind"`
 	} `json:"flow"`
 	// Diplomas are the extracts the subject added.
 	Diplomas []diplomaResponse `json:"diplomas"`
@@ -168,6 +183,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	}
 	out.Flow.YiviAvailable = YiviAppAvailable(f)
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
+	out.Flow.Kind = hosted.Request.FlowKind
 	diplomas, err := h.service.RequestDiplomas(r.Context(), []uuid.UUID{hosted.Request.ID})
 	if err != nil {
 		return mapError(err)

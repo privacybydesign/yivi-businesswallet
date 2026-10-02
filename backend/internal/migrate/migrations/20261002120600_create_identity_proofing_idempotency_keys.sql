@@ -7,12 +7,14 @@ CREATE TABLE identity_proofing_idempotency_keys
     customer_id  UUID        NOT NULL REFERENCES identity_proofing_customers (id) ON DELETE CASCADE,
     key          TEXT        NOT NULL,
     request_hash BYTEA       NOT NULL,
-    status_code  INT,
+    status_code  INTEGER,
     response     BYTEA,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (customer_id, key)
 );
-CREATE INDEX identity_proofing_idempotency_keys_created_idx ON identity_proofing_idempotency_keys (created_at);
+
+CREATE INDEX identity_proofing_idempotency_keys_created_idx
+    ON identity_proofing_idempotency_keys (created_at);
 
 -- +goose Down
 DROP TABLE identity_proofing_idempotency_keys;

@@ -80,6 +80,7 @@ func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, 
 		RequiredAssuranceLevel: in.Flow.RequiredAssuranceLevel,
 		RedirectURL:            in.RedirectURL, Language: in.Language, Diplomas: in.Diplomas,
 		ExpectsSubject: in.Subject.BirthDate != "", expectedBirthDate: in.Subject.BirthDate,
+		FlowKind: in.FlowKind,
 	}
 	f.stored = &req
 	f.linkHash = in.LinkTokenHash

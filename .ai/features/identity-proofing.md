@@ -114,9 +114,8 @@ the vcmrtd deep link's `api=` is `IDENTITY_PROOFING_PUBLIC_URL` (default
 - **The org is the engine's tenant: one tenant id, the org's.** A session and a
   flow carry `organizations.id`; there is nothing to provision, no key to hold
   and no enable step. (Under IPS the wallet created a tenant per org with a live
-  and a test key in `org_identity_proofing_settings`, audited
-  `identity_proofing.provisioned`; that table is dropped and old audit rows
-  keep the action.)
+  and a test key, audited `identity_proofing.provisioned`; the schema keeps
+  none of it, and old audit rows keep the action.)
 - **Customers are the wallet's, not IPS sub-tenants.** IPS sub-tenants only
   override privacy knobs (BSN policy, blurring), share the parent's keys and
   cannot own flows, so a customer (`identity_proofing_customers`) is a wallet row
@@ -207,13 +206,16 @@ the vcmrtd deep link's `api=` is `IDENTITY_PROOFING_PUBLIC_URL` (default
   (`flow_version`). Activating an earlier version rolls back. Audited:
   `flow_created`, `flow_version_created`, `flow_version_activated`, each with
   the full configuration (a flow holds no personal data).
-- **Admin allow-list.** `org_identity_proofing_flows` holds only the flow ids an
-  admin made available to members, and exactly one default (partial unique index).
+- **Admin allow-list.** `identity_proofing_flow_settings.member_allowed` marks the
+  flows an admin made available to members, and `member_default` exactly one
+  default (partial unique index). That table is the wallet's one row per org and
+  flow id, shared with the hosted and diploma settings below; saving one of the
+  three leaves the others alone, and no row reads as every default.
   `PUT /flow-selection` replaces it whole, audited `identity_proofing.flows_configured`
   with before/after. A new flow starts unselected. A request is refused
   (`flow_not_allowed`) on any flow outside the list, for admins too. An id IPS no
   longer lists is ignored on read. With the stub provider, flows live in memory, so
-  a backend restart empties the list while the selection rows stay (and are ignored).
+  a backend restart empties the list while the settings rows stay (and are ignored).
   Stub sessions never decide unless `IDENTITY_PROOFING_STUB_OUTCOME` is set
   (`approved`, `rejected` or `needs_review`); then the stub pushes the change
   (`SessionChanged`) 2 s after creation, as IPS would.
@@ -516,11 +518,12 @@ accessibility test (axe, WCAG 2.2 AA): it needs a rendered DOM, and the frontend
 tests run without one by design.
 The deep-link gap of §11 applies: the page shows the QR, and says so.
 
-**Per-flow hosted settings** (`identity_proofing_flow_hosted_settings`,
-`flow_hosted.go`; flows live at IPS, so keyed on org and flow id): `enabled`
-(off: a hosted create is 409 `hosted_disabled`), `locales` (empty: every one; a
-create with another `language` is 400; the page keeps to them), and
-`completion` (`redirect`, or `done`, where a create with a `redirectUrl` is 400).
+**Per-flow hosted settings** (the `hosted_*` columns of
+`identity_proofing_flow_settings`, `flow_hosted.go`; flows belong to the
+provider, so keyed on org and flow id with no foreign key): `enabled` (off: a
+hosted create is 409 `hosted_disabled`), `locales` (empty: every one; a create
+with another `language` is 400; the page keeps to them), and `completion`
+(`redirect`, or `done`, where a create with a `redirectUrl` is 400).
 Admins edit them under "Hosted page" on a flow in the flows page, with a
 preview of the overview step in a customer's branding. No row is the defaults.
 **Theme:** the page applies the customer's `primaryColor` through
@@ -592,12 +595,9 @@ the time as `purgeAt`. A member's request is not purged.
   result is read only for an approved customer subject, whose name is kept.
 - **No face engine.** A flow's face step and the Yivi method need Regula; IPS
   flows on its `engine` provider cannot run here.
-- **Flows did not move.** Flows created at IPS are not copied into the engine:
-  an org recreates them. `20261001180000_remove_identity_proofing_ips_flow_config`
-  removes what named an IPS flow (the members' allow-list, customer
-  assignments, hosted and diploma settings); requests keep their flow id and
-  name as history, and one in flight at IPS during the switch settles as
-  expired (the engine does not know its session).
+- **Flows did not move.** Flows created at IPS were not copied into the engine:
+  an org recreates them, with their member, hosted and diploma settings and
+  customer assignments. Requests keep their flow id and name as history.
 
 ## 12. Diplomas (DUO extracts)
 
@@ -605,10 +605,10 @@ For onboarding where a qualification matters (training for professionals: a
 new student proves who they are, then which diplomas they hold). Wallet-side
 only: the engine knows nothing of it.
 
-- **Per flow** (`identity_proofing_flow_diploma_settings`, `FlowDiplomaStore`,
-  `PUT .../flows/{id}/diplomas`, admin): `off` (no row) or `required`, audited
-  `flow_diplomas_configured`. A step is in the flow or not, so there is no
-  optional diploma step (an earlier `optional` was migrated to `required`).
+- **Per flow** (`identity_proofing_flow_settings.diplomas`, `FlowDiplomaStore`,
+  `PUT .../flows/{id}/diplomas`, admin): `off` (the default) or `required`,
+  audited `flow_diplomas_configured`. A step is in the flow or not, so there is
+  no optional diploma step.
   The flow editor shows it as the last step, "Upload diplomas (DUO)": a step
   for the admin, never sent to IPS (its steps are the app's, and it would
   refuse one it does not know). It is saved after the flow, so a new flow
@@ -728,3 +728,55 @@ holder's change of bank account). IPS's `referencePhoto`, ported back.
   carries no image, as ever.
 - **Not built:** sending it from the wallet's own send form; combining it
   with the expected-subject match (§13), which needs the document data.
+
+## 15. Data requests (GDPR access and erasure)
+
+A person asks a customer what is held of them ("see my data", Art. 15) or for
+its erasure ("delete my data", Art. 17). The customer sends them a session on
+a flow of that kind, like any other session (API, hosted link, mail or
+on-screen); the person proves who they are, and the session goes to the
+customer's **needs review**, where an org admin decides. Code:
+`data_request*.go`; frontend `routes/data-request-review.tsx`, the flow
+editor's Type, and the hosted page.
+
+- **Flow kind.** `identity_proofing_flow_settings.kind`: `identity` (the
+  default), `data_access` or `data_erasure`, set in the flow editor
+  (`PUT …/flows/{id}/kind`, audited `identity_proofing.flow_kind_configured`).
+  A data request flow must read the name and date of birth
+  (`flow_no_identity`) and is never a members' flow (`data_flow_for_member`,
+  a CHECK and both service paths); it asks for no diplomas. A request keeps
+  the kind it was sent with (`identity_proofing_requests.flow_kind`).
+- **To review, not approved.** When the engine approves a data request's
+  person, `tryReconcile` calls `findDataMatches` and records `needs_review`
+  (sending `session.review_opened`) instead of approving; it keeps the proofed
+  name like an approval. From then on the wallet owns the decision: a later
+  engine read (approved, or the session purged at the engine) changes nothing.
+- **Matches.** `findDataMatches` reads the person's identity and every
+  `Candidates` session of the **same customer** (identity kind, same mode, not
+  purged, settled), skipping one whose kept proofed name lacks the family
+  name, and matches with `diploma.MatchFullName` on name and date of birth:
+  `strong` when document type, issuing state and expiry also agree (the same
+  document; the document number is never read), `probable` otherwise. Stored
+  in `identity_proofing_request_matches`. No HMAC or other deterministic
+  identifier: it would link a person's sessions for anyone reading the
+  database.
+- **Review.** The session's panel shows the person's identity and proof (name,
+  date of birth, document, chip, face match, liveness, eIDAS level; the
+  result read allows a data request in review, `heldToVerdict`) and the
+  matches to untick. `DecideReview` → `decideDataRequest` (decided at the
+  engine too if it holds a review there): approve takes `requestIds` (all when
+  absent). Erasure purges each approved match through `Service.purge` (row
+  stays, personal data goes, `session.purged` per session), then the request
+  itself. Access sets `data_export_until` (`DataExportWindow`, 7 days).
+  Reject records `MANUAL_REVIEW_REJECTED` unless a code is given.
+- **Export.** An approved access request's data: per approved session the
+  outcome, the contact the customer gave, identity and evidence, diplomas;
+  images named in `imagesHeld`, never included. For the person on their
+  hosted link (`GET /proof/{token}/data-export`, `dataExportUntil` in the
+  progress), for the admin (`…/requests/{id}/data-export`) and for the
+  customer (`GET /proofing/sessions/{id}/data-export`). Audited
+  `identity_proofing.data_exported`.
+- **Not built:** matching across customers or orgs (each customer is the
+  controller of its own sessions); a mail to the person when decided (a hosted
+  person reopens the link; otherwise the customer tells them); members' own
+  proofing requests.

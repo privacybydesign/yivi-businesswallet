@@ -69,6 +69,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/hosted", admin(respond.HandlerFunc(h.saveFlowHosted)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/diplomas", admin(respond.HandlerFunc(h.getFlowDiplomas)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/diplomas", admin(respond.HandlerFunc(h.saveFlowDiplomas)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/kind", admin(respond.HandlerFunc(h.getFlowKind)))
+	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/kind", admin(respond.HandlerFunc(h.saveFlowKind)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions", admin(respond.HandlerFunc(h.editFlow)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions/{version}/activate", admin(respond.HandlerFunc(h.activateFlowVersion)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flow-selection", admin(respond.HandlerFunc(h.configureFlows)))
@@ -85,6 +87,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", admin(respond.HandlerFunc(h.decideReview)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", admin(respond.HandlerFunc(h.requestResult)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", admin(respond.HandlerFunc(h.dataMatches)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-export", admin(respond.HandlerFunc(h.adminDataExport)))
 	mux.Handle("GET /orgs/{slug}/customers", member(respond.HandlerFunc(h.listCustomers)))
 	mux.Handle("POST /orgs/{slug}/customers", admin(respond.HandlerFunc(h.createCustomer)))
 	mux.Handle("GET /orgs/{slug}/customers/{customerID}", member(respond.HandlerFunc(h.getCustomer)))
@@ -132,6 +136,10 @@ type flowResponse struct {
 	// NeedsReferencePhoto is a flow that matches the face without reading the
 	// chip: only a customer's API can send it, with its own photo.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
+	// Kind is what the flow's sessions are for (an identity check, or a
+	// person asking for their data or its erasure); absent on a single
+	// version, as DiplomaMode.
+	Kind FlowKind `json:"kind,omitempty"`
 }
 
 func newFlowResponse(f OrgFlow) flowResponse {
@@ -140,7 +148,7 @@ func newFlowResponse(f OrgFlow) flowResponse {
 	}
 	return flowResponse{
 		Flow: f.Flow, Completable: Completable(f.Flow), Allowed: f.Allowed, Default: f.Default, DiplomaMode: f.Diplomas,
-		NeedsReferencePhoto: NeedsReferencePhoto(f.Flow),
+		NeedsReferencePhoto: NeedsReferencePhoto(f.Flow), Kind: f.Kind,
 	}
 }
 
@@ -269,6 +277,11 @@ type requestResponse struct {
 	// ExpectedSubject is a request for one known person: only subjectName,
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
+	// FlowKind is what the session is for; a data request goes to review once
+	// the person is proven. DataExportUntil is until when an approved "see my
+	// data" request's data downloads.
+	FlowKind        FlowKind   `json:"flowKind"`
+	DataExportUntil *time.Time `json:"dataExportUntil,omitempty"`
 }
 
 // withDiplomas adds the extracts a request holds to its response.
@@ -287,6 +300,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject,
+		FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
 	}
 }
 
@@ -379,6 +393,9 @@ type reviewDecisionRequest struct {
 	Decision  string `json:"decision"`
 	Reason    string `json:"reason"`
 	ErrorCode string `json:"errorCode"`
+	// RequestIDs are the matched sessions approving a data request takes;
+	// absent takes them all.
+	RequestIDs []uuid.UUID `json:"requestIds"`
 }
 
 func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
@@ -395,7 +412,7 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 	}
 	req, err := h.service.DecideReview(r.Context(), orgFromRequest(r).ID, id,
 		string(auth.UserFromContext(r.Context()).Email),
-		ReviewInput{Approve: body.Decision == "approve", ErrorCode: body.ErrorCode, Reason: body.Reason})
+		ReviewInput{Approve: body.Decision == "approve", ErrorCode: body.ErrorCode, Reason: body.Reason, RequestIDs: body.RequestIDs})
 	if err != nil {
 		return mapError(err)
 	}
@@ -865,6 +882,8 @@ type customerFlowResponse struct {
 	// NeedsReferencePhoto: see flowResponse. Completable counts it as
 	// finishable (CustomerCompletable), sent through the customer's API.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
+	// Kind: see flowResponse.
+	Kind FlowKind `json:"kind"`
 }
 
 // listCustomerFlows shows an admin every flow of the org with the customer's
@@ -885,7 +904,7 @@ func (h *Handler) listCustomerFlows(w http.ResponseWriter, r *http.Request) erro
 		}
 		out = append(out, customerFlowResponse{
 			Flow: f.Flow, Completable: CustomerCompletable(f.Flow), Assigned: f.Assigned, Default: f.Default, DiplomaMode: f.Diplomas,
-			NeedsReferencePhoto: NeedsReferencePhoto(f.Flow),
+			NeedsReferencePhoto: NeedsReferencePhoto(f.Flow), Kind: f.Kind,
 		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)
@@ -1001,6 +1020,12 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusForbidden, Code: "proofing_paused", Message: "identity proofing is paused for this organisation"}
 	case errors.Is(err, ErrOrgNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "organization_not_found", Message: "organisation not found"}
+	case errors.Is(err, ErrFlowNoIdentity):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "a data request flow must read the name and date of birth, which a person's sessions are found by"}
+	case errors.Is(err, ErrDataFlowForMember):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "data_flow_for_member", Message: "a data request flow is for a customer's subjects, not for members"}
+	case errors.Is(err, ErrExportUnavailable):
+		return &respond.APIError{Status: http.StatusGone, Code: "export_unavailable", Message: "no data is available to download for this session"}
 	case errors.Is(err, ErrRedirectNotAllowed):
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "redirect_not_allowed", Message: "redirectUrl must be on one of the customer's allowed redirect origins"}
 	case errors.Is(err, proofingprovider.ErrMethodUnavailable):

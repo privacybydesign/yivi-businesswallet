@@ -28,20 +28,24 @@ func (s *SettingsStore) FlowSelection(ctx context.Context, orgID uuid.UUID) (Flo
 }
 
 // SaveFlowSelection replaces the org's allow-list and audits
-// identity_proofing.flows_configured in the same transaction. The org must
-// already be provisioned (the rows reference its settings row).
+// identity_proofing.flows_configured in the same transaction. A flow taken off
+// the list keeps its other settings.
 func (s *SettingsStore) SaveFlowSelection(ctx context.Context, orgID uuid.UUID, sel FlowSelection) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		before, err := readFlowSelection(ctx, q, orgID)
 		if err != nil {
 			return err
 		}
-		if _, err := q.Exec(ctx, `DELETE FROM org_identity_proofing_flows WHERE organization_id = $1`, orgID); err != nil {
+		if _, err := q.Exec(ctx, `UPDATE identity_proofing_flow_settings
+			SET member_allowed = false, member_default = false, updated_at = now()
+			WHERE organization_id = $1 AND member_allowed`, orgID); err != nil {
 			return fmt.Errorf("proofing: clear flow selection org %s: %w", orgID, err)
 		}
-		const insert = `INSERT INTO org_identity_proofing_flows (organization_id, flow_id, is_default)
-			SELECT $1, id, id = $3 FROM unnest($2::text[]) AS id`
-		if _, err := q.Exec(ctx, insert, orgID, sel.FlowIDs, sel.DefaultFlowID); err != nil {
+		const upsert = `INSERT INTO identity_proofing_flow_settings (organization_id, flow_id, member_allowed, member_default)
+			SELECT $1, id, true, id = $3 FROM unnest($2::text[]) AS id
+			ON CONFLICT (organization_id, flow_id) DO UPDATE SET
+				member_allowed = true, member_default = EXCLUDED.member_default, updated_at = now()`
+		if _, err := q.Exec(ctx, upsert, orgID, sel.FlowIDs, sel.DefaultFlowID); err != nil {
 			return fmt.Errorf("proofing: save flow selection org %s: %w", orgID, err)
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingFlowsConfigured,
@@ -52,7 +56,8 @@ func (s *SettingsStore) SaveFlowSelection(ctx context.Context, orgID uuid.UUID, 
 
 func readFlowSelection(ctx context.Context, q database.Querier, orgID uuid.UUID) (FlowSelection, error) {
 	rows, err := q.Query(ctx,
-		`SELECT flow_id, is_default FROM org_identity_proofing_flows WHERE organization_id = $1 ORDER BY flow_id`, orgID)
+		`SELECT flow_id, member_default FROM identity_proofing_flow_settings
+			WHERE organization_id = $1 AND member_allowed ORDER BY flow_id`, orgID)
 	if err != nil {
 		return FlowSelection{}, fmt.Errorf("proofing: read flow selection org %s: %w", orgID, err)
 	}

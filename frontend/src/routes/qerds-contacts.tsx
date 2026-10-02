@@ -227,7 +227,7 @@ export default function QerdsContacts(): React.JSX.Element {
         title={t("qerds.contacts.title")}
         subtitle={t("qerds.contacts.subtitle")}
       />
-      <div className="p-8">{body()}</div>
+      <div className="p-4 sm:p-8">{body()}</div>
     </>
   );
 }

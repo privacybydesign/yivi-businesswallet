@@ -543,6 +543,11 @@ export const en = {
       diplomasClosed:
         "Diplomas can only be added for a while after the identity check succeeded.",
       diplomasNotAsked: "This check does not ask for diplomas.",
+      flowNoIdentity:
+        "A data request flow must read the name and date of birth: the person's sessions are found by them.",
+      dataFlowForMember:
+        "A data request flow is for a customer's subjects. Take it off the members' flows first.",
+      exportUnavailable: "This data can no longer be downloaded.",
       tooLarge: "The file is too large.",
       generic: "Something went wrong. Please try again.",
     },
@@ -849,6 +854,37 @@ export const en = {
         reasonRequired: "Give a reason: it is kept in the audit log.",
         approve: "Approve",
         reject: "Reject",
+      },
+      dataRequest: {
+        data_access: {
+          title: "This person asks what data is held about them",
+          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to share: they can download that data from their link for 7 days, and you can download it here to send it.",
+          approve_one: "Approve: share {{count}} session",
+          approve_other: "Approve: share {{count}} sessions",
+        },
+        data_erasure: {
+          title: "This person asks for their data to be deleted",
+          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to erase: their personal data is deleted at once, the sessions stay as a record, and the customer is told per session.",
+          approve_one: "Approve: erase {{count}} session",
+          approve_other: "Approve: erase {{count}} sessions",
+        },
+        reasonPlaceholder:
+          "What you checked, and why, e.g. a legal duty to keep the data",
+        noMatches:
+          "No other sessions of this person were found at this customer.",
+        matches_one: "{{count}} session of this person found",
+        matches_other: "{{count}} sessions of this person found",
+        levels: {
+          strong: "Same document",
+          probable: "Name and date of birth",
+        },
+        untickHint:
+          "Untick what must be kept, for example under a legal retention duty.",
+        erased: "Erased",
+        approved: "Approved",
+        kept: "Kept",
+        download: "Download the data",
+        downloadUntil: "Available until {{date}}",
       },
       method: "Method",
       timeline: "Timeline",
@@ -1158,7 +1194,22 @@ export const en = {
       biometrics:
         "How closely the face matched the document photo, and whether it was a live person.",
     },
+    kinds: {
+      identity: {
+        title: "Identity check",
+        hint: "The person proves who they are; the customer gets the outcome.",
+      },
+      data_access: {
+        title: "See my data",
+        hint: "A person asks the customer what data is held about them. After the identity check the session goes to review with their other sessions; approving lets them download that data.",
+      },
+      data_erasure: {
+        title: "Delete my data",
+        hint: "A person asks the customer to delete their data. After the identity check the session goes to review with their other sessions; approving erases them.",
+      },
+    },
     new: {
+      kind: "Type",
       title: "New flow",
       editTitle: "Edit {{name}}",
       hint: "A flow is the steps a session walks through, the result data the proofing service returns, and the checks that score its assurance.",
@@ -1233,6 +1284,24 @@ export const en = {
     decline: "Decline",
     redirecting: "Taking you back…",
     poweredBy: "Powered by Yivi",
+    dataRequest: {
+      data_access: {
+        intro:
+          "You are asking {{customer}} what data is held about you. First confirm who you are.",
+        inReview:
+          "Your request was sent to {{customer}} for review. Open this link again later to see the outcome.",
+      },
+      data_erasure: {
+        intro:
+          "You are asking {{customer}} to delete your data. First confirm who you are.",
+        inReview:
+          "Your request was sent to {{customer}} for review. Open this link again later to see the outcome.",
+      },
+      erased: "Your data was deleted.",
+      download: "Download my data",
+      downloadUntil: "Available until {{date}}.",
+      downloadExpired: "The download is no longer available.",
+    },
   },
   vog: {
     title: "Submit your VOG",
@@ -1719,6 +1788,8 @@ export const en = {
       identityProofingRejected: "Identity verification rejected",
       identityProofingNeedsReview: "Identity verification needs review",
       identityProofingReviewDecided: "Identity verification review decided",
+      identityProofingDataExported: "Data request data downloaded",
+      identityProofingFlowKindConfigured: "Identity proofing flow type set",
       identityProofingCustomerCreated: "Added identity proofing customer",
       identityProofingCustomerUpdated: "Updated identity proofing customer",
       identityProofingCustomerFlowsConfigured:

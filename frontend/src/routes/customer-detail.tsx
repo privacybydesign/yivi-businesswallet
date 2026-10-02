@@ -25,6 +25,7 @@ import type {
   ProofingRequest,
   ProofingResult,
 } from "../api/identity-proofing";
+import { isDataRequest } from "../api/identity-proofing";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import type { AuditEvent } from "../api/organization";
@@ -82,6 +83,7 @@ import {
   ResultTag,
   SecretReveal,
 } from "./proofing-customer-ui";
+import { DataRequestPanel, DataRequestTag } from "./data-request-review";
 
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
@@ -398,7 +400,7 @@ function FlowsTab({
 
   return (
     <>
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <p className={`${HINT} max-w-2xl`}>{t("customers.flows.intro")}</p>
         {isAdmin && view.kind === "list" && (
           <div className="flex shrink-0 items-center gap-2">
@@ -1164,8 +1166,13 @@ function SessionRow({
   const subject = requestSubject(request);
   const duration = sessionDurationSeconds(request);
   const detailsId = `session-details-${request.id}`;
+  const dataRequest = isDataRequest(request.flowKind);
+  // A data request awaiting review shows who asks: the review is about them.
   const showIdentity =
-    isAdmin && (request.status === "approved" || request.status === "rejected");
+    isAdmin &&
+    (request.status === "approved" ||
+      request.status === "rejected" ||
+      (dataRequest && request.status === "needs_review"));
   const result = useProofingRequestResultQuery(
     slug,
     request.id,
@@ -1212,6 +1219,7 @@ function SessionRow({
             <Tag tone="amber">{t("customers.apiKeys.test")}</Tag>
           )}
           <DiplomaTag request={request} />
+          <DataRequestTag request={request} />
         </Table.Cell>
         <Table.Cell className="whitespace-nowrap">
           {formatWhen(request.createdAt)}
@@ -1346,7 +1354,10 @@ function SessionRow({
               </div>
               <SessionTimeline slug={slug} request={request} />
             </div>
-            {isAdmin && request.status === "needs_review" && (
+            {isAdmin && dataRequest && (
+              <DataRequestPanel slug={slug} request={request} />
+            )}
+            {isAdmin && !dataRequest && request.status === "needs_review" && (
               <ReviewDecision slug={slug} requestId={request.id} />
             )}
           </td>

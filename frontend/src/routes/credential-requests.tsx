@@ -110,7 +110,7 @@ export default function CredentialRequests(): React.JSX.Element {
         }
       />
 
-      <div className="border-line bg-surface flex gap-1 border-b px-8">
+      <div className="border-line bg-surface flex gap-1 overflow-x-auto border-b px-4 sm:px-8">
         {TABS.map((value) => {
           const active = tab === value;
           return (
@@ -119,7 +119,7 @@ export default function CredentialRequests(): React.JSX.Element {
               type="button"
               onClick={() => setTab(value)}
               className={[
-                "h-11 border-b-2 px-3.5 text-[13.5px] transition-colors",
+                "h-11 shrink-0 border-b-2 px-3.5 text-[13.5px] whitespace-nowrap transition-colors",
                 active
                   ? "border-primary text-ink font-semibold"
                   : "text-ink-soft hover:text-ink border-transparent font-medium",
@@ -136,7 +136,7 @@ export default function CredentialRequests(): React.JSX.Element {
         })}
       </div>
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {org.isError ? (
           <MessageCard message={accessMessage(org.error, t)} error />
         ) : org.isPending ? (
