@@ -10,8 +10,9 @@ import {
   useProofingFlowVersionsQuery,
   useProofingFlowsQuery,
   useSetProofingFlowSelectionMutation,
+  useSaveProofingFlowDiplomasMutation,
 } from "../api/identity-proofing.queries";
-import type { ProofingFlow } from "../api/identity-proofing";
+import type { DiplomaMode, ProofingFlow } from "../api/identity-proofing";
 import { useWhenFormatter } from "../lib/format-when";
 import {
   ASSURANCE_LEVELS,
@@ -30,7 +31,9 @@ import {
   flowDraftError,
   flowSpecFromDraft,
   isProofingStep,
+  levelRequirement,
   proofingErrorMessage,
+  withAssuranceLevel,
 } from "../lib/identity-proofing";
 import type {
   EditableFlow,
@@ -310,6 +313,10 @@ function FlowSummary({ flow }: { flow: ProofingFlow }): React.JSX.Element {
   const steps = flow.steps.map((step) =>
     isProofingStep(step) ? t(`identityProofingFlows.steps.${step}`) : step,
   );
+  // The wallet's own step, after the app's: uploaded in the browser.
+  if (flow.diplomaMode === "required") {
+    steps.push(t("identityProofingFlows.steps.diploma_upload"));
+  }
   const checks = (flow.requiredChecks ?? []).map((check) => {
     const key = CHECK_LABELS[check];
     return key ? t(`identityProofingFlows.checks.${key}`) : check;
@@ -411,12 +418,18 @@ export function FlowEditor({
   const create = useCreateProofingFlowMutation(slug);
   const edit = useEditProofingFlowMutation(slug, editing?.id ?? "");
   const save = editing ? edit : create;
+  // Kept by the wallet, not the proofing service: saved after the flow.
+  const saveDiplomas = useSaveProofingFlowDiplomasMutation(slug);
+  const savedDiplomas: DiplomaMode = editing?.diplomaMode ?? "off";
+  const [diplomaMode, setDiplomaMode] = useState<DiplomaMode>(savedDiplomas);
   const [draft, setDraft] = useState<ProofingFlowDraft>(() =>
     editing ? draftFromFlow(editing) : emptyFlowDraft(),
   );
   const [touched, setTouched] = useState(false);
   const invalid = flowDraftError(draft);
   const steps = draftSteps(draft);
+
+  const required = levelRequirement(draft.assuranceLevel);
 
   function update(patch: Partial<ProofingFlowDraft>): void {
     setDraft((current) => ({ ...current, ...patch }));
@@ -440,8 +453,18 @@ export function FlowEditor({
     }
     save.mutate(flowSpecFromDraft(draft), {
       onSuccess: (flow) => {
-        onSaved?.(flow);
-        onDone();
+        const finish = (): void => {
+          onSaved?.(flow);
+          onDone();
+        };
+        if (diplomaMode === savedDiplomas) {
+          finish();
+          return;
+        }
+        saveDiplomas.mutate(
+          { flowId: flow.id, mode: diplomaMode },
+          { onSuccess: finish },
+        );
       },
     });
   }
@@ -493,6 +516,7 @@ export function FlowEditor({
           <Checkbox
             id="proofing-flow-step-document"
             checked={draft.documentAndChip}
+            disabled={required.documentAndChip === true}
             label={t("identityProofingFlows.steps.document_capture")}
             hint={t("identityProofingFlows.new.documentCaptureHint")}
             onChange={(checked) => update({ documentAndChip: checked })}
@@ -500,6 +524,7 @@ export function FlowEditor({
           <Checkbox
             id="proofing-flow-step-nfc"
             checked={draft.documentAndChip}
+            disabled={required.documentAndChip === true}
             label={t("identityProofingFlows.steps.nfc_read")}
             hint={t("identityProofingFlows.new.nfcReadHint")}
             onChange={(checked) => update({ documentAndChip: checked })}
@@ -514,17 +539,34 @@ export function FlowEditor({
           <Checkbox
             id="proofing-flow-step-face"
             checked={draft.faceVerification}
+            disabled={required.faceVerification === true}
             label={t("identityProofingFlows.steps.face_verification")}
             hint={t("identityProofingFlows.new.faceVerificationHint")}
             onChange={(checked) => update({ faceVerification: checked })}
           />
+          <Checkbox
+            id="proofing-flow-step-diplomas"
+            checked={diplomaMode !== "off"}
+            label={t("identityProofingFlows.steps.diploma_upload")}
+            hint={t("identityProofingFlows.new.diplomaUploadHint")}
+            onChange={(checked) => setDiplomaMode(checked ? "required" : "off")}
+          />
+          {saveDiplomas.isError && (
+            <p className={ERROR}>
+              {proofingErrorMessage(saveDiplomas.error, t)}
+            </p>
+          )}
           <p className={HINT}>
             {steps.length > 0
               ? t("identityProofingFlows.new.stepsOrder", {
-                  steps: steps
-                    .filter(isProofingStep)
-                    .map((step) => t(`identityProofingFlows.steps.${step}`))
-                    .join(" → "),
+                  steps: [
+                    ...steps
+                      .filter(isProofingStep)
+                      .map((step) => t(`identityProofingFlows.steps.${step}`)),
+                    ...(diplomaMode === "off"
+                      ? []
+                      : [t("identityProofingFlows.steps.diploma_upload")]),
+                  ].join(" → "),
                 })
               : t("identityProofingFlows.new.errors.steps")}
           </p>
@@ -543,6 +585,7 @@ export function FlowEditor({
                 id="proofing-flow-face-provider"
                 className={SELECT_CLASS}
                 value={draft.faceProvider}
+                disabled={required.faceProvider !== undefined}
                 onChange={(event) =>
                   update({
                     faceProvider: event.target
@@ -603,7 +646,9 @@ export function FlowEditor({
             <Checkbox
               id="proofing-flow-check-chip-auth"
               checked={draft.documentAndChip && draft.chipAuthentication}
-              disabled={!draft.documentAndChip}
+              disabled={
+                !draft.documentAndChip || required.chipAuthentication === true
+              }
               label={t("identityProofingFlows.checks.chipAuth")}
               onChange={(checked) => update({ chipAuthentication: checked })}
             />
@@ -617,7 +662,7 @@ export function FlowEditor({
             <Checkbox
               id="proofing-flow-check-liveness"
               checked={draft.faceVerification && draft.liveness}
-              disabled={!draft.faceVerification}
+              disabled={!draft.faceVerification || required.liveness === true}
               label={t("identityProofingFlows.checks.liveness")}
               onChange={(checked) => update({ liveness: checked })}
             />
@@ -686,23 +731,29 @@ export function FlowEditor({
           <Field
             id="proofing-flow-assurance"
             label={t("identityProofingFlows.new.assuranceLevel")}
-            hint={t("identityProofingFlows.new.assuranceLevelHint")}
+            hint={t(
+              draft.assuranceLevel === ""
+                ? "identityProofingFlows.new.assuranceLevelHint"
+                : `identityProofingFlows.new.assuranceLevelNeeds.${draft.assuranceLevel}`,
+            )}
           >
             <select
               id="proofing-flow-assurance"
               className={SELECT_CLASS}
               value={draft.assuranceLevel}
               onChange={(event) =>
-                update({
-                  assuranceLevel: event.target
-                    .value as ProofingFlowDraft["assuranceLevel"],
-                })
+                setDraft((current) =>
+                  withAssuranceLevel(
+                    current,
+                    event.target.value as ProofingFlowDraft["assuranceLevel"],
+                  ),
+                )
               }
             >
               <option value="">{t("identityProofingFlows.new.none")}</option>
               {ASSURANCE_LEVELS.map((level) => (
                 <option key={level} value={level}>
-                  {level}
+                  {t(`identityProofingFlows.assuranceLevels.${level}`)}
                 </option>
               ))}
             </select>

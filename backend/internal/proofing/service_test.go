@@ -19,54 +19,9 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
-const (
-	testAPIKey  = "sk_live_org"
-	testTestKey = "sk_test_org"
-)
-
 type fakeSettings struct {
-	canStore      bool
-	apiKeyReads   int
-	testKey       string
-	apiKey        string
-	webhookSecret string
-	saves         int
-	selection     FlowSelection
-	flowEvents    []string
-}
-
-func (f *fakeSettings) CanStoreSecrets() bool { return f.canStore }
-
-func (f *fakeSettings) APIKey(_ context.Context, _ uuid.UUID, mode Mode) (string, error) {
-	f.apiKeyReads++
-	key := f.apiKey
-	if mode == ModeTest {
-		key = f.testKey
-	}
-	if key == "" {
-		return "", ErrNotProvisioned
-	}
-	return key, nil
-}
-
-func (f *fakeSettings) WebhookSecret(_ context.Context, orgID uuid.UUID) (string, error) {
-	if f.apiKey == "" || orgID != testOrg.ID {
-		return "", ErrNotProvisioned
-	}
-	return f.webhookSecret, nil
-}
-
-func (f *fakeSettings) Provision(ctx context.Context, _ uuid.UUID, create func(context.Context) (ProvisionedTenant, error)) error {
-	if f.apiKey != "" {
-		return nil
-	}
-	t, err := create(ctx)
-	if err != nil {
-		return err
-	}
-	f.saves++
-	f.apiKey, f.testKey, f.webhookSecret = t.LiveKey, t.TestKey, t.WebhookSecret
-	return nil
+	selection  FlowSelection
+	flowEvents []string
 }
 
 func (f *fakeSettings) FlowSelection(context.Context, uuid.UUID) (FlowSelection, error) {
@@ -123,7 +78,8 @@ func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, 
 		Status: StatusPending, LinkExpiresAt: in.LinkExpiresAt, Method: in.Method, Mode: in.Mode,
 		Hosted:                 in.LinkTokenHash != nil,
 		RequiredAssuranceLevel: in.Flow.RequiredAssuranceLevel,
-		RedirectURL:            in.RedirectURL, Language: in.Language,
+		RedirectURL:            in.RedirectURL, Language: in.Language, Diplomas: in.Diplomas,
+		ExpectsSubject: in.Subject.BirthDate != "", expectedBirthDate: in.Subject.BirthDate,
 	}
 	f.stored = &req
 	f.linkHash = in.LinkTokenHash
@@ -141,6 +97,13 @@ func (f *fakeRequests) AttachSession(_ context.Context, req Request, sess proofi
 		f.stored.Method = req.Method
 	}
 	return true, nil
+}
+
+func (f *fakeRequests) ReferencePhoto(context.Context, Request) (*proofingprovider.Image, error) {
+	if len(f.created) == 0 {
+		return nil, nil
+	}
+	return f.created[len(f.created)-1].ReferencePhoto, nil
 }
 
 func (f *fakeRequests) LapseLinks(context.Context, time.Time, int) (int, error) {
@@ -241,6 +204,9 @@ func (f *fakeRequests) RecordOutcome(ctx context.Context, _ Request, _ string, s
 	f.stored.Status = status
 	f.stored.ProofedName = res.Name
 	f.stored.AssuranceLevel, f.stored.EIDASLevel, f.stored.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
+	if status == StatusApproved || status == StatusRejected {
+		f.stored.expectedBirthDate = ""
+	}
 	return nil
 }
 
@@ -407,15 +373,11 @@ type fakeIPS struct {
 	flows          []proofingprovider.Flow
 	flowLists      int
 	decisions      []proofingprovider.ReviewDecision
-	tenantIDs      []string
-	tenantExists   bool
-	rotations      int
-	sessionKeys    []string
+	sessionKeys    []proofingprovider.Tenant
 	statusReads    int
 	resultReads    int
 	result         proofingprovider.Result
 	resultErr      error
-	tenants        int
 	sessions       []proofingprovider.SessionInput
 	sessionExpires time.Time
 	createdFlows   []proofingprovider.FlowSpec
@@ -436,22 +398,24 @@ type fakeIPS struct {
 	deleteErr error
 }
 
-func (f *fakeIPS) SessionIdentity(_ context.Context, _, _, _ string) (proofingprovider.Identity, error) {
+func (f *fakeIPS) SessionIdentity(_ context.Context, _ proofingprovider.Tenant, _, _ string) (proofingprovider.Identity, error) {
 	f.resultReads++
-	return proofingprovider.Identity{Result: f.result, GivenName: "Anna", FamilyName: "Jansen"}, f.resultErr
+	return proofingprovider.Identity{
+		Result: f.result, GivenName: "Anna", FamilyName: "Jansen", BirthDate: testBirthDate,
+	}, f.resultErr
 }
 
-func (f *fakeIPS) CancelSession(context.Context, string, string, string) error {
+func (f *fakeIPS) CancelSession(context.Context, proofingprovider.Tenant, string, string) error {
 	f.cancels++
 	return f.cancelErr
 }
 
-func (f *fakeIPS) DeleteSession(context.Context, string, string, string) error {
+func (f *fakeIPS) DeleteSession(context.Context, proofingprovider.Tenant, string, string) error {
 	f.deletes++
 	return f.deleteErr
 }
 
-func (f *fakeIPS) SessionHandover(_ context.Context, _, sessionID, _ string) (proofingprovider.Claim, error) {
+func (f *fakeIPS) SessionHandover(_ context.Context, _ proofingprovider.Tenant, sessionID, _ string) (proofingprovider.Claim, error) {
 	f.handovers++
 	if f.handoverErr != nil {
 		return proofingprovider.Claim{}, f.handoverErr
@@ -459,38 +423,17 @@ func (f *fakeIPS) SessionHandover(_ context.Context, _, sessionID, _ string) (pr
 	return proofingprovider.Claim{DeepLink: "vcmrtd://verify?handover=fresh-" + sessionID, ExpiresAt: time.Now().Add(time.Minute), Handover: f.slotClaimed}, nil
 }
 
-func (f *fakeIPS) CreateTenant(_ context.Context, id, _ string) (proofingprovider.Tenant, error) {
-	f.tenants++
-	f.tenantIDs = append(f.tenantIDs, id)
-	if f.tenantExists {
-		return proofingprovider.Tenant{}, proofingprovider.ErrTenantExists
-	}
-	return proofingprovider.Tenant{ID: id, WebhookSecret: "whsec"}, nil
-}
-
-func (f *fakeIPS) RotateWebhookSecret(context.Context, string) (string, error) {
-	f.rotations++
-	return "whsec-rotated", nil
-}
-
-func (*fakeIPS) CreateAPIKey(_ context.Context, _ string, env proofingprovider.KeyEnvironment, _ []string) (string, error) {
-	if env == proofingprovider.KeyTest {
-		return testTestKey, nil
-	}
-	return testAPIKey, nil
-}
-
-func (f *fakeIPS) ListFlows(context.Context, string) ([]proofingprovider.Flow, error) {
+func (f *fakeIPS) ListFlows(context.Context, proofingprovider.Tenant) ([]proofingprovider.Flow, error) {
 	f.flowLists++
 	return f.flows, nil
 }
 
-func (f *fakeIPS) CreateFlow(_ context.Context, _ string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
+func (f *fakeIPS) CreateFlow(_ context.Context, _ proofingprovider.Tenant, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
 	f.createdFlows = append(f.createdFlows, in)
 	return proofingprovider.Flow{FlowSpec: in, ID: "new", Version: 1, Active: true}, nil
 }
 
-func (f *fakeIPS) CreateFlowVersion(_ context.Context, _, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
+func (f *fakeIPS) CreateFlowVersion(_ context.Context, _ proofingprovider.Tenant, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
 	if !slices.ContainsFunc(f.flows, func(fl proofingprovider.Flow) bool { return fl.ID == id }) {
 		return proofingprovider.Flow{}, proofingprovider.ErrNotFound
 	}
@@ -499,17 +442,17 @@ func (f *fakeIPS) CreateFlowVersion(_ context.Context, _, id string, in proofing
 	return proofingprovider.Flow{FlowSpec: in, ID: id, Version: 2, Active: true}, nil
 }
 
-func (f *fakeIPS) ListFlowVersions(_ context.Context, _, id string) ([]proofingprovider.Flow, error) {
+func (f *fakeIPS) ListFlowVersions(_ context.Context, _ proofingprovider.Tenant, id string) ([]proofingprovider.Flow, error) {
 	return []proofingprovider.Flow{{ID: id, Version: 1}, {ID: id, Version: 2, Active: true}}, nil
 }
 
-func (*fakeIPS) ActivateFlowVersion(_ context.Context, _, id string, version int) (proofingprovider.Flow, error) {
+func (*fakeIPS) ActivateFlowVersion(_ context.Context, _ proofingprovider.Tenant, id string, version int) (proofingprovider.Flow, error) {
 	return proofingprovider.Flow{ID: id, Version: version, Active: true}, nil
 }
 
-func (f *fakeIPS) CreateSession(_ context.Context, apiKey string, in proofingprovider.SessionInput) (proofingprovider.Session, error) {
+func (f *fakeIPS) CreateSession(_ context.Context, tenant proofingprovider.Tenant, in proofingprovider.SessionInput) (proofingprovider.Session, error) {
 	f.sessions = append(f.sessions, in)
-	f.sessionKeys = append(f.sessionKeys, apiKey)
+	f.sessionKeys = append(f.sessionKeys, tenant)
 	id := "ses-" + in.ClientReference
 	sess := proofingprovider.Session{ID: id, Token: "tok", ExpiresAt: f.sessionExpires, FlowVersion: testPinnedVersion}
 	if !f.noClaim {
@@ -518,19 +461,19 @@ func (f *fakeIPS) CreateSession(_ context.Context, apiKey string, in proofingpro
 	return sess, nil
 }
 
-func (f *fakeIPS) SessionStatus(context.Context, string, string, string) (proofingprovider.Result, error) {
+func (f *fakeIPS) SessionStatus(context.Context, proofingprovider.Tenant, string, string) (proofingprovider.Result, error) {
 	f.statusReads++
 	res := f.result
 	res.Name = ""
 	return res, f.resultErr
 }
 
-func (f *fakeIPS) SessionResult(context.Context, string, string, string) (proofingprovider.Result, error) {
+func (f *fakeIPS) SessionResult(context.Context, proofingprovider.Tenant, string, string) (proofingprovider.Result, error) {
 	f.resultReads++
 	return f.result, f.resultErr
 }
 
-func (f *fakeIPS) SubmitReference(_ context.Context, _, _, _ string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error) {
+func (f *fakeIPS) SubmitReference(_ context.Context, _ proofingprovider.Tenant, _, _ string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error) {
 	f.references = append(f.references, ref)
 	return proofingprovider.YiviDisclosure{OK: true, StableFrames: 3}, nil
 }
@@ -564,7 +507,7 @@ func (*fakeIPS) SubmitFaceFrame(context.Context, string, string) (proofingprovid
 }
 
 // DecideReview settles the session the way IPS does: the next read has the outcome.
-func (f *fakeIPS) DecideReview(_ context.Context, _, _, _ string, d proofingprovider.ReviewDecision) error {
+func (f *fakeIPS) DecideReview(_ context.Context, _ proofingprovider.Tenant, _, _ string, d proofingprovider.ReviewDecision) error {
 	f.decisions = append(f.decisions, d)
 	if f.result.Status != proofingprovider.StatusNeedsReview {
 		return &proofingprovider.RejectedError{Status: 409, Message: "not under review"}
@@ -607,8 +550,8 @@ func withFaceProvider(f proofingprovider.Flow, provider string) proofingprovider
 }
 
 var (
-	// appFlow's face check runs on IPS's engine, so the Yivi app can run it too.
-	appFlow  = withFaceProvider(testFlow("f-app", "Passport + face", []string{"nfc_read", "face_match"}, "native"), faceProviderEngine)
+	// appFlow's face check runs on Regula, so the Yivi app can run it too.
+	appFlow  = withFaceProvider(testFlow("f-app", "Passport + face", []string{"nfc_read", "face_match"}, "native"), faceProviderRegula)
 	chipFlow = testFlow("f-chip", "Passport only", []string{"document_capture", "nfc_read"}, "native")
 	// browserFlow captures the face in a browser a recipient cannot reach.
 	browserFlow = testFlow("f-web", "Web selfie", []string{"selfie"}, selfieLocationBrowser)
@@ -635,12 +578,11 @@ type fixture struct {
 	mailer    *fakeMailer
 }
 
-// newFixture builds a service over fakes. A provisioned org already has its IPS
-// key and appFlow made available to members as the default; alex is a member
-// and initech a customer.
-func newFixture(provisioned bool) fixture {
+// newFixture builds a service over fakes: appFlow is made available to
+// members as the default; alex is a member and initech a customer.
+func newFixture() fixture {
 	f := fixture{
-		settings: &fakeSettings{canStore: true, selection: FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: appFlow.ID}},
+		settings: &fakeSettings{selection: FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: appFlow.ID}},
 		requests: &fakeRequests{members: map[uuid.UUID]Member{alex.UserID: alex}},
 		ips: &fakeIPS{
 			flows: []proofingprovider.Flow{appFlow, chipFlow, browserFlow}, sessionExpires: time.Now().Add(testSession),
@@ -649,9 +591,6 @@ func newFixture(provisioned bool) fixture {
 		customers: &fakeCustomers{byID: map[uuid.UUID]Customer{initech.ID: initech}},
 		verifier:  &fakeVerifier{},
 		mailer:    &fakeMailer{},
-	}
-	if provisioned {
-		f.settings.apiKey, f.settings.testKey = testAPIKey, testTestKey
 	}
 	f.svc = NewService(Stores{Settings: f.settings, Requests: f.requests, Customers: f.customers, APIKeys: fakeAPIKeys{}},
 		f.ips, f.verifier, f.mailer)
@@ -683,48 +622,8 @@ func (f fixture) reconcile(t *testing.T) Request {
 	return reqs[0]
 }
 
-func TestFirstUseProvisionsOnce(t *testing.T) {
-	f := newFixture(false)
-	for range 2 {
-		if _, err := f.svc.Flows(context.Background(), testOrg, true); err != nil {
-			t.Fatalf("Flows: %v", err)
-		}
-	}
-	if f.ips.tenants != 1 || f.settings.saves != 1 {
-		t.Errorf("tenants = %d, saves = %d; want one of each", f.ips.tenants, f.settings.saves)
-	}
-	if len(f.ips.tenantIDs) != 1 || f.ips.tenantIDs[0] != testOrg.ID.String() {
-		t.Errorf("tenant ids = %v, want the org's own id", f.ips.tenantIDs)
-	}
-	if f.settings.apiKey != testAPIKey || f.settings.testKey != testTestKey || f.settings.webhookSecret != "whsec" {
-		t.Errorf("stored = %+v; want the live and test keys and the webhook secret", f.settings)
-	}
-}
-
-func TestFirstUseTakesOverAnExistingTenant(t *testing.T) {
-	f := newFixture(false)
-	f.ips.tenantExists = true
-	if _, err := f.svc.Flows(context.Background(), testOrg, true); err != nil {
-		t.Fatalf("Flows: %v", err)
-	}
-	if f.ips.rotations != 1 || f.settings.webhookSecret != "whsec-rotated" || f.settings.apiKey != testAPIKey {
-		t.Errorf("rotations = %d, stored = %+v; want the tenant taken over with a fresh secret", f.ips.rotations, f.settings)
-	}
-}
-
-func TestFirstUseWithoutKeyProvisionsNothing(t *testing.T) {
-	f := newFixture(false)
-	f.settings.canStore = false
-	if _, err := f.svc.Flows(context.Background(), testOrg, true); !errors.Is(err, ErrNoEncryptionKey) {
-		t.Fatalf("Flows = %v, want ErrNoEncryptionKey", err)
-	}
-	if f.ips.tenants != 0 {
-		t.Errorf("an IPS tenant was created with nowhere to store its key")
-	}
-}
-
 func TestFlowsAppliesSelection(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	all, err := f.svc.Flows(context.Background(), testOrg, true)
 	if err != nil {
 		t.Fatalf("Flows(all): %v", err)
@@ -756,7 +655,7 @@ func TestConfigureFlowsValidates(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			f := newFixture(true)
+			f := newFixture()
 			before := f.settings.selection
 			err := f.svc.ConfigureFlows(context.Background(), testOrg, tc.sel)
 			if !errors.Is(err, tc.want) {
@@ -770,7 +669,7 @@ func TestConfigureFlowsValidates(t *testing.T) {
 }
 
 func TestConfigureFlowsDropsDuplicates(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	sel := FlowSelection{FlowIDs: []string{chipFlow.ID, chipFlow.ID}, DefaultFlowID: chipFlow.ID}
 	if err := f.svc.ConfigureFlows(context.Background(), testOrg, sel); err != nil {
 		t.Fatalf("ConfigureFlows: %v", err)
@@ -792,7 +691,7 @@ func TestCreateRequestValidates(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			f := newFixture(true)
+			f := newFixture()
 			_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()}, tc.in)
 			if !errors.Is(err, tc.want) {
 				t.Errorf("err = %v, want %v", err, tc.want)
@@ -807,7 +706,7 @@ func TestCreateRequestValidates(t *testing.T) {
 // Sending creates the IPS session on the request's id and flow, with the
 // session TTL, and mails its vcmrtd deep link: the mail is the session.
 func TestCreateRequestStartsTheSessionAndMailsItsDeepLink(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	sent := f.send(t)
 
 	if len(f.ips.sessions) != 1 || f.ips.sessions[0].TTL != SessionTTL ||
@@ -836,7 +735,7 @@ func TestCreateRequestStartsTheSessionAndMailsItsDeepLink(t *testing.T) {
 
 // A session IPS offers no vcmrtd link for cannot be mailed, so nothing is stored.
 func TestCreateRequestWithoutADeepLinkStoresNothing(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	f.ips.noClaim = true
 	_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()},
 		NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID})
@@ -847,7 +746,7 @@ func TestCreateRequestWithoutADeepLinkStoresNothing(t *testing.T) {
 }
 
 func TestCreateRequestReportsAFailedMail(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	f.mailer.err = errors.New("smtp down")
 	if sent := f.send(t); sent.MailSent {
 		t.Error("a failed mail reported as sent")
@@ -862,7 +761,7 @@ func TestCreateRequestReportsAFailedMail(t *testing.T) {
 func TestASessionThatEndsUndecidedExpiresTheRequest(t *testing.T) {
 	for _, status := range []proofingprovider.Status{proofingprovider.StatusExpired, proofingprovider.StatusCancelled} {
 		t.Run(string(status), func(t *testing.T) {
-			f := newFixture(true)
+			f := newFixture()
 			f.send(t)
 			f.ips.result = proofingprovider.Result{Status: status}
 			req := f.reconcile(t)
@@ -878,7 +777,7 @@ func TestASessionThatEndsUndecidedExpiresTheRequest(t *testing.T) {
 }
 
 func TestAReviewIPSEndsExpiresTheRequest(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	f.send(t)
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
 	if req := f.reconcile(t); req.Status != StatusNeedsReview || !req.needsReconcile() {
@@ -892,7 +791,7 @@ func TestAReviewIPSEndsExpiresTheRequest(t *testing.T) {
 }
 
 func TestReconcileMarksStartedThenRecordsOutcomeOnce(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	f.send(t)
 
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusOpened}
@@ -935,7 +834,7 @@ func TestApprovalBelowRequiredAssuranceIsRejected(t *testing.T) {
 		"unknown requirement": {"extreme", "substantial", StatusRejected, ErrorAssuranceNotMet},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newFixture(true)
+			f := newFixture()
 			f.ips.flows[0] = withRequiredAssurance(appFlow, tc.required)
 			f.send(t)
 			f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: tc.achieved, Name: "Anna Jansen"}
@@ -953,7 +852,7 @@ func TestApprovalBelowRequiredAssuranceIsRejected(t *testing.T) {
 // A Yivi session reaches only yiviEIDASLevel: IPS does not score it, so the
 // wallet records that level.
 func TestYiviAssurance(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	f.ips.flows[0] = withRequiredAssurance(appFlow, eidasLow)
 	f.sendYivi(t)
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, Method: proofingprovider.MethodYivi}
@@ -987,7 +886,7 @@ func TestMeetsAssurance(t *testing.T) {
 }
 
 func TestRequestsSurviveIPSOutage(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	f.send(t)
 	f.ips.resultErr = errors.New("unreachable")
 	if req := f.reconcile(t); req.Status != StatusPending {
@@ -1032,7 +931,7 @@ func TestCompletable(t *testing.T) {
 }
 
 func TestCreateAndEditFlowCaptureFaceInApp(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	face := proofingprovider.FlowSpec{Name: "Face", Steps: []string{"document_capture", "nfc_read", "face_verification"}, SelfieLocation: selfieLocationBrowser}
 	if _, err := f.svc.CreateFlow(context.Background(), testOrg, face); err != nil {
 		t.Fatalf("CreateFlow: %v", err)
@@ -1055,16 +954,16 @@ func TestCreateAndEditFlowCaptureFaceInApp(t *testing.T) {
 }
 
 func TestCreateFlowFaceProvider(t *testing.T) {
-	f := newFixture(true)
-	face := proofingprovider.FlowSpec{Name: "Face", Steps: []string{"document_capture", "nfc_read", "face_verification"}, FaceProvider: "engine"}
+	f := newFixture()
+	face := proofingprovider.FlowSpec{Name: "Face", Steps: []string{"document_capture", "nfc_read", "face_verification"}, FaceProvider: faceProviderIris}
 	chip := proofingprovider.FlowSpec{Name: "Chip", Steps: []string{"document_capture", "nfc_read"}, FaceProvider: "regula"}
 	for _, spec := range []proofingprovider.FlowSpec{face, chip} {
 		if _, err := f.svc.CreateFlow(context.Background(), testOrg, spec); err != nil {
 			t.Fatalf("CreateFlow(%s): %v", spec.Name, err)
 		}
 	}
-	if got := f.ips.createdFlows[0].FaceProvider; got != "engine" {
-		t.Errorf("face flow faceProvider = %q, want engine", got)
+	if got := f.ips.createdFlows[0].FaceProvider; got != faceProviderIris {
+		t.Errorf("face flow faceProvider = %q, want Iris", got)
 	}
 	if got := f.ips.createdFlows[1].FaceProvider; got != "" {
 		t.Errorf("chip-only flow faceProvider = %q, want none", got)
@@ -1077,43 +976,18 @@ func TestCreateFlowFaceProvider(t *testing.T) {
 	if got := f.ips.createdFlows[2].FaceProvider; got != faceProviderRegula {
 		t.Errorf("face flow without a provider = %q, want regula", got)
 	}
-	bad := face
-	bad.FaceProvider = "iris"
-	if _, err := f.svc.CreateFlow(context.Background(), testOrg, bad); !errors.Is(err, ErrInvalidInput) {
-		t.Errorf("CreateFlow(unknown provider) = %v, want ErrInvalidInput", err)
-	}
-}
-
-// Only a chip read plus a Regula face check reaches substantial at IPS, so a
-// flow requiring it without them would fail every request.
-func TestCreateFlowSubstantialNeedsChipAndRegula(t *testing.T) {
-	f := newFixture(true)
-	ok := proofingprovider.FlowSpec{
-		Name: "Substantial", Steps: []string{"document_capture", "nfc_read", "face_verification"}, RequiredAssuranceLevel: eidasSubstantial,
-	}
-	if _, err := f.svc.CreateFlow(context.Background(), testOrg, ok); err != nil {
-		t.Fatalf("CreateFlow(chip + regula): %v", err)
-	}
-	engine := ok
-	engine.FaceProvider = faceProviderEngine
-	chipOnly := ok
-	chipOnly.Steps = []string{"document_capture", "nfc_read"}
-	faceOnly := ok
-	faceOnly.Steps = []string{"face_verification"}
-	for name, spec := range map[string]proofingprovider.FlowSpec{"engine": engine, "chip only": chipOnly, "face only": faceOnly} {
-		if _, err := f.svc.CreateFlow(context.Background(), testOrg, spec); !errors.Is(err, ErrInvalidInput) {
-			t.Errorf("CreateFlow(%s) = %v, want ErrInvalidInput", name, err)
+	// The wallet runs no face engine of its own.
+	for _, provider := range []string{"iris", faceProviderEngine} {
+		bad := face
+		bad.FaceProvider = provider
+		if _, err := f.svc.CreateFlow(context.Background(), testOrg, bad); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("CreateFlow(%s) = %v, want ErrInvalidInput", provider, err)
 		}
-	}
-	low := engine
-	low.RequiredAssuranceLevel = eidasLow
-	if _, err := f.svc.CreateFlow(context.Background(), testOrg, low); err != nil {
-		t.Errorf("CreateFlow(low on engine): %v", err)
 	}
 }
 
 func TestEditUnknownFlowIsNotFound(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	_, err := f.svc.EditFlow(context.Background(), testOrg, "nope", proofingprovider.FlowSpec{Name: "x", Steps: []string{"nfc_read"}})
 	if !errors.Is(err, ErrFlowNotFound) {
 		t.Errorf("EditFlow = %v, want ErrFlowNotFound", err)
@@ -1133,7 +1007,7 @@ func (f fixture) sendForCustomer(t *testing.T, email, name string) Sent {
 // A customer's subject is not a member: it is reached by the address the sender
 // typed, on a flow assigned to the customer even when members may not use it.
 func TestCreateRequestForCustomerSubject(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	sent := f.sendForCustomer(t, "  Anna@Example.ORG ", "  ")
 
 	stored := f.requests.created[0].Subject
@@ -1162,7 +1036,7 @@ func TestCreateRequestForCustomerValidates(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			f := newFixture(true)
+			f := newFixture()
 			_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()}, tc.in)
 			if !errors.Is(err, tc.want) {
 				t.Errorf("err = %v, want %v", err, tc.want)
@@ -1177,7 +1051,7 @@ func TestCreateRequestForCustomerValidates(t *testing.T) {
 // The app a subject used is carried from IPS's first report of the session
 // opening onto the request, and kept once a later read no longer lists it.
 func TestReconcileRecordsTheMethod(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	f.send(t)
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusInProgress, Method: proofingprovider.MethodIdem}
 	if got := f.reconcile(t); got.Method != proofingprovider.MethodIdem {
@@ -1192,7 +1066,7 @@ func TestReconcileRecordsTheMethod(t *testing.T) {
 // led to) is audited with that app as actor, whoever's read triggered it; an
 // outcome after review is not the app's.
 func TestReconcileAuditsTheAppAsActor(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	f.send(t)
 	ctx := audit.ContextWithActor(context.Background(), audit.Actor{UserID: uuid.New()})
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusInProgress, Method: proofingprovider.MethodIdem}
@@ -1209,7 +1083,7 @@ func TestReconcileAuditsTheAppAsActor(t *testing.T) {
 
 // A paused customer takes no new request, and resuming it takes them again.
 func TestCreateRequestForPausedCustomerIsRefused(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	if _, err := f.svc.SetCustomerPaused(ctx, testOrg.ID, initech.ID, true); err != nil {
 		t.Fatalf("SetCustomerPaused: %v", err)
@@ -1231,7 +1105,7 @@ func TestCreateRequestForPausedCustomerIsRefused(t *testing.T) {
 
 // A customer without a live API key takes no live request; a test one runs.
 func TestCreateRequestForCustomerWithoutLiveKeyIsRefused(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	c := f.customers.byID[initech.ID]
 	c.HasLiveKey = false
@@ -1251,7 +1125,7 @@ func TestCreateRequestForCustomerWithoutLiveKeyIsRefused(t *testing.T) {
 
 // A customer's session lifetime is what IPS is asked for and what the mail says.
 func TestCreateRequestForCustomerUsesItsSessionLifetime(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	short := CustomerSettings{SessionTTL: 2 * time.Minute, DataRetentionDays: 7}
 	if _, err := f.svc.SaveCustomerSettings(ctx, testOrg.ID, initech.ID, short); err != nil {
@@ -1267,7 +1141,7 @@ func TestCreateRequestForCustomerUsesItsSessionLifetime(t *testing.T) {
 }
 
 func TestSaveCustomerSettingsOffersOnlyItsOptions(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	for _, settings := range []CustomerSettings{
 		{SessionTTL: 3 * time.Minute, DataRetentionDays: 30},
 		{SessionTTL: SessionTTL, DataRetentionDays: 366},
@@ -1282,7 +1156,7 @@ func TestSaveCustomerSettingsOffersOnlyItsOptions(t *testing.T) {
 // A customer's subject's mail is signed and styled as the customer; a member's
 // stays the org's.
 func TestCustomerSubjectMailCarriesTheCustomersBranding(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	logo := LogoChange{Replace: true, Logo: CustomerLogo{Bytes: []byte("\x89PNG"), ContentType: "image/png"}}
 	if _, err := f.svc.SaveCustomerBranding(ctx, testOrg.ID, initech.ID, CustomerBranding{
@@ -1306,7 +1180,7 @@ func TestCustomerSubjectMailCarriesTheCustomersBranding(t *testing.T) {
 }
 
 func TestSaveCustomerBrandingValidates(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	for name, b := range map[string]CustomerBranding{
 		"colour":       {PrimaryColor: "green"},
 		"http privacy": {PrivacyURL: "http://initech.example/privacy"},
@@ -1332,7 +1206,7 @@ func TestReconcileKeepsProofedNameForApprovedCustomerSubjectOnly(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			f := newFixture(true)
+			f := newFixture()
 			if tc.customer {
 				f.sendForCustomer(t, "anna@example.org", "")
 			} else {
@@ -1362,7 +1236,7 @@ func TestAssignCustomerFlowsValidates(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			f := newFixture(true)
+			f := newFixture()
 			_, err := f.svc.AssignCustomerFlows(context.Background(), testOrg, initech.ID, tc.sel)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
@@ -1372,14 +1246,14 @@ func TestAssignCustomerFlowsValidates(t *testing.T) {
 			}
 		})
 	}
-	f := newFixture(true)
+	f := newFixture()
 	if _, err := f.svc.AssignCustomerFlows(context.Background(), testOrg, uuid.New(), FlowSelection{}); !errors.Is(err, ErrCustomerNotFound) {
 		t.Errorf("unknown customer err = %v, want ErrCustomerNotFound", err)
 	}
 }
 
 func TestCustomerFlowsAppliesAssignment(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	all, err := f.svc.CustomerFlows(context.Background(), testOrg, initech.ID, true)
 	if err != nil {
 		t.Fatalf("CustomerFlows(all): %v", err)
@@ -1397,7 +1271,7 @@ func TestCustomerFlowsAppliesAssignment(t *testing.T) {
 }
 
 func TestCreateCustomerNeedsAName(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	for _, name := range []string{"", "   ", strings.Repeat("x", maxCustomerNameLength+1)} {
 		if _, err := f.svc.CreateCustomer(context.Background(), testOrg.ID, uuid.New(), name); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("CreateCustomer(%q) err = %v, want ErrInvalidInput", name, err)
@@ -1423,7 +1297,7 @@ func (f fixture) sendYivi(t *testing.T) Sent {
 // A customer's list pages newest first: a full page carries the cursor that
 // continues after its last row, the last page none, a bad cursor is refused.
 func TestCustomerRequestPage(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	base := time.Now()
 	for i := range 3 {
@@ -1450,7 +1324,7 @@ func TestCustomerRequestPage(t *testing.T) {
 // A customer's result is read from IPS once settled, audited each time, and
 // gone once erased.
 func TestRequestResult(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()},
 		NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
@@ -1475,7 +1349,7 @@ func TestRequestResult(t *testing.T) {
 
 // A new key gets every scope.
 func TestCreateAPIKeyScopes(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	key, _, err := f.svc.CreateAPIKey(context.Background(), testOrg.ID, initech.ID, uuid.New(), "CI", ModeLive)
 	if err != nil || !slices.Equal(key.Scopes, APIKeyScopes) {
 		t.Errorf("scopes = %v, %v; want every scope", key.Scopes, err)
@@ -1485,7 +1359,7 @@ func TestCreateAPIKeyScopes(t *testing.T) {
 // A customer's request without an outcome is cancelled at IPS and here, once;
 // purging it erases it at IPS and marks it.
 func TestCancelAndPurgeRequest(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()},
 		NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
@@ -1510,7 +1384,7 @@ func TestCancelAndPurgeRequest(t *testing.T) {
 // A request past its retention is erased at IPS and here by the pruner; one
 // IPS fails to erase is kept for the next run.
 func TestPurgeDue(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()},
 		NewRequest{CustomerID: &initech.ID, SubjectName: "Anna", SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
@@ -1539,7 +1413,7 @@ func TestPurgeDue(t *testing.T) {
 // only once a phone held the session; an app still holding the session, a Yivi
 // request and a test request get none.
 func TestClaimLink(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
 		NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID, Method: proofingprovider.MethodIdem, Channel: ChannelOnScreen})
@@ -1576,7 +1450,7 @@ func TestClaimLink(t *testing.T) {
 // A running Idem request's phone is read live from IPS, each time; a Yivi
 // request has none.
 func TestApp(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
 		NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID, Method: proofingprovider.MethodIdem, Channel: ChannelOnScreen})
@@ -1604,13 +1478,13 @@ func TestApp(t *testing.T) {
 	}
 }
 
-// Only a face provider the Yivi app does not have keeps a flow from it; Regula,
-// the engine and an unset provider all run there.
+// Only a face provider the Yivi app does not have keeps a flow from it; Regula
+// and an unset provider run there.
 func TestYiviNeedsAFaceProviderItHas(t *testing.T) {
 	for provider, wantErr := range map[string]bool{
-		faceProviderRegula: false, faceProviderEngine: false, "": false, faceProviderIris: true,
+		faceProviderRegula: false, "": false, faceProviderIris: true,
 	} {
-		f := newFixture(true)
+		f := newFixture()
 		f.ips.flows[0] = withFaceProvider(appFlow, provider)
 		_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
 			NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID, Method: proofingprovider.MethodYivi, Channel: ChannelOnScreen})
@@ -1626,7 +1500,7 @@ func TestYiviNeedsAFaceProviderItHas(t *testing.T) {
 // The Yivi disclosure runs over OpenID4VP at the wallet's verifier; its photo
 // goes to IPS as the face reference, apart from the other claims.
 func TestYiviDisclosureRunsOverOpenID4VP(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	sent := f.sendYivi(t)
 
@@ -1669,7 +1543,7 @@ func TestYiviDisclosureRunsOverOpenID4VP(t *testing.T) {
 }
 
 func TestYiviStepsRefuseAnIdemRequest(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	sent := f.send(t)
 	if _, err := f.svc.StartYivi(context.Background(), testOrg.ID, sent.Request.ID, nil); !errors.Is(err, ErrWrongMethod) {
 		t.Fatalf("StartYivi on an Idem request: %v, want ErrWrongMethod", err)
@@ -1680,7 +1554,7 @@ func TestYiviStepsRefuseAnIdemRequest(t *testing.T) {
 }
 
 func TestListReadsNeverCallIPS(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	f.send(t)
 	for range 3 {
 		if _, err := f.svc.Requests(context.Background(), testOrg.ID, RequestFilter{}); err != nil {
@@ -1693,7 +1567,7 @@ func TestListReadsNeverCallIPS(t *testing.T) {
 }
 
 func TestARequestReadRechecksIPSAtMostOncePerInterval(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	sent := f.send(t)
 	now := time.Now()
 	f.svc.now = func() time.Time { return now }
@@ -1716,19 +1590,18 @@ func TestARequestReadRechecksIPSAtMostOncePerInterval(t *testing.T) {
 }
 
 func TestCreateRequestResolvesEachDependencyOnce(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	customer := initech
 	customer.Flows = FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: appFlow.ID}
 	f.customers.byID[customer.ID] = customer
-	f.settings.apiKeyReads = 0
 	_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
 		NewRequest{CustomerID: &customer.ID, SubjectEmail: "anna@example.org"})
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
-	if f.ips.flowLists != 1 || f.customers.gets != 1 || f.settings.apiKeyReads != 1 || len(f.ips.sessions) != 1 {
-		t.Errorf("flow lists = %d, customer reads = %d, key reads = %d, sessions = %d; want 1 each",
-			f.ips.flowLists, f.customers.gets, f.settings.apiKeyReads, len(f.ips.sessions))
+	if f.ips.flowLists != 1 || f.customers.gets != 1 || len(f.ips.sessions) != 1 {
+		t.Errorf("flow lists = %d, customer reads = %d, sessions = %d; want 1 each",
+			f.ips.flowLists, f.customers.gets, len(f.ips.sessions))
 	}
 }
 
@@ -1745,7 +1618,7 @@ func TestReconcileReadsTheFullResultOnlyForTheName(t *testing.T) {
 		"customer subject approved": {true, proofingprovider.StatusApproved, 1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newFixture(true)
+			f := newFixture()
 			if tc.customer {
 				customer := initech
 				customer.Flows = FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: appFlow.ID}
@@ -1775,7 +1648,7 @@ func (f fixture) testCustomer() Customer {
 }
 
 func TestATestRequestRunsScriptedOnTheTestKey(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	customer := f.testCustomer()
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial}
 	for range 2 {
@@ -1788,12 +1661,9 @@ func TestATestRequestRunsScriptedOnTheTestKey(t *testing.T) {
 			t.Errorf("sent = %+v; want an approved, unmailed test request", sent)
 		}
 	}
-	if f.ips.tenants != 0 {
-		t.Errorf("tenants = %d, want none: a test request runs on the org's own tenant", f.ips.tenants)
-	}
 	in := f.ips.sessions[0]
-	if f.ips.sessionKeys[0] != testTestKey || in.FlowID != "" || in.ScriptedOutcome != defaultScriptedOutcome {
-		t.Errorf("session on key %q with %+v; want the test key, no flow, scripted %q",
+	if f.ips.sessionKeys[0] != orgTenant(testOrg.ID, ModeTest) || in.FlowID != "" || in.ScriptedOutcome != defaultScriptedOutcome {
+		t.Errorf("session on tenant %+v with %+v; want the org in test mode, no flow, scripted %q",
 			f.ips.sessionKeys[0], in, defaultScriptedOutcome)
 	}
 	if len(f.mailer.sent) != 0 {
@@ -1802,7 +1672,7 @@ func TestATestRequestRunsScriptedOnTheTestKey(t *testing.T) {
 }
 
 func TestOnlyATestRequestScriptsAValidOutcome(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	customer := f.testCustomer()
 	for name, in := range map[string]NewRequest{
 		"live with a script":  {ScriptedOutcome: "approve"},
@@ -1846,7 +1716,7 @@ func (f fixture) sendHosted(t *testing.T) (Sent, string) {
 }
 
 func TestAHostedLinkStartsOneSessionWhenTheSubjectPicksAnApp(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	sent, token := f.sendHosted(t)
 	if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 || sent.DeepLink != "" {
 		t.Fatalf("a hosted request made %d sessions and %d mails; want none until the subject starts",
@@ -1875,7 +1745,7 @@ func TestAHostedLinkStartsOneSessionWhenTheSubjectPicksAnApp(t *testing.T) {
 }
 
 func TestAHostedLinkCannotBeStartedOnceItExpired(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	sent, token := f.sendHosted(t)
 	later := time.Now().Add(HostedLinkTTL + time.Minute)
 	f.svc.now = func() time.Time { return later }
@@ -1888,7 +1758,7 @@ func TestAHostedLinkCannotBeStartedOnceItExpired(t *testing.T) {
 }
 
 func TestAHostedLinkRunsTheYiviAppFromTheSubjectsBrowser(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	_, token := f.sendHosted(t)
 	if _, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodYivi); err != nil {
 		t.Fatalf("StartHosted(yivi): %v", err)
@@ -1900,7 +1770,7 @@ func TestAHostedLinkRunsTheYiviAppFromTheSubjectsBrowser(t *testing.T) {
 }
 
 func TestAHostedRequestNeedsACustomerAndALiveKey(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	customer := f.testCustomer()
 	f.svc.SetHostedBaseURL(testHostedBase)
 	for name, in := range map[string]NewRequest{
@@ -1914,7 +1784,7 @@ func TestAHostedRequestNeedsACustomerAndALiveKey(t *testing.T) {
 }
 
 func TestAReviewDecisionSettlesTheRequestThroughItsOutcome(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	sent := f.send(t)
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
 	if req := f.reconcile(t); req.Status != StatusNeedsReview {

@@ -4,7 +4,13 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/http";
 import i18n from "../i18n";
 import type { ProofingFlow } from "../api/identity-proofing";
+import { DIPLOMA_MODES } from "../api/identity-proofing";
 import {
+  diplomaRejectionReason,
+  diplomaStepDone,
+  readsIdentity,
+  sendableByMail,
+  verifyStages,
   assignedFlows,
   attributeAvailable,
   draftFromFlow,
@@ -19,10 +25,12 @@ import {
   isProofingStep,
   isRequestedAttribute,
   latestRequestByMember,
+  levelRequirement,
   proofingErrorMessage,
   proofingStatsBy,
   proofingStatusLabel,
   requestSubject,
+  withAssuranceLevel,
   searchCustomers,
   sendableFlows,
   sessionDurationSeconds,
@@ -133,8 +141,8 @@ describe("face provider", () => {
   it("sends the provider only with the face step, Regula by default", () => {
     expect(flowSpecFromDraft(draft({})).faceProvider).toBe("regula");
     expect(
-      flowSpecFromDraft(draft({ faceProvider: "engine" })).faceProvider,
-    ).toBe("engine");
+      flowSpecFromDraft(draft({ faceProvider: "Iris" })).faceProvider,
+    ).toBe("Iris");
     expect(
       flowSpecFromDraft(
         draft({ faceProvider: "regula", faceVerification: false }),
@@ -158,6 +166,9 @@ describe("face provider", () => {
     expect(
       draftFromFlow({ ...stored, faceProvider: "iris" }).faceProvider,
     ).toBe("regula");
+    expect(
+      draftFromFlow({ ...stored, faceProvider: "engine" }).faceProvider,
+    ).toBe("regula");
     expect(draftFromFlow(stored).faceProvider).toBe("regula");
   });
 });
@@ -165,9 +176,6 @@ describe("face provider", () => {
 describe("yiviAppAvailable", () => {
   it("leaves only a face provider the Yivi app lacks to the Idem app", () => {
     const face = ["document_capture", "nfc_read", "face_verification"];
-    expect(yiviAppAvailable({ steps: face, faceProvider: "engine" })).toBe(
-      true,
-    );
     expect(yiviAppAvailable({ steps: face, faceProvider: "regula" })).toBe(
       true,
     );
@@ -196,8 +204,8 @@ describe("attributeAvailable", () => {
     expect(attributeAvailable(withPhoto, "document_image")).toBe(true);
     expect(draftSteps(withPhoto)).toEqual([
       "document_capture",
-      "nfc_read",
       "document_photo",
+      "nfc_read",
       "face_verification",
     ]);
     expect(
@@ -232,7 +240,9 @@ describe("draftFromFlow", () => {
     expect(edited).toMatchObject({
       documentAndChip: true,
       faceVerification: true,
-      liveness: false,
+      // Substantial needs them, though this version predates that rule.
+      chipAuthentication: true,
+      liveness: true,
       faceMatchThreshold: "0.7",
       assuranceLevel: "substantial",
       bsnPolicy: "omit",
@@ -244,6 +254,45 @@ describe("draftFromFlow", () => {
       requestedAttributes: ["dg1", "selfie"],
       assuranceTiers: [{ level: "low", minPercent: 0 }],
       legalBasis: "consent",
+    });
+  });
+});
+
+describe("assurance level", () => {
+  it("turns on what the level needs and keeps the rest", () => {
+    const bare = draft({
+      documentAndChip: false,
+      faceVerification: false,
+      faceProvider: "Iris",
+      blurFace: "true",
+    });
+    expect(withAssuranceLevel(bare, "low")).toMatchObject({
+      assuranceLevel: "low",
+      documentAndChip: true,
+      faceVerification: false,
+      faceProvider: "Iris",
+      blurFace: "true",
+    });
+    expect(
+      flowSpecFromDraft(withAssuranceLevel(bare, "substantial")),
+    ).toMatchObject({
+      steps: ["document_capture", "nfc_read", "face_verification"],
+      requiredChecks: [
+        "nfc.passive_auth",
+        "nfc.chip_auth",
+        "face.match",
+        "face.liveness",
+      ],
+      faceProvider: "regula",
+      requiredAssuranceLevel: "substantial",
+    });
+  });
+
+  it("locks nothing without a level", () => {
+    expect(levelRequirement("")).toEqual({});
+    expect(withAssuranceLevel(draft({ liveness: false }), "")).toMatchObject({
+      assuranceLevel: "",
+      liveness: false,
     });
   });
 });
@@ -710,5 +759,97 @@ describe("secondsUntil", () => {
   it("never goes below zero, also for an unreadable time", () => {
     expect(secondsUntil("2026-09-28T09:59:00Z", now)).toBe(0);
     expect(secondsUntil("not a time", now)).toBe(0);
+  });
+});
+
+// The diploma modes the flows page offers are the ones the backend accepts,
+// both ways.
+describe("diploma modes mirror backend/internal/proofing", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL("../../../backend/internal/proofing/diploma.go", import.meta.url),
+    ),
+    "utf8",
+  );
+  const backend = [
+    ...source.matchAll(/Diplomas\w+\s+DiplomaMode = "(\w+)"/g),
+  ].map((m) => m[1]);
+
+  it("has every backend mode and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    for (const mode of backend) {
+      expect(DIPLOMA_MODES).toContain(mode);
+    }
+    for (const mode of DIPLOMA_MODES) {
+      expect(backend).toContain(mode);
+    }
+  });
+});
+
+describe("diploma step", () => {
+  it("adds the diploma stage after the session when the flow has it", () => {
+    expect(verifyStages(true, true)).toEqual([
+      "overview",
+      "method",
+      "session",
+      "diplomas",
+    ]);
+    expect(verifyStages(false, false)).toEqual(["overview", "session"]);
+  });
+
+  it("ends the step once an extract is held or the time is up", () => {
+    expect(diplomaStepDone(0, 60)).toBe(false);
+    expect(diplomaStepDone(1, 60)).toBe(true);
+    expect(diplomaStepDone(0, 0)).toBe(true);
+  });
+
+  it("mails only a flow that asks for no diplomas", () => {
+    expect(sendableByMail(undefined)).toBe(true);
+    expect(sendableByMail({})).toBe(true);
+    expect(sendableByMail({ diplomaMode: "off" })).toBe(true);
+    expect(sendableByMail({ diplomaMode: "required" })).toBe(false);
+  });
+
+  // Mirrors proofing.ReadsIdentity: a request for one person is matched
+  // against the document data.
+  it("knows which flows read the name and date of birth", () => {
+    expect(readsIdentity(undefined)).toBe(false);
+    expect(readsIdentity({ steps: ["document_capture", "nfc_read"] })).toBe(
+      true,
+    );
+    expect(readsIdentity({ steps: ["nfc_read"] })).toBe(false);
+    expect(
+      readsIdentity({ steps: ["document_capture"], requestedAttributes: [] }),
+    ).toBe(true);
+    expect(
+      readsIdentity({
+        steps: ["document_capture"],
+        requestedAttributes: ["dg1"],
+      }),
+    ).toBe(true);
+    expect(
+      readsIdentity({
+        steps: ["document_capture"],
+        requestedAttributes: ["dg2"],
+      }),
+    ).toBe(false);
+  });
+
+  it("explains every refusal the backend gives, and shows another as is", () => {
+    const t = i18n.getFixedT("en");
+    const sources = [
+      "../../../backend/internal/diploma/checker.go",
+      "../../../backend/internal/proofing/diploma.go",
+    ].map((path) =>
+      readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8"),
+    );
+    const reasons = sources.flatMap((source) =>
+      [...source.matchAll(/Reason\w*\s*= "(\w+)"/g)].map((m) => m[1]),
+    );
+    expect(reasons.length).toBe(4);
+    for (const reason of reasons) {
+      expect(diplomaRejectionReason(reason, t)).not.toBe(reason);
+    }
+    expect(diplomaRejectionReason("something_new", t)).toBe("something_new");
   });
 });

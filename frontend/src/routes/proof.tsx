@@ -22,7 +22,11 @@ import {
   postCompletion,
 } from "../lib/hosted-completion";
 import { applyOrgTheme, clearOrgTheme } from "../lib/theme";
-import { isProofingLive, proofingErrorMessage } from "../lib/identity-proofing";
+import {
+  isProofingLive,
+  proofingErrorMessage,
+  verifyStages,
+} from "../lib/identity-proofing";
 import { Button, Card, Stepper } from "../ui";
 import { CustomerMark } from "./proofing-customer-ui";
 import { MethodChoice, Overview, Session } from "./proofing-verify-steps";
@@ -31,7 +35,6 @@ const HINT = "text-ink-soft text-[13px]";
 const NOT_FOUND = "session_not_found";
 
 type Step = "overview" | "method" | "session";
-const STEPS: readonly Step[] = ["overview", "method", "session"];
 
 // A customer's subject on their own device, from a hosted link: what the
 // customer collects (declining cancels the link), the app to use, then that
@@ -83,7 +86,8 @@ function HostedFlow({
   const { t } = useTranslation();
   const { customer, flow } = page;
   const choice = flow.yiviAvailable;
-  const steps = choice ? STEPS : STEPS.filter((s) => s !== "method");
+  const stages = verifyStages(choice, flow.diplomaMode === "required");
+  const [inDiplomas, setInDiplomas] = useState(false);
   // A link started before (another tab, a reload) goes straight to its session.
   const [step, setStep] = useState<Step>(
     page.started || !isProofingLive(page.status) ? "session" : "overview",
@@ -158,8 +162,8 @@ function HostedFlow({
         <span className="text-ink text-[16px] font-bold">{customer.name}</span>
       </div>
       <Stepper
-        steps={steps.map((s) => t(`customers.onScreen.steps.${s}`))}
-        current={steps.indexOf(step)}
+        steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
+        current={stages.indexOf(inDiplomas ? "diplomas" : step)}
       />
       {step === "overview" && (
         <Overview
@@ -200,6 +204,9 @@ function HostedFlow({
           initial={started ?? page}
           deepLink={started?.deepLink}
           method={method}
+          diplomaMode={flow.diplomaMode}
+          diplomas={page.diplomas}
+          onDiplomaStep={setInDiplomas}
           onSettled={settle}
           outcomeActions={
             redirecting ? (

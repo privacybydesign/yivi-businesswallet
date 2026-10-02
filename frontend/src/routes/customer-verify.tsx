@@ -15,6 +15,7 @@ import type {
 } from "../api/identity-proofing";
 import {
   proofingErrorMessage,
+  verifyStages,
   yiviAppAvailable,
 } from "../lib/identity-proofing";
 import { Button, Card, Stepper, TopBar } from "../ui";
@@ -25,21 +26,22 @@ const HINT = "text-ink-soft text-[13px]";
 const ERROR = "text-error text-[12.5px]";
 
 type Step = "overview" | "method" | "session";
-const STEPS: readonly Step[] = ["overview", "method", "session"];
 
 // What the send form hands over: the subject as the sender typed it. Kept out
 // of the URL, so a reload runs the flow without them.
 interface VerifyState {
   name?: string;
   email?: string;
+  birthDate?: string;
 }
 
 function verifyState(state: unknown): VerifyState {
   if (typeof state !== "object" || state === null) return {};
-  const { name, email } = state as Record<string, unknown>;
+  const { name, email, birthDate } = state as Record<string, unknown>;
   return {
     name: typeof name === "string" ? name : undefined,
     email: typeof email === "string" ? email : undefined,
+    birthDate: typeof birthDate === "string" ? birthDate : undefined,
   };
 }
 
@@ -103,7 +105,8 @@ function VerifyFlow({
   const [method, setMethod] = useState<ProofingMethod>("idem_app");
   // A flow the Yivi app cannot run leaves the Idem app only: no choice to make.
   const choice = yiviAppAvailable(flow);
-  const steps = choice ? STEPS : STEPS.filter((s) => s !== "method");
+  const stages = verifyStages(choice, flow.diplomaMode === "required");
+  const [inDiplomas, setInDiplomas] = useState(false);
   const [sent, setSent] = useState<ProofingSent>();
   const create = useCreateProofingRequestMutation(slug);
   const name = customer.branding.displayName || customer.name;
@@ -114,6 +117,7 @@ function VerifyFlow({
         customerId: customer.id,
         email: subject.email ?? "",
         name: subject.name ?? "",
+        birthDate: subject.birthDate,
         flowId: flow.id,
         method,
         channel: "on_screen",
@@ -140,8 +144,8 @@ function VerifyFlow({
         <span className="text-ink text-[16px] font-bold">{name}</span>
       </div>
       <Stepper
-        steps={steps.map((s) => t(`customers.onScreen.steps.${s}`))}
-        current={steps.indexOf(step)}
+        steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
+        current={stages.indexOf(inDiplomas ? "diplomas" : step)}
       />
       {step === "overview" && (
         <Overview
@@ -182,6 +186,9 @@ function VerifyFlow({
           deepLink={sent.deepLink}
           deepLinkExpiresAt={sent.deepLinkExpiresAt}
           method={method}
+          diplomaMode={sent.diplomaMode}
+          diplomas={sent.diplomas}
+          onDiplomaStep={setInDiplomas}
           onRestart={restart}
           outcomeActions={
             <div className="flex flex-wrap justify-center gap-2">

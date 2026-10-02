@@ -158,11 +158,8 @@ func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f 
 
 // orgHasFlow is ErrFlowNotFound for a flow that is not one of the org's.
 func (s *Service) orgHasFlow(ctx context.Context, org Org, flowID string) error {
-	apiKey, err := s.orgAPIKey(ctx, org)
-	if err != nil {
-		return err
-	}
-	flows, err := s.ips.ListFlows(ctx, apiKey)
+	tenant := orgTenant(org.ID, ModeLive)
+	flows, err := s.ips.ListFlows(ctx, tenant)
 	if err != nil {
 		return fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
 	}

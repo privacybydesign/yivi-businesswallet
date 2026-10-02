@@ -163,8 +163,7 @@ const (
 )
 
 var (
-	ErrNotProvisioned     = errors.New("proofing: organization has no identity proofing tenant")
-	ErrNoEncryptionKey    = errors.New("proofing: no identity proofing encryption key configured")
+	ErrNoEncryptionKey    = proofingprovider.ErrNoEncryptionKey
 	ErrFlowNotFound       = errors.New("proofing: flow not found")
 	ErrFlowNotCompletable = errors.New("proofing: flow needs a browser step the recipient cannot reach")
 	ErrFlowNotAllowed     = errors.New("proofing: flow is not available to members")
@@ -191,6 +190,10 @@ var (
 	ErrWrongMethod = errors.New("proofing: the request does not run in the Yivi app")
 	// ErrSessionOver is a call on a request whose session can no longer run.
 	ErrSessionOver = errors.New("proofing: the request's session is over")
+	// ErrReferencePhotoRequired is a request on a flow that matches the face
+	// against the customer's own photo (NeedsReferencePhoto) sent without one:
+	// only the customer API can carry it.
+	ErrReferencePhotoRequired = errors.New("proofing: the flow matches the face against a reference photo the request must carry")
 	// ErrDisclosurePending is a Yivi request whose subject has not finished the
 	// OpenID4VP disclosure in the Yivi app yet.
 	ErrDisclosurePending = errors.New("proofing: the Yivi disclosure is not finished")
@@ -277,7 +280,16 @@ type Request struct {
 	// the subject's browser to decide.
 	RedirectURL string
 	Language    email.Locale
+	// Diplomas is whether the request asks for DUO diploma extracts once the
+	// identity is approved: its flow's DiplomaMode when it was sent.
+	Diplomas DiplomaMode
+	// ExpectsSubject is a request for one known person: only an identity that
+	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
+	ExpectsSubject bool
 
+	// expectedBirthDate is the birth date an ExpectsSubject request was sent
+	// with, as YYYY-MM-DD; empty once the request is decided or purged.
+	expectedBirthDate string
 	// session is the live IPS session, decrypted; nil when none is attached.
 	session *ipsSession
 	// yiviTransactionID is the verifier's transaction of a Yivi request's
@@ -393,6 +405,8 @@ type OrgFlow struct {
 	proofingprovider.Flow
 	Allowed bool
 	Default bool
+	// Diplomas is whether the flow asks for DUO diploma extracts.
+	Diplomas DiplomaMode
 }
 
 // RequestFilter narrows a request list: to the requests one member sent, and/or
@@ -410,7 +424,15 @@ type NewRequest struct {
 	CustomerID    *uuid.UUID
 	SubjectEmail  string
 	SubjectName   string
-	FlowID        string
+	// ReferencePhoto is the customer's own photo of the subject's face,
+	// standard base64: the live face is matched against it, for a flow that
+	// NeedsReferencePhoto (required there, refused anywhere else).
+	ReferencePhoto string
+	// SubjectBirthDate (YYYY-MM-DD) makes the request one for exactly the
+	// person SubjectName names, born then: any other identity is rejected
+	// with ErrorIdentityMismatch. Empty proofs whoever takes part.
+	SubjectBirthDate string
+	FlowID           string
 	// SkipMail leaves the mail out: an API caller that shows the deep link in
 	// its own interface.
 	SkipMail bool
@@ -464,6 +486,9 @@ type Subject struct {
 	CustomerID *uuid.UUID
 	Name       string
 	Email      string
+	// BirthDate (YYYY-MM-DD) is set for a request for one known person: Name,
+	// born then. Empty for anyone.
+	BirthDate string
 }
 
 // Customer is one of the org's B2B customers, with the org flows assigned to it.
@@ -524,6 +549,7 @@ type CustomerFlow struct {
 	proofingprovider.Flow
 	Assigned bool
 	Default  bool
+	Diplomas DiplomaMode
 }
 
 // faceSteps are the IPS flow steps that capture the subject's face. With the
@@ -539,14 +565,15 @@ const (
 
 const (
 	faceProviderRegula = "regula"
+	// faceProviderEngine is the identity-proofing-service's own TFLite face
+	// engine, which the wallet's engine does not run: a flow cannot pick it.
 	faceProviderEngine = "engine"
 	faceProviderIris   = "Iris"
 )
 
 // faceProviders are the values the wallet sets on a flow's face provider. It
-// always names one: IPS's empty deployment default silently falls back to its
-// engine when Regula is not configured there.
-var faceProviders = []string{faceProviderRegula, faceProviderEngine, faceProviderIris}
+// always names one, so a flow never depends on the engine's default.
+var faceProviders = []string{faceProviderRegula, faceProviderIris}
 
 // idemOnlyFaceProviders are the face providers the Yivi app does not have: a
 // flow on one runs in the Idem app only, so the subject gets no app choice.
@@ -556,7 +583,9 @@ var idemOnlyFaceProviders = []string{faceProviderIris}
 // photographs the document, which only the Idem app does, or its face step is
 // on a provider the Yivi app does not have.
 func YiviAppAvailable(f proofingprovider.Flow) bool {
-	if slices.Contains(f.Steps, stepDocumentPhoto) {
+	// The Yivi app matches the face against its credential's photo, never
+	// against a customer's reference photo.
+	if slices.Contains(f.Steps, stepDocumentPhoto) || NeedsReferencePhoto(f) {
 		return false
 	}
 	return !hasFaceStep(f.Steps) || !slices.Contains(idemOnlyFaceProviders, f.FaceProvider)
@@ -592,6 +621,14 @@ const yiviEIDASLevel = eidasLow
 // recorded as a pass at the lower level.
 const ErrorAssuranceNotMet = "ASSURANCE_NOT_MET"
 
+// ErrorIdentityMismatch is the error code the wallet records when a request
+// for one known person (ExpectsSubject) is approved for someone else: the
+// identity read off the document is not that name and birth date.
+const ErrorIdentityMismatch = "IDENTITY_MISMATCH"
+
+// birthDateLayout is how a request's expected birth date is written.
+const birthDateLayout = time.DateOnly
+
 // MeetsAssurance reports whether an achieved eIDAS level satisfies a required
 // one. No requirement is always met; an unknown or absent achieved level
 // meets none, and an unknown requirement is never met (fail closed).
@@ -609,6 +646,13 @@ func MeetsAssurance(achieved, required string) bool {
 // session, which the wallet does not have.
 const stepNFCRead = "nfc_read"
 
+// stepDocumentCapture is the document scan (the MRZ), which reads the holder's
+// name and date of birth: the document data, attributeDocument.
+const (
+	stepDocumentCapture = "document_capture"
+	attributeDocument   = "dg1"
+)
+
 // stepDocumentPhoto is the photos of the document's front and back, taken in
 // the Idem app.
 const stepDocumentPhoto = "document_photo"
@@ -622,6 +666,28 @@ func Completable(f proofingprovider.Flow) bool {
 	}
 	return f.SelfieLocation != selfieLocationBrowser && slices.Contains(f.Steps, stepNFCRead)
 }
+
+// NeedsReferencePhoto reports whether flow f matches the face without
+// reading the chip: there is no chip photo, so each session carries the
+// customer's own photo of the person (NewRequest.ReferencePhoto). Only a
+// customer can send one, through its API; a member cannot be sent such a flow.
+func NeedsReferencePhoto(f proofingprovider.Flow) bool {
+	return hasFaceStep(f.Steps) && !slices.Contains(f.Steps, stepNFCRead) && f.SelfieLocation != selfieLocationBrowser
+}
+
+// CustomerCompletable is Completable for a customer's subject, whose session
+// may carry a reference photo: a flow that needs one can be assigned and sent.
+func CustomerCompletable(f proofingprovider.Flow) bool {
+	return Completable(f) || NeedsReferencePhoto(f)
+}
+
+// MaxReferencePhotoBytes bounds a reference photo: a face to match, not a
+// document scan.
+const MaxReferencePhotoBytes = 512 << 10
+
+// referencePhotoTypes are the image types a reference photo may be, sniffed
+// from its bytes: the ones Regula and a browser both read.
+var referencePhotoTypes = []string{"image/jpeg", "image/png", "image/webp"}
 
 func hasFaceStep(steps []string) bool {
 	return slices.ContainsFunc(steps, func(step string) bool { return slices.Contains(faceSteps, step) })

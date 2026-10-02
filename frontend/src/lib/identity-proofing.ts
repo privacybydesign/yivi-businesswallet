@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import { ApiError } from "../api/http";
 import type {
+  DiplomaMode,
   ProofingFlow,
   ProofingFlowSelection,
   ProofingFlowSpec,
@@ -61,8 +62,10 @@ export function proofingStatusLabel(status: string, t: TFunction): string {
 //   - Steps: document_capture (the document scan: vcmrtd reads the MRZ with the
 //     camera to derive the chip access key) and nfc_read (the NFC chip read) are
 //     always submitted together, so they toggle as a pair; document_photo (a
-//     photo of the document's printed page) stands on its own; face_verification
-//     is one step covering selfie, liveness and face match.
+//     photo of the document's printed page) stands on its own and is listed
+//     right after document_capture, as the Idem app takes it: the MRZ scan
+//     photographs the side it reads; face_verification is one step covering
+//     selfie, liveness and face match.
 //   - Checks: nfc.passive_auth is mandatory with nfc_read and face.match with
 //     face_verification, so those are locked on; nfc.chip_auth and face.liveness
 //     are optional; a check without its step is unavailable. A threshold exists
@@ -94,12 +97,16 @@ export const REQUESTED_ATTRIBUTES = [
   { value: "biometrics", step: STEP_FACE_VERIFICATION },
 ] as const;
 
-export const ASSURANCE_LEVELS = ["low", "substantial", "high"] as const;
+// The eIDAS levels the proofing engine can claim (flow.LevelRequirements);
+// high is not among them.
+export const ASSURANCE_LEVELS = ["low", "substantial"] as const;
+export type AssuranceLevel = (typeof ASSURANCE_LEVELS)[number];
 
 export const BSN_POLICIES = ["retrieve", "mask", "omit"] as const;
 
-// What verifies the face step; a new flow starts on the first, Regula.
-export const FACE_PROVIDERS = ["regula", "engine", "Iris"] as const;
+// What verifies the face step; a new flow starts on the first, Regula. The
+// wallet runs no face engine of its own, so there is no "engine".
+export const FACE_PROVIDERS = ["regula", "Iris"] as const;
 export type FaceProvider = (typeof FACE_PROVIDERS)[number];
 
 // The service's steps that capture the face (proofing.faceSteps).
@@ -144,7 +151,7 @@ export interface ProofingFlowDraft {
   // Comma-separated lists as typed; empty accepts any.
   acceptedDocumentTypes: string;
   acceptedIssuingCountries: string;
-  assuranceLevel: Inherit<(typeof ASSURANCE_LEVELS)[number]>;
+  assuranceLevel: Inherit<AssuranceLevel>;
   bsnPolicy: Inherit<(typeof BSN_POLICIES)[number]>;
   blurFace: Tristate;
   blurBsn: Tristate;
@@ -158,19 +165,63 @@ export interface ProofingFlowDraft {
   >;
 }
 
-// The steps a draft sends, in the service's order.
+// The steps a draft sends, in the order the Idem app runs them: the document
+// photo with the document scan, before the chip read.
 export function draftSteps(draft: ProofingFlowDraft): string[] {
   const steps: string[] = [];
   if (draft.documentAndChip) {
-    steps.push(STEP_DOCUMENT_CAPTURE, STEP_NFC_READ);
+    steps.push(STEP_DOCUMENT_CAPTURE);
   }
   if (draft.documentPhoto) {
     steps.push(STEP_DOCUMENT_PHOTO);
+  }
+  if (draft.documentAndChip) {
+    steps.push(STEP_NFC_READ);
   }
   if (draft.faceVerification) {
     steps.push(STEP_FACE_VERIFICATION);
   }
   return steps;
+}
+
+// The draft settings a level needs, as the proofing engine requires them
+// (flow.LevelRequirements): low a chip read whose data verifies; substantial
+// also the copy check and a live face matched by Regula against the chip photo.
+type LevelRequirement = Partial<
+  Pick<
+    ProofingFlowDraft,
+    | "documentAndChip"
+    | "chipAuthentication"
+    | "faceVerification"
+    | "liveness"
+    | "faceProvider"
+  >
+>;
+
+const LEVEL_REQUIREMENTS: Record<AssuranceLevel, LevelRequirement> = {
+  low: { documentAndChip: true },
+  substantial: {
+    documentAndChip: true,
+    chipAuthentication: true,
+    faceVerification: true,
+    liveness: true,
+    faceProvider: "regula",
+  },
+};
+
+// What a draft's assurance level locks on; nothing without a level.
+export function levelRequirement(
+  level: Inherit<AssuranceLevel>,
+): LevelRequirement {
+  return level === "" ? {} : LEVEL_REQUIREMENTS[level];
+}
+
+// The draft with level selected and every setting it needs turned on.
+export function withAssuranceLevel(
+  draft: ProofingFlowDraft,
+  level: Inherit<AssuranceLevel>,
+): ProofingFlowDraft {
+  return { ...draft, assuranceLevel: level, ...levelRequirement(level) };
 }
 
 // Whether a requested-data item's step is in the draft.
@@ -222,11 +273,13 @@ function tristate(value: boolean | undefined): Tristate {
 // list's own selection flags: what the editor needs to seed a new version.
 export type EditableFlow = Omit<ProofingFlow, "allowed" | "default">;
 
-// The editor state for a new version of an existing flow.
+// The editor state for a new version of an existing flow, with whatever its
+// assurance level needs turned on: a version saved before the level required
+// it would otherwise show a locked setting off.
 export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
   const checks = new Set(flow.requiredChecks ?? []);
   const threshold = flow.checkThresholds?.[CHECK_FACE_MATCH];
-  return {
+  const draft: ProofingFlowDraft = {
     name: flow.name,
     documentAndChip:
       flow.steps.includes(STEP_DOCUMENT_CAPTURE) ||
@@ -253,6 +306,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
       assuranceTiers: flow.assuranceTiers,
     },
   };
+  return withAssuranceLevel(draft, draft.assuranceLevel);
 }
 
 function list(raw: string): string[] {
@@ -454,9 +508,73 @@ export function proofingRejectionReason(code: string, t: TFunction): string {
       return t("identityProofing.rejectionReasons.docExpired");
     case "ASSURANCE_NOT_MET":
       return t("identityProofing.rejectionReasons.assuranceNotMet");
+    case "IDENTITY_MISMATCH":
+      return t("identityProofing.rejectionReasons.identityMismatch");
     default:
       return code;
   }
+}
+
+// The stages a verify page's stepper shows: what is collected, the app (when
+// the subject has a choice), its session, and the diploma upload (when the
+// flow has that step).
+export type VerifyStage = "overview" | "method" | "session" | "diplomas";
+
+export function verifyStages(
+  appChoice: boolean,
+  diplomas: boolean,
+): VerifyStage[] {
+  return [
+    "overview",
+    ...(appChoice ? (["method"] as const) : []),
+    "session",
+    ...(diplomas ? (["diplomas"] as const) : []),
+  ];
+}
+
+// Whether a request on flow can be mailed (proofing.ErrDiplomasNeedPage): a
+// flow that asks for diplomas has them uploaded on the page that runs the
+// session. No flow picked yet is mailable.
+export function sendableByMail(
+  flow: { diplomaMode?: DiplomaMode } | undefined,
+): boolean {
+  return (flow?.diplomaMode ?? "off") === "off";
+}
+
+// Whether flow's result carries the holder's name and date of birth (the
+// document data, dg1), which a request for one known person is matched
+// against (proofing.ReadsIdentity). A flow listing no data gets what its
+// steps collect.
+export function readsIdentity(
+  flow: { steps: string[]; requestedAttributes?: string[] } | undefined,
+): boolean {
+  if (flow === undefined) return false;
+  const attributes = flow.requestedAttributes ?? [];
+  if (attributes.length === 0) return flow.steps.includes("document_capture");
+  return attributes.includes("dg1");
+}
+
+// Why an uploaded diploma extract was not kept, from its verdict's reason.
+// An unknown reason is shown as is.
+export function diplomaRejectionReason(reason: string, t: TFunction): string {
+  switch (reason) {
+    case "not_a_diploma":
+      return t("identityProofing.diplomas.reasons.notADiploma");
+    case "signature_invalid":
+      return t("identityProofing.diplomas.reasons.signatureInvalid");
+    case "holder_mismatch":
+      return t("identityProofing.diplomas.reasons.holderMismatch");
+    case "duplicate":
+      return t("identityProofing.diplomas.reasons.duplicate");
+    default:
+      return reason;
+  }
+}
+
+// Whether the diploma step can end: once an extract is held, or the time to
+// add one is up.
+export function diplomaStepDone(held: number, secondsLeft: number): boolean {
+  return held > 0 || secondsLeft === 0;
 }
 
 // The copy an identity proofing API error shows, keyed on its stable code.
@@ -490,6 +608,17 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.deviceActive");
     case "method_unavailable":
       return t("identityProofing.errors.methodUnavailable");
+    case "diplomas_need_page":
+      return t("identityProofing.errors.diplomasNeedPage");
+    case "hosted_disabled":
+      return t("identityProofing.errors.hostedDisabled");
+    case "diplomas_closed":
+      return t("identityProofing.errors.diplomasClosed");
+    case "diplomas_not_asked":
+      return t("identityProofing.errors.diplomasNotAsked");
+    case "too_large":
+      return t("identityProofing.errors.tooLarge");
+    case "too_many_files":
     case "invalid_input":
     case "rejected_by_provider":
       return serverMessage(error) ?? t("identityProofing.errors.generic");

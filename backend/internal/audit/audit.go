@@ -211,6 +211,12 @@ const (
 
 	// a flow's hosted page settings
 	IdentityProofingFlowHostedConfigured = "identity_proofing.flow_hosted_configured"
+
+	// whether a flow asks for DUO diploma extracts, and an extract a subject
+	// uploaded: kept, or refused with its reason
+	IdentityProofingFlowDiplomasConfigured = "identity_proofing.flow_diplomas_configured"
+	IdentityProofingDiplomaAdded           = "identity_proofing.diploma_added"
+	IdentityProofingDiplomaRejected        = "identity_proofing.diploma_rejected"
 )
 
 const (

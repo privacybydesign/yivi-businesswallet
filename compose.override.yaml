@@ -23,9 +23,6 @@ services:
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-admin@yivi.app}
       # Claim links in dev point at the local frontend.
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
-      # A local IPS runs in its own container, where localhost is itself: it
-      # reaches this backend through the host.
-      IDENTITY_PROOFING_CALLBACK_URL: ${IDENTITY_PROOFING_CALLBACK_URL:-http://host.docker.internal:8080/api/v1/identity-proofing/ips-events}
       # The backend delivers default-endpoint webhooks to itself, inside its container.
       IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL: ${IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL:-http://localhost:8080/api/v1/identity-proofing/default-webhook}
       # Attestation issuer: stub by default. Set ATTESTATION_ISSUER=veramo (+ token)

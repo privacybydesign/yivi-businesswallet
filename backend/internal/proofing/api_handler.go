@@ -190,6 +190,9 @@ type apiFlowResponse struct {
 	RequiredAssuranceLevel string   `json:"requiredAssuranceLevel,omitempty"`
 	RequestedAttributes    []string `json:"requestedAttributes"`
 	Default                bool     `json:"default"`
+	// NeedsReferencePhoto is a flow that matches the face without reading
+	// the chip: every session on it carries a referencePhoto.
+	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
 }
 
 func (h *Handler) apiListFlows(w http.ResponseWriter, r *http.Request) error {
@@ -206,7 +209,7 @@ func (h *Handler) apiListFlows(w http.ResponseWriter, r *http.Request) error {
 		}
 		out = append(out, apiFlowResponse{
 			ID: f.ID, Name: f.Name, Version: f.Version, RequiredAssuranceLevel: f.RequiredAssuranceLevel,
-			RequestedAttributes: attrs, Default: f.Default,
+			RequestedAttributes: attrs, Default: f.Default, NeedsReferencePhoto: NeedsReferencePhoto(f.Flow),
 		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)
@@ -238,6 +241,10 @@ type apiSessionResponse struct {
 	PurgedAt *time.Time `json:"purgedAt,omitempty"`
 	// Livemode is false for a test key's session.
 	Livemode bool `json:"livemode"`
+	// ExpectedSubject is a session for one known person, created with a
+	// birthDate: only that name and birth date are approved (IDENTITY_MISMATCH
+	// otherwise).
+	ExpectedSubject bool `json:"expectedSubject"`
 }
 
 func newAPISessionResponse(req Request, now time.Time) apiSessionResponse {
@@ -247,6 +254,7 @@ func newAPISessionResponse(req Request, now time.Time) apiSessionResponse {
 		ProofedName: req.ProofedName, AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel,
 		ErrorCode: req.ErrorCode, ExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		CancelledAt: req.CancelledAt, PurgedAt: req.PurgedAt, Livemode: req.mode() == ModeLive,
+		ExpectedSubject: req.ExpectsSubject,
 	}
 }
 
@@ -264,10 +272,17 @@ type apiCreatedSessionResponse struct {
 // absent flowId is the customer's default flow, and sendMail false leaves the
 // mail out.
 type apiCreateSessionRequest struct {
-	Email    string `json:"email"`
-	Name     string `json:"name"`
-	FlowID   string `json:"flowId"`
-	SendMail *bool  `json:"sendMail"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
+	// BirthDate (YYYY-MM-DD) with Name makes the session one for that person
+	// only: anyone else is rejected with IDENTITY_MISMATCH.
+	BirthDate string `json:"birthDate"`
+	// ReferencePhoto is the customer's own photo of the subject's face
+	// (standard base64 of a PNG, JPEG or WebP, at most MaxReferencePhotoBytes),
+	// for a flow that matches the face without the chip read.
+	ReferencePhoto string `json:"referencePhoto"`
+	FlowID         string `json:"flowId"`
+	SendMail       *bool  `json:"sendMail"`
 	// Language (en/nl) is the mail's and the Idem app's; empty is the default.
 	Language email.Locale `json:"language"`
 	// ScriptedOutcome is a test key's outcome: approve (the default), reject:<CODE>,
@@ -282,6 +297,8 @@ type apiCreateSessionRequest struct {
 }
 
 func (h *Handler) apiCreateSession(w http.ResponseWriter, r *http.Request) error {
+	// A reference photo makes this the one large body the API takes.
+	r.Body = http.MaxBytesReader(w, r.Body, maxIdempotentBody)
 	var body apiCreateSessionRequest
 	if err := decode(r, &body); err != nil {
 		return err
@@ -295,7 +312,7 @@ func (h *Handler) apiCreateSession(w http.ResponseWriter, r *http.Request) error
 		Requester{Name: caller.KeyName, APIKeyID: &caller.KeyID}, NewRequest{
 			Channel:    channel,
 			CustomerID: &caller.CustomerID, SubjectEmail: body.Email, SubjectName: body.Name,
-			FlowID: body.FlowID, SkipMail: body.SendMail != nil && !*body.SendMail, Language: body.Language,
+			SubjectBirthDate: body.BirthDate, ReferencePhoto: body.ReferencePhoto, FlowID: body.FlowID, SkipMail: body.SendMail != nil && !*body.SendMail, Language: body.Language,
 			Mode: caller.Mode, ScriptedOutcome: body.ScriptedOutcome, RedirectURL: body.RedirectURL,
 		})
 	if err != nil {
@@ -421,6 +438,9 @@ type apiResultResponse struct {
 	Identity       *apiIdentity       `json:"identity,omitempty"`
 	Evidence       []apiEvidenceEntry `json:"evidence"`
 	Livemode       bool               `json:"livemode"`
+	// Diplomas are the DUO diploma extracts the subject added, each checked
+	// against DUO's signature and the proofed identity.
+	Diplomas []diplomaResponse `json:"diplomas"`
 }
 
 type apiIdentity struct {
@@ -451,8 +471,21 @@ func (h *Handler) apiSessionResult(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, newAPIResultResponse(req, identity, time.Now()))
+	out := newAPIResultResponse(req, identity, time.Now())
+	if out.Diplomas, err = h.diplomaResponses(r, req); err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, out)
 	return nil
+}
+
+// diplomaResponses are the extracts req holds.
+func (h *Handler) diplomaResponses(r *http.Request, req Request) ([]diplomaResponse, error) {
+	diplomas, err := h.service.RequestDiplomas(r.Context(), []uuid.UUID{req.ID})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return newDiplomaResponses(diplomas[req.ID]), nil
 }
 
 // requestResult is an org admin's view of a customer request's identity in the
@@ -468,8 +501,12 @@ func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 		return mapError(err)
 	}
 	out := adminResultResponse{apiResultResponse: newAPIResultResponse(req, identity, time.Now())}
+	if out.Diplomas, err = h.diplomaResponses(r, req); err != nil {
+		return err
+	}
 	if identity.Status == proofingprovider.StatusApproved {
 		out.Photo, out.Selfie = newAdminImage(identity.Photo), newAdminImage(identity.Selfie)
+		out.ReferencePhoto = newAdminImage(identity.ReferencePhoto)
 		out.DocumentImage = newAdminImage(identity.DocumentImage)
 		out.DocumentImageBack = newAdminImage(identity.DocumentImageBack)
 	}
@@ -483,8 +520,11 @@ func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 // customer API never carries an image.
 type adminResultResponse struct {
 	apiResultResponse
-	Photo             *adminImage `json:"photo,omitempty"`
-	Selfie            *adminImage `json:"selfie,omitempty"`
+	Photo  *adminImage `json:"photo,omitempty"`
+	Selfie *adminImage `json:"selfie,omitempty"`
+	// ReferencePhoto is the customer's own photo the selfie was matched
+	// against, for a flow without the chip read.
+	ReferencePhoto    *adminImage `json:"referencePhoto,omitempty"`
 	DocumentImage     *adminImage `json:"documentImage,omitempty"`
 	DocumentImageBack *adminImage `json:"documentImageBack,omitempty"`
 }
@@ -508,7 +548,7 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 	out := apiResultResponse{
 		ID: PublicSessionID(req.ID), Status: req.EffectiveStatus(now), Method: string(identity.Method),
 		AssuranceLevel: identity.AssuranceLevel, EIDASLevel: identity.EIDASLevel, ErrorCode: identity.ErrorCode,
-		Evidence: []apiEvidenceEntry{}, Livemode: req.mode() == ModeLive,
+		Evidence: []apiEvidenceEntry{}, Livemode: req.mode() == ModeLive, Diplomas: []diplomaResponse{},
 	}
 	if identity.Status == proofingprovider.StatusApproved {
 		out.VerifiedAt = identity.CompletedAt

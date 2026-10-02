@@ -376,3 +376,10 @@ func ParseDutchDate(s string) (time.Time, error) {
 	}
 	return t, nil
 }
+
+// Pool is the PDFium pool the parser owns, for another PDF parser in the
+// process to borrow (diploma.NewPDFiumParser): each instance is a full PDFium
+// heap, so a process keeps one pool. Close still closes it.
+func (p *PDFiumParser) Pool() pdfium.Pool {
+	return p.pool
+}

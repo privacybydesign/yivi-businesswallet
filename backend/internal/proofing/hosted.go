@@ -88,11 +88,8 @@ func (s *Service) HostedRequest(ctx context.Context, token string) (Hosted, erro
 }
 
 func (s *Service) hostedFlow(ctx context.Context, req Request) (proofingprovider.Flow, error) {
-	apiKey, err := s.settings.APIKey(ctx, req.OrganizationID, ModeLive)
-	if err != nil {
-		return proofingprovider.Flow{}, err
-	}
-	flows, err := s.ips.ListFlows(ctx, apiKey)
+	tenant := orgTenant(req.OrganizationID, ModeLive)
+	flows, err := s.ips.ListFlows(ctx, tenant)
 	if err != nil {
 		return proofingprovider.Flow{}, fmt.Errorf("proofing: list flows org %s: %w", req.OrganizationID, err)
 	}
@@ -179,23 +176,31 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 	if err != nil {
 		return Sent{}, err
 	}
-	if !Completable(flow) {
+	if !CustomerCompletable(flow) {
 		return Sent{}, ErrFlowNotCompletable
 	}
 	if method == proofingprovider.MethodYivi && !YiviAppAvailable(flow) {
 		return Sent{}, fmt.Errorf("%w: this flow's face provider only runs in the Idem app", ErrInvalidInput)
 	}
+	// The reference photo was held for this start; a flow that needs one
+	// it lacks (the flow changed since the send) cannot run.
+	var photo *proofingprovider.Image
+	if NeedsReferencePhoto(flow) {
+		if photo, err = s.requests.ReferencePhoto(ctx, req); err != nil {
+			return Sent{}, err
+		}
+		if photo == nil {
+			return Sent{}, ErrFlowNotCompletable
+		}
+	}
 	ttl := SessionTTL
 	if customer.Settings.SessionTTL != 0 {
 		ttl = customer.Settings.SessionTTL
 	}
-	apiKey, err := s.settings.APIKey(ctx, req.OrganizationID, ModeLive)
-	if err != nil {
-		return Sent{}, err
-	}
-	sess, err := s.ips.CreateSession(ctx, apiKey, proofingprovider.SessionInput{
-		FlowID: flow.ID, ClientReference: req.ID.String(), TTL: ttl, Method: method, CallbackURL: s.callbackURL,
-		Language: string(req.Language),
+	tenant := orgTenant(req.OrganizationID, ModeLive)
+	sess, err := s.ips.CreateSession(ctx, tenant, proofingprovider.SessionInput{
+		FlowID: flow.ID, ClientReference: req.ID.String(), TTL: ttl, Method: method,
+		Language: string(req.Language), Retention: engineRetention(&customer), ReferencePhoto: photo,
 	})
 	if err != nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", req.ID, err)

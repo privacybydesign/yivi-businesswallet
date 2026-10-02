@@ -39,6 +39,9 @@ const (
 	EventSessionExpired      = "session.expired"
 	EventSessionCancelled    = "session.cancelled"
 	EventSessionPurged       = "session.purged"
+	// EventSessionDiplomaAdded is sent for each DUO diploma extract the
+	// subject added after their identity was approved.
+	EventSessionDiplomaAdded = "session.diploma_added"
 	EventTest                = "test"
 )
 
@@ -46,7 +49,7 @@ const (
 var WebhookEvents = []string{
 	EventSessionCreated, EventSessionStarted, EventSessionHandover,
 	EventSessionVerified, EventSessionFailed, EventSessionReviewOpened, EventSessionExpired,
-	EventSessionCancelled, EventSessionPurged,
+	EventSessionCancelled, EventSessionPurged, EventSessionDiplomaAdded,
 }
 
 // outcomeEvents is the webhook event each recorded outcome sends.
@@ -147,6 +150,9 @@ func verifyWebhookSignature(secret, header string, body []byte, now time.Time) e
 	return nil
 }
 
+// ErrBadSignature is a webhook delivery whose signature does not verify.
+var ErrBadSignature = errors.New("proofing: bad webhook signature")
+
 // webhookBody is what a delivery POSTs: the same bytes on every attempt, so a
 // receiver can drop a duplicate by id.
 func webhookBody(id uuid.UUID, event string, createdAt time.Time, data json.RawMessage) ([]byte, error) {
@@ -171,6 +177,9 @@ func sessionEventData(req Request, status Status) map[string]any {
 		if value != "" {
 			data[key] = value
 		}
+	}
+	if req.ExpectsSubject {
+		data["expectedSubject"] = true
 	}
 	return data
 }

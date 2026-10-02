@@ -117,7 +117,7 @@ func registeredRoutes(t *testing.T) map[string]bool {
 			}
 			pattern := strings.Trim(lit.Value, "`\"")
 			method, urlPath, ok := splitPattern(pattern)
-			if !ok || strings.HasPrefix(urlPath, "/api/") {
+			if !ok || strings.HasPrefix(urlPath, "/api/") || undocumented(urlPath) {
 				return true
 			}
 			routes[method+" /api/v1"+urlPath] = true
@@ -129,6 +129,21 @@ func registeredRoutes(t *testing.T) map[string]bool {
 		t.Fatalf("walk internal source: %v", err)
 	}
 	return routes
+}
+
+// undocumentedPrefixes are /api/v1 routes left out of the spec on purpose: the
+// Idem (vcmrtd) app's session routes (proofingengine.Engine.Register). Only
+// that app calls them; integrators use the customer API, and the app's client
+// (ProofingSessionClient) is the contract. The spec must not document them.
+var undocumentedPrefixes = []string{"/app/"}
+
+func undocumented(urlPath string) bool {
+	for _, prefix := range undocumentedPrefixes {
+		if strings.HasPrefix(urlPath, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func documentedRoutes(t *testing.T) map[string]bool {
@@ -144,6 +159,9 @@ func documentedRoutes(t *testing.T) map[string]bool {
 	for urlPath, ops := range doc.Paths {
 		if !strings.HasPrefix(urlPath, "/api/v1/") {
 			continue
+		}
+		if undocumented(strings.TrimPrefix(urlPath, "/api/v1")) {
+			t.Errorf("route %q is documented but is the Idem app's own (undocumentedPrefixes)", urlPath)
 		}
 		for method := range ops {
 			if methods[method] {

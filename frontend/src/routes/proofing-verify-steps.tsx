@@ -10,9 +10,13 @@ import {
   useProofingYiviDisclosureQuery,
   useStartProofingYiviMutation,
   useSubmitProofingFaceFrameMutation,
+  useUploadProofingDiplomasMutation,
 } from "../api/identity-proofing.queries";
 import type {
+  DiplomaMode,
+  DiplomaVerdict,
   ProofingCustomer,
+  ProofingDiploma,
   ProofingFaceVerdict,
   ProofingApp,
   ProofingMethod,
@@ -20,6 +24,8 @@ import type {
   VerifyTarget,
 } from "../api/identity-proofing";
 import {
+  diplomaRejectionReason,
+  diplomaStepDone,
   formatDuration,
   isProofingLive,
   isRequestedAttribute,
@@ -28,6 +34,7 @@ import {
   secondsUntil,
 } from "../lib/identity-proofing";
 import type { RequestedAttribute } from "../lib/identity-proofing";
+import { useDateFormatter } from "../lib/format-when";
 import { yiviUniversalLink } from "../lib/yivi-universal-link";
 import { Button, DataDisclosure, Icon, Outcome } from "../ui";
 import type { DataDisclosureItem, IconName } from "../ui";
@@ -63,7 +70,12 @@ export interface VerifyFlowInfo {
   name: string;
   requestedAttributes?: string[];
   requiredAssuranceLevel?: string;
+  // Whether the subject is asked for their DUO diploma extracts afterwards.
+  diplomaMode?: DiplomaMode;
 }
+
+// Where a subject logs in with DigiD to download the extract of a diploma.
+const MIJN_DUO_URL = "https://mijn.duo.nl";
 
 const ATTRIBUTE_ICONS: Record<RequestedAttribute, IconName> = {
   dg1: "personal",
@@ -105,6 +117,13 @@ export function Overview({
       label: t(`identityProofingFlows.attributes.${value}`),
       detail: t(`customers.onScreen.attributeDetails.${value}`),
     }));
+  if (flow.diplomaMode !== undefined && flow.diplomaMode !== "off") {
+    items.push({
+      icon: "flag",
+      label: t("identityProofing.diplomas.overview.label"),
+      detail: t("identityProofing.diplomas.overview.detail"),
+    });
+  }
   const { supportContact, privacyUrl } = customer.branding;
 
   return (
@@ -269,6 +288,9 @@ export function Session({
   onRestart,
   outcomeActions,
   onSettled,
+  diplomaMode = "off",
+  diplomas = [],
+  onDiplomaStep,
 }: {
   target: VerifyTarget;
   initial: ProofingProgress;
@@ -277,18 +299,34 @@ export function Session({
   method: ProofingMethod;
   onRestart?: () => void;
   outcomeActions?: React.ReactNode;
-  // Called with the status once the session has an outcome.
+  // Called with the status once the session has an outcome, and the subject
+  // is done adding diploma extracts when it asks for them.
   onSettled?: (status: string) => void;
+  // Whether an approved session goes on to the diploma step, and the extracts
+  // already added (a hosted page reopened).
+  diplomaMode?: DiplomaMode;
+  diplomas?: ProofingDiploma[];
+  // Told whether the diploma step shows, for the page's stepper.
+  onDiplomaStep?: (active: boolean) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const progress = useProofingProgressQuery(target);
   const current = progress.data ?? initial;
   const settled = !isProofingLive(current.status);
+  const [diplomasDone, setDiplomasDone] = useState(false);
+  const askDiplomas =
+    settled &&
+    diplomaMode !== "off" &&
+    current.diplomasUntil !== undefined &&
+    !diplomasDone;
   useEffect(() => {
-    if (settled) {
+    if (settled && !askDiplomas) {
       onSettled?.(current.status);
     }
-  }, [settled, current.status, onSettled]);
+  }, [settled, askDiplomas, current.status, onSettled]);
+  useEffect(() => {
+    onDiplomaStep?.(askDiplomas);
+  }, [askDiplomas, onDiplomaStep]);
   const secondsLeft = useSecondsLeft(current.linkExpiresAt);
   const [link, setLink] = useState(deepLink);
   const fresh = useNewProofingClaimLinkMutation(target);
@@ -318,6 +356,16 @@ export function Session({
     </div>
   );
 
+  if (askDiplomas && current.diplomasUntil !== undefined) {
+    return (
+      <DiplomaStep
+        target={target}
+        until={current.diplomasUntil}
+        initial={diplomas}
+        onDone={() => setDiplomasDone(true)}
+      />
+    );
+  }
   if (settled) {
     return <SessionOutcome progress={current} actions={outcomeActions} />;
   }
@@ -381,6 +429,195 @@ export function Session({
         )}
     </div>
   );
+}
+
+// After an approved identity: the subject uploads the extracts of their
+// diplomas they downloaded from DUO, each checked at once against DUO's
+// signature and their proven name and date of birth. The step ends once one
+// is held, or the time to add one is up.
+function DiplomaStep({
+  target,
+  until,
+  initial,
+  onDone,
+}: {
+  target: VerifyTarget;
+  until: string;
+  initial: ProofingDiploma[];
+  onDone: () => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const formatDate = useDateFormatter();
+  const upload = useUploadProofingDiplomasMutation(target);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [held, setHeld] = useState<ProofingDiploma[]>(initial);
+  const [refused, setRefused] = useState<DiplomaVerdict[]>([]);
+  const secondsLeft = useSecondsLeft(until);
+  const open = secondsLeft > 0;
+  const canFinish = diplomaStepDone(held.length, secondsLeft);
+
+  function check(files: File[]): void {
+    if (files.length === 0) return;
+    upload.mutate(files, {
+      onSuccess: (verdicts) => {
+        setHeld((current) => [
+          ...current,
+          ...verdicts.flatMap((v) => (v.diploma ? [v.diploma] : [])),
+        ]);
+        setRefused(verdicts.filter((v) => !v.accepted));
+      },
+    });
+  }
+
+  return (
+    <div className="flex w-full flex-col gap-5">
+      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
+        <Icon name="valid" className="text-success shrink-0" />
+        {t("identityProofing.diplomas.identityDone")}
+      </p>
+
+      <div className="flex flex-col gap-1">
+        <h2 className="text-ink text-[18px] font-bold">
+          {t("identityProofing.diplomas.heading")}
+        </h2>
+        <p className={HINT}>{t("identityProofing.diplomas.intro")}</p>
+      </div>
+
+      <ol className="flex flex-col gap-2.5">
+        {(["login", "download", "upload"] as const).map((step, i) => (
+          <li key={step} className="flex items-start gap-3 text-[13.5px]">
+            <span className="bg-surface-3 text-ink flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold">
+              {i + 1}
+            </span>
+            <span className="text-ink pt-0.5">
+              {t(`identityProofing.diplomas.how.${step}`)}
+              {step === "login" && (
+                <>
+                  {" "}
+                  <a
+                    href={MIJN_DUO_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-link font-semibold hover:underline"
+                  >
+                    {t("identityProofing.diplomas.how.openDuo")}
+                  </a>
+                </>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
+
+      {held.length > 0 && (
+        <ul className="flex flex-col gap-2">
+          {held.map((d) => (
+            <li
+              key={d.documentNumber}
+              className="bg-success-bg rounded-yivi flex items-start gap-3 px-4 py-3"
+            >
+              <Icon name="valid" className="text-success mt-0.5 shrink-0" />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-ink text-[14px] font-semibold">
+                  {d.qualification}
+                </span>
+                <span className="text-ink-soft text-[12.5px]">
+                  {diplomaDetail(d, formatDate, t)}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {refused.length > 0 && (
+        <ul className="flex flex-col gap-2">
+          {refused.map((v, i) => (
+            <li
+              key={`${v.fileName}-${i}`}
+              className="bg-error-bg rounded-yivi flex items-start gap-3 px-4 py-3"
+            >
+              <Icon name="invalid" className="text-error mt-0.5 shrink-0" />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-ink truncate text-[13.5px] font-semibold">
+                  {v.fileName}
+                </span>
+                <span className="text-ink-soft text-[12.5px]">
+                  {diplomaRejectionReason(v.reason ?? "", t)}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {open ? (
+        <div className="flex flex-col gap-2">
+          <input
+            ref={fileInput}
+            type="file"
+            accept="application/pdf"
+            multiple
+            className="hidden"
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              // Reset so picking the same file again fires onChange.
+              event.target.value = "";
+              check(files);
+            }}
+          />
+          <Button
+            variant={held.length === 0 ? "primary" : "secondary"}
+            icon="add"
+            className="w-full"
+            loading={upload.isPending}
+            onClick={() => fileInput.current?.click()}
+          >
+            {upload.isPending
+              ? t("identityProofing.diplomas.checking")
+              : held.length === 0
+                ? t("identityProofing.diplomas.choose")
+                : t("identityProofing.diplomas.chooseAnother")}
+          </Button>
+          {upload.isError && (
+            <p className={ERROR}>{proofingErrorMessage(upload.error, t)}</p>
+          )}
+        </div>
+      ) : (
+        <p className={HINT}>{t("identityProofing.diplomas.closed")}</p>
+      )}
+
+      <div className="border-line flex items-center justify-between gap-3 border-t pt-4">
+        {open ? <Countdown seconds={secondsLeft} /> : <span />}
+        <Button
+          variant={held.length === 0 ? "secondary" : "primary"}
+          icon="arrow_front"
+          disabled={!canFinish || upload.isPending}
+          onClick={onDone}
+        >
+          {t("identityProofing.diplomas.done")}
+        </Button>
+      </div>
+      {!canFinish && (
+        <p className={`${HINT} -mt-3 text-right`}>
+          {t("identityProofing.diplomas.needOne")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// The line under a diploma's qualification: who awarded it, when, its level.
+function diplomaDetail(
+  d: ProofingDiploma,
+  formatDate: (iso: string) => string,
+  t: TFunction,
+): string {
+  const parts = [d.institution, formatDate(d.dateAwarded)];
+  if (d.nlqfLevel) {
+    parts.push(t("identityProofing.diplomas.level", { level: d.nlqfLevel }));
+  }
+  return parts.join(" · ");
 }
 
 // A code the page shows for the Idem app: a claim while no phone scanned

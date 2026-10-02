@@ -41,15 +41,10 @@ func TestIdentityProofingAdminHTTPFlow(t *testing.T) {
 	me := env.login("admin@acme.test")
 	env.addMembership(me.ID, orgID, organization.RoleAdmin)
 
-	// The org's IPS tenant is provisioned on first use, once.
-	for range 2 {
-		flows := decodeJSON[[]proofingFlowResp](t, env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/flows", nil))
-		if len(flows) != 0 {
-			t.Fatalf("flows of a new org = %+v, want none", flows)
-		}
-	}
-	if n := env.auditCount(orgID, audit.IdentityProofingProvisioned); n != 1 {
-		t.Errorf("provisioned audits = %d, want 1", n)
+	// The org is the engine's tenant: nothing is provisioned on first use.
+	flows := decodeJSON[[]proofingFlowResp](t, env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/flows", nil))
+	if len(flows) != 0 {
+		t.Fatalf("flows of a new org = %+v, want none", flows)
 	}
 
 	resp := env.postJSON("/api/v1/orgs/acme/identity-proofing/flows", map[string]any{
@@ -707,6 +702,22 @@ func TestIdentityProofingHostedLinkHTTPFlow(t *testing.T) {
 	_ = resp.Body.Close()
 	if status := decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token+"/status", "", nil)); !status.Started {
 		t.Errorf("status = %+v, want started", status)
+	}
+
+	// A member makes the same link in the wallet, to hand the subject.
+	resp = env.postJSON("/api/v1/orgs/acme/identity-proofing/requests", map[string]any{
+		"customerId": customer.ID, "flowId": flow.ID, "channel": "hosted", "name": "Dibran Mulder",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("wallet hosted request = %d, want 201", resp.StatusCode)
+	}
+	fromWallet := decodeJSON[struct {
+		Status    string `json:"status"`
+		HostedURL string `json:"hostedUrl"`
+		MailSent  bool   `json:"mailSent"`
+	}](t, resp)
+	if _, walletToken, ok := strings.Cut(fromWallet.HostedURL, "/p/"); !ok || walletToken == "" || fromWallet.Status != "pending" || fromWallet.MailSent {
+		t.Errorf("wallet hosted request = %+v; want a pending link to /p/<token>, no mail", fromWallet)
 	}
 }
 

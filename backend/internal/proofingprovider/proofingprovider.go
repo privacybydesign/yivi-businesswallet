@@ -1,63 +1,46 @@
-// Package proofingprovider is the leaf client seam for the identity-proofing
-// service (privacybydesign/identity-proofing-service, "IPS"): document + face
-// verification run on the subject's phone in the vcmrtd app. The business wallet
-// is an IPS relying party; an org is an IPS tenant under the org's own id.
+// Package proofingprovider holds the value types of the identity-proofing
+// seam: what internal/proofing hands the proofing engine and gets back.
+// Document and face verification run on the subject's phone in the Idem
+// (vcmrtd) app, or as a Yivi disclosure plus a live face check; the engine
+// itself is internal/proofingengine, which runs in the wallet (it replaced
+// the identity-proofing-service the wallet used to call over HTTP). An org
+// is the engine's tenant, under the org's own id.
 //
 // This package imports no other internal/* package (leaf level, like
-// signingprovider). It exports value types, a concrete net/http Client and an
-// in-process Stub; the domain orchestration lives in internal/proofing behind a
-// consumer-defined interface there. IPS's wire format is kept in this package
-// only, because IPS is still moving (its device-binding API is work in progress).
-//
-// Redaction: a call carries the IPS admin key, a tenant API key or a session
-// bearer token, and net/http names the URL in transport errors. No error from
-// this package repeats the base URL or a credential; a failed call is reported
-// as a status code, plus IPS's own validation message for a rejected request.
+// signingprovider). It exports the value types and an in-memory Stub for
+// tests; the orchestration lives in internal/proofing behind a
+// consumer-defined interface there.
 package proofingprovider
 
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 )
 
-// Scopes the wallet asks for on an org's IPS API key: sessions for proofing
-// requests, flows for the admin flow screen. Nothing for audit, usage or webhooks.
-var TenantKeyScopes = []string{"sessions:read", "sessions:write", "flows:read", "flows:manage"}
-
-// Tenant is a freshly created IPS tenant. WebhookSecret is only ever returned by
-// the create call (and RotateWebhookSecret).
+// Tenant is which org a call is for. Sandbox runs it in the org's test
+// mode: a session there only resolves to a scripted outcome.
 type Tenant struct {
-	ID            string
-	WebhookSecret string
+	ID      string
+	Sandbox bool
 }
 
-// KeyEnvironment is an IPS API key's environment. A test key is its tenant's
-// sandbox: IPS lets it create scripted-outcome sessions only.
-type KeyEnvironment string
-
-const (
-	KeyLive KeyEnvironment = "live"
-	KeyTest KeyEnvironment = "test"
-)
-
 // FlowSpec is everything an org admin sets on a flow: the body of both a new
-// flow and a new version of one. IPS validates the combination (which steps need
+// flow and a new version of one. The engine validates the combination (which steps need
 // which checks, what an assurance level requires) and answers a *RejectedError.
-// Empty optional fields fall back to the tenant's own policy at IPS.
+// Empty optional fields fall back to the engine's defaults.
 type FlowSpec struct {
 	Name  string   `json:"name"`
 	Steps []string `json:"steps"`
 	// RequestedAttributes limits what a session result may carry (dg1, dg11, dg2,
-	// selfie, chip_checks, biometrics, document_image). Nil lets IPS derive them
+	// selfie, chip_checks, biometrics, document_image). Nil lets the engine derive them
 	// from the steps. The wallet never reads the data itself, only the outcome.
 	RequestedAttributes []string `json:"requestedAttributes,omitempty"`
 	// SelfieLocation is which client captures the face: "native" (the vcmrtd
-	// app) or "browser". IPS defaults an empty value to browser.
+	// app) or "browser". The engine defaults an empty value to browser.
 	SelfieLocation string `json:"selfieLocation,omitempty"`
 	// FaceProvider verifies the face step: "regula", "engine", or empty for
-	// IPS's deployment default.
+	// the engine's default (Regula when configured).
 	FaceProvider             string             `json:"faceProvider,omitempty"`
 	AcceptedDocumentTypes    []string           `json:"acceptedDocumentTypes,omitempty"`
 	AcceptedIssuingCountries []string           `json:"acceptedIssuingCountries,omitempty"`
@@ -75,13 +58,13 @@ type FlowSpec struct {
 	ProcessingPurpose        string          `json:"processingPurpose,omitempty"`
 }
 
-// AssuranceTier maps a minimum score percentage to an IPS assurance tier name.
+// AssuranceTier maps a minimum score percentage to an assurance tier name.
 type AssuranceTier struct {
 	Level      string  `json:"level"`
 	MinPercent float64 `json:"minPercent"`
 }
 
-// Flow is one IPS flow version. The id is stable across versions; exactly one
+// Flow is one flow version. The id is stable across versions; exactly one
 // version of a flow is active, and a session pins the version active when it
 // is created.
 type Flow struct {
@@ -92,9 +75,9 @@ type Flow struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// SessionInput starts a proofing session. ClientReference is echoed back by IPS
-// on every read and webhook; the wallet sets it to its own request id. TTL is
-// how long the session may live; IPS caps it at its own maximum (15 minutes).
+// SessionInput starts a proofing session. ClientReference is echoed back by the engine
+// on every read; the wallet sets it to its own request id. TTL is
+// how long the session may live; the engine caps it at its own maximum (15 minutes).
 type SessionInput struct {
 	FlowID          string
 	ClientReference string
@@ -103,23 +86,28 @@ type SessionInput struct {
 	// Method is the app the subject proofs with: MethodIdem (the default when
 	// empty) or MethodYivi. MethodBrowser cannot be asked for.
 	Method Method
-	// CallbackURL, when set, is where IPS pushes each change of the session:
-	// a signed notice with no personal data (callbackPayload "minimal").
-	CallbackURL string
+	// Retention is how long the engine keeps the session (its evidence) once it
+	// ended; 0 is the flow's own retention, else the engine's default.
+	Retention time.Duration
+	// ReferencePhoto is the relying party's own photo of the subject's face,
+	// for a flow whose face step runs without reading the chip: the live
+	// face is matched against it instead of the chip's DG2. Required exactly
+	// for such a flow, refused for any other.
+	ReferencePhoto *Image
 	// ScriptedOutcome resolves the session at once, without a subject: approve,
-	// reject:<code>, needs_review or expire. Only a sandbox tenant accepts it.
+	// reject:<code>, needs_review or expire. Only test mode (Tenant.Sandbox) accepts it.
 	ScriptedOutcome string
 }
 
-// Session is a created IPS session. Token is the relying-party bearer token every
-// later read needs; IPS returns it only here.
+// Session is a created proofing session. Token is the relying-party bearer token every
+// later read needs; the engine returns it only here.
 type Session struct {
 	ID        string
 	Token     string
 	ExpiresAt time.Time
-	// FlowVersion is the flow version IPS pinned the session to; 0 when unknown.
+	// FlowVersion is the flow version the engine pinned the session to; 0 when unknown.
 	FlowVersion int
-	// Claim is the vcmrtd link for the subject's phone, nil when IPS offered none
+	// Claim is the vcmrtd link for the subject's phone, nil when the engine offered none
 	// (always for MethodYivi, whose page starts the Yivi disclosure instead).
 	Claim *Claim
 }
@@ -134,7 +122,7 @@ type Claim struct {
 	Handover bool
 }
 
-// Status is an IPS session status.
+// Status is a proofing session status.
 type Status string
 
 const (
@@ -149,7 +137,7 @@ const (
 )
 
 // Result is a session's outcome, reduced to the assurance summary and the
-// subject's name. The IPS result also carries the other document fields, the BSN
+// subject's name. The engine's result also carries the other document fields, the BSN
 // and images; they are never decoded.
 type Result struct {
 	// Method is how the subject took part: MethodIdem, MethodYivi or
@@ -161,7 +149,7 @@ type Result struct {
 	EIDASLevel     string
 	CompletedAt    *time.Time
 	// Name is the holder's name as read off the document: its DG11 display name
-	// when IPS has one, else the MRZ first and last name. Empty when the flow did
+	// when the chip has one, else the MRZ first and last name. Empty when the flow did
 	// not request the document data (dg1) or the session has no result yet.
 	Name string
 	// App is where the Idem app's phone is; SessionStatus only.
@@ -179,7 +167,7 @@ const (
 )
 
 // Identity is a session's outcome with who was proofed and on what evidence,
-// for a customer's result read. Only these fields are decoded from IPS: never
+// for a customer's result read. Only these fields are read from the engine: never
 // the document number, personal number or place of birth.
 type Identity struct {
 	Result
@@ -191,9 +179,12 @@ type Identity struct {
 	Evidence *Evidence
 	// Photo is the document's portrait (the chip's DG2, or the disclosed
 	// credential's photo) and Selfie the live face matched against it; nil
-	// when the flow did not request them or IPS released none a browser shows.
+	// when the flow did not request them or the engine released none a browser shows.
 	Photo  *Image
 	Selfie *Image
+	// ReferencePhoto is the relying party's own photo the live face was
+	// matched against, for a flow without the chip read; nil otherwise.
+	ReferencePhoto *Image
 	// DocumentImage and DocumentImageBack are the photos of the document's
 	// front and back (the document_photo step; no back for a passport), the
 	// printed BSN blurred under the tenant's policy.
@@ -201,7 +192,7 @@ type Identity struct {
 	DocumentImageBack *Image
 }
 
-// Image is a face image as IPS releases it: already converted to a format a
+// Image is a face image as the engine releases it: already converted to a format a
 // browser renders, and blurred when the tenant's policy says so. Base64 is
 // the standard-encoded bytes.
 type Image struct {
@@ -210,7 +201,8 @@ type Image struct {
 }
 
 // Evidence is the checks behind an Identity. Type is EvidenceEMRTD (the chip,
-// read by the Idem app) or EvidenceYivi (a Yivi disclosure). PassiveAuth and
+// read by the Idem app), EvidenceYivi (a Yivi disclosure) or
+// EvidenceReferencePhoto (a live face against the relying party's photo). PassiveAuth and
 // ActiveAuth are CheckValid, CheckInvalid or CheckNotPerformed.
 type Evidence struct {
 	Type         string
@@ -220,13 +212,16 @@ type Evidence struct {
 	PassiveAuth  string
 	ActiveAuth   string
 	FaceMatch    *float64
-	// Liveness is IPS's passed, failed or not_performed.
+	// Liveness is passed, failed or not_performed.
 	Liveness string
 }
 
 const (
 	EvidenceEMRTD = "emrtd"
 	EvidenceYivi  = "yivi_disclosure"
+	// EvidenceReferencePhoto is a live face matched against the relying
+	// party's own photo: no document was read.
+	EvidenceReferencePhoto = "reference_photo"
 
 	CheckValid        = "valid"
 	CheckInvalid      = "invalid"
@@ -234,8 +229,8 @@ const (
 )
 
 // ReviewDecision is a reviewer's decision on a session in needs_review:
-// Approve, or a rejection with ErrorCode (IPS's MANUAL_REVIEW_REJECTED when
-// empty). Reason and Reviewer are recorded in IPS's audit trail.
+// Approve, or a rejection with ErrorCode (MANUAL_REVIEW_REJECTED when
+// empty). Reason and Reviewer are checked but not kept by the engine.
 type ReviewDecision struct {
 	Approve   bool
 	ErrorCode string
@@ -247,68 +242,15 @@ type ReviewDecision struct {
 type Method string
 
 const (
-	// MethodIdem is the Idem app (vcmrtd), IPS's native device: it reads the
+	// MethodIdem is the Idem app (vcmrtd), the native device: it reads the
 	// document's chip over NFC.
 	MethodIdem Method = "idem_app"
 	// MethodYivi is a disclosure of existing identity credentials from the Yivi
-	// app, over OpenID4VP at the wallet's verifier, whose photo IPS then checks
-	// the live face against (IPS's biometric_bound_login).
+	// app, over OpenID4VP at the wallet's verifier, whose photo the engine then checks
+	// the live face against (biometric_bound_login).
 	MethodYivi Method = "yivi_app"
-	// MethodBrowser is IPS's web device alone, with no app involved.
+	// MethodBrowser is the web device alone, with no app involved.
 	MethodBrowser Method = "browser"
-)
-
-// IPS device roles (device_access.go): the native slot is vcmrtd/Idem.
-const (
-	deviceRoleNative = "native"
-	deviceRoleWeb    = "web"
-)
-
-// methodOf derives the method from what IPS reports: a Yivi disclosure in the
-// result, else the devices that claimed the session, native before web.
-// appOf is where the native slot's current device is.
-func appOf(devices []statusDevice) App {
-	for _, d := range devices {
-		if d.Current && d.Role == deviceRoleNative {
-			if d.Away {
-				return AppAway
-			}
-			return AppConnected
-		}
-	}
-	return AppWaiting
-}
-
-func methodOf(disclosed bool, roles []string) Method {
-	switch {
-	case disclosed:
-		return MethodYivi
-	case slices.Contains(roles, deviceRoleNative):
-		return MethodIdem
-	case slices.Contains(roles, deviceRoleWeb):
-		return MethodBrowser
-	default:
-		return ""
-	}
-}
-
-// ipsMethod is IPS's name for the method a session is created for.
-func ipsMethod(m Method) (string, error) {
-	switch m {
-	case "", MethodIdem:
-		return ipsMethodNFCPassport, nil
-	case MethodYivi:
-		return ipsMethodBoundLogin, nil
-	default:
-		return "", fmt.Errorf("proofingprovider: no session can be started for method %q", m)
-	}
-}
-
-// IPS session methods (session.Method): the vcmrtd chip read, and the Yivi
-// disclosure of a photo credential followed by a live face check.
-const (
-	ipsMethodNFCPassport = "nfc_passport"
-	ipsMethodBoundLogin  = "biometric_bound_login"
 )
 
 // Reference is what the subject's verified OpenID4VP disclosure gives a
@@ -321,7 +263,7 @@ type Reference struct {
 	Attributes map[string]string
 }
 
-// YiviDisclosure is IPS taking a Reference. OK false ended the session
+// YiviDisclosure is the engine taking a Reference. OK false ended the session
 // (Code says why: photo_missing, reference_no_face); OK true moves on to the face check, which approves after
 // StableFrames matching frames and rejects after MaxAttempts without them.
 type YiviDisclosure struct {
@@ -352,29 +294,29 @@ type FaceVerdict struct {
 	Decision     FaceDecision
 }
 
-// ErrMethodUnavailable is IPS refusing a session for a method it cannot run:
-// MethodYivi on an IPS that takes no wallet reference
-// (BOUND_LOGIN_RELYING_PARTY_REFERENCE off).
+// ErrMethodUnavailable is the engine refusing a session for a method it cannot
+// run: MethodYivi without Regula, which scores its face check.
 var ErrMethodUnavailable = errors.New("proofingprovider: method unavailable")
 
-// ErrNotFound is IPS answering 404: an unknown session, or a tenant it no longer has.
+// ErrNoEncryptionKey is a deployment without IDENTITY_PROOFING_ENCRYPTION_KEY:
+// no session (whose evidence is sealed under it) can be stored.
+var ErrNoEncryptionKey = errors.New("proofing: no identity proofing encryption key configured")
+
+// ErrNotFound is an unknown session or flow.
 var ErrNotFound = errors.New("proofingprovider: not found")
 
-// ErrTenantExists is IPS refusing to create a tenant under an id it already has.
-var ErrTenantExists = errors.New("proofingprovider: tenant exists")
-
-// RejectedError is IPS refusing a request as invalid (400/409/422), or a
+// RejectedError is the engine refusing a request as invalid (400/409/422), or a
 // subject-facing call on a session that is over (410). Message is
-// IPS's own explanation (e.g. which check a flow step requires) and is safe to
+// the engine's own explanation (e.g. which check a flow step requires) and is safe to
 // show to the org admin who made the request.
 type RejectedError struct {
 	Status  int
 	Message string
-	// Code is IPS's machine-readable reason, when it sent one.
+	// Code is the machine-readable reason, when it sent one.
 	Code string
 }
 
-// CodeDeviceActive is IPS refusing a handover while the app holding the
+// CodeDeviceActive is the engine refusing a handover while the app holding the
 // session is still active: the subject carries on there.
 const CodeDeviceActive = "device_active"
 

@@ -256,7 +256,7 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 		t.Fatalf("proofing cipher: %v", err)
 	}
 	proofingService := proofing.NewService(proofing.Stores{
-		Settings:  proofing.NewSettingsStore(pool, audit.NewDBRecorder(), proofingCipher),
+		Settings:  proofing.NewSettingsStore(pool, audit.NewDBRecorder()),
 		Requests:  proofing.NewRequestStore(pool, audit.NewDBRecorder(), proofingCipher),
 		Customers: proofing.NewCustomerStore(pool, audit.NewDBRecorder()),
 		APIKeys:   proofing.NewAPIKeyStore(pool, audit.NewDBRecorder()),

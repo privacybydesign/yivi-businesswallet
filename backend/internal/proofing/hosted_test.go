@@ -16,7 +16,7 @@ import (
 )
 
 func TestRedirectOriginsAreOriginsOnHTTPS(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	customer := f.testCustomer()
 	saved, err := f.svc.SaveCustomerRedirectOrigins(context.Background(), testOrg.ID, customer.ID,
 		[]string{"https://Portal.Initech.example/", "http://localhost:3000", "https://portal.initech.example"})
@@ -46,7 +46,7 @@ func TestRedirectOriginsAreOriginsOnHTTPS(t *testing.T) {
 }
 
 func TestAHostedRequestRedirectsOnlyToAnAllowedOrigin(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	customer := f.testCustomer()
 	f.svc.SetHostedBaseURL(testHostedBase)
 	if _, err := f.svc.SaveCustomerRedirectOrigins(context.Background(), testOrg.ID, customer.ID,
@@ -93,7 +93,7 @@ func TestAHostedRequestRedirectsOnlyToAnAllowedOrigin(t *testing.T) {
 }
 
 func TestADeclinedHostedLinkIsCancelledAndCannotStart(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	_, token := f.sendHosted(t)
 	declined, err := f.svc.DeclineHosted(context.Background(), token)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestADeclinedHostedLinkIsCancelledAndCannotStart(t *testing.T) {
 }
 
 func TestAStartedHostedLinkCannotBeDeclined(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	_, token := f.sendHosted(t)
 	if _, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem); err != nil {
 		t.Fatalf("StartHosted: %v", err)
@@ -125,7 +125,7 @@ func TestAStartedHostedLinkCannotBeDeclined(t *testing.T) {
 }
 
 func TestAHostedPageIsFramedOnlyByItsCustomersOrigins(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	_, token := f.sendHosted(t)
 	h := NewHandler(f.svc, nil, nil)
 	csp := func(path string) string {
@@ -169,7 +169,7 @@ func (f *fakeFlowHosted) Save(_ context.Context, _ uuid.UUID, flowID string, s F
 }
 
 func TestAFlowsHostedSettingsGovernItsLinks(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	f.svc.flowHostedSettings = &fakeFlowHosted{byFlow: map[string]FlowHosted{}}
 	customer := f.testCustomer()
 	f.svc.SetHostedBaseURL(testHostedBase)

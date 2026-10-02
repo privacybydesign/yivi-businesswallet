@@ -57,7 +57,7 @@ func withPauses(f fixture) *fakePauses {
 }
 
 func TestEitherPauseStopsAnOrgsProofingAndOnlyItsOwnLevelLiftsIt(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	withPauses(f)
 	ctx := context.Background()
 	if err := f.svc.checkActive(ctx, testOrg.ID); err != nil {
@@ -87,7 +87,7 @@ func TestEitherPauseStopsAnOrgsProofingAndOnlyItsOwnLevelLiftsIt(t *testing.T) {
 }
 
 func TestAPausedOrgsHostedLinkRefusesEverything(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	_, token := f.sendHosted(t)
 	withPauses(f)
 	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PausePlatform, true); err != nil {
@@ -111,7 +111,7 @@ func TestAPausedOrgsHostedLinkRefusesEverything(t *testing.T) {
 }
 
 func TestAPausedOrgsRoutesAnswerProofingPaused(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	withPauses(f)
 	h := NewHandler(f.svc, nil, nil)
 	reached := false

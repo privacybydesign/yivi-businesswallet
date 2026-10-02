@@ -22,6 +22,32 @@ const assuranceTierSchema = z.object({
 
 export type ProofingAssuranceTier = z.infer<typeof assuranceTierSchema>;
 
+// Whether a flow has the diploma step: once their identity is approved, its
+// subject must add their DUO diploma extracts (the PDFs from mijn.duo.nl),
+// checked by the wallet.
+export const DIPLOMA_MODES = ["off", "required"] as const;
+export const diplomaModeSchema = z.enum(DIPLOMA_MODES);
+export type DiplomaMode = z.infer<typeof diplomaModeSchema>;
+
+// A DUO diploma extract a session holds: what DUO printed about the
+// qualification, checked against DUO's signature and the proofed identity.
+export const proofingDiplomaSchema = z.object({
+  documentType: z.string(),
+  qualification: z.string(),
+  profiles: z.array(z.string()),
+  institution: z.string(),
+  placeOfIssue: z.string(),
+  dateAwarded: z.string(),
+  nlqfLevel: z.string().optional(),
+  eqfLevel: z.string().optional(),
+  // The number duo.nl/diplomacontrole checks.
+  documentNumber: z.string(),
+  signedAt: z.string().optional(),
+  addedAt: z.string(),
+});
+
+export type ProofingDiploma = z.infer<typeof proofingDiplomaSchema>;
+
 // A flow version as the proofing service stores it. The id is stable across
 // versions; exactly one version is active, the one new requests run.
 export const proofingFlowSchema = z.object({
@@ -49,10 +75,17 @@ export const proofingFlowSchema = z.object({
   createdAt: z.string(),
   // False for a flow a recipient cannot finish with only the vcmrtd app.
   completable: z.boolean(),
+  // A flow that matches the face without reading the chip: every session on
+  // it carries the customer's own photo, sent through the customer API.
+  // Absent on a single version (created, edited, a version list).
+  needsReferencePhoto: z.boolean().optional(),
   // The admin made it available to members; default is the one the request
   // form preselects. A member's list only holds allowed flows.
   allowed: z.boolean(),
   default: z.boolean(),
+  // Absent on a single version (created, edited, a version list): the flow
+  // list carries it.
+  diplomaMode: diplomaModeSchema.optional(),
 });
 
 export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
@@ -90,6 +123,14 @@ export const proofingRequestSchema = z.object({
   // When the session's personal data is due to be purged; purgedAt once it was.
   purgeAt: z.string().optional(),
   purgedAt: z.string().optional(),
+  // Whether the session asks for diploma extracts, the ones it holds, and
+  // until when the subject can add one (absent until approved).
+  diplomaMode: diplomaModeSchema,
+  diplomas: z.array(proofingDiplomaSchema),
+  diplomasUntil: z.string().optional(),
+  // A request for one known person: only subjectName, born on the date it
+  // was sent with, is approved (IDENTITY_MISMATCH otherwise).
+  expectedSubject: z.boolean(),
 });
 
 export type ProofingRequest = z.infer<typeof proofingRequestSchema>;
@@ -102,6 +143,9 @@ export const proofingSentSchema = proofingRequestSchema.extend({
   mailSent: z.boolean(),
   deepLink: z.string().optional(),
   deepLinkExpiresAt: z.string().optional(),
+  // A hosted request's link to the customer's page, for the member to hand
+  // the person; valid 72 hours.
+  hostedUrl: z.string().optional(),
 });
 
 export type ProofingSent = z.infer<typeof proofingSentSchema>;
@@ -137,7 +181,7 @@ export interface ProofingFlowSelection {
 // check in the browser showing its QR, so it is on-screen only.
 export const PROOFING_METHODS = ["idem_app", "yivi_app"] as const;
 export type ProofingMethod = (typeof PROOFING_METHODS)[number];
-export type ProofingChannel = "email" | "on_screen";
+export type ProofingChannel = "email" | "on_screen" | "hosted";
 
 export type ProofingRequestInput =
   | { userId: string; flowId: string }
@@ -145,6 +189,8 @@ export type ProofingRequestInput =
       customerId: string;
       email: string;
       name: string;
+      // YYYY-MM-DD: with name, only that person can pass.
+      birthDate?: string;
       flowId: string;
       method?: ProofingMethod;
       channel?: ProofingChannel;
@@ -430,6 +476,24 @@ export function saveProofingFlowHosted(
     body: settings,
     signal,
   });
+}
+
+export const proofingFlowDiplomasSchema = z.object({
+  diplomaMode: diplomaModeSchema,
+});
+
+export function saveProofingFlowDiplomas(
+  slug: string,
+  flowId: string,
+  diplomaMode: DiplomaMode,
+  signal?: AbortSignal,
+): Promise<DiplomaMode> {
+  return request(`${flowBase(slug, flowId)}/diplomas`, {
+    schema: proofingFlowDiplomasSchema,
+    method: "PUT",
+    body: { diplomaMode },
+    signal,
+  }).then((r) => r.diplomaMode);
 }
 
 export function getProofingFlowVersions(
@@ -796,6 +860,9 @@ export const proofingResultSchema = z.object({
   ),
   photo: proofingImageSchema.optional(),
   selfie: proofingImageSchema.optional(),
+  // The customer's own photo the selfie was matched against, for a flow
+  // without the chip read.
+  referencePhoto: proofingImageSchema.optional(),
   documentImage: proofingImageSchema.optional(),
   documentImageBack: proofingImageSchema.optional(),
 });
@@ -867,6 +934,8 @@ export interface ProofingProgress {
   status: string;
   errorCode?: string;
   linkExpiresAt: string;
+  // Until when the subject can add diploma extracts, once approved.
+  diplomasUntil?: string;
 }
 
 export function startProofingYivi(
@@ -978,6 +1047,8 @@ export const hostedProgressSchema = z.object({
   method: z.string().optional(),
   linkExpiresAt: z.string(),
   started: z.boolean(),
+  // Until when the subject can add a diploma extract; absent while they cannot.
+  diplomasUntil: z.string().optional(),
 });
 
 export type HostedProgress = z.infer<typeof hostedProgressSchema>;
@@ -1005,7 +1076,10 @@ export const hostedProofingSchema = hostedProgressSchema.extend({
     requiredAssuranceLevel: z.string().optional(),
     requestedAttributes: z.array(z.string()),
     yiviAvailable: z.boolean(),
+    diplomaMode: diplomaModeSchema,
   }),
+  // The diploma extracts the subject added.
+  diplomas: z.array(proofingDiplomaSchema),
 });
 
 export type HostedProofing = z.infer<typeof hostedProofingSchema>;
@@ -1057,6 +1131,40 @@ export function declineHostedProofing(
   return request(`${verifyPath({ kind: "hosted", token })}/decline`, {
     schema: hostedProgressSchema,
     method: "POST",
+    signal,
+  });
+}
+
+// What became of one uploaded file: kept, or refused with a reason
+// (not_a_diploma, signature_invalid, holder_mismatch, duplicate).
+export const diplomaVerdictSchema = z.object({
+  fileName: z.string(),
+  accepted: z.boolean(),
+  diploma: proofingDiplomaSchema.optional(),
+  reason: z.string().optional(),
+  failedCheck: z.string().optional(),
+});
+
+export type DiplomaVerdict = z.infer<typeof diplomaVerdictSchema>;
+
+// An upload checks a signature per file and may load the EU trusted lists.
+const DIPLOMA_UPLOAD_TIMEOUT_MS = 120_000;
+
+// Uploads DUO diploma extracts on a verify page, after an approved identity.
+export function uploadProofingDiplomas(
+  target: VerifyTarget,
+  files: File[],
+  signal?: AbortSignal,
+): Promise<DiplomaVerdict[]> {
+  const form = new FormData();
+  for (const file of files) {
+    form.append("file", file);
+  }
+  return request(`${verifyPath(target)}/diplomas`, {
+    schema: z.array(diplomaVerdictSchema),
+    method: "POST",
+    body: form,
+    timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,
     signal,
   });
 }

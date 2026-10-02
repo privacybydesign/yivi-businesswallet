@@ -509,6 +509,8 @@ export const en = {
       chipCloneDetected: "cloned document chip detected",
       docExpired: "document expired",
       assuranceNotMet: "below the flow's required assurance level",
+      identityMismatch:
+        "a different person: the name or date of birth on the document is not the one the request was for",
     },
     errors: {
       noEncryptionKey:
@@ -533,8 +535,50 @@ export const en = {
       deviceActive:
         "The Idem app still has this session open: carry on there, or close it first.",
       methodUnavailable:
-        "The identity proofing service cannot run Yivi app sessions yet. Choose the Idem app.",
+        "This deployment cannot run Yivi app sessions: the face check is not configured. Choose the Idem app.",
+      hostedDisabled:
+        "This flow's hosted page is switched off. Turn it on under Hosted page on the flow, or send the request another way.",
+      diplomasNeedPage:
+        "This flow asks for diplomas, which are uploaded on the page that runs the check. Show it on this screen or send a hosted link.",
+      diplomasClosed:
+        "Diplomas can only be added for a while after the identity check succeeded.",
+      diplomasNotAsked: "This check does not ask for diplomas.",
+      tooLarge: "The file is too large.",
       generic: "Something went wrong. Please try again.",
+    },
+    diplomas: {
+      overview: {
+        label: "Diplomas",
+        detail:
+          "After the identity check: the diploma extracts you download from DUO, checked against DUO's signature and your name and date of birth",
+      },
+      identityDone: "Your identity is verified.",
+      heading: "Now add your diploma",
+      intro:
+        "Upload the official extract of your diploma from DUO. We check that DUO issued it and that it is in your name.",
+      how: {
+        login: "Log in to Mijn DUO with DigiD.",
+        openDuo: "Open Mijn DUO",
+        download:
+          "Under “Mijn diploma's”, download the extract (uittreksel) of your diploma as a PDF.",
+        upload:
+          "Upload that PDF here, unchanged. A scan or photo of your diploma does not work.",
+      },
+      choose: "Choose PDF",
+      chooseAnother: "Add another diploma",
+      checking: "Checking…",
+      closed: "The time to add diplomas is up.",
+      done: "Done",
+      needOne: "Add at least one diploma to continue.",
+      level: "level {{level}}",
+      reasons: {
+        notADiploma:
+          "This is not a diploma extract from DUO. Download the original PDF from Mijn DUO.",
+        signatureInvalid:
+          "DUO's signature does not hold: the file was changed or not made by DUO. Download the original PDF again.",
+        holderMismatch: "This diploma is not in your name and date of birth.",
+        duplicate: "This diploma was added already.",
+      },
     },
   },
   customers: {
@@ -645,20 +689,39 @@ export const en = {
           title: "Show on this screen",
           hint: "A page here, for a person who is with you.",
         },
+        link: {
+          title: "Copy a link",
+          hint: "A link to the customer's page, which you send the person yourself. Valid 72 hours.",
+        },
       },
       emailOptional: "E-mail address (optional)",
       submitOnScreen: "Open page",
+      submitLink: "Create link",
+      hintLink:
+        "You get a link to a page in the customer's branding. The person opens it on their own device, reads what is collected, picks the app and starts there; the session runs from then. Nothing is mailed.",
+      linkTitle: "Link created",
+      linkHint:
+        "Send this link to the person, for example by chat. It can be started once, within 72 hours; the outcome appears under Sessions.",
+      linkDone: "Done",
       email: "E-mail address",
       emailRequired: "Enter a valid e-mail address.",
+      diplomasOnScreen:
+        "This flow asks for diplomas, which are uploaded on the page that runs the check, so it runs on this screen or as a link.",
       name: "Name (optional)",
       nameHint:
         "Leave it empty if you do not know it: once verified, the name on their document is shown here for 30 days.",
+      nameRequired: "Enter the name of the person the date of birth is for.",
+      birthDate: "Date of birth (optional)",
+      birthDateHint:
+        "With a date of birth, only this person can pass: the name and date of birth on their document must match, or the check is rejected.",
       flow: "Flow",
       submit: "Send request",
       cancel: "Cancel",
       noFlowsAdmin: "Assign a flow to this customer first, on the Flows tab.",
       noFlowsMember:
         "An admin has to assign a flow to this customer before you can send a request.",
+      referencePhotoFlows:
+        "Flows that match the face against the customer's own photo are not listed: the customer's system sends those through the API, with the photo.",
     },
     onScreen: {
       title: "Verify a person",
@@ -668,6 +731,7 @@ export const en = {
         overview: "What is collected",
         method: "Choose an app",
         session: "Scan the QR code",
+        diplomas: "Diploma",
       },
       overview: {
         heading: "{{name}} wants to verify your identity",
@@ -792,6 +856,8 @@ export const en = {
       identity: {
         audited: "Opening a settled session is recorded in the audit log.",
         photo: "Document photo",
+        referencePhoto: "Customer's photo",
+        noDocument: "None: the face was matched against the customer's photo",
         selfie: "Selfie",
         documentImage: "Front of the document",
         documentImageBack: "Back of the document",
@@ -837,6 +903,17 @@ export const en = {
       reason: "Reason",
       completed: "Finished",
       purgeAt: "Personal data purged on",
+      expectedSubject: "Expected person",
+      expectedSubjectValue:
+        "Name and date of birth checked against the document",
+      diplomas: {
+        title: "Diplomas",
+        none: "No diploma added.",
+        tag_one: "{{count}} diploma",
+        tag_other: "{{count}} diplomas",
+        missing: "No diploma",
+        number: "DUO number {{number}}",
+      },
       purged: "Personal data purged",
       purgedSubject: "Purged",
       failedBecause: "{{status}} · {{reason}}",
@@ -1007,6 +1084,7 @@ export const en = {
       "Define the checks and data of each flow, keep its versions, and choose which flows members may use.",
     adminOnly: "Only an admin of this organization can manage proofing flows.",
     notCompletable: "Cannot be sent from the wallet",
+    referencePhoto: "Own photo, via API",
     versionShort: "v{{version}}",
     edit: "Edit",
     selection: {
@@ -1044,10 +1122,14 @@ export const en = {
       nfc_read: "Read the document's chip",
       document_photo: "Photograph the document",
       face_verification: "Face check",
+      diploma_upload: "Upload diplomas (DUO)",
+    },
+    assuranceLevels: {
+      low: "Low",
+      substantial: "Substantial",
     },
     faceProviders: {
       regula: "Regula",
-      engine: "Built-in engine",
       Iris: "Iris SDK",
     },
     checks: {
@@ -1096,13 +1178,15 @@ export const en = {
       faceVerificationHint:
         "The person takes a selfie, which is checked to be a live person and compared with the photo on the chip.",
       stepsOrder: "Will be sent in this order: {{steps}}",
+      diplomaUploadHint:
+        "After the identity check, in the browser rather than the Idem app: the person uploads the diploma extracts they download from DUO, checked against DUO's signature and their name and date of birth. Such a flow is shown on screen or sent as a hosted link, never mailed.",
       faceLocationNative:
         "The face check runs in the app: the person has no browser step.",
       faceProvider: "Face check provider",
       faceProviderHint:
-        "Regula checks liveness in the app and the proofing service matches the face; the built-in engine uses the proofing service's own models. Only the built-in engine also runs in the Yivi app.",
+        "Regula checks liveness in the app and the wallet matches the face against the chip photo; in the Yivi app Regula matches the camera against the credential's photo. Iris runs in the Idem app only.",
       faceWithoutChip:
-        "Without reading the chip there is no chip photo to compare the face against, so members cannot be sent this flow.",
+        "Without reading the chip there is no chip photo: the face is matched against the customer's own photo of the person, which its system sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
       dataTitle: "Requested result data",
       dataHint:
         "Controls which result data the proofing service returns. Only data from a step in this flow can be requested. The wallet itself keeps only the outcome and assurance level.",
@@ -1121,7 +1205,12 @@ export const en = {
       policyTitle: "Assurance and privacy",
       assuranceLevel: "Required assurance level",
       assuranceLevelHint:
-        "Substantial needs a chip check plus the face match. High is not achievable yet and is refused by the proofing service.",
+        "With a required level the session is held to it: one that falls short is rejected. Without one no level is calculated.",
+      assuranceLevelNeeds: {
+        low: "Low needs the chip read with its data verified. Those settings are locked on.",
+        substantial:
+          "Substantial needs the chip read with its data and copy check verified, and a live face matched by Regula against the chip photo. Those settings are locked on.",
+      },
       none: "(none)",
       inherit: "(inherit organization)",
       yes: "true",
@@ -1642,6 +1731,10 @@ export const en = {
       identityProofingWebhookRemoved: "Removed customer webhook",
       identityProofingPaused: "Paused identity proofing",
       identityProofingFlowHostedConfigured: "Changed a flow's hosted page",
+      identityProofingFlowDiplomasConfigured:
+        "Changed whether a flow asks for diplomas",
+      identityProofingDiplomaAdded: "Added a diploma",
+      identityProofingDiplomaRejected: "Refused a diploma",
       identityProofingResumed: "Resumed identity proofing",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",

@@ -13,7 +13,7 @@ import (
 // An admin reads a customer request's identity in the wallet, audited each
 // time; a member's request has no identity to show.
 func TestAdminRequestResult(t *testing.T) {
-	f := newFixture(true)
+	f := newFixture()
 	ctx := context.Background()
 	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()},
 		NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID})

@@ -198,11 +198,14 @@ export function SecretReveal({
   title,
   hint,
   secret,
+  doneLabel,
   onClose,
 }: {
   title: string;
   hint: string;
   secret: string;
+  // The close button's label; "I have stored it" when absent.
+  doneLabel?: string;
   onClose: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
@@ -214,7 +217,7 @@ export function SecretReveal({
       onClose={onClose}
       footer={
         <Button size="sm" onClick={onClose}>
-          {t("customers.secret.done")}
+          {doneLabel ?? t("customers.secret.done")}
         </Button>
       }
     >

@@ -127,9 +127,13 @@ func (h *Handler) idempotent(next respond.HandlerFunc) respond.HandlerFunc {
 		if len(key) > maxIdempotencyKeyLength {
 			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "the Idempotency-Key is too long"}
 		}
-		body, err := io.ReadAll(io.LimitReader(r.Body, maxIdempotentBody))
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxIdempotentBody+1))
 		if err != nil {
 			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "could not read the request body"}
+		}
+		// A body cut at the limit would hash, and then decode, as another one.
+		if len(body) > maxIdempotentBody {
+			return &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "body_too_large", Message: "the request body is too large"}
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		sum := sha256.Sum256(append([]byte(r.Method+" "+r.URL.Path+"\n"), body...))

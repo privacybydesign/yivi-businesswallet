@@ -39,14 +39,11 @@ that invokes the business wallet as a holder (see
 `devverifier` image the Delivery workflow publishes); `signer`, `domibus` and `verid` are
 the signing and QERDS benches.
 
-Identity proofing runs on a separate product, the
-[identity-proofing-service](https://github.com/privacybydesign/identity-proofing-service)
-(IPS). With `IDENTITY_PROOFING_PROVIDER=ips` in `.env`, `npm run dev` also starts and
-rebuilds it from `../identity-proofing-service` (override with
-`IDENTITY_PROOFING_SERVICE_PATH`), under its own compose project so its data is kept.
-Plain `docker compose up` here does not; start IPS from its repo with
-`docker compose up -d --build passport-issuer`. Without the setting, a built-in stub is
-used and no IPS is needed.
+Identity proofing runs in the backend itself (`internal/proofingengine`): the Idem app
+claims a session and submits its steps to `/api/v1/app/...` on this backend. To test with
+a phone, set `IDENTITY_PROOFING_PUBLIC_URL` in `.env` to an address the phone reaches
+(e.g. `http://<your-LAN-IP>:8080`) and `REGULA_FACE_API_URL` for the face step;
+`IDENTITY_PROOFING_PROVIDER=stub` swaps in an in-memory stand-in no phone can reach.
 
 On first run `npm run dev` creates a root `.env` from `.env.example` if one does
 not exist. Compose **requires** `POSTGRES_PASSWORD` (there is no weak default), so

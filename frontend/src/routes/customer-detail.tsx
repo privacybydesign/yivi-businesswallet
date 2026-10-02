@@ -47,6 +47,8 @@ import {
   proofingMethodLabel,
   proofingRejectionReason,
   requestSubject,
+  readsIdentity,
+  sendableByMail,
   sessionEventDetail,
   SESSION_FILTERS,
   formatDuration,
@@ -78,6 +80,7 @@ import {
   CustomerMark,
   CustomerStatusTag,
   ResultTag,
+  SecretReveal,
 } from "./proofing-customer-ui";
 
 const LABEL = "text-ink-soft text-[12px] font-semibold";
@@ -702,6 +705,9 @@ function AssignedFlowsCard({
                           {t("identityProofingFlows.notCompletable")}
                         </Tag>
                       )}
+                      {flow.needsReferencePhoto && (
+                        <Tag>{t("identityProofingFlows.referencePhoto")}</Tag>
+                      )}
                     </label>
                   </div>
                   <label className="flex items-center gap-2 text-[13px]">
@@ -733,11 +739,16 @@ function AssignedFlowsCard({
   );
 }
 
-// How a request reaches its subject: a mail that is the session, or this
-// screen, which walks the person present through it.
-const SEND_CHANNELS: { value: ProofingChannel; key: "email" | "onScreen" }[] = [
+// How a request reaches its subject: a mail that is the session, this
+// screen, which walks the person present through it, or a link to the
+// customer's hosted page that the member hands the person.
+const SEND_CHANNELS: {
+  value: ProofingChannel;
+  key: "email" | "onScreen" | "link";
+}[] = [
   { value: "email", key: "email" },
   { value: "on_screen", key: "onScreen" },
+  { value: "hosted", key: "link" },
 ];
 
 function SendForm({
@@ -757,35 +768,60 @@ function SendForm({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const create = useCreateProofingRequestMutation(slug);
-  const { sendable, initial } = assignedFlows(flows);
+  // A flow matched against the customer's own photo is the customer API's
+  // to send: this form has no photo to give it.
+  const { sendable, initial } = assignedFlows(
+    flows.filter((f) => f.needsReferencePhoto !== true),
+  );
+  const photoOnly = flows.some((f) => f.assigned && f.needsReferencePhoto);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [birthDate, setBirthDate] = useState("");
   const [picked, setPicked] = useState("");
   const [touched, setTouched] = useState(false);
   const [channel, setChannel] = useState<ProofingChannel>("email");
+  const [link, setLink] = useState<string>();
   const navigate = useNavigate();
   // A pick that is no longer assigned falls back to the default.
   const flowId = sendable.some((f) => f.id === picked)
     ? picked
     : (initial?.id ?? "");
-  const onScreen = channel === "on_screen";
-  // On screen the person is present: an address is optional, but one given
-  // must still be one.
-  const emailMissing = onScreen
-    ? email.trim() !== "" && !email.includes("@")
-    : !email.includes("@");
+  // A flow that asks for diplomas has them uploaded on the page that runs
+  // the session, so it cannot be mailed.
+  const picks = sendable.find((f) => f.id === flowId);
+  const mailable = sendableByMail(picks);
+  // Only a flow that reads the name and date of birth can check for one
+  // person; with a date of birth, the name is that person's.
+  const matchable = readsIdentity(picks);
+  const expected = matchable ? birthDate : "";
+  const nameMissing = expected !== "" && name.trim() === "";
+  // A flow that cannot be mailed falls back to this screen.
+  const delivery: ProofingChannel =
+    channel === "email" && !mailable ? "on_screen" : channel;
+  const onScreen = delivery === "on_screen";
+  // Only a mail needs an address; one given must still be one.
+  const emailMissing =
+    delivery === "email"
+      ? !email.includes("@")
+      : email.trim() !== "" && !email.includes("@");
 
   function submit(event: React.FormEvent): void {
     event.preventDefault();
     setTouched(true);
-    if (emailMissing || flowId === "") {
+    if (emailMissing || nameMissing || flowId === "") {
       return;
     }
     if (onScreen) {
       // The session starts on the page, once the person has picked an app.
       void navigate(
         `verify?${new URLSearchParams({ flow: flowId }).toString()}`,
-        { state: { name: name.trim(), email: email.trim() } },
+        {
+          state: {
+            name: name.trim(),
+            email: email.trim(),
+            birthDate: expected || undefined,
+          },
+        },
       );
       return;
     }
@@ -794,59 +830,97 @@ function SendForm({
         customerId: customer.id,
         email: email.trim(),
         name: name.trim(),
+        birthDate: expected || undefined,
         flowId,
+        channel: delivery,
       },
       {
-        onSuccess: onSent,
+        // A link is shown to copy before the form closes.
+        onSuccess: (sent) =>
+          delivery === "hosted" && sent.hostedUrl
+            ? setLink(sent.hostedUrl)
+            : onSent(),
       },
+    );
+  }
+
+  if (link !== undefined) {
+    return (
+      <SecretReveal
+        title={t("customers.send.linkTitle")}
+        hint={t("customers.send.linkHint")}
+        secret={link}
+        doneLabel={t("customers.send.linkDone")}
+        onClose={onSent}
+      />
     );
   }
 
   return (
     <div className="flex flex-col gap-4">
       <p className={HINT}>
-        {onScreen ? t("customers.send.hintOnScreen") : t("customers.send.hint")}
+        {onScreen
+          ? t("customers.send.hintOnScreen")
+          : delivery === "hosted"
+            ? t("customers.send.hintLink")
+            : t("customers.send.hint")}
       </p>
       {sendable.length === 0 ? (
         <p className="text-ink-soft text-[13px]">
-          {isAdmin
-            ? t("customers.send.noFlowsAdmin")
-            : t("customers.send.noFlowsMember")}
+          {photoOnly
+            ? t("customers.send.referencePhotoFlows")
+            : isAdmin
+              ? t("customers.send.noFlowsAdmin")
+              : t("customers.send.noFlowsMember")}
         </p>
       ) : (
         <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+          {photoOnly && (
+            <p className={HINT}>{t("customers.send.referencePhotoFlows")}</p>
+          )}
           <fieldset className="flex flex-col gap-2">
             <legend className={`${LABEL} mb-1`}>
               {t("customers.send.channel")}
             </legend>
-            {SEND_CHANNELS.map((option) => (
-              <label
-                key={option.value}
-                className={[
-                  "rounded-yivi flex cursor-pointer items-start gap-3 border p-3",
-                  channel === option.value
-                    ? "border-primary bg-highlight"
-                    : "border-line-strong bg-surface",
-                ].join(" ")}
-              >
-                <input
-                  type="radio"
-                  name="proofing-channel"
-                  value={option.value}
-                  checked={channel === option.value}
-                  onChange={() => setChannel(option.value)}
-                  className="mt-1"
-                />
-                <span className="flex flex-col gap-0.5">
-                  <span className="text-ink text-[13.5px] font-semibold">
-                    {t(`customers.send.channels.${option.key}.title`)}
+            {SEND_CHANNELS.map((option) => {
+              const checked = delivery === option.value;
+              const disabled = option.value === "email" && !mailable;
+              return (
+                <label
+                  key={option.value}
+                  className={[
+                    "rounded-yivi flex items-start gap-3 border p-3",
+                    disabled
+                      ? "cursor-not-allowed opacity-60"
+                      : "cursor-pointer",
+                    checked
+                      ? "border-primary bg-highlight"
+                      : "border-line-strong bg-surface",
+                  ].join(" ")}
+                >
+                  <input
+                    type="radio"
+                    name="proofing-channel"
+                    value={option.value}
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() => setChannel(option.value)}
+                    className="mt-1"
+                  />
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-ink text-[13.5px] font-semibold">
+                      {t(`customers.send.channels.${option.key}.title`)}
+                    </span>
+                    <span className={HINT}>
+                      {t(`customers.send.channels.${option.key}.hint`)}
+                    </span>
                   </span>
-                  <span className={HINT}>
-                    {t(`customers.send.channels.${option.key}.hint`)}
-                  </span>
-                </span>
-              </label>
-            ))}
+                </label>
+              );
+            })}
+            {!mailable && (
+              <p className={HINT}>{t("customers.send.diplomasOnScreen")}</p>
+            )}
           </fieldset>
           <div className="flex flex-col gap-1">
             <label htmlFor="proofing-subject-email" className={LABEL}>
@@ -874,13 +948,35 @@ function SendForm({
               id="proofing-subject-name"
               autoComplete="off"
               value={name}
+              aria-invalid={touched && nameMissing}
               aria-describedby="proofing-subject-name-hint"
               onChange={(event) => setName(event.target.value)}
             />
             <p id="proofing-subject-name-hint" className={HINT}>
               {t("customers.send.nameHint")}
             </p>
+            {touched && nameMissing && (
+              <p className={ERROR}>{t("customers.send.nameRequired")}</p>
+            )}
           </div>
+          {matchable && (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="proofing-subject-birth-date" className={LABEL}>
+                {t("customers.send.birthDate")}
+              </label>
+              <Input
+                id="proofing-subject-birth-date"
+                type="date"
+                autoComplete="off"
+                value={birthDate}
+                aria-describedby="proofing-subject-birth-date-hint"
+                onChange={(event) => setBirthDate(event.target.value)}
+              />
+              <p id="proofing-subject-birth-date-hint" className={HINT}>
+                {t("customers.send.birthDateHint")}
+              </p>
+            </div>
+          )}
           <div className="flex flex-col gap-1">
             <label htmlFor="proofing-subject-flow" className={LABEL}>
               {t("customers.send.flow")}
@@ -908,6 +1004,10 @@ function SendForm({
             {onScreen ? (
               <Button type="submit" icon="scan_qrcode">
                 {t("customers.send.submitOnScreen")}
+              </Button>
+            ) : delivery === "hosted" ? (
+              <Button type="submit" loading={create.isPending}>
+                {t("customers.send.submitLink")}
               </Button>
             ) : (
               <Button type="submit" icon="email" loading={create.isPending}>
@@ -1111,6 +1211,7 @@ function SessionRow({
           {request.mode === "test" && (
             <Tag tone="amber">{t("customers.apiKeys.test")}</Tag>
           )}
+          <DiplomaTag request={request} />
         </Table.Cell>
         <Table.Cell className="whitespace-nowrap">
           {formatWhen(request.createdAt)}
@@ -1160,6 +1261,14 @@ function SessionRow({
                   </dd>
                   <dt className="text-muted">{t("customers.send.email")}</dt>
                   <dd>{request.subjectEmail || "—"}</dd>
+                  {request.expectedSubject && (
+                    <>
+                      <dt className="text-muted">
+                        {t("customers.sessions.expectedSubject")}
+                      </dt>
+                      <dd>{t("customers.sessions.expectedSubjectValue")}</dd>
+                    </>
+                  )}
                   {isAdmin && (
                     <>
                       <dt className="text-muted">
@@ -1231,6 +1340,9 @@ function SessionRow({
                     {t("customers.sessions.identity.audited")}
                   </p>
                 )}
+                {request.diplomaMode !== "off" && (
+                  <SessionDiplomas request={request} />
+                )}
               </div>
               <SessionTimeline slug={slug} request={request} />
             </div>
@@ -1241,6 +1353,81 @@ function SessionRow({
         </tr>
       )}
     </>
+  );
+}
+
+// Whether a session that asks for diplomas holds any: how many, or, for an
+// approved one that requires them, that none came.
+function DiplomaTag({
+  request,
+}: {
+  request: ProofingRequest;
+}): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (request.diplomas.length > 0) {
+    return (
+      <Tag tone="blue">
+        {t("customers.sessions.diplomas.tag", {
+          count: request.diplomas.length,
+        })}
+      </Tag>
+    );
+  }
+  if (request.diplomaMode === "required" && request.status === "approved") {
+    return <Tag tone="amber">{t("customers.sessions.diplomas.missing")}</Tag>;
+  }
+  return null;
+}
+
+// The DUO diploma extracts a session holds, each as DUO printed it, with the
+// number duo.nl/diplomacontrole checks.
+function SessionDiplomas({
+  request,
+}: {
+  request: ProofingRequest;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-ink text-[13.5px] font-bold">
+        {t("customers.sessions.diplomas.title")}
+      </h3>
+      {request.diplomas.length === 0 ? (
+        <p className={HINT}>{t("customers.sessions.diplomas.none")}</p>
+      ) : (
+        <ul className="border-line divide-y rounded-lg border">
+          {request.diplomas.map((d) => (
+            <li
+              key={d.documentNumber}
+              className="flex flex-col gap-0.5 px-3 py-2"
+            >
+              <span className="text-ink text-[13px] font-semibold">
+                {d.qualification}
+              </span>
+              <span className={HINT}>
+                {[
+                  d.documentType,
+                  d.institution,
+                  `${d.placeOfIssue} ${d.dateAwarded}`,
+                  d.nlqfLevel
+                    ? t("identityProofing.diplomas.level", {
+                        level: d.nlqfLevel,
+                      })
+                    : undefined,
+                ]
+                  .filter((part) => part !== undefined && part.trim() !== "")
+                  .join(" · ")}
+              </span>
+              <span className="text-muted font-mono text-[11.5px]">
+                {t("customers.sessions.diplomas.number", {
+                  number: d.documentNumber,
+                })}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -1403,9 +1590,11 @@ function IdentityRows({
             {t("customers.sessions.identity.document")}
           </dt>
           <dd>
-            {[evidence.documentType, evidence.issuingState]
-              .filter(Boolean)
-              .join(" · ") || evidence.type}
+            {evidence.type === "reference_photo"
+              ? t("customers.sessions.identity.noDocument")
+              : [evidence.documentType, evidence.issuingState]
+                  .filter(Boolean)
+                  .join(" · ") || evidence.type}
           </dd>
           <dt className="text-muted">
             {t("customers.sessions.identity.passiveAuth")}
@@ -1430,7 +1619,8 @@ function IdentityRows({
 }
 
 // The document's photo (read off the chip over NFC, or the disclosed
-// credential's) beside the live selfie matched against it, and the photos of
+// credential's), or the customer's own photo for a flow without the chip,
+// beside the live selfie matched against it, and the photos of
 // the document's front and back; only an approval carries them, and only when
 // the flow requested them.
 function IdentityPhotos({
@@ -1441,6 +1631,7 @@ function IdentityPhotos({
   const { t } = useTranslation();
   const photos = [
     { key: "photo", image: result.photo },
+    { key: "referencePhoto", image: result.referencePhoto },
     { key: "selfie", image: result.selfie },
     { key: "documentImage", image: result.documentImage },
     { key: "documentImageBack", image: result.documentImageBack },

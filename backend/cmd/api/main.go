@@ -23,6 +23,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/csc"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/emailchannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
@@ -39,6 +40,11 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/postguard"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine"
+	proofingflow "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regulasweep"
+	proofingsession "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/provisioner"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/provisioning"
@@ -76,10 +82,6 @@ const (
 	// client timeout has to outlast that whole sequence, not one attempt.
 	vogHTTPTimeout = 2 * time.Minute
 
-	proofingProbeTimeout = 10 * time.Second
-	// One IPS call per request; a session result embeds the document images,
-	// which is what the headroom is for.
-	proofingHTTPTimeout = 30 * time.Second
 	// heldStatusRecheckEvery is how often held credentials' status lists are
 	// re-read: issuers publish revocations on the scale of hours, not seconds.
 	heldStatusRecheckEvery = 6 * time.Hour
@@ -143,6 +145,26 @@ type vogValidatorProvider interface {
 	Validate(ctx context.Context, pdf []byte) (vog.ResponseCode, error)
 }
 
+// newDiplomaValidator checks a diploma extract's DUO signature: for real
+// (ProviderDUO, loading the trust anchors now, which with the EU lists takes
+// a few seconds), or the stub that accepts every signature.
+func newDiplomaValidator(ctx context.Context, cfg config.Config) (diploma.Validator, error) {
+	switch cfg.DiplomaValidatorProvider {
+	case config.ProviderStub:
+		return diploma.StubValidator{}, nil
+	case config.ProviderDUO:
+		store, err := diploma.NewTrustStore(ctx, diploma.TrustConfig{
+			Source: cfg.DiplomaTrustSource, CacheDir: cfg.DiplomaTrustCacheDir, FallbackToPinned: true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("diploma trust anchors: %w", err)
+		}
+		return diploma.NewPadesValidator(store, false), nil
+	default:
+		return nil, fmt.Errorf("diploma validator provider %q is not implemented", cfg.DiplomaValidatorProvider)
+	}
+}
+
 func newVogValidatorProvider(cfg config.Config) (vogValidatorProvider, error) {
 	switch cfg.VogValidatorProvider {
 	case config.ProviderStub:
@@ -154,24 +176,34 @@ func newVogValidatorProvider(cfg config.Config) (vogValidatorProvider, error) {
 	}
 }
 
-// proofingProvider is the boot-time identity-proofing-service surface: the
-// readiness probe plus what the proofing service drives. Chosen by config.
-type proofingProvider interface {
-	Ping(context.Context) error
-	proofing.Provider
-}
-
-func newProofingProvider(cfg config.Config) (proofingProvider, error) {
+// newProofingProvider builds what the proofing service drives: the wallet's
+// own engine (on the pool, sealing under cipher), or the in-memory stub. The
+// engine is also returned on its own so its app routes and jobs get wired.
+func newProofingProvider(cfg config.Config, pool *pgxpool.Pool, cipher *crypto.Cipher, orgStore *organization.Store) (proofing.Provider, *proofingengine.Engine, error) {
 	switch cfg.IdentityProofingProvider {
 	case config.ProviderStub:
 		stub := proofingprovider.NewStub()
 		stub.Outcome = proofingprovider.Status(cfg.IdentityProofingStubOutcome)
-		return stub, nil
-	case config.ProviderIPS:
-		return proofingprovider.NewClient(cfg.IdentityProofingURL, cfg.IdentityProofingAdminKey,
-			&http.Client{Timeout: proofingHTTPTimeout}), nil
+		return stub, nil, nil
+	case config.ProviderEngine:
+		engineCfg := proofingengine.DefaultConfig()
+		engineCfg.PublicBaseURL = cfg.IdentityProofingPublicURL
+		if cfg.RegulaFaceAPIURL != "" {
+			regulaClient := regula.New(cfg.RegulaFaceAPIURL)
+			engineCfg.Regula = regulaClient
+			engineCfg.RegulaFaceAPIPublicURL = cfg.RegulaFaceAPIPublicURL
+			engineCfg.RegulaSweeps = regulasweep.NewDedup(regulasweep.NewStore(pool))
+		}
+		if cfg.RegulaFaceMatchThreshold > 0 {
+			engineCfg.RegulaFaceMatchThreshold = cfg.RegulaFaceMatchThreshold
+		}
+		// Without a cipher the session store refuses every session
+		// (proofingprovider.ErrNoEncryptionKey); flows still work.
+		sessions := proofingsession.NewPostgresStore(pool, cipher)
+		engine := proofingengine.New(engineCfg, sessions, proofingflow.NewPostgresStore(pool), orgNames{store: orgStore}, nil)
+		return engine, engine, nil
 	default:
-		return nil, fmt.Errorf("identity proofing provider %q is not implemented", cfg.IdentityProofingProvider)
+		return nil, nil, fmt.Errorf("identity proofing provider %q is not implemented", cfg.IdentityProofingProvider)
 	}
 }
 
@@ -807,19 +839,15 @@ func run() error {
 		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingOrgs{store: orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
 		requireUser, orgHandler.Authorize)
 
-	// Identity proofing: one identity-proofing-service tenant per org, e-mailed
-	// proofing requests. Its own deployment key seals each org's IPS API key;
-	// without it no org can be provisioned (proofing.ErrNoEncryptionKey).
-	ips, err := newProofingProvider(cfg)
+	// Identity proofing: the wallet's own engine runs every org's sessions, the
+	// org being its tenant. The deployment key seals the sessions' evidence and
+	// the customer secrets; without it nothing can be sent
+	// (proofing.ErrNoEncryptionKey).
+	proofingCipher, err := crypto.NewCipher(cfg.IdentityProofingEncryptionKey)
 	if err != nil {
 		return err
 	}
-	proofingProbeCtx, proofingProbeCancel := context.WithTimeout(ctx, proofingProbeTimeout)
-	defer proofingProbeCancel()
-	if err := ips.Ping(proofingProbeCtx); err != nil {
-		return fmt.Errorf("identity proofing ping: %w", err)
-	}
-	proofingCipher, err := crypto.NewCipher(cfg.IdentityProofingEncryptionKey)
+	ips, proofingEngine, err := newProofingProvider(cfg, pool, proofingCipher, orgStore)
 	if err != nil {
 		return err
 	}
@@ -827,23 +855,42 @@ func run() error {
 	proofingWebhooks := proofing.NewWebhookStore(pool, recorder, proofingCipher)
 	proofingWebhooks.SetDefaultEndpoint(cfg.IdentityProofingDefaultWebhookURL)
 	proofingService := proofing.NewService(proofing.Stores{
-		Settings:   proofing.NewSettingsStore(pool, recorder, proofingCipher),
-		Requests:   proofingRequests,
-		Customers:  proofing.NewCustomerStore(pool, recorder),
-		APIKeys:    proofing.NewAPIKeyStore(pool, recorder),
-		Webhooks:   proofingWebhooks,
-		Events:     audit.NewReader(pool),
-		Pauses:     proofing.NewPauseStore(pool, recorder),
-		FlowHosted: proofing.NewFlowHostedStore(pool, recorder),
+		Settings:     proofing.NewSettingsStore(pool, recorder),
+		Requests:     proofingRequests,
+		Customers:    proofing.NewCustomerStore(pool, recorder),
+		APIKeys:      proofing.NewAPIKeyStore(pool, recorder),
+		Webhooks:     proofingWebhooks,
+		Events:       audit.NewReader(pool),
+		Pauses:       proofing.NewPauseStore(pool, recorder),
+		FlowHosted:   proofing.NewFlowHostedStore(pool, recorder),
+		FlowDiplomas: proofing.NewFlowDiplomaStore(pool, recorder),
+		Diplomas:     proofing.NewDiplomaStore(pool, recorder),
 	}, ips, verifier, emailService)
+	// A diploma extract is parsed on the VOG parser's PDFium pool.
+	diplomaValidator, err := newDiplomaValidator(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	diplomaChecker := diploma.NewChecker(diplomaValidator, diploma.NewPDFiumParser(vogParser.Pool()))
+	if err := diplomaChecker.Ping(ctx); err != nil {
+		return fmt.Errorf("diploma validator ping: %w", err)
+	}
+	proofingService.SetDiplomaChecker(diplomaChecker)
 	// A customer's session keeps its personal data for its customer's data retention.
 	startPruner(ctx, "identity_proofing_purge", cfg.SessionPruneEvery, proofingService.PurgeDue)
-	// IPS pushes every session change to the callback (HandleIPSEvent); a
-	// session nobody finishes is reconciled at its cap. Neither polls.
-	proofingService.SetCallbackURL(cfg.IdentityProofingCallbackURL)
+	// The engine tells the service about every session change; a session
+	// nobody finishes is reconciled at its cap. Neither polls.
 	proofingService.SetHostedBaseURL(strings.TrimSuffix(cfg.AppBaseURL, "/") + "/p/")
 	if stub, ok := ips.(interface{ OnSessionChange(func(string)) }); ok {
 		stub.OnSessionChange(func(sessionID string) { proofingService.SessionChanged(ctx, sessionID) })
+	}
+	var proofingApp server.Registerer = noRoutes{}
+	if proofingEngine != nil {
+		proofingEngine.SetNotifier(proofingService.SessionChanged)
+		go proofingEngine.Run(ctx)
+		proofingApp = proofingEngine
+		startPruner(ctx, "identity_proofing_engine_sessions", cfg.SessionPruneEvery, proofingEngine.Purge)
+		startPruner(ctx, "identity_proofing_regula_sweep", cfg.SessionPruneEvery, proofingEngine.SweepRegula)
 	}
 	database.RunOnNotify(ctx, pool, proofing.SessionChannel, "identity_proofing_deadlines", proofingService.ReconcileDue)
 	// Customer webhooks go out as their change commits, retries at their due
@@ -879,6 +926,7 @@ func run() error {
 		cscHandler,
 		signingHandler,
 		proofingHandler,
+		proofingApp,
 	)
 
 	httpServer := &http.Server{

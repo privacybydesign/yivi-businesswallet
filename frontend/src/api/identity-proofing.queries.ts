@@ -40,6 +40,7 @@ import {
   declineHostedProofing,
   getProofingFlowHosted,
   saveProofingFlowHosted,
+  saveProofingFlowDiplomas,
   getProofingPause,
   listProofingPauses,
   setPlatformProofingPause,
@@ -49,6 +50,7 @@ import {
   newProofingClaimLink,
   startProofingYivi,
   submitProofingFaceFrame,
+  uploadProofingDiplomas,
 } from "./identity-proofing";
 import type {
   ProofingCustomer,
@@ -82,6 +84,8 @@ import type {
   ProofingResult,
   ProofingPause,
   ProofingFlowHosted,
+  DiplomaMode,
+  DiplomaVerdict,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
@@ -227,6 +231,23 @@ function invalidateFlow(
   // Each customer's flow list carries the flows' active version too.
   void queryClient.invalidateQueries({
     queryKey: proofingCustomersQueryKey(slug),
+  });
+}
+
+// The flow lists carry each flow's diploma mode, so they are refetched.
+export function useSaveProofingFlowDiplomasMutation(
+  slug: string,
+): UseMutationResult<
+  DiplomaMode,
+  Error,
+  { flowId: string; mode: DiplomaMode }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ flowId, mode }) =>
+      saveProofingFlowDiplomas(slug, flowId, mode),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => invalidateFlow(queryClient, slug),
   });
 }
 
@@ -875,6 +896,16 @@ export function useSubmitProofingFaceFrameMutation(
 ): UseMutationResult<ProofingFaceVerdict, Error, string> {
   return useMutation({
     mutationFn: (image) => submitProofingFaceFrame(target, image),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+// Checks uploaded diploma extracts; each verdict says what became of a file.
+export function useUploadProofingDiplomasMutation(
+  target: VerifyTarget,
+): UseMutationResult<DiplomaVerdict[], Error, File[]> {
+  return useMutation({
+    mutationFn: (files) => uploadProofingDiplomas(target, files),
     meta: { suppressErrorToast: true },
   });
 }

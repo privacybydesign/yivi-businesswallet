@@ -1,11 +1,12 @@
-# Feature: Identity proofing (identity-proofing-service)
+# Feature: Identity proofing
 
-**Status:** Integrated (backend + frontend). Every org is an IPS tenant under the
-org's own id, created on first use. The sidebar's "Identity proofing" section holds three pages under
+**Status:** Integrated (backend + frontend). The wallet runs proofing itself, in
+its own engine (`internal/proofingengine`, §0); every org is the engine's
+tenant under the org's own id, with no provisioning step. The sidebar's "Identity proofing" section holds three pages under
 `/{org}/identity-proofing`: **Overview** (the last 30 days' customer sessions
 counted, the newest ones, the customers, and an alert per failing webhook),
 **Customers** (search, 30-day sessions and verified share, webhook health,
-status) and, admin-only, **Flows** (full IPS configuration, versioned, and which
+status) and, admin-only, **Flows** (full flow configuration, versioned, and which
 flows members may use). A customer's page has tabs: Flows and Sessions for every
 member; Branding, API keys, Webhooks and Settings for an admin. "Verify a
 person" in its header opens the send form; an admin can pause a customer, after
@@ -13,7 +14,7 @@ which no request can be sent for it (`customer_paused`, 409) while sent ones run
 out. The customers API is at `/orgs/{slug}/customers`. A member is sent a
 request from their member detail page (admin-only, like that page). Customers
 are B2B clients with no login: members act for them, and their own backend can
-through the public API with one of their keys. Sending creates an IPS session
+through the public API with one of their keys. Sending creates an engine session
 (2, 5 or 10 minutes, per customer) and mails its vcmrtd deep link as a QR code
 and a button: the mail is the session, with no wallet page in between. The
 outcome lands on the request, in the audit log and at the customer's webhook.
@@ -26,16 +27,19 @@ vcmrtd QR and link; Yivi starts an **OpenID4VP** disclosure of the passport or
 ID card with its photo at the wallet's own EUDI verifier (`yivi/start`:
 `ScopeProofing`, the `openid4vp://` request shown as an `open.yivi.app` universal
 link and QR; the transaction id stays in `yivi_transaction_id`), polls
-`yivi/disclosure`, which on DONE hands the photo and claims to IPS as the face
-reference (`POST /api/v1/sessions/{id}/reference`, IPS's
-`BOUND_LOGIN_RELYING_PARTY_REFERENCE` must be on; IPS's own IRMA requestor is not
-used), then runs the face check from the browser camera (`yivi/face`). A subject
+`yivi/disclosure`, which on DONE hands the photo and claims to the engine as the
+face reference (`SubmitReference`), then runs the face check from the browser
+camera (`yivi/face`): each frame is a Regula image match against that photo
+(`MatchImages`), so the Yivi method needs Regula (`ErrMethodUnavailable`
+otherwise). A subject
 who cancels in the app is not reported: the verifier only knows pending or done,
 so the page waits out the countdown. Both count down to the
 session's expiry and poll `GET requests/{id}` for the outcome. Nothing is
 mailed, and the subject's name and address travel in router state, not the URL.
 The hosted page's completion (redirect origins, decline, locale) is in §7.
-**Slice:** `internal/proofingprovider` (the IPS client + stub, leaf level),
+**Slice:** `internal/proofingengine` (the engine: sessions, flows, the Idem app's
+routes, chip verification, results, Regula), `internal/proofingprovider` (the
+seam's value types + a test stub, leaf level),
 `internal/proofing` (settings, flow selection, members, requests, service,
 handler), `internal/email` (kind `identity_proofing_requested`, the `qr` block),
 `frontend/src/routes/member-proofing.tsx` (the member detail panel),
@@ -48,31 +52,71 @@ guard every externally supplied URL goes through),
 selection), `frontend/src/routes/customers.tsx` + `customer-detail.tsx`
 (customers, tabs, assignment, send, requests, pause), `hosted*.go` +
 `routes/proof.tsx` (the hosted link, §7), `pause*.go` (§8), `flow_hosted*.go` +
-`routes/flow-hosted-settings.tsx` (per-flow hosted settings).
-**Depends on:** `privacybydesign/identity-proofing-service` ("IPS"), an HTTP
-service we are a relying party of. It is itself work in progress. Every IPS wire detail lives in
-`internal/proofingprovider/client.go`, so an IPS change is a one-file change.
+`routes/flow-hosted-settings.tsx` (per-flow hosted settings), `diploma*.go` +
+`internal/diploma` + `routes/identity-proofing-flows.tsx` (the flow's diploma
+step) + `routes/proofing-verify-steps.tsx` (the upload) (DUO diplomas, §12),
+`matchSubject` in `service.go` (one known person, §13).
+**Depends on:** the Regula Face API (`REGULA_FACE_API_URL`) for every face
+check, and the Idem app's `/api/v1/app/{token}/...` contract
+(`vcmrtd/idem/lib/services/proofing_session_client.dart`). It no longer depends
+on `privacybydesign/identity-proofing-service` ("IPS"); "IPS" below names the
+behaviour the engine kept from it.
+
+---
+
+## 0. The engine
+
+`internal/proofingengine` is IPS's session engine folded into the wallet
+(ported at IPS `6ef3e19`), minus what the wallet already owns (tenants, API
+keys, webhooks, audit, admin pages) and minus IPS's TFLite face engine.
+`proofing.Service` drives it through Go methods (`rp.go`: flows, create
+session, status/result/identity, review, handover, cancel, delete) with a
+`proofingprovider.Tenant{ID: org id, Sandbox: test mode}`; nothing goes over
+HTTP. The Idem app talks to the routes `Engine.Register` mounts under
+`/api/v1/app/...` (claim, view, events, steps, submit; left out of the API
+docs on purpose, only the app calls them), unchanged from IPS, so
+the vcmrtd deep link's `api=` is `IDENTITY_PROOFING_PUBLIC_URL` (default
+`APP_BASE_URL`).
+
+- **Storage.** Flow versions in `identity_proofing_flow_versions` (definition as
+  JSON, one active version per flow); sessions in `identity_proofing_sessions`,
+  the session itself (evidence included) sealed under
+  `IDENTITY_PROOFING_ENCRYPTION_KEY`, only token and grant hashes in the clear;
+  Regula tags to delete in `identity_proofing_regula_sweeps`. Without the key
+  every session is refused (`ErrNoEncryptionKey`); flows still work.
+- **Changes reach the wallet in process.** Where IPS pushed a signed webhook,
+  the engine calls `Service.SessionChanged` (opened, step started, outcome,
+  expiry). A lazy expiry is noticed by whichever read finds the deadline past.
+- **Faces.** Only Regula: the native face step (liveness transaction + match
+  against DG2) and the Yivi method's per-frame match. The `engine` face
+  provider is refused; a JPEG2000 chip portrait is converted to PNG only in a
+  `-tags jpeg2000` build (ImageMagick via cgo), so the default build hands
+  Regula and the browser the original bytes.
+- **Retention.** A finished session is deleted 90 days after it ended
+  (IPS's default). A customer's session carries the customer's data retention
+  plus a day (`engineRetention`), so `PurgeDue` erases it first.
+  `Engine.Purge` and `Engine.SweepRegula` run on `SESSION_PRUNE_EVERY`.
+- **Yivi state is in the session**, sealed (`session.YiviState`: the disclosed
+  photo and the run of frames), not in memory, so any API replica scores the
+  next frame; it is cleared as the session settles.
+- **Change notices** go through one bounded queue (`Engine.Run`), one per
+  session while it waits; a full queue drops the notice and the deadline job
+  reconciles instead.
+- **Claims are rate-limited per session** (`ClaimLimit`, 20 a minute), not per
+  client IP: behind the reverse proxy every phone has the proxy's address.
+- `IDENTITY_PROOFING_PROVIDER=stub` swaps in `proofingprovider.Stub`, which no
+  phone can reach (tests, and `IDENTITY_PROOFING_STUB_OUTCOME` in dev).
 
 ---
 
 ## 1. Model
 
-- **The org is the IPS tenant: one tenant id, the org's.** IPS keeps its own
-  tenant model so it can run on its own, but the wallet creates each org's
-  tenant under `organizations.id` (`POST /api/v1/admin/tenants` with `id`) and
-  stores no IPS tenant id. The wallet holds the deployment's IPS `ADMIN_KEY`
-  (`IDENTITY_PROOFING_ADMIN_KEY`); no admin ever enters a key. The first org
-  route that needs the org's key (listing or creating flows, saving the
-  selection, sending a request) creates the tenant with a `live` and a `test` key
-  scoped to `sessions:read`/`:write` + `flows:read`/`:manage`, and stores both keys and the webhook secret
-  sealed under `IDENTITY_PROOFING_ENCRYPTION_KEY` (`org_identity_proofing_settings`,
-  one row per org), audited `identity_proofing.provisioned`. IPS shows them
-  exactly once. Provisioning checks the encryption key exists *before* calling
-  IPS, so a missing key never leaves an orphaned tenant, and runs under a per-org
-  advisory lock, so concurrent first uses create it once. A tenant IPS already
-  has (a first use whose save was lost) answers 409 and is taken over: the
-  wallet rotates its webhook secret (`POST .../tenants/{id}/webhook-secret`) and
-  mints fresh keys. There is no enable step or on/off state.
+- **The org is the engine's tenant: one tenant id, the org's.** A session and a
+  flow carry `organizations.id`; there is nothing to provision, no key to hold
+  and no enable step. (Under IPS the wallet created a tenant per org with a live
+  and a test key in `org_identity_proofing_settings`, audited
+  `identity_proofing.provisioned`; that table is dropped and old audit rows
+  keep the action.)
 - **Customers are the wallet's, not IPS sub-tenants.** IPS sub-tenants only
   override privacy knobs (BSN policy, blurring), share the parent's keys and
   cannot own flows, so a customer (`identity_proofing_customers`) is a wallet row
@@ -96,7 +140,12 @@ service we are a relying party of. It is itself work in progress. Every IPS wire
   - Steps: `document_capture` (vcmrtd scans the MRZ to unlock the chip) and
     `nfc_read` (NFC chip read) toggle as a pair; `document_photo` (a photo of
     the printed page, IPS `POST /app/{token}/steps/document_photo`) stands
-    alone; `face_verification` is one step.
+    alone; `face_verification` is one step. `draftSteps` lists
+    `document_photo` between `document_capture` and `nfc_read`: the Idem app
+    photographs the side it reads the MRZ from as it reads it, cut to the
+    frame, and shows it for review (use or retake) right after the scan,
+    whatever the listed order: a passport's photo page is then the whole
+    photo; a card's MRZ side is its back, so the front is taken next. IPS does not enforce order.
   - Checks: `nfc.passive_auth` is locked on with `nfc_read`, and `face.match`
     with `face_verification`; `nfc.chip_auth` and `face.liveness` are optional;
     a check without its step is unavailable; the threshold is only for
@@ -107,18 +156,25 @@ service we are a relying party of. It is itself work in progress. Every IPS wire
     codes. Each item is
     available only with its step and cleared otherwise. None is forced on (IPS
     forces nothing).
-  - Assurance level: none/low/substantial/high, as IPS offers; IPS refuses high
-    and an unbacked substantial, and the wallet shows its message. IPS reports
-    substantial only for a chip read (passive + chip auth) plus a Regula face
-    check against the chip's DG2, so the wallet itself refuses a substantial
-    flow without `nfc_read`, a face step and Regula (`checkReachable`), which
-    IPS's own check lets through. In a session the Idem app follows the
+  - Assurance level: none/low/substantial; high is not offered (no certified
+    anti-spoofing). One table says what each level needs,
+    `flow.LevelRequirements`, mirrored in the editor's `LEVEL_REQUIREMENTS`:
+    low = chip read with `nfc.passive_auth` verified (genuine evidence held);
+    substantial = low plus `nfc.chip_auth`, `face.match` and `face.liveness`,
+    the face verified by Regula against the chip's DG2. Picking a level turns
+    those steps, checks and the provider on and locks them
+    (`withAssuranceLevel`; `draftFromFlow` applies it to an older version
+    too), and `flow.Validate` refuses a flow whose checks or provider do not
+    meet its level. A session's eIDAS level is the highest whose every check
+    verified (`computeEIDASAssuranceLevel`), and is only calculated when the
+    flow sets a level: without one it is empty, sandbox included. A check that
+    did not apply (a chip without an Active Authentication key) has not
+    verified, so such a document reaches low at most. In a session the Idem app follows the
     flow, never its own settings: Active Authentication exactly when the
     flow lists `nfc.chip_auth`, active liveness when it lists
     `face.liveness` (IPS's app view carries `requiredChecks`), and the
     face engine the flow's provider names (`faceProvider`: Regula, or the
-    on-device engine for `engine`). A skipped check scores as failed and
-    caps the level. IPS only
+    on-device engine for `engine`). IPS only
     *declares* it: it approves on its checks and never compares the eIDAS level
     a session achieved with it. The wallet does: a request stores its flow's
     level at send (`required_assurance_level`), and an approval below it is
@@ -142,8 +198,8 @@ service we are a relying party of. It is itself work in progress. Every IPS wire
   Idem app; every other flow lets the subject pick Yivi or Idem
   (`YiviAppAvailable`, mirrored by `yiviAppAvailable`). IPS's Yivi face check
   (bound login) always scores on its own engine, whatever the flow names. A face step without `nfc_read` needs a
-  per-session reference photo the wallet does not have, so such a flow is not
-  `completable` and cannot be made available or sent. A flow with
+  per-session reference photo (§14): such a flow is not `completable` for
+  members, but a customer may be assigned it and send it through its API. A flow with
   `document_photo` (front and back, or a passport's photo page) runs in the
   Idem app only: it rules out the Yivi app. "Edit" is
   `POST /flows/{id}/versions`: the new version is active at once, and a session
@@ -210,26 +266,19 @@ link variable (`proofingUrl`) is declared with `AppScheme: "vcmrtd"`
 (`internal/email/catalog.go`): its value must be a `vcmrtd:` link with a host,
 checked at render, and only that variable may carry the scheme.
 
-The `api` host in the deep link is IPS's `PUBLIC_BASE_URL`, which must be
-reachable from the phone. A mail that fails to send leaves the request standing
+The `api` host in the deep link is `IDENTITY_PROOFING_PUBLIC_URL`, which must
+be reachable from the phone. A mail that fails to send leaves the request standing
 but answers `mailSent: false`, and the UI says so.
 
 Mail goes through the org's own SMTP settings (`internal/email`); in the dev
 stack the seeded org points at Mailpit (`localhost:8025`), so nothing leaves the
 machine until an admin sets a real server under e-mail settings.
 
-## 3. Outcomes: pushed by IPS, never polled
+## 3. Outcomes: notified by the engine, never polled
 
-Every session is created with `callbackUrl` = `IDENTITY_PROOFING_CALLBACK_URL`
-(default `APP_BASE_URL` + `/api/v1/identity-proofing/ips-events`) and
-`callbackPayload: "minimal"`: IPS pushes each change (opened, in_progress,
-verified, rejected, needs_review, cancelled, expired) as a notice with no
-personal data, signed with the org's IPS tenant webhook secret (the event's
-`tenantId` is the org id)
-(`X-Signature: sha256=hex(HMAC("<X-Webhook-Timestamp>.<body>"))`, 5-minute
-skew). `HandleIPSEvent` verifies it, then reconciles that one request with the
-org's key (`tryReconcile`, reading `GET /api/v1/sessions/{id}/status`, §11);
-the result never travels in the push. A session nobody finishes is reconciled at its cap by the deadline
+The engine calls `Service.SessionChanged` off its request path on each change
+(opened, in_progress, verified, rejected, needs_review, cancelled, expired);
+it reconciles that one request (`tryReconcile`, `SessionStatus`, §11). A session nobody finishes is reconciled at its cap by the deadline
 job (`ReconcileDue`), which sleeps until the earliest cap and is woken by
 `pg_notify` on `identity_proofing_sessions` when a session is attached; one IPS
 still reports open past its cap is asked again after 30 s. The job leases what
@@ -237,10 +286,8 @@ it re-checks (`ips_reconcile_leased_until`, `FOR UPDATE SKIP LOCKED`), so API
 replicas never ask IPS about the same session at once. Nothing runs on a fixed
 interval. List reads never call IPS; a single-request read (the on-screen page,
 the customer API's `GET sessions/{id}`) re-checks a live request at most once
-per `readReconcileEvery` (10 s), as a fallback for a missed push. An event for
-an unknown tenant or session is acknowledged, except a fresh one (under
-`earlyEventWindow`) naming a request, which answers 503 so IPS retries it while
-the session is still being stored. `needs_review` is not final: IPS decides it,
+per `readReconcileEvery` (10 s), as a fallback for a missed push. A change for a
+session not attached yet is dropped; its deadline or next change reconciles it. `needs_review` is not final: IPS decides it,
 or ends it (expired/cancelled), which ends the request as expired and sends
 `session.expired`. The UI treats it as not live: it stops polling and shows
 "waiting for review". IPS `opened`/`in_progress` moves the request from `pending` to
@@ -384,8 +431,8 @@ post-review outcome stay the system's.
 
 A customer key is `live` (`yp_live_`) or `test` (`yp_test_`), fixed at creation
 (`identity_proofing_api_keys.mode`, audited on `api_key_created`). A test key's
-`POST /proofing/sessions` runs on the org's own IPS tenant under the org's IPS
-**test key**, which IPS treats as that tenant's sandbox: it only creates
+`POST /proofing/sessions` runs on the org's own tenant in test mode
+(`Tenant.Sandbox`), the engine's sandbox: it only creates
 scripted-outcome sessions, and a live key never can. The session is created
 without a flow and resolves at once to `scriptedOutcome` (`approve` by default,
 `reject:<CODE>`, `needs_review`, `expire`; IPS's own sandbox): the wallet still
@@ -393,13 +440,12 @@ checks the flow is assigned to the customer and records it on the request. A
 test request (`mode = test`) is reconciled right away, never mailed, has no
 deep link, is left out of the stats, and carries `livemode: false` in the API
 answer and its webhooks. A live key sending `scriptedOutcome` is refused
-(400). Its IPS events come from the org's one tenant; the request's mode picks
-the key it is reconciled with.
+(400). The request's mode picks the tenant it is reconciled under.
 
 ## 6. A new Idem code mid-session
 
-`POST …/requests/{id}/claim-link` and `POST /proof/{token}/claim-link` call IPS
-`POST /sessions/{id}/handover`. An unclaimed slot gets a new claim (the first
+`POST …/requests/{id}/claim-link` and `POST /proof/{token}/claim-link` call the
+engine's `SessionHandover`. An unclaimed slot gets a new claim (the first
 lapsed after 10 minutes); a slot whose app went inactive or silent gets a
 handover, and the phone that scans takes the session over. Only a handover (IPS
 answers `slotClaimed`) is audited `identity_proofing.session_handover` (the
@@ -432,6 +478,12 @@ routes, which share their implementation with the org routes. The session is
 created at `start` for the app the subject picked (`AttachSession` records it)
 and runs the customer's session TTL. An unstarted link reads as pending until
 it lapses, then expired, in `EffectiveStatus` and the stats alike.
+
+A member makes the same link from the wallet: "Copy a link" in the send form
+(`channel: hosted` on `POST .../requests`, which answers `hostedUrl`), for a
+person not present and a flow the mail cannot carry (diplomas); the form
+shows the link to copy (`SecretReveal`). No redirect: the page ends on its
+own done screen.
 
 A link that lapses unstarted is ended by the deadline job (`LapseLinks`,
 audited `session_ended` with `reason: link_lapsed`, webhook `session.expired`).
@@ -496,8 +548,8 @@ instead. Only the pause routes stay reachable. Running sessions still settle
 A session IPS sends to review (`needs_review`) waits for a decision (or for IPS
 to end it, §3). An admin decides it on the customer's Sessions tab (filter
 "Needs review", also counted on the overview): approve or reject (optionally
-with an error code), with a required reason. `POST .../requests/{id}/review` calls IPS's
-`POST /sessions/{id}/decision` (the admin's e-mail as `reviewer`), audits
+with an error code), with a required reason. `POST .../requests/{id}/review` calls the engine's
+`DecideReview` (the admin's e-mail as `reviewer`), audits
 `identity_proofing.review_decided` with the admin as actor, then reconciles:
 the outcome lands like any other, so an approval still has to meet the flow's
 assurance level and the customer's webhook is sent. A request no longer under
@@ -525,24 +577,154 @@ under `IDENTITY_PROOFING_ENCRYPTION_KEY` in `proofed_name_ciphertext`, shown as
 A customer's session is purged by the `identity_proofing_purge` pruner
 (`Service.PurgeDue`) its customer's `data_retention_days` (§4) after it ends
 (completed, cancelled, expired; not while it awaits review): as `DELETE`
-above, erased at IPS, then its personal data cleared here. The dashboard shows
+above, erased in the engine, then its personal data cleared here. The dashboard shows
 the time as `purgeAt`. A member's request is not purged.
 
-## 11. Known IPS gaps to track
+## 11. Known gaps to track
 
-- **No end-user web page.** IPS's web claim URL points at its staff-only db-test
-  page. So only flows whose face capture runs in the app (`selfieLocation:
-  native`) can be sent. The wallet forces `native` on flows it creates (IPS
-  defaults to `browser`) and refuses requests on other flows
-  (`flow_not_completable`).
-- **Deep link tap does not open vcmrtd yet** (IPS `session-model.md`); scanning
-  the QR from inside the app works.
-- **Reconciling reads `GET /sessions/{id}/status`**, which carries no personal
-  data and is not audited at IPS; the full `/result` (audited as
-  `proofing.data.read`) is read only for an approved customer subject, whose
-  name is kept. Against an IPS without the status route the client falls back
-  to `/result`.
-- **IPS rate-limits session creation per tenant** (30/min by default), so each
-  org has its own budget.
-- Local dev: IPS and the wallet backend both publish host port 8080; remap one
-  (see `compose.yaml`).
+- **No end-user web page.** The engine keeps IPS's web slot but the wallet has
+  no browser proofing page, so only flows whose face capture runs in the app
+  (`selfieLocation: native`) can be sent; the wallet forces `native` and refuses
+  others (`flow_not_completable`).
+- **Deep link tap does not open vcmrtd yet**; scanning the QR from inside the app
+  works.
+- **Reconciling reads `SessionStatus`**, which carries no personal data; the full
+  result is read only for an approved customer subject, whose name is kept.
+- **No face engine.** A flow's face step and the Yivi method need Regula; IPS
+  flows on its `engine` provider cannot run here.
+- **Flows did not move.** Flows created at IPS are not copied into the engine:
+  an org recreates them. `20261001180000_remove_identity_proofing_ips_flow_config`
+  removes what named an IPS flow (the members' allow-list, customer
+  assignments, hosted and diploma settings); requests keep their flow id and
+  name as history, and one in flight at IPS during the switch settles as
+  expired (the engine does not know its session).
+
+## 12. Diplomas (DUO extracts)
+
+For onboarding where a qualification matters (training for professionals: a
+new student proves who they are, then which diplomas they hold). Wallet-side
+only: the engine knows nothing of it.
+
+- **Per flow** (`identity_proofing_flow_diploma_settings`, `FlowDiplomaStore`,
+  `PUT .../flows/{id}/diplomas`, admin): `off` (no row) or `required`, audited
+  `flow_diplomas_configured`. A step is in the flow or not, so there is no
+  optional diploma step (an earlier `optional` was migrated to `required`).
+  The flow editor shows it as the last step, "Upload diplomas (DUO)": a step
+  for the admin, never sent to IPS (its steps are the app's, and it would
+  refuse one it does not know). It is saved after the flow, so a new flow
+  gets it once it has an id; the flow list's summary appends it to the IPS
+  steps. The flow list carries it as
+  `diplomaMode`; a single version's answer (create, edit, versions) omits it.
+  A request snapshots it at send (`identity_proofing_requests.diplomas`), as
+  it does the assurance level; a test request is always `off`.
+- **A page, never a mail.** The extracts are uploaded on the page that ran the
+  session, so a diploma flow is refused on the mail channel and as a bare
+  deep link (`diplomas_need_page`, 422): on screen or hosted only. The send
+  form switches to on-screen by itself (`sendableByMail`).
+- **Upload** (`POST .../requests/{id}/diplomas`, `POST /proof/{token}/diplomas`,
+  multipart `file` parts): only on an approved request, within
+  `DiplomaUploadWindow` (1 h) of its approval (`diplomasUntil` in the
+  request, hosted progress), at most 10 per request, 5 MiB each. The page
+  shows the step after an approval and hands back (`onSettled`, the hosted
+  redirect) only once the subject is done: at least one extract held, or the
+  window closed.
+- **The check** (`internal/diploma`, ported from `privacybydesign/go-diploma-issuer`,
+  which has the detail): PDFium (the VOG parser's pool, `vog.PDFiumParser.Pool`)
+  reads the extract; DUO's PAdES signature must cover the whole file, carry a
+  qualified timestamp and chain on the EU Trusted Lists to DUO's qualified
+  e-seal; the printed holder (one line, `MatchFullName`) and birth date must
+  match the identity IPS approved, read with `SessionIdentity` at upload.
+  `DIPLOMA_VALIDATOR_PROVIDER=stub` (default; dev/CI hold no DUO-signed
+  extract of a test person) accepts every signature but still parses and
+  matches for real; `duo` checks it, with `DIPLOMA_TRUST_SOURCE`
+  `eutl` (default, lists cached in `DIPLOMA_TRUST_CACHE_DIR`, reloaded on use
+  once 24 h old, pinned roots as fallback) or `pinned`. OCSP is off.
+- **Kept**: what DUO printed about the qualification (type, name, profiles,
+  institution, place and date, NLQF/EQF, the number duo.nl/diplomacontrole
+  checks, signing time) in `identity_proofing_request_diplomas`. Never the
+  PDF, the holder's name or birth date. Audited `diploma_added` (webhook
+  `session.diploma_added`) and `diploma_rejected` (reason only:
+  `not_a_diploma`, `signature_invalid`, `holder_mismatch`, `duplicate`).
+  Shown in the request responses, the customer API's `result`, and the
+  Sessions tab. `Purge` deletes them with the rest.
+- **Not built**: mailing a hosted link for a diploma flow (the mail is the
+  vcmrtd session, §2); diplomas on a member's request page; no real DUO
+  extract is in the test suite (personal data), so the parser is covered by
+  synthetic layouts only, as upstream verified it against real ones.
+
+
+## 13. One known person (expected subject)
+
+For a check that must be one particular person, not whoever takes part: an
+account recovery (the org's "wachtwoord vergeten" sends its user to a hosted
+session) or "Dibran Mulder must identify himself". Wallet-side only: the engine
+proofs whoever scans, and the wallet holds the outcome to the person.
+
+- **Send.** A customer's request with a `birthDate` (YYYY-MM-DD, past, with
+  `name`): the send form's "Date of birth" (shown only for a flow that reads
+  the document data), `POST .../requests`, and the customer API's
+  `POST /proofing/sessions`, on every channel. A member's request cannot
+  (`ErrInvalidInput`: the wallet holds no birth date of a member), nor a flow
+  whose result lacks the document data (`ReadsIdentity`, mirrored by
+  `readsIdentity`: `dg1` requested, or `document_capture` when the flow
+  lists no data). Without a birth date the name stays a label.
+- **Kept.** `expects_subject` on the request, and the birth date sealed under
+  `IDENTITY_PROOFING_ENCRYPTION_KEY` in `expected_birth_date_ciphertext`
+  until the request is decided (`RecordOutcome` approved/rejected) or
+  purged; `needs_review` keeps it for the decision. Audited only as
+  `expectsSubject: true` on `requested`, never the date.
+- **The match** (`matchSubject`, in `tryReconcile` after `enforceAssurance`):
+  on an approval it reads `SessionIdentity` and runs
+  `diploma.MatchFullName(subjectName, birthDate, identity)`, the DUO holder
+  match (diacritics, prefixes, given-name order). A mismatch is recorded as
+  `rejected` with `IDENTITY_MISMATCH` (no proofed name kept); a failed
+  identity read leaves the request undecided for the next reconcile. A
+  review approval is matched too. The engine still holds its approval, so
+  the result read (`requestResult` → `heldToVerdict`, customer API and admin
+  view alike) answers the wallet's rejection and code with no identity or
+  images: the other person is never shown (`ASSURANCE_NOT_MET` likewise).
+- **Shown.** `expectedSubject` on the request, the customer API's session
+  and its webhooks; "Expected person" in the Sessions tab's details; the
+  reason in words (`proofingRejectionReason`). A test session's identity is
+  the sandbox fixture, `Sandbox Testperson` born 1990-01-01, so an
+  integrator can script a match and a mismatch.
+- **Not built:** the hosted and on-screen pages do not name the expected
+  person to the subject.
+
+## 14. The customer's own photo (reference photo)
+
+For a customer that already holds a photo of the person and wants a live face
+check against it without the document (an insurer confirming a policy
+holder's change of bank account). IPS's `referencePhoto`, ported back.
+
+- **Flow.** A face step without `nfc_read` (`NeedsReferencePhoto`; the
+  editor's "Face check" alone). `Completable` stays false for it (a member
+  has no photo to send); `CustomerCompletable` is true, so it can be
+  assigned to a customer, and the flow lists carry `needsReferencePhoto`.
+  It runs in the Idem app only (`YiviAppAvailable` false: the Yivi app
+  matches against its credential's photo) and reaches no eIDAS level (the
+  levels need the chip; the engine scores it with `chipReference` false).
+  The send form leaves it out.
+- **Send.** Only the customer API: `referencePhoto`, standard base64,
+  sniffed as PNG/JPEG/WebP, at most `MaxReferencePhotoBytes` (512 KiB;
+  the create body is capped at 1 MiB, an idempotent one past that is 413
+  `body_too_large`). Required on such a flow (422
+  `reference_photo_required`), refused on any other (400), so a chip flow is
+  never matched against a supplied photo. A test request checks it and
+  drops it (a scripted session runs no flow). Audited as `referencePhoto:
+  true`, never the image.
+- **Held.** The engine's session keeps it sealed (`session.ReferencePhoto`)
+  and hands it to the app as `faceReference` for the face step
+  (`faceMatchReference`); `Session.ForStorage` drops it once the session is
+  under review or over (the result's copy, below, is all that stays). A hosted request
+  holds it sealed (`reference_photo_ciphertext`) only until its subject
+  starts (`AttachSession`), cancels, lets the link lapse, or it is purged;
+  `RequestStore.ReferencePhoto` reads it at start only, never with a list.
+- **In the result.** The session's result marks `faceReference:
+  relying_party` (the evidence reads `reference_photo`, not `emrtd`) and,
+  when the flow requests the selfie, releases the photo beside it
+  (`referencePhoto`), kept and purged with the selfie: the Sessions tab
+  shows "Customer's photo" next to the selfie. The customer API's result
+  carries no image, as ever.
+- **Not built:** sending it from the wallet's own send form; combining it
+  with the expected-subject match (§13), which needs the document data.

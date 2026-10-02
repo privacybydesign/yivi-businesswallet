@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -74,97 +73,11 @@ func auditCount(t *testing.T, pool *pgxpool.Pool, action string) int {
 	return n
 }
 
-// testTenant is a provisioned tenant's secrets, for Provision.
-func testTenant(context.Context) (ProvisionedTenant, error) {
-	return ProvisionedTenant{WebhookSecret: "whsec_secret", LiveKey: "sk_live_secret", TestKey: "sk_test_secret"}, nil
-}
-
-func TestSettingsStoreSealsKeysAndProvisionsOnce(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	store := NewSettingsStore(pool, audit.NewDBRecorder(), newTestCipher(t))
-	orgID := makeOrg(t, pool, "acme")
-	ctx := context.Background()
-
-	if _, err := store.WebhookSecret(ctx, orgID); !errors.Is(err, ErrNotProvisioned) {
-		t.Errorf("WebhookSecret before provisioning = %v, want ErrNotProvisioned", err)
-	}
-	// Concurrent first uses: the lock lets one create the tenant.
-	var creates atomic.Int32
-	var wg sync.WaitGroup
-	for range 4 {
-		wg.Go(func() {
-			if err := store.Provision(ctx, orgID, func(ctx context.Context) (ProvisionedTenant, error) {
-				creates.Add(1)
-				return testTenant(ctx)
-			}); err != nil {
-				t.Errorf("Provision: %v", err)
-			}
-		})
-	}
-	wg.Wait()
-	if n := creates.Load(); n != 1 {
-		t.Errorf("creates = %d, want 1", n)
-	}
-
-	var stored []byte
-	if err := pool.QueryRow(ctx, `SELECT api_key_ciphertext || test_api_key_ciphertext || webhook_secret_ciphertext
-		FROM org_identity_proofing_settings WHERE organization_id = $1`, orgID).Scan(&stored); err != nil {
-		t.Fatalf("read row: %v", err)
-	}
-	if bytes.Contains(stored, []byte("sk_live_secret")) || bytes.Contains(stored, []byte("sk_test_secret")) ||
-		bytes.Contains(stored, []byte("whsec_secret")) {
-		t.Error("a key or the webhook secret is stored in the clear")
-	}
-	for mode, want := range map[Mode]string{ModeLive: "sk_live_secret", ModeTest: "sk_test_secret"} {
-		if key, err := store.APIKey(ctx, orgID, mode); err != nil || key != want {
-			t.Errorf("APIKey(%s) = %q, %v; want %q", mode, key, err, want)
-		}
-	}
-	if secret, err := store.WebhookSecret(ctx, orgID); err != nil || secret != "whsec_secret" {
-		t.Errorf("WebhookSecret = %q, %v", secret, err)
-	}
-	if n := auditCount(t, pool, audit.IdentityProofingProvisioned); n != 1 {
-		t.Errorf("provisioned audits = %d, want 1", n)
-	}
-}
-
-func TestSettingsStoreStoresNothingWhenCreateFails(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	store := NewSettingsStore(pool, audit.NewDBRecorder(), newTestCipher(t))
-	orgID := makeOrg(t, pool, "acme")
-	failed := errors.New("ips down")
-	err := store.Provision(context.Background(), orgID, func(context.Context) (ProvisionedTenant, error) {
-		return ProvisionedTenant{}, failed
-	})
-	if !errors.Is(err, failed) {
-		t.Fatalf("Provision = %v, want the create error", err)
-	}
-	if _, err := store.APIKey(context.Background(), orgID, ModeLive); !errors.Is(err, ErrNotProvisioned) {
-		t.Errorf("APIKey = %v, want ErrNotProvisioned", err)
-	}
-}
-
-func TestSettingsStoreWithoutKeyRefuses(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	store := NewSettingsStore(pool, audit.NopRecorder{}, nil)
-	orgID := makeOrg(t, pool, "acme")
-
-	if err := store.Provision(context.Background(), orgID, testTenant); !errors.Is(err, ErrNoEncryptionKey) {
-		t.Errorf("Provision = %v, want ErrNoEncryptionKey", err)
-	}
-	if _, err := store.APIKey(context.Background(), orgID, ModeLive); !errors.Is(err, ErrNotProvisioned) {
-		t.Errorf("APIKey = %v, want ErrNotProvisioned", err)
-	}
-}
-
 func TestSettingsStoreReplacesFlowSelection(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := NewSettingsStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	store := NewSettingsStore(pool, audit.NewDBRecorder())
 	orgID := makeOrg(t, pool, "acme")
 	ctx := context.Background()
-	if err := store.Provision(ctx, orgID, testTenant); err != nil {
-		t.Fatalf("Provision: %v", err)
-	}
 
 	empty, err := store.FlowSelection(ctx, orgID)
 	if err != nil || len(empty.FlowIDs) != 0 || empty.DefaultFlowID != "" {
@@ -579,6 +492,101 @@ func TestRequestStoreCustomerSubjectAndProofedName(t *testing.T) {
 	}
 	if due, err := store.ListPurgeDue(ctx, 10); err != nil || len(due) != 0 {
 		t.Errorf("purge due after purge = %d, %v; want none", len(due), err)
+	}
+}
+
+// A request for one known person seals the expected birth date, audits only
+// that a person is expected, and drops the date once decided.
+func TestRequestStoreExpectedSubject(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	orgID := makeOrg(t, pool, "acme")
+	requester := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, requester, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+
+	const birthDate = "1984-07-21"
+	req := createStarted(t, store, newStoredRequest(orgID, requester,
+		Subject{CustomerID: &customer.ID, Name: "Dibran Mulder", Email: "dibran@example.org", BirthDate: birthDate}), "s1")
+	if !req.ExpectsSubject || req.expectedBirthDate != birthDate {
+		t.Fatalf("created expects subject = %v, birth date = %q", req.ExpectsSubject, req.expectedBirthDate)
+	}
+	var birthDateCT []byte
+	if err := pool.QueryRow(ctx, `SELECT expected_birth_date_ciphertext FROM identity_proofing_requests WHERE id = $1`,
+		req.ID).Scan(&birthDateCT); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if len(birthDateCT) == 0 || bytes.Contains(birthDateCT, []byte(birthDate)) {
+		t.Error("the expected birth date is missing or stored in the clear")
+	}
+	var metadata string
+	if err := pool.QueryRow(ctx, `SELECT metadata::text FROM audit_events WHERE action = $1`,
+		audit.IdentityProofingRequested).Scan(&metadata); err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	if strings.Contains(metadata, birthDate) || !strings.Contains(metadata, "expectsSubject") {
+		t.Errorf("requested audit = %s; want expectsSubject without the birth date", metadata)
+	}
+
+	// Under review the match is still to be made.
+	if err := store.RecordOutcome(ctx, req, "s1", StatusNeedsReview, proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}); err != nil {
+		t.Fatalf("RecordOutcome review: %v", err)
+	}
+	if got := onlyRequest(t, store, orgID); got.expectedBirthDate != birthDate {
+		t.Errorf("birth date under review = %q, want it kept", got.expectedBirthDate)
+	}
+	req = onlyRequest(t, store, orgID)
+	res := proofingprovider.Result{Status: proofingprovider.StatusApproved, ErrorCode: ErrorIdentityMismatch}
+	if err := store.RecordOutcome(ctx, req, "s1", StatusRejected, res); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	got := onlyRequest(t, store, orgID)
+	if !got.ExpectsSubject || got.expectedBirthDate != "" || got.ErrorCode != ErrorIdentityMismatch {
+		t.Errorf("decided = expects %v, birth date %q, code %q; want expected, dropped, mismatch",
+			got.ExpectsSubject, got.expectedBirthDate, got.ErrorCode)
+	}
+}
+
+// A hosted request holds its reference photo sealed, read only at start, and
+// drops it once the session is attached.
+func TestRequestStoreHoldsTheReferencePhotoUntilStart(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	orgID := makeOrg(t, pool, "acme")
+	requester := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, requester, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	photo := &proofingprovider.Image{MimeType: "image/jpeg", Base64: "/9j/4AAQ"}
+	in := newStoredRequest(orgID, requester, Subject{CustomerID: &customer.ID, Email: "dibran@example.org"})
+	in.LinkTokenHash, in.ReferencePhoto = []byte("hash"), photo
+	req, err := store.Create(ctx, in)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	var photoCT []byte
+	if err := pool.QueryRow(ctx, `SELECT reference_photo_ciphertext FROM identity_proofing_requests WHERE id = $1`,
+		req.ID).Scan(&photoCT); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if len(photoCT) == 0 || bytes.Contains(photoCT, []byte(photo.Base64)) {
+		t.Error("the reference photo is missing or stored in the clear")
+	}
+	if got, err := store.ReferencePhoto(ctx, req); err != nil || got == nil || *got != *photo {
+		t.Fatalf("ReferencePhoto = %+v, %v; want the photo", got, err)
+	}
+	if ok, err := store.AttachSession(ctx, req, attachedSession("s1")); err != nil || !ok {
+		t.Fatalf("AttachSession = %v, %v", ok, err)
+	}
+	if got, err := store.ReferencePhoto(ctx, req); err != nil || got != nil {
+		t.Errorf("ReferencePhoto after start = %+v, %v; want none", got, err)
 	}
 }
 

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
@@ -67,6 +69,7 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("POST /proof/{token}/claim-link", h.limitHosted(h.hostedClaimLink))
 	mux.Handle("GET /proof/{token}/yivi/disclosure", h.limitHosted(h.hostedYiviDisclosure))
 	mux.Handle("POST /proof/{token}/yivi/face", h.limitHosted(h.hostedFaceFrame))
+	mux.Handle("POST /proof/{token}/diplomas", h.limitHosted(h.hostedAddDiplomas))
 }
 
 func (h *Handler) limitHosted(next respond.HandlerFunc) respond.HandlerFunc {
@@ -87,6 +90,9 @@ type hostedProgressResponse struct {
 	LinkExpiresAt time.Time  `json:"linkExpiresAt"`
 	Started       bool       `json:"started"`
 	CompletedAt   *time.Time `json:"completedAt,omitempty"`
+	// DiplomasUntil is when the subject can last add a diploma extract;
+	// absent while they cannot.
+	DiplomasUntil *time.Time `json:"diplomasUntil,omitempty"`
 }
 
 func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
@@ -97,6 +103,7 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 	return hostedProgressResponse{
 		Status: req.EffectiveStatus(now), ErrorCode: req.ErrorCode, Method: string(req.Method),
 		LinkExpiresAt: expires, Started: req.session != nil, CompletedAt: req.CompletedAt,
+		DiplomasUntil: diplomasUntil(req),
 	}
 }
 
@@ -123,7 +130,11 @@ type hostedViewResponse struct {
 		RequiredAssuranceLevel string   `json:"requiredAssuranceLevel,omitempty"`
 		RequestedAttributes    []string `json:"requestedAttributes"`
 		YiviAvailable          bool     `json:"yiviAvailable"`
+		// DiplomaMode is whether the session asks for DUO diploma extracts.
+		DiplomaMode DiplomaMode `json:"diplomaMode"`
 	} `json:"flow"`
+	// Diplomas are the extracts the subject added.
+	Diplomas []diplomaResponse `json:"diplomas"`
 }
 
 func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
@@ -156,6 +167,12 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 		out.Flow.RequestedAttributes = []string{}
 	}
 	out.Flow.YiviAvailable = YiviAppAvailable(f)
+	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
+	diplomas, err := h.service.RequestDiplomas(r.Context(), []uuid.UUID{hosted.Request.ID})
+	if err != nil {
+		return mapError(err)
+	}
+	out.Diplomas = newDiplomaResponses(diplomas[hosted.Request.ID])
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }

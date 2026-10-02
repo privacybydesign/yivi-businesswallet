@@ -25,8 +25,9 @@ import (
 // Handler serves identity proofing: the org routes (any member reads the flows
 // made available to them and the org's customers, and sends requests; defining
 // flows, choosing which members may use, and managing customers and the flows
-// assigned to them is admin-only), the customer API and IPS's event push. The
-// org's IPS tenant is provisioned by whichever route uses it first.
+// assigned to them is admin-only), the customer API, the hosted page and the
+// wallet's default webhook endpoint. The org is the proofing engine's tenant
+// under its own id; nothing is provisioned first.
 type Handler struct {
 	service     *Service
 	requireUser func(http.Handler) http.Handler
@@ -66,6 +67,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/versions", admin(respond.HandlerFunc(h.listFlowVersions)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/hosted", admin(respond.HandlerFunc(h.getFlowHosted)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/hosted", admin(respond.HandlerFunc(h.saveFlowHosted)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/diplomas", admin(respond.HandlerFunc(h.getFlowDiplomas)))
+	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/diplomas", admin(respond.HandlerFunc(h.saveFlowDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions", admin(respond.HandlerFunc(h.editFlow)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions/{version}/activate", admin(respond.HandlerFunc(h.activateFlowVersion)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flow-selection", admin(respond.HandlerFunc(h.configureFlows)))
@@ -79,6 +82,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/app", member(respond.HandlerFunc(h.app)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure", member(respond.HandlerFunc(h.yiviDisclosure)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/face", member(respond.HandlerFunc(h.faceFrame)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", admin(respond.HandlerFunc(h.decideReview)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", admin(respond.HandlerFunc(h.requestResult)))
 	mux.Handle("GET /orgs/{slug}/customers", member(respond.HandlerFunc(h.listCustomers)))
@@ -100,8 +104,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	h.registerPublicAPI(mux)
 	h.registerHosted(mux)
 	h.registerPause(mux)
-	// IPS pushes session changes here, signed per tenant; no user session.
-	mux.Handle("POST /identity-proofing/ips-events", respond.HandlerFunc(h.ipsEvent))
+	// The wallet's own webhook deliverer posts here for a customer without an
+	// endpoint of its own, signed with the default secret; no user session.
 	mux.Handle("POST /identity-proofing/default-webhook", respond.HandlerFunc(h.defaultWebhook))
 	mux.Handle("GET /orgs/{slug}/customers/{customerID}/flows", member(respond.HandlerFunc(h.listCustomerFlows)))
 	mux.Handle("PUT /orgs/{slug}/customers/{customerID}/flow-selection", admin(respond.HandlerFunc(h.assignCustomerFlows)))
@@ -121,13 +125,23 @@ type flowResponse struct {
 	// is the one the request form preselects.
 	Allowed bool `json:"allowed"`
 	Default bool `json:"default"`
+	// DiplomaMode is whether the flow asks for DUO diploma extracts after the
+	// identity check; absent on a single version (create, edit, versions),
+	// whose answer does not read the wallet's setting.
+	DiplomaMode DiplomaMode `json:"diplomaMode,omitempty"`
+	// NeedsReferencePhoto is a flow that matches the face without reading the
+	// chip: only a customer's API can send it, with its own photo.
+	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
 }
 
 func newFlowResponse(f OrgFlow) flowResponse {
 	if f.Steps == nil {
 		f.Steps = []string{}
 	}
-	return flowResponse{Flow: f.Flow, Completable: Completable(f.Flow), Allowed: f.Allowed, Default: f.Default}
+	return flowResponse{
+		Flow: f.Flow, Completable: Completable(f.Flow), Allowed: f.Allowed, Default: f.Default, DiplomaMode: f.Diplomas,
+		NeedsReferencePhoto: NeedsReferencePhoto(f.Flow),
+	}
 }
 
 // listFlows shows an admin every flow of the org and a member the ones the admin
@@ -246,17 +260,33 @@ type requestResponse struct {
 	// PurgedAt when it was.
 	PurgeAt  *time.Time `json:"purgeAt,omitempty"`
 	PurgedAt *time.Time `json:"purgedAt,omitempty"`
+	// DiplomaMode is whether the request asks for DUO diploma extracts;
+	// Diplomas the ones it holds, and DiplomasUntil when the subject can last
+	// add one (absent until the identity is approved).
+	DiplomaMode   DiplomaMode       `json:"diplomaMode"`
+	Diplomas      []diplomaResponse `json:"diplomas"`
+	DiplomasUntil *time.Time        `json:"diplomasUntil,omitempty"`
+	// ExpectedSubject is a request for one known person: only subjectName,
+	// born on the date it was sent with, is approved.
+	ExpectedSubject bool `json:"expectedSubject"`
+}
+
+// withDiplomas adds the extracts a request holds to its response.
+func (r requestResponse) withDiplomas(diplomas []Diploma) requestResponse {
+	r.Diplomas = newDiplomaResponses(diplomas)
+	return r
 }
 
 func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
+		DiplomaMode: diplomaModeOf(req), Diplomas: []diplomaResponse{}, DiplomasUntil: diplomasUntil(req),
 		ID: req.ID, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		CustomerID: req.CustomerID, CustomerName: req.CustomerName,
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
 		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Mode: req.mode(), Status: req.EffectiveStatus(now),
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
-		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt,
+		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject,
 	}
 }
 
@@ -280,10 +310,18 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
+	ids := make([]uuid.UUID, 0, len(reqs))
+	for _, req := range reqs {
+		ids = append(ids, req.ID)
+	}
+	diplomas, err := h.service.RequestDiplomas(r.Context(), ids)
+	if err != nil {
+		return mapError(err)
+	}
 	now := time.Now()
 	out := make([]requestResponse, 0, len(reqs))
 	for _, req := range reqs {
-		out = append(out, newRequestResponse(req, now))
+		out = append(out, newRequestResponse(req, now).withDiplomas(diplomas[req.ID]))
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
@@ -326,7 +364,11 @@ func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, newRequestResponse(req, time.Now()))
+	diplomas, err := h.service.RequestDiplomas(r.Context(), []uuid.UUID{req.ID})
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, newRequestResponse(req, time.Now()).withDiplomas(diplomas[req.ID]))
 	return nil
 }
 
@@ -526,7 +568,7 @@ func (h *Handler) requestEvents(w http.ResponseWriter, r *http.Request) error {
 }
 
 // createRequestRequest names a member (userId), or a customer and its subject's
-// e-mail address and optional name.
+// e-mail address and optional name (with a birth date: only that person).
 // Method (idem_app, the default, or yivi_app) is the app the subject proofs
 // with, Channel (email, the default, or on_screen) how the session reaches them.
 type createRequestRequest struct {
@@ -539,6 +581,9 @@ type createRequestRequest struct {
 	Channel    Channel                 `json:"channel"`
 	// Language is the sender's wallet language (en/nl).
 	Language email.Locale `json:"language"`
+	// BirthDate (YYYY-MM-DD) with Name makes a customer's request one for
+	// that person only.
+	BirthDate string `json:"birthDate"`
 }
 
 type createRequestResponse struct {
@@ -550,6 +595,9 @@ type createRequestResponse struct {
 	// as the QR code; absent for a mailed request and a Yivi one.
 	DeepLink          string     `json:"deepLink,omitempty"`
 	DeepLinkExpiresAt *time.Time `json:"deepLinkExpiresAt,omitempty"`
+	// HostedURL is a hosted request's link (channel hosted), for the member
+	// to hand the customer's subject; valid HostedLinkTTL.
+	HostedURL string `json:"hostedUrl,omitempty"`
 }
 
 func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
@@ -561,13 +609,15 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 	sent, err := h.service.CreateRequest(r.Context(), orgFromRequest(r),
 		Requester{UserID: caller.ID, Name: displayName(caller)}, NewRequest{
 			SubjectUserID: body.UserID, CustomerID: body.CustomerID,
-			SubjectEmail: body.Email, SubjectName: body.Name, FlowID: body.FlowID,
+			SubjectEmail: body.Email, SubjectName: body.Name, SubjectBirthDate: body.BirthDate, FlowID: body.FlowID,
 			Method: body.Method, Channel: body.Channel, Language: body.Language,
 		})
 	if err != nil {
 		return mapError(err)
 	}
-	out := createRequestResponse{requestResponse: newRequestResponse(sent.Request, time.Now()), MailSent: sent.MailSent}
+	out := createRequestResponse{
+		requestResponse: newRequestResponse(sent.Request, time.Now()), MailSent: sent.MailSent, HostedURL: sent.HostedURL,
+	}
 	if body.Channel == ChannelOnScreen && sent.DeepLink != "" {
 		out.DeepLink, out.DeepLinkExpiresAt = sent.DeepLink, &sent.DeepLinkExpiresAt
 	}
@@ -809,8 +859,12 @@ type customerFlowResponse struct {
 	Completable bool `json:"completable"`
 	// Assigned is the admin having assigned the flow to the customer; Default is
 	// the one the request form preselects for it.
-	Assigned bool `json:"assigned"`
-	Default  bool `json:"default"`
+	Assigned    bool        `json:"assigned"`
+	Default     bool        `json:"default"`
+	DiplomaMode DiplomaMode `json:"diplomaMode"`
+	// NeedsReferencePhoto: see flowResponse. Completable counts it as
+	// finishable (CustomerCompletable), sent through the customer's API.
+	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
 }
 
 // listCustomerFlows shows an admin every flow of the org with the customer's
@@ -829,7 +883,10 @@ func (h *Handler) listCustomerFlows(w http.ResponseWriter, r *http.Request) erro
 		if f.Steps == nil {
 			f.Steps = []string{}
 		}
-		out = append(out, customerFlowResponse{Flow: f.Flow, Completable: Completable(f.Flow), Assigned: f.Assigned, Default: f.Default})
+		out = append(out, customerFlowResponse{
+			Flow: f.Flow, Completable: CustomerCompletable(f.Flow), Assigned: f.Assigned, Default: f.Default, DiplomaMode: f.Diplomas,
+			NeedsReferencePhoto: NeedsReferencePhoto(f.Flow),
+		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
@@ -859,31 +916,9 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
-// maxIPSEventBytes bounds an IPS event body: a notify-only notice is tiny.
-const maxIPSEventBytes = 16 << 10
-
 // maxDefaultWebhookBytes bounds a delivery to the default endpoint: its data
 // is ids, a status and levels.
 const maxDefaultWebhookBytes = 16 << 10
-
-func (h *Handler) ipsEvent(w http.ResponseWriter, r *http.Request) error {
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxIPSEventBytes))
-	if err != nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "invalid request body"}
-	}
-	err = h.service.HandleIPSEvent(r.Context(), body, r.Header.Get("X-Webhook-Timestamp"), r.Header.Get("X-Signature"))
-	if errors.Is(err, ErrBadSignature) {
-		return &respond.APIError{Status: http.StatusUnauthorized, Code: "bad_signature", Message: "invalid event signature"}
-	}
-	if errors.Is(err, ErrEventTooEarly) {
-		return &respond.APIError{Status: http.StatusServiceUnavailable, Code: "retry_later", Message: "session not stored yet"}
-	}
-	if err != nil {
-		return mapError(err)
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
 
 // defaultWebhook is the wallet's own webhook endpoint, where a customer
 // without one is sent its events; the deliverer is its only caller.
@@ -952,6 +987,14 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}
 	case errors.Is(err, ErrLinkStarted):
 		return &respond.APIError{Status: http.StatusConflict, Code: "link_started", Message: "this link was started already"}
+	case errors.Is(err, ErrDiplomasNotAsked):
+		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_not_asked", Message: "this session asks for no diplomas"}
+	case errors.Is(err, ErrDiplomasClosed):
+		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_closed", Message: "diplomas can be added for a while after the identity is approved: " + DiplomaUploadWindow.String()}
+	case errors.Is(err, ErrReferencePhotoRequired):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "reference_photo_required", Message: "this flow matches the face against your own photo of the person: send it as referencePhoto through the customer API"}
+	case errors.Is(err, ErrDiplomasNeedPage):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "diplomas_need_page", Message: "this flow asks for diplomas, which are uploaded on a page: show the session on screen or send a hosted link"}
 	case errors.Is(err, ErrHostedDisabled):
 		return &respond.APIError{Status: http.StatusConflict, Code: "hosted_disabled", Message: "this flow's hosted page is switched off"}
 	case errors.Is(err, ErrProofingPaused):
@@ -961,7 +1004,7 @@ func mapError(err error) error {
 	case errors.Is(err, ErrRedirectNotAllowed):
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "redirect_not_allowed", Message: "redirectUrl must be on one of the customer's allowed redirect origins"}
 	case errors.Is(err, proofingprovider.ErrMethodUnavailable):
-		return &respond.APIError{Status: http.StatusConflict, Code: "method_unavailable", Message: "the identity proofing service cannot run Yivi app sessions: it does not take the wallet's disclosure (BOUND_LOGIN_RELYING_PARTY_REFERENCE)"}
+		return &respond.APIError{Status: http.StatusConflict, Code: "method_unavailable", Message: "Yivi app sessions need the Regula face check, which this deployment has not configured"}
 	case errors.As(err, &rejected):
 		// IPS's own validation message (e.g. which check a step requires) is what
 		// the admin needs to fix the flow.

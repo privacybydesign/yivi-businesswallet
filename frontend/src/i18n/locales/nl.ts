@@ -527,6 +527,8 @@ export const nl: Translation<typeof en> = {
       chipCloneDetected: "gekloonde documentchip gedetecteerd",
       docExpired: "document verlopen",
       assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",
+      identityMismatch:
+        "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
     },
     errors: {
       noEncryptionKey:
@@ -551,8 +553,50 @@ export const nl: Translation<typeof en> = {
       deviceActive:
         "De Idem-app heeft deze sessie nog open: ga daar verder, of sluit hem eerst.",
       methodUnavailable:
-        "De verificatiedienst kan nog geen sessies met de Yivi-app uitvoeren. Kies de Idem-app.",
+        "Deze omgeving kan geen sessies met de Yivi-app uitvoeren: de gezichtscontrole is niet ingesteld. Kies de Idem-app.",
+      hostedDisabled:
+        "De gehoste pagina van deze flow staat uit. Zet hem aan onder Gehoste pagina bij de flow, of verstuur het verzoek op een andere manier.",
+      diplomasNeedPage:
+        "Deze flow vraagt om diploma's, die worden geüpload op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
+      diplomasClosed:
+        "Diploma's kunnen alleen kort na een geslaagde identiteitscontrole worden toegevoegd.",
+      diplomasNotAsked: "Deze controle vraagt niet om diploma's.",
+      tooLarge: "Het bestand is te groot.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
+    },
+    diplomas: {
+      overview: {
+        label: "Diploma's",
+        detail:
+          "Na de identiteitscontrole: de diploma-uittreksels die je bij DUO downloadt, gecontroleerd op de handtekening van DUO en op je naam en geboortedatum",
+      },
+      identityDone: "Je identiteit is geverifieerd.",
+      heading: "Voeg nu je diploma toe",
+      intro:
+        "Upload het officiële uittreksel van je diploma van DUO. We controleren of DUO het heeft uitgegeven en of het op jouw naam staat.",
+      how: {
+        login: "Log in bij Mijn DUO met DigiD.",
+        openDuo: "Open Mijn DUO",
+        download:
+          "Download bij ‘Mijn diploma's’ het uittreksel van je diploma als pdf.",
+        upload:
+          "Upload die pdf hier, onveranderd. Een scan of foto van je diploma werkt niet.",
+      },
+      choose: "Pdf kiezen",
+      chooseAnother: "Nog een diploma toevoegen",
+      checking: "Bezig met controleren…",
+      closed: "De tijd om diploma's toe te voegen is voorbij.",
+      done: "Klaar",
+      needOne: "Voeg minstens één diploma toe om verder te gaan.",
+      level: "niveau {{level}}",
+      reasons: {
+        notADiploma:
+          "Dit is geen diploma-uittreksel van DUO. Download de originele pdf via Mijn DUO.",
+        signatureInvalid:
+          "De handtekening van DUO klopt niet: het bestand is gewijzigd of niet door DUO gemaakt. Download de originele pdf opnieuw.",
+        holderMismatch: "Dit diploma staat niet op jouw naam en geboortedatum.",
+        duplicate: "Dit diploma is al toegevoegd.",
+      },
     },
   },
   customers: {
@@ -663,14 +707,31 @@ export const nl: Translation<typeof en> = {
           title: "Op dit scherm tonen",
           hint: "Een pagina hier, voor iemand die bij je is.",
         },
+        link: {
+          title: "Link kopiëren",
+          hint: "Een link naar de pagina van de klant, die je de persoon zelf stuurt. 72 uur geldig.",
+        },
       },
       emailOptional: "E-mailadres (optioneel)",
       submitOnScreen: "Pagina openen",
+      submitLink: "Link maken",
+      hintLink:
+        "Je krijgt een link naar een pagina in de huisstijl van de klant. De persoon opent die op het eigen apparaat, leest wat er wordt verzameld, kiest de app en start daar; vanaf dan loopt de sessie. Er wordt niets gemaild.",
+      linkTitle: "Link gemaakt",
+      linkHint:
+        "Stuur deze link naar de persoon, bijvoorbeeld via chat. Hij kan één keer worden gestart, binnen 72 uur; de uitkomst verschijnt onder Sessies.",
+      linkDone: "Klaar",
       email: "E-mailadres",
       emailRequired: "Vul een geldig e-mailadres in.",
+      diplomasOnScreen:
+        "Deze flow vraagt om diploma's, die worden geüpload op de pagina waar de controle loopt, dus hij loopt op dit scherm of als link.",
       name: "Naam (optioneel)",
       nameHint:
         "Laat leeg als je die niet weet: na verificatie staat de naam van het document hier 30 dagen.",
+      nameRequired: "Vul de naam in van de persoon bij deze geboortedatum.",
+      birthDate: "Geboortedatum (optioneel)",
+      birthDateHint:
+        "Met een geboortedatum kan alleen deze persoon slagen: de naam en geboortedatum op het document moeten kloppen, anders wordt de controle afgewezen.",
       flow: "Flow",
       submit: "Verzoek versturen",
       cancel: "Annuleren",
@@ -678,6 +739,8 @@ export const nl: Translation<typeof en> = {
         "Wijs eerst een flow aan deze klant toe, op het tabblad Flows.",
       noFlowsMember:
         "Een beheerder moet eerst een flow aan deze klant toewijzen voordat je een verzoek kunt versturen.",
+      referencePhotoFlows:
+        "Flows die het gezicht vergelijken met de eigen foto van de klant staan hier niet: het systeem van de klant verstuurt die via de API, met de foto.",
     },
     onScreen: {
       title: "Een persoon verifiëren",
@@ -687,6 +750,7 @@ export const nl: Translation<typeof en> = {
         overview: "Wat er wordt verzameld",
         method: "Kies een app",
         session: "Scan de QR-code",
+        diplomas: "Diploma",
       },
       overview: {
         heading: "{{name}} wil je identiteit verifiëren",
@@ -814,6 +878,8 @@ export const nl: Translation<typeof en> = {
         audited:
           "Het openen van een afgeronde sessie wordt vastgelegd in het auditlog.",
         photo: "Documentfoto",
+        referencePhoto: "Foto van de klant",
+        noDocument: "Geen: het gezicht is vergeleken met de foto van de klant",
         selfie: "Selfie",
         documentImage: "Voorkant van het document",
         documentImageBack: "Achterkant van het document",
@@ -859,6 +925,17 @@ export const nl: Translation<typeof en> = {
       reason: "Reden",
       completed: "Afgerond",
       purgeAt: "Persoonsgegevens gewist op",
+      expectedSubject: "Verwachte persoon",
+      expectedSubjectValue:
+        "Naam en geboortedatum gecontroleerd tegen het document",
+      diplomas: {
+        title: "Diploma's",
+        none: "Geen diploma toegevoegd.",
+        tag_one: "{{count}} diploma",
+        tag_other: "{{count}} diploma's",
+        missing: "Geen diploma",
+        number: "DUO-nummer {{number}}",
+      },
       purged: "Persoonsgegevens gewist",
       purgedSubject: "Gewist",
       failedBecause: "{{status}} · {{reason}}",
@@ -1031,6 +1108,7 @@ export const nl: Translation<typeof en> = {
     adminOnly:
       "Alleen een beheerder van deze organisatie kan verificatieflows beheren.",
     notCompletable: "Kan niet vanuit de wallet verstuurd worden",
+    referencePhoto: "Eigen foto, via API",
     versionShort: "v{{version}}",
     edit: "Bewerken",
     selection: {
@@ -1070,10 +1148,14 @@ export const nl: Translation<typeof en> = {
       nfc_read: "Chip van het document lezen",
       document_photo: "Document fotograferen",
       face_verification: "Gezichtscontrole",
+      diploma_upload: "Diploma's uploaden (DUO)",
+    },
+    assuranceLevels: {
+      low: "Laag",
+      substantial: "Substantieel",
     },
     faceProviders: {
       regula: "Regula",
-      engine: "Ingebouwde engine",
       Iris: "Iris SDK",
     },
     checks: {
@@ -1123,13 +1205,15 @@ export const nl: Translation<typeof en> = {
       faceVerificationHint:
         "De persoon maakt een selfie; die wordt gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
       stepsOrder: "Wordt in deze volgorde verstuurd: {{steps}}",
+      diplomaUploadHint:
+        "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon uploadt de diploma-uittreksels die hij bij DUO downloadt, gecontroleerd op de handtekening van DUO en op naam en geboortedatum. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
       faceLocationNative:
         "De gezichtscontrole gebeurt in de app: de persoon heeft geen browserstap.",
       faceProvider: "Aanbieder gezichtscontrole",
       faceProviderHint:
-        "Regula doet de levendheidscontrole in de app en vergelijkt op de server; de ingebouwde engine gebruikt de eigen modellen van de proofing-dienst. Alleen de ingebouwde engine werkt ook in de Yivi-app.",
+        "Regula doet de levendheidscontrole in de app en de wallet vergelijkt het gezicht met de chipfoto; in de Yivi-app vergelijkt Regula de camera met de foto uit het credential. Iris werkt alleen in de Idem-app.",
       faceWithoutChip:
-        "Zonder het lezen van de chip is er geen chipfoto om het gezicht mee te vergelijken, dus deze flow kan niet naar leden worden gestuurd.",
+        "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met de eigen foto van de klant van deze persoon, die het systeem van de klant bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
       dataTitle: "Gevraagde resultaatgegevens",
       dataHint:
         "Bepaalt welke resultaatgegevens de verificatiedienst teruggeeft. Alleen gegevens van een stap in deze flow kunnen worden gevraagd. De wallet bewaart zelf alleen de uitkomst en het betrouwbaarheidsniveau.",
@@ -1148,7 +1232,12 @@ export const nl: Translation<typeof en> = {
       policyTitle: "Betrouwbaarheid en privacy",
       assuranceLevel: "Vereist betrouwbaarheidsniveau",
       assuranceLevelHint:
-        "Substantial vereist een chipcontrole plus de gezichtsvergelijking. High is nog niet haalbaar en wordt door de verificatiedienst geweigerd.",
+        "Met een vereist niveau wordt de sessie daaraan gehouden: een sessie die tekortschiet wordt afgewezen. Zonder niveau wordt er geen niveau berekend.",
+      assuranceLevelNeeds: {
+        low: "Laag vereist het lezen van de chip met geverifieerde chipgegevens. Die instellingen staan vast aan.",
+        substantial:
+          "Substantieel vereist het lezen van de chip met geverifieerde chipgegevens en kopiecontrole, en een levend gezicht dat Regula met de chipfoto vergelijkt. Die instellingen staan vast aan.",
+      },
       none: "(geen)",
       inherit: "(organisatie overnemen)",
       yes: "true",
@@ -1678,6 +1767,10 @@ export const nl: Translation<typeof en> = {
       identityProofingPaused: "Identiteitsverificatie gepauzeerd",
       identityProofingFlowHostedConfigured:
         "Gehoste pagina van een flow gewijzigd",
+      identityProofingFlowDiplomasConfigured:
+        "Gewijzigd of een flow om diploma's vraagt",
+      identityProofingDiplomaAdded: "Diploma toegevoegd",
+      identityProofingDiplomaRejected: "Diploma geweigerd",
       identityProofingResumed: "Identiteitsverificatie hervat",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",

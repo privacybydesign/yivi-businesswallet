@@ -2,6 +2,7 @@ package proofing
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
@@ -21,27 +23,25 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
-// Provider is the IPS surface the service drives (implemented by
-// *proofingprovider.Client and *proofingprovider.Stub).
+// Provider is the proofing engine the service drives (implemented by
+// *proofingengine.Engine, and by *proofingprovider.Stub in tests). Every call
+// names the org it is for as the engine's tenant.
 type Provider interface {
-	CreateTenant(ctx context.Context, id, name string) (proofingprovider.Tenant, error)
-	RotateWebhookSecret(ctx context.Context, tenantID string) (string, error)
-	CreateAPIKey(ctx context.Context, tenantID string, env proofingprovider.KeyEnvironment, scopes []string) (string, error)
-	ListFlows(ctx context.Context, apiKey string) ([]proofingprovider.Flow, error)
-	CreateFlow(ctx context.Context, apiKey string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error)
-	CreateFlowVersion(ctx context.Context, apiKey, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error)
-	ListFlowVersions(ctx context.Context, apiKey, id string) ([]proofingprovider.Flow, error)
-	ActivateFlowVersion(ctx context.Context, apiKey, id string, version int) (proofingprovider.Flow, error)
-	CreateSession(ctx context.Context, apiKey string, in proofingprovider.SessionInput) (proofingprovider.Session, error)
-	SessionStatus(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Result, error)
-	SessionResult(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Result, error)
-	SubmitReference(ctx context.Context, apiKey, sessionID, sessionToken string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error)
+	ListFlows(ctx context.Context, t proofingprovider.Tenant) ([]proofingprovider.Flow, error)
+	CreateFlow(ctx context.Context, t proofingprovider.Tenant, in proofingprovider.FlowSpec) (proofingprovider.Flow, error)
+	CreateFlowVersion(ctx context.Context, t proofingprovider.Tenant, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error)
+	ListFlowVersions(ctx context.Context, t proofingprovider.Tenant, id string) ([]proofingprovider.Flow, error)
+	ActivateFlowVersion(ctx context.Context, t proofingprovider.Tenant, id string, version int) (proofingprovider.Flow, error)
+	CreateSession(ctx context.Context, t proofingprovider.Tenant, in proofingprovider.SessionInput) (proofingprovider.Session, error)
+	SessionStatus(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Result, error)
+	SessionResult(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Result, error)
+	SubmitReference(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error)
 	SubmitFaceFrame(ctx context.Context, sessionToken, image string) (proofingprovider.FaceVerdict, error)
-	DecideReview(ctx context.Context, apiKey, sessionID, sessionToken string, d proofingprovider.ReviewDecision) error
-	SessionHandover(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Claim, error)
-	SessionIdentity(ctx context.Context, apiKey, sessionID, sessionToken string) (proofingprovider.Identity, error)
-	CancelSession(ctx context.Context, apiKey, sessionID, sessionToken string) error
-	DeleteSession(ctx context.Context, apiKey, sessionID, sessionToken string) error
+	DecideReview(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, d proofingprovider.ReviewDecision) error
+	SessionHandover(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Claim, error)
+	SessionIdentity(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Identity, error)
+	CancelSession(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) error
+	DeleteSession(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) error
 }
 
 // verifier is the OpenID4VP verifier a Yivi request's disclosure runs at
@@ -52,10 +52,6 @@ type verifier interface {
 }
 
 type settingsStore interface {
-	CanStoreSecrets() bool
-	APIKey(ctx context.Context, orgID uuid.UUID, mode Mode) (string, error)
-	WebhookSecret(ctx context.Context, orgID uuid.UUID) (string, error)
-	Provision(ctx context.Context, orgID uuid.UUID, create func(context.Context) (ProvisionedTenant, error)) error
 	FlowSelection(ctx context.Context, orgID uuid.UUID) (FlowSelection, error)
 	SaveFlowSelection(ctx context.Context, orgID uuid.UUID, sel FlowSelection) error
 	RecordFlowEvent(ctx context.Context, orgID uuid.UUID, action string, flow proofingprovider.Flow) error
@@ -74,6 +70,7 @@ type requestStore interface {
 	Member(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
 	RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
+	ReferencePhoto(ctx context.Context, req Request) (*proofingprovider.Image, error)
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
 	GetForCustomer(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, error)
 	Get(ctx context.Context, orgID, id uuid.UUID) (Request, error)
@@ -151,21 +148,20 @@ type Service struct {
 	pauses    pauseStore
 	// flowHostedSettings is each flow's hosted page settings; nil the defaults.
 	flowHostedSettings flowHostedStore
-	ips                Provider
-	verifier           verifier
-	mailer             Mailer
-	now                func() time.Time
+	// flowDiplomaSettings is each flow's DiplomaMode, diplomas the extracts
+	// requests hold; nil asks for none.
+	flowDiplomaSettings flowDiplomaStore
+	diplomas            diplomaStore
+	diplomaChecker      diplomaChecker
+	ips                 Provider
+	verifier            verifier
+	mailer              Mailer
+	now                 func() time.Time
 	// readChecks throttles the IPS re-check of a single-request read.
 	readChecks *readThrottle
-	// callbackURL is where IPS pushes session changes (HandleIPSEvent); empty
-	// leaves a session to its deadline and to reads.
-	callbackURL string
 	// hostedBaseURL is the public page a hosted link's token is appended to.
 	hostedBaseURL string
 }
-
-// SetCallbackURL sets where IPS pushes session changes; call before serving.
-func (s *Service) SetCallbackURL(u string) { s.callbackURL = u }
 
 // NewService builds the proofing service. A nil mailer skips the e-mail (tests).
 // Stores are the service's persistence, one store per concern.
@@ -180,84 +176,59 @@ type Stores struct {
 	Pauses pauseStore
 	// FlowHosted holds each flow's hosted page settings; nil is the defaults.
 	FlowHosted flowHostedStore
+	// FlowDiplomas holds each flow's DiplomaMode and Diplomas the extracts
+	// requests hold; nil asks for none.
+	FlowDiplomas flowDiplomaStore
+	Diplomas     diplomaStore
 }
 
 func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *Service {
 	return &Service{
 		settings: stores.Settings, requests: stores.Requests, customers: stores.Customers, apiKeys: stores.APIKeys,
-		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted, ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
+		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
+		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
 		readChecks: newReadThrottle(readReconcileEvery),
 	}
 }
 
-// orgAPIKey returns the org's live IPS API key, provisioning the org's IPS
-// tenant on its first use: an org needs no enable step before it can proof.
-func (s *Service) orgAPIKey(ctx context.Context, org Org) (string, error) {
-	return s.orgKey(ctx, org, ModeLive)
+// orgTenant is the org as the engine's tenant: its own id, in the org's test
+// mode (a sandbox that only runs scripted outcomes) for ModeTest. An org
+// needs no enable step before it can proof.
+func orgTenant(orgID uuid.UUID, mode Mode) proofingprovider.Tenant {
+	return proofingprovider.Tenant{ID: orgID.String(), Sandbox: mode == ModeTest}
 }
 
-// orgKey is orgAPIKey for mode: the test key runs the org's test requests,
-// scripted at IPS, on the same tenant.
-func (s *Service) orgKey(ctx context.Context, org Org, mode Mode) (string, error) {
-	apiKey, err := s.settings.APIKey(ctx, org.ID, mode)
-	if !errors.Is(err, ErrNotProvisioned) {
-		return apiKey, err
+// retentionGrace is how much longer the engine keeps a customer's session
+// than the customer's data retention, so PurgeDue (which erases it in the
+// engine too) always runs first.
+const retentionGrace = 24 * time.Hour
+
+// engineRetention is how long the engine keeps a session once it ended: a
+// customer's data retention (plus grace); a member's request leaves it to
+// the engine's default.
+func engineRetention(customer *Customer) time.Duration {
+	if customer == nil {
+		return 0
 	}
-	if err := s.provision(ctx, org); err != nil {
-		return "", err
-	}
-	return s.settings.APIKey(ctx, org.ID, mode)
+	return customer.Settings.DataRetention() + retentionGrace
 }
 
-// requestAPIKey is the IPS key req's session runs under.
-func (s *Service) requestAPIKey(ctx context.Context, req Request) (string, error) {
-	return s.settings.APIKey(ctx, req.OrganizationID, req.mode())
-}
-
-// provision creates the org's IPS tenant under the org's own id, with a live
-// and a test key, and stores them. The encryption key is checked first, so a
-// deployment without one never leaves an orphaned tenant at IPS. A tenant IPS
-// already has (a first use whose save was lost) is taken over with a fresh
-// webhook secret and fresh keys.
-func (s *Service) provision(ctx context.Context, org Org) error {
-	if !s.settings.CanStoreSecrets() {
-		return ErrNoEncryptionKey
-	}
-	id := org.ID.String()
-	return s.settings.Provision(ctx, org.ID, func(ctx context.Context) (ProvisionedTenant, error) {
-		var out ProvisionedTenant
-		tenant, err := s.ips.CreateTenant(ctx, id, org.Name)
-		out.WebhookSecret = tenant.WebhookSecret
-		if errors.Is(err, proofingprovider.ErrTenantExists) {
-			out.WebhookSecret, err = s.ips.RotateWebhookSecret(ctx, id)
-		}
-		if err != nil {
-			return out, fmt.Errorf("proofing: provision tenant org %s: %w", org.ID, err)
-		}
-		if out.LiveKey, err = s.ips.CreateAPIKey(ctx, id, proofingprovider.KeyLive, proofingprovider.TenantKeyScopes); err != nil {
-			return out, fmt.Errorf("proofing: provision live api key org %s: %w", org.ID, err)
-		}
-		if out.TestKey, err = s.ips.CreateAPIKey(ctx, id, proofingprovider.KeyTest, proofingprovider.TenantKeyScopes); err != nil {
-			return out, fmt.Errorf("proofing: provision test api key org %s: %w", org.ID, err)
-		}
-		return out, nil
-	})
+// requestTenant is the tenant req's session runs under.
+func requestTenant(req Request) proofingprovider.Tenant {
+	return orgTenant(req.OrganizationID, req.mode())
 }
 
 // Flows returns the org's active IPS flows with the admin's selection applied.
 // all lists every flow (the admin's view); otherwise only the flows members may
 // send a request on.
 func (s *Service) Flows(ctx context.Context, org Org, all bool) ([]OrgFlow, error) {
-	apiKey, err := s.orgAPIKey(ctx, org)
-	if err != nil {
-		return nil, err
-	}
-	return s.orgFlows(ctx, org, apiKey, all)
+	tenant := orgTenant(org.ID, ModeLive)
+	return s.orgFlows(ctx, org, tenant, all)
 }
 
 // orgFlows is Flows with the org's IPS key already resolved.
-func (s *Service) orgFlows(ctx context.Context, org Org, apiKey string, all bool) ([]OrgFlow, error) {
-	flows, err := s.ips.ListFlows(ctx, apiKey)
+func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider.Tenant, all bool) ([]OrgFlow, error) {
+	flows, err := s.ips.ListFlows(ctx, tenant)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
 	}
@@ -265,9 +236,19 @@ func (s *Service) orgFlows(ctx context.Context, org Org, apiKey string, all bool
 	if err != nil {
 		return nil, err
 	}
+	diplomas, err := s.allFlowDiplomas(ctx, org.ID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]OrgFlow, 0, len(flows))
 	for _, f := range flows {
-		of := OrgFlow{Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && Completable(f), Default: f.ID == sel.DefaultFlowID}
+		of := OrgFlow{
+			Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && Completable(f), Default: f.ID == sel.DefaultFlowID,
+			Diplomas: DiplomasOff,
+		}
+		if mode, ok := diplomas[f.ID]; ok {
+			of.Diplomas = mode
+		}
 		if all || of.Allowed {
 			out = append(out, of)
 		}
@@ -279,7 +260,7 @@ func (s *Service) orgFlows(ctx context.Context, org Org, apiKey string, all bool
 // active IPS flow a recipient can finish, and a non-empty selection needs a
 // default among it.
 func (s *Service) ConfigureFlows(ctx context.Context, org Org, sel FlowSelection) error {
-	sel, err := s.validSelection(ctx, org, sel)
+	sel, err := s.validSelection(ctx, org, sel, Completable)
 	if err != nil {
 		return err
 	}
@@ -288,8 +269,10 @@ func (s *Service) ConfigureFlows(ctx context.Context, org Org, sel FlowSelection
 
 // validSelection deduplicates sel and checks it: every flow an active IPS flow
 // of the org a recipient can finish, and a non-empty selection has its default
-// among it. Both the members' allow-list and a customer's assignment are one.
-func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection) (FlowSelection, error) {
+// among it. Both the members' allow-list and a customer's assignment are one;
+// completable is what the recipients can finish (Completable for members,
+// CustomerCompletable for a customer's subjects).
+func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection, completable func(proofingprovider.Flow) bool) (FlowSelection, error) {
 	ids := make([]string, 0, len(sel.FlowIDs))
 	for _, id := range sel.FlowIDs {
 		if !slices.Contains(ids, id) {
@@ -312,7 +295,7 @@ func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection
 		if i < 0 {
 			return sel, ErrFlowNotFound
 		}
-		if !Completable(flows[i].Flow) {
+		if !completable(flows[i].Flow) {
 			return sel, ErrFlowNotCompletable
 		}
 	}
@@ -327,11 +310,8 @@ func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.F
 	if err != nil {
 		return proofingprovider.Flow{}, err
 	}
-	apiKey, err := s.orgAPIKey(ctx, org)
-	if err != nil {
-		return proofingprovider.Flow{}, err
-	}
-	flow, err := s.ips.CreateFlow(ctx, apiKey, in)
+	tenant := orgTenant(org.ID, ModeLive)
+	flow, err := s.ips.CreateFlow(ctx, tenant, in)
 	if err != nil {
 		return proofingprovider.Flow{}, err
 	}
@@ -348,11 +328,8 @@ func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingp
 	if err != nil {
 		return proofingprovider.Flow{}, err
 	}
-	apiKey, err := s.orgAPIKey(ctx, org)
-	if err != nil {
-		return proofingprovider.Flow{}, err
-	}
-	flow, err := s.ips.CreateFlowVersion(ctx, apiKey, id, in)
+	tenant := orgTenant(org.ID, ModeLive)
+	flow, err := s.ips.CreateFlowVersion(ctx, tenant, id, in)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
 		return proofingprovider.Flow{}, ErrFlowNotFound
 	}
@@ -367,11 +344,8 @@ func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingp
 
 // FlowVersions returns every version of flow id, oldest first.
 func (s *Service) FlowVersions(ctx context.Context, org Org, id string) ([]proofingprovider.Flow, error) {
-	apiKey, err := s.orgAPIKey(ctx, org)
-	if err != nil {
-		return nil, err
-	}
-	versions, err := s.ips.ListFlowVersions(ctx, apiKey, id)
+	tenant := orgTenant(org.ID, ModeLive)
+	versions, err := s.ips.ListFlowVersions(ctx, tenant, id)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
 		return nil, ErrFlowNotFound
 	}
@@ -384,11 +358,8 @@ func (s *Service) FlowVersions(ctx context.Context, org Org, id string) ([]proof
 // ActivateFlowVersion makes an earlier (or later) version of flow id the one new
 // requests run, and audits it.
 func (s *Service) ActivateFlowVersion(ctx context.Context, org Org, id string, version int) (proofingprovider.Flow, error) {
-	apiKey, err := s.orgAPIKey(ctx, org)
-	if err != nil {
-		return proofingprovider.Flow{}, err
-	}
-	flow, err := s.ips.ActivateFlowVersion(ctx, apiKey, id, version)
+	tenant := orgTenant(org.ID, ModeLive)
+	flow, err := s.ips.ActivateFlowVersion(ctx, tenant, id, version)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
 		return proofingprovider.Flow{}, ErrFlowNotFound
 	}
@@ -412,7 +383,7 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 	in.SelfieLocation = ""
 	if !hasFaceStep(in.Steps) {
 		in.FaceProvider = ""
-		return in, checkReachable(in)
+		return in, nil
 	}
 	in.SelfieLocation = selfieLocationNative
 	if in.FaceProvider == "" {
@@ -421,22 +392,7 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 	if !slices.Contains(faceProviders, in.FaceProvider) {
 		return in, fmt.Errorf("%w: unknown face provider %q", ErrInvalidInput, in.FaceProvider)
 	}
-	return in, checkReachable(in)
-}
-
-// checkReachable refuses a flow whose required level its steps can never
-// reach, which would fail every request with ErrorAssuranceNotMet. IPS
-// (computeEIDASAssuranceLevel) reports substantial only for a chip read plus a
-// Regula face check against the chip's portrait; Validate at IPS accepts
-// weaker flows, as it checks the declared checks and not the face provider.
-func checkReachable(in proofingprovider.FlowSpec) error {
-	if in.RequiredAssuranceLevel != eidasSubstantial {
-		return nil
-	}
-	if !slices.Contains(in.Steps, stepNFCRead) || !hasFaceStep(in.Steps) || in.FaceProvider != faceProviderRegula {
-		return fmt.Errorf("%w: substantial needs the chip read and a face step verified by Regula", ErrInvalidInput)
-	}
-	return nil
+	return in, nil
 }
 
 // Requester is the member sending a request.
@@ -490,34 +446,50 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if customer != nil && customer.Settings.SessionTTL != 0 {
 		ttl = customer.Settings.SessionTTL
 	}
-	apiKey, err := s.orgAPIKey(ctx, org)
-	if err != nil {
-		return Sent{}, err
-	}
-	flow, err := s.sendableFlow(ctx, org, apiKey, in.FlowID, customer)
+	tenant := orgTenant(org.ID, ModeLive)
+	flow, err := s.sendableFlow(ctx, org, tenant, in.FlowID, customer)
 	if err != nil {
 		return Sent{}, err
 	}
 	if in.Method == proofingprovider.MethodYivi && !YiviAppAvailable(flow) {
 		return Sent{}, fmt.Errorf("%w: this flow's face provider only runs in the Idem app", ErrInvalidInput)
 	}
+	if subject.BirthDate != "" && !ReadsIdentity(flow) {
+		return Sent{}, fmt.Errorf("%w: this flow does not read the name and date of birth, so it cannot check for one person", ErrInvalidInput)
+	}
+	photo, err := referencePhotoFor(flow, in.ReferencePhoto)
+	if err != nil {
+		return Sent{}, err
+	}
+	diplomas, err := s.flowDiplomas(ctx, org.ID, flow.ID)
+	if err != nil {
+		return Sent{}, err
+	}
+	// The extracts are uploaded on the page that ran the session; a test
+	// request runs none and asks for none.
+	if in.Mode == ModeTest {
+		diplomas = DiplomasOff
+	}
+	if diplomas.asked() && in.Channel != ChannelHosted && in.Channel != ChannelOnScreen {
+		return Sent{}, ErrDiplomasNeedPage
+	}
 	if in.Channel == ChannelHosted {
-		return s.createHosted(ctx, org, by, in, subject, *customer, flow)
+		return s.createHosted(ctx, org, by, in, subject, *customer, flow, diplomas, photo)
 	}
 
 	id := uuid.New()
-	sessionKey, input := apiKey, proofingprovider.SessionInput{
-		FlowID: flow.ID, ClientReference: id.String(), TTL: ttl, Method: in.Method, CallbackURL: s.callbackURL,
-		Language: string(in.Language),
+	input := proofingprovider.SessionInput{
+		FlowID: flow.ID, ClientReference: id.String(), TTL: ttl, Method: in.Method,
+		Language: string(in.Language), Retention: engineRetention(customer),
 	}
 	if in.Mode == ModeTest {
-		// A test key's session runs no flow: its outcome is scripted at IPS.
-		if sessionKey, err = s.orgKey(ctx, org, ModeTest); err != nil {
-			return Sent{}, err
-		}
+		// A test session runs no flow: its outcome is scripted by the engine,
+		// so a reference photo is checked above but has no face to match.
 		input.FlowID, input.ScriptedOutcome = "", in.ScriptedOutcome
+	} else {
+		input.ReferencePhoto = photo
 	}
-	sess, err := s.ips.CreateSession(ctx, sessionKey, input)
+	sess, err := s.ips.CreateSession(ctx, orgTenant(org.ID, in.Mode), input)
 	if err != nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", id, err)
 	}
@@ -529,6 +501,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: id, OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
 		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: in.Method, Channel: in.Channel, Mode: in.Mode,
+		Diplomas: diplomas,
 	})
 	if err != nil {
 		return Sent{}, err
@@ -545,9 +518,9 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	}
 	req.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt}
 	if in.Mode == ModeTest {
-		// Record the scripted outcome now rather than on IPS's push; a failure
-		// is logged and the push or the deadline job records it instead.
-		req, _ = s.tryReconcile(ctx, sessionKey, req)
+		// Record the scripted outcome now rather than on the engine's notice;
+		// a failure is logged and the notice or the deadline job records it.
+		req, _ = s.tryReconcile(ctx, orgTenant(org.ID, in.Mode), req)
 		return Sent{Request: req}, nil
 	}
 
@@ -571,7 +544,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 // the subject starts one from the page (StartHosted) until HostedLinkTTL. Its
 // redirect must be on one of the customer's allowed origins.
 func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in NewRequest, subject Subject,
-	customer Customer, flow proofingprovider.Flow,
+	customer Customer, flow proofingprovider.Flow, diplomas DiplomaMode, photo *proofingprovider.Image,
 ) (Sent, error) {
 	if s.hostedBaseURL == "" {
 		return Sent{}, errors.New("proofing: no hosted page URL configured")
@@ -602,6 +575,7 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 		ID: uuid.New(), OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
 		Flow: flow, LinkExpiresAt: s.now().Add(HostedLinkTTL), Method: in.Method, Channel: in.Channel,
 		Mode: in.Mode, LinkTokenHash: hash, RedirectURL: in.RedirectURL, Language: in.Language,
+		Diplomas: diplomas, ReferencePhoto: photo,
 	})
 	if err != nil {
 		return Sent{}, err
@@ -659,6 +633,9 @@ func normalizeRequest(in NewRequest) (NewRequest, error) {
 // An on-screen request's subject is in front of the sender and needs no address.
 func (s *Service) subject(ctx context.Context, org Org, in NewRequest) (Subject, *Customer, error) {
 	if in.CustomerID == nil {
+		if strings.TrimSpace(in.SubjectBirthDate) != "" {
+			return Subject{}, nil, fmt.Errorf("%w: only a customer's request can be for one known person", ErrInvalidInput)
+		}
 		m, err := s.requests.Member(ctx, org.ID, in.SubjectUserID)
 		if err != nil {
 			return Subject{}, nil, err
@@ -682,14 +659,77 @@ func (s *Service) subject(ctx context.Context, org Org, in NewRequest) (Subject,
 	if len(name) > maxSubjectNameLength {
 		return Subject{}, nil, fmt.Errorf("%w: the name is too long", ErrInvalidInput)
 	}
+	birthDate, err := expectedBirthDate(in.SubjectBirthDate, name, s.now())
+	if err != nil {
+		return Subject{}, nil, err
+	}
+	subject := Subject{CustomerID: in.CustomerID, Name: name, BirthDate: birthDate}
 	if in.Channel != ChannelEmail && strings.TrimSpace(in.SubjectEmail) == "" {
-		return Subject{CustomerID: in.CustomerID, Name: name}, &customer, nil
+		return subject, &customer, nil
 	}
 	email, err := user.ParseEmail(in.SubjectEmail)
 	if err != nil {
 		return Subject{}, nil, fmt.Errorf("%w: enter a valid e-mail address", ErrInvalidInput)
 	}
-	return Subject{CustomerID: in.CustomerID, Name: name, Email: string(email)}, &customer, nil
+	subject.Email = string(email)
+	return subject, &customer, nil
+}
+
+// referencePhotoFor checks the reference photo a request on flow carries: one
+// is required exactly when the flow NeedsReferencePhoto, so a chip flow is
+// never matched against anything but the chip. It must be a PNG, JPEG or WebP
+// image (sniffed, not trusted from the caller) of at most
+// MaxReferencePhotoBytes; nil for a flow that takes none.
+func referencePhotoFor(flow proofingprovider.Flow, raw string) (*proofingprovider.Image, error) {
+	raw = strings.TrimSpace(raw)
+	switch needs := NeedsReferencePhoto(flow); {
+	case needs && raw == "":
+		return nil, ErrReferencePhotoRequired
+	case !needs && raw != "":
+		return nil, fmt.Errorf("%w: this flow matches the face against the document's chip and takes no reference photo", ErrInvalidInput)
+	case !needs:
+		return nil, nil
+	}
+	data, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the reference photo is not standard base64", ErrInvalidInput)
+	}
+	if len(data) > MaxReferencePhotoBytes {
+		return nil, fmt.Errorf("%w: the reference photo is larger than %d KiB", ErrInvalidInput, MaxReferencePhotoBytes>>10)
+	}
+	mime := http.DetectContentType(data)
+	if !slices.Contains(referencePhotoTypes, mime) {
+		return nil, fmt.Errorf("%w: the reference photo must be a PNG, JPEG or WebP image", ErrInvalidInput)
+	}
+	return &proofingprovider.Image{MimeType: mime, Base64: base64.StdEncoding.EncodeToString(data)}, nil
+}
+
+// expectedBirthDate checks the birth date a request for one known person is
+// sent with (YYYY-MM-DD, in the past) and returns it in that form; empty is a
+// request for anyone. The person is the name sent with it, so it needs one.
+func expectedBirthDate(raw, name string, now time.Time) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if name == "" {
+		return "", fmt.Errorf("%w: a request for one person needs their name with the date of birth", ErrInvalidInput)
+	}
+	date, err := time.Parse(birthDateLayout, raw)
+	if err != nil || !date.Before(now) {
+		return "", fmt.Errorf("%w: the date of birth is a past date written YYYY-MM-DD", ErrInvalidInput)
+	}
+	return date.Format(birthDateLayout), nil
+}
+
+// ReadsIdentity reports whether flow f's result carries the holder's name and
+// date of birth (the document data, dg1): what a request for one known person
+// is matched against. A flow that lists no data gets what its steps collect.
+func ReadsIdentity(f proofingprovider.Flow) bool {
+	if len(f.RequestedAttributes) == 0 {
+		return slices.Contains(f.Steps, stepDocumentCapture)
+	}
+	return slices.Contains(f.RequestedAttributes, attributeDocument)
 }
 
 // proofingMail is the mail a request sends. A member's is the org's; a
@@ -724,9 +764,9 @@ func (s *Service) proofingMail(ctx context.Context, org Org, customer *Customer,
 // member (customer nil), a flow the admin made available to members; for a
 // customer's subject, one assigned to that customer, its default when flowID is
 // empty. Either way it must be one a recipient can finish.
-func (s *Service) sendableFlow(ctx context.Context, org Org, apiKey, flowID string, customer *Customer) (proofingprovider.Flow, error) {
+func (s *Service) sendableFlow(ctx context.Context, org Org, tenant proofingprovider.Tenant, flowID string, customer *Customer) (proofingprovider.Flow, error) {
 	if customer == nil {
-		flows, err := s.orgFlows(ctx, org, apiKey, true)
+		flows, err := s.orgFlows(ctx, org, tenant, true)
 		if err != nil {
 			return proofingprovider.Flow{}, err
 		}
@@ -734,7 +774,7 @@ func (s *Service) sendableFlow(ctx context.Context, org Org, apiKey, flowID stri
 		if i < 0 {
 			return proofingprovider.Flow{}, ErrFlowNotFound
 		}
-		if err := sendable(flows[i].Flow, flows[i].Allowed, ErrFlowNotAllowed); err != nil {
+		if err := sendable(Completable(flows[i].Flow), flows[i].Allowed, ErrFlowNotAllowed); err != nil {
 			return proofingprovider.Flow{}, err
 		}
 		return flows[i].Flow, nil
@@ -745,7 +785,7 @@ func (s *Service) sendableFlow(ctx context.Context, org Org, apiKey, flowID stri
 			return proofingprovider.Flow{}, ErrFlowNotAssigned
 		}
 	}
-	flows, err := s.ips.ListFlows(ctx, apiKey)
+	flows, err := s.ips.ListFlows(ctx, tenant)
 	if err != nil {
 		return proofingprovider.Flow{}, fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
 	}
@@ -753,16 +793,16 @@ func (s *Service) sendableFlow(ctx context.Context, org Org, apiKey, flowID stri
 	if i < 0 {
 		return proofingprovider.Flow{}, ErrFlowNotFound
 	}
-	if err := sendable(flows[i], slices.Contains(customer.Flows.FlowIDs, flowID), ErrFlowNotAssigned); err != nil {
+	if err := sendable(CustomerCompletable(flows[i]), slices.Contains(customer.Flows.FlowIDs, flowID), ErrFlowNotAssigned); err != nil {
 		return proofingprovider.Flow{}, err
 	}
 	return flows[i], nil
 }
 
-// sendable refuses a flow no recipient can finish, then one the sender may not
-// use (notPermitted).
-func sendable(flow proofingprovider.Flow, permitted bool, notPermitted error) error {
-	if !Completable(flow) {
+// sendable refuses a flow no recipient can finish (completable false), then
+// one the sender may not use (notPermitted).
+func sendable(completable, permitted bool, notPermitted error) error {
+	if !completable {
 		return ErrFlowNotCompletable
 	}
 	if !permitted {
@@ -781,18 +821,18 @@ func (s *Service) Requests(ctx context.Context, orgID uuid.UUID, filter RequestF
 // with no actor: the audit trail shows it as the system's. An IPS
 // failure is logged and the row is shown as last known: a read must not fail
 // because IPS is briefly away.
-func (s *Service) reconcile(ctx context.Context, apiKey string, req Request) Request {
-	req, _ = s.tryReconcile(ctx, apiKey, req)
+func (s *Service) reconcile(ctx context.Context, tenant proofingprovider.Tenant, req Request) Request {
+	req, _ = s.tryReconcile(ctx, tenant, req)
 	return req
 }
 
 // tryReconcile is reconcile that also returns the (already logged) failure.
-func (s *Service) tryReconcile(ctx context.Context, apiKey string, req Request) (Request, error) {
+func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tenant, req Request) (Request, error) {
 	// What IPS reports is the subject's doing and the wallet's record of it, not
 	// that of whoever's read happened to trigger the check.
 	ctx = audit.WithoutActor(ctx)
 	sess := req.session
-	res, err := s.ips.SessionStatus(ctx, apiKey, sess.ID, sess.Token)
+	res, err := s.ips.SessionStatus(ctx, tenant, sess.ID, sess.Token)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
 		// IPS purged or erased the session: treat it like a lapsed one.
 		res, err = proofingprovider.Result{Status: proofingprovider.StatusExpired}, nil
@@ -846,6 +886,13 @@ func (s *Service) tryReconcile(ctx context.Context, apiKey string, req Request) 
 	if next == StatusApproved {
 		next, res = enforceAssurance(req, res)
 	}
+	if next == StatusApproved && req.ExpectsSubject {
+		if next, res, err = s.matchSubject(ctx, tenant, req, res); err != nil {
+			slog.WarnContext(ctx, "identity proofing: read the identity to match failed",
+				slog.String("request_id", req.ID.String()), slog.Any("error", err))
+			return req, err
+		}
+	}
 	if next == req.Status {
 		return req, nil
 	}
@@ -853,7 +900,7 @@ func (s *Service) tryReconcile(ctx context.Context, apiKey string, req Request) 
 	// sender may know only by address, and only once the document is approved:
 	// only then is the full result, with its personal data, read at all.
 	if req.CustomerID != nil && next == StatusApproved {
-		full, err := s.ips.SessionResult(ctx, apiKey, sess.ID, sess.Token)
+		full, err := s.ips.SessionResult(ctx, tenant, sess.ID, sess.Token)
 		if err != nil {
 			slog.WarnContext(ctx, "identity proofing: read the approved result failed",
 				slog.String("request_id", req.ID.String()), slog.Any("error", err))
@@ -897,6 +944,27 @@ func enforceAssurance(req Request, res proofingprovider.Result) (Status, proofin
 	}
 	res.ErrorCode = ErrorAssuranceNotMet
 	return StatusRejected, res
+}
+
+// matchSubject holds an approval of a request for one known person to that
+// person: the identity read off the document must be the request's name, born
+// on its birth date (diploma.MatchFullName, as a DUO extract's holder is
+// matched), or the request is rejected with ErrorIdentityMismatch. A request
+// already decided holds no birth date any more, and is never matched again.
+func (s *Service) matchSubject(ctx context.Context, tenant proofingprovider.Tenant, req Request, res proofingprovider.Result) (Status, proofingprovider.Result, error) {
+	if req.expectedBirthDate == "" {
+		return StatusApproved, res, nil
+	}
+	identity, err := s.ips.SessionIdentity(ctx, tenant, req.session.ID, req.session.Token)
+	if err != nil {
+		return "", res, fmt.Errorf("proofing: identity to match request %s: %w", req.ID, err)
+	}
+	holder := diploma.Person{GivenNames: identity.GivenName, Surname: identity.FamilyName, DateOfBirth: identity.BirthDate}
+	if diploma.MatchFullName(req.SubjectName, req.expectedBirthDate, holder).Matched {
+		return StatusApproved, res, nil
+	}
+	res.ErrorCode = ErrorIdentityMismatch
+	return StatusRejected, res, nil
 }
 
 // SubjectAppActorPrefix starts the actor label of the app a subject proofed
@@ -948,8 +1016,9 @@ func (s *Service) CustomerFlows(ctx context.Context, org Org, id uuid.UUID, all 
 	for _, f := range flows {
 		cf := CustomerFlow{
 			Flow:     f.Flow,
-			Assigned: slices.Contains(customer.Flows.FlowIDs, f.ID) && Completable(f.Flow),
+			Assigned: slices.Contains(customer.Flows.FlowIDs, f.ID) && CustomerCompletable(f.Flow),
 			Default:  f.ID == customer.Flows.DefaultFlowID,
+			Diplomas: f.Diplomas,
 		}
 		if all || cf.Assigned {
 			out = append(out, cf)
@@ -1037,11 +1106,8 @@ func (s *Service) CancelRequest(ctx context.Context, orgID, customerID, id uuid.
 		return Request{}, ErrSessionOver
 	}
 	if sess := req.liveSession(s.now()); sess != nil {
-		apiKey, err := s.requestAPIKey(ctx, req)
-		if err != nil {
-			return Request{}, err
-		}
-		if err := s.ips.CancelSession(ctx, apiKey, sess.ID, sess.Token); err != nil {
+		tenant := requestTenant(req)
+		if err := s.ips.CancelSession(ctx, tenant, sess.ID, sess.Token); err != nil {
 			var rejected *proofingprovider.RejectedError
 			if errors.As(err, &rejected) {
 				// IPS decided it first; the pushed outcome records that.
@@ -1093,11 +1159,8 @@ func (s *Service) requestResult(ctx context.Context, req Request) (Request, proo
 	if !req.Status.Settled() {
 		return Request{}, proofingprovider.Identity{}, ErrResultNotReady
 	}
-	apiKey, err := s.requestAPIKey(ctx, req)
-	if err != nil {
-		return Request{}, proofingprovider.Identity{}, err
-	}
-	identity, err := s.ips.SessionIdentity(ctx, apiKey, req.session.ID, req.session.Token)
+	tenant := requestTenant(req)
+	identity, err := s.ips.SessionIdentity(ctx, tenant, req.session.ID, req.session.Token)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
 		return Request{}, proofingprovider.Identity{}, ErrRequestNotFound
 	}
@@ -1107,7 +1170,24 @@ func (s *Service) requestResult(ctx context.Context, req Request) (Request, proo
 	if err := s.requests.RecordResultRead(ctx, req); err != nil {
 		return Request{}, proofingprovider.Identity{}, err
 	}
-	return req, identity, nil
+	return req, heldToVerdict(req, identity), nil
+}
+
+// heldToVerdict holds the engine's identity to the wallet's verdict on req: an
+// approval the wallet rejected (ErrorAssuranceNotMet, ErrorIdentityMismatch)
+// is read as that rejection, without the person or their images. A mismatch
+// is someone other than the expected person, whose identity is never shown.
+func heldToVerdict(req Request, identity proofingprovider.Identity) proofingprovider.Identity {
+	if identity.Status != proofingprovider.StatusApproved || req.Status == StatusApproved {
+		return identity
+	}
+	return proofingprovider.Identity{
+		Result: proofingprovider.Result{
+			Method: identity.Method, Status: proofingprovider.StatusRejected, ErrorCode: req.ErrorCode,
+			AssuranceLevel: identity.AssuranceLevel, EIDASLevel: identity.EIDASLevel, CompletedAt: identity.CompletedAt,
+		},
+		Evidence: identity.Evidence,
+	}
 }
 
 // PurgeRequest erases a customer's request at IPS and every personal detail
@@ -1152,19 +1232,11 @@ func (s *Service) PurgeDue(ctx context.Context) (int64, error) {
 	}
 }
 
-// purge erases req's session at IPS, then what the wallet holds of it.
+// purge erases req's session in the engine, then what the wallet holds of it.
 func (s *Service) purge(ctx context.Context, req Request) error {
 	if req.session != nil {
-		apiKey, err := s.requestAPIKey(ctx, req)
-		switch {
-		case errors.Is(err, ErrNotProvisioned):
-			// No IPS tenant left, so nothing there to erase.
-		case err != nil:
-			return err
-		default:
-			if err := s.ips.DeleteSession(ctx, apiKey, req.session.ID, req.session.Token); err != nil {
-				return fmt.Errorf("proofing: purge request %s: %w", req.ID, err)
-			}
+		if err := s.ips.DeleteSession(ctx, requestTenant(req), req.session.ID, req.session.Token); err != nil {
+			return fmt.Errorf("proofing: purge request %s: %w", req.ID, err)
 		}
 	}
 	return s.requests.Purge(ctx, req)
@@ -1188,11 +1260,8 @@ func (s *Service) readReconciled(ctx context.Context, req Request) (Request, err
 	if !req.needsReconcile() || !s.readChecks.allow(req.ID, s.now()) {
 		return req, nil
 	}
-	apiKey, err := s.requestAPIKey(ctx, req)
-	if err != nil {
-		return Request{}, err
-	}
-	return s.reconcile(ctx, apiKey, req), nil
+	tenant := requestTenant(req)
+	return s.reconcile(ctx, tenant, req), nil
 }
 
 // sentRequest is one of the org's requests, scoped like the list: an admin
@@ -1243,11 +1312,8 @@ func (s *Service) App(ctx context.Context, orgID, id uuid.UUID, requestedBy *uui
 	if sess == nil || req.Status.Settled() {
 		return "", ErrSessionOver
 	}
-	apiKey, err := s.requestAPIKey(ctx, req)
-	if err != nil {
-		return "", err
-	}
-	res, err := s.ips.SessionStatus(ctx, apiKey, sess.ID, sess.Token)
+	tenant := requestTenant(req)
+	res, err := s.ips.SessionStatus(ctx, tenant, sess.ID, sess.Token)
 	if err != nil {
 		return "", fmt.Errorf("proofing: app of request %s: %w", req.ID, err)
 	}
@@ -1274,11 +1340,8 @@ func (s *Service) claimLink(ctx context.Context, req Request) (proofingprovider.
 	if sess == nil || req.Status.Settled() {
 		return proofingprovider.Claim{}, ErrSessionOver
 	}
-	apiKey, err := s.requestAPIKey(ctx, req)
-	if err != nil {
-		return proofingprovider.Claim{}, err
-	}
-	claim, err := s.ips.SessionHandover(ctx, apiKey, sess.ID, sess.Token)
+	tenant := requestTenant(req)
+	claim, err := s.ips.SessionHandover(ctx, tenant, sess.ID, sess.Token)
 	var rejected *proofingprovider.RejectedError
 	switch {
 	case errors.As(err, &rejected) && rejected.Code == proofingprovider.CodeDeviceActive:
@@ -1355,19 +1418,16 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	if !ok {
 		return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no passport or id-card")
 	}
-	apiKey, err := s.requestAPIKey(ctx, req)
-	if err != nil {
-		return proofingprovider.YiviDisclosure{}, err
-	}
+	tenant := requestTenant(req)
 	attributes := maps.Clone(doc.Claims)
 	delete(attributes, openid4vpverifier.ClaimPhoto)
-	disclosure, err := s.ips.SubmitReference(ctx, apiKey, sess.ID, sess.Token, proofingprovider.Reference{
+	disclosure, err := s.ips.SubmitReference(ctx, tenant, sess.ID, sess.Token, proofingprovider.Reference{
 		Credential: doc.Credential, Photo: doc.Claims[openid4vpverifier.ClaimPhoto], Attributes: attributes,
 	})
 	if err != nil {
 		return proofingprovider.YiviDisclosure{}, yiviStepError(err)
 	}
-	s.reconcile(ctx, apiKey, req)
+	s.reconcile(ctx, tenant, req)
 	return disclosure, nil
 }
 
@@ -1407,13 +1467,7 @@ func yiviStepError(err error) error {
 // reconcileNow records what IPS decided for req. A failure is logged: the
 // background reconciler picks the outcome up later.
 func (s *Service) reconcileNow(ctx context.Context, req Request) {
-	apiKey, err := s.requestAPIKey(ctx, req)
-	if err != nil {
-		slog.WarnContext(ctx, "identity proofing: reconcile after the Yivi step skipped",
-			slog.String("request_id", req.ID.String()), slog.Any("error", err))
-		return
-	}
-	s.reconcile(ctx, apiKey, req)
+	s.reconcile(ctx, requestTenant(req), req)
 }
 
 // RequestEvents is one request's audit trail, oldest first: its timeline. A
@@ -1598,7 +1652,7 @@ func (s *Service) AssignCustomerFlows(ctx context.Context, org Org, id uuid.UUID
 	if _, err := s.customers.Get(ctx, org.ID, id); err != nil {
 		return Customer{}, err
 	}
-	sel, err := s.validSelection(ctx, org, sel)
+	sel, err := s.validSelection(ctx, org, sel, CustomerCompletable)
 	if err != nil {
 		return Customer{}, err
 	}

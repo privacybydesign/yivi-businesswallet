@@ -47,14 +47,11 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 	if req.Status != StatusNeedsReview || req.session == nil || req.session.EndedAt != nil {
 		return Request{}, ErrNotUnderReview
 	}
-	apiKey, err := s.requestAPIKey(ctx, req)
-	if err != nil {
-		return Request{}, err
-	}
+	tenant := requestTenant(req)
 	decision := proofingprovider.ReviewDecision{
 		Approve: in.Approve, ErrorCode: in.ErrorCode, Reason: in.Reason, Reviewer: reviewer,
 	}
-	if err := s.ips.DecideReview(ctx, apiKey, req.session.ID, req.session.Token, decision); err != nil {
+	if err := s.ips.DecideReview(ctx, tenant, req.session.ID, req.session.Token, decision); err != nil {
 		var rejected *proofingprovider.RejectedError
 		if errors.As(err, &rejected) {
 			// IPS no longer holds it under review: another decision won, or it ended.
@@ -70,6 +67,6 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 		return Request{}, err
 	}
 	// A failed read is logged; IPS's push or the next read records the outcome.
-	req, _ = s.tryReconcile(ctx, apiKey, req)
+	req, _ = s.tryReconcile(ctx, tenant, req)
 	return req, nil
 }

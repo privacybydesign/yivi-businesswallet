@@ -3,133 +3,23 @@ package proofing
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
-// SettingsStore persists what the wallet holds for an org's IPS tenant (whose
-// id is the org's own) and the admin's flow selection. The API keys and webhook
-// secret are sealed under the deployment IDENTITY_PROOFING_ENCRYPTION_KEY; with
-// no key (cipher nil) nothing can be stored, so no org can be provisioned.
+// SettingsStore persists the org admin's flow selection.
 type SettingsStore struct {
-	db     database.DB
-	audit  audit.Recorder
-	cipher *crypto.Cipher
+	db    database.DB
+	audit audit.Recorder
 }
 
-func NewSettingsStore(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher) *SettingsStore {
-	return &SettingsStore{db: db, audit: recorder, cipher: cipher}
-}
-
-// CanStoreSecrets reports whether the deployment has an encryption key, checked
-// before provisioning so a missing key never leaves an orphaned IPS tenant.
-func (s *SettingsStore) CanStoreSecrets() bool { return s.cipher != nil }
-
-// APIKey returns the decrypted IPS API key of the org's tenant for mode (its
-// test key for ModeTest), or ErrNotProvisioned.
-func (s *SettingsStore) APIKey(ctx context.Context, orgID uuid.UUID, mode Mode) (string, error) {
-	column := "api_key_ciphertext"
-	if mode == ModeTest {
-		column = "test_api_key_ciphertext"
-	}
-	var ciphertext []byte
-	err := s.db.QueryRow(ctx,
-		`SELECT `+column+` FROM org_identity_proofing_settings WHERE organization_id = $1`, orgID).Scan(&ciphertext)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotProvisioned
-	}
-	if err != nil {
-		return "", fmt.Errorf("proofing: read api key org %s: %w", orgID, err)
-	}
-	if s.cipher == nil {
-		return "", ErrNoEncryptionKey
-	}
-	plain, err := s.cipher.Decrypt(ciphertext)
-	if err != nil {
-		return "", fmt.Errorf("proofing: decrypt api key org %s: %w", orgID, err)
-	}
-	return string(plain), nil
-}
-
-// WebhookSecret returns the secret IPS signs the org's session changes with, or
-// ErrNotProvisioned.
-func (s *SettingsStore) WebhookSecret(ctx context.Context, orgID uuid.UUID) (string, error) {
-	var ciphertext []byte
-	err := s.db.QueryRow(ctx,
-		`SELECT webhook_secret_ciphertext FROM org_identity_proofing_settings WHERE organization_id = $1`, orgID).Scan(&ciphertext)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotProvisioned
-	}
-	if err != nil {
-		return "", fmt.Errorf("proofing: read webhook secret org %s: %w", orgID, err)
-	}
-	if s.cipher == nil {
-		return "", ErrNoEncryptionKey
-	}
-	plain, err := s.cipher.Decrypt(ciphertext)
-	if err != nil {
-		return "", fmt.Errorf("proofing: decrypt webhook secret org %s: %w", orgID, err)
-	}
-	return string(plain), nil
-}
-
-// ProvisionedTenant is an org's IPS tenant as the wallet sets it up: the
-// webhook secret and a live and a test API key.
-type ProvisionedTenant struct {
-	WebhookSecret string
-	LiveKey       string
-	TestKey       string
-}
-
-// Provision stores the org's IPS tenant, set up by create, and audits
-// identity_proofing.provisioned in the same transaction. A per-org lock holds
-// concurrent first uses (on any instance) back, and create is not called for an
-// org that has its tenant already.
-func (s *SettingsStore) Provision(ctx context.Context, orgID uuid.UUID, create func(context.Context) (ProvisionedTenant, error)) error {
-	if s.cipher == nil {
-		return ErrNoEncryptionKey
-	}
-	return database.InTx(ctx, s.db, func(q database.Querier) error {
-		if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-			"identity_proofing_provision:"+orgID.String()); err != nil {
-			return fmt.Errorf("proofing: lock provisioning org %s: %w", orgID, err)
-		}
-		var exists bool
-		if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM org_identity_proofing_settings WHERE organization_id = $1)`,
-			orgID).Scan(&exists); err != nil {
-			return fmt.Errorf("proofing: read settings org %s: %w", orgID, err)
-		}
-		if exists {
-			return nil
-		}
-		t, err := create(ctx)
-		if err != nil {
-			return err
-		}
-		var sealed [3][]byte
-		for i, v := range []string{t.LiveKey, t.TestKey, t.WebhookSecret} {
-			if sealed[i], err = s.cipher.Encrypt([]byte(v)); err != nil {
-				return fmt.Errorf("proofing: encrypt tenant secrets org %s: %w", orgID, err)
-			}
-		}
-		if _, err := q.Exec(ctx, `INSERT INTO org_identity_proofing_settings
-				(organization_id, api_key_ciphertext, test_api_key_ciphertext, webhook_secret_ciphertext)
-				VALUES ($1, $2, $3, $4)`, orgID, sealed[0], sealed[1], sealed[2]); err != nil {
-			return fmt.Errorf("proofing: save settings org %s: %w", orgID, err)
-		}
-		// The keys and secret never enter the audit log.
-		return s.audit.Record(ctx, q, audit.IdentityProofingProvisioned,
-			audit.Target{Type: audit.TargetIdentityProofingSettings, ID: orgID.String(), OrgID: &orgID},
-			audit.Created(map[string]any{"modes": []string{string(ModeLive), string(ModeTest)}}))
-	})
+func NewSettingsStore(db database.DB, recorder audit.Recorder) *SettingsStore {
+	return &SettingsStore{db: db, audit: recorder}
 }
 
 // FlowSelection returns the org's allow-list; empty when the admin chose none.
