@@ -16,7 +16,7 @@ import type {
   DiplomaMode,
   DiplomaVerdict,
   ProofingCustomer,
-  ProofingDiploma,
+  HostedDiploma,
   ProofingFaceVerdict,
   ProofingApp,
   ProofingMethod,
@@ -24,6 +24,7 @@ import type {
   VerifyTarget,
 } from "../api/identity-proofing";
 import {
+  assuranceLevelLabel,
   diplomaRejectionReason,
   diplomaStepDone,
   formatDuration,
@@ -52,18 +53,14 @@ const LINK_BUTTON =
 
 const QR_SIZE = 240;
 const COUNTDOWN_TICK_MS = 1000;
-// A face frame as IPS's own bound-login page sends it: 640 px wide, JPEG at
-// 0.8, one every 400 ms.
+// A face frame: 640 px wide, JPEG at 0.8, one every 400 ms.
 const FACE_FRAME_WIDTH = 640;
 const FACE_FRAME_QUALITY = 0.8;
 const FACE_FRAME_INTERVAL_MS = 400;
 const FACE_DECISION_PENDING = "pending";
 
 // Who asks: the customer as the steps show it.
-export type VerifyCustomer = Pick<
-  ProofingCustomer,
-  "name" | "branding" | "dataRetentionDays"
->;
+export type VerifyCustomer = Pick<ProofingCustomer, "name" | "branding">;
 
 // What the flow collects, as the steps show it.
 export interface VerifyFlowInfo {
@@ -72,6 +69,9 @@ export interface VerifyFlowInfo {
   requiredAssuranceLevel?: string;
   // Whether the subject is asked for their DUO diploma extracts afterwards.
   diplomaMode?: DiplomaMode;
+  // The most days the session's data is kept, as the server works it out:
+  // the flow's retention when it sets one, else the customer's.
+  retentionDays: number;
 }
 
 // Where a subject logs in with DigiD to download the extract of a diploma.
@@ -153,9 +153,7 @@ export function Overview({
           <div className="text-ink mt-1 text-[13px]">
             {flow.requiredAssuranceLevel
               ? t("customers.flows.eidas", {
-                  level:
-                    flow.requiredAssuranceLevel.charAt(0).toUpperCase() +
-                    flow.requiredAssuranceLevel.slice(1),
+                  level: assuranceLevelLabel(flow.requiredAssuranceLevel, t),
                 })
               : t("customers.flows.noAssurance")}
           </div>
@@ -163,7 +161,7 @@ export function Overview({
       </div>
       <p className={HINT}>
         {t("customers.onScreen.overview.retention", {
-          count: customer.dataRetentionDays,
+          count: flow.retentionDays,
         })}
       </p>
       {(supportContact !== "" || privacyUrl !== "") && (
@@ -305,7 +303,7 @@ export function Session({
   // Whether an approved session goes on to the diploma step, and the extracts
   // already added (a hosted page reopened).
   diplomaMode?: DiplomaMode;
-  diplomas?: ProofingDiploma[];
+  diplomas?: HostedDiploma[];
   // Told whether the diploma step shows, for the page's stepper.
   onDiplomaStep?: (active: boolean) => void;
 }): React.JSX.Element {
@@ -443,14 +441,14 @@ function DiplomaStep({
 }: {
   target: VerifyTarget;
   until: string;
-  initial: ProofingDiploma[];
+  initial: HostedDiploma[];
   onDone: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const formatDate = useDateFormatter();
   const upload = useUploadProofingDiplomasMutation(target);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [held, setHeld] = useState<ProofingDiploma[]>(initial);
+  const [held, setHeld] = useState<HostedDiploma[]>(initial);
   const [refused, setRefused] = useState<DiplomaVerdict[]>([]);
   const secondsLeft = useSecondsLeft(until);
   const open = secondsLeft > 0;
@@ -511,9 +509,9 @@ function DiplomaStep({
 
       {held.length > 0 && (
         <ul className="flex flex-col gap-2">
-          {held.map((d) => (
+          {held.map((d, i) => (
             <li
-              key={d.documentNumber}
+              key={`${d.qualification}-${i}`}
               className="bg-success-bg rounded-yivi flex items-start gap-3 px-4 py-3"
             >
               <Icon name="valid" className="text-success mt-0.5 shrink-0" />
@@ -609,7 +607,7 @@ function DiplomaStep({
 
 // The line under a diploma's qualification: who awarded it, when, its level.
 function diplomaDetail(
-  d: ProofingDiploma,
+  d: HostedDiploma,
   formatDate: (iso: string) => string,
   t: TFunction,
 ): string {
@@ -779,11 +777,15 @@ function YiviSession({
   useEffect(() => {
     mutate();
   }, [mutate]);
-  const disclosure = useProofingYiviDisclosureQuery(target, start.isSuccess);
   const yiviSecondsLeft = useSecondsLeft(start.data?.expiresAt);
   const secondsLeft = start.data
     ? Math.min(sessionSecondsLeft, yiviSecondsLeft)
     : sessionSecondsLeft;
+  // Polling stops once the session has expired: nothing can finish it then.
+  const disclosure = useProofingYiviDisclosureQuery(
+    target,
+    start.isSuccess && secondsLeft > 0,
+  );
 
   if (start.isError) {
     return (
@@ -859,7 +861,7 @@ function yiviEndReason(code: string | undefined, t: TFunction): string {
 }
 
 // The live face check of a Yivi session: camera frames are sent one at a time
-// until IPS decides. The decision itself lands on the request, which the
+// until the engine decides. The decision itself lands on the request, which the
 // session polls; this only shows the progress.
 function FaceCheck({
   target,
@@ -877,12 +879,21 @@ function FaceCheck({
   const submit = useSubmitProofingFaceFrameMutation(target);
   const { mutateAsync } = submit;
   const [attempt, setAttempt] = useState(0);
+  const [frameTick, setFrameTick] = useState(0);
 
   useEffect(() => {
     let stream: MediaStream | undefined;
     let cancelled = false;
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: "user" }, audio: false })
+    // Started inside a promise so a browser without navigator.mediaDevices
+    // (an insecure context, some in-app browsers) lands in the camera error
+    // below instead of throwing out of the effect.
+    Promise.resolve()
+      .then(() =>
+        navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: false,
+        }),
+      )
       .then(async (media) => {
         if (cancelled) {
           media.getTracks().forEach((track) => track.stop());
@@ -913,7 +924,12 @@ function FaceCheck({
     let cancelled = false;
     const timer = setTimeout(() => {
       const frame = captureFrame(videoRef.current);
-      if (frame === undefined) return;
+      if (frame === undefined) {
+        // No frame yet (the video has no size): try again on the next tick
+        // rather than stopping, which would leave the check waiting forever.
+        setFrameTick((tick) => tick + 1);
+        return;
+      }
       mutateAsync(frame)
         .then((next) => {
           if (!cancelled) setVerdict(next);
@@ -926,7 +942,7 @@ function FaceCheck({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [ready, decided, frameError, verdict, mutateAsync, t]);
+  }, [ready, decided, frameError, verdict, frameTick, mutateAsync, t]);
 
   const total = verdict?.stableFrames ?? stableFrames;
   return (
@@ -1124,6 +1140,7 @@ function QrCode({ value }: { value: string }): React.JSX.Element {
       cancelled = true;
     };
   }, [value]);
+
   if (dataUrl === "") return <QrPlaceholder />;
   return (
     <img

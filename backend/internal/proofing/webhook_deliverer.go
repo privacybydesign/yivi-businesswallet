@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
@@ -16,7 +17,24 @@ import (
 
 const (
 	// deliveryBatch is how many deliveries one worker round sends at most.
-	deliveryBatch = 50
+	deliveryBatch = 20
+	// deliveryWorkers is how many of a batch are sent at once: an endpoint
+	// that never answers holds a worker for safehttp.RequestTimeout, not the
+	// batch.
+	deliveryWorkers = 10
+	// endpointWorkers is how many of a batch go to one endpoint at once, so a
+	// slow endpoint holds at most this many workers and the rest keep sending
+	// every other org's deliveries.
+	//
+	// It also bounds the batch inside deliveryLease. Worst case, every
+	// delivery of the batch goes to one endpoint that never answers: that
+	// endpoint's sends run ceil(deliveryBatch/endpointWorkers) = 10 deep,
+	// 10 x RequestTimeout (10 s) = 100 s. Across endpoints, the time all
+	// deliveryWorkers are busy adds at most deliveryBatch/deliveryWorkers x
+	// RequestTimeout = 20 s, so a batch ends within 120 s, well inside the
+	// 5 min lease, and no delivery is re-claimed and sent twice.
+	// TestDeliveryBatchFitsLease holds this.
+	endpointWorkers = 2
 	// responseDrainLimit bounds how much of a receiver's answer is read: only
 	// its status matters.
 	responseDrainLimit = 4 << 10
@@ -58,18 +76,47 @@ func (d *Deliverer) DeliverDue(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	for _, delivery := range due {
-		code, sendErr := d.send(ctx, delivery)
-		msg := ""
-		if sendErr != nil {
-			msg = sendErr.Error()
-		}
-		if err := d.store.recordAttempt(ctx, delivery, code, msg); err != nil {
-			slog.ErrorContext(ctx, "identity proofing: record webhook delivery failed",
-				slog.String("delivery_id", delivery.ID.String()), slog.Any("error", err))
-		}
-	}
+	sendFair(ctx, due, d.deliver)
 	return int64(len(due)), nil
+}
+
+// sendFair runs deliver for every delivery of a batch: at most deliveryWorkers
+// at once, and at most endpointWorkers to the same URL, so a slow endpoint
+// cannot take every worker. Deliveries to the default endpoint share its URL
+// and so one lane.
+func sendFair(ctx context.Context, due []dueDelivery, deliver func(context.Context, dueDelivery)) {
+	workers := make(chan struct{}, deliveryWorkers)
+	lanes := make(map[string]chan struct{})
+	var wg sync.WaitGroup
+	for _, delivery := range due {
+		lane, ok := lanes[delivery.URL]
+		if !ok {
+			lane = make(chan struct{}, endpointWorkers)
+			lanes[delivery.URL] = lane
+		}
+		wg.Go(func() {
+			// The lane first: a delivery waiting on its endpoint holds no worker.
+			lane <- struct{}{}
+			workers <- struct{}{}
+			deliver(ctx, delivery)
+			<-workers
+			<-lane
+		})
+	}
+	wg.Wait()
+}
+
+// deliver sends one delivery and records the attempt.
+func (d *Deliverer) deliver(ctx context.Context, delivery dueDelivery) {
+	code, sendErr := d.send(ctx, delivery)
+	msg := ""
+	if sendErr != nil {
+		msg = sendErr.Error()
+	}
+	if err := d.store.recordAttempt(ctx, delivery, code, msg); err != nil {
+		slog.ErrorContext(ctx, "identity proofing: record webhook delivery failed",
+			slog.String("delivery_id", delivery.ID.String()), slog.Any("error", err))
+	}
 }
 
 // Run sends everything due, then returns when the next delivery (a retry, or
@@ -108,7 +155,7 @@ func (d *Deliverer) send(ctx context.Context, delivery dueDelivery) (*int, error
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, contentTypeJSON)
 	req.Header.Set(EventHeader, delivery.Event)
 	req.Header.Set(DeliveryHeader, delivery.ID.String())
 	req.Header.Set(SignatureHeader, webhookSignature(delivery.Secret, d.now(), body))

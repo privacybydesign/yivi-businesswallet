@@ -47,6 +47,10 @@ type Queue interface {
 	// Add queues tag, due at dueAt; a tag already queued keeps the later of
 	// the two due times, so a session that runs longer is not swept early.
 	Add(ctx context.Context, tag string, dueAt time.Time) error
+	// Settle queues tag due at dueAt for a session that has ended: a tag
+	// already queued keeps the earlier of the two, so the sweep runs from the
+	// session's end rather than its expiry.
+	Settle(ctx context.Context, tag string, dueAt time.Time) error
 	// Due returns up to limit tags due at now, oldest first.
 	Due(ctx context.Context, now time.Time, limit int) ([]Entry, error)
 	// Done removes a swept tag.
@@ -136,6 +140,24 @@ func (d *Dedup) Add(ctx context.Context, tag string, dueAt time.Time) error {
 			}
 		}
 	}
+	d.mu.Unlock()
+	return nil
+}
+
+// Settle passes a session's end on once: polled again with the same due time,
+// it costs no write.
+func (d *Dedup) Settle(ctx context.Context, tag string, dueAt time.Time) error {
+	d.mu.Lock()
+	if due, ok := d.queued[tag]; ok && due.Equal(dueAt) {
+		d.mu.Unlock()
+		return nil
+	}
+	d.mu.Unlock()
+	if err := d.Queue.Settle(ctx, tag, dueAt); err != nil {
+		return err
+	}
+	d.mu.Lock()
+	d.queued[tag] = dueAt
 	d.mu.Unlock()
 	return nil
 }

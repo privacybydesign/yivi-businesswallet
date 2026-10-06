@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestWebhookSignatureSignsTimestampAndBody(t *testing.T) {
+func TestWebhookSignature(t *testing.T) {
 	at := time.Unix(1_790_000_000, 0)
 	body := []byte(`{"id":"x"}`)
 	got := webhookSignature("whsec_test", at, body)
@@ -46,7 +46,7 @@ func TestWebhookRetriesSpanADay(t *testing.T) {
 	}
 }
 
-func TestNewWebhookSecretIsRecognisableAndUnique(t *testing.T) {
+func TestNewWebhookSecret(t *testing.T) {
 	a, b := newWebhookSecret(), newWebhookSecret()
 	if !strings.HasPrefix(a, webhookSecretPrefix) || a == b {
 		t.Errorf("secrets = %q, %q; want two distinct whsec_ secrets", a, b)

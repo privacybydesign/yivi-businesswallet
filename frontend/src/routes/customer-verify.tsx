@@ -1,5 +1,11 @@
-import { useState } from "react";
-import { Link, useLocation, useParams, useSearchParams } from "react-router";
+import { useEffect, useState } from "react";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
@@ -28,7 +34,9 @@ const ERROR = "text-error text-[12.5px]";
 type Step = "overview" | "method" | "session";
 
 // What the send form hands over: the subject as the sender typed it. Kept out
-// of the URL, so a reload runs the flow without them.
+// of the URL, and taken out of the history entry once read (the browser keeps
+// history state, the birth date included, after the page is gone), so a reload
+// runs the flow without them.
 interface VerifyState {
   name?: string;
   email?: string;
@@ -55,7 +63,17 @@ export default function CustomerVerify(): React.JSX.Element {
   const slug = orgSlug!;
   const id = customerId!;
   const [searchParams] = useSearchParams();
-  const subject = verifyState(useLocation().state);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [subject] = useState(() => verifyState(location.state));
+  const hasState = location.state !== null;
+  useEffect(() => {
+    if (!hasState) return;
+    void navigate(
+      { pathname: location.pathname, search: location.search },
+      { replace: true, state: null },
+    );
+  }, [hasState, navigate, location.pathname, location.search]);
   const customer = useProofingCustomerQuery(slug, id);
   const flows = useProofingCustomerFlowsQuery(slug, id);
   const flowId = searchParams.get("flow") ?? customer.data?.defaultFlowId;
@@ -105,7 +123,10 @@ function VerifyFlow({
   const [method, setMethod] = useState<ProofingMethod>("idem_app");
   // A flow the Yivi app cannot run leaves the Idem app only: no choice to make.
   const choice = yiviAppAvailable(flow);
-  const stages = verifyStages(choice, flow.diplomaMode === "required");
+  const stages = verifyStages({
+    appChoice: choice,
+    diplomas: flow.diplomaMode === "required",
+  });
   const [inDiplomas, setInDiplomas] = useState(false);
   const [sent, setSent] = useState<ProofingSent>();
   const create = useCreateProofingRequestMutation(slug);

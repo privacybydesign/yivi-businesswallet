@@ -9,7 +9,7 @@ import (
 
 // A face matched against the relying party's photo says so in the result, and
 // releases that photo with the selfie, so a reviewer sees both faces.
-func TestResultCarriesTheReferencePhoto(t *testing.T) {
+func TestResultReferencePhoto(t *testing.T) {
 	sess := session.Session{
 		ID: "s1", ReferencePhoto: "cGhvdG8=", ReferencePhotoMime: "image/png",
 		RequestedAttributes: []string{attrSelfie, attrBiometrics},

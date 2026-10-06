@@ -44,6 +44,8 @@ claims a session and submits its steps to `/api/v1/app/...` on this backend. To 
 a phone, set `IDENTITY_PROOFING_PUBLIC_URL` in `.env` to an address the phone reaches
 (e.g. `http://<your-LAN-IP>:8080`) and `REGULA_FACE_API_URL` for the face step;
 `IDENTITY_PROOFING_PROVIDER=stub` swaps in an in-memory stand-in no phone can reach.
+Diploma uploads accept any PDF in the dev stack (`DIPLOMA_VALIDATOR_PROVIDER=stub`, set by
+`compose.override.yaml`); set it to `duo` in `.env` to check real DUO extracts.
 
 On first run `npm run dev` creates a root `.env` from `.env.example` if one does
 not exist. Compose **requires** `POSTGRES_PASSWORD` (there is no weak default), so

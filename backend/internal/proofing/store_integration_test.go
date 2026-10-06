@@ -73,7 +73,7 @@ func auditCount(t *testing.T, pool *pgxpool.Pool, action string) int {
 	return n
 }
 
-func TestSettingsStoreReplacesFlowSelection(t *testing.T) {
+func TestSettingsReplacesFlows(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewSettingsStore(pool, audit.NewDBRecorder())
 	orgID := makeOrg(t, pool, "acme")
@@ -235,7 +235,7 @@ func TestRequestStoreLifecycle(t *testing.T) {
 
 // A session that ends undecided ends the request: the end is recorded once,
 // and the request reads as expired.
-func TestRequestStoreEndSessionExpiresTheRequest(t *testing.T) {
+func TestStoreEndSessionExpires(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
@@ -261,7 +261,7 @@ func TestRequestStoreEndSessionExpiresTheRequest(t *testing.T) {
 	}
 }
 
-func TestRequestStoreEndSessionEndsAReview(t *testing.T) {
+func TestStoreEndSessionEndsReview(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
@@ -287,7 +287,7 @@ func TestRequestStoreEndSessionEndsAReview(t *testing.T) {
 	}
 }
 
-func TestRequestStoreSessionDeadlines(t *testing.T) {
+func TestStoreSessionDeadlines(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
@@ -384,7 +384,7 @@ func TestCustomerStoreLifecycle(t *testing.T) {
 
 // A rejection is audited as its own action, with IPS's error code as the reason
 // and the subject it was about.
-func TestRequestStoreRejectionAuditsReason(t *testing.T) {
+func TestStoreRejectionAuditsReason(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
@@ -419,7 +419,7 @@ func TestRequestStoreRejectionAuditsReason(t *testing.T) {
 
 // A customer's subject is stored without a member; the proofed name is sealed,
 // shown until its retention passes, and then purged with the subject.
-func TestRequestStoreCustomerSubjectAndProofedName(t *testing.T) {
+func TestStoreCustomerProofedName(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	customers := NewCustomerStore(pool, audit.NopRecorder{})
@@ -474,6 +474,10 @@ func TestRequestStoreCustomerSubjectAndProofedName(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests SET completed_at = now() - interval '31 days' WHERE id = $1`, req.ID); err != nil {
 		t.Fatalf("age the request: %v", err)
 	}
+	// A raw write: the store would set purge_at in the same transaction.
+	if err := refreshPurgeAt(ctx, pool, req.ID); err != nil {
+		t.Fatalf("refresh purge time: %v", err)
+	}
 	due, err := store.ListPurgeDue(ctx, 10)
 	if err != nil || len(due) != 1 || due[0].ID != req.ID {
 		t.Fatalf("purge due past retention = %+v, %v; want the request", due, err)
@@ -493,11 +497,30 @@ func TestRequestStoreCustomerSubjectAndProofedName(t *testing.T) {
 	if due, err := store.ListPurgeDue(ctx, 10); err != nil || len(due) != 0 {
 		t.Errorf("purge due after purge = %d, %v; want none", len(due), err)
 	}
+
+	// A request whose session never got attached settles when its link
+	// lapses, and is purged its retention after that.
+	orphan, err := store.Create(ctx, newStoredRequest(orgID, requester,
+		Subject{CustomerID: &customer.ID, Email: "bram@example.org"}))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests SET link_expires_at = now() - interval '31 days'
+		WHERE id = $1`, orphan.ID); err != nil {
+		t.Fatalf("age the orphan: %v", err)
+	}
+	// A raw write: the store would set purge_at in the same transaction.
+	if err := refreshPurgeAt(ctx, pool, orphan.ID); err != nil {
+		t.Fatalf("refresh purge time: %v", err)
+	}
+	if due, err := store.ListPurgeDue(ctx, 10); err != nil || len(due) != 1 || due[0].ID != orphan.ID {
+		t.Errorf("purge due for a request without a session = %+v, %v; want it", due, err)
+	}
 }
 
 // A request for one known person seals the expected birth date, audits only
 // that a person is expected, and drops the date once decided.
-func TestRequestStoreExpectedSubject(t *testing.T) {
+func TestStoreExpectedSubject(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	customers := NewCustomerStore(pool, audit.NopRecorder{})
@@ -540,12 +563,12 @@ func TestRequestStoreExpectedSubject(t *testing.T) {
 		t.Errorf("birth date under review = %q, want it kept", got.expectedBirthDate)
 	}
 	req = onlyRequest(t, store, orgID)
-	res := proofingprovider.Result{Status: proofingprovider.StatusApproved, ErrorCode: ErrorIdentityMismatch}
+	res := proofingprovider.Result{Status: proofingprovider.StatusApproved, ErrorCode: errorIdentityMismatch}
 	if err := store.RecordOutcome(ctx, req, "s1", StatusRejected, res); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
 	got := onlyRequest(t, store, orgID)
-	if !got.ExpectsSubject || got.expectedBirthDate != "" || got.ErrorCode != ErrorIdentityMismatch {
+	if !got.ExpectsSubject || got.expectedBirthDate != "" || got.ErrorCode != errorIdentityMismatch {
 		t.Errorf("decided = expects %v, birth date %q, code %q; want expected, dropped, mismatch",
 			got.ExpectsSubject, got.expectedBirthDate, got.ErrorCode)
 	}
@@ -553,7 +576,7 @@ func TestRequestStoreExpectedSubject(t *testing.T) {
 
 // A hosted request holds its reference photo sealed, read only at start, and
 // drops it once the session is attached.
-func TestRequestStoreHoldsTheReferencePhotoUntilStart(t *testing.T) {
+func TestStoreHoldsPhotoUntilStart(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	customers := NewCustomerStore(pool, audit.NopRecorder{})
@@ -590,7 +613,7 @@ func TestRequestStoreHoldsTheReferencePhotoUntilStart(t *testing.T) {
 	}
 }
 
-func TestCustomerStorePauseAndResume(t *testing.T) {
+func TestCustomerPauseAndResume(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewCustomerStore(pool, audit.NewDBRecorder())
 	orgID := makeOrg(t, pool, "acme")
@@ -601,17 +624,17 @@ func TestCustomerStorePauseAndResume(t *testing.T) {
 		t.Fatalf("Create = %+v, %v; want an active customer", c, err)
 	}
 
-	if c, err = store.SetPaused(ctx, orgID, c.ID, true); err != nil || c.Status() != CustomerPaused {
+	if c, err = store.SetStatus(ctx, orgID, c.ID, CustomerPaused); err != nil || c.Status() != CustomerPaused {
 		t.Fatalf("pause = %+v, %v", c, err)
 	}
 	// Pausing a paused customer changes and audits nothing.
-	if c, err = store.SetPaused(ctx, orgID, c.ID, true); err != nil || !c.Paused() {
+	if c, err = store.SetStatus(ctx, orgID, c.ID, CustomerPaused); err != nil || !c.Paused() {
 		t.Fatalf("pause again = %+v, %v", c, err)
 	}
-	if c, err = store.SetPaused(ctx, orgID, c.ID, false); err != nil || c.Status() != CustomerActive {
+	if c, err = store.SetStatus(ctx, orgID, c.ID, CustomerActive); err != nil || c.Status() != CustomerActive {
 		t.Fatalf("resume = %+v, %v", c, err)
 	}
-	if _, err := store.SetPaused(ctx, orgID, uuid.New(), true); !errors.Is(err, ErrCustomerNotFound) {
+	if _, err := store.SetStatus(ctx, orgID, uuid.New(), CustomerPaused); !errors.Is(err, ErrCustomerNotFound) {
 		t.Errorf("pause unknown = %v, want ErrCustomerNotFound", err)
 	}
 	if n := auditCount(t, pool, audit.IdentityProofingCustomerUpdated); n != 2 {
@@ -619,7 +642,7 @@ func TestCustomerStorePauseAndResume(t *testing.T) {
 	}
 }
 
-func TestRequestStoreStatsCountsCustomerRequestsByOutcome(t *testing.T) {
+func TestStoreStatsByOutcome(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
 	customers := NewCustomerStore(pool, audit.NopRecorder{})
@@ -673,9 +696,18 @@ func TestRequestStoreStatsCountsCustomerRequestsByOutcome(t *testing.T) {
 		}
 	}
 
-	since := time.Now().Add(-StatsWindow)
+	// A cancelled one counts apart from the expired ones.
+	cancelled, err := store.Create(ctx, newStoredRequest(orgID, kim, Subject{CustomerID: &customer.ID, Email: "c@example.org"}))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if ok, err := store.Cancel(ctx, cancelled); err != nil || !ok {
+		t.Fatalf("Cancel = %v, %v", ok, err)
+	}
+
+	since := time.Now().Add(-statsWindow)
 	rows, err := store.Stats(ctx, orgID, nil, since)
-	want := StatsRow{CustomerID: customer.ID, FlowID: "f1", Sessions: 5, Approved: 1, NeedsReview: 1, Expired: 2}
+	want := StatsRow{CustomerID: customer.ID, FlowID: "f1", Sessions: 6, Approved: 1, NeedsReview: 1, Expired: 2, Cancelled: 1}
 	if err != nil || len(rows) != 1 || rows[0] != want {
 		t.Errorf("Stats = %+v, %v; want [%+v]", rows, err, want)
 	}
@@ -689,7 +721,7 @@ func TestRequestStoreStatsCountsCustomerRequestsByOutcome(t *testing.T) {
 	}
 }
 
-func TestCustomerStoreRemovePurgesItsRequests(t *testing.T) {
+func TestCustomerStoreRemovePurges(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	customers := NewCustomerStore(pool, audit.NewDBRecorder())
 	requests := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
@@ -705,8 +737,15 @@ func TestCustomerStoreRemovePurgesItsRequests(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	for _, c := range []Customer{gone, kept} {
-		if _, err := requests.Create(ctx, newStoredRequest(orgID, sam, Subject{CustomerID: &c.ID, Email: "a@example.org"})); err != nil {
+		req, err := requests.Create(ctx, newStoredRequest(orgID, sam, Subject{CustomerID: &c.ID, Email: "a@example.org"}))
+		if err != nil {
 			t.Fatalf("create request: %v", err)
+		}
+		// Removal takes only purged requests (Service.RemoveCustomer purges first).
+		if c.ID == gone.ID {
+			if err := requests.Purge(ctx, req); err != nil {
+				t.Fatalf("purge request: %v", err)
+			}
 		}
 	}
 
@@ -728,7 +767,7 @@ func TestCustomerStoreRemovePurgesItsRequests(t *testing.T) {
 	}
 }
 
-func TestCustomerStoreSavesSettingsAndRetainsNamesForThem(t *testing.T) {
+func TestCustomerStoreSettings(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	customers := NewCustomerStore(pool, audit.NewDBRecorder())
 	requests := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
@@ -736,7 +775,7 @@ func TestCustomerStoreSavesSettingsAndRetainsNamesForThem(t *testing.T) {
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
 	c, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil || c.Settings.SessionTTL != SessionTTL || c.Settings.DataRetention() != ProofedNameRetention {
+	if err != nil || c.Settings.SessionTTL != SessionTTL || c.Settings.DataRetention() != proofedNameRetention {
 		t.Fatalf("Create = %+v, %v; want the default settings", c, err)
 	}
 	week := CustomerSettings{SessionTTL: 5 * time.Minute, DataRetentionDays: 7}
@@ -766,7 +805,7 @@ func TestCustomerStoreSavesSettingsAndRetainsNamesForThem(t *testing.T) {
 	}
 }
 
-func TestWebhookOutboxDeliversSignedEventsWithBackOff(t *testing.T) {
+func TestWebhookOutboxBackOff(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	customers := NewCustomerStore(pool, audit.NopRecorder{})
@@ -829,7 +868,7 @@ func TestWebhookOutboxDeliversSignedEventsWithBackOff(t *testing.T) {
 	if bytes.Contains(first.body, []byte("Anna")) || bytes.Contains(first.body, []byte("a@example.org")) {
 		t.Errorf("the event body carries personal data: %s", first.body)
 	}
-	if !bytes.Contains(first.body, []byte(PublicSessionID(approved.ID))) || !bytes.Contains(first.body, []byte("substantial")) {
+	if !bytes.Contains(first.body, []byte(publicSessionID(approved.ID))) || !bytes.Contains(first.body, []byte("substantial")) {
 		t.Errorf("the event body misses the session or its assurance: %s", first.body)
 	}
 
@@ -906,7 +945,7 @@ func TestPurgeSendsPurgedEvent(t *testing.T) {
 
 // A session going to manual review sends session.review_opened, and its
 // decision then sends the outcome.
-func TestNeedsReviewSendsReviewOpenedEvent(t *testing.T) {
+func TestNeedsReviewSendsEvent(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	customers := NewCustomerStore(pool, audit.NopRecorder{})
@@ -981,7 +1020,7 @@ func TestSessionStatesSendWebhooks(t *testing.T) {
 
 // A customer without its own endpoint is sent every event at the wallet's
 // default endpoint: signed with the default secret, retried like any other.
-func TestWebhookWithoutEndpointSendsToDefault(t *testing.T) {
+func TestWebhookDefaultEndpoint(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	customers := NewCustomerStore(pool, audit.NopRecorder{})
@@ -1079,7 +1118,7 @@ func TestRequestStoreHostedLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID})
-	in.LinkTokenHash, in.LinkExpiresAt = hash, time.Now().Add(HostedLinkTTL)
+	in.LinkTokenHash, in.LinkExpiresAt = hash, time.Now().Add(hostedLinkTTL)
 	if _, err := store.Create(ctx, in); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -1090,7 +1129,7 @@ func TestRequestStoreHostedLink(t *testing.T) {
 	if _, err := store.GetByLinkToken(ctx, []byte("other")); !errors.Is(err, ErrRequestNotFound) {
 		t.Errorf("unknown link = %v, want ErrRequestNotFound", err)
 	}
-	rows, err := store.Stats(ctx, orgID, nil, time.Now().Add(-StatsWindow))
+	rows, err := store.Stats(ctx, orgID, nil, time.Now().Add(-statsWindow))
 	if err != nil || len(rows) != 1 || rows[0].Expired != 0 {
 		t.Errorf("Stats = %+v, %v; want the unstarted link not counted as expired", rows, err)
 	}
@@ -1105,7 +1144,7 @@ func TestRequestStoreHostedLink(t *testing.T) {
 
 // A hosted link that lapses unstarted is ended once by the deadline job, with
 // session_ended and a session.expired webhook, and wakes the job at its lapse.
-func TestRequestStoreLapsesUnstartedLinks(t *testing.T) {
+func TestStoreLapsesUnstartedLinks(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), cipher)
@@ -1137,10 +1176,10 @@ func TestRequestStoreLapsesUnstartedLinks(t *testing.T) {
 	if n, err := store.LapseLinks(ctx, time.Now(), 10); err != nil || n != 0 {
 		t.Errorf("LapseLinks before the lapse = %d, %v; want none", n, err)
 	}
-	for want := range []int{1, 0} {
+	for run, want := range []int{1, 0} {
 		n, err := store.LapseLinks(ctx, lapse.Add(time.Second), 10)
-		if err != nil || n != 1-want {
-			t.Errorf("LapseLinks run %d = %d, %v; want %d", want+1, n, err, 1-want)
+		if err != nil || n != want {
+			t.Errorf("LapseLinks run %d = %d, %v; want %d", run+1, n, err, want)
 		}
 	}
 	req, err := store.GetByLinkToken(ctx, hash)
@@ -1154,4 +1193,247 @@ func TestRequestStoreLapsesUnstartedLinks(t *testing.T) {
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionExpired {
 		t.Errorf("deliveries = %+v, %v; want one session.expired", deliveries, err)
 	}
+}
+
+// Delivered and failed deliveries are pruned past DeliveryRetention; a
+// pending one stays whatever its age.
+func TestPruneDeliveries(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", WebhookEvents); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries
+		SET created_at = now() - $1::interval - interval '1 day'`, DeliveryRetention.String()); err != nil {
+		t.Fatalf("age deliveries: %v", err)
+	}
+	if n, err := webhooks.PruneDeliveries(ctx); err != nil || n != 0 {
+		t.Fatalf("pruned %d pending, %v; want none", n, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET status = $1`, DeliveryDelivered); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if n, err := webhooks.PruneDeliveries(ctx); err != nil || n == 0 {
+		t.Errorf("pruned %d delivered past retention, %v; want them gone", n, err)
+	}
+}
+
+// LockReview holds one decision at a time on a request: a second waits until
+// the first releases.
+func TestLockReviewSerialises(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	ctx := context.Background()
+	id := uuid.New()
+	release, err := store.LockReview(ctx, id)
+	if err != nil {
+		t.Fatalf("LockReview: %v", err)
+	}
+	second := make(chan struct{})
+	go func() {
+		releaseSecond, err := store.LockReview(ctx, id)
+		if err != nil {
+			t.Errorf("second LockReview: %v", err)
+			close(second)
+			return
+		}
+		releaseSecond()
+		close(second)
+	}()
+	select {
+	case <-second:
+		t.Fatal("a second decision took the lock while the first held it")
+	case <-time.After(200 * time.Millisecond):
+	}
+	release()
+	select {
+	case <-second:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second decision never got the lock after the first released it")
+	}
+	if other, err := store.LockReview(ctx, uuid.New()); err != nil {
+		t.Fatalf("another request's lock: %v", err)
+	} else {
+		other()
+	}
+}
+
+// A proofed name is dropped once its own retention passed, even while the
+// request is not due for a purge.
+func TestClearExpiredProofedNames(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	store := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	req := createStarted(t, store, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	if err := store.RecordOutcome(ctx, req, "s1", StatusNeedsReview,
+		proofingprovider.Result{Status: proofingprovider.StatusNeedsReview, Name: "Anna Jansen"}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	if n, err := store.ClearExpiredProofedNames(ctx); err != nil || n != 0 {
+		t.Fatalf("cleared %d within retention, %v; want none", n, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests SET proofed_name_purge_after = now() - interval '1 minute'
+		WHERE id = $1`, req.ID); err != nil {
+		t.Fatalf("age the name: %v", err)
+	}
+	if n, err := store.ClearExpiredProofedNames(ctx); err != nil || n != 1 {
+		t.Fatalf("cleared %d past retention, %v; want 1", n, err)
+	}
+	got, err := store.Get(ctx, orgID, req.ID)
+	if err != nil || got.ProofedName != "" || got.Status != StatusNeedsReview {
+		t.Errorf("request = %q %s, %v; want the name gone and the review kept", got.ProofedName, got.Status, err)
+	}
+}
+
+// A list narrowed to one member holds only the requests proofing them.
+func TestRequestListBySubjectUser(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	alex := makeUser(t, pool, "alex@example.org")
+	ctx := context.Background()
+	mine := createStarted(t, store, newStoredRequest(orgID, sam, Subject{UserID: &alex, Email: "alex@example.org"}), "s1")
+	if _, err := store.Create(ctx, newStoredRequest(orgID, alex, Subject{UserID: &sam, Email: "sam@example.org"})); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := store.List(ctx, orgID, RequestFilter{SubjectUserID: &alex})
+	if err != nil || len(got) != 1 || got[0].ID != mine.ID {
+		t.Errorf("List for alex = %d rows, %v; want only the request proofing alex", len(got), err)
+	}
+}
+
+// A request for one known person drops the expected birth date as soon as no
+// match can follow: here, cancelled.
+func TestCancelDropsBirthDate(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	orgID := makeOrg(t, pool, "acme")
+	requester := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, requester, "Initech")
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	req := createStarted(t, store, newStoredRequest(orgID, requester,
+		Subject{CustomerID: &customer.ID, Name: "Anna de Vries", Email: "anna@example.org", BirthDate: "1990-04-12"}), "s1")
+	if ok, err := store.Cancel(ctx, req); err != nil || !ok {
+		t.Fatalf("Cancel = %v, %v", ok, err)
+	}
+	var birthDateCT []byte
+	if err := pool.QueryRow(ctx, `SELECT expected_birth_date_ciphertext FROM identity_proofing_requests WHERE id = $1`,
+		req.ID).Scan(&birthDateCT); err != nil || birthDateCT != nil {
+		t.Errorf("birth date after cancel = %d bytes, %v; want it dropped", len(birthDateCT), err)
+	}
+}
+
+// A flow's own retention sets the purge, in place of the customer's: a week
+// brings it forward, a year pushes it back.
+func TestPurgeFollowsFlowRetention(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	store := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, "Initech") // 30 days by default
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	for _, tc := range []struct {
+		name     string
+		override time.Duration
+		age      string
+		due      bool
+	}{
+		{"a week's override, 8 days on", 7 * 24 * time.Hour, "8 days", true},
+		{"a year's override, 31 days on", 365 * 24 * time.Hour, "31 days", false},
+	} {
+		if _, err := pool.Exec(ctx, `DELETE FROM identity_proofing_requests`); err != nil {
+			t.Fatalf("clear: %v", err)
+		}
+		in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"})
+		in.Flow.RetentionOverrideSeconds = int(tc.override.Seconds())
+		req := createStarted(t, store, in, "s-"+tc.age)
+		if req.RetentionOverride != tc.override || req.NameRetention != tc.override {
+			t.Errorf("%s: retention = %v, name %v; want the flow's", tc.name, req.RetentionOverride, req.NameRetention)
+		}
+		if err := store.RecordOutcome(ctx, req, "s-"+tc.age, StatusApproved, proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
+			t.Fatalf("RecordOutcome: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests SET completed_at = now() - $2::interval WHERE id = $1`, req.ID, tc.age); err != nil {
+			t.Fatalf("age the request: %v", err)
+		}
+		// A raw write: the store would set purge_at in the same transaction.
+		if err := refreshPurgeAt(ctx, pool, req.ID); err != nil {
+			t.Fatalf("refresh purge time: %v", err)
+		}
+		due, err := store.ListPurgeDue(ctx, 10)
+		if err != nil || (len(due) == 1) != tc.due {
+			t.Errorf("%s: purge due = %d, %v; want due %v", tc.name, len(due), err, tc.due)
+		}
+	}
+}
+
+// A session's device event lands in the audit log on its request; one for a
+// session the org holds no request of records nothing.
+func TestRecordDeviceEvent(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	req := createStarted(t, store, newStoredRequest(orgID, sam, Subject{UserID: &sam, Email: "sam@example.org"}), "s1")
+	if err := store.RecordDeviceEvent(ctx, orgID.String(), "s1", "device_claimed", map[string]any{"role": "native", "deviceId": "d1"}); err != nil {
+		t.Fatalf("RecordDeviceEvent: %v", err)
+	}
+	var target, metadata string
+	if err := pool.QueryRow(ctx, `SELECT target_id, metadata::text FROM audit_events WHERE action = $1`,
+		audit.IdentityProofingDeviceClaimed).Scan(&target, &metadata); err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	if target != req.ID.String() || !strings.Contains(metadata, "d1") {
+		t.Errorf("audited on %s with %s; want the request, with the device", target, metadata)
+	}
+	for _, tc := range []struct{ tenant, session string }{{orgID.String(), "unknown"}, {uuid.NewString(), "s1"}} {
+		if err := store.RecordDeviceEvent(ctx, tc.tenant, tc.session, "access_denied", nil); err != nil {
+			t.Errorf("RecordDeviceEvent(%s, %s) = %v, want nothing recorded", tc.tenant, tc.session, err)
+		}
+	}
+	if n := countAction(t, pool, audit.IdentityProofingAccessDenied); n != 0 {
+		t.Errorf("access_denied audits = %d, want none", n)
+	}
+	if err := store.RecordDeviceEvent(ctx, orgID.String(), "s1", "nonsense", nil); err == nil {
+		t.Error("an unknown device event was accepted")
+	}
+}
+
+func countAction(t *testing.T, pool *pgxpool.Pool, action string) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_events WHERE action = $1`, action).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", action, err)
+	}
+	return n
 }

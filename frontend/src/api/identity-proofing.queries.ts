@@ -68,7 +68,6 @@ import type {
   CreatedProofingApiKey,
   ProofingApiKey,
   ProofingBrandingInput,
-  ProofingMode,
   ProofingWebhook,
   WebhookDelivery,
   ProofingFaceVerdict,
@@ -93,7 +92,10 @@ import type {
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
-import { isProofingLive } from "../lib/identity-proofing";
+import {
+  isProofingLive,
+  progressPollContinues,
+} from "../lib/identity-proofing";
 
 // Both reads reconcile live requests at the proofing service, so a request in
 // flight is re-fetched until it settles. The recipient's own page polls faster:
@@ -105,6 +107,10 @@ const DELIVERIES_POLL_INTERVAL_MS = 5_000;
 // The on-screen page is watching one phone finish, so it re-reads its request
 // and the Yivi disclosure much sooner.
 const ON_SCREEN_POLL_INTERVAL_MS = 2_000;
+// A mutation whose answer carries a secret (a new API key, a webhook signing
+// secret) is dropped from the cache as soon as nothing shows it, instead of
+// lingering there for the default five minutes.
+const SECRET_MUTATION_GC_TIME_MS = 0;
 
 export function proofingQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "identity-proofing"];
@@ -218,10 +224,15 @@ export function useSaveProofingFlowHostedMutation(
   flowId: string,
 ): UseMutationResult<ProofingFlowHosted, Error, ProofingFlowHosted> {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: (settings) => saveProofingFlowHosted(slug, flowId, settings),
-    onSuccess: (saved) =>
-      queryClient.setQueryData(proofingFlowHostedQueryKey(slug, flowId), saved),
+    // The form shows a failure itself; the global toast would say it twice.
+    meta: { suppressErrorToast: true },
+    onSuccess: (saved) => {
+      toast.success(t("toasts.identityProofingHostedSettingsSaved"));
+      queryClient.setQueryData(proofingFlowHostedQueryKey(slug, flowId), saved);
+    },
   });
 }
 
@@ -330,8 +341,26 @@ export function useProofingRequestsQuery(
     queryKey: customerId
       ? proofingCustomerRequestsQueryKey(slug, customerId)
       : proofingRequestsQueryKey(slug),
-    queryFn: ({ signal }) => getProofingRequests(slug, customerId, signal),
+    queryFn: ({ signal }) => getProofingRequests(slug, { customerId }, signal),
     enabled: slug !== "" && customerId !== "",
+    refetchInterval: (query) =>
+      query.state.data?.some((r) => isProofingLive(r.status))
+        ? REQUESTS_POLL_INTERVAL_MS
+        : false,
+  });
+}
+
+// The requests sent to one member, newest first. Under the requests key, so
+// everything that refreshes the org's requests refreshes these too.
+export function useMemberProofingRequestsQuery(
+  slug: string,
+  userId: string,
+): UseQueryResult<ProofingRequest[], Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), "member", userId],
+    queryFn: ({ signal }) =>
+      getProofingRequests(slug, { subjectUserId: userId }, signal),
+    enabled: slug !== "" && userId !== "",
     refetchInterval: (query) =>
       query.state.data?.some((r) => isProofingLive(r.status))
         ? REQUESTS_POLL_INTERVAL_MS
@@ -370,8 +399,14 @@ export function useCreateProofingRequestMutation(
       void queryClient.invalidateQueries({
         queryKey: proofingRequestsQueryKey(slug),
       });
-      // An on-screen session is on the page that asked for it: nothing mailed.
-      if ("channel" in input && input.channel === "on_screen") {
+      // Only a mailed request has a mail to report on: an on-screen session is
+      // on the page that asked for it, and a hosted link is handed out by the
+      // sender, so neither is mailed.
+      if (
+        "channel" in input &&
+        input.channel !== undefined &&
+        input.channel !== "email"
+      ) {
         return;
       }
       // The request stands either way, without the mail the member has no link.
@@ -435,11 +470,13 @@ export function useUpdateProofingCustomerMutation(
     meta: { suppressErrorToast: true },
     onSuccess: (customer, update) => {
       toast.success(
-        update.paused === undefined
-          ? t("toasts.identityProofingCustomerRenamed")
-          : update.paused
+        update.paused !== undefined
+          ? update.paused
             ? t("toasts.identityProofingCustomerPaused")
-            : t("toasts.identityProofingCustomerResumed"),
+            : t("toasts.identityProofingCustomerResumed")
+          : update.name !== undefined
+            ? t("toasts.identityProofingCustomerRenamed")
+            : t("toasts.identityProofingCustomerSettingsSaved"),
       );
       queryClient.setQueryData(
         proofingCustomerQueryKey(slug, customerId),
@@ -578,21 +615,17 @@ export function useProofingApiKeysQuery(
 export function useCreateProofingApiKeyMutation(
   slug: string,
   customerId: string,
-): UseMutationResult<
-  CreatedProofingApiKey,
-  Error,
-  { name: string; mode: ProofingMode }
-> {
+): UseMutationResult<CreatedProofingApiKey, Error, { name: string }> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ name, mode }) =>
-      createProofingApiKey(slug, customerId, name, mode),
+    mutationFn: ({ name }) => createProofingApiKey(slug, customerId, name),
+    gcTime: SECRET_MUTATION_GC_TIME_MS,
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: proofingApiKeysQueryKey(slug, customerId),
       });
-      // A customer's hasLiveKey follows its keys.
+      // A customer's hasApiKey follows its keys.
       void queryClient.invalidateQueries({
         queryKey: proofingCustomersQueryKey(slug),
       });
@@ -614,7 +647,7 @@ export function useRevokeProofingApiKeyMutation(
       void queryClient.invalidateQueries({
         queryKey: proofingApiKeysQueryKey(slug, customerId),
       });
-      // A customer's hasLiveKey follows its keys.
+      // A customer's hasApiKey follows its keys.
       void queryClient.invalidateQueries({
         queryKey: proofingCustomersQueryKey(slug),
       });
@@ -682,6 +715,7 @@ export function useSaveProofingWebhookMutation(
   const { t } = useTranslation();
   return useMutation({
     mutationFn: (input) => saveProofingWebhook(slug, customerId, input),
+    gcTime: SECRET_MUTATION_GC_TIME_MS,
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.identityProofingWebhookSaved"));
@@ -713,6 +747,7 @@ export function useRotateProofingWebhookSecretMutation(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => rotateProofingWebhookSecret(slug, customerId),
+    gcTime: SECRET_MUTATION_GC_TIME_MS,
     meta: { suppressErrorToast: true },
     onSuccess: () => invalidateWebhook(queryClient, slug, customerId),
   });
@@ -738,14 +773,28 @@ export function useSendProofingWebhookTestMutation(
 // adding events, so it is re-read while it runs.
 export function useProofingRequestEventsQuery(
   slug: string,
-  requestId: string,
-  live: boolean,
+  request: { id: string; status: string },
 ): UseQueryResult<AuditEvent[], Error> {
   return useQuery({
-    queryKey: [...proofingRequestsQueryKey(slug), requestId, "events"],
-    queryFn: ({ signal }) => getProofingRequestEvents(slug, requestId, signal),
+    queryKey: [...proofingRequestsQueryKey(slug), request.id, "events"],
+    queryFn: ({ signal }) => getProofingRequestEvents(slug, request.id, signal),
+    enabled: slug !== "" && request.id !== "",
+    refetchInterval: isProofingLive(request.status)
+      ? REQUESTS_POLL_INTERVAL_MS
+      : false,
+  });
+}
+
+// A data request's matched sessions, for its review and, once decided, what
+// the reviewer approved.
+export function useProofingDataMatchesQuery(
+  slug: string,
+  requestId: string,
+): UseQueryResult<ProofingDataMatch[], Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), requestId, "data-matches"],
+    queryFn: ({ signal }) => getProofingDataMatches(slug, requestId, signal),
     enabled: slug !== "" && requestId !== "",
-    refetchInterval: live ? REQUESTS_POLL_INTERVAL_MS : false,
   });
 }
 
@@ -753,18 +802,11 @@ export function useProofingRequestEventsQuery(
 // open. Every read is audited, so it is never refetched on its own: its key
 // sits outside every prefix the proofing mutations invalidate. The timeline
 // then shows the read.
-// A data request's matched sessions, for its review and, once decided, what
-// the reviewer approved.
-export function useProofingDataMatchesQuery(
+function proofingRequestResultQueryKey(
   slug: string,
   requestId: string,
-  enabled: boolean,
-): UseQueryResult<ProofingDataMatch[], Error> {
-  return useQuery({
-    queryKey: [...proofingRequestsQueryKey(slug), requestId, "data-matches"],
-    queryFn: ({ signal }) => getProofingDataMatches(slug, requestId, signal),
-    enabled: enabled && slug !== "" && requestId !== "",
-  });
+): readonly string[] {
+  return ["identity-proofing", "result", slug, requestId];
 }
 
 export function useProofingRequestResultQuery(
@@ -774,7 +816,7 @@ export function useProofingRequestResultQuery(
 ): UseQueryResult<ProofingResult, Error> {
   const queryClient = useQueryClient();
   const query = useQuery({
-    queryKey: ["identity-proofing", "result", slug, requestId],
+    queryKey: proofingRequestResultQueryKey(slug, requestId),
     queryFn: ({ signal }) => getProofingRequestResult(slug, requestId, signal),
     enabled: enabled && slug !== "" && requestId !== "",
     staleTime: Infinity,
@@ -865,7 +907,7 @@ export function useProofingProgressQuery(
         ? getProofingRequest(target.slug, target.requestId, signal)
         : getHostedProofingStatus(target.token, signal),
     refetchInterval: (query) =>
-      query.state.data === undefined || isProofingLive(query.state.data.status)
+      progressPollContinues(query.state.data, query.state.error)
         ? ON_SCREEN_POLL_INTERVAL_MS
         : false,
   });
@@ -881,7 +923,7 @@ export function useStartProofingYiviMutation(
 }
 
 // Where an on-screen Idem request's phone is, polled while its session runs;
-// each read asks IPS live.
+// each read asks the engine live.
 export function useProofingAppQuery(
   slug: string,
   requestId: string,
@@ -905,8 +947,8 @@ export function useNewProofingClaimLinkMutation(
   });
 }
 
-// Polled until the subject has finished in the Yivi app; enabled only while
-// the page shows the Yivi QR.
+// Polled until the subject has finished in the Yivi app or a poll fails (the
+// page then shows the error); enabled only while the page shows the Yivi QR.
 export function useProofingYiviDisclosureQuery(
   target: VerifyTarget,
   enabled: boolean,
@@ -916,7 +958,9 @@ export function useProofingYiviDisclosureQuery(
     queryFn: ({ signal }) => getProofingYiviDisclosure(target, signal),
     enabled,
     refetchInterval: (query) =>
-      query.state.data?.done ? false : ON_SCREEN_POLL_INTERVAL_MS,
+      query.state.data?.done || query.state.status === "error"
+        ? false
+        : ON_SCREEN_POLL_INTERVAL_MS,
   });
 }
 
@@ -989,6 +1033,11 @@ export function useDecideProofingReviewMutation(
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: proofingRequestsQueryKey(slug),
+      });
+      // The result is read once and kept (staleTime Infinity); the decision
+      // changed it, so the one read under review is no longer the outcome.
+      void queryClient.invalidateQueries({
+        queryKey: proofingRequestResultQueryKey(slug, requestId),
       });
     },
   });

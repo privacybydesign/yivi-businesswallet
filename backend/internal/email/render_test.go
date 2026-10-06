@@ -504,7 +504,7 @@ func TestDefaultTemplateReturnsACopy(t *testing.T) {
 	}
 }
 
-func TestRenderQRBlockEmbedsTheLinkAsAnInlineImage(t *testing.T) {
+func TestRenderQRBlockInlinesImage(t *testing.T) {
 	tpl, _ := DefaultTemplate(KindIdentityProofingRequested, LocaleEN)
 	const link = "vcmrtd://verify?handover=abc&api=https%3A%2F%2Fproofing.example.org"
 	body, err := Render(KindIdentityProofingRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
@@ -533,7 +533,7 @@ func TestRenderQRBlockEmbedsTheLinkAsAnInlineImage(t *testing.T) {
 
 // The proofing link is a vcmrtd deep link and nothing else: an http(s) URL or
 // another scheme in its place is refused, not delivered.
-func TestRenderHoldsAnAppLinkVariableToItsScheme(t *testing.T) {
+func TestRenderAppLinkKeepsScheme(t *testing.T) {
 	tpl, _ := DefaultTemplate(KindIdentityProofingRequested, LocaleEN)
 	for _, link := range []string{"https://wallet.example.org/proof/abc", "javascript:alert(1)", "vcmrtd:verify"} {
 		_, err := Render(KindIdentityProofingRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
@@ -548,7 +548,7 @@ func TestRenderHoldsAnAppLinkVariableToItsScheme(t *testing.T) {
 
 // Only the variable that declares the scheme may carry it: an http(s) variable
 // holding a vcmrtd link still fails.
-func TestRenderRefusesAnAppLinkInAnHTTPVariable(t *testing.T) {
+func TestRenderRefusesAppLinkInHTTP(t *testing.T) {
 	tpl, _ := DefaultTemplate(KindVogRequested, LocaleEN)
 	_, err := Render(KindVogRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
 		varOrgName: "Acme BV", varVogURL: "vcmrtd://verify?handover=abc", varReason: "Expired.",
@@ -558,7 +558,7 @@ func TestRenderRefusesAnAppLinkInAnHTTPVariable(t *testing.T) {
 	}
 }
 
-func TestValidateTemplateRejectsAQRBlockWithoutAURLVariable(t *testing.T) {
+func TestValidateQRBlockNeedsURL(t *testing.T) {
 	tpl := Template{Subject: "x", Blocks: []Block{
 		{Type: BlockParagraph, Text: "Hello"},
 		{Type: BlockQR, URL: "{{requesterName}}"},

@@ -404,6 +404,23 @@ describe("heldHistory", () => {
     expect(entries[1].revoked).toBe(true);
   });
 
+  it("leaves the direction of a status change open when its detail is hidden", () => {
+    const entries = heldHistory(
+      [
+        {
+          occurredAt: "2026-07-22T06:12:00Z",
+          action: "attestation.held_status_changed",
+          metadata: {},
+          actor: null,
+          detailHidden: true,
+        },
+      ],
+      { receivedAt: "2026-01-09T11:05:00Z" },
+    );
+    expect(entries[1]).toMatchObject({ kind: "statusChanged" });
+    expect(entries[1].revoked).toBeUndefined();
+  });
+
   it("adds the receipt of a credential received before the trail recorded it", () => {
     const entries = heldHistory([], { receivedAt: "2026-01-09T11:05:00Z" });
     expect(entries).toEqual([

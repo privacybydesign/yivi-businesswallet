@@ -3,6 +3,7 @@ package diploma
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -44,7 +45,7 @@ func MatchFullName(fullName, dateOfBirth string, disclosed Person) Result {
 	result := Result{}
 	result.DateOfBirthMatch = compareDatesOfBirth(dateOfBirth, disclosed.DateOfBirth, &result.Reasons)
 
-	tokens := strings.Fields(Normalize(fullName))
+	tokens := nameTokens(fullName)
 	given := tokens
 	for _, surname := range surnameTails(disclosed) {
 		if len(surname) == 0 || len(surname) >= len(tokens) {
@@ -63,7 +64,7 @@ func MatchFullName(fullName, dateOfBirth string, disclosed Person) Result {
 		}
 	}
 
-	result.GivenNamesMatch = givenNamesMatch(strings.Join(given, " "), disclosed.GivenNames)
+	result.GivenNamesMatch = givenNamesMatch(given, nameTokens(disclosed.GivenNames))
 	if !result.GivenNamesMatch {
 		result.Reasons = append(result.Reasons, "given names differ")
 	}
@@ -97,34 +98,33 @@ func compareDatesOfBirth(document, disclosed string, reasons *[]string) bool {
 // for the disclosed person: the surname variants of surnameVariants plus every
 // rotation of a multi-word surname, because travel documents may print "Berg
 // van der" for a name DUO prints as "van der Berg".
-func surnameTails(p Person) [][]string {
-	var tails [][]string
+func surnameTails(p Person) [][]nameToken {
+	var tails [][]nameToken
 	seen := map[string]bool{}
-	add := func(tokens []string) {
-		key := strings.Join(tokens, " ")
+	add := func(tokens []nameToken) {
+		key := tokensKey(tokens)
 		if key == "" || seen[key] {
 			return
 		}
 		seen[key] = true
 		tails = append(tails, tokens)
 	}
-	for _, variant := range surnameVariants(p) {
-		tokens := strings.Fields(variant)
+	for _, tokens := range surnameVariants(p) {
 		add(tokens)
 		for i := 1; i < len(tokens); i++ {
-			rotated := append(append([]string{}, tokens[i:]...), tokens[:i]...)
+			rotated := append(append([]nameToken{}, tokens[i:]...), tokens[:i]...)
 			add(rotated)
 		}
 	}
 	return tails
 }
 
-func equalTokens(a, b []string) bool {
+func equalTokens(a, b []nameToken) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		if !a[i].equals(b[i]) {
 			return false
 		}
 	}
@@ -133,51 +133,123 @@ func equalTokens(a, b []string) bool {
 
 // surnameVariants returns the normalised surname with and without prefix, and
 // with the prefix trailing (as some MRZ transliterations do).
-func surnameVariants(p Person) []string {
-	surname := Normalize(p.Surname)
-	prefix := Normalize(p.Prefix)
-	variants := []string{surname}
-	if prefix != "" {
-		variants = append(variants, prefix+" "+surname, surname+" "+prefix)
+func surnameVariants(p Person) [][]nameToken {
+	surname := nameTokens(p.Surname)
+	prefix := nameTokens(p.Prefix)
+	variants := [][]nameToken{surname}
+	if len(prefix) > 0 {
+		variants = append(variants,
+			append(append([]nameToken{}, prefix...), surname...),
+			append(append([]nameToken{}, surname...), prefix...))
 	}
 	return variants
 }
 
-func givenNamesMatch(documentNames, disclosedNames string) bool {
-	documentTokens := strings.Fields(Normalize(documentNames))
-	disclosedTokens := strings.Fields(Normalize(disclosedNames))
+func givenNamesMatch(documentTokens, disclosedTokens []nameToken) bool {
 	if len(documentTokens) == 0 || len(disclosedTokens) == 0 {
 		return false
 	}
-	if documentTokens[0] == disclosedTokens[0] {
+	if documentTokens[0].equals(disclosedTokens[0]) {
 		return true
 	}
-	disclosedSet := map[string]bool{}
-	for _, t := range disclosedTokens {
-		disclosedSet[t] = true
-	}
-	for _, t := range documentTokens {
-		if !disclosedSet[t] {
+	for _, document := range documentTokens {
+		if !slices.ContainsFunc(disclosedTokens, document.equals) {
 			return false
 		}
 	}
 	return true
 }
 
+// SameName reports whether a and b are the same full name: as many words, each
+// equal to its counterpart in order, plain or ICAO 9303 transliterated (see
+// nameToken), case, accents and punctuation aside. A missing or extra name is
+// a different name: "Anna Smit" is not "Anna Jansen Smit".
+func SameName(a, b string) bool {
+	tokens := nameTokens(a)
+	return len(tokens) > 0 && equalTokens(tokens, nameTokens(b))
+}
+
+// nameToken is one word of a name in both spellings a document may use for
+// it: plain (diacritics stripped, "Müller" → MULLER) and ICAO 9303
+// transliterated ("Müller" → MUELLER, as a passport's MRZ prints it). Two
+// words are the same when either spelling agrees, so a DUO extract printing
+// "Müller" matches a passport reading MUELLER or MULLER, and nothing else.
+type nameToken struct{ plain, icao string }
+
+func (t nameToken) equals(other nameToken) bool {
+	return t.plain == other.plain || t.icao == other.icao
+}
+
+// nameTokens splits a name into its words in both spellings. Both
+// normalisations map a letter to letters and anything else to a space, so the
+// two word lists always line up.
+func nameTokens(s string) []nameToken {
+	plain := strings.Fields(normalizeWith(s, plainTransliteration))
+	icao := strings.Fields(normalizeWith(s, icaoTransliteration))
+	tokens := make([]nameToken, len(plain))
+	for i := range plain {
+		tokens[i] = nameToken{plain: plain[i], icao: icao[i]}
+	}
+	return tokens
+}
+
+func tokensKey(tokens []nameToken) string {
+	parts := make([]string, len(tokens))
+	for i, t := range tokens {
+		parts[i] = t.plain + "/" + t.icao
+	}
+	return strings.Join(parts, " ")
+}
+
+// plainTransliteration spells out the letters NFD does not decompose, so
+// stripping diacritics alone would keep them as they are ("Søren" stays
+// SØREN and never meets SOREN).
+var plainTransliteration = map[rune]string{
+	'ß': "SS", 'ẞ': "SS", 'Ø': "O", 'Æ': "AE", 'Œ': "OE", 'Þ': "TH", 'Ð': "D",
+	'Ĳ': "IJ", 'Ł': "L", 'Đ': "D", 'Ħ': "H", 'Ŋ': "N", 'ı': "I",
+}
+
+// icaoTransliteration is the ICAO 9303 part 3 transliteration of the letters it
+// spells out with two, on top of plainTransliteration.
+var icaoTransliteration = func() map[rune]string {
+	icao := map[rune]string{'Ä': "AE", 'Ö': "OE", 'Ü': "UE", 'Å': "AA", 'Ø': "OE"}
+	for r, spelled := range plainTransliteration {
+		if _, ok := icao[r]; !ok {
+			icao[r] = spelled
+		}
+	}
+	return icao
+}()
+
 // Normalize upper-cases, strips diacritics, turns punctuation into spaces and
 // collapses whitespace so "Müller-Lüdenscheidt" and "MULLER LUDENSCHEIDT"
-// compare equal.
+// compare equal. Letters without a decomposition are spelled out ("Strauß" →
+// STRAUSS, "Søren" → SOREN).
 func Normalize(s string) string {
-	decomposed := norm.NFD.String(s)
+	return normalizeWith(s, plainTransliteration)
+}
+
+func normalizeWith(s string, transliteration map[rune]string) string {
 	var b strings.Builder
-	for _, r := range decomposed {
-		switch {
-		case unicode.Is(unicode.Mn, r):
+	for _, r := range norm.NFC.String(s) {
+		upper := unicode.ToUpper(r)
+		if spelled, ok := transliteration[upper]; ok {
+			b.WriteString(spelled)
 			continue
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			b.WriteRune(unicode.ToUpper(r))
-		default:
-			b.WriteRune(' ')
+		}
+		if spelled, ok := transliteration[r]; ok {
+			b.WriteString(spelled)
+			continue
+		}
+		for _, d := range norm.NFD.String(string(upper)) {
+			switch {
+			case unicode.Is(unicode.Mn, d):
+				continue
+			case unicode.IsLetter(d) || unicode.IsDigit(d):
+				b.WriteRune(d)
+			default:
+				b.WriteRune(' ')
+			}
 		}
 	}
 	return strings.Join(strings.Fields(b.String()), " ")

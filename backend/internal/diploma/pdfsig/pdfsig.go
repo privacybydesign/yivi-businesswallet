@@ -43,14 +43,29 @@ type Signature struct {
 // concatenation of the two ByteRange segments.
 func (s *Signature) SignedBytes(pdf []byte) ([]byte, error) {
 	br := s.ByteRange
+	if !withinFile(br, len(pdf)) {
+		return nil, fmt.Errorf("pdfsig: ByteRange %v does not fit in a %d byte file", br, len(pdf))
+	}
 	end1, end2 := br[0]+br[1], br[2]+br[3]
-	if br[0] < 0 || br[2] < 0 || end1 > int64(len(pdf)) || end2 > int64(len(pdf)) || end1 > br[2] {
+	if end1 > int64(len(pdf)) || end2 > int64(len(pdf)) || end1 > br[2] {
 		return nil, fmt.Errorf("pdfsig: ByteRange %v does not fit in a %d byte file", br, len(pdf))
 	}
 	out := make([]byte, 0, br[1]+br[3])
 	out = append(out, pdf[br[0]:end1]...)
 	out = append(out, pdf[br[2]:end2]...)
 	return out, nil
+}
+
+// withinFile reports whether every ByteRange entry lies in [0, size]. Checked
+// before any entries are added, so a crafted range near the int64 limit cannot
+// overflow into a negative offset and panic the slice expression.
+func withinFile(br [4]int64, size int) bool {
+	for _, v := range br {
+		if v < 0 || v > int64(size) {
+			return false
+		}
+	}
+	return true
 }
 
 // Info holds document metadata taken from the PDF /Info dictionary.
@@ -88,9 +103,12 @@ func Extract(pdf []byte) ([]Signature, error) {
 			}
 			s.ByteRange[i] = v
 		}
+		if !withinFile(s.ByteRange, len(pdf)) {
+			return nil, fmt.Errorf("pdfsig: ByteRange %v does not fit in a %d byte file", s.ByteRange, len(pdf))
+		}
 		// /Contents sits in the gap between the two ranges: <hex...>
 		gapStart, gapEnd := s.ByteRange[0]+s.ByteRange[1], s.ByteRange[2]
-		if gapStart >= gapEnd || gapEnd > int64(len(pdf)) {
+		if gapStart >= gapEnd {
 			return nil, fmt.Errorf("pdfsig: ByteRange %v leaves no room for /Contents", s.ByteRange)
 		}
 		gap := bytes.TrimSpace(pdf[gapStart:gapEnd])

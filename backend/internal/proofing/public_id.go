@@ -13,12 +13,12 @@ const sessionIDPrefix = "ps_"
 
 var publicIDEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
-// PublicSessionID is a request's customer-facing id.
-func PublicSessionID(id uuid.UUID) string {
+// publicSessionID is a request's customer-facing id.
+func publicSessionID(id uuid.UUID) string {
 	return sessionIDPrefix + strings.ToLower(publicIDEncoding.EncodeToString(id[:]))
 }
 
-// parsePublicSessionID reads a PublicSessionID back; false for anything else.
+// parsePublicSessionID reads a publicSessionID back; false for anything else.
 func parsePublicSessionID(s string) (uuid.UUID, bool) {
 	raw, ok := strings.CutPrefix(s, sessionIDPrefix)
 	if !ok {

@@ -1,15 +1,11 @@
-// Package redact blurs regions of stored evidence images per tenant policy
-// (requirements.md §3: "Option to blur the photo and/or the BSN"). This is
-// the enforcement point for that policy: called from
-// internal/api.buildResult before a session's result is ever written to the
-// session store, so a retained image is redacted from the moment it's
-// stored, not only when it's later re-rendered to a relying party.
+// Package redact covers parts of evidence images under the redaction policy,
+// before a result or stored evidence is written, so a kept image is redacted
+// from the moment it is stored.
 //
-// Redaction is pixelation (block-averaging), not a Gaussian blur: it's
-// simpler to reason about and verify (a fixed grid of flat-colour blocks),
-// and, at the block size used here, just as irreversible for the purpose of
-// keeping a face or a printed BSN from being read back out of the stored
-// image.
+// A face (Image) is pixelated into flat blocks, which keeps it from being
+// recognised. A region (Region, the BSN) is filled solid: nine digits in a known
+// font can be read back from a mosaic by rendering candidates through the same
+// grid.
 package redact
 
 import (
@@ -22,17 +18,16 @@ import (
 	"image/jpeg"
 	"image/png"
 	"strings"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
 )
 
-// Rect is a region of an image in normalized [0,1] coordinates, top-left
-// origin — resolution independent, so a region located against whatever
-// size an image was captured at still lands correctly against whatever size
-// ends up stored. Values outside [0,1] are clamped.
+// Rect is a region of an image in [0,1] coordinates from the top left, so it
+// holds at any resolution. Values outside [0,1] are clamped.
 type Rect struct {
 	X, Y, W, H float64
 }
 
-// wholeImage is the Rect covering an entire image — see Image.
 var wholeImage = Rect{X: 0, Y: 0, W: 1, H: 1}
 
 // pixelateDivisions sets how coarse the redaction grid is: each block is
@@ -50,25 +45,32 @@ const (
 // can't make this allocate gigabytes.
 const maxImagePixels = 40_000_000
 
-// Image blurs an entire image — used when the stored image already IS the
-// sensitive content (e.g. a DG2/selfie face photo is already just a face
-// crop, not a face within a wider scene, so there's no smaller region to
-// locate first).
+// The names go-jpeg2000 registers its formats under with the image package:
+// a JPEG2000 is held to images.MaxJPEG2000Pixels, since it compresses a
+// raster far smaller than a JPEG or PNG does.
+const (
+	jp2Format = "jp2"
+	j2kFormat = "j2k"
+)
+
+// redactionColor covers a Region.
+var redactionColor = color.RGBA{A: 0xff}
+
+// Image pixelates a whole image: a portrait or selfie is the face crop itself.
 func Image(imageBase64, mimeType string) (string, string, error) {
-	return Region(imageBase64, mimeType, wholeImage)
+	return apply(imageBase64, mimeType, wholeImage, pixelate)
 }
 
-// Region blurs just r within the image, leaving the rest untouched — used
-// to redact a known bounding box (e.g. a document image's BSN text, see
-// api.documentImageInfo.BSNRegion) without destroying the rest of the
-// evidence image.
-//
-// imageBase64 is plain (non-data-URL) base64, matching the convention
-// photoInfo/documentImageInfo already use elsewhere in this codebase (see
-// internal/images.ToDisplayablePNG). Returns the redacted image re-encoded
-// in its original format (JPEG stays JPEG, everything else becomes PNG) and
-// its mime type.
+// Region fills r within the image with a solid block and leaves the rest, as
+// for the printed BSN of a document photo.
 func Region(imageBase64, mimeType string, r Rect) (string, string, error) {
+	return apply(imageBase64, mimeType, r, func(img *image.RGBA, bounds image.Rectangle) {
+		fill(img, bounds.Min.X, bounds.Min.Y, bounds.Max.X, bounds.Max.Y, redactionColor)
+	})
+}
+
+// apply decodes the image, runs redact over r's pixels and re-encodes it.
+func apply(imageBase64, mimeType string, r Rect, redact func(*image.RGBA, image.Rectangle)) (string, string, error) {
 	if imageBase64 == "" {
 		return imageBase64, mimeType, nil
 	}
@@ -76,12 +78,16 @@ func Region(imageBase64, mimeType string, r Rect) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("redact: decode base64 image: %w", err)
 	}
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {
 		return "", "", fmt.Errorf("redact: unsupported or corrupt image: %w", err)
 	}
-	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width*cfg.Height > maxImagePixels {
-		return "", "", fmt.Errorf("redact: image dimensions %dx%d exceed the %d pixel limit", cfg.Width, cfg.Height, maxImagePixels)
+	limit := int64(maxImagePixels)
+	if format == jp2Format || format == j2kFormat {
+		limit = images.MaxJPEG2000Pixels
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > limit {
+		return "", "", fmt.Errorf("redact: image dimensions %dx%d exceed the %d pixel limit", cfg.Width, cfg.Height, limit)
 	}
 	img, format, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
@@ -89,7 +95,7 @@ func Region(imageBase64, mimeType string, r Rect) (string, string, error) {
 	}
 
 	rgba := toRGBA(img)
-	pixelate(rgba, rectToBounds(r, rgba.Bounds().Dx(), rgba.Bounds().Dy()))
+	redact(rgba, rectToBounds(r, rgba.Bounds().Dx(), rgba.Bounds().Dy()))
 
 	return encode(rgba, format)
 }
@@ -179,10 +185,8 @@ func fill(img *image.RGBA, x0, y0, x1, y1 int, c color.RGBA) {
 	}
 }
 
-// encode re-encodes rgba as format ("jpeg" stays JPEG at a high quality;
-// anything else — png, gif, webp — becomes PNG, since Go's standard library
-// only ships a lossless encoder for those), returning base64 and the
-// matching mime type.
+// encode re-encodes rgba: JPEG stays JPEG, anything else becomes PNG (Go ships
+// no lossy encoder for the others). It returns base64 and the mime type.
 func encode(rgba *image.RGBA, format string) (string, string, error) {
 	var buf bytes.Buffer
 	mimeType := "image/png"

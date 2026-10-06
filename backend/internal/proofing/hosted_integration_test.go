@@ -37,7 +37,7 @@ func TestHostedCompletionIsStored(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID})
-	in.LinkTokenHash, in.LinkExpiresAt = hash, time.Now().Add(HostedLinkTTL)
+	in.LinkTokenHash, in.LinkExpiresAt = hash, time.Now().Add(hostedLinkTTL)
 	in.RedirectURL, in.Language = "https://portal.initech.example/done", email.LocaleNL
 	if _, err := store.Create(ctx, in); err != nil {
 		t.Fatalf("Create: %v", err)

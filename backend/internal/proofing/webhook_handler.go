@@ -147,9 +147,11 @@ func (h *Handler) testWebhook(w http.ResponseWriter, r *http.Request) error {
 }
 
 type deliveryResponse struct {
-	ID             uuid.UUID  `json:"id"`
-	Event          string     `json:"event"`
-	SessionID      *uuid.UUID `json:"sessionId,omitempty"`
+	ID    uuid.UUID `json:"id"`
+	Event string    `json:"event"`
+	// SessionID is the session's ps_ id, as its webhook payload carries it;
+	// absent for a test event, which has no session.
+	SessionID      string     `json:"sessionId,omitempty"`
 	EndpointURL    string     `json:"endpointUrl,omitempty"`
 	Status         string     `json:"status"`
 	Attempts       int        `json:"attempts"`
@@ -171,8 +173,12 @@ func (h *Handler) listWebhookDeliveries(w http.ResponseWriter, r *http.Request) 
 	}
 	out := make([]deliveryResponse, 0, len(deliveries))
 	for _, d := range deliveries {
+		sessionID := ""
+		if d.RequestID != nil {
+			sessionID = publicSessionID(*d.RequestID)
+		}
 		out = append(out, deliveryResponse{
-			ID: d.ID, Event: d.Event, SessionID: d.RequestID, EndpointURL: d.EndpointURL, Status: d.Status, Attempts: d.Attempts,
+			ID: d.ID, Event: d.Event, SessionID: sessionID, EndpointURL: d.EndpointURL, Status: d.Status, Attempts: d.Attempts,
 			LastStatusCode: d.LastStatusCode, LastError: d.LastError, LastAttemptAt: d.LastAttemptAt,
 			DeliveredAt: d.DeliveredAt, CreatedAt: d.CreatedAt,
 		})

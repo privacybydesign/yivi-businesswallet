@@ -14,7 +14,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
 
-func TestFlowDiplomaStoreSavesAndAudits(t *testing.T) {
+func TestFlowDiplomaSavesAndAudits(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewFlowDiplomaStore(pool, audit.NewDBRecorder())
 	orgID := makeOrg(t, pool, "acme")
@@ -37,7 +37,7 @@ func TestFlowDiplomaStoreSavesAndAudits(t *testing.T) {
 	}
 }
 
-func TestDiplomaStoreKeepsExtractsUntilPurged(t *testing.T) {
+func TestDiplomaExtractsUntilPurge(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	customers := NewCustomerStore(pool, audit.NopRecorder{})
@@ -102,5 +102,31 @@ func TestDiplomaStoreKeepsExtractsUntilPurged(t *testing.T) {
 	}
 	if held, err := diplomas.List(ctx, []uuid.UUID{req.ID}); err != nil || len(held[req.ID]) != 0 {
 		t.Errorf("after purge List = %v, %v; want none", held, err)
+	}
+
+	// Nothing of the subject or their diplomas is left in the request's audit
+	// events or webhook deliveries, wherever the event held it.
+	var leftover []string
+	rows, err := pool.Query(ctx, `SELECT action || ': ' || metadata::text FROM audit_events
+		WHERE target_id = $1 AND (metadata::text ~ $2)`, req.ID.String(),
+		`anna@example\.org|Anna Jansen|Verpleegkunde|Hogeschool Utrecht|2896311|2015-07-01`)
+	if err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			t.Fatalf("scan audit: %v", err)
+		}
+		leftover = append(leftover, row)
+	}
+	rows.Close()
+	if len(leftover) != 0 {
+		t.Errorf("audit events after purge still hold personal data: %v", leftover)
+	}
+	var payloads int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM identity_proofing_webhook_deliveries
+		WHERE request_id = $1 AND payload ? 'diploma'`, req.ID).Scan(&payloads); err != nil || payloads != 0 {
+		t.Errorf("deliveries holding a diploma after purge = %d, %v; want 0", payloads, err)
 	}
 }

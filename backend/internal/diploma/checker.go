@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma/verify"
 )
 
 // Reasons an extract is refused, stable keys the frontend translates.
@@ -19,8 +21,9 @@ const (
 	ReasonHolder = "holder_mismatch"
 )
 
-// Outcome is the verdict on one extract. Document is set whenever the file
-// parsed; Reason is empty for an accepted extract.
+// Outcome is the verdict on one extract. Document is set whenever the
+// signature verified and the file parsed; Reason is empty for an accepted
+// extract.
 type Outcome struct {
 	Document *Document
 	// SignedAt is when DUO signed it (the trusted timestamp when there is one).
@@ -52,23 +55,31 @@ func (c *Checker) Ping(ctx context.Context) error {
 
 // Check decides on pdf for holder. An error is the checker's own failure (no
 // trust anchors, PDFium unavailable), never the document's.
+//
+// The signature is checked first, on the raw bytes, so only a file DUO signed
+// reaches PDFium: the upload is public, and a crafted PDF is otherwise parsed
+// by a full PDF engine before anything vouches for it. A file without any
+// signature is no extract, so it reads as not a diploma, as before.
 func (c *Checker) Check(ctx context.Context, pdf []byte, holder Person) (Outcome, error) {
-	doc, err := c.parser.Parse(pdf)
+	verification, err := c.validator.Validate(ctx, pdf)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("diploma: validate: %w", err)
+	}
+	if !verification.Valid {
+		key := verification.Key()
+		if key == verify.CheckSignaturePresent {
+			return Outcome{Reason: ReasonNotADiploma}, nil
+		}
+		return Outcome{SignedAt: verification.SigningTime, Reason: ReasonSignature, FailedCheck: key}, nil
+	}
+	doc, err := c.parser.Parse(ctx, pdf)
 	if errors.Is(err, ErrNotADiploma) {
 		return Outcome{Reason: ReasonNotADiploma}, nil
 	}
 	if err != nil {
 		return Outcome{}, err
 	}
-	verification, err := c.validator.Validate(ctx, pdf)
-	if err != nil {
-		return Outcome{}, fmt.Errorf("diploma: validate: %w", err)
-	}
 	out := Outcome{Document: doc, SignedAt: verification.SigningTime}
-	if !verification.Valid {
-		out.Reason, out.FailedCheck = ReasonSignature, verification.Key()
-		return out, nil
-	}
 	if !MatchFullName(doc.FullName, doc.DateOfBirth.Format(time.DateOnly), holder).Matched {
 		out.Reason = ReasonHolder
 	}

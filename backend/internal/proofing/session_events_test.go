@@ -12,7 +12,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
-func TestSessionChangedReconcilesTheSession(t *testing.T) {
+func TestSessionChangedReconciles(t *testing.T) {
 	f := newFixture()
 	f.send(t)
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved}
@@ -59,7 +59,7 @@ func TestReconcileDueWakesAtTheCap(t *testing.T) {
 	}
 }
 
-func TestARequestFollowsTheSendersLanguage(t *testing.T) {
+func TestRequestFollowsSenderLang(t *testing.T) {
 	f := newFixture()
 	if _, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
 		NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID, Language: email.LocaleNL}); err != nil {

@@ -16,7 +16,7 @@ func newTestLimiter(limit Limit) (*Limiter, *clock) {
 	return l, c
 }
 
-func TestAllowSpendsTheBurstThenRefills(t *testing.T) {
+func TestAllowBurstThenRefill(t *testing.T) {
 	l, c := newTestLimiter(Limit{Burst: 3, Per: 3 * time.Second})
 	for i := range 3 {
 		if ok, _ := l.Allow("k"); !ok {

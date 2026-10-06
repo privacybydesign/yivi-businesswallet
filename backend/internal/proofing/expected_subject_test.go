@@ -35,8 +35,8 @@ func TestExpectedSubjectIsMatched(t *testing.T) {
 	}{
 		"same person":           {"Anna Jansen", testBirthDate, StatusApproved, ""},
 		"written differently":   {"  anna   JANSEN ", testBirthDate, StatusApproved, ""},
-		"another name":          {"Dibran Mulder", testBirthDate, StatusRejected, ErrorIdentityMismatch},
-		"another date of birth": {"Anna Jansen", "1991-04-12", StatusRejected, ErrorIdentityMismatch},
+		"another name":          {"Dibran Mulder", testBirthDate, StatusRejected, errorIdentityMismatch},
+		"another date of birth": {"Anna Jansen", "1991-04-12", StatusRejected, errorIdentityMismatch},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture()
@@ -72,13 +72,16 @@ func TestNameAloneIsNotMatched(t *testing.T) {
 
 // The identity can only be matched once IPS approved; a failed read leaves
 // the request undecided for the next reconcile.
-func TestExpectedSubjectIdentityReadFails(t *testing.T) {
+func TestExpectedSubjectReadFails(t *testing.T) {
 	f := newFixture()
 	f.sendForPerson(t, "Anna Jansen", testBirthDate)
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved}
-	f.ips.resultErr = errors.New("unreachable")
+	f.ips.identityErr = errors.New("unreachable")
 	if req := f.reconcile(t); req.Status.Settled() {
 		t.Errorf("status = %s, want undecided while the identity cannot be read", req.Status)
+	}
+	if f.ips.identityReads != 1 {
+		t.Errorf("identity reads = %d, want 1: the status read passed and the match read the identity", f.ips.identityReads)
 	}
 	if len(f.requests.outcomes) != 0 {
 		t.Errorf("outcomes recorded = %v, want none", f.requests.outcomes)
@@ -120,6 +123,10 @@ func TestReadsIdentity(t *testing.T) {
 	}{
 		"steps scan the document":  {testFlow("a", "a", []string{"document_capture", "nfc_read"}, "native"), true},
 		"steps only read the chip": {testFlow("b", "b", []string{"nfc_read"}, "native"), false},
+		// A flow that requests no data releases the outcome only.
+		"requests no data": {
+			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}}}, false,
+		},
 		"requests the document data": {
 			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}, RequestedAttributes: []string{"dg1"}}}, true,
 		},
@@ -127,28 +134,28 @@ func TestReadsIdentity(t *testing.T) {
 			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}, RequestedAttributes: []string{"dg2"}}}, false,
 		},
 	} {
-		if got := ReadsIdentity(tc.flow); got != tc.want {
-			t.Errorf("%s: ReadsIdentity = %v, want %v", name, got, tc.want)
+		if got := readsIdentity(tc.flow); got != tc.want {
+			t.Errorf("%s: readsIdentity = %v, want %v", name, got, tc.want)
 		}
 	}
 }
 
 // A request the wallet rejected for someone other than the expected person
 // reads as that rejection, without the identity the engine approved.
-func TestMismatchResultHidesTheIdentity(t *testing.T) {
+func TestMismatchHidesIdentity(t *testing.T) {
 	f := newFixture()
 	sent := f.sendForPerson(t, "Dibran Mulder", testBirthDate)
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}
-	if req := f.reconcile(t); req.ErrorCode != ErrorIdentityMismatch {
-		t.Fatalf("code = %q, want %s", req.ErrorCode, ErrorIdentityMismatch)
+	if req := f.reconcile(t); req.ErrorCode != errorIdentityMismatch {
+		t.Fatalf("code = %q, want %s", req.ErrorCode, errorIdentityMismatch)
 	}
-	f.requests.stored.Status, f.requests.stored.ErrorCode = StatusRejected, ErrorIdentityMismatch
+	f.requests.stored.Status, f.requests.stored.ErrorCode = StatusRejected, errorIdentityMismatch
 	_, identity, err := f.svc.AdminRequestResult(context.Background(), testOrg.ID, sent.Request.ID)
 	if err != nil {
 		t.Fatalf("AdminRequestResult: %v", err)
 	}
-	if identity.Status != proofingprovider.StatusRejected || identity.ErrorCode != ErrorIdentityMismatch {
-		t.Errorf("status = %s, code = %q; want rejected, %s", identity.Status, identity.ErrorCode, ErrorIdentityMismatch)
+	if identity.Status != proofingprovider.StatusRejected || identity.ErrorCode != errorIdentityMismatch {
+		t.Errorf("status = %s, code = %q; want rejected, %s", identity.Status, identity.ErrorCode, errorIdentityMismatch)
 	}
 	if identity.GivenName != "" || identity.FamilyName != "" || identity.BirthDate != "" {
 		t.Errorf("identity = %+v, want no person", identity)

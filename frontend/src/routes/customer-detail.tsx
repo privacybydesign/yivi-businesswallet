@@ -36,19 +36,23 @@ import {
   auditVisual,
 } from "../lib/audit-event";
 import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
+import { fullName } from "../lib/name";
+import { toast } from "../lib/toast";
 import {
   assignedFlows,
+  assuranceLevelLabel,
   editedFlowSelection,
   isProofingStep,
   isRequestedAttribute,
   noProofingSessions,
   proofingErrorMessage,
   proofingStatsBy,
-  isProofingLive,
   proofingMethodLabel,
   proofingRejectionReason,
   requestSubject,
   readsIdentity,
+  REVIEW_REASON_MAX_CHARS,
+  reviewReasonTooLong,
   sendableByMail,
   sessionEventDetail,
   SESSION_FILTERS,
@@ -91,8 +95,6 @@ const ERROR = "text-error text-[12.5px]";
 const CAPTION =
   "text-muted font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase";
 const HTTP_NOT_FOUND = 404;
-// The longest reason a reviewer may give, as the backend allows.
-const REVIEW_REASON_MAX = 500;
 const SESSION_COLUMNS = 8;
 const OPEN_ICON_SIZE = 18;
 const TIMELINE_ICON_SIZE = 14;
@@ -168,7 +170,7 @@ export default function CustomerDetail(): React.JSX.Element {
     customer.error instanceof ApiError &&
     customer.error.status === HTTP_NOT_FOUND;
   const paused = customer.data?.status === "paused";
-  const noLiveKey = customer.data?.hasLiveKey === false;
+  const noApiKey = customer.data?.hasApiKey === false;
 
   return (
     <>
@@ -195,7 +197,13 @@ export default function CustomerDetail(): React.JSX.Element {
                   loading={update.isPending}
                   onClick={() =>
                     paused
-                      ? update.mutate({ paused: false })
+                      ? update.mutate(
+                          { paused: false },
+                          {
+                            onError: (error) =>
+                              toast.error(proofingErrorMessage(error, t)),
+                          },
+                        )
                       : setConfirmingPause(true)
                   }
                 >
@@ -206,7 +214,7 @@ export default function CustomerDetail(): React.JSX.Element {
               )}
               <Button
                 icon="email"
-                disabled={paused || noLiveKey}
+                disabled={paused || noApiKey}
                 onClick={() => setSending(true)}
               >
                 {t("customers.detail.verify")}
@@ -231,13 +239,19 @@ export default function CustomerDetail(): React.JSX.Element {
           message={t("customers.detail.pauseConfirm.message")}
           confirmLabel={t("customers.detail.pauseConfirm.confirm")}
           busy={update.isPending}
+          error={
+            update.isError ? proofingErrorMessage(update.error, t) : undefined
+          }
           onConfirm={() =>
             update.mutate(
               { paused: true },
               { onSuccess: () => setConfirmingPause(false) },
             )
           }
-          onClose={() => setConfirmingPause(false)}
+          onClose={() => {
+            update.reset();
+            setConfirmingPause(false);
+          }}
         />
       )}
       {customer.isPending ? (
@@ -301,12 +315,12 @@ export default function CustomerDetail(): React.JSX.Element {
                 {t("customers.detail.pausedNotice")}
               </p>
             )}
-            {!paused && noLiveKey && (
+            {!paused && noApiKey && (
               <div className="bg-warning-bg text-warning-fg rounded-yivi flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-[13px]">
                 <span>
                   {isAdmin
-                    ? t("customers.detail.noLiveKeyNotice")
-                    : t("customers.detail.noLiveKeyNoticeMember")}
+                    ? t("customers.detail.noApiKeyNotice")
+                    : t("customers.detail.noApiKeyNoticeMember")}
                 </span>
                 {isAdmin && activeTab !== "apiKeys" && (
                   <Button
@@ -329,8 +343,9 @@ export default function CustomerDetail(): React.JSX.Element {
             )}
             {activeTab === "branding" && isAdmin && (
               <BrandingTab
-                // Reseeded when the saved branding changes.
-                key={customer.data.updatedAt}
+                // Not keyed on updatedAt: any save (a pause, another card) bumps
+                // it, and remounting would throw away an edit in progress. Each
+                // form reseeds itself from its own save's answer.
                 slug={slug}
                 customer={customer.data}
               />
@@ -349,11 +364,7 @@ export default function CustomerDetail(): React.JSX.Element {
               />
             )}
             {activeTab === "settings" && isAdmin && (
-              <SettingsTab
-                key={customer.data.updatedAt}
-                slug={slug}
-                customer={customer.data}
-              />
+              <SettingsTab slug={slug} customer={customer.data} />
             )}
           </div>
         </>
@@ -473,7 +484,7 @@ function FlowsTab({
             key={flow.id}
             flow={flow}
             paused={customer.status === "paused"}
-            noLiveKey={!customer.hasLiveKey}
+            noApiKey={!customer.hasApiKey}
             sessions={
               (sessionsByFlow.get(flow.id) ?? noProofingSessions()).sessions
             }
@@ -500,13 +511,13 @@ type FlowsView =
 function FlowCard({
   flow,
   paused,
-  noLiveKey,
+  noApiKey,
   sessions,
   onEdit,
 }: {
   flow: ProofingCustomerFlow;
   paused: boolean;
-  noLiveKey: boolean;
+  noApiKey: boolean;
   sessions: number;
   onEdit?: () => void;
 }): React.JSX.Element {
@@ -525,7 +536,7 @@ function FlowCard({
           <span className="text-ink text-[14.5px] font-bold">{flow.name}</span>
           {paused ? (
             <Tag dot>{t("customers.status.paused")}</Tag>
-          ) : noLiveKey ? (
+          ) : noApiKey ? (
             <Tag tone="amber" dot>
               {t("customers.status.setupNeeded")}
             </Tag>
@@ -555,9 +566,7 @@ function FlowCard({
         <div className="text-ink mt-1 text-[13px] font-semibold">
           {flow.requiredAssuranceLevel
             ? t("customers.flows.eidas", {
-                level:
-                  flow.requiredAssuranceLevel.charAt(0).toUpperCase() +
-                  flow.requiredAssuranceLevel.slice(1),
+                level: assuranceLevelLabel(flow.requiredAssuranceLevel, t),
               })
             : t("customers.flows.noAssurance")}
         </div>
@@ -700,7 +709,9 @@ function AssignedFlowsCard({
                         })}
                       </Tag>
                       {flow.requiredAssuranceLevel && (
-                        <Tag tone="blue">{flow.requiredAssuranceLevel}</Tag>
+                        <Tag tone="blue">
+                          {assuranceLevelLabel(flow.requiredAssuranceLevel, t)}
+                        </Tag>
                       )}
                       {!flow.completable && (
                         <Tag tone="amber">
@@ -1167,12 +1178,15 @@ function SessionRow({
   const duration = sessionDurationSeconds(request);
   const detailsId = `session-details-${request.id}`;
   const dataRequest = isDataRequest(request.flowKind);
-  // A data request awaiting review shows who asks: the review is about them.
+  // A session in review shows who it is and what the checks found: that is
+  // what the reviewer decides on (a data request: who asks). A purged session
+  // has no identity left to read, so nothing is fetched.
   const showIdentity =
     isAdmin &&
+    request.purgedAt === undefined &&
     (request.status === "approved" ||
       request.status === "rejected" ||
-      (dataRequest && request.status === "needs_review"));
+      request.status === "needs_review");
   const result = useProofingRequestResultQuery(
     slug,
     request.id,
@@ -1215,9 +1229,6 @@ function SessionRow({
         </Table.Cell>
         <Table.Cell>
           <ResultTag request={request} compact />{" "}
-          {request.mode === "test" && (
-            <Tag tone="amber">{t("customers.apiKeys.test")}</Tag>
-          )}
           <DiplomaTag request={request} />
           <DataRequestTag request={request} />
         </Table.Cell>
@@ -1456,11 +1467,12 @@ function ReviewDecision({
   const [reason, setReason] = useState("");
   const [touched, setTouched] = useState(false);
   const missing = reason.trim() === "";
+  const tooLong = reviewReasonTooLong(reason);
   const fieldId = `review-reason-${requestId}`;
 
   function submit(decision: "approve" | "reject"): void {
     setTouched(true);
-    if (missing) return;
+    if (missing || tooLong) return;
     decide.mutate({ decision, reason: reason.trim() });
   }
 
@@ -1481,8 +1493,7 @@ function ReviewDecision({
       <textarea
         id={fieldId}
         value={reason}
-        maxLength={REVIEW_REASON_MAX}
-        aria-invalid={touched && missing}
+        aria-invalid={(touched && missing) || tooLong}
         placeholder={t("customers.sessions.review.reasonPlaceholder")}
         onChange={(event) => setReason(event.target.value)}
         className="rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-16 w-full border px-3 py-2 text-[13.5px] outline-none focus:ring-3"
@@ -1490,6 +1501,13 @@ function ReviewDecision({
       {touched && missing && (
         <p className="text-error text-[12.5px]">
           {t("customers.sessions.review.reasonRequired")}
+        </p>
+      )}
+      {tooLong && (
+        <p className="text-error text-[12.5px]">
+          {t("customers.sessions.review.reasonTooLong", {
+            max: REVIEW_REASON_MAX_CHARS,
+          })}
         </p>
       )}
       {decide.isError && (
@@ -1522,7 +1540,7 @@ function ReviewDecision({
   );
 }
 
-// The checks IPS reports, in words; an unknown value shows as it is.
+// The checks the engine reports, in words; an unknown value shows as it is.
 const CHECK_OUTCOMES = [
   "valid",
   "invalid",
@@ -1538,7 +1556,7 @@ function isCheckOutcome(
 }
 
 // A settled session's verified identity, as rows of its detail list: read
-// from IPS when an admin opens the row, audited each time.
+// from the engine when an admin opens the row, audited each time.
 function IdentityRows({
   result,
 }: {
@@ -1683,11 +1701,7 @@ function SessionTimeline({
   request: ProofingRequest;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const events = useProofingRequestEventsQuery(
-    slug,
-    request.id,
-    isProofingLive(request.status),
-  );
+  const events = useProofingRequestEventsQuery(slug, request);
   const formatWhen = useWhenFormatter();
 
   return (
@@ -1735,10 +1749,7 @@ function SessionTimeline({
                     </time>
                   </div>
                   <div className="text-ink-soft text-[12px]">
-                    {[
-                      timelineActor(event, request, t, detail.length > 0),
-                      ...detail,
-                    ]
+                    {[timelineActor(event, request, t, detail), ...detail]
                       .filter((part) => part !== null)
                       .join(" · ")}
                   </div>
@@ -1759,18 +1770,15 @@ function timelineActor(
   event: AuditEvent,
   request: ProofingRequest,
   t: TFunction,
-  hasDetail: boolean,
+  detail: readonly string[],
 ): string | null {
   if (event.actor) {
-    return (
-      event.actor.preferredName ??
-      `${event.actor.givenNames} ${event.actor.lastName}`.trim()
-    );
+    return fullName(event.actor);
   }
   if (event.action === "identity_proofing.requested" && request.apiKeyName) {
     return t("customers.sessions.viaApiKey", { name: request.apiKeyName });
   }
   const label = auditActorLabel(event.actorLabel, t);
   if (label) return label;
-  return hasDetail ? null : t("auditLog.system");
+  return detail.length > 0 ? null : t("auditLog.system");
 }

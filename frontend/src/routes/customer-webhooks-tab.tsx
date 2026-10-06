@@ -192,7 +192,7 @@ function EndpointForm({
 }
 
 // Without its own endpoint a customer's results go to the wallet's endpoint,
-// which IPS pushes every session change to; they show in Sessions and the audit log.
+// which gets every session change; they show in Sessions and the audit log.
 function DefaultEndpointCard({
   onCustomize,
 }: {

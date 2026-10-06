@@ -1,15 +1,11 @@
 package proofing
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,7 +18,11 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 )
 
-var HostedCallLimit = ratelimit.Limit{Burst: 300, Per: time.Minute}
+// HostedCallLimit holds the hosted page per customer across all its links, as
+// apiCallLimit holds the API, and per API replica. It fits some twenty people
+// at a hosted face check at once: its frames go every 400 ms, its status polls
+// every 2 s.
+var HostedCallLimit = ratelimit.Limit{Burst: 3000, Per: time.Minute}
 
 // hostedPagePrefix is the SPA route of a hosted link's page, /p/:token.
 const hostedPagePrefix = "/p/"
@@ -42,8 +42,14 @@ func (h *Handler) PageHeaders(r *http.Request, header http.Header) {
 }
 
 func (h *Handler) framePolicy(r *http.Request, token string) string {
-	hash := sha256.Sum256([]byte(token))
-	if ok, _ := h.hostedCalls.Allow(hex.EncodeToString(hash[:])); !ok {
+	key, err := h.service.hostedLimitKey(r.Context(), token)
+	if err != nil {
+		if !errors.Is(err, ErrRequestNotFound) {
+			slog.ErrorContext(r.Context(), "proofing: hosted page frame origins", slog.Any("error", err))
+		}
+		return frameNone
+	}
+	if ok, _ := h.hostedCalls.Allow(key.String()); !ok {
 		return frameNone
 	}
 	origins, err := h.service.HostedEmbedOrigins(r.Context(), token)
@@ -75,10 +81,12 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 
 func (h *Handler) limitHosted(next respond.HandlerFunc) respond.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) error {
-		hash := sha256.Sum256([]byte(r.PathValue("token")))
-		if ok, wait := h.hostedCalls.Allow(hex.EncodeToString(hash[:])); !ok {
-			w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
-			return &respond.APIError{Status: http.StatusTooManyRequests, Code: "rate_limited", Message: "too many requests for this link; retry after the Retry-After seconds"}
+		key, err := h.service.hostedLimitKey(r.Context(), r.PathValue("token"))
+		if err != nil {
+			return mapError(err)
+		}
+		if err := rateLimited(w, h.hostedCalls, key); err != nil {
+			return err
 		}
 		return next(w, r)
 	}
@@ -111,12 +119,17 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 	}
 }
 
-// openExport is until when req's data downloads, or nil when it does not.
+// openExport is until when req's data downloads through its hosted link, or
+// nil when it does not: hostedExportWindow from the approval.
 func openExport(req Request, now time.Time) *time.Time {
-	if req.Status != StatusApproved || req.DataExportUntil == nil || !now.Before(*req.DataExportUntil) {
+	if req.Status != StatusApproved || req.DataExportUntil == nil || req.PurgedAt != nil {
 		return nil
 	}
-	return req.DataExportUntil
+	until := req.DataExportUntil.Add(hostedExportWindow - DataExportWindow)
+	if !now.Before(until) {
+		return nil
+	}
+	return &until
 }
 
 type hostedViewResponse struct {
@@ -147,9 +160,33 @@ type hostedViewResponse struct {
 		// Kind is what the session is for: an identity check, or the person
 		// asking for their data or its erasure.
 		Kind FlowKind `json:"kind"`
+		// RetentionDays is how many days the session's data is kept at most:
+		// subjectRetentionDays, with the flow's override at send.
+		RetentionDays int `json:"retentionDays"`
 	} `json:"flow"`
-	// Diplomas are the extracts the subject added.
-	Diplomas []diplomaResponse `json:"diplomas"`
+	// Diplomas are the extracts the subject added, as the page lists them.
+	Diplomas []hostedDiplomaResponse `json:"diplomas"`
+}
+
+// hostedDiplomaResponse is an extract as the hosted page lists it: only what
+// the subject needs to recognise it. The link's token alone opens the page, so
+// it leaves out the document number and the rest of the admin view.
+type hostedDiplomaResponse struct {
+	Qualification string `json:"qualification"`
+	Institution   string `json:"institution"`
+	DateAwarded   string `json:"dateAwarded"`
+	NLQFLevel     string `json:"nlqfLevel,omitempty"`
+}
+
+func newHostedDiplomas(diplomas []Diploma) []hostedDiplomaResponse {
+	out := make([]hostedDiplomaResponse, 0, len(diplomas))
+	for _, d := range diplomas {
+		out = append(out, hostedDiplomaResponse{
+			Qualification: d.Qualification, Institution: d.Institution,
+			DateAwarded: d.DateAwarded.Format(time.DateOnly), NLQFLevel: d.NLQFLevel,
+		})
+	}
+	return out
 }
 
 func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
@@ -160,7 +197,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	}
 	var out hostedViewResponse
 	out.hostedProgressResponse = newHostedProgress(hosted.Request, time.Now())
-	out.SessionID = PublicSessionID(hosted.Request.ID)
+	out.SessionID = publicSessionID(hosted.Request.ID)
 	out.RedirectURL, out.Language = hosted.Request.RedirectURL, string(hosted.Request.Language)
 	c := hosted.Customer
 	out.EmbedOrigins = append([]string{}, c.RedirectOrigins...)
@@ -181,14 +218,15 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	if out.Flow.RequestedAttributes == nil {
 		out.Flow.RequestedAttributes = []string{}
 	}
-	out.Flow.YiviAvailable = YiviAppAvailable(f)
+	out.Flow.YiviAvailable = yiviAppAvailable(f)
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
 	out.Flow.Kind = hosted.Request.FlowKind
+	out.Flow.RetentionDays = subjectRetentionDays(c, hosted.Request.RetentionOverride)
 	diplomas, err := h.service.RequestDiplomas(r.Context(), []uuid.UUID{hosted.Request.ID})
 	if err != nil {
 		return mapError(err)
 	}
-	out.Diplomas = newDiplomaResponses(diplomas[hosted.Request.ID])
+	out.Diplomas = newHostedDiplomas(diplomas[hosted.Request.ID])
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }

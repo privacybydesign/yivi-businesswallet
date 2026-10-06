@@ -170,7 +170,7 @@ const (
 	PresentationResponseReceived = "presentation.response_received"
 	PresentationRequestFailed    = "presentation.request_failed"
 
-	// idnetity profing service
+	// identity proofing service
 	IdentityProofingProvisioned     = "identity_proofing.provisioned"
 	IdentityProofingFlowCreated     = "identity_proofing.flow_created"
 	IdentityProofingFlowsConfigured = "identity_proofing.flows_configured"
@@ -182,11 +182,19 @@ const (
 	IdentityProofingSessionCreated       = "identity_proofing.session_created"
 	IdentityProofingSessionStarted       = "identity_proofing.session_started"
 	IdentityProofingSessionHandover      = "identity_proofing.session_handover"
-	IdentityProofingSessionEnded         = "identity_proofing.session_ended"
-	IdentityProofingSessionCancelled     = "identity_proofing.session_cancelled"
-	IdentityProofingSessionPurged        = "identity_proofing.session_purged"
-	IdentityProofingResultRead           = "identity_proofing.result_read"
-	// an IPS outcome, one action per decision so a rejection never reads as a success
+	// The device trail of a session, as the engine reports it: which device
+	// claimed it, took it over, was handed a code, failed a claim, or was
+	// refused.
+	IdentityProofingDeviceClaimed       = "identity_proofing.device_claimed"
+	IdentityProofingDeviceHandedOver    = "identity_proofing.device_handed_over"
+	IdentityProofingHandoverIssued      = "identity_proofing.handover_issued"
+	IdentityProofingHandoverClaimFailed = "identity_proofing.handover_claim_failed"
+	IdentityProofingAccessDenied        = "identity_proofing.access_denied"
+	IdentityProofingSessionEnded        = "identity_proofing.session_ended"
+	IdentityProofingSessionCancelled    = "identity_proofing.session_cancelled"
+	IdentityProofingSessionPurged       = "identity_proofing.session_purged"
+	IdentityProofingResultRead          = "identity_proofing.result_read"
+	// an engine outcome, one action per decision so a rejection never reads as a success
 	IdentityProofingApproved    = "identity_proofing.approved"
 	IdentityProofingRejected    = "identity_proofing.rejected"
 	IdentityProofingNeedsReview = "identity_proofing.needs_review"

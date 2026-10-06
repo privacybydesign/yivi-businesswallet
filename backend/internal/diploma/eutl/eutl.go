@@ -10,12 +10,11 @@
 // needs no root store of its own. This is how the reference implementation
 // (EU DSS) validates PAdES signatures.
 //
-// Scope of this proof of concept: the lists are fetched over HTTPS and cached
-// on disk, but their XAdES signatures are not verified (there is no mature Go
-// XAdES implementation). Transport security is therefore the integrity
-// guarantee. Service status history is also ignored: a service is used if its
-// current status is granted. A production verifier should check that the
-// service was granted at the signing time.
+// Limits: the lists are fetched over HTTPS and cached on disk, but their XAdES
+// signatures are not verified (there is no mature Go XAdES implementation), so
+// transport security is the integrity guarantee. Service status history is
+// ignored too: a service is used if its current status is granted, not checked
+// against the signing time.
 package eutl
 
 import (

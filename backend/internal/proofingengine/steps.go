@@ -1,16 +1,9 @@
-// The Idem app's step endpoints (/api/v1/app/{token}/steps/...): a session
-// collects its evidence one step at a time, so a device that takes the
-// session over resumes where the last one stopped. A step never finishes the
-// session: once every step of the flow has evidence the views say
-// readyToSubmit, and the session gets its outcome only on POST .../submit
-// (handleSubmitSession), decided by the server (finishSession) -
-// authenticityFailure/flowComplianceFailure can only push a would-be approval
-// to rejected, never the other way around.
-//
-// A session needs a resolved flow for these; one without uses the legacy
-// POST .../result. document_capture (the MRZ the app scanned) and nfc_read
-// (the chip) always come together; the app's camera reads the MRZ, there is
-// no OCR here. The face step runs in the app against Regula.
+// The Idem app's step endpoints (/api/v1/app/{token}/steps/...). A session
+// collects its evidence one step at a time, so a device taking it over resumes
+// where the last stopped. A step never finishes the session: once every step
+// has evidence the session is readyToSubmit, and POST .../submit lets the
+// server decide the outcome (finishSession). document_capture (the MRZ the app
+// scanned) and nfc_read (the chip) always come together.
 package proofingengine
 
 import (
@@ -33,14 +26,11 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 )
 
-// stepSession resolves the app-facing token to a session governed by a
-// resolved flow that can still take step - every step endpoint's shared
-// precondition, checked with stepWriteCheck on this snapshot so a doomed
-// request fails before any processing. The write itself checks again (see
-// writeStep). A step that already has evidence is answered right here with
-// the current state (alreadyRecorded) - a retry never stores anything new.
-// step "" (the preview probe) skips that. ok is false once a response has
-// been written.
+// stepSession resolves the path token to a session whose flow can still take
+// step, checked on this snapshot so a doomed request fails early (the write
+// checks again). A step that already has evidence is answered with the current
+// state. step "" (the preview probe) skips that. ok is false once a response
+// has been written.
 func (s *Server) stepSession(w http.ResponseWriter, r *http.Request, step flow.Step) (session.Session, *flow.FlowDefinition, appCaller, bool) {
 	sess, caller, ok := s.appSessionByPathToken(w, r)
 	if !ok {
@@ -48,7 +38,7 @@ func (s *Server) stepSession(w http.ResponseWriter, r *http.Request, step flow.S
 	}
 	resolvedFlow, err := s.resolveSessionFlow(r.Context(), sess)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not resolve flow: "+err.Error())
+		writeInternalError(w, r, "could not resolve flow", err)
 		return session.Session{}, nil, appCaller{}, false
 	}
 	if err := stepWriteCheck(sess, caller, step); err != nil {
@@ -56,21 +46,57 @@ func (s *Server) stepSession(w http.ResponseWriter, r *http.Request, step flow.S
 		return session.Session{}, nil, appCaller{}, false
 	}
 	if resolvedFlow == nil {
-		writeError(w, http.StatusConflict, "this session has no resolved flow definition; use POST .../result instead")
+		writeError(w, http.StatusConflict, "this session has no resolved flow definition")
+		return session.Session{}, nil, appCaller{}, false
+	}
+	// A step outside the flow collects nothing: its evidence would be stored
+	// and re-verified at the finish though the flow never asked for it.
+	inFlow := step
+	if isFaceStep(step) {
+		inFlow = flow.Step(faceStepName(resolvedFlow))
+	}
+	if !slices.Contains(resolvedFlow.Steps, inFlow) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("step %q is not part of this session's flow", step))
 		return session.Session{}, nil, appCaller{}, false
 	}
 	return sess, resolvedFlow, caller, true
 }
 
-// errStepAlreadyRecorded: the step already has evidence, which is never
-// replaced - the request is answered with the current state instead.
+// errStepAlreadyRecorded: a step's evidence is never replaced, save a failed
+// face step's (faceStepRetryable).
 var errStepAlreadyRecorded = errors.New("step already recorded")
 
-// stepWriteCheck is whether caller may write step's evidence to sess right
-// now: it still holds its slot, the session hasn't expired or been
-// cancelled, step has no evidence yet (errStepAlreadyRecorded) and the
-// session has no outcome yet. Run on the request's snapshot and again
-// inside the write's Update, where it is what actually counts.
+// maxFaceStepAttempts bounds how often one session's face step is submitted.
+// How often the subject may retry a failed liveness or match is the app's
+// call; this is only the engine's safety bound on the Regula transactions a
+// session runs. Past it the last failed evidence stands and the submit
+// decides on it.
+const maxFaceStepAttempts = 3
+
+// faceStepRetryable reports whether ev, recorded face evidence, may be
+// replaced by a new attempt: it failed liveness or did not match, and the
+// session has attempts left.
+func faceStepRetryable(ev *session.SelfieStepEvidence) bool {
+	if ev == nil {
+		return false
+	}
+	failed := !ev.LivenessPassed || (ev.FaceVerified != nil && !*ev.FaceVerified)
+	return failed && faceStepAttempts(ev) < maxFaceStepAttempts
+}
+
+// faceStepAttempts is how many times ev's face step was submitted; 0 without
+// evidence.
+func faceStepAttempts(ev *session.SelfieStepEvidence) int {
+	if ev == nil {
+		return 0
+	}
+	return max(ev.Attempts, 1)
+}
+
+// stepWriteCheck reports whether caller may write step's evidence: it holds its
+// slot, the session is open and undecided, and the step has no evidence yet
+// (or failed face evidence it may replace). The check inside the write's
+// Update is the one that counts.
 func stepWriteCheck(sess session.Session, caller appCaller, step flow.Step) error {
 	if caller.role != "" || sess.Access.Bound() {
 		if err := sess.Access.AuthorizeAs(caller.deviceToken, caller.role); err != nil {
@@ -83,17 +109,15 @@ func stepWriteCheck(sess session.Session, caller appCaller, step flow.Step) erro
 	case session.StatusCancelled:
 		return errSessionComplete
 	}
-	if step != "" && stepHasEvidence(sess, step) {
+	if step != "" && stepHasEvidence(sess, step) && (!isFaceStep(step) || !faceStepRetryable(sess.Steps.Selfie)) {
 		return errStepAlreadyRecorded
 	}
 	return sessionOpenForDevices(sess)
 }
 
-// writeStep stores one step's evidence: apply runs inside the Update only
-// once stepWriteCheck passes there, so a device handed away from, a session
-// that expired or finished, or a step recorded meanwhile - while this
-// request was still processing - can't write. The device's participation
-// records the step.
+// writeStep stores one step's evidence once stepWriteCheck passes inside the
+// Update, so a request that was overtaken (handed over, expired, recorded
+// meanwhile) cannot write.
 func (s *Server) writeStep(sess session.Session, caller appCaller, step flow.Step, apply func(*session.Session, time.Time)) (session.Session, error) {
 	return s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if err := stepWriteCheck(*sess, caller, step); err != nil {
@@ -106,8 +130,6 @@ func (s *Server) writeStep(sess session.Session, caller appCaller, step flow.Ste
 	})
 }
 
-// writeStepError answers a refused step write: the current state for a
-// step that was already recorded, the access/session error otherwise.
 func (s *Server) writeStepError(w http.ResponseWriter, r *http.Request, sess session.Session, fd *flow.FlowDefinition, caller appCaller, step flow.Step, err error) {
 	if !errors.Is(err, errStepAlreadyRecorded) {
 		s.denyApp(w, r, sess, caller, err)
@@ -124,12 +146,8 @@ func (s *Server) writeStepError(w http.ResponseWriter, r *http.Request, sess ses
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// stepTiming stamps a step's StartedAt/SubmittedAt — see
-// session.StepTiming's doc comment for why this is server time, not
-// client-reported. existing is timing already recorded for this step (nil
-// if none; today only the NFC submission superseding an MRZ-only
-// document_capture passes one): its StartedAt is kept rather than reset, so
-// it still reflects when the user first reached the step.
+// stepTiming stamps a step with server time. An existing StartedAt is kept, so
+// it says when the subject first reached the step.
 func stepTiming(existing *session.StepTiming, now time.Time) session.StepTiming {
 	startedAt := now
 	if existing != nil && !existing.StartedAt.IsZero() {
@@ -138,12 +156,8 @@ func stepTiming(existing *session.StepTiming, now time.Time) session.StepTiming 
 	return session.StepTiming{StartedAt: startedAt, SubmittedAt: now}
 }
 
-// advanceToInProgress walks sess from created (or opened) to in_progress —
-// the status machine (session.transitions) has no direct created ->
-// in_progress edge, so a session that reaches its first step submission
-// without ever having called GET /api/v1/app/{token} (handleAppSession,
-// which marks it opened) still needs both hops, not just one. A no-op for
-// a session already at in_progress or later.
+// advanceToInProgress moves sess to in_progress, through opened when it never
+// was (there is no direct created to in_progress transition).
 func advanceToInProgress(sess *session.Session, now time.Time) error {
 	if sess.Status == session.StatusCreated {
 		if err := sess.SetStatus(session.StatusOpened, now); err != nil {
@@ -158,9 +172,8 @@ func advanceToInProgress(sess *session.Session, now time.Time) error {
 	return nil
 }
 
-// writeStepRejected answers a step request for a session that can no
-// longer take one: 410 session_expired, or 409 session_complete once an
-// outcome exists (terminal or needs_review).
+// writeStepRejected answers a step for a session that can no longer take one:
+// 410 when expired, 409 once it has an outcome.
 func writeStepRejected(w http.ResponseWriter, sess session.Session) {
 	if sess.Status == session.StatusExpired {
 		writeErrorCode(w, http.StatusGone, errCodeSessionExpired, "session already expired; step rejected")
@@ -173,22 +186,17 @@ func writeStepRejected(w http.ResponseWriter, sess session.Session) {
 	writeErrorCode(w, http.StatusConflict, errCodeSessionComplete, msg)
 }
 
-// stepResponse is what every step endpoint returns: the step's result is
-// stored and the server has decided what comes next - CurrentStep is the
-// step to continue with ("" once Lifecycle is COMPLETE), so the client
-// never has to derive it.
+// stepResponse is every step endpoint's answer: the step is stored, and
+// CurrentStep is what comes next ("" once complete).
 type stepResponse struct {
 	Status         session.Status `json:"status"`
 	CompletedSteps []string       `json:"completedSteps"`
 	CurrentStep    *string        `json:"currentStep,omitempty"`
 	Lifecycle      string         `json:"lifecycle"`
 	ErrorCode      string         `json:"errorCode,omitempty"`
-	// ReadyToSubmit: every step has evidence and the session waits for the
-	// user to submit it (POST .../submit) - see readyToSubmit.
-	ReadyToSubmit bool `json:"readyToSubmit,omitempty"`
-	// AlreadyRecorded is set when this request's step already had evidence
-	// (or, for POST .../submit, the session was already submitted): nothing
-	// was stored, the response is just the current state.
+	ReadyToSubmit  bool           `json:"readyToSubmit,omitempty"`
+	// AlreadyRecorded: the step (or the submit) was already recorded, so nothing
+	// was stored.
 	AlreadyRecorded bool `json:"alreadyRecorded,omitempty"`
 }
 
@@ -199,8 +207,6 @@ func (s *Server) stepResponseFor(sess session.Session, fd *flow.FlowDefinition) 
 	}
 }
 
-// readyToSubmit reports whether sess has evidence for every step fd
-// requires but no outcome yet: it waits for POST .../submit.
 func readyToSubmit(sess session.Session, fd *flow.FlowDefinition) bool {
 	return fd != nil && sessionOpenForDevices(sess) == nil && requiredStepsComplete(sess, fd)
 }
@@ -212,14 +218,9 @@ const (
 	errCodeFaceProviderUnavailable = "FACE_PROVIDER_UNAVAILABLE" // Regula unreachable or not configured
 )
 
-// submitSelfieStepRequest is the selfie/liveness step: the chosen frame,
-// scored against the real anti-spoof model when one is loaded (see
-// checkLiveness), plus a short burst of frames (Frames) still used for the
-// frame-distinctness duplicate-submission check (api.injectionInfo) that
-// check keeps enforcing alongside the model.
-//
-// LivenessTransactionID replaces Image when the app ran a Regula liveness
-// session (appSessionView.FaceVerification): exactly one of the two is set.
+// submitSelfieStepRequest is the face step: the Regula liveness transaction the
+// app ran, or an image with a burst of frames for a provider that takes one.
+// Exactly one of LivenessTransactionID and Image is set.
 type submitSelfieStepRequest struct {
 	Image                 string   `json:"image,omitempty"`
 	MimeType              string   `json:"mimeType,omitempty"`
@@ -232,40 +233,22 @@ type selfieStepResponse struct {
 	Biometrics *biometricsInfo `json:"biometrics,omitempty"`
 }
 
-// handleSubmitSelfieStep is the selfie/liveness/face_match steps, computed
-// together since they're one live capture. Because the browser flow always
-// completes an nfc_read handover (when the resolved flow asks for one)
-// before this step (see the frontend's screen order), the face_match
-// reference — the chip's DG2 photo, or the relying party's own
-// referencePhoto for a flow with face_match but no nfc_read — is always
-// already resolved by the time this runs, so the match is computed here
-// once, not deferred.
-//
-//	@Summary	Submit the selfie/liveness/face_match steps
-//	@Tags		proofing-app
-//	@Accept		json
-//	@Produce	json
-//	@Param		token	path		string							true	"Session token"
-//	@Param		request	body		api.submitSelfieStepRequest	true	"Live selfie capture"
-//	@Success	200		{object}	api.selfieStepResponse
-//	@Failure	400		{object}	map[string]string
-//	@Failure	404		{object}	map[string]string
-//	@Failure	409		{object}	map[string]string
-//	@Failure	410		{object}	map[string]string
-//	@Failure	503		{object}	map[string]string
-//	@Router		/api/v1/app/{token}/steps/selfie [post]
+// handleSubmitSelfieStep is the face steps, one live capture for all of them.
+// The reference (the chip portrait, or the customer's photo on a flow without
+// nfc_read) has landed by then, so the match is made here.
 func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) {
-	// The body is read before the session checks so a Regula transaction is
-	// released on every path, including a refused request.
 	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
 	var req submitSelfieStepRequest
 	decodeErr := json.NewDecoder(r.Body).Decode(&req)
-	if decodeErr == nil && req.LivenessTransactionID != "" && s.cfg.Regula != nil {
-		defer regulaFaceVerifier{client: s.cfg.Regula}.Release(r.Context(), liveCapture{TransactionID: req.LivenessTransactionID})
-	}
 	sess, resolvedFlow, caller, ok := s.stepSession(w, r, flow.StepSelfie)
 	if !ok {
 		return
+	}
+	// The session's own Regula transaction is released on every path from
+	// here, a refused submission included; Release leaves another session's
+	// alone, and an unauthenticated request never reaches it.
+	if decodeErr == nil && req.LivenessTransactionID != "" && s.cfg.Regula != nil {
+		defer regulaFaceVerifier{client: s.cfg.Regula}.Release(r.Context(), sess, liveCapture{TransactionID: req.LivenessTransactionID})
 	}
 	if decodeErr != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body: "+decodeErr.Error())
@@ -284,7 +267,7 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 	live := liveCapture{TransactionID: req.LivenessTransactionID, Frames: req.Frames}
 	var selfieMime string
 	if req.Image != "" {
-		raw, mime, err := decodeImageBase64(req.Image, firstNonEmpty(req.MimeType, "image/jpeg"))
+		raw, mime, err := decodeImageBase64(req.Image, firstNonEmpty(req.MimeType, defaultImageMime))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid image: "+err.Error())
 			return
@@ -304,19 +287,25 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 
 	out, err := verifier.Verify(r.Context(), sess, ref, live)
 	if err != nil {
-		writeFaceVerifyError(w, provider, err)
+		writeFaceVerifyError(w, r, provider, err)
 		return
 	}
 
-	// Liveness and the face match above can take seconds; writeStep checks
-	// again that this device still holds the session and nothing finished it
-	// meanwhile, so a stale result is never stored.
+	// Liveness and the match take seconds; writeStep checks again that nothing
+	// overtook this request.
 	stage := faceStepName(resolvedFlow)
 	updated, err := s.writeStep(sess, caller, flow.Step(stage), func(sess *session.Session, now time.Time) {
+		// A retry replaces a failed attempt (faceStepRetryable): the step
+		// started with the first.
+		var started *session.StepTiming
+		if prev := sess.Steps.Selfie; prev != nil {
+			started = &prev.Timing
+		}
 		ev := &session.SelfieStepEvidence{
 			LivenessPassed: out.LivenessPassed, LivenessScore: out.LivenessScore,
 			FaceMatchScore: out.MatchScore, FaceVerified: out.Matched,
-			Timing: stepTiming(nil, now),
+			Attempts: faceStepAttempts(sess.Steps.Selfie) + 1,
+			Timing:   stepTiming(started, now),
 		}
 		// Regula holds the capture itself and it is deleted with the
 		// transaction: the selfie kept is the live face's crop from the match.
@@ -335,10 +324,9 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 	submitted := actorDetails(updated, caller.role)
 	submitted["livenessPassed"] = out.LivenessPassed
 	submitted["provider"] = string(provider)
+	submitted["attempt"] = faceStepAttempts(updated.Steps.Selfie)
 	s.auditStepSubmitted(updated, resolvedFlow, stage, submitted)
 	resp := selfieStepResponse{stepResponse: s.stepResponseFor(updated, resolvedFlow)}
-	// Always populated: liveness runs on every selfie submission, with or
-	// without a face match.
 	resp.Biometrics = &biometricsInfo{
 		FaceMatchScore: out.MatchScore, FaceVerified: out.Matched,
 		LivenessResult: livenessResult(out.LivenessPassed), LivenessScore: out.LivenessScore,
@@ -348,7 +336,7 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 }
 
 // writeFaceVerifyError maps a FaceVerifier error to its HTTP response.
-func writeFaceVerifyError(w http.ResponseWriter, provider flow.FaceProvider, err error) {
+func writeFaceVerifyError(w http.ResponseWriter, r *http.Request, provider flow.FaceProvider, err error) {
 	var captureErr faceCaptureError
 	switch {
 	case errors.Is(err, errFaceProviderUnavailable):
@@ -364,7 +352,7 @@ func writeFaceVerifyError(w http.ResponseWriter, provider flow.FaceProvider, err
 	case errors.As(err, &captureErr):
 		writeError(w, http.StatusBadRequest, captureErr.Error())
 	default:
-		writeError(w, http.StatusInternalServerError, "face verification failed")
+		writeInternalError(w, r, "face verification failed", err)
 	}
 }
 
@@ -379,7 +367,6 @@ func writeFaceProviderUnavailable(w http.ResponseWriter) {
 	writeErrorCode(w, http.StatusServiceUnavailable, errCodeFaceProviderUnavailable, errCodeFaceProviderUnavailable)
 }
 
-// livenessResult is biometricsInfo.LivenessResult for a check that ran.
 func livenessResult(passed bool) string {
 	if passed {
 		return "passed"
@@ -387,11 +374,9 @@ func livenessResult(passed bool) string {
 	return "failed"
 }
 
-// faceMatchReference is what a selfie is compared against: the relying
-// party's reference photo (a flow without nfc_read, required at creation), or
-// the chip's DG2 photo from the nfc_read step. ok is false while that has not
-// landed; the app reads the chip first, but the server never trusts client
-// sequencing.
+// faceMatchReference is what the face is matched against: the customer's
+// reference photo (a flow without nfc_read), or the chip's DG2 portrait. ok is
+// false until that has landed; the server does not rely on the app's order.
 func (s *Server) faceMatchReference(sess session.Session) (image, mimeType string, ok bool) {
 	if sess.ReferencePhoto != "" {
 		return sess.ReferencePhoto, sess.ReferencePhotoMime, true
@@ -406,19 +391,10 @@ func (s *Server) faceMatchReference(sess session.Session) (image, mimeType strin
 
 // ---- nfc_read ---------------------------------------------------------------
 
-// submitNFCStepRequest is what vcmrtd posts for the nfc_read step: the same
-// shape appResultRequest always carried for this part (Photo/MrtdEvidence/
-// Document/Device), just through its own endpoint instead of the old
-// single-shot POST .../result — see this file's package doc comment for
-// why.
-//
-// Document, when the resolved flow's Steps includes document_capture (see
-// flow.Validate — it's always paired with nfc_read), is the *entire*
-// document identity vcmrtd read off the document itself (the same full
-// shape appResultRequest.Document always carried) — there is no other
-// source of it at all, since document_capture has no browser-side
-// counterpart. handleSubmitNFCStep derives session.DocumentStepEvidence
-// straight from it (see documentEvidenceFromNativeDocument).
+// submitNFCStepRequest is the nfc_read step as the Idem app posts it. Document
+// is the app's own reading and is never trusted: handleSubmitNFCStep reads the
+// document from the evidence's DG1/DG11, the bytes Passive Authentication
+// checks. The field stays so the request still decodes.
 type submitNFCStepRequest struct {
 	Photo        *photoInfo           `json:"photo,omitempty"`
 	Document     *documentInfo        `json:"document,omitempty"`
@@ -426,20 +402,6 @@ type submitNFCStepRequest struct {
 	Device       *deviceInfo          `json:"device,omitempty"`
 }
 
-// handleSubmitNFCStep is the nfc_read step.
-//
-//	@Summary	Submit the nfc_read step
-//	@Tags		proofing-app
-//	@Accept		json
-//	@Produce	json
-//	@Param		token	path		string						true	"Session token"
-//	@Param		request	body		api.submitNFCStepRequest	true	"Chip evidence"
-//	@Success	200		{object}	api.stepResponse
-//	@Failure	400		{object}	map[string]string
-//	@Failure	404		{object}	map[string]string
-//	@Failure	409		{object}	map[string]string
-//	@Failure	410		{object}	map[string]string
-//	@Router		/api/v1/app/{token}/steps/nfc [post]
 func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 	sess, resolvedFlow, caller, ok := s.stepSession(w, r, flow.StepNFCRead)
 	if !ok {
@@ -453,33 +415,39 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "mrtdEvidence is required")
 		return
 	}
+	if flow.DrivingLicence(req.MrtdEvidence.DocumentType) {
+		writeDocumentUnsupported(w)
+		return
+	}
 	if _, err := verifyMrtdEvidence(req.MrtdEvidence, sess.AAChallenge); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid mrtdEvidence: "+err.Error())
 		return
 	}
+	// The document is read off the chip evidence, never taken from the
+	// app's own copy: see documentFromEvidence.
+	chipDoc, err := documentFromEvidence(req.MrtdEvidence, time.Now().UTC())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid mrtdEvidence: "+err.Error())
+		return
+	}
+	req.Document = chipDoc
 	// The photo is the face_match reference (faceMatchReference), so it must
 	// be the chip's own portrait: see photoFromChip.
 	if req.Photo != nil && !photoFromChip(req.Photo, req.MrtdEvidence) {
 		writeError(w, http.StatusBadRequest, "photo is not the portrait in mrtdEvidence's DG2")
 		return
 	}
-	// The chip can carry a BSN even on documents whose MRZ/VIZ never did
-	// (older Dutch documents still populate DG11's personal number). Apply
-	// the tenant's BSN policy here, before req.Document is ever persisted
-	// into Steps.NFC.Raw/Steps.Document.Parsed below - the same guarantee
-	// buildResult gives Session.Result (see applyBSNPolicy's doc comment)
-	// must also hold for Session.Steps, which is stored independently and
-	// never re-redacted afterward. That guarantee covers req.Document's
-	// parsed PersonalNumber field; req.MrtdEvidence.DataGroups["DG11"] is
-	// the same BSN again, but as the chip's own raw bytes, and marshalToMap
-	// below persists req (MrtdEvidence included) verbatim - so
-	// redactBSNFromEvidence has to redact that copy too, or it would reach
-	// Steps.NFC.Raw unmasked regardless of policy.
-	// Without a document in this request, the issuing state (which decides
-	// whether DG11 can carry a BSN) comes from an already-recorded MRZ
-	// document step; with neither, redactBSNFromEvidence can't tell and
-	// leaves DG11 alone, so drop it under a mask/omit policy rather than
-	// store a possibly-unmasked BSN.
+	// Without it a flow that matches the face against the chip could never
+	// finish: the face step would wait for a reference that never comes.
+	if req.Photo == nil && sess.ReferencePhoto == "" && flowNeedsFaceMatch(resolvedFlow) {
+		writeError(w, http.StatusBadRequest, "photo is required: the face step matches against the chip's portrait")
+		return
+	}
+	// Apply the BSN policy before anything is stored: to the parsed number, and to
+	// the raw DG11, which carries the same BSN and is stored with the evidence.
+	// Older Dutch chips have a BSN in DG11 even when the MRZ shows none. Without
+	// any document to tell the issuing state, DG11 is dropped under a mask or omit
+	// policy rather than kept possibly readable.
 	bsnPolicy, _ := effectivePrivacyPolicy(resolvedFlow)
 	switch {
 	case req.Document != nil:
@@ -489,12 +457,12 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 		redactBSNFromEvidence(req.MrtdEvidence, &documentInfo{IssuingState: sess.Steps.Document.Parsed.IssuingState}, bsnPolicy)
 	default:
 		if p := bsnPolicy.Effective(); p == privacy.BSNPolicyMask || p == privacy.BSNPolicyOmit {
-			delete(req.MrtdEvidence.DataGroups, "DG11")
+			delete(req.MrtdEvidence.DataGroups, dataGroupPersonalDetails)
 		}
 	}
 	raw, err := marshalToMap(req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not store nfc evidence: "+err.Error())
+		writeInternalError(w, r, "could not store nfc evidence", err)
 		return
 	}
 
@@ -504,11 +472,9 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 		if !hasDocumentCapture {
 			return
 		}
-		// document_capture, if vcmrtd didn't already submit it on its own
-		// (POST .../steps/document_capture), is fulfilled by this same
-		// submission. A document sent here supersedes the MRZ-only one: it
-		// arrives together with the chip evidence that vouches for it. The
-		// MRZ copy's chip access key isn't needed any more either way.
+		// This submission also fulfils document_capture, and its document, backed by
+		// the chip evidence, supersedes an MRZ-only one. The chip access key is no
+		// longer needed.
 		switch {
 		case req.Document != nil || sess.Steps.Document == nil:
 			var existing *session.StepTiming
@@ -517,14 +483,13 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 			} else {
 				sess.Access.RecordStep(caller.role, string(flow.StepDocumentCapture))
 			}
-			evidence := documentEvidenceFromNativeDocument(req.Document)
+			evidence := documentEvidence(req.Document)
 			evidence.Timing = stepTiming(existing, now)
 			evidence.Source = session.DocumentSourceChip
 			sess.Steps.Document = &evidence
 		default:
-			// Copy rather than write through the pointer: the in-memory
-			// store's Update works on a shallow copy, so the old evidence
-			// may still be read elsewhere (and must survive a failed flush).
+			// A copy, not a write through the pointer: the in-memory store's Update works
+			// on a shallow copy.
 			doc := *sess.Steps.Document
 			doc.ChipAccess = nil
 			sess.Steps.Document = &doc
@@ -538,18 +503,15 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.stepResponseFor(updated, resolvedFlow))
 }
 
-// photoFromChip reports whether photo's image bytes are embedded verbatim in
-// ev's DG2, the holder's portrait (ICAO 9303), as vcmrtd sends the image it
-// extracted from it. Passive Authentication hashes DG2 against EF.SOD, but
-// not the separately submitted photo: without this, a genuine chip read could
-// be paired with any face, and a face match against it would bind the
-// subject to that face instead of to the document.
+// photoFromChip reports whether photo's bytes are inside ev's DG2. Passive
+// Authentication covers DG2 but not the separately sent photo; without this a
+// genuine chip could be paired with any face.
 func photoFromChip(photo *photoInfo, ev *mrtdEvidenceRequest) bool {
 	raw, _, err := decodeImageBase64(photo.ImageBase64, photo.MimeType)
 	if err != nil || len(raw) == 0 {
 		return false
 	}
-	dg2, err := hex.DecodeString(ev.DataGroups["DG2"])
+	dg2, err := hex.DecodeString(ev.DataGroups[dataGroupPortrait])
 	return err == nil && bytes.Contains(dg2, raw)
 }
 
@@ -579,8 +541,6 @@ func marshalToMap(v any) (map[string]any, error) {
 
 // ---- completion --------------------------------------------------------------
 
-// requiredStepsComplete reports whether sess has accumulated evidence for
-// every step fd.Steps lists.
 func requiredStepsComplete(sess session.Session, fd *flow.FlowDefinition) bool {
 	for _, step := range fd.Steps {
 		if !stepHasEvidence(sess, step) {
@@ -590,8 +550,8 @@ func requiredStepsComplete(sess session.Session, fd *flow.FlowDefinition) bool {
 	return true
 }
 
-// stepHasEvidence reports whether sess already holds the evidence that
-// fulfils step - the selfie submission covers every face step at once.
+// stepHasEvidence reports whether sess holds step's evidence; the one face
+// capture covers every face step.
 func stepHasEvidence(sess session.Session, step flow.Step) bool {
 	switch step {
 	case flow.StepDocumentCapture:
@@ -606,9 +566,8 @@ func stepHasEvidence(sess session.Session, step flow.Step) bool {
 	return true
 }
 
-// faceStepName is the name fd itself uses for its face step (e.g.
-// face_verification, or selfie), so the audit log names the step the way the
-// flow definition does. The selfie submission fulfils all of them at once.
+// faceStepName is the face step's name in fd, so the audit log names it as the
+// flow does.
 func faceStepName(fd *flow.FlowDefinition) string {
 	for _, step := range fd.Steps {
 		switch step {
@@ -619,15 +578,11 @@ func faceStepName(fd *flow.FlowDefinition) string {
 	return string(flow.StepSelfie)
 }
 
-// errStepAlreadyStarted makes markStepStarted's Update a no-op once another
-// request recorded the same start first.
 var errStepAlreadyStarted = errors.New("step already started")
 
-// markStepStarted records that the user began step (without evidence yet),
-// moving the session to in_progress and appending an eventSessionInProgress
-// with stepState "started" - once per step; every later call for the same
-// step, or one for a step that already has evidence, is a cheap no-op, so
-// it's safe from a per-frame endpoint like the selfie preview.
+// markStepStarted records the subject beginning step: in_progress and one
+// event per step. Repeats, and steps with evidence, are no-ops, so it is cheap
+// enough for a per-frame endpoint.
 func (s *Server) markStepStarted(sess session.Session, fd *flow.FlowDefinition, step string, caller appCaller) error {
 	if slices.Contains(sess.Steps.Started, step) || stepHasEvidence(sess, flow.Step(step)) {
 		return nil
@@ -652,34 +607,9 @@ func (s *Server) markStepStarted(sess session.Session, fd *flow.FlowDefinition, 
 	return nil
 }
 
-// handleStartStep is the per-step "the user just began this step" signal,
-// sent by whoever runs the step the moment it starts - vcmrtd when it opens
-// its MRZ camera (document_capture) and when it starts talking to the chip
-// (nfc_read), the browser when it turns the camera on for the face step. It
-// moves the session to in_progress and appends one
-// proofing.session.in_progress audit event naming the step (see
-// markStepStarted), so the audit log shows each step as it starts rather
-// than only once its evidence is submitted - that submission is recorded
-// separately as proofing.result.submitted. Idempotent: repeating it for a
-// step that already started, or already has evidence, changes nothing.
-//
-// Unlike the evidence endpoints this works without a resolved flow too, so a
-// session still on the single-shot POST .../result gets the same per-step
-// trail; with a flow, the step must be one the flow actually contains.
-//
-//	@Summary	Mark a step as started
-//	@Tags		proofing-app
-//	@Produce	json
-//	@Param		token	path		string	true	"Session token"
-//	@Param		step	path		string	true	"document_capture, nfc_read, or the flow's face step (face_verification, selfie, liveness, face_match)"
-//	@Success	200		{object}	api.stepResponse
-//	@Failure	400		{object}	map[string]string
-//	@Failure	401		{object}	map[string]string
-//	@Failure	403		{object}	map[string]string
-//	@Failure	404		{object}	map[string]string
-//	@Failure	409		{object}	map[string]string
-//	@Failure	410		{object}	map[string]string
-//	@Router		/api/v1/app/{token}/steps/{step}/start [post]
+// handleStartStep is the signal that the subject began a step of the flow
+// (the app opening its camera or the chip read, the browser its camera), so the
+// audit log shows each step as it starts. Idempotent.
 func (s *Server) handleStartStep(w http.ResponseWriter, r *http.Request) {
 	sess, resolvedFlow, step, caller, ok := s.appStepRequest(w, r)
 	if !ok {
@@ -698,17 +628,15 @@ func (s *Server) handleStartStep(w http.ResponseWriter, r *http.Request) {
 	}
 	current, err := s.sessions.Get(sess.TenantID, sess.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not reload session: "+err.Error())
+		writeInternalError(w, r, "could not reload session", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s.stepResponseFor(current, resolvedFlow))
 }
 
-// appStepRequest is the shared front half of the /steps/{step}/... routes:
-// the authorized session, its flow (nil without one) and the {step} path
-// value, normalised - any face step name maps to the one the flow itself
-// uses, since a single capture fulfils them all - and checked against the
-// flow.
+// appStepRequest is the shared start of the /steps/{step}/... routes: the
+// session, its flow and the step, with any face step name mapped to the flow's
+// own.
 func (s *Server) appStepRequest(w http.ResponseWriter, r *http.Request) (session.Session, *flow.FlowDefinition, flow.Step, appCaller, bool) {
 	sess, caller, ok := s.appSessionByPathToken(w, r)
 	if !ok {
@@ -721,7 +649,7 @@ func (s *Server) appStepRequest(w http.ResponseWriter, r *http.Request) (session
 	}
 	resolvedFlow, err := s.resolveSessionFlow(r.Context(), sess)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not resolve flow: "+err.Error())
+		writeInternalError(w, r, "could not resolve flow", err)
 		return session.Session{}, nil, "", appCaller{}, false
 	}
 	if resolvedFlow != nil {
@@ -736,31 +664,14 @@ func (s *Server) appStepRequest(w http.ResponseWriter, r *http.Request) (session
 	return sess, resolvedFlow, step, caller, true
 }
 
-// stepResultResponse is GET .../steps/{step}/result: one step's stored
-// result plus where the session stands now.
 type stepResultResponse struct {
 	stepResultView
 	stepResponse
 }
 
-// handleStepResult reads back one step's server-side result - what a
-// reloaded or handed-over client uses to confirm a step it (or the other
-// application) completed really landed, before moving on to CurrentStep.
-// Verdicts only (liveness passed, document checks valid, ...), never the
-// evidence itself. Readable after completion too: the result doesn't go
-// away when the session finishes.
-//
-//	@Summary	Get one step's stored result
-//	@Tags		proofing-app
-//	@Produce	json
-//	@Param		token	path		string	true	"Session token"
-//	@Param		step	path		string	true	"Step name"
-//	@Success	200		{object}	api.stepResultResponse
-//	@Failure	400		{object}	map[string]string
-//	@Failure	401		{object}	map[string]string
-//	@Failure	403		{object}	map[string]string
-//	@Failure	404		{object}	map[string]string
-//	@Router		/api/v1/app/{token}/steps/{step}/result [get]
+// handleStepResult is one step's stored verdicts, never its evidence: how a
+// reloaded or handed-over client confirms a step landed. Readable after the
+// session finished.
 func (s *Server) handleStepResult(w http.ResponseWriter, r *http.Request) {
 	sess, resolvedFlow, step, _, ok := s.appStepRequest(w, r)
 	if !ok {
@@ -772,44 +683,20 @@ func (s *Server) handleStepResult(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// submitDocumentStepRequest is the document_capture step on its own: the
-// document identity vcmrtd read from the MRZ (the same documentInfo shape
-// POST .../steps/nfc carries), sent the moment the MRZ scan completes.
+// submitDocumentStepRequest is document_capture on its own: the MRZ reading,
+// sent as soon as the scan completes.
 type submitDocumentStepRequest struct {
 	Document *documentInfo `json:"document"`
-	// ChipAccess is the MRZ-derived key to open the chip, kept until
-	// nfc_read lands so a device taking over can go straight to the chip
-	// read (appSessionView.ChipAccess). Optional.
+	// ChipAccess is the MRZ-derived chip key, kept until nfc_read lands so a device
+	// taking over can go straight to the chip. Optional.
 	ChipAccess *session.ChipAccessKey `json:"chipAccess,omitempty"`
 }
 
-// handleSubmitDocumentStep stores the document_capture step's result as
-// soon as vcmrtd has read the MRZ, instead of only alongside the chip read,
-// so every step reaches the server when it completes and the server moves
-// the session on to nfc_read. The later POST .../steps/nfc may still carry
-// the document too; that chip-backed copy then supersedes this one.
-//
-//	@Summary	Submit the document_capture step
-//	@Tags		proofing-app
-//	@Accept		json
-//	@Produce	json
-//	@Param		token	path		string							true	"Session token"
-//	@Param		request	body		api.submitDocumentStepRequest	true	"Document identity from the MRZ"
-//	@Success	200		{object}	api.stepResponse
-//	@Failure	400		{object}	map[string]string
-//	@Failure	401		{object}	map[string]string
-//	@Failure	403		{object}	map[string]string
-//	@Failure	404		{object}	map[string]string
-//	@Failure	409		{object}	map[string]string
-//	@Failure	410		{object}	map[string]string
-//	@Router		/api/v1/app/{token}/steps/document_capture [post]
+// handleSubmitDocumentStep stores the MRZ reading as soon as it is scanned. A
+// later nfc_read carrying the chip's reading supersedes it.
 func (s *Server) handleSubmitDocumentStep(w http.ResponseWriter, r *http.Request) {
 	sess, resolvedFlow, caller, ok := s.stepSession(w, r, flow.StepDocumentCapture)
 	if !ok {
-		return
-	}
-	if !slices.Contains(resolvedFlow.Steps, flow.StepDocumentCapture) {
-		writeError(w, http.StatusBadRequest, "step \"document_capture\" is not part of this session's flow")
 		return
 	}
 	var req submitDocumentStepRequest
@@ -824,6 +711,10 @@ func (s *Server) handleSubmitDocumentStep(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "chipAccess.documentType must be passport, identity_card or drivers_license")
 		return
 	}
+	if flow.DrivingLicence(req.Document.Type) || (req.ChipAccess != nil && flow.DrivingLicence(req.ChipAccess.DocumentType)) {
+		writeDocumentUnsupported(w)
+		return
+	}
 	// Same BSN guarantee as handleSubmitNFCStep: the policy applies before
 	// anything is persisted into Steps.
 	bsnPolicy, _ := effectivePrivacyPolicy(resolvedFlow)
@@ -831,7 +722,7 @@ func (s *Server) handleSubmitDocumentStep(w http.ResponseWriter, r *http.Request
 	keepChipAccess := slices.Contains(resolvedFlow.Steps, flow.StepNFCRead)
 
 	updated, err := s.writeStep(sess, caller, flow.StepDocumentCapture, func(sess *session.Session, now time.Time) {
-		evidence := documentEvidenceFromNativeDocument(req.Document)
+		evidence := documentEvidence(req.Document)
 		evidence.Timing = stepTiming(nil, now)
 		evidence.Source = session.DocumentSourceMRZ
 		if keepChipAccess && sess.Steps.NFC == nil {
@@ -847,50 +738,26 @@ func (s *Server) handleSubmitDocumentStep(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, s.stepResponseFor(updated, resolvedFlow))
 }
 
-// submitDocumentPhotoStepRequest is the document_photo step: the photo of
-// the document's printed data page or card, and where on it the printed BSN
-// is, when the app found it.
+// submitDocumentPhotoStepRequest is the document_photo step: the printed data
+// page's photo, and where its BSN is when the app found it.
 type submitDocumentPhotoStepRequest struct {
 	Front *documentPhotoSideRequest `json:"front"`
 	// Back is omitted for a document without one worth taking (a passport).
 	Back *documentPhotoSideRequest `json:"back,omitempty"`
 }
 
-// documentPhotoSideRequest is one side's photo, and where on it the printed
-// BSN is, when the app found it.
 type documentPhotoSideRequest struct {
 	Image     string       `json:"image"`
 	MimeType  string       `json:"mimeType,omitempty"`
 	BSNRegion *imageRegion `json:"bsnRegion,omitempty"`
 }
 
-// handleSubmitDocumentPhotoStep stores the document_photo step's photos of
-// the document's front and (optionally) back. They are released as the
-// result's documentImage and documentImageBack (attrDocumentImage), each BSN
-// region blurred under a BlurBSN policy (buildResult), and the stored copies
-// blurred the same way once the result is built (redactStepsForStorage).
-//
-//	@Summary	Submit the document_photo step
-//	@Tags		proofing-app
-//	@Accept		json
-//	@Produce	json
-//	@Param		token	path		string								true	"Session token"
-//	@Param		request	body		api.submitDocumentPhotoStepRequest	true	"Photo of the document"
-//	@Success	200		{object}	api.stepResponse
-//	@Failure	400		{object}	map[string]string
-//	@Failure	401		{object}	map[string]string
-//	@Failure	403		{object}	map[string]string
-//	@Failure	404		{object}	map[string]string
-//	@Failure	409		{object}	map[string]string
-//	@Failure	410		{object}	map[string]string
-//	@Router		/api/v1/app/{token}/steps/document_photo [post]
+// handleSubmitDocumentPhotoStep stores the document's front and optional back,
+// released as documentImage and documentImageBack with the BSN covered under a
+// BlurBSN policy, in the result and in storage.
 func (s *Server) handleSubmitDocumentPhotoStep(w http.ResponseWriter, r *http.Request) {
 	sess, resolvedFlow, caller, ok := s.stepSession(w, r, flow.StepDocumentPhoto)
 	if !ok {
-		return
-	}
-	if !slices.Contains(resolvedFlow.Steps, flow.StepDocumentPhoto) {
-		writeError(w, http.StatusBadRequest, "step \"document_photo\" is not part of this session's flow")
 		return
 	}
 	var req submitDocumentPhotoStepRequest
@@ -927,13 +794,11 @@ func (s *Server) handleSubmitDocumentPhotoStep(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, s.stepResponseFor(updated, resolvedFlow))
 }
 
-// documentPhotoSide validates one side's photo (name says which, for the
-// error) and returns it as stored evidence.
 func documentPhotoSide(name string, in documentPhotoSideRequest) (session.DocumentPhotoSide, error) {
 	if in.Image == "" {
 		return session.DocumentPhotoSide{}, fmt.Errorf("%s.image is required", name)
 	}
-	raw, mime, err := decodeImageBase64(in.Image, firstNonEmpty(in.MimeType, "image/jpeg"))
+	raw, mime, err := decodeImageBase64(in.Image, firstNonEmpty(in.MimeType, defaultImageMime))
 	if err != nil {
 		return session.DocumentPhotoSide{}, fmt.Errorf("invalid %s.image: %w", name, err)
 	}
@@ -952,12 +817,27 @@ func validImageRegion(r imageRegion) bool {
 	return r.X >= 0 && r.Y >= 0 && r.W > 0 && r.H > 0 && r.X+r.W <= 1 && r.Y+r.H <= 1
 }
 
-func validChipAccessDocumentType(t string) bool {
-	return t == "passport" || t == "identity_card" || t == "drivers_license"
+// errCodeDocumentUnsupported refuses an EU driving licence at
+// document_capture and nfc_read: there is no CSCA source for licences
+// (mrtdverify.DrivingLicenceCertPool is empty), so a genuine one could only
+// end DOC_TAMPERED.
+const errCodeDocumentUnsupported = "document_unsupported"
+
+func writeDocumentUnsupported(w http.ResponseWriter) {
+	writeErrorCode(w, http.StatusUnprocessableEntity, errCodeDocumentUnsupported,
+		"EU driving licences are not supported yet: scan a passport or identity card")
 }
 
-// isFaceStep reports whether step is one of the face steps the single
-// selfie capture fulfils.
+// The document types a chip access key may name.
+const (
+	chipAccessPassport     = "passport"
+	chipAccessIdentityCard = "identity_card"
+)
+
+func validChipAccessDocumentType(t string) bool {
+	return t == chipAccessPassport || t == chipAccessIdentityCard || t == flow.DocumentTypeDrivingLicence
+}
+
 func isFaceStep(step flow.Step) bool {
 	switch step {
 	case flow.StepSelfie, flow.StepLiveness, flow.StepFaceMatch, flow.StepFaceVerification:
@@ -966,8 +846,6 @@ func isFaceStep(step flow.Step) bool {
 	return false
 }
 
-// flowStepProgress splits fd's steps, in flow order, into those sess
-// already has evidence for and those still to come.
 func flowStepProgress(sess session.Session, fd *flow.FlowDefinition) (completed, remaining []string) {
 	completed, remaining = []string{}, []string{}
 	for _, step := range fd.Steps {
@@ -980,27 +858,13 @@ func flowStepProgress(sess session.Session, fd *flow.FlowDefinition) (completed,
 	return completed, remaining
 }
 
-// errStepsIncomplete: POST .../submit before every step has evidence - or
-// the session's steps were reset while its result was being built.
+// errStepsIncomplete: a submit before every step has evidence, or a reset while
+// the result was being built.
 var errStepsIncomplete = errors.New("not every step of this session has a result yet")
 
-// handleSubmitSession is the user submitting a session whose steps are all
-// done (readyToSubmit): only now does it get its outcome (finishSession).
-// Any device holding one of the session's slots may submit. Submitting a
-// session that already has its outcome (a double tap, a retry) is answered
-// with the current state (alreadyRecorded) and changes nothing.
-//
-//	@Summary	Submit a session whose steps are all done
-//	@Tags		proofing-app
-//	@Produce	json
-//	@Param		token	path		string	true	"Session token"
-//	@Success	200		{object}	api.stepResponse
-//	@Failure	401		{object}	map[string]string
-//	@Failure	403		{object}	map[string]string
-//	@Failure	404		{object}	map[string]string
-//	@Failure	409		{object}	map[string]string
-//	@Failure	410		{object}	map[string]string
-//	@Router		/api/v1/app/{token}/submit [post]
+// handleSubmitSession lets any device of the session submit it once every step
+// has evidence; only then does it get its outcome. A repeat answers the
+// current state.
 func (s *Server) handleSubmitSession(w http.ResponseWriter, r *http.Request) {
 	sess, caller, ok := s.appSessionByPathToken(w, r)
 	if !ok {
@@ -1008,11 +872,11 @@ func (s *Server) handleSubmitSession(w http.ResponseWriter, r *http.Request) {
 	}
 	resolvedFlow, err := s.resolveSessionFlow(r.Context(), sess)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not resolve flow: "+err.Error())
+		writeInternalError(w, r, "could not resolve flow", err)
 		return
 	}
 	if resolvedFlow == nil {
-		writeError(w, http.StatusConflict, "this session has no resolved flow definition; use POST .../result instead")
+		writeError(w, http.StatusConflict, "this session has no resolved flow definition")
 		return
 	}
 	updated, err := s.finishSession(r.Context(), sess, resolvedFlow, caller)
@@ -1029,19 +893,15 @@ func (s *Server) handleSubmitSession(w http.ResponseWriter, r *http.Request) {
 	case accessErrorCode(err) != "":
 		s.denyApp(w, r, sess, caller, err)
 	case err != nil:
-		writeError(w, http.StatusInternalServerError, "could not finish session: "+err.Error())
+		writeInternalError(w, r, "could not finish session", err)
 	default:
 		writeJSON(w, http.StatusOK, s.stepResponseFor(updated, resolvedFlow))
 	}
 }
 
-// finishSession gives sess, whose every step fd requires has evidence, its
-// outcome — the server, not the caller, decides it. It assembles the same
-// appResultRequest shape handleAppSessionResult always built from one
-// request body, just sourced from sess.Steps' accumulated evidence, then
-// runs the exact same authenticityFailure/flowComplianceFailure/buildResult
-// chain. The write re-checks caller's slot and the session's state
-// (checkAppWrite) and that every step still has evidence (errStepsIncomplete).
+// finishSession decides the outcome of a session whose steps all have
+// evidence: the server, not the app, decides. The write re-checks the caller's
+// slot, the evidence and that the session was not reset meanwhile.
 func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *flow.FlowDefinition, caller appCaller) (session.Session, error) {
 	if err := checkAppWrite(&sess, caller); err != nil {
 		return sess, err
@@ -1061,20 +921,15 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 		req.Document = &doc
 	}
 	if sess.Steps.Selfie != nil {
-		// A Regula selfie without a crop (no match ran, or Regula found no
-		// face) keeps no image: the result then has no "selfie".
+		// A Regula selfie without a crop (no match ran, or no face found) has no
+		// image.
 		if sess.Steps.Selfie.Image != "" {
-			if raw, mime, err := decodeImageBase64(sess.Steps.Selfie.Image, firstNonEmpty(sess.Steps.Selfie.MimeType, "image/jpeg")); err == nil {
+			if raw, mime, err := decodeImageBase64(sess.Steps.Selfie.Image, firstNonEmpty(sess.Steps.Selfie.MimeType, defaultImageMime)); err == nil {
 				req.Selfie = &photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
 			}
 		}
-		// LivenessPassed is computed unconditionally on every selfie
-		// submission (handleSubmitSelfieStep), regardless of whether the
-		// flow even asks for face_match — so once Steps.Selfie is non-nil
-		// the check has always actually run; "not_performed" would
-		// misreport a check that ran and failed as one that never ran at
-		// all (requirements.md §5: "unambiguous statuses"). Matches
-		// handleSubmitSelfieStep's own immediate response exactly.
+		// Liveness ran on every face submission, so a failure is "failed", not
+		// "not_performed".
 		req.Biometrics = &biometricsInfo{
 			FaceMatchScore: sess.Steps.Selfie.FaceMatchScore, FaceVerified: sess.Steps.Selfie.FaceVerified,
 			LivenessResult: livenessResult(sess.Steps.Selfie.LivenessPassed), LivenessScore: sess.Steps.Selfie.LivenessScore,
@@ -1095,9 +950,7 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 		}
 		verifiedChecks = checks
 		if nfcReq.Document != nil && req.Document != nil {
-			// DG11 extras only the chip carries — prefer them the same way
-			// documentInfo.DisplayName's own doc comment already prefers
-			// DG11 over MRZ.
+			// The DG11 extras, and its name over the MRZ's.
 			req.Document.PersonalNumber = firstNonEmpty(nfcReq.Document.PersonalNumber, req.Document.PersonalNumber)
 			req.Document.PlaceOfBirth = nfcReq.Document.PlaceOfBirth
 			if nfcReq.Document.DisplayName != "" {
@@ -1109,25 +962,19 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 	bsnPolicy, redactionPolicy := effectivePrivacyPolicy(fd)
 	result := buildResult(sess, req, verifiedChecks, fd, bsnPolicy, redactionPolicy)
 
-	finalStatus, finalErrorCode, authenticityOverridden := session.StatusApproved, "", false
-	if failed, code := authenticityFailure(verifiedChecks); failed {
-		finalStatus, finalErrorCode, authenticityOverridden = session.StatusRejected, code, true
-	}
-	flowViolated := false
-	if !authenticityOverridden {
-		if failed, code := flowComplianceFailure(fd, sess, req); failed {
-			finalStatus, finalErrorCode, flowViolated = session.StatusRejected, code, true
-		}
-	}
+	achieved := computeEIDASAssuranceLevel(fd, req, verifiedChecks, sess.ReferencePhoto == "")
+	finalStatus, finalErrorCode, reason := sessionOutcome(fd, sess, req, verifiedChecks, achieved, s.cfg.Now())
 
+	snapshotResets, snapshotFaceAttempts := sess.ResetCount, faceStepAttempts(sess.Steps.Selfie)
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if err := checkAppWrite(sess, caller); err != nil {
 			return err
 		}
-		// result was built from the snapshot above; if the session was reset
-		// (POST .../reset) in between, that evidence is gone and must not be
-		// turned into an outcome.
-		if !requiredStepsComplete(*sess, fd) {
+		// The result was built from the snapshot above: a reset in between means it is
+		// not this session's evidence any more, even if new evidence completed the
+		// steps again; nor is it once a face retry replaced the face evidence.
+		if sess.ResetCount != snapshotResets || faceStepAttempts(sess.Steps.Selfie) != snapshotFaceAttempts ||
+			!requiredStepsComplete(*sess, fd) {
 			return errStepsIncomplete
 		}
 		now := time.Now().UTC()
@@ -1139,12 +986,9 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 		}
 		sess.ErrorCode = finalErrorCode
 		sess.Result = result
-		// Result has just been built from sess.Steps above (buildResult, via
-		// req) - nothing after this point ever needs the raw evidence again,
-		// so this is the first point it's safe to redact the copy Steps
-		// itself retains. See redactStepsForStorage's doc comment for why it
-		// can't run any earlier (it would corrupt the face_match reference).
-		redactStepsForStorage(sess, redactionPolicy)
+		// The result is built; only now may the stored evidence be redacted
+		// (redactStepsForStorage).
+		redactStepsForStorage(sess, bsnPolicy, redactionPolicy)
 		return nil
 	})
 	if err != nil {
@@ -1157,55 +1001,55 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 	if updated.ErrorCode != "" {
 		outcomeDetails["errorCode"] = updated.ErrorCode
 	}
-	if authenticityOverridden {
-		outcomeDetails["reason"] = "tamper_detected"
-	}
-	if flowViolated {
-		outcomeDetails["reason"] = "flow_policy_violation"
-	}
-	if devices := deviceParticipation(updated.Access); len(devices) > 0 {
-		outcomeDetails["devices"] = devices
-	}
-	if updated.Status == session.StatusApproved {
-		if photo, ok := result["photo"]; ok {
-			outcomeDetails["photo"] = photo
-		}
-		if selfie, ok := result["selfie"]; ok {
-			outcomeDetails["selfie"] = selfie
-		}
+	if reason != "" {
+		outcomeDetails["reason"] = reason
 	}
 	s.auditProofing(updated, eventTypeForStatus(updated.Status), outcomeDetails)
+	// The app is done, whatever the outcome: its liveness attempts are swept
+	// from now, not from the session's expiry.
+	s.queueRegulaSweep(ctx, updated)
 	return updated, nil
 }
 
-// redactStepsForStorage applies the tenant's BlurFace redaction policy to
-// sess.Steps in place - closing docs/compliance.md §6.1.1's gap, where
-// Session.Steps kept the full-resolution selfie image and the chip's raw
-// DG2 photo forever, regardless of RedactionPolicy (only Session.Result,
-// built from the same evidence, was ever redacted).
-//
-// It must only be called once every read of the raw image evidence has
-// already happened - specifically after buildResult has run (finishSession
-// calls this from within the same Update closure that just set sess.Result
-// from it). Redacting any earlier would corrupt real evidence still in use:
-// faceMatchReference reads Steps.NFC.Raw's photo as the face_match
-// reference image for computeFaceMatch, and that happens at the *next*
-// step's submission time, not this one's - blurring it up front would make
-// every subsequent face match fail against pixelated noise instead of the
-// actual chip photo. BSN masking has no equivalent ordering problem
-// (handleSubmitNFCStep already applies it before Steps.NFC.Raw/
-// Steps.Document.Parsed are ever persisted, see its own comment), so this
-// only ever touches face imagery.
-func redactStepsForStorage(sess *session.Session, redaction privacy.RedactionPolicy) {
+// Audit reasons of a rejection (sessionOutcome).
+const (
+	reasonTamperDetected      = "tamper_detected"
+	reasonFlowPolicyViolation = "flow_policy_violation"
+	reasonCheckFailed         = "check_failed"
+	reasonAssuranceNotMet     = "assurance_not_met"
+)
+
+// sessionOutcome decides a finished session of fd: rejected for a tampered or
+// cloned chip, a submission outside what fd accepts, a face step that did not
+// verify the person, or an achieved eIDAS level below fd's required one, in
+// that order; approved otherwise. The required level is only that minimum: it
+// neither raises nor caps achieved, which is computed without it.
+func sessionOutcome(fd *flow.FlowDefinition, sess session.Session, req appResultRequest, checks *chipChecksInfo, achieved flow.AssuranceLevel, now time.Time) (status session.Status, errorCode, reason string) {
+	if failed, code := authenticityFailure(fd, checks); failed {
+		return session.StatusRejected, code, reasonTamperDetected
+	}
+	if failed, code := flowComplianceFailure(fd, sess, req, now); failed {
+		return session.StatusRejected, code, reasonFlowPolicyViolation
+	}
+	if failed, code := faceStepFailure(fd, req, checks); failed {
+		return session.StatusRejected, code, reasonCheckFailed
+	}
+	if !flow.MeetsLevel(achieved, fd.RequiredAssuranceLevel) {
+		return session.StatusRejected, errCodeAssuranceNotMet, reasonAssuranceNotMet
+	}
+	return session.StatusApproved, "", ""
+}
+
+// redactStepsForStorage applies the BSN and redaction policies to the stored
+// steps. It runs only after buildResult: the face match reads the raw chip
+// portrait, so redacting earlier would match against a blurred image. The raw
+// DG1 is dropped too; Passive Authentication already ran on it.
+func redactStepsForStorage(sess *session.Session, bsnPolicy privacy.BSNPolicy, redaction privacy.RedactionPolicy) {
 	if redaction.BlurBSN {
 		redactStoredDocumentPhoto(sess)
 	}
-	if !redaction.BlurFace {
-		return
-	}
-	if sess.Steps.Selfie != nil && sess.Steps.Selfie.Image != "" {
-		// A copy, not a write through the pointer - see the NFC step's
-		// ChipAccess comment in handleSubmitNFCStep.
+	if redaction.BlurFace && sess.Steps.Selfie != nil && sess.Steps.Selfie.Image != "" {
+		// A copy, not a write through the pointer (see handleSubmitNFCStep).
 		selfie := *sess.Steps.Selfie
 		if blurred, mime, ok := blurFace(selfie.Image, selfie.MimeType); ok {
 			selfie.Image, selfie.MimeType = blurred, mime
@@ -1219,20 +1063,40 @@ func redactStepsForStorage(sess *session.Session, redaction privacy.RedactionPol
 		return
 	}
 	req, err := decodeNFCStepRequest(sess.Steps.NFC.Raw)
-	if err != nil || req.Photo == nil || req.Photo.ImageBase64 == "" {
+	if err != nil {
 		return
 	}
-	if blurred, mime, ok := blurFace(req.Photo.ImageBase64, req.Photo.MimeType); ok {
-		req.Photo.ImageBase64, req.Photo.MimeType = blurred, mime
-	} else {
-		slog.Warn("identity proofing: could not blur the stored chip photo; dropping it", slog.String("session_id", sess.ID))
-		req.Photo = nil
+	changed := false
+	if redaction.BlurFace && req.Photo != nil && req.Photo.ImageBase64 != "" {
+		if blurred, mime, ok := blurFace(req.Photo.ImageBase64, req.Photo.MimeType); ok {
+			req.Photo.ImageBase64, req.Photo.MimeType = blurred, mime
+		} else {
+			slog.Warn("identity proofing: could not blur the stored chip photo; dropping it", slog.String("session_id", sess.ID))
+			req.Photo = nil
+		}
+		changed = true
+	}
+	if req.MrtdEvidence != nil {
+		// The raw data groups are the same face and the same BSN again, as
+		// the chip's own bytes: no redacted encoding of them exists, so they
+		// go. Passive Authentication needed them; the result is built.
+		if redaction.BlurFace {
+			changed = dropDataGroups(req.MrtdEvidence, dataGroupPortrait, dataGroupDLPortrait) || changed
+		}
+		if p := bsnPolicy.Effective(); (p == privacy.BSNPolicyMask || p == privacy.BSNPolicyOmit) && dutchDocument(*sess, req) {
+			// Older Dutch documents carry the BSN in the MRZ's optional data
+			// (DG1) as well as in DG11.
+			changed = dropDataGroups(req.MrtdEvidence, dataGroupMRZ, dataGroupPersonalDetails) || changed
+		}
+	}
+	if !changed {
+		return
 	}
 	raw, err := marshalToMap(req)
 	if err != nil {
-		// Never keep the unblurred original: without a re-marshalled copy,
+		// Never keep the unredacted original: without a re-marshalled copy,
 		// drop the stored chip evidence's raw form altogether.
-		slog.Warn("identity proofing: could not store the blurred chip photo", slog.String("session_id", sess.ID), slog.Any("error", err))
+		slog.Warn("identity proofing: could not store the redacted chip evidence", slog.String("session_id", sess.ID), slog.Any("error", err))
 		raw = nil
 	}
 	nfc := *sess.Steps.NFC
@@ -1240,8 +1104,33 @@ func redactStepsForStorage(sess *session.Session, redaction privacy.RedactionPol
 	sess.Steps.NFC = &nfc
 }
 
-// documentImageFromSide is a stored side as the result request carries it;
-// nil for no side.
+const (
+	dataGroupMRZ             = "DG1"
+	dataGroupPortrait        = "DG2"
+	dataGroupDLPortrait      = "DG6"
+	dataGroupPersonalDetails = "DG11"
+	// dataGroupAAKey is a passport's or ID card's Active Authentication key.
+	dataGroupAAKey = "DG15"
+)
+
+func dropDataGroups(ev *mrtdEvidenceRequest, names ...string) bool {
+	dropped := false
+	for _, name := range names {
+		if _, ok := ev.DataGroups[name]; ok {
+			delete(ev.DataGroups, name)
+			dropped = true
+		}
+	}
+	return dropped
+}
+
+func dutchDocument(sess session.Session, req submitNFCStepRequest) bool {
+	if req.Document != nil && req.Document.IssuingState != "" {
+		return req.Document.IssuingState == dutchIssuingState
+	}
+	return sess.Steps.Document != nil && sess.Steps.Document.Parsed.IssuingState == dutchIssuingState
+}
+
 func documentImageFromSide(side *session.DocumentPhotoSide) *documentImageInfo {
 	if side == nil {
 		return nil
@@ -1253,9 +1142,8 @@ func documentImageFromSide(side *session.DocumentPhotoSide) *documentImageInfo {
 	return img
 }
 
-// redactStoredDocumentPhoto blurs the printed BSN in the stored document
-// photos, as buildResult already did in the result. A photo whose BSN could
-// not be blurred is dropped rather than kept readable.
+// redactStoredDocumentPhoto covers the printed BSN in the stored photos as
+// buildResult did in the result, and drops a photo it could not cover.
 func redactStoredDocumentPhoto(sess *session.Session) {
 	p := sess.Steps.DocumentPhoto
 	if p == nil {
@@ -1284,11 +1172,9 @@ func redactedSide(sess *session.Session, side session.DocumentPhotoSide) session
 	return side
 }
 
-// blurFace pixelates a face image under a BlurFace redaction policy. It
-// takes what the API accepts - plain or data-URL base64, and a chip's
-// JPEG2000 DG2 portrait, which redact.Image can't decode on its own - and
-// fails closed: ok is false when the image couldn't be blurred, and callers
-// must then drop it rather than keep the unblurred original.
+// blurFace pixelates a face under a BlurFace policy, including a chip's
+// JPEG2000 portrait. ok is false when it could not, and the caller then drops
+// the image.
 func blurFace(imageBase64, mimeType string) (string, string, bool) {
 	raw, mime, err := decodeImageBase64(imageBase64, mimeType)
 	if err != nil {
@@ -1305,13 +1191,8 @@ func blurFace(imageBase64, mimeType string) (string, string, bool) {
 	return blurred, blurredMime, true
 }
 
-// documentEvidenceFromNativeDocument builds document_capture's evidence
-// from vcmrtd's own submitted document identity — see submitNFCStepRequest's
-// doc comment; this is document_capture's only source, always. No VIZ
-// image: there is no document photo anywhere in this flow, so a session's
-// result never has a documentImage from document_capture — an expected
-// trade-off, not a bug.
-func documentEvidenceFromNativeDocument(doc *documentInfo) session.DocumentStepEvidence {
+// documentEvidence is document_capture's evidence from the app's MRZ reading.
+func documentEvidence(doc *documentInfo) session.DocumentStepEvidence {
 	if doc == nil {
 		return session.DocumentStepEvidence{}
 	}
@@ -1321,11 +1202,8 @@ func documentEvidenceFromNativeDocument(doc *documentInfo) session.DocumentStepE
 			Nationality: doc.Nationality, Surname: doc.LastName, GivenNames: doc.FirstName,
 			Sex: doc.Sex, DateOfBirth: doc.DateOfBirth, DateOfExpiry: doc.DateOfExpiry,
 			PersonalNumber: doc.PersonalNumber,
-			// AllChecksValid: there's no MRZ/OCR checksum to validate here at
-			// all - the chip's own Passive Authentication (verifyMrtdEvidence,
-			// already run before this is called) is what actually vouches for
-			// this data instead. True here means "nothing failed", not
-			// "checksums ran and passed".
+			// No MRZ checksums run here: Passive Authentication vouches for this data, so
+			// true means nothing failed.
 			AllChecksValid: true,
 		},
 	}
@@ -1333,7 +1211,7 @@ func documentEvidenceFromNativeDocument(doc *documentInfo) session.DocumentStepE
 
 func documentInfoFromParsedMRZ(p session.ParsedMRZ) documentInfo {
 	valid := p.AllChecksValid
-	notExpired := isFutureDate(p.DateOfExpiry)
+	notExpired := !documentExpired(p.DateOfExpiry, time.Now())
 	return documentInfo{
 		Type: p.DocumentType, Number: p.Number, IssuingState: p.IssuingState, Nationality: p.Nationality,
 		FirstName: p.GivenNames, LastName: p.Surname, DisplayName: displayName(p.GivenNames, p.Surname),
@@ -1352,10 +1230,13 @@ func displayName(given, surname string) string {
 	return given + " " + surname
 }
 
-func isFutureDate(yyyyMMdd string) bool {
-	t, err := time.Parse("2006-01-02", yyyyMMdd)
+// documentExpired reports whether a yyyyMMdd expiry date has passed on now's
+// date (UTC): a document is valid through its expiry day. An unreadable date
+// is expired.
+func documentExpired(yyyyMMdd string, now time.Time) bool {
+	expiry, err := time.Parse(time.DateOnly, yyyyMMdd)
 	if err != nil {
-		return false
+		return true
 	}
-	return t.After(time.Now().UTC())
+	return expiry.Before(now.UTC().Truncate(day))
 }

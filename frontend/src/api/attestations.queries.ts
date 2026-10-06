@@ -120,20 +120,21 @@ export function credentialOffersQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "attestations", "offers"];
 }
 
+// One held credential's detail in every language it was read in: the prefix
+// of heldAttestationClaimsQueryKey.
+export function heldAttestationClaimsBaseQueryKey(
+  slug: string,
+  heldId: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "held", heldId];
+}
+
 export function heldAttestationClaimsQueryKey(
   slug: string,
   heldId: string,
   lang: string,
 ): readonly string[] {
-  return [
-    "organizations",
-    "detail",
-    slug,
-    "attestations",
-    "held",
-    heldId,
-    lang,
-  ];
+  return [...heldAttestationClaimsBaseQueryKey(slug, heldId), lang];
 }
 
 // Public claim polling: re-fetches while the attestation is still offered so the

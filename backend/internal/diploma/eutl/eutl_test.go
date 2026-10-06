@@ -36,7 +36,7 @@ func mustCertB64(t *testing.T) (string, *x509.Certificate) {
 	return base64.StdEncoding.EncodeToString(blk.Bytes), c
 }
 
-func TestLoadParsesLOTLAndMemberList(t *testing.T) {
+func TestLoadParsesLOTLAndMembers(t *testing.T) {
 	certB64, cert := mustCertB64(t)
 	mux := http.NewServeMux()
 	var srv *httptest.Server
@@ -122,8 +122,6 @@ func TestLoadParsesLOTLAndMemberList(t *testing.T) {
 }
 
 func TestCacheIsUsedWhenFresh(t *testing.T) {
-	certB64, _ := mustCertB64(t)
-	_ = certB64
 	hits := 0
 	mux := http.NewServeMux()
 	var srv *httptest.Server
@@ -154,10 +152,10 @@ func TestCacheIsUsedWhenFresh(t *testing.T) {
 	}
 }
 
-// TestLiveNLAndRO hits the real EU infrastructure; skipped with -short.
 // liveEnv opts in to TestLiveNLAndRO, which downloads the real EU lists.
 const liveEnv = "DIPLOMA_LIVE_EUTL"
 
+// TestLiveNLAndRO hits the real EU infrastructure; skipped unless liveEnv is set.
 func TestLiveNLAndRO(t *testing.T) {
 	if os.Getenv(liveEnv) == "" {
 		t.Skipf("downloads the EU trusted lists; set %s to run it", liveEnv)

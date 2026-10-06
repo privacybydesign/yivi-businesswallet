@@ -9,6 +9,7 @@ import type { TFunction } from "i18next";
 import { HELD_SOURCES } from "../api/attestations";
 import type { HeldAttestation, HeldSource } from "../api/attestations";
 import { credentialDisplayName } from "./credential-display";
+import { fullName } from "./name";
 
 // How long before a credential expires it moves to "Needs attention", so the org
 // has time to have it re-issued before it stops working.
@@ -290,6 +291,7 @@ interface HistoryEvent {
     givenNames: string;
     lastName: string;
   } | null;
+  detailHidden?: boolean;
 }
 
 function afterField(event: HistoryEvent, key: string): unknown {
@@ -307,9 +309,12 @@ export function heldHistory(
   credential: { receivedAt: string; statusCheckedAt?: string },
 ): HeldHistoryEntry[] {
   const entries: HeldHistoryEntry[] = events.map((event) => {
+    // Named as the audit log names its actors.
     const actor = event.actor
-      ? (event.actor.preferredName ??
-        `${event.actor.givenNames} ${event.actor.lastName}`.trim())
+      ? fullName({
+          ...event.actor,
+          preferredName: event.actor.preferredName ?? null,
+        })
       : undefined;
     switch (event.action) {
       case "attestation.held_received": {
@@ -328,7 +333,10 @@ export function heldHistory(
           at: event.occurredAt,
           kind: "statusChanged",
           action: event.action,
-          revoked: afterField(event, "revoked") === true,
+          // Which way it moved is metadata, withheld from an ordinary member.
+          revoked: event.detailHidden
+            ? undefined
+            : afterField(event, "revoked") === true,
         };
       case "attestation.held_deleted":
         return {

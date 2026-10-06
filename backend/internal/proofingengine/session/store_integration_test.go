@@ -84,3 +84,19 @@ func TestStoreExpiresLazilyOnce(t *testing.T) {
 		t.Fatalf("purge = %d, %v", len(removed), err)
 	}
 }
+
+// A backlog larger than one removal batch is worked off in one Purge: each
+// batch has its own timeout, and the loop runs until a batch comes back short.
+func TestStorePurgeManyBatches(t *testing.T) {
+	s, org := newStore(t)
+	const sessions = 150 // more than the store's removal batch of 100
+	for range sessions {
+		if _, err := s.Create(session.Session{TenantID: org, Method: session.MethodNFCPassport, ExpiresAt: time.Now().Add(-time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err := s.Purge(time.Second, time.Now().Add(time.Minute))
+	if err != nil || len(removed) != sessions {
+		t.Fatalf("purge = %d, %v; want all %d", len(removed), err, sessions)
+	}
+}

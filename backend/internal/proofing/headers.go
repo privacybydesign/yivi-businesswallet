@@ -1,0 +1,12 @@
+package proofing
+
+// HTTP header names and values the proofing routes set or read.
+const (
+	headerAuthorization      = "Authorization"
+	headerWWWAuthenticate    = "WWW-Authenticate"
+	headerRetryAfter         = "Retry-After"
+	headerContentType        = "Content-Type"
+	headerContentDisposition = "Content-Disposition"
+	headerCacheControl       = "Cache-Control"
+	contentTypeJSON          = "application/json"
+)

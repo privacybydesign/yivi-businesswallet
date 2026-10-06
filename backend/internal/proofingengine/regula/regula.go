@@ -36,6 +36,12 @@ const (
 	liveImageIndex      = 2
 )
 
+// HTTP header names and values the client sets.
+const (
+	headerContentType = "Content-Type"
+	contentTypeJSON   = "application/json"
+)
+
 // alignType3x4 is FaceImageQualityAlignType ALIGN_3x4: a crop in a passport
 // photo's aspect ratio.
 const alignType3x4 = 0
@@ -45,16 +51,17 @@ var ErrTransactionNotFound = errors.New("regula: liveness transaction not found"
 
 // LivenessTransaction is the part of GET /api/v2/liveness's TransactionInfo we use.
 type LivenessTransaction struct {
-	// Status is 0 when liveness is confirmed.
-	Status int `json:"status"`
+	// Status is 0 when liveness is confirmed; nil when Regula left it out.
+	Status *int `json:"status"`
 	// Code is the raw FaceSDKResultCode.
 	Code int `json:"code"`
 	// Tag is the tag the client set when it started the liveness session.
 	Tag string `json:"tag"`
 }
 
-// Confirmed reports whether Regula judged the captured face live.
-func (t LivenessTransaction) Confirmed() bool { return t.Status == 0 }
+// Confirmed reports whether Regula judged the captured face live. A
+// transaction without a status is not: it fails closed.
+func (t LivenessTransaction) Confirmed() bool { return t.Status != nil && *t.Status == 0 }
 
 // Client talks to one Regula Face API instance.
 type Client struct {
@@ -197,7 +204,7 @@ func (c *Client) do(ctx context.Context, method, target string, body []byte) (*h
 		return nil, fmt.Errorf("regula: build %s request: %w", method, err)
 	}
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(headerContentType, contentTypeJSON)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

@@ -61,6 +61,20 @@ func (s *Service) hostedRequest(ctx context.Context, token string) (Request, err
 	return req, nil
 }
 
+// hostedLimitKey is whose rate limit a hosted link's calls count against:
+// its customer, or its org for a link sent to a member.
+func (s *Service) hostedLimitKey(ctx context.Context, token string) (uuid.UUID, error) {
+	hash := sha256.Sum256([]byte(token))
+	req, err := s.requests.GetByLinkToken(ctx, hash[:])
+	if err != nil {
+		return uuid.UUID{}, err
+	}
+	if req.CustomerID != nil {
+		return *req.CustomerID, nil
+	}
+	return req.OrganizationID, nil
+}
+
 func (s *Service) HostedRequest(ctx context.Context, token string) (Hosted, error) {
 	req, err := s.hostedRequest(ctx, token)
 	if err != nil {
@@ -88,7 +102,7 @@ func (s *Service) HostedRequest(ctx context.Context, token string) (Hosted, erro
 }
 
 func (s *Service) hostedFlow(ctx context.Context, req Request) (proofingprovider.Flow, error) {
-	tenant := orgTenant(req.OrganizationID, ModeLive)
+	tenant := orgTenant(req.OrganizationID)
 	flows, err := s.ips.ListFlows(ctx, tenant)
 	if err != nil {
 		return proofingprovider.Flow{}, fmt.Errorf("proofing: list flows org %s: %w", req.OrganizationID, err)
@@ -129,8 +143,8 @@ type Headless struct {
 // picking an app on the hosted page would, for a customer building its own UI.
 // A Yivi one's disclosure starts at once; its face check runs through the
 // hosted link's routes. A request not created hosted is ErrNotHosted.
-func (s *Service) StartHeadless(ctx context.Context, orgID, customerID, id uuid.UUID, method proofingprovider.Method) (Headless, error) {
-	req, err := s.requests.GetForCustomer(ctx, orgID, customerID, id)
+func (s *Service) StartHeadless(ctx context.Context, scope CustomerScope, id uuid.UUID, method proofingprovider.Method) (Headless, error) {
+	req, err := s.requests.GetForCustomer(ctx, scope, id)
 	if err != nil {
 		return Headless{}, err
 	}
@@ -176,16 +190,16 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 	if err != nil {
 		return Sent{}, err
 	}
-	if !CustomerCompletable(flow) {
+	if !customerCompletable(flow) {
 		return Sent{}, ErrFlowNotCompletable
 	}
-	if method == proofingprovider.MethodYivi && !YiviAppAvailable(flow) {
+	if method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
 		return Sent{}, fmt.Errorf("%w: this flow's face provider only runs in the Idem app", ErrInvalidInput)
 	}
 	// The reference photo was held for this start; a flow that needs one
 	// it lacks (the flow changed since the send) cannot run.
 	var photo *proofingprovider.Image
-	if NeedsReferencePhoto(flow) {
+	if flowNeedsReferencePhoto(flow) {
 		if photo, err = s.requests.ReferencePhoto(ctx, req); err != nil {
 			return Sent{}, err
 		}
@@ -197,25 +211,27 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 	if customer.Settings.SessionTTL != 0 {
 		ttl = customer.Settings.SessionTTL
 	}
-	tenant := orgTenant(req.OrganizationID, ModeLive)
+	tenant := orgTenant(req.OrganizationID)
 	sess, err := s.ips.CreateSession(ctx, tenant, proofingprovider.SessionInput{
 		FlowID: flow.ID, ClientReference: req.ID.String(), TTL: ttl, Method: method,
-		Language: string(req.Language), Retention: engineRetention(&customer), ReferencePhoto: photo,
+		Language: string(req.Language), Retention: engineRetention(&customer, req.RetentionOverride), ReferencePhoto: photo,
 	})
 	if err != nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", req.ID, err)
 	}
 	if method == proofingprovider.MethodIdem && sess.Claim == nil {
-		return Sent{}, fmt.Errorf("proofing: create session request %s: IPS offered no vcmrtd link", req.ID)
+		return Sent{}, s.discardSession(ctx, tenant, sess,
+			fmt.Errorf("proofing: create session request %s: IPS offered no vcmrtd link", req.ID))
 	}
 	req.Method = method
 	attached, err := s.requests.AttachSession(ctx, req, sess)
 	if err != nil {
-		return Sent{}, err
+		return Sent{}, s.discardSession(ctx, tenant, sess, err)
 	}
 	if !attached {
-		// A concurrent start won; this session lapses unused at IPS.
-		return Sent{}, ErrLinkStarted
+		// A concurrent start won (or the request ended meanwhile): this
+		// session, holding the reference photo, is erased again.
+		return Sent{}, s.discardSession(ctx, tenant, sess, ErrLinkStarted)
 	}
 	if sess.FlowVersion != 0 {
 		req.FlowVersion = sess.FlowVersion
@@ -274,7 +290,7 @@ func (s *Service) HostedFaceFrame(ctx context.Context, token, image string) (pro
 }
 
 // HostedEmbedOrigins are the origins that may frame a hosted link's page: its
-// customer's allowed redirect origins. It reads no IPS state.
+// customer's allowed redirect origins. It reads no the engine state.
 func (s *Service) HostedEmbedOrigins(ctx context.Context, token string) ([]string, error) {
 	req, err := s.hostedRequest(ctx, token)
 	if err != nil {

@@ -92,6 +92,9 @@ const (
 	// revocation check.
 	trustHTTPTimeout = 30 * time.Second
 	ocspHTTPTimeout  = 10 * time.Second
+	// trustReloadTimeout bounds a whole reload (the List of Trusted Lists and
+	// every territory's list), apart from the upload that triggered it.
+	trustReloadTimeout = 2 * time.Minute
 )
 
 // TrustConfig is where the trust anchors come from.
@@ -182,12 +185,17 @@ func (s *TrustStore) load(ctx context.Context) (verify.TrustSource, string, erro
 }
 
 // Current returns the anchors, first reloading them when they are
-// TrustRefresh old; a failed reload keeps the current ones.
+// TrustRefresh old; a failed reload keeps the current ones. The reload runs
+// under its own trustReloadTimeout, not the triggering request's deadline or
+// cancellation: an upload cut short must not leave every later one on the old
+// lists, nor cut a reload short halfway.
 func (s *TrustStore) Current(ctx context.Context) verify.TrustSource {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	if s.now().Sub(s.loadedAt) >= TrustRefresh {
-		if err := s.refresh(ctx); err != nil {
+		reloadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), trustReloadTimeout)
+		defer cancel()
+		if err := s.refresh(reloadCtx); err != nil {
 			slog.WarnContext(ctx, "diploma: reload trust anchors, keeping the current ones", slog.String("error", err.Error()))
 		}
 	}

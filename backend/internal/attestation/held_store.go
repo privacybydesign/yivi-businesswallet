@@ -144,8 +144,9 @@ func (s *Store) RecordHeldStatusChange(ctx context.Context, orgID, id uuid.UUID,
 	})
 }
 
-// HeldHistory is a held credential's audit trail, oldest first: received,
-// status changes, removal. Existence is the caller's check.
+// HeldHistory is a held credential's audit trail, oldest first: received and
+// status changes, the newest audit.MaxListLimit of them. Existence is the
+// caller's check (Service.HeldHistory refuses a removed credential).
 func (s *Store) HeldHistory(ctx context.Context, orgID, id uuid.UUID) ([]audit.Event, error) {
 	page, err := audit.NewReader(s.db).ListForTarget(ctx, orgID, audit.TargetHeldAttestation, id.String(), nil, audit.MaxListLimit)
 	if err != nil {

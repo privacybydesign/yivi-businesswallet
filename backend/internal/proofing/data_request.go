@@ -55,12 +55,22 @@ const (
 	// (or one the session did not describe): likely the same person, not
 	// proven.
 	MatchProbable MatchLevel = "probable"
+	// MatchEmail is an unfinished session (pending, in progress, expired or
+	// cancelled) sent to exactly the e-mail address the request was sent to:
+	// it holds the name and e-mail the customer typed, and no proofed identity
+	// to match on. Listed after the others and only taken when the reviewer
+	// ticks it.
+	MatchEmail MatchLevel = "email"
 )
 
 const (
 	// DataExportWindow is how long an approved "see my data" request's data
 	// can be downloaded.
 	DataExportWindow = 7 * 24 * time.Hour
+	// hostedExportWindow is how long the same data downloads through the
+	// hosted link, which only its bearer token guards: a day from the
+	// approval, within DataExportWindow.
+	hostedExportWindow = 24 * time.Hour
 	// ErrorReviewRejected is the error code a rejected review records when
 	// the reviewer names none, as the engine does.
 	ErrorReviewRejected = "MANUAL_REVIEW_REJECTED"
@@ -105,6 +115,7 @@ type dataRequestStore interface {
 	AllFlowKinds(ctx context.Context, orgID uuid.UUID) (map[string]FlowKind, error)
 	SaveFlowKind(ctx context.Context, orgID uuid.UUID, flowID string, kind FlowKind) (FlowKind, error)
 	Candidates(ctx context.Context, req Request) ([]Request, error)
+	EmailCandidates(ctx context.Context, req Request) ([]Request, error)
 	SaveMatches(ctx context.Context, req Request, matches []NewDataMatch) error
 	Matches(ctx context.Context, req Request) ([]DataMatch, error)
 	MatchedRequests(ctx context.Context, req Request) ([]Request, error)
@@ -146,7 +157,7 @@ func (s *Service) SaveFlowKind(ctx context.Context, org Org, flowID string, kind
 	if !kind.valid() {
 		return "", fmt.Errorf("%w: kind is identity, data_access or data_erasure", ErrInvalidInput)
 	}
-	flows, err := s.Flows(ctx, org, true)
+	flows, err := s.Flows(ctx, org, FlowsAll)
 	if err != nil {
 		return "", err
 	}
@@ -155,7 +166,7 @@ func (s *Service) SaveFlowKind(ctx context.Context, org Org, flowID string, kind
 		return "", ErrFlowNotFound
 	}
 	if kind.dataRequest() {
-		if !ReadsIdentity(flows[i].Flow) {
+		if !readsIdentity(flows[i].Flow) {
 			return "", ErrFlowNoIdentity
 		}
 		if flows[i].Allowed {
@@ -233,7 +244,31 @@ func (s *Service) findDataMatches(ctx context.Context, tenant proofingprovider.T
 			}
 		}
 	}
-	return s.dataRequests.SaveMatches(ctx, req, matches)
+	emailed, err := s.emailMatches(ctx, req, matches)
+	if err != nil {
+		return err
+	}
+	return s.dataRequests.SaveMatches(ctx, req, append(matches, emailed...))
+}
+
+// emailMatches are req's MatchEmail matches: the customer's unfinished
+// sessions sent to the address req was sent to, apart from those already
+// matched on identity. None when req has no address.
+func (s *Service) emailMatches(ctx context.Context, req Request, matched []NewDataMatch) ([]NewDataMatch, error) {
+	if strings.TrimSpace(req.SubjectEmail) == "" {
+		return nil, nil
+	}
+	candidates, err := s.dataRequests.EmailCandidates(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	out := []NewDataMatch{}
+	for _, c := range candidates {
+		if !slices.ContainsFunc(matched, func(m NewDataMatch) bool { return m.RequestID == c.ID }) {
+			out = append(out, NewDataMatch{RequestID: c.ID, Level: MatchEmail})
+		}
+	}
+	return out, nil
 }
 
 // nameHolds reports whether every word of familyName is in name, compared as
@@ -249,21 +284,30 @@ func nameHolds(name, familyName string) bool {
 }
 
 // matchLevel compares the identity a session holds with the requester's: the
-// same full name and date of birth (diploma.MatchFullName, as a DUO extract's
-// holder is matched) is a match, MatchStrong when the session was proven with
-// the same document. The document number is never read.
+// same full name, every given name and the family name in order
+// (diploma.SameName), and the same date of birth is a match, MatchStrong when
+// the session was proven with the same document. Nothing looser: a match can
+// be erased. The document number is never read.
 func matchLevel(requester SubjectIdentity, held proofingprovider.Identity) (MatchLevel, bool) {
-	if requester.BirthDate == "" || held.BirthDate == "" || held.FamilyName == "" {
-		return "", false
-	}
-	person := diploma.Person{GivenNames: requester.GivenName, Surname: requester.FamilyName, DateOfBirth: requester.BirthDate}
-	if !diploma.MatchFullName(held.GivenName+" "+held.FamilyName, held.BirthDate, person).Matched {
+	if !samePerson(requester.GivenName, requester.FamilyName, requester.BirthDate, held.GivenName+" "+held.FamilyName, held.BirthDate) {
 		return "", false
 	}
 	if sameDocument(requester, subjectIdentityOf(held)) {
 		return MatchStrong, true
 	}
 	return MatchProbable, true
+}
+
+// samePerson reports whether a person with these given and family names,
+// born on birthDate, is the one named fullName born on otherBirthDate: every
+// word of the name in order (diploma.SameName) and the same date.
+func samePerson(givenName, familyName, birthDate, fullName, otherBirthDate string) bool {
+	if familyName == "" || birthDate == "" || otherBirthDate == "" {
+		return false
+	}
+	a, errA := diploma.ParseDate(birthDate)
+	b, errB := diploma.ParseDate(otherBirthDate)
+	return errA == nil && errB == nil && a.Equal(b) && diploma.SameName(givenName+" "+familyName, fullName)
 }
 
 func sameDocument(a, b SubjectIdentity) bool {
@@ -295,11 +339,25 @@ func (s *Service) DataMatches(ctx context.Context, orgID, id uuid.UUID) (Request
 // named a code. A session the engine itself holds in review is decided there
 // too.
 func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer string, in ReviewInput) (Request, error) {
+	// The reviewer's choice is checked before anything is decided anywhere.
+	matches, err := s.dataRequests.Matches(ctx, req)
+	if err != nil {
+		return Request{}, err
+	}
+
+	approved := []uuid.UUID{}
+	if in.Approve {
+		if approved, err = approvedMatches(matches, in.RequestIDs); err != nil {
+			return Request{}, err
+		}
+	}
+
 	tenant := requestTenant(req)
 	held, err := s.ips.SessionStatus(ctx, tenant, req.session.ID, req.session.Token)
 	if err != nil && !errors.Is(err, proofingprovider.ErrNotFound) {
 		return Request{}, fmt.Errorf("proofing: decide data request %s: %w", req.ID, err)
 	}
+
 	if err == nil && held.Status == proofingprovider.StatusNeedsReview {
 		decision := proofingprovider.ReviewDecision{
 			Approve: in.Approve, ErrorCode: in.ErrorCode, Reason: in.Reason, Reviewer: reviewer,
@@ -308,26 +366,19 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 			return Request{}, fmt.Errorf("proofing: decide data request %s at the engine: %w", req.ID, err)
 		}
 	}
-	matches, err := s.dataRequests.Matches(ctx, req)
-	if err != nil {
-		return Request{}, err
-	}
-	approved := []uuid.UUID{}
-	if in.Approve {
-		if approved, err = approvedMatches(matches, in.RequestIDs); err != nil {
-			return Request{}, err
-		}
-	}
+
 	if in.Approve && req.FlowKind == FlowDataErasure {
 		if err := s.purgeMatches(ctx, req, approved); err != nil {
 			return Request{}, err
 		}
 	}
+
 	var exportUntil *time.Time
 	if in.Approve && req.FlowKind == FlowDataAccess {
 		until := s.now().Add(DataExportWindow)
 		exportUntil = &until
 	}
+
 	decided, code := StatusApproved, ""
 	if !in.Approve {
 		decided, code = StatusRejected, in.ErrorCode
@@ -335,40 +386,53 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 			code = ErrorReviewRejected
 		}
 	}
+
 	if err := s.dataRequests.RecordDecision(ctx, req, approved, exportUntil); err != nil {
 		return Request{}, err
 	}
+
 	if err := s.requests.RecordReviewDecision(ctx, req, decided, in.Reason, code); err != nil {
 		return Request{}, err
 	}
+
 	if err := s.requests.RecordOutcome(ctx, req, req.session.ID, decided, proofingprovider.Result{
 		Method: req.Method, AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: code,
 		Name: req.ProofedName,
 	}); err != nil {
 		return Request{}, err
 	}
+
 	out, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
 	if err != nil {
 		return Request{}, err
 	}
+
 	if in.Approve && req.FlowKind == FlowDataErasure {
 		if err := s.purge(ctx, out); err != nil {
 			return Request{}, err
 		}
 		return s.requests.Get(ctx, req.OrganizationID, req.ID)
 	}
+
 	return out, nil
 }
 
 // approvedMatches checks a reviewer's approved sessions against the matches;
-// nil approves every match.
+// nil approves only the MatchStrong ones, proven with the same document: a
+// MatchProbable or MatchEmail one is taken only by a reviewer's own tick.
 func approvedMatches(matches []DataMatch, approved []uuid.UUID) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0, len(matches))
 	for _, m := range matches {
 		ids = append(ids, m.RequestID)
 	}
 	if approved == nil {
-		return ids, nil
+		strong := []uuid.UUID{}
+		for _, m := range matches {
+			if m.Level == MatchStrong {
+				strong = append(strong, m.RequestID)
+			}
+		}
+		return strong, nil
 	}
 	out := []uuid.UUID{}
 	for _, id := range approved {
@@ -415,10 +479,10 @@ type DataExportSession struct {
 	Diplomas []Diploma
 }
 
-// dataExport builds req's export while it is open: audited
-// identity_proofing.data_exported by the actor in ctx.
+// dataExport builds req's export while it is open, and never once req is
+// erased: audited identity_proofing.data_exported by the actor in ctx.
 func (s *Service) dataExport(ctx context.Context, req Request) (DataExport, error) {
-	if s.dataRequests == nil || req.FlowKind != FlowDataAccess || req.Status != StatusApproved ||
+	if s.dataRequests == nil || req.FlowKind != FlowDataAccess || req.Status != StatusApproved || req.PurgedAt != nil ||
 		req.DataExportUntil == nil || !s.now().Before(*req.DataExportUntil) {
 		return DataExport{}, ErrExportUnavailable
 	}
@@ -476,8 +540,8 @@ func (s *Service) AdminDataExport(ctx context.Context, orgID, id uuid.UUID) (Dat
 
 // CustomerDataExport is an approved "see my data" request's data for the
 // customer that sent it.
-func (s *Service) CustomerDataExport(ctx context.Context, orgID, customerID, id uuid.UUID) (DataExport, error) {
-	req, err := s.requests.GetForCustomer(ctx, orgID, customerID, id)
+func (s *Service) CustomerDataExport(ctx context.Context, scope CustomerScope, id uuid.UUID) (DataExport, error) {
+	req, err := s.requests.GetForCustomer(ctx, scope, id)
 	if err != nil {
 		return DataExport{}, err
 	}
@@ -490,6 +554,9 @@ func (s *Service) HostedDataExport(ctx context.Context, token string) (DataExpor
 	req, err := s.hostedRequest(ctx, token)
 	if err != nil {
 		return DataExport{}, err
+	}
+	if openExport(req, s.now()) == nil {
+		return DataExport{}, ErrExportUnavailable
 	}
 	return s.dataExport(audit.ContextWithActor(ctx, hostedSubjectActor), req)
 }

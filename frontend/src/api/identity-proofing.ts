@@ -4,16 +4,14 @@ import { absoluteApiUrl, request } from "./http";
 import { auditEventSchema } from "./organization";
 import type { AuditEvent } from "./organization";
 
-// Identity proofing through the identity-proofing-service (IPS): one IPS tenant
-// per organization (provisioned on its first use), flows defined by org admins
-// who choose which of them members may use, the org's customers (no login of
-// their own) with the flows assigned to each, and e-mailed requests any member
-// can send, to a member or to a customer's subject. Only a request's outcome and
-// assurance level come back, plus, for a customer's approved subject, the name
-// on their document for a limited time; never other document data.
+// Identity proofing: flows defined by org admins, who choose which members may
+// use, the org's customers (no login of their own) with the flows assigned to
+// each, and requests any member can send, to a member or a customer's subject.
+// Only a request's outcome and assurance level come back, plus, for a
+// customer's approved subject, the name on their document for a limited time.
 //
-// Step, check and status values are plain strings rather than zod enums: IPS is
-// still adding steps and checks, and an unknown value must not break the page.
+// Step, check and status values are plain strings rather than zod enums, so a
+// value the backend adds never breaks the page.
 
 const assuranceTierSchema = z.object({
   level: z.string(),
@@ -26,14 +24,14 @@ export type ProofingAssuranceTier = z.infer<typeof assuranceTierSchema>;
 // subject must add their DUO diploma extracts (the PDFs from mijn.duo.nl),
 // checked by the wallet.
 export const DIPLOMA_MODES = ["off", "required"] as const;
-export const diplomaModeSchema = z.enum(DIPLOMA_MODES);
+const diplomaModeSchema = z.enum(DIPLOMA_MODES);
 
 // What a flow's sessions are for: an identity check, or a customer's subject
 // asking for the data held of them ("see my data") or for its erasure
 // ("delete my data"). A data request goes to review once the person is
 // proven, with the customer's sessions of that person.
 export const FLOW_KINDS = ["identity", "data_access", "data_erasure"] as const;
-export const flowKindSchema = z.enum(FLOW_KINDS);
+const flowKindSchema = z.enum(FLOW_KINDS);
 export type FlowKind = z.infer<typeof flowKindSchema>;
 
 export function isDataRequest(kind: FlowKind | undefined): boolean {
@@ -43,7 +41,7 @@ export type DiplomaMode = z.infer<typeof diplomaModeSchema>;
 
 // A DUO diploma extract a session holds: what DUO printed about the
 // qualification, checked against DUO's signature and the proofed identity.
-export const proofingDiplomaSchema = z.object({
+const proofingDiplomaSchema = z.object({
   documentType: z.string(),
   qualification: z.string(),
   profiles: z.array(z.string()),
@@ -60,9 +58,21 @@ export const proofingDiplomaSchema = z.object({
 
 export type ProofingDiploma = z.infer<typeof proofingDiplomaSchema>;
 
+// An extract as the hosted page lists it: only what the subject needs to
+// recognise it, never its document number, since the link's token alone
+// opens the page.
+const hostedDiplomaSchema = proofingDiplomaSchema.pick({
+  qualification: true,
+  institution: true,
+  dateAwarded: true,
+  nlqfLevel: true,
+});
+
+export type HostedDiploma = z.infer<typeof hostedDiplomaSchema>;
+
 // A flow version as the proofing service stores it. The id is stable across
 // versions; exactly one version is active, the one new requests run.
-export const proofingFlowSchema = z.object({
+const proofingFlowSchema = z.object({
   id: z.string(),
   version: z.number(),
   active: z.boolean(),
@@ -104,17 +114,11 @@ export const proofingFlowSchema = z.object({
 
 export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
 
-// A test key's sessions run scripted in the org's sandbox.
-export const proofingModeSchema = z.enum(["live", "test"]);
-
-export type ProofingMode = z.infer<typeof proofingModeSchema>;
-
-export const proofingRequestSchema = z.object({
+const proofingRequestSchema = z.object({
   id: z.string(),
   requestedByName: z.string(),
   // Set for a request the customer's backend created with one of its keys.
   apiKeyName: z.string().optional(),
-  mode: proofingModeSchema,
   subjectUserId: z.string().optional(),
   customerId: z.string().optional(),
   customerName: z.string().optional(),
@@ -157,7 +161,7 @@ export type ProofingRequest = z.infer<typeof proofingRequestSchema>;
 // but the recipient never got its link. deepLink is an on-screen Idem session's
 // vcmrtd link, the QR code the page shows, until deepLinkExpiresAt; absent for
 // a mailed or Yivi request.
-export const proofingSentSchema = proofingRequestSchema.extend({
+const proofingSentSchema = proofingRequestSchema.extend({
   mailSent: z.boolean(),
   deepLink: z.string().optional(),
   deepLinkExpiresAt: z.string().optional(),
@@ -197,8 +201,7 @@ export interface ProofingFlowSelection {
 // The app the subject proofs with, and how the session reaches them: mailed
 // (the default) or shown on the sender's screen. A Yivi session runs its face
 // check in the browser showing its QR, so it is on-screen only.
-export const PROOFING_METHODS = ["idem_app", "yivi_app"] as const;
-export type ProofingMethod = (typeof PROOFING_METHODS)[number];
+export type ProofingMethod = "idem_app" | "yivi_app";
 export type ProofingChannel = "email" | "on_screen" | "hosted";
 
 export type ProofingRequestInput =
@@ -215,11 +218,11 @@ export type ProofingRequestInput =
     };
 
 // A paused customer takes no new request; requests already sent run out.
-export const PROOFING_CUSTOMER_STATUSES = ["active", "paused"] as const;
+const PROOFING_CUSTOMER_STATUSES = ["active", "paused"] as const;
 
 // How a customer's webhook endpoint has been answering. State is a plain
 // string: an unknown one renders neutrally.
-export const webhookHealthSchema = z.object({
+const webhookHealthSchema = z.object({
   state: z.string(),
   lastStatusCode: z.number().optional(),
   failingSince: z.string().optional(),
@@ -229,7 +232,7 @@ export const webhookHealthSchema = z.object({
 export type WebhookHealth = z.infer<typeof webhookHealthSchema>;
 
 // Empty strings fall back: the customer's name, the org's colour, no logo.
-export const proofingCustomerBrandingSchema = z.object({
+const proofingCustomerBrandingSchema = z.object({
   displayName: z.string(),
   primaryColor: z.string(),
   supportContact: z.string(),
@@ -243,7 +246,7 @@ export type ProofingCustomerBranding = z.infer<
   typeof proofingCustomerBrandingSchema
 >;
 
-export const proofingCustomerSchema = z.object({
+const proofingCustomerSchema = z.object({
   id: z.string(),
   name: z.string(),
   flowIds: z.array(z.string()),
@@ -257,7 +260,7 @@ export const proofingCustomerSchema = z.object({
   // Where a hosted page may send its subject back to and be embedded on.
   allowedRedirectOrigins: z.array(z.string()),
   // Live requests need an unrevoked live API key.
-  hasLiveKey: z.boolean(),
+  hasApiKey: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -267,7 +270,7 @@ export type ProofingCustomer = z.infer<typeof proofingCustomerSchema>;
 // A customer's requests on one flow since `since`, by outcome; what the outcome
 // counts leave is still pending or in progress. As last reconciled by a request
 // list read.
-export const proofingStatsRowSchema = z.object({
+const proofingStatsRowSchema = z.object({
   customerId: z.string(),
   flowId: z.string(),
   sessions: z.number(),
@@ -275,11 +278,13 @@ export const proofingStatsRowSchema = z.object({
   rejected: z.number(),
   needsReview: z.number(),
   expired: z.number(),
+  // Withdrawn before they finished; not counted under expired.
+  cancelled: z.number(),
 });
 
 export type ProofingStatsRow = z.infer<typeof proofingStatsRowSchema>;
 
-export const proofingStatsSchema = z.object({
+const proofingStatsSchema = z.object({
   since: z.string(),
   rows: z.array(proofingStatsRowSchema),
 });
@@ -295,11 +300,10 @@ export interface ProofingCustomerUpdate {
   allowedRedirectOrigins?: string[];
 }
 
-export const proofingApiKeySchema = z.object({
+const proofingApiKeySchema = z.object({
   id: z.string(),
   name: z.string(),
   prefix: z.string(),
-  mode: proofingModeSchema,
   // What the key may call; results:read reads verified identities.
   scopes: z.array(z.string()),
   createdAt: z.string(),
@@ -310,7 +314,7 @@ export const proofingApiKeySchema = z.object({
 export type ProofingApiKey = z.infer<typeof proofingApiKeySchema>;
 
 // The one answer that carries the key's secret.
-export const createdProofingApiKeySchema = proofingApiKeySchema.extend({
+const createdProofingApiKeySchema = proofingApiKeySchema.extend({
   secret: z.string(),
 });
 
@@ -318,7 +322,7 @@ export type CreatedProofingApiKey = z.infer<typeof createdProofingApiKeySchema>;
 
 // A customer's endpoint; secret is set only in the answer that created it or
 // rotated it.
-export const proofingWebhookSchema = z.object({
+const proofingWebhookSchema = z.object({
   configured: z.boolean(),
   url: z.string().optional(),
   events: z.array(z.string()),
@@ -331,7 +335,7 @@ export const proofingWebhookSchema = z.object({
 
 export type ProofingWebhook = z.infer<typeof proofingWebhookSchema>;
 
-export const webhookDeliverySchema = z.object({
+const webhookDeliverySchema = z.object({
   id: z.string(),
   event: z.string(),
   sessionId: z.string().optional(),
@@ -360,19 +364,33 @@ export interface ProofingBrandingInput {
   removeLogo?: boolean;
 }
 
-export const proofingCustomerFlowSchema = proofingFlowSchema
+const proofingCustomerFlowSchema = proofingFlowSchema
   .omit({ allowed: true, default: true })
-  .extend({ assigned: z.boolean(), default: z.boolean() });
+  .extend({
+    assigned: z.boolean(),
+    default: z.boolean(),
+    // The most days a subject's data is kept on this flow for this customer:
+    // the flow's retention, else the customer's, plus the engine's extra day.
+    retentionDays: z.number(),
+  });
 
 export type ProofingCustomerFlow = z.infer<typeof proofingCustomerFlowSchema>;
 
 // Whether an org's identity proofing is paused, and by whom: a platform
 // admin's pause the org's admin cannot lift.
-export const proofingPauseSchema = z.object({
+// Who first set a level's pause, while it holds.
+const proofingPausedBySchema = z.object({
+  userId: z.string(),
+  name: z.string(),
+});
+
+const proofingPauseSchema = z.object({
   organizationId: z.string(),
   paused: z.boolean(),
   platformPausedAt: z.string().optional(),
   orgPausedAt: z.string().optional(),
+  platformPausedBy: proofingPausedBySchema.optional(),
+  orgPausedBy: proofingPausedBySchema.optional(),
 });
 
 export type ProofingPause = z.infer<typeof proofingPauseSchema>;
@@ -463,7 +481,7 @@ function flowBase(slug: string, flowId: string): string {
 
 // How a flow's hosted page behaves: whether links may be made for it, the
 // languages it offers (empty: every one), and how it ends.
-export const proofingFlowHostedSchema = z.object({
+const proofingFlowHostedSchema = z.object({
   enabled: z.boolean(),
   locales: z.array(z.string()),
   completion: z.enum(["redirect", "done"]),
@@ -496,7 +514,7 @@ export function saveProofingFlowHosted(
   });
 }
 
-export const proofingFlowDiplomasSchema = z.object({
+const proofingFlowDiplomasSchema = z.object({
   diplomaMode: diplomaModeSchema,
 });
 
@@ -514,7 +532,7 @@ export function saveProofingFlowDiplomas(
   }).then((r) => r.diplomaMode);
 }
 
-export const proofingFlowKindSchema = z.object({ kind: flowKindSchema });
+const proofingFlowKindSchema = z.object({ kind: flowKindSchema });
 
 export function saveProofingFlowKind(
   slug: string,
@@ -595,14 +613,17 @@ export function getProofingStats(
 }
 
 // customerId narrows the list to the requests sent for that customer.
+// The org's requests, newest first and capped by the backend; narrowed to one
+// customer's or to those sent to one member.
 export function getProofingRequests(
   slug: string,
-  customerId?: string,
+  filter: { customerId?: string; subjectUserId?: string },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
-  const query = customerId
-    ? `?customerId=${encodeURIComponent(customerId)}`
-    : "";
+  const params = new URLSearchParams();
+  if (filter.customerId) params.set("customerId", filter.customerId);
+  if (filter.subjectUserId) params.set("subjectUserId", filter.subjectUserId);
+  const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
     schema: z.array(proofingRequestSchema),
     signal,
@@ -753,13 +774,12 @@ export function createProofingApiKey(
   slug: string,
   customerId: string,
   name: string,
-  mode: ProofingMode,
   signal?: AbortSignal,
 ): Promise<CreatedProofingApiKey> {
   return request(`${customerBase(slug, customerId)}/api-keys`, {
     schema: createdProofingApiKeySchema,
     method: "POST",
-    body: { name, mode },
+    body: { name },
     signal,
   });
 }
@@ -866,7 +886,7 @@ export type ProofingImage = z.infer<typeof proofingImageSchema>;
 // A settled customer request's result, as an admin reads it in the wallet:
 // the identity, the document's photo and the selfie only for an approval.
 // Every read is audited.
-export const proofingResultSchema = z.object({
+const proofingResultSchema = z.object({
   status: z.string(),
   assuranceLevel: z.string().optional(),
   eidasLevel: z.string().optional(),
@@ -917,7 +937,7 @@ export function getProofingRequestResult(
 // A data request's matches: the customer's sessions whose proofed identity is
 // the person's, strong when proven with the same document, probable on name
 // and date of birth alone. approved is the reviewer's choice, once decided.
-export const proofingDataMatchSchema = z.object({
+const proofingDataMatchSchema = z.object({
   requestId: z.string(),
   sessionId: z.string(),
   flowName: z.string(),
@@ -928,13 +948,15 @@ export const proofingDataMatchSchema = z.object({
   createdAt: z.string(),
   completedAt: z.string().optional(),
   purgedAt: z.string().optional(),
-  level: z.enum(["strong", "probable"]),
+  // email: an unfinished session sent to the same address, with no proofed
+  // identity to match on; never ticked by default.
+  level: z.enum(["strong", "probable", "email"]),
   approved: z.boolean().optional(),
 });
 
 export type ProofingDataMatch = z.infer<typeof proofingDataMatchSchema>;
 
-export const proofingDataMatchesSchema = z.object({
+const proofingDataMatchesSchema = z.object({
   flowKind: flowKindSchema,
   matches: z.array(proofingDataMatchSchema),
 });
@@ -991,7 +1013,7 @@ export function getProofingRequest(
 
 // The OpenID4VP disclosure an on-screen Yivi request asks for. walletLink is
 // the openid4vp:// request the Yivi app opens.
-export const proofingYiviStartSchema = z.object({
+const proofingYiviStartSchema = z.object({
   walletLink: z.string(),
   expiresAt: z.string(),
 });
@@ -1033,7 +1055,7 @@ export function startProofingYivi(
 
 // A fresh Idem app link for a running session: a new claim once the first
 // lapsed, or a handover once the app that held the session left.
-export const proofingClaimLinkSchema = z.object({
+const proofingClaimLinkSchema = z.object({
   deepLink: z.string(),
   expiresAt: z.string(),
 });
@@ -1042,7 +1064,7 @@ export type ProofingClaimLink = z.infer<typeof proofingClaimLinkSchema>;
 
 // Where a running on-screen Idem request's phone is: no phone scanned yet, the
 // app holds the session, or it was closed and a claim link hands it over.
-export const proofingAppSchema = z.object({
+const proofingAppSchema = z.object({
   app: z.enum(["waiting", "connected", "away"]),
 });
 
@@ -1072,7 +1094,7 @@ export function newProofingClaimLink(
 
 // done is false while the subject has not finished in the Yivi app; ok false
 // ended the session and code says why, ok true moves on to the face check.
-export const proofingYiviDisclosureSchema = z.object({
+const proofingYiviDisclosureSchema = z.object({
   done: z.boolean(),
   ok: z.boolean(),
   code: z.string().optional(),
@@ -1096,7 +1118,7 @@ export function getProofingYiviDisclosure(
 
 // One live camera frame scored against the disclosed photo. decision is
 // "pending", "approved" or "rejected".
-export const proofingFaceVerdictSchema = z.object({
+const proofingFaceVerdictSchema = z.object({
   faceDetected: z.boolean(),
   matched: z.boolean(),
   consecutive: z.number(),
@@ -1123,7 +1145,7 @@ export function submitProofingFaceFrame(
 
 // A hosted link's progress: its status and, until it settles, when the link
 // (not started) or its session (started) ends.
-export const hostedProgressSchema = z.object({
+const hostedProgressSchema = z.object({
   status: z.string(),
   errorCode: z.string().optional(),
   method: z.string().optional(),
@@ -1139,7 +1161,7 @@ export type HostedProgress = z.infer<typeof hostedProgressSchema>;
 
 // The hosted page: who asks, what the flow collects, the progress, and how
 // the page hands its subject back once settled.
-export const hostedProofingSchema = hostedProgressSchema.extend({
+const hostedProofingSchema = hostedProgressSchema.extend({
   // The customer's id for the session, handed back on completion.
   sessionId: z.string(),
   // Absent shows the page's own done screen.
@@ -1162,14 +1184,16 @@ export const hostedProofingSchema = hostedProgressSchema.extend({
     yiviAvailable: z.boolean(),
     diplomaMode: diplomaModeSchema,
     kind: flowKindSchema,
+    // The most days the session's data is kept, as the page tells the subject.
+    retentionDays: z.number(),
   }),
   // The diploma extracts the subject added.
-  diplomas: z.array(proofingDiplomaSchema),
+  diplomas: z.array(hostedDiplomaSchema),
 });
 
 export type HostedProofing = z.infer<typeof hostedProofingSchema>;
 
-export const hostedStartSchema = hostedProgressSchema.extend({
+const hostedStartSchema = hostedProgressSchema.extend({
   deepLink: z.string().optional(),
 });
 
@@ -1222,7 +1246,7 @@ export function declineHostedProofing(
 
 // What became of one uploaded file: kept, or refused with a reason
 // (not_a_diploma, signature_invalid, holder_mismatch, duplicate).
-export const diplomaVerdictSchema = z.object({
+const diplomaVerdictSchema = z.object({
   fileName: z.string(),
   accepted: z.boolean(),
   diploma: proofingDiplomaSchema.optional(),

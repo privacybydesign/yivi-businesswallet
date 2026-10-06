@@ -14,6 +14,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
 type proofingFlowResp struct {
@@ -35,7 +36,7 @@ type proofingRequestResp struct {
 	MailSent      bool   `json:"mailSent"`
 }
 
-func TestIdentityProofingAdminHTTPFlow(t *testing.T) {
+func TestProofingAdminHTTPFlow(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("admin@acme.test")
@@ -135,7 +136,7 @@ func TestIdentityProofingAdminHTTPFlow(t *testing.T) {
 	}
 }
 
-func TestIdentityProofingMemberCanRequestButNotManage(t *testing.T) {
+func TestProofingMemberCannotManage(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("member@acme.test")
@@ -181,7 +182,7 @@ type proofingCustomerResp struct {
 	Name          string   `json:"name"`
 	FlowIDs       []string `json:"flowIds"`
 	DefaultFlowID string   `json:"defaultFlowId"`
-	HasLiveKey    bool     `json:"hasLiveKey"`
+	HasAPIKey     bool     `json:"hasApiKey"`
 }
 
 type proofingCustomerFlowResp struct {
@@ -202,7 +203,7 @@ type proofingCustomerRequestResp struct {
 
 // An admin creates a customer and assigns it a flow members may not use; a
 // request for that customer then goes to an external subject by address alone.
-func TestIdentityProofingCustomerHTTPFlow(t *testing.T) {
+func TestProofingCustomerHTTPFlow(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("admin@acme.test")
@@ -246,8 +247,8 @@ func TestIdentityProofingCustomerHTTPFlow(t *testing.T) {
 		t.Fatalf("create api key = %d, want 201", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
-	if got := decodeJSON[proofingCustomerResp](t, env.do(http.MethodGet, base, nil)); !got.HasLiveKey {
-		t.Errorf("customer = %+v, want hasLiveKey", got)
+	if got := decodeJSON[proofingCustomerResp](t, env.do(http.MethodGet, base, nil)); !got.HasAPIKey {
+		t.Errorf("customer = %+v, want hasApiKey", got)
 	}
 
 	resp = env.postJSON("/api/v1/orgs/acme/identity-proofing/requests", subject)
@@ -301,7 +302,7 @@ func TestIdentityProofingCustomerHTTPFlow(t *testing.T) {
 	_ = resp.Body.Close()
 }
 
-func TestIdentityProofingMemberUsesButCannotManageCustomers(t *testing.T) {
+func TestProofingMemberCustomerUse(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("member@acme.test")
@@ -333,7 +334,6 @@ type proofingAPIKeyResp struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Prefix    string `json:"prefix"`
-	Mode      string `json:"mode"`
 	Secret    string `json:"secret"`
 	RevokedAt string `json:"revokedAt"`
 }
@@ -345,7 +345,6 @@ type proofingAPISessionResp struct {
 	DeepLink  string `json:"deepLink"`
 	MailSent  bool   `json:"mailSent"`
 	ErrorCode string `json:"errorCode"`
-	Livemode  bool   `json:"livemode"`
 	PurgedAt  string `json:"purgedAt"`
 }
 
@@ -373,7 +372,7 @@ func (e *testEnv) apiCall(method, path, key string, body any) *http.Response {
 	return resp
 }
 
-func TestIdentityProofingCustomerAPIKeyHTTPFlow(t *testing.T) {
+func TestProofingCustomerAPIKeyFlow(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("admin@acme.test")
@@ -463,6 +462,15 @@ func TestIdentityProofingCustomerAPIKeyHTTPFlow(t *testing.T) {
 		t.Errorf("key reused with another body = %d, want 422", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
+	// The kept answer is sealed: the subject's address is not in it.
+	var stored []byte
+	if err := env.pool.QueryRow(context.Background(), `SELECT response FROM identity_proofing_idempotency_keys
+		WHERE key LIKE '%retry-1'`).Scan(&stored); err != nil {
+		t.Fatalf("read idempotent answer: %v", err)
+	}
+	if strings.Contains(string(stored), "cleo@example.org") {
+		t.Error("idempotent answer stored in plaintext")
+	}
 	page := decodeJSON[struct {
 		Sessions   []proofingAPISessionResp `json:"sessions"`
 		NextCursor *string                  `json:"nextCursor"`
@@ -549,10 +557,11 @@ func TestIdentityProofingCustomerAPIKeyHTTPFlow(t *testing.T) {
 	_ = resp.Body.Close()
 }
 
-// A test key's sessions run scripted in the org's sandbox: resolved at once,
-// never mailed, marked livemode false, and only a test key may script one.
-func TestIdentityProofingTestKeyHTTPFlow(t *testing.T) {
+// A key reads an approved session's identity only with results:read, and
+// creates one only with sessions:write.
+func TestProofingAPIKeyScopesFlow(t *testing.T) {
 	env := setup(t)
+	env.proofing.Outcome = proofingprovider.StatusApproved
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("admin@acme.test")
 	env.addMembership(me.ID, orgID, organization.RoleAdmin)
@@ -565,27 +574,13 @@ func TestIdentityProofingTestKeyHTTPFlow(t *testing.T) {
 	resp := env.putJSON(base+"/flow-selection", map[string]any{"flowIds": []string{flow.ID}, "defaultFlowId": flow.ID})
 	_ = resp.Body.Close()
 
-	testKey := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "CI", "mode": "test"}))
-	if !strings.HasPrefix(testKey.Secret, "yp_test_") || testKey.Mode != "test" {
-		t.Fatalf("test key = %+v; want a yp_test_ secret in test mode", testKey)
+	key := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "CI"}))
+	if !strings.HasPrefix(key.Secret, "yp_live_") {
+		t.Fatalf("key = %+v; want a yp_live_ secret", key)
 	}
-	liveKey := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "Prod"}))
-
-	for script, want := range map[string]string{"": "approved", "reject:DOC_EXPIRED": "rejected"} {
-		resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", testKey.Secret,
-			map[string]any{"email": "anna@example.org", "scriptedOutcome": script})
-		if resp.StatusCode != http.StatusCreated {
-			t.Fatalf("test session %q = %d, want 201", script, resp.StatusCode)
-		}
-		session := decodeJSON[proofingAPISessionResp](t, resp)
-		if session.Status != want || session.Livemode || session.MailSent {
-			t.Errorf("test session %q = %+v; want %s, livemode false, unmailed", script, session, want)
-		}
-	}
-	// A new key reads the identity; one narrowed in the database without results:read is refused.
-	approved := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", testKey.Secret,
-		map[string]any{"email": "anna@example.org"}))
-	narrowed := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "Status", "mode": "test"}))
+	approved := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
+		map[string]any{"email": "anna@example.org", "sendMail": false}))
+	narrowed := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "Status"}))
 	if _, err := env.pool.Exec(context.Background(),
 		`UPDATE identity_proofing_api_keys SET scopes = ARRAY['sessions:read'] WHERE id = $1`, narrowed.ID); err != nil {
 		t.Fatalf("narrow key: %v", err)
@@ -606,38 +601,18 @@ func TestIdentityProofingTestKeyHTTPFlow(t *testing.T) {
 		Identity *struct {
 			FamilyName string `json:"familyName"`
 		} `json:"identity"`
-		Evidence []struct {
-			Type        string `json:"type"`
-			PassiveAuth string `json:"passiveAuth"`
-		} `json:"evidence"`
-	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+approved.ID+"/result", testKey.Secret, nil))
-	if result.ID != approved.ID || result.Status != "approved" || result.Identity == nil || result.Identity.FamilyName == "" ||
-		len(result.Evidence) != 1 || result.Evidence[0].PassiveAuth == "" {
-		t.Errorf("result = %+v; want the approved identity with its evidence", result)
+	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+approved.ID+"/result", key.Secret, nil))
+	if result.ID != approved.ID || result.Status != "approved" || result.Identity == nil || result.Identity.FamilyName == "" {
+		t.Errorf("result = %+v; want the approved identity", result)
 	}
 	if n := env.auditCount(orgID, audit.IdentityProofingResultRead); n != 1 {
 		t.Errorf("result_read audits = %d, want 1", n)
-	}
-
-	resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", liveKey.Secret,
-		map[string]any{"email": "anna@example.org", "scriptedOutcome": "approve"})
-	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusUnprocessableEntity {
-		t.Errorf("live key with a script = %d, want refused", resp.StatusCode)
-	}
-	_ = resp.Body.Close()
-	stats := decodeJSON[struct {
-		Rows []struct {
-			Sessions int `json:"sessions"`
-		} `json:"rows"`
-	}](t, env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/stats", nil))
-	if len(stats.Rows) != 0 {
-		t.Errorf("stats rows = %+v, want test sessions left out", stats.Rows)
 	}
 }
 
 // A hosted session is a link: the subject opens the public page without an
 // account, starts once for the app they pick, and the page follows the outcome.
-func TestIdentityProofingHostedLinkHTTPFlow(t *testing.T) {
+func TestProofingHostedLinkFlow(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("admin@acme.test")
@@ -723,7 +698,7 @@ func TestIdentityProofingHostedLinkHTTPFlow(t *testing.T) {
 
 // A customer with its own UI picks the app of a hosted session over the API and
 // polls it from stored state; a session not created hosted has no such start.
-func TestIdentityProofingHeadlessHTTPFlow(t *testing.T) {
+func TestProofingHeadlessHTTPFlow(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("admin@acme.test")
@@ -770,9 +745,10 @@ func TestIdentityProofingHeadlessHTTPFlow(t *testing.T) {
 }
 
 // An admin decides a session under review; the outcome then lands as any
-// other. A test key's scripted needs_review is how to get one without a subject.
-func TestIdentityProofingReviewDecisionHTTPFlow(t *testing.T) {
+// other.
+func TestProofingReviewDecisionFlow(t *testing.T) {
 	env := setup(t)
+	env.proofing.Outcome = proofingprovider.StatusNeedsReview
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("admin@acme.test")
 	env.addMembership(me.ID, orgID, organization.RoleAdmin)
@@ -784,11 +760,12 @@ func TestIdentityProofingReviewDecisionHTTPFlow(t *testing.T) {
 	base := "/api/v1/orgs/acme/customers/" + customer.ID
 	resp := env.putJSON(base+"/flow-selection", map[string]any{"flowIds": []string{flow.ID}, "defaultFlowId": flow.ID})
 	_ = resp.Body.Close()
-	key := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "CI", "mode": "test"}))
+	key := decodeJSON[proofingAPIKeyResp](t, env.postJSON(base+"/api-keys", map[string]any{"name": "CI"}))
 	session := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
-		map[string]any{"email": "anna@example.org", "scriptedOutcome": "needs_review"}))
-	if session.Status != "needs_review" {
-		t.Fatalf("session = %+v, want needs_review", session)
+		map[string]any{"email": "anna@example.org", "sendMail": false}))
+	if read := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+session.ID,
+		key.Secret, nil)); read.Status != "needs_review" {
+		t.Fatalf("session = %+v, want needs_review", read)
 	}
 
 	review := "/api/v1/orgs/acme/identity-proofing/requests/" + session.ID + "/review"
@@ -816,7 +793,7 @@ func TestIdentityProofingReviewDecisionHTTPFlow(t *testing.T) {
 
 // The public API holds each customer to proofing.APISessionLimit sessions,
 // answering 429 with Retry-After past it; reads have their own, larger budget.
-func TestIdentityProofingCustomerAPIRateLimit(t *testing.T) {
+func TestProofingCustomerRateLimit(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("admin@acme.test")

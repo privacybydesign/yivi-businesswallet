@@ -145,7 +145,7 @@ func TestSendUsesTheDeploymentDefaultLocale(t *testing.T) {
 	}
 }
 
-func TestSendIdentityProofingRequestedUsesTheSendersLocale(t *testing.T) {
+func TestProofingMailSenderLocale(t *testing.T) {
 	for _, tc := range []struct {
 		locale Locale
 		want   string

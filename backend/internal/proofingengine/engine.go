@@ -1,19 +1,12 @@
-// Package proofingengine runs identity proofing inside the wallet: the
-// sessions the Idem app (vcmrtd) claims and walks through, the chip
-// verification, the result with its BSN and image redaction, assurance
-// scoring, Regula face checks and the manual review. It is the
-// identity-proofing-service (IPS) folded in: the same session model, the
-// same app-facing /api/v1/app/{token}/... contract, minus everything the
-// wallet already owns (tenants, API keys, webhooks, audit, admin).
+// Package proofingengine runs identity proofing inside the wallet: the sessions
+// the Idem app (vcmrtd) claims and walks through, chip verification, the result
+// with its BSN and image redaction, assurance scoring, Regula face checks and
+// the manual review.
 //
 // The org is the tenant: a session's and a flow's TenantID is the
 // organization's id. internal/proofing drives the engine through Engine's
-// Go methods (rp.go), never over HTTP; the Idem app talks to the routes
-// Register mounts.
-//
-// The code is ported from identity-proofing-service at 6ef3e19. A comment
-// citing requirements.md, docs/compliance.md or docs/session-model.md means
-// that repository's document at that commit.
+// methods (rp.go), never over HTTP; the Idem app talks to the routes Register
+// mounts.
 package proofingengine
 
 import (
@@ -35,7 +28,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
 )
 
-// Config tunes the engine. DefaultConfig is IPS's own timing.
+// Config tunes the engine.
 type Config struct {
 	// MaxBodyBytes caps an app request body (base64 images and chip data).
 	MaxBodyBytes int64
@@ -72,6 +65,10 @@ type Config struct {
 	// api= of every vcmrtd deep link.
 	PublicBaseURL string
 
+	// Now is the clock a document's expiry date is judged against; nil is
+	// time.Now. A test sets it to read a fixture document while it was valid.
+	Now func() time.Time
+
 	// Regula verifies a native face step (and the Yivi method's face check)
 	// against the Regula Face API; nil leaves both unavailable.
 	Regula RegulaClient
@@ -88,9 +85,51 @@ type Config struct {
 	BoundLoginTTL          time.Duration
 	BoundLoginStableFrames int
 	BoundLoginMaxAttempts  int
+
+	// DeviceTrail records which devices took part in a session in the org's
+	// audit log (deviceTrailEvents); nil keeps the trail in the server log only.
+	DeviceTrail DeviceTrail
 }
 
-// DefaultConfig is IPS's DefaultConfig, minus what the wallet does not run.
+// DeviceTrail is where the engine reports a session's device events: the
+// wallet records each in the org's audit log against the request the session
+// belongs to. Details carry device ids, roles and reasons, never personal data.
+type DeviceTrail interface {
+	RecordDeviceEvent(ctx context.Context, tenantID, sessionID string, event DeviceEvent, details map[string]any) error
+}
+
+// DeviceEvent names a device event in the audit log.
+type DeviceEvent string
+
+// The device events the org's audit log gets: which device claimed the
+// session, handovers to another device, and requests refused for access.
+const (
+	DeviceClaimed        DeviceEvent = "device_claimed"
+	DeviceHandedOver     DeviceEvent = "device_handed_over"
+	DeviceHandoverIssued DeviceEvent = "handover_issued"
+	DeviceHandoverFailed DeviceEvent = "handover_claim_failed"
+	DeviceAccessDenied   DeviceEvent = "access_denied"
+)
+
+// deviceTrailEvents maps the engine's session events to the device events
+// the audit log records. The others (a reconnect, a device's state) stay in
+// the server log: they say how a device behaved, not which one took part.
+var deviceTrailEvents = map[string]DeviceEvent{
+	eventDeviceClaimed:       DeviceClaimed,
+	eventSessionHandedOver:   DeviceHandedOver,
+	eventHandoverIssued:      DeviceHandoverIssued,
+	eventHandoverClaimFailed: DeviceHandoverFailed,
+	eventAccessDenied:        DeviceAccessDenied,
+}
+
+// deviceTrailDetails are the detail keys a device event may carry into the
+// audit log: none of them is personal data.
+var deviceTrailDetails = []string{"role", "via", "deviceId", "previousDeviceId", "byRole", "byDeviceId", "reason", "route", "expiresAt"}
+
+// deviceTrailTimeout bounds one device event's write to the audit log.
+const deviceTrailTimeout = 5 * time.Second
+
+// DefaultConfig is the engine's default timing and limits.
 func DefaultConfig() Config {
 	return Config{
 		MaxBodyBytes:             12 << 20,
@@ -114,8 +153,8 @@ func DefaultConfig() Config {
 	}
 }
 
-// defaultSessionRetention is IPS's default: a finished session's evidence is
-// gone 90 days after it ended.
+// defaultSessionRetention: a finished session's evidence goes 90 days after it
+// ended.
 const defaultSessionRetention = 90 * 24 * time.Hour
 
 // RegulaClient is the subset of *regula.Client the engine uses.
@@ -171,6 +210,9 @@ func New(cfg Config, sessions session.Interface, flows flow.Store, tenants Tenan
 	}
 	if cfg.BoundLoginTTL <= 0 {
 		cfg.BoundLoginTTL = cfg.SessionCreateTTL
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
 	}
 	s := &Server{
 		cfg: cfg, sessions: sessions, flows: flows, tenants: tenants, notify: notify,
@@ -311,6 +353,28 @@ func (s *Server) auditProofing(sess session.Session, eventType string, extra map
 	if notifyEventTypes[eventType] {
 		s.queueChanged(sess.ID)
 	}
+	s.recordDeviceEvent(sess, eventType, extra)
+}
+
+// recordDeviceEvent passes a device event on to the org's audit log. A failed
+// write is logged: the device's request has been answered either way.
+func (s *Server) recordDeviceEvent(sess session.Session, eventType string, extra map[string]any) {
+	event, ok := deviceTrailEvents[eventType]
+	if !ok || s.cfg.DeviceTrail == nil {
+		return
+	}
+	details := map[string]any{}
+	for _, k := range deviceTrailDetails {
+		if v, ok := extra[k]; ok && v != "" {
+			details[k] = v
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), deviceTrailTimeout)
+	defer cancel()
+	if err := s.cfg.DeviceTrail.RecordDeviceEvent(ctx, sess.TenantID, sess.ID, event, details); err != nil {
+		slog.Warn("identity proofing: record device event", slog.String("session_id", sess.ID),
+			slog.String("event", string(event)), slog.Any("error", err))
+	}
 }
 
 // tenantDisplayName is who the app tells the subject is asking: the org's
@@ -341,7 +405,7 @@ func (s *Server) decode(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, contentTypeJSON)
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil && !errors.Is(err, http.ErrHandlerTimeout) {
 		slog.Warn("identity proofing: write response", slog.Any("error", err))

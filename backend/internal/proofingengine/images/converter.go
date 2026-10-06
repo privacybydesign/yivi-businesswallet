@@ -14,19 +14,10 @@ import (
 	"github.com/gmrtd/gmrtd/utils"
 )
 
-// ToDisplayablePNG converts a chip photo to a format every browser can
-// render inline. Passport/ID-card DG2 portraits are frequently encoded as
-// JPEG2000 (image/jp2) per ICAO 9303 — no mainstream browser decodes that
-// inline, so an <img> using the raw bytes renders broken even though the
-// data is a perfectly valid image (e.g. macOS Preview, which does support
-// JP2, opens it fine — which is why downloading the same bytes "works" while
-// the in-page preview doesn't). Driving-licence DG6 portraits are almost
-// always plain JPEG already, which is why they've never shown this problem.
-//
-// Anything not detected as JPEG2000 — including a failed decode — is
-// returned unchanged. This is a display nicety, not a validation step:
-// callers must not treat a non-nil error, or an unconverted pass-through, as
-// meaning the photo itself is invalid.
+// ToDisplayablePNG converts a JPEG2000 chip portrait (common in DG2, per ICAO
+// 9303) to PNG, since browsers do not render JPEG2000. Anything else, a failed
+// decode included, comes back unchanged: this is for display, not a
+// validation.
 func ToDisplayablePNG(imageBase64, mimeType string) (string, string, error) {
 	if imageBase64 == "" {
 		return imageBase64, mimeType, nil

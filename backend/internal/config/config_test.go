@@ -309,3 +309,32 @@ func TestLoadRejectsHalfConfiguredRequesterCA(t *testing.T) {
 		})
 	}
 }
+
+// The real DUO signature check is the default, as in go-diploma-issuer: a
+// deployment that forgets the setting never accepts any PDF as a diploma.
+func TestLoadDiplomaDefaultsToDUO(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DiplomaValidatorProvider != ProviderDUO {
+		t.Errorf("diploma validator = %q, want %q", cfg.DiplomaValidatorProvider, ProviderDUO)
+	}
+	stub, err := loadWith(t, map[string]string{envDiplomaValidatorProvider: ProviderStub})
+	if err != nil || stub.DiplomaValidatorProvider != ProviderStub {
+		t.Errorf("explicit stub = %q, %v; want %q", stub.DiplomaValidatorProvider, err, ProviderStub)
+	}
+}
+
+// The online revocation check is off unless switched on, as in
+// go-diploma-issuer.
+func TestLoadDiplomaOCSPIsOptIn(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil || cfg.DiplomaOCSP {
+		t.Errorf("default DiplomaOCSP = %v, %v; want off", cfg.DiplomaOCSP, err)
+	}
+	cfg, err = loadWith(t, map[string]string{envDiplomaOCSP: "true"})
+	if err != nil || !cfg.DiplomaOCSP {
+		t.Errorf("DIPLOMA_OCSP=true: DiplomaOCSP = %v, %v; want on", cfg.DiplomaOCSP, err)
+	}
+}

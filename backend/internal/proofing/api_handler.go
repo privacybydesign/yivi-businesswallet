@@ -24,14 +24,12 @@ import (
 // customer's API keys (Authorization: Bearer yp_live_…), lists the customer's
 // flows, creates sessions for its subjects and reads their outcome. It acts
 // exactly as a member sending for the customer would, on the customer's
-// assigned flows, and is refused while the customer is paused. A test key
-// (yp_test_…) creates test sessions: scripted, in the org's sandbox, unmailed.
+// assigned flows, and is refused while the customer is paused.
 
 type apiKeyResponse struct {
 	ID         uuid.UUID  `json:"id"`
 	Name       string     `json:"name"`
 	Prefix     string     `json:"prefix"`
-	Mode       Mode       `json:"mode"`
 	Scopes     []string   `json:"scopes"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
@@ -40,7 +38,7 @@ type apiKeyResponse struct {
 
 func newAPIKeyResponse(k APIKey) apiKeyResponse {
 	return apiKeyResponse{
-		ID: k.ID, Name: k.Name, Prefix: k.Prefix, Mode: k.Mode, Scopes: k.Scopes,
+		ID: k.ID, Name: k.Name, Prefix: k.Prefix, Scopes: k.Scopes,
 		CreatedAt: k.CreatedAt, LastUsedAt: k.LastUsedAt, RevokedAt: k.RevokedAt,
 	}
 }
@@ -70,8 +68,6 @@ func (h *Handler) listAPIKeys(w http.ResponseWriter, r *http.Request) error {
 
 type createAPIKeyRequest struct {
 	Name string `json:"name"`
-	// Mode is live (the default when empty) or test.
-	Mode Mode `json:"mode"`
 }
 
 func (h *Handler) createAPIKey(w http.ResponseWriter, r *http.Request) error {
@@ -84,7 +80,7 @@ func (h *Handler) createAPIKey(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	caller := auth.UserFromContext(r.Context())
-	key, secret, err := h.service.CreateAPIKey(r.Context(), orgFromRequest(r).ID, id, caller.ID, body.Name, body.Mode)
+	key, secret, err := h.service.CreateAPIKey(r.Context(), orgFromRequest(r).ID, id, caller.ID, body.Name)
 	if err != nil {
 		return mapError(err)
 	}
@@ -121,28 +117,34 @@ const bearerPrefix = "Bearer "
 // requireAPIKey authenticates the customer key in the Authorization header.
 func (h *Handler) requireAPIKey(scope string, next respond.HandlerFunc) http.Handler {
 	return respond.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
-		raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), bearerPrefix)
+		raw, ok := strings.CutPrefix(r.Header.Get(headerAuthorization), bearerPrefix)
 		if !ok || raw == "" {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="proofing"`)
+			w.Header().Set(headerWWWAuthenticate, `Bearer realm="proofing"`)
 			return &respond.APIError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "send a customer API key as a Bearer token"}
 		}
+
 		caller, err := h.service.AuthenticateAPIKey(r.Context(), strings.TrimSpace(raw))
 		if errors.Is(err, ErrAPIKeyInvalid) {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="proofing", error="invalid_token"`)
+			w.Header().Set(headerWWWAuthenticate, `Bearer realm="proofing", error="invalid_token"`)
 			return &respond.APIError{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "this API key is unknown or revoked"}
 		}
+
 		if err != nil {
 			return err
 		}
+
 		if err := h.service.checkActive(r.Context(), caller.Org.ID); err != nil {
 			return mapError(err)
 		}
+
 		if !slices.Contains(caller.Scopes, scope) {
 			return &respond.APIError{Status: http.StatusForbidden, Code: "insufficient_scope", Message: "this API key lacks the " + scope + " scope"}
 		}
+
 		if err := rateLimited(w, h.apiCalls, caller.CustomerID); err != nil {
 			return err
 		}
+
 		ctx := audit.ContextWithActor(context.WithValue(r.Context(), apiCallerKey{}, caller),
 			audit.Actor{Label: APIKeyActorPrefix + caller.KeyPrefix})
 		return next(w, r.WithContext(ctx))
@@ -150,7 +152,7 @@ func (h *Handler) requireAPIKey(scope string, next respond.HandlerFunc) http.Han
 }
 
 // limitSessions holds session creation to APISessionLimit per customer, on
-// top of APICallLimit: each one costs an IPS session and maybe a mail.
+// top of apiCallLimit: each one costs an engine session and maybe a mail.
 func (h *Handler) limitSessions(next respond.HandlerFunc) respond.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		if err := rateLimited(w, h.apiSessions, callerFromContext(r.Context()).CustomerID); err != nil {
@@ -167,7 +169,7 @@ func rateLimited(w http.ResponseWriter, limiter *ratelimit.Limiter, customerID u
 	if ok {
 		return nil
 	}
-	w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+	w.Header().Set(headerRetryAfter, strconv.Itoa(int(math.Ceil(wait.Seconds()))))
 	return &respond.APIError{Status: http.StatusTooManyRequests, Code: "rate_limited", Message: "too many requests for this customer; retry after the Retry-After seconds"}
 }
 
@@ -191,14 +193,14 @@ type apiFlowResponse struct {
 	RequiredAssuranceLevel string   `json:"requiredAssuranceLevel,omitempty"`
 	RequestedAttributes    []string `json:"requestedAttributes"`
 	Default                bool     `json:"default"`
-	// NeedsReferencePhoto is a flow that matches the face without reading
+	// flowNeedsReferencePhoto is a flow that matches the face without reading
 	// the chip: every session on it carries a referencePhoto.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
 }
 
 func (h *Handler) apiListFlows(w http.ResponseWriter, r *http.Request) error {
 	caller := callerFromContext(r.Context())
-	flows, err := h.service.CustomerFlows(r.Context(), caller.Org, caller.CustomerID, false)
+	flows, err := h.service.CustomerFlows(r.Context(), caller.Org, caller.CustomerID, FlowsAllowed)
 	if err != nil {
 		return mapError(err)
 	}
@@ -210,7 +212,7 @@ func (h *Handler) apiListFlows(w http.ResponseWriter, r *http.Request) error {
 		}
 		out = append(out, apiFlowResponse{
 			ID: f.ID, Name: f.Name, Version: f.Version, RequiredAssuranceLevel: f.RequiredAssuranceLevel,
-			RequestedAttributes: attrs, Default: f.Default, NeedsReferencePhoto: NeedsReferencePhoto(f.Flow),
+			RequestedAttributes: attrs, Default: f.Default, NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow),
 		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)
@@ -221,7 +223,7 @@ func (h *Handler) apiListFlows(w http.ResponseWriter, r *http.Request) error {
 // outcome, and for an approved subject the name read off their document until
 // the customer's data retention clears it. Never other document data.
 type apiSessionResponse struct {
-	// ID is the session's ps_ id (PublicSessionID).
+	// ID is the session's ps_ id (publicSessionID).
 	ID             string     `json:"id"`
 	Status         Status     `json:"status"`
 	FlowID         string     `json:"flowId"`
@@ -240,8 +242,6 @@ type apiSessionResponse struct {
 	CancelledAt    *time.Time `json:"cancelledAt,omitempty"`
 	// PurgedAt is when the session's data was erased (DELETE).
 	PurgedAt *time.Time `json:"purgedAt,omitempty"`
-	// Livemode is false for a test key's session.
-	Livemode bool `json:"livemode"`
 	// ExpectedSubject is a session for one known person, created with a
 	// birthDate: only that name and birth date are approved (IDENTITY_MISMATCH
 	// otherwise).
@@ -256,11 +256,11 @@ type apiSessionResponse struct {
 
 func newAPISessionResponse(req Request, now time.Time) apiSessionResponse {
 	return apiSessionResponse{
-		ID: PublicSessionID(req.ID), Status: req.EffectiveStatus(now), FlowID: req.FlowID, FlowName: req.FlowName,
+		ID: publicSessionID(req.ID), Status: req.EffectiveStatus(now), FlowID: req.FlowID, FlowName: req.FlowName,
 		FlowVersion: req.FlowVersion, Method: string(req.Method), SubjectEmail: req.SubjectEmail, SubjectName: req.SubjectName,
 		ProofedName: req.ProofedName, AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel,
 		ErrorCode: req.ErrorCode, ExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
-		CancelledAt: req.CancelledAt, PurgedAt: req.PurgedAt, Livemode: req.mode() == ModeLive,
+		CancelledAt: req.CancelledAt, PurgedAt: req.PurgedAt,
 		ExpectedSubject: req.ExpectsSubject, FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
 	}
 }
@@ -285,16 +285,13 @@ type apiCreateSessionRequest struct {
 	// only: anyone else is rejected with IDENTITY_MISMATCH.
 	BirthDate string `json:"birthDate"`
 	// ReferencePhoto is the customer's own photo of the subject's face
-	// (standard base64 of a PNG, JPEG or WebP, at most MaxReferencePhotoBytes),
+	// (standard base64 of a PNG, JPEG or WebP, at most maxReferencePhotoBytes),
 	// for a flow that matches the face without the chip read.
 	ReferencePhoto string `json:"referencePhoto"`
 	FlowID         string `json:"flowId"`
 	SendMail       *bool  `json:"sendMail"`
 	// Language (en/nl) is the mail's and the Idem app's; empty is the default.
 	Language email.Locale `json:"language"`
-	// ScriptedOutcome is a test key's outcome: approve (the default), reject:<CODE>,
-	// needs_review or expire. A live key may not set it.
-	ScriptedOutcome string `json:"scriptedOutcome"`
 	// Hosted asks for a link to the hosted page instead of a session: the
 	// subject opens it on their own device and starts there; nothing is mailed.
 	Hosted bool `json:"hosted"`
@@ -320,7 +317,7 @@ func (h *Handler) apiCreateSession(w http.ResponseWriter, r *http.Request) error
 			Channel:    channel,
 			CustomerID: &caller.CustomerID, SubjectEmail: body.Email, SubjectName: body.Name,
 			SubjectBirthDate: body.BirthDate, ReferencePhoto: body.ReferencePhoto, FlowID: body.FlowID, SkipMail: body.SendMail != nil && !*body.SendMail, Language: body.Language,
-			Mode: caller.Mode, ScriptedOutcome: body.ScriptedOutcome, RedirectURL: body.RedirectURL,
+			RedirectURL: body.RedirectURL,
 		})
 	if err != nil {
 		return mapError(err)
@@ -348,7 +345,7 @@ func (h *Handler) apiListSessions(w http.ResponseWriter, r *http.Request) error 
 		limit = n
 	}
 	caller := callerFromContext(r.Context())
-	reqs, next, err := h.service.CustomerRequestPage(r.Context(), caller.Org.ID, caller.CustomerID, r.URL.Query().Get("cursor"), limit)
+	reqs, next, err := h.service.CustomerRequestPage(r.Context(), caller.Scope(), r.URL.Query().Get("cursor"), limit)
 	if err != nil {
 		return mapError(err)
 	}
@@ -381,12 +378,12 @@ func (h *Handler) apiStartMethod(w http.ResponseWriter, r *http.Request) error {
 	}
 	method := proofingprovider.Method(r.PathValue("method"))
 	caller := callerFromContext(r.Context())
-	started, err := h.service.StartHeadless(r.Context(), caller.Org.ID, caller.CustomerID, id, method)
+	started, err := h.service.StartHeadless(r.Context(), caller.Scope(), id, method)
 	if err != nil {
 		return mapError(err)
 	}
 	respond.JSON(w, r, http.StatusOK, apiMethodResponse{
-		ID: PublicSessionID(started.Request.ID), Method: string(method),
+		ID: publicSessionID(started.Request.ID), Method: string(method),
 		AppLink: started.AppLink, WalletLink: started.WalletLink, ExpiresAt: started.ExpiresAt,
 	})
 	return nil
@@ -407,7 +404,7 @@ func (h *Handler) apiMethodStatus(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	req, err := h.service.StoredCustomerRequest(r.Context(), caller.Org.ID, caller.CustomerID, id)
+	req, err := h.service.StoredCustomerRequest(r.Context(), caller.Scope(), id)
 	if err != nil {
 		return mapError(err)
 	}
@@ -416,7 +413,7 @@ func (h *Handler) apiMethodStatus(w http.ResponseWriter, r *http.Request) error 
 	}
 	status := req.EffectiveStatus(time.Now())
 	respond.JSON(w, r, http.StatusOK, apiMethodStatusResponse{
-		ID: PublicSessionID(req.ID), Method: string(req.Method), Status: status,
+		ID: publicSessionID(req.ID), Method: string(req.Method), Status: status,
 		Done: status != StatusPending && status != StatusInProgress,
 	})
 	return nil
@@ -444,7 +441,6 @@ type apiResultResponse struct {
 	VerifiedAt     *time.Time         `json:"verifiedAt,omitempty"`
 	Identity       *apiIdentity       `json:"identity,omitempty"`
 	Evidence       []apiEvidenceEntry `json:"evidence"`
-	Livemode       bool               `json:"livemode"`
 	// Diplomas are the DUO diploma extracts the subject added, each checked
 	// against DUO's signature and the proofed identity.
 	Diplomas []diplomaResponse `json:"diplomas"`
@@ -474,7 +470,7 @@ func (h *Handler) apiSessionResult(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	req, identity, err := h.service.RequestResult(r.Context(), caller.Org.ID, caller.CustomerID, id)
+	req, identity, err := h.service.RequestResult(r.Context(), caller.Scope(), id)
 	if err != nil {
 		return mapError(err)
 	}
@@ -553,9 +549,9 @@ func newAdminImage(img *proofingprovider.Image) *adminImage {
 // approval.
 func newAPIResultResponse(req Request, identity proofingprovider.Identity, now time.Time) apiResultResponse {
 	out := apiResultResponse{
-		ID: PublicSessionID(req.ID), Status: req.EffectiveStatus(now), Method: string(identity.Method),
+		ID: publicSessionID(req.ID), Status: req.EffectiveStatus(now), Method: string(identity.Method),
 		AssuranceLevel: identity.AssuranceLevel, EIDASLevel: identity.EIDASLevel, ErrorCode: identity.ErrorCode,
-		Evidence: []apiEvidenceEntry{}, Livemode: req.mode() == ModeLive, Diplomas: []diplomaResponse{},
+		Evidence: []apiEvidenceEntry{}, Diplomas: []diplomaResponse{},
 	}
 	if identity.Status == proofingprovider.StatusApproved {
 		out.VerifiedAt = identity.CompletedAt
@@ -579,7 +575,7 @@ func (h *Handler) apiCancelSession(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	req, err := h.service.CancelRequest(r.Context(), caller.Org.ID, caller.CustomerID, id)
+	req, err := h.service.CancelRequest(r.Context(), caller.Scope(), id)
 	if err != nil {
 		return mapError(err)
 	}
@@ -593,7 +589,7 @@ func (h *Handler) apiPurgeSession(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	if err := h.service.PurgeRequest(r.Context(), caller.Org.ID, caller.CustomerID, id); err != nil {
+	if err := h.service.PurgeRequest(r.Context(), caller.Scope(), id); err != nil {
 		return mapError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -606,7 +602,7 @@ func (h *Handler) apiGetSession(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	req, err := h.service.CustomerRequest(r.Context(), caller.Org.ID, caller.CustomerID, id)
+	req, err := h.service.CustomerRequest(r.Context(), caller.Scope(), id)
 	if err != nil {
 		return mapError(err)
 	}

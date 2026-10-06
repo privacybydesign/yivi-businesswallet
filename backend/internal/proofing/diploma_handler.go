@@ -91,7 +91,7 @@ func diplomaModeOf(req Request) DiplomaMode {
 // diplomasUntil is when the subject can last add an extract: an hour after
 // the approval of a request that asks for them, nil otherwise.
 func diplomasUntil(req Request) *time.Time {
-	if !req.Diplomas.asked() || req.mode() == ModeTest || req.Status != StatusApproved || req.CompletedAt == nil {
+	if !req.Diplomas.asked() || req.Status != StatusApproved || req.CompletedAt == nil {
 		return nil
 	}
 	until := req.CompletedAt.Add(DiplomaUploadWindow)
@@ -183,8 +183,14 @@ func (h *Handler) addDiplomas(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// hostedAddDiplomas checks the extracts a hosted link's subject uploaded.
+// hostedAddDiplomas checks the extracts a hosted link's subject uploaded. The
+// link is checked before the body is read: the route is anonymous, and its
+// rate limit is keyed on the token, so a fresh token per call would otherwise
+// buy a full upload's worth of memory each time.
 func (h *Handler) hostedAddDiplomas(w http.ResponseWriter, r *http.Request) error {
+	if err := h.service.HostedDiplomasOpen(r.Context(), r.PathValue("token")); err != nil {
+		return mapError(err)
+	}
 	files, err := readDiplomaFiles(w, r)
 	if err != nil {
 		return err

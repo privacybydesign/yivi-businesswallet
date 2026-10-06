@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -35,12 +36,10 @@ type Interface interface {
 }
 
 // PostgresStore keeps sessions in identity_proofing_sessions: the lookup
-// columns in the clear, the session itself (evidence included) as JSON
-// sealed under the deployment's encryption key. A session's TenantID is its
-// organization's id.
-//
-// The interface carries no context, as IPS's did; every call runs under
-// storeTimeout so a stuck database never pins a request forever.
+// columns in the clear, the session itself (evidence included) as JSON sealed
+// under the deployment's encryption key. A session's TenantID is its
+// organization's id. Calls take no context; each runs under storeTimeout, so
+// a stuck database never pins a request.
 type PostgresStore struct {
 	db       database.DB
 	cipher   *crypto.Cipher
@@ -208,6 +207,8 @@ func (s *PostgresStore) expireIfDue(sess Session) Session {
 	}
 	updated, err := s.Update(sess.TenantID, sess.ID, func(*Session) error { return nil })
 	if err != nil {
+		// The read still answers; the next read or the purge job expires it.
+		slog.Warn("identity proofing: expire session on read", slog.String("session_id", sess.ID), slog.Any("error", err))
 		return sess
 	}
 	return updated
@@ -291,10 +292,40 @@ func (s *PostgresStore) Delete(tenantID, id string) error {
 	return nil
 }
 
+// purgeBatch bounds how many finished sessions one DELETE removes, so each
+// batch runs under its own storeTimeout however many are due.
+const purgeBatch = 100
+
 // Purge expires every open session past its deadline (reporting each), then
 // removes finished sessions older than their own retention override, or
-// retention when they have none and it is positive, and returns them.
+// retention when they have none and it is positive, and returns them. Each
+// step has its own storeTimeout: the listing, every expiry (Update) and every
+// batch of removals, so a large backlog is worked off rather than cut short.
 func (s *PostgresStore) Purge(retention time.Duration, now time.Time) ([]Session, error) {
+	due, err := s.listDue(now)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range due {
+		// Update expires (and reports) it; a concurrent writer may have won.
+		if _, err := s.Update(k.tenant, k.id, func(*Session) error { return nil }); err != nil && !errors.Is(err, ErrNotFound) {
+			slog.Warn("identity proofing: expire due session", slog.String("session_id", k.id), slog.Any("error", err))
+		}
+	}
+	var removed []Session
+	for {
+		batch, err := s.removeExpired(retention, now)
+		removed = append(removed, batch...)
+		if err != nil || len(batch) < purgeBatch {
+			return removed, err
+		}
+	}
+}
+
+type sessionKey struct{ id, tenant string }
+
+// listDue is every open session past its deadline.
+func (s *PostgresStore) listDue(now time.Time) ([]sessionKey, error) {
 	c, cancel := ctx()
 	defer cancel()
 	rows, err := s.db.Query(c, `SELECT id, organization_id::text FROM identity_proofing_sessions
@@ -302,48 +333,56 @@ func (s *PostgresStore) Purge(retention time.Duration, now time.Time) ([]Session
 	if err != nil {
 		return nil, fmt.Errorf("session: list due: %w", err)
 	}
-	type key struct{ id, tenant string }
-	var due []key
+	defer rows.Close()
+	var due []sessionKey
 	for rows.Next() {
-		var k key
+		var k sessionKey
 		if err := rows.Scan(&k.id, &k.tenant); err != nil {
-			rows.Close()
 			return nil, fmt.Errorf("session: list due: %w", err)
 		}
 		due = append(due, k)
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("session: list due: %w", err)
 	}
-	for _, k := range due {
-		// Update expires (and reports) it; a concurrent writer may have won.
-		_, _ = s.Update(k.tenant, k.id, func(*Session) error { return nil })
-	}
-	// A session's own (its flow's) retention applies whatever the default;
-	// a default of 0 keeps the rest until they are deleted.
-	removedRows, err := s.db.Query(c, `
-		DELETE FROM identity_proofing_sessions
-		WHERE status IN (`+terminalStatusList+`)
-			AND (retention_override_seconds > 0 OR $2 > 0)
-			AND COALESCE(completed_at, updated_at) <= $1::timestamptz - make_interval(secs =>
-				CASE WHEN retention_override_seconds > 0 THEN retention_override_seconds ELSE $2 END)
-		RETURNING data`, now, int64(retention/time.Second))
+	return due, nil
+}
+
+// removeExpired deletes up to purgeBatch finished sessions past their
+// retention and returns them. A session's own (its flow's) retention applies
+// whatever the default; a default of 0 keeps the rest until they are deleted.
+func (s *PostgresStore) removeExpired(retention time.Duration, now time.Time) ([]Session, error) {
+	c, cancel := ctx()
+	defer cancel()
+	rows, err := s.db.Query(c, `
+		DELETE FROM identity_proofing_sessions WHERE id IN (
+			SELECT id FROM identity_proofing_sessions
+			WHERE status IN (`+terminalStatusList+`)
+				AND (retention_override_seconds > 0 OR $2 > 0)
+				AND COALESCE(completed_at, updated_at) <= $1::timestamptz - make_interval(secs =>
+					CASE WHEN retention_override_seconds > 0 THEN retention_override_seconds ELSE $2 END)
+			LIMIT $3)
+		RETURNING id, organization_id::text, data`, now, int64(retention/time.Second), purgeBatch)
 	if err != nil {
 		return nil, fmt.Errorf("session: purge: %w", err)
 	}
-	defer removedRows.Close()
+	defer rows.Close()
 	var removed []Session
-	for removedRows.Next() {
+	for rows.Next() {
+		var id, tenant string
 		var data []byte
-		if err := removedRows.Scan(&data); err != nil {
-			return nil, fmt.Errorf("session: purge: %w", err)
+		if err := rows.Scan(&id, &tenant, &data); err != nil {
+			return removed, fmt.Errorf("session: purge: %w", err)
 		}
-		if sess, err := s.open(data); err == nil {
-			removed = append(removed, sess)
+		sess, err := s.open(data)
+		if err != nil {
+			// Gone all the same: reported by id, so the purge is still recorded.
+			slog.Warn("identity proofing: purged a session that does not open", slog.String("session_id", id), slog.Any("error", err))
+			sess = Session{ID: id, TenantID: tenant}
 		}
+		removed = append(removed, sess)
 	}
-	if err := removedRows.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return removed, fmt.Errorf("session: purge: %w", err)
 	}
 	return removed, nil

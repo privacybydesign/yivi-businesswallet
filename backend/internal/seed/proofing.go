@@ -9,19 +9,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 )
 
-// The identity proofing use cases the demo org runs for its customers: each a
-// customer with the flows its use case needs, as an admin would set them up.
-// A flow is found by its name, a customer by its name, so a re-run creates
-// only what is missing. What a session of a use case needs beyond the flow
-// (an expected person's name and date of birth, a reference photo) is sent
-// with the session through the customer API.
+// The identity proofing use cases of the demo orgs: each org runs proofing
+// for its own dummy customers, with the flows its use case needs and the two
+// data request flows, as an org admin would set them up. A flow is found by
+// its name within its org, a customer by its name, so a re-run creates only
+// what is missing. What a session of a use case needs beyond the flow (an
+// expected person's name and date of birth, a reference photo) is sent with
+// the session through the customer API.
 
-// demoProofingFlow is one of the demo org's flows: its engine definition and
+// demoProofingFlow is one of a demo org's flows: its engine definition and
 // the wallet's own settings for it.
 type demoProofingFlow struct {
 	def      flow.FlowDefinition
@@ -30,11 +33,20 @@ type demoProofingFlow struct {
 }
 
 // demoProofingCustomer is a customer with the flows assigned to it, the
-// first its default.
+// first its default; every customer is also given the data request flows. Its
+// name says "(Demo)", like the seeded orgs: they are real organisations.
 type demoProofingCustomer struct {
 	name          string
 	flows         []string
 	retentionDays int
+}
+
+// demoProofingOrg is a demo org (by slug, one of demoOrganizations) with its
+// own flows, besides the data request flows every org has, and its customers.
+type demoProofingOrg struct {
+	slug      string
+	flows     []demoProofingFlow
+	customers []demoProofingCustomer
 }
 
 // The engine's names for what a flow reads and checks.
@@ -60,8 +72,8 @@ const (
 )
 
 // chipAndFace is an eIDAS substantial flow: the document's chip read in the
-// Idem app (passport, identity card or EU driving licence) and a live face
-// matched against its portrait by Regula.
+// Idem app (passport or identity card; the engine refuses an EU driving
+// licence for now) and a live face matched against its portrait by Regula.
 func chipAndFace(name string, basis privacy.LegalBasis, purpose string) flow.FlowDefinition {
 	return flow.FlowDefinition{
 		Name: name, Steps: chipAndFaceSteps, SelfieLocation: flow.LocationNative,
@@ -72,12 +84,12 @@ func chipAndFace(name string, basis privacy.LegalBasis, purpose string) flow.Flo
 
 // Flow names, also how a customer below names its flows.
 const (
-	flowRadboudEnrol     = "Radboud – Aanmelden cursist"
-	flowRadboudPassword  = "Radboud – Wachtwoord herstellen"
-	flowASRKnownPerson   = "a.s.r. – Identificatie bekende persoon"
-	flowASRAccountChange = "a.s.r. – Rekeningnummer wijzigen"
-	flowUnibetOnboarding = "Unibet – Nieuwe klant (AMLR)"
-	flowCMAgeCheck       = "CM – Ticket: echte persoon en leeftijd"
+	flowRadboudEnrol     = "Aanmelden cursist"
+	flowRadboudPassword  = "Wachtwoord herstellen"
+	flowASRKnownPerson   = "Identificatie bekende persoon"
+	flowASRAccountChange = "Rekeningnummer wijzigen"
+	flowUnibetOnboarding = "Nieuwe klant (AMLR)"
+	flowCMAgeCheck       = "Ticket: echte persoon en leeftijd"
 	flowDataAccess       = "Mijn gegevens inzien"
 	flowDataErasure      = "Mijn gegevens verwijderen"
 )
@@ -85,66 +97,118 @@ const (
 // purposeDataRequest is the processing purpose of the data request flows.
 const purposeDataRequest = "Verzoek van de betrokkene (AVG art. 15/17)"
 
-var demoProofingFlows = []demoProofingFlow{
-	// A new course participant enrols with their passport, identity card or
-	// driving licence, then uploads their DUO diploma extracts.
-	{def: chipAndFace(flowRadboudEnrol, privacy.LegalBasisContract, "Inschrijving cursus Radboud Academy"), diplomas: proofing.DiplomasRequired},
-	// A user resets their password by proving they are the account's
-	// holder: sent for one known person (name and birth date with the session).
-	{def: chipAndFace(flowRadboudPassword, privacy.LegalBasisContract, "Herstel van het wachtwoord")},
-	// A pre-configured person (name and birth date sent with the session)
-	// identifies themselves; anyone else is rejected (IDENTITY_MISMATCH).
-	{def: chipAndFace(flowASRKnownPerson, privacy.LegalBasisContract, "Identificatie van de verzekerde")},
-	// Changing the bank account on a policy: a liveness check of the known
-	// policyholder, their live face matched against a.s.r.'s own photo of
-	// them (sent with the session); no document is read.
-	{def: flow.FlowDefinition{
-		Name: flowASRAccountChange, Steps: faceOnlySteps, SelfieLocation: flow.LocationNative,
-		FaceProvider: flow.FaceProviderRegula, RequiredChecks: faceChecks,
-		LegalBasis: privacy.LegalBasisContract, ProcessingPurpose: "Wijziging van het rekeningnummer op de polis",
-	}},
-	// A new player under the AMLR: full identification and liveness. The
-	// occupational status (UWV Verzekeringsbericht) is not a step the wallet
-	// can collect yet.
-	{def: chipAndFace(flowUnibetOnboarding, privacy.LegalBasisLegalObligation, "Klantonderzoek kansspelen (AMLR/Wwft)")},
-	// Buying a ticket: a real, live person of age. Only the chip's data and
-	// the checks come back, never an image.
-	{def: flow.FlowDefinition{
-		Name: flowCMAgeCheck, Steps: chipAndFaceSteps, SelfieLocation: flow.LocationNative,
-		FaceProvider: flow.FaceProviderRegula, RequiredChecks: substantialChecks,
-		RequestedAttributes: cmAttributes, RequestedAttributesConfigured: true,
-		LegalBasis: privacy.LegalBasisContract, ProcessingPurpose: "Leeftijdscontrole bij aankoop ticket",
-	}},
-	// A customer's subject asks what is held of them, or for its erasure: the
-	// session goes to review once they are proven.
+// dataRequestFlows are every org's: a customer's subject asks what is held of
+// them, or for its erasure, and the session goes to review once they are
+// proven. Every customer is offered them: each holds personal data a subject
+// may ask about.
+var dataRequestFlows = []demoProofingFlow{
 	{def: chipAndFace(flowDataAccess, privacy.LegalBasisLegalObligation, purposeDataRequest), kind: proofing.FlowDataAccess},
 	{def: chipAndFace(flowDataErasure, privacy.LegalBasisLegalObligation, purposeDataRequest), kind: proofing.FlowDataErasure},
 }
 
-// dataRequestFlows are offered to every customer: each holds personal data a
-// subject may ask about.
-var dataRequestFlows = []string{flowDataAccess, flowDataErasure}
-
-var demoProofingCustomers = []demoProofingCustomer{
-	{name: "Radboud Universiteit", flows: []string{flowRadboudEnrol, flowRadboudPassword}, retentionDays: demoRetentionDays},
-	{name: "a.s.r. verzekeringen", flows: []string{flowASRKnownPerson, flowASRAccountChange}, retentionDays: demoRetentionDays},
-	{name: "Unibet", flows: []string{flowUnibetOnboarding}, retentionDays: demoRetentionDays},
-	{name: "CM", flows: []string{flowCMAgeCheck}, retentionDays: shortRetentionDays},
+var demoProofingOrgs = []demoProofingOrg{
+	{
+		slug: radboudSlug,
+		flows: []demoProofingFlow{
+			// A new course participant enrols with their passport or identity
+			// card, then uploads their DUO diploma extracts.
+			{def: chipAndFace(flowRadboudEnrol, privacy.LegalBasisContract, "Inschrijving cursus Radboud Academy"), diplomas: proofing.DiplomasRequired},
+			// A user resets their password by proving they are the account's
+			// holder: sent for one known person (name and birth date with the
+			// session).
+			{def: chipAndFace(flowRadboudPassword, privacy.LegalBasisContract, "Herstel van het wachtwoord")},
+		},
+		customers: []demoProofingCustomer{
+			{name: "Radboud Academy (Demo)", flows: []string{flowRadboudEnrol, flowRadboudPassword}, retentionDays: demoRetentionDays},
+			{name: "Radboud Studentenservice (Demo)", flows: []string{flowRadboudPassword}, retentionDays: demoRetentionDays},
+		},
+	},
+	{
+		slug: asrSlug,
+		flows: []demoProofingFlow{
+			// A pre-configured person (name and birth date sent with the
+			// session) identifies themselves; anyone else is rejected
+			// (IDENTITY_MISMATCH).
+			{def: chipAndFace(flowASRKnownPerson, privacy.LegalBasisContract, "Identificatie van de verzekerde")},
+			// Changing the bank account on a policy: a liveness check of the
+			// known policyholder, their live face matched against a.s.r.'s own
+			// photo of them (sent with the session); no document is read.
+			{def: flow.FlowDefinition{
+				Name: flowASRAccountChange, Steps: faceOnlySteps, SelfieLocation: flow.LocationNative,
+				FaceProvider: flow.FaceProviderRegula, RequiredChecks: faceChecks,
+				LegalBasis: privacy.LegalBasisContract, ProcessingPurpose: "Wijziging van het rekeningnummer op de polis",
+			}},
+		},
+		customers: []demoProofingCustomer{
+			{name: "a.s.r. Schadeverzekeringen (Demo)", flows: []string{flowASRKnownPerson, flowASRAccountChange}, retentionDays: demoRetentionDays},
+			{name: "a.s.r. Levensverzekeringen (Demo)", flows: []string{flowASRKnownPerson, flowASRAccountChange}, retentionDays: demoRetentionDays},
+		},
+	},
+	{
+		slug: unibetSlug,
+		flows: []demoProofingFlow{
+			// A new player under the AMLR: full identification and liveness.
+			// The occupational status (UWV Verzekeringsbericht) is not a step
+			// the wallet can collect yet.
+			{def: chipAndFace(flowUnibetOnboarding, privacy.LegalBasisLegalObligation, "Klantonderzoek kansspelen (AMLR/Wwft)")},
+		},
+		customers: []demoProofingCustomer{
+			{name: "Unibet Casino (Demo)", flows: []string{flowUnibetOnboarding}, retentionDays: demoRetentionDays},
+			{name: "Unibet Sport (Demo)", flows: []string{flowUnibetOnboarding}, retentionDays: demoRetentionDays},
+		},
+	},
+	{
+		slug: cmSlug,
+		flows: []demoProofingFlow{
+			// Buying a ticket: a real, live person of age. Only the chip's data
+			// and the checks come back, never an image.
+			{def: flow.FlowDefinition{
+				Name: flowCMAgeCheck, Steps: chipAndFaceSteps, SelfieLocation: flow.LocationNative,
+				FaceProvider: flow.FaceProviderRegula, RequiredChecks: substantialChecks,
+				RequestedAttributes: cmAttributes,
+				LegalBasis:          privacy.LegalBasisContract, ProcessingPurpose: "Leeftijdscontrole bij aankoop ticket",
+			}},
+		},
+		customers: []demoProofingCustomer{
+			{name: "CM Tickets Concerten (Demo)", flows: []string{flowCMAgeCheck}, retentionDays: shortRetentionDays},
+			{name: "CM Tickets Festivals (Demo)", flows: []string{flowCMAgeCheck}, retentionDays: shortRetentionDays},
+		},
+	},
 }
 
-// seedProofing gives orgID the demo flows and customers, created by createdBy.
-func seedProofing(ctx context.Context, pool *pgxpool.Pool, orgID, createdBy uuid.UUID) error {
+// allFlows is o's own flows and the data request flows.
+func (o demoProofingOrg) allFlows() []demoProofingFlow {
+	return append(slices.Clone(o.flows), dataRequestFlows...)
+}
+
+// seedProofing gives each demo proofing org, found in orgsBySlug, its flows
+// and customers, created by createdBy.
+func seedProofing(ctx context.Context, pool *pgxpool.Pool, orgsBySlug map[string]organization.Organization, createdBy uuid.UUID) error {
+	for _, o := range demoProofingOrgs {
+		org, ok := orgsBySlug[o.slug]
+		if !ok {
+			return fmt.Errorf("seed: proofing org %s not seeded", o.slug)
+		}
+		if err := seedProofingOrg(ctx, pool, org.ID, createdBy, o); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// seedProofingOrg gives orgID o's flows and customers, created by createdBy.
+func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID, createdBy uuid.UUID, o demoProofingOrg) error {
 	recorder := audit.NewDBRecorder()
-	flowIDs, err := ensureProofingFlows(ctx, pool, recorder, orgID)
+	flowIDs, err := ensureProofingFlows(ctx, pool, recorder, orgID, o.allFlows())
 	if err != nil {
 		return err
 	}
 	customers := proofing.NewCustomerStore(pool, recorder)
 	existing, err := customers.List(ctx, orgID)
 	if err != nil {
-		return fmt.Errorf("seed: list customers: %w", err)
+		return fmt.Errorf("seed: list customers %s: %w", o.slug, err)
 	}
-	for _, c := range demoProofingCustomers {
+	for _, c := range o.customers {
 		if slices.ContainsFunc(existing, func(e proofing.Customer) bool { return e.Name == c.name }) {
 			continue
 		}
@@ -153,7 +217,7 @@ func seedProofing(ctx context.Context, pool *pgxpool.Pool, orgID, createdBy uuid
 			return fmt.Errorf("seed: customer %s: %w", c.name, err)
 		}
 		sel := proofing.FlowSelection{DefaultFlowID: flowIDs[c.flows[0]]}
-		for _, name := range append(slices.Clone(c.flows), dataRequestFlows...) {
+		for _, name := range c.flowNames() {
 			sel.FlowIDs = append(sel.FlowIDs, flowIDs[name])
 		}
 		if _, err := customers.SaveFlows(ctx, orgID, customer.ID, sel); err != nil {
@@ -168,9 +232,18 @@ func seedProofing(ctx context.Context, pool *pgxpool.Pool, orgID, createdBy uuid
 	return nil
 }
 
-// ensureProofingFlows creates each demo flow orgID lacks, with its kind and
-// diploma setting, and returns every demo flow's id by name.
-func ensureProofingFlows(ctx context.Context, pool *pgxpool.Pool, recorder audit.Recorder, orgID uuid.UUID) (map[string]string, error) {
+// flowNames is every flow c is offered: its own and the data request flows.
+func (c demoProofingCustomer) flowNames() []string {
+	names := slices.Clone(c.flows)
+	for _, f := range dataRequestFlows {
+		names = append(names, f.def.Name)
+	}
+	return names
+}
+
+// ensureProofingFlows creates each of want that orgID lacks, with its kind and
+// diploma setting, and returns every one's id by name.
+func ensureProofingFlows(ctx context.Context, pool *pgxpool.Pool, recorder audit.Recorder, orgID uuid.UUID, want []demoProofingFlow) (map[string]string, error) {
 	flows := flow.NewPostgresStore(pool)
 	existing, err := flows.List(ctx, orgID.String())
 	if err != nil {
@@ -179,13 +252,18 @@ func ensureProofingFlows(ctx context.Context, pool *pgxpool.Pool, recorder audit
 	kinds := proofing.NewDataRequestStore(pool, recorder, nil)
 	diplomas := proofing.NewFlowDiplomaStore(pool, recorder)
 	ids := map[string]string{}
-	for _, f := range demoProofingFlows {
+	for _, f := range want {
 		i := slices.IndexFunc(existing, func(e flow.FlowDefinition) bool { return e.Name == f.def.Name })
 		if i >= 0 {
 			ids[f.def.Name] = existing[i].ID
 			continue
 		}
 		def := f.def
+		// A flow listing no data releases only the outcome; the demo flows
+		// that list none release everything their steps collect.
+		if len(def.RequestedAttributes) == 0 {
+			def.RequestedAttributes = proofingengine.AttributesForSteps(def.Steps)
+		}
 		def.TenantID = orgID.String()
 		saved, err := flows.Save(ctx, def)
 		if err != nil {

@@ -251,8 +251,10 @@ func (h *Handler) heldClaims(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// heldHistory is a held credential's trail, oldest first: received, each
-// status change the issuer's list reported, removal.
+// heldHistory is a held credential's trail, oldest first: received and each
+// status change the issuer's list reported. A removed credential is not
+// found, so its removal is never in it; at most audit.MaxListLimit events.
+// Like the org audit log, only an admin sees who acted and what changed.
 func (h *Handler) heldHistory(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
@@ -265,6 +267,9 @@ func (h *Handler) heldHistory(w http.ResponseWriter, r *http.Request) error {
 		return notFound("held_not_found", "held attestation not found")
 	case err != nil:
 		return fmt.Errorf("reading held attestation history: %w", err)
+	}
+	if !organization.SeesAuditDetail(r.Context()) {
+		audit.HideDetail(events)
 	}
 	respond.JSON(w, r, http.StatusOK, struct {
 		Events []audit.Event `json:"events"`

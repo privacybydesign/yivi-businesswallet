@@ -1,17 +1,22 @@
 package mrtdverify
 
 import (
+	"crypto/sha256"
+	"encoding/asn1"
 	"encoding/hex"
 	"testing"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/mrtdverify/mrtdtestfixtures"
+
 	"github.com/gmrtd/gmrtd/cms"
 	"github.com/gmrtd/gmrtd/document"
+	"github.com/gmrtd/gmrtd/oid"
 	"github.com/gmrtd/gmrtd/tlv"
 )
 
 // countryMismatchDg1Hex rebuilds the fixture's own DG1 with a different
 // issuing state ("NLD" instead of the fixture's "GBR"), so the resulting
-// document has a validly-signed EF.SOD (signed by TestCsca, a "gb" CSCA) but
+// document has a validly-signed EF.SOD (signed by mrtdtestfixtures.TestCsca, a "gb" CSCA) but
 // a DG1 that claims a different country — exactly what
 // passiveauth.PassiveAuth's country cross-check exists to catch. This is
 // buildable at all only because MRZ's issuing-state field carries no check
@@ -19,20 +24,20 @@ import (
 // composite are check-digited, issuingState/nationality are not) — swapping
 // it doesn't need touching any checksum. This is deliberately a *different*
 // scenario from a tampered/injected data group (VerifyPassive's existing
-// tests): the resulting DG1 hash no longer matches TestSodHex's signed hash
+// tests): the resulting DG1 hash no longer matches mrtdtestfixtures.TestSodHex's signed hash
 // for DG1 either, but PassiveAuth's country check runs and fails before it
 // would ever reach that hash check (see countryCscaCerts in gmrtd's
 // passiveauth package), so this specifically exercises the country
 // cross-check path, not the hash-check path.
 func countryMismatchDg1Hex(t *testing.T) string {
 	t.Helper()
-	dg1Bytes, err := hex.DecodeString(TestDg1Hex)
+	dg1Bytes, err := hex.DecodeString(mrtdtestfixtures.TestDg1Hex)
 	if err != nil {
-		t.Fatalf("decode TestDg1Hex: %v", err)
+		t.Fatalf("decode mrtdtestfixtures.TestDg1Hex: %v", err)
 	}
 	dg1, err := document.NewDG1(dg1Bytes)
 	if err != nil {
-		t.Fatalf("parse TestDg1Hex: %v", err)
+		t.Fatalf("parse mrtdtestfixtures.TestDg1Hex: %v", err)
 	}
 	if dg1.Mrz.IssuingState != "GBR" {
 		t.Fatalf("fixture DG1 issuing state = %q, want GBR (test assumption changed?)", dg1.Mrz.IssuingState)
@@ -53,13 +58,13 @@ func countryMismatchDg1Hex(t *testing.T) string {
 // with content that no longer matches what EF.SOD signed).
 func tamperedDg1Hex(t *testing.T) string {
 	t.Helper()
-	dg1Bytes, err := hex.DecodeString(TestDg1Hex)
+	dg1Bytes, err := hex.DecodeString(mrtdtestfixtures.TestDg1Hex)
 	if err != nil {
-		t.Fatalf("decode TestDg1Hex: %v", err)
+		t.Fatalf("decode mrtdtestfixtures.TestDg1Hex: %v", err)
 	}
 	dg1, err := document.NewDG1(dg1Bytes)
 	if err != nil {
-		t.Fatalf("parse TestDg1Hex: %v", err)
+		t.Fatalf("parse mrtdtestfixtures.TestDg1Hex: %v", err)
 	}
 
 	mrz := []byte(dg1.RawMrz)
@@ -71,10 +76,10 @@ func tamperedDg1Hex(t *testing.T) string {
 	return hex.EncodeToString(root.Encode())
 }
 
-func TestVerifyPassiveICAO_validDocumentPasses(t *testing.T) {
-	result, err := VerifyPassiveICAO(TestSodHex, map[string]string{
-		"DG1": TestDg1Hex,
-		"DG2": Dg2Hex,
+func TestVerifyICAOValid(t *testing.T) {
+	result, err := VerifyPassiveICAO(mrtdtestfixtures.TestSodHex, map[string]string{
+		"DG1": mrtdtestfixtures.TestDg1Hex,
+		"DG2": mrtdtestfixtures.Dg2Hex,
 	}, trustedTestCertPool(t))
 	if err != nil {
 		t.Fatalf("VerifyPassiveICAO: %v", err)
@@ -96,23 +101,103 @@ func TestVerifyPassiveICAO_validDocumentPasses(t *testing.T) {
 	}
 }
 
-// NB there's no test here for the DG14/DG15-referenced-but-omitted case
-// itself (an app stripping DG15 to dodge Active Authentication) — doing so
-// needs a fixture whose EF.SOD genuinely signs a hash list that includes
-// DG15, and this package has no CSCA private key to produce one; the fixture
-// above (ported from go-passport-issuer) only ever covered DG1/DG2.
-// document.Document.Verify's own test suite in gmrtd covers that check
-// directly; VerifyPassiveICAO's part is just calling it and recording the
-// result, exercised (for the "nothing to flag" case) above.
+// aaKeyDataGroupNumber is DG15, the Active Authentication public key.
+const aaKeyDataGroupNumber = 15
 
-func TestVerifyPassiveICAO_countryMismatchFailsWithoutError(t *testing.T) {
-	// EF.SOD is signed by a "gb" CSCA (TestCsca); this DG1 claims "NLD".
+// unsignedSODHex rebuilds the fixture's EF.SOD around its own hash list, plus
+// a DG15 hash when withDG15. Without a CSCA private key it carries no signer,
+// so the signature never verifies: the completeness check runs regardless,
+// which is all it is for.
+func unsignedSODHex(t *testing.T, withDG15 bool) string {
+	t.Helper()
+	fixture, err := parseSOD(mrtdtestfixtures.TestSodHex)
+	if err != nil {
+		t.Fatalf("parse mrtdtestfixtures.TestSodHex: %v", err)
+	}
+	type dataGroupHash struct {
+		Number int
+		Hash   []byte
+	}
+	type ldsSecurityObject struct {
+		Version       int
+		HashAlgorithm asn1.RawValue
+		Hashes        []dataGroupHash
+	}
+	type encapContentInfo struct {
+		Type    asn1.ObjectIdentifier
+		Content []byte `asn1:"explicit,tag:0"`
+	}
+	type signedData struct {
+		Version          int
+		DigestAlgorithms []asn1.RawValue `asn1:"set"`
+		Content          encapContentInfo
+		SignerInfos      []asn1.RawValue `asn1:"set"`
+	}
+	type contentInfo struct {
+		Type    asn1.ObjectIdentifier
+		Content signedData `asn1:"explicit,tag:0"`
+	}
+
+	hashAlgorithm, err := asn1.Marshal(fixture.LdsSecurityObject.HashAlgorithm)
+	if err != nil {
+		t.Fatalf("marshal hash algorithm: %v", err)
+	}
+	lds := ldsSecurityObject{HashAlgorithm: asn1.RawValue{FullBytes: hashAlgorithm}}
+	for _, h := range fixture.LdsSecurityObject.DataGroupHashValues {
+		lds.Hashes = append(lds.Hashes, dataGroupHash{h.DataGroupNumber, h.DataGroupHashValue})
+	}
+	if withDG15 {
+		lds.Hashes = append(lds.Hashes, dataGroupHash{aaKeyDataGroupNumber, make([]byte, sha256.Size)})
+	}
+	ldsBytes, err := asn1.Marshal(lds)
+	if err != nil {
+		t.Fatalf("marshal LDSSecurityObject: %v", err)
+	}
+	sdBytes, err := asn1.Marshal(contentInfo{
+		Type:    oid.OidSignedData,
+		Content: signedData{Version: 3, Content: encapContentInfo{Type: oid.OidLdsSecurityObject, Content: ldsBytes}},
+	})
+	if err != nil {
+		t.Fatalf("marshal SignedData: %v", err)
+	}
+	return hex.EncodeToString(tlv.NewTlvSimpleNode(tlv.TlvTag(document.SODTag), sdBytes).Encode())
+}
+
+// An app cannot dodge Active Authentication by leaving out the DG15 its EF.SOD
+// lists: the document is incomplete, whatever else verified.
+func TestOmittedDG15IsIncomplete(t *testing.T) {
+	sent := map[string]string{"DG1": mrtdtestfixtures.TestDg1Hex, "DG2": mrtdtestfixtures.Dg2Hex}
+	for _, tc := range []struct {
+		name     string
+		withDG15 bool
+		want     bool
+	}{
+		{"SOD lists DG15", true, false},
+		{"SOD lists no DG15", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := VerifyPassiveICAO(unsignedSODHex(t, tc.withDG15), sent, trustedTestCertPool(t))
+			if err != nil {
+				t.Fatalf("VerifyPassiveICAO: %v", err)
+			}
+			if !result.DataGroupHashesValid {
+				t.Errorf("DataGroupHashesValid = false, InvalidDataGroups=%v", result.InvalidDataGroups)
+			}
+			if result.DocumentComplete != tc.want {
+				t.Errorf("DocumentComplete = %v, want %v (DocumentVerifyErr=%q)", result.DocumentComplete, tc.want, result.DocumentVerifyErr)
+			}
+		})
+	}
+}
+
+func TestVerifyICAOCountryMismatch(t *testing.T) {
+	// EF.SOD is signed by a "gb" CSCA (mrtdtestfixtures.TestCsca); this DG1 claims "NLD".
 	// PassiveAuth's country cross-check must catch that and fail closed —
 	// this is exactly the gap VerifyPassive (used unchanged for EU driving
 	// licences) cannot catch.
-	result, err := VerifyPassiveICAO(TestSodHex, map[string]string{
+	result, err := VerifyPassiveICAO(mrtdtestfixtures.TestSodHex, map[string]string{
 		"DG1": countryMismatchDg1Hex(t),
-		"DG2": Dg2Hex,
+		"DG2": mrtdtestfixtures.Dg2Hex,
 	}, trustedTestCertPool(t))
 	if err != nil {
 		t.Fatalf("VerifyPassiveICAO: %v (a country mismatch is a legitimate verification failure, not a request error)", err)
@@ -122,10 +207,10 @@ func TestVerifyPassiveICAO_countryMismatchFailsWithoutError(t *testing.T) {
 	}
 }
 
-func TestVerifyPassiveICAO_untrustedCertPoolFailsSignatureCheck(t *testing.T) {
-	result, err := VerifyPassiveICAO(TestSodHex, map[string]string{
-		"DG1": TestDg1Hex,
-		"DG2": Dg2Hex,
+func TestVerifyICAOUntrusted(t *testing.T) {
+	result, err := VerifyPassiveICAO(mrtdtestfixtures.TestSodHex, map[string]string{
+		"DG1": mrtdtestfixtures.TestDg1Hex,
+		"DG2": mrtdtestfixtures.Dg2Hex,
 	}, &cms.GenericCertPool{})
 	if err != nil {
 		t.Fatalf("VerifyPassiveICAO: %v", err)
@@ -135,7 +220,7 @@ func TestVerifyPassiveICAO_untrustedCertPoolFailsSignatureCheck(t *testing.T) {
 	}
 }
 
-func TestVerifyPassiveICAO_tamperedDataGroupStillFailsHashCheckDiagnostic(t *testing.T) {
+func TestVerifyICAOTamperedDG(t *testing.T) {
 	// Unlike VerifyPassive's own tamper test (which flips the last raw byte
 	// of the whole TLV blob — fine there, since VerifyPassive never parses
 	// MRZ semantics at all), VerifyPassiveICAO builds a typed document.DG1,
@@ -146,9 +231,9 @@ func TestVerifyPassiveICAO_tamperedDataGroupStillFailsHashCheckDiagnostic(t *tes
 	// which carries no check digit — see decodeTD3.
 	tamperedDg1 := tamperedDg1Hex(t)
 
-	result, err := VerifyPassiveICAO(TestSodHex, map[string]string{
+	result, err := VerifyPassiveICAO(mrtdtestfixtures.TestSodHex, map[string]string{
 		"DG1": tamperedDg1,
-		"DG2": Dg2Hex,
+		"DG2": mrtdtestfixtures.Dg2Hex,
 	}, trustedTestCertPool(t))
 	if err != nil {
 		t.Fatalf("VerifyPassiveICAO: %v", err)
@@ -170,40 +255,40 @@ func TestVerifyPassiveICAO_tamperedDataGroupStillFailsHashCheckDiagnostic(t *tes
 	}
 }
 
-func TestVerifyPassiveICAO_missingMandatoryDataGroupIsARequestError(t *testing.T) {
+func TestVerifyICAOMissingDG(t *testing.T) {
 	pool := trustedTestCertPool(t)
 
-	if _, err := VerifyPassiveICAO(TestSodHex, map[string]string{"DG2": Dg2Hex}, pool); err == nil {
+	if _, err := VerifyPassiveICAO(mrtdtestfixtures.TestSodHex, map[string]string{"DG2": mrtdtestfixtures.Dg2Hex}, pool); err == nil {
 		t.Error("expected an error when DG1 (mandatory) is missing")
 	}
-	if _, err := VerifyPassiveICAO(TestSodHex, map[string]string{"DG1": TestDg1Hex}, pool); err == nil {
+	if _, err := VerifyPassiveICAO(mrtdtestfixtures.TestSodHex, map[string]string{"DG1": mrtdtestfixtures.TestDg1Hex}, pool); err == nil {
 		t.Error("expected an error when DG2 (mandatory) is missing")
 	}
 }
 
-func TestVerifyPassiveICAO_malformedInputsAreRequestErrors(t *testing.T) {
+func TestVerifyICAOMalformed(t *testing.T) {
 	pool := trustedTestCertPool(t)
 
 	if _, err := VerifyPassiveICAO("not hex", map[string]string{}, pool); err == nil {
 		t.Error("expected an error for invalid EF.SOD hex")
 	}
-	if _, err := VerifyPassiveICAO(TestSodHex, map[string]string{"DGx": "aabb", "DG1": TestDg1Hex, "DG2": Dg2Hex}, pool); err == nil {
+	if _, err := VerifyPassiveICAO(mrtdtestfixtures.TestSodHex, map[string]string{"DGx": "aabb", "DG1": mrtdtestfixtures.TestDg1Hex, "DG2": mrtdtestfixtures.Dg2Hex}, pool); err == nil {
 		t.Error("expected an error for an invalid data group name")
 	}
-	if _, err := VerifyPassiveICAO(TestSodHex, map[string]string{"DG1": "not hex", "DG2": Dg2Hex}, pool); err == nil {
+	if _, err := VerifyPassiveICAO(mrtdtestfixtures.TestSodHex, map[string]string{"DG1": "not hex", "DG2": mrtdtestfixtures.Dg2Hex}, pool); err == nil {
 		t.Error("expected an error for invalid data group hex")
 	}
 }
 
-// TestVerifyPassiveICAO_unparseableDataGroupIsAVerificationFailureNotARequestError
+// TestVerifyICAOUnparseableDG
 // checks the deliberate split documented on VerifyPassiveICAO: DG1 present
 // in dataGroupsHex (structurally valid hex) but not a parseable MRZ is what
 // a corrupted/tampered document looks like, not a malformed request — so
 // this must come back as a verification failure (nil error), not an error,
 // unlike a bad data-group *name* or non-hex value (still hard errors, see
-// TestVerifyPassiveICAO_malformedInputsAreRequestErrors).
-func TestVerifyPassiveICAO_unparseableDataGroupIsAVerificationFailureNotARequestError(t *testing.T) {
-	result, err := VerifyPassiveICAO(TestSodHex, map[string]string{"DG1": "aabbcc", "DG2": Dg2Hex}, trustedTestCertPool(t))
+// TestVerifyICAOMalformed).
+func TestVerifyICAOUnparseableDG(t *testing.T) {
+	result, err := VerifyPassiveICAO(mrtdtestfixtures.TestSodHex, map[string]string{"DG1": "aabbcc", "DG2": mrtdtestfixtures.Dg2Hex}, trustedTestCertPool(t))
 	if err != nil {
 		t.Fatalf("VerifyPassiveICAO: %v (an unparseable-but-present data group is a verification failure, not a request error)", err)
 	}

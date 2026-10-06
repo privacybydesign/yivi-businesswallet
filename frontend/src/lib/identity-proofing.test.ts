@@ -11,6 +11,8 @@ import {
   readsIdentity,
   sendableByMail,
   verifyStages,
+  progressPollContinues,
+  reviewSubmitStep,
   assignedFlows,
   attributeAvailable,
   draftFromFlow,
@@ -18,19 +20,17 @@ import {
   editedFlowSelection,
   emptyFlowDraft,
   flowDraftError,
+  reachesAssuranceLevel,
   flowSpecFromDraft,
   formatDuration,
   secondsUntil,
   isProofingLive,
   isProofingStep,
   isRequestedAttribute,
-  latestRequestByMember,
-  levelRequirement,
   proofingErrorMessage,
   proofingStatsBy,
   proofingStatusLabel,
   requestSubject,
-  withAssuranceLevel,
   searchCustomers,
   sendableFlows,
   sessionDurationSeconds,
@@ -141,9 +141,6 @@ describe("face provider", () => {
   it("sends the provider only with the face step, Regula by default", () => {
     expect(flowSpecFromDraft(draft({})).faceProvider).toBe("regula");
     expect(
-      flowSpecFromDraft(draft({ faceProvider: "Iris" })).faceProvider,
-    ).toBe("Iris");
-    expect(
       flowSpecFromDraft(
         draft({ faceProvider: "regula", faceVerification: false }),
       ).faceProvider,
@@ -174,16 +171,17 @@ describe("face provider", () => {
 });
 
 describe("yiviAppAvailable", () => {
-  it("leaves only a face provider the Yivi app lacks to the Idem app", () => {
+  it("leaves a face step to either app when the chip is read", () => {
     const face = ["document_capture", "nfc_read", "face_verification"];
-    expect(yiviAppAvailable({ steps: face, faceProvider: "regula" })).toBe(
+    expect(yiviAppAvailable({ steps: face })).toBe(true);
+  });
+
+  it("leaves a face match against a reference photo to the Idem app", () => {
+    const noChip = ["document_capture", "face_verification"];
+    expect(yiviAppAvailable({ steps: noChip })).toBe(false);
+    expect(yiviAppAvailable({ steps: noChip, selfieLocation: "browser" })).toBe(
       true,
     );
-    expect(yiviAppAvailable({ steps: face })).toBe(true);
-    expect(yiviAppAvailable({ steps: face, faceProvider: "Iris" })).toBe(false);
-    expect(
-      yiviAppAvailable({ steps: ["nfc_read"], faceProvider: "Iris" }),
-    ).toBe(true);
   });
 
   it("leaves a flow that photographs the document to the Idem app", () => {
@@ -240,9 +238,10 @@ describe("draftFromFlow", () => {
     expect(edited).toMatchObject({
       documentAndChip: true,
       faceVerification: true,
-      // Substantial needs them, though this version predates that rule.
-      chipAuthentication: true,
-      liveness: true,
+      // Kept as stored, though substantial needs them: the editor refuses to
+      // save it until they are turned on, rather than turning them on itself.
+      chipAuthentication: false,
+      liveness: false,
       faceMatchThreshold: "0.7",
       assuranceLevel: "substantial",
       bsnPolicy: "omit",
@@ -259,41 +258,46 @@ describe("draftFromFlow", () => {
 });
 
 describe("assurance level", () => {
-  it("turns on what the level needs and keeps the rest", () => {
-    const bare = draft({
-      documentAndChip: false,
-      faceVerification: false,
-      faceProvider: "Iris",
-      blurFace: "true",
-    });
-    expect(withAssuranceLevel(bare, "low")).toMatchObject({
-      assuranceLevel: "low",
-      documentAndChip: true,
-      faceVerification: false,
-      faceProvider: "Iris",
-      blurFace: "true",
-    });
+  it("turns nothing on: a draft that cannot reach its level is refused", () => {
+    const chipOnly = draft({ faceVerification: false });
+    expect(flowDraftError({ ...chipOnly, assuranceLevel: "low" })).toBeNull();
+    const short = { ...chipOnly, assuranceLevel: "substantial" as const };
+    expect(reachesAssuranceLevel(short)).toBe(false);
+    expect(flowDraftError(short)).toBe("assuranceLevel");
+    expect(flowSpecFromDraft(short).steps).toEqual([
+      "document_capture",
+      "nfc_read",
+    ]);
     expect(
-      flowSpecFromDraft(withAssuranceLevel(bare, "substantial")),
-    ).toMatchObject({
-      steps: ["document_capture", "nfc_read", "face_verification"],
-      requiredChecks: [
-        "nfc.passive_auth",
-        "nfc.chip_auth",
-        "face.match",
-        "face.liveness",
-      ],
-      faceProvider: "regula",
-      requiredAssuranceLevel: "substantial",
-    });
+      flowDraftError(draft({ documentAndChip: false, assuranceLevel: "low" })),
+    ).toBe("assuranceLevel");
   });
 
-  it("locks nothing without a level", () => {
-    expect(levelRequirement("")).toEqual({});
-    expect(withAssuranceLevel(draft({ liveness: false }), "")).toMatchObject({
-      assuranceLevel: "",
-      liveness: false,
+  it("accepts a draft configured for more than its level requires", () => {
+    const full = draft({
+      chipAuthentication: true,
+      liveness: true,
+      faceProvider: "regula",
     });
+    expect(flowDraftError({ ...full, assuranceLevel: "low" })).toBeNull();
+    expect(
+      flowDraftError({ ...full, assuranceLevel: "substantial" }),
+    ).toBeNull();
+    expect(flowSpecFromDraft({ ...full, assuranceLevel: "low" })).toMatchObject(
+      {
+        requiredChecks: [
+          "nfc.passive_auth",
+          "nfc.chip_auth",
+          "face.match",
+          "face.liveness",
+        ],
+        requiredAssuranceLevel: "low",
+      },
+    );
+  });
+
+  it("needs nothing without a level", () => {
+    expect(reachesAssuranceLevel(draft({ documentAndChip: false }))).toBe(true);
   });
 });
 
@@ -301,6 +305,16 @@ describe("flowDraftError", () => {
   it("points at the field to fix", () => {
     expect(flowDraftError(draft())).toBeNull();
     expect(flowDraftError(draft({ name: " " }))).toBe("name");
+    // Countries are 3-letter codes; whether one exists is the engine's check.
+    expect(
+      flowDraftError(draft({ acceptedIssuingCountries: "nld, DEU" })),
+    ).toBeNull();
+    expect(flowDraftError(draft({ acceptedIssuingCountries: "NL" }))).toBe(
+      "issuingCountries",
+    );
+    expect(
+      flowDraftError(draft({ acceptedIssuingCountries: "NLD, Nederland" })),
+    ).toBe("issuingCountries");
     expect(
       flowDraftError(
         draft({ documentAndChip: false, faceVerification: false }),
@@ -312,18 +326,6 @@ describe("flowDraftError", () => {
     expect(flowDraftError(draft({ retentionSeconds: "-1" }))).toBe(
       "retentionSeconds",
     );
-  });
-});
-
-describe("latestRequestByMember", () => {
-  it("keeps the newest request per member", () => {
-    const latest = latestRequestByMember([
-      { id: "new", subjectUserId: "u1" },
-      { id: "old", subjectUserId: "u1" },
-      { id: "legacy" },
-    ]);
-    expect(latest.get("u1")?.id).toBe("new");
-    expect(latest.size).toBe(1);
   });
 });
 
@@ -477,6 +479,23 @@ describe("proofingErrorMessage", () => {
     ).toBe(t("identityProofing.errors.flowNotAllowed"));
   });
 
+  it.each([
+    [409, "customer_sessions_left", "customerSessionsLeft"],
+    [404, "api_key_not_found", "apiKeyNotFound"],
+    [404, "session_not_found", "sessionNotFound"],
+    [409, "not_under_review", "notUnderReview"],
+    [422, "reference_photo_required", "referencePhotoRequired"],
+    [404, "organization_not_found", "organizationNotFound"],
+    [404, "webhook_not_found", "webhookNotFound"],
+    [409, "link_started", "linkStarted"],
+  ] as const)("maps %i %s to its own copy", (status, code, key) => {
+    const copy = t(`identityProofing.errors.${key}`);
+    expect(copy).not.toBe(`identityProofing.errors.${key}`);
+    expect(proofingErrorMessage(apiError(status, code, "internal"), t)).toBe(
+      copy,
+    );
+  });
+
   it("falls back to generic copy for anything else", () => {
     expect(proofingErrorMessage(new Error("boom"), t)).toBe(
       t("identityProofing.errors.generic"),
@@ -498,6 +517,7 @@ describe("proofing stats", () => {
     rejected: number;
     needsReview: number;
     expired: number;
+    cancelled: number;
   } => ({
     customerId,
     flowId,
@@ -506,6 +526,7 @@ describe("proofing stats", () => {
     rejected: 1,
     needsReview: 0,
     expired: 1,
+    cancelled: 1,
   });
   const rows = [
     row("c1", "f1", 10, 6),
@@ -520,6 +541,7 @@ describe("proofing stats", () => {
       rejected: 3,
       needsReview: 0,
       expired: 3,
+      cancelled: 3,
     });
     expect(sumProofingStats([]).sessions).toBe(0);
   });
@@ -655,21 +677,21 @@ describe("customerDisplayStatus", () => {
       customerDisplayStatus({
         status: "active",
         webhook: { state: "failing" },
-        hasLiveKey: true,
+        hasApiKey: true,
       }),
     ).toBe("needs_attention");
     expect(
       customerDisplayStatus({
         status: "paused",
         webhook: { state: "failing" },
-        hasLiveKey: true,
+        hasApiKey: true,
       }),
     ).toBe("paused");
     expect(
       customerDisplayStatus({
         status: "active",
         webhook: { state: "delivering" },
-        hasLiveKey: true,
+        hasApiKey: true,
       }),
     ).toBe("active");
   });
@@ -679,14 +701,14 @@ describe("customerDisplayStatus", () => {
       customerDisplayStatus({
         status: "active",
         webhook: { state: "failing" },
-        hasLiveKey: false,
+        hasApiKey: false,
       }),
     ).toBe("setup_needed");
     expect(
       customerDisplayStatus({
         status: "paused",
         webhook: { state: "delivering" },
-        hasLiveKey: false,
+        hasApiKey: false,
       }),
     ).toBe("paused");
   });
@@ -788,13 +810,16 @@ describe("diploma modes mirror backend/internal/proofing", () => {
 
 describe("diploma step", () => {
   it("adds the diploma stage after the session when the flow has it", () => {
-    expect(verifyStages(true, true)).toEqual([
+    expect(verifyStages({ appChoice: true, diplomas: true })).toEqual([
       "overview",
       "method",
       "session",
       "diplomas",
     ]);
-    expect(verifyStages(false, false)).toEqual(["overview", "session"]);
+    expect(verifyStages({ appChoice: false, diplomas: false })).toEqual([
+      "overview",
+      "session",
+    ]);
   });
 
   it("ends the step once an extract is held or the time is up", () => {
@@ -810,26 +835,20 @@ describe("diploma step", () => {
     expect(sendableByMail({ diplomaMode: "required" })).toBe(false);
   });
 
-  // Mirrors proofing.ReadsIdentity: a request for one person is matched
+  // Mirrors proofing.readsIdentity: a request for one person is matched
   // against the document data.
   it("knows which flows read the name and date of birth", () => {
     expect(readsIdentity(undefined)).toBe(false);
-    expect(readsIdentity({ steps: ["document_capture", "nfc_read"] })).toBe(
-      true,
-    );
-    expect(readsIdentity({ steps: ["nfc_read"] })).toBe(false);
-    expect(
-      readsIdentity({ steps: ["document_capture"], requestedAttributes: [] }),
-    ).toBe(true);
+    // A flow that requests no data releases the outcome only.
+    expect(readsIdentity({})).toBe(false);
+    expect(readsIdentity({ requestedAttributes: [] })).toBe(false);
     expect(
       readsIdentity({
-        steps: ["document_capture"],
         requestedAttributes: ["dg1"],
       }),
     ).toBe(true);
     expect(
       readsIdentity({
-        steps: ["document_capture"],
         requestedAttributes: ["dg2"],
       }),
     ).toBe(false);
@@ -851,5 +870,72 @@ describe("diploma step", () => {
       expect(diplomaRejectionReason(reason, t)).not.toBe(reason);
     }
     expect(diplomaRejectionReason("something_new", t)).toBe("something_new");
+  });
+});
+
+describe("data request review", () => {
+  it("confirms an erasure before approving it", () => {
+    expect(
+      reviewSubmitStep({
+        decision: "approve",
+        kind: "data_erasure",
+        confirming: false,
+      }),
+    ).toBe("confirm");
+    // Submitting from the confirmation decides.
+    expect(
+      reviewSubmitStep({
+        decision: "approve",
+        kind: "data_erasure",
+        confirming: true,
+      }),
+    ).toBe("decide");
+  });
+
+  it("decides a rejection or an access request at once", () => {
+    expect(
+      reviewSubmitStep({
+        decision: "reject",
+        kind: "data_erasure",
+        confirming: false,
+      }),
+    ).toBe("decide");
+    expect(
+      reviewSubmitStep({
+        decision: "approve",
+        kind: "data_access",
+        confirming: false,
+      }),
+    ).toBe("decide");
+  });
+
+  it("names the sessions an erasure deletes", () => {
+    const key = "customers.sessions.dataRequest.data_erasure.confirm.title";
+    expect(t(key, { count: 1 })).toBe("Erase 1 session?");
+    expect(t(key, { count: 3 })).toBe("Erase 3 sessions?");
+  });
+});
+
+describe("progress poll", () => {
+  const notAllowed = new ApiError(403, "", "/api/v1/x", null);
+  const gone = new ApiError(404, "", "/api/v1/x", null);
+
+  it("polls until the first read and while live", () => {
+    expect(progressPollContinues(undefined, null)).toBe(true);
+    expect(progressPollContinues({ status: "pending" }, null)).toBe(true);
+    expect(progressPollContinues({ status: "approved" }, null)).toBe(false);
+  });
+
+  it("stops after a 403 or a 404", () => {
+    expect(progressPollContinues(undefined, notAllowed)).toBe(false);
+    expect(progressPollContinues({ status: "pending" }, gone)).toBe(false);
+  });
+
+  it("keeps polling after a passing failure", () => {
+    const unavailable = new ApiError(503, "", "/api/v1/x", null);
+    expect(progressPollContinues({ status: "pending" }, unavailable)).toBe(
+      true,
+    );
+    expect(progressPollContinues(undefined, new Error("offline"))).toBe(true);
   });
 });

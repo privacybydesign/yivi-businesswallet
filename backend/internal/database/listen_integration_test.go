@@ -29,7 +29,7 @@ func waitRuns(t *testing.T, runs *atomic.Int32, n int32) {
 	}
 }
 
-func TestRunOnNotifyWakesOnNotifyAndDeadlineOnly(t *testing.T) {
+func TestRunOnNotifyWakeups(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

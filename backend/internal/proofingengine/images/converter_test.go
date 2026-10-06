@@ -3,9 +3,12 @@ package images
 import (
 	"bytes"
 	"encoding/base64"
+	"image"
 	"image/png"
 	"os"
 	"testing"
+
+	jpeg2000 "github.com/mrjoshuak/go-jpeg2000"
 )
 
 // jp2SamplePhotoBase64 loads testdata/passport_photo.jp2: a real ICAO 9303
@@ -22,7 +25,7 @@ func jp2SamplePhotoBase64(t *testing.T) string {
 	return base64.StdEncoding.EncodeToString(raw)
 }
 
-func TestToDisplayablePNG_JPEG2000IsConvertedToPNG(t *testing.T) {
+func TestDisplayablePNGJPEG2000(t *testing.T) {
 	gotBase64, gotMime, err := ToDisplayablePNG(jp2SamplePhotoBase64(t), "image/jp2")
 	if err != nil {
 		t.Fatalf("ToDisplayablePNG returned error: %v", err)
@@ -48,7 +51,7 @@ func TestToDisplayablePNG_JPEG2000IsConvertedToPNG(t *testing.T) {
 	}
 }
 
-func TestToDisplayablePNG_JPEGPassesThroughUnchanged(t *testing.T) {
+func TestDisplayablePNGJPEG(t *testing.T) {
 	// A minimal 1x1 white JPEG. Driving-licence DG6 portraits are typically
 	// plain JPEG already and must not be touched — no browser rendering
 	// problem to solve, and re-encoding would lose quality for no reason.
@@ -66,7 +69,7 @@ func TestToDisplayablePNG_JPEGPassesThroughUnchanged(t *testing.T) {
 	}
 }
 
-func TestToDisplayablePNG_EmptyPhotoPassesThrough(t *testing.T) {
+func TestDisplayablePNGEmptyPhoto(t *testing.T) {
 	gotBase64, gotMime, err := ToDisplayablePNG("", "")
 	if err != nil {
 		t.Fatalf("ToDisplayablePNG returned error: %v", err)
@@ -76,8 +79,24 @@ func TestToDisplayablePNG_EmptyPhotoPassesThrough(t *testing.T) {
 	}
 }
 
-func TestToDisplayablePNG_InvalidBase64Errors(t *testing.T) {
+func TestDisplayablePNGBadBase64(t *testing.T) {
 	if _, _, err := ToDisplayablePNG("not-actually-base64!!!", "image/jp2"); err == nil {
 		t.Error("expected an error for invalid base64 input, got nil")
+	}
+}
+
+// A JPEG2000 whose header claims more than MaxJPEG2000Pixels is refused
+// before its raster is decoded, and passed through unconverted.
+func TestParseJPEG2000RefusesHuge(t *testing.T) {
+	var buf bytes.Buffer
+	if err := jpeg2000.Encode(&buf, image.NewGray(image.Rect(0, 0, 2001, 2000)), nil); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if _, err := parseJPEG2000(buf.Bytes()); err == nil {
+		t.Fatalf("a %d-byte JPEG2000 of 2001x2000 decoded, want it refused by its header", buf.Len())
+	}
+	in := base64.StdEncoding.EncodeToString(buf.Bytes())
+	if got, mime, err := ToDisplayablePNG(in, "image/jp2"); err != nil || got != in || mime != "image/jp2" {
+		t.Errorf("ToDisplayablePNG = %d bytes, %q, %v; want the original back", len(got), mime, err)
 	}
 }

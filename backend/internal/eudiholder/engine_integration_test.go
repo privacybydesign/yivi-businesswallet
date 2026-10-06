@@ -274,6 +274,87 @@ func TestEngineValidities(t *testing.T) {
 	}
 }
 
+// TestValiditiesLiftedSuspension pins that a batch reads the status of its
+// most recently checked instance. irmago's status sweep writes back one
+// representative instance per batch, picked from an unordered query, so after a
+// suspension is lifted the "valid" write can land on a sibling of the instance
+// that still records the suspension.
+func TestValiditiesLiftedSuspension(t *testing.T) {
+	eng, pool := newTestEngine(t)
+	ctx := context.Background()
+	org := uuid.New()
+
+	ref, err := eng.Store(ctx, org, sampleCredential("nl.kvk.registration", "hash-suspended"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	sibling := cloneInstance(t, pool, org, ref)
+
+	suspendedAt := time.Unix(1_800_000_000, 0).UTC()
+	liftedAt := suspendedAt.Add(time.Hour)
+	// statuslist.StatusSuspended (3) on the first sweep's representative, then
+	// StatusValid (1) on the next sweep's, a different instance of the same batch.
+	setInstanceCheck(t, pool, org, ref, 3, suspendedAt)
+	setInstanceCheck(t, pool, org, sibling, 1, liftedAt)
+
+	validities, err := eng.Validities(ctx, org)
+	if err != nil {
+		t.Fatalf("validities: %v", err)
+	}
+	for _, id := range []string{ref, sibling} {
+		if validities[id].Revoked {
+			t.Errorf("validities[%s].Revoked = true, want false: the latest check reads valid", id)
+		}
+	}
+
+	// And the other way round: a newer suspension wins over an older valid read.
+	setInstanceCheck(t, pool, org, ref, 3, liftedAt.Add(time.Hour))
+	validities, err = eng.Validities(ctx, org)
+	if err != nil {
+		t.Fatalf("validities after re-suspension: %v", err)
+	}
+	if !validities[sibling].Revoked {
+		t.Error("validities[sibling].Revoked = false, want true: the latest check reads suspended")
+	}
+}
+
+// cloneInstance copies a credential instance under a new id in the same batch,
+// standing in for a batch issued with more than one instance.
+func cloneInstance(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID, ref string) string {
+	t.Helper()
+	schema := "holder_" + hex.EncodeToString(orgID[:])
+	id := uuid.NewString()
+	//nolint:gosec // schema is a fixed identifier derived from the org id, not user input.
+	query := fmt.Sprintf(`INSERT INTO %[1]q.issued_credential_instances
+		SELECT (jsonb_populate_record(i, to_jsonb(i) || jsonb_build_object('id', $1::text))).*
+		FROM %[1]q.issued_credential_instances i WHERE id = $2`, schema)
+	tag, err := pool.Exec(context.Background(), query, id, ref)
+	if err != nil {
+		t.Fatalf("clone instance %s: %v", ref, err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("clone instance %s affected %d rows, want 1", ref, tag.RowsAffected())
+	}
+	return id
+}
+
+// setInstanceCheck writes an instance's status bit and check time, as one status
+// sweep's writeback does.
+func setInstanceCheck(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID, ref string, status uint8, checkedAt time.Time) {
+	t.Helper()
+	schema := "holder_" + hex.EncodeToString(orgID[:])
+	//nolint:gosec // schema is a fixed identifier derived from the org id, not user input.
+	query := fmt.Sprintf(`UPDATE %q.issued_credential_instances
+		SET last_known_status = $1, last_status_check_at = $2 WHERE id = $3`, schema)
+	tag, err := pool.Exec(context.Background(), query, status, checkedAt, ref)
+	if err != nil {
+		t.Fatalf("set check for %s: %v", ref, err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("set check for %s affected %d rows, want 1", ref, tag.RowsAffected())
+	}
+}
+
 // setInstanceStatus writes a credential instance's last known status-list bit in an
 // org's isolated schema, standing in for irmago's status-refresh writeback.
 func setInstanceStatus(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID, ref string, status uint8) {

@@ -25,6 +25,9 @@ const (
 	deliveryLease = 5 * time.Minute
 	// maxDeliveryError bounds the error kept on a delivery.
 	maxDeliveryError = 300
+	// DeliveryRetention is how long a delivered or failed delivery is kept, for
+	// the Webhooks tab and endpoint health, before PruneDeliveries drops it.
+	DeliveryRetention = 30 * 24 * time.Hour
 	// defaultSecretPurpose derives the default endpoint's signing secret from
 	// the proofing key, so every replica signs and verifies alike.
 	defaultSecretPurpose = "identity-proofing default webhook"
@@ -334,6 +337,7 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit int) ([]dueDelivery, 
 	if err != nil {
 		return nil, err
 	}
+
 	// A delivery for a customer endpoint that is gone is never sent to the default.
 	rows, err := s.db.Query(ctx, `WITH due AS (
 			SELECT d.id, w.url, w.secret_ciphertext FROM identity_proofing_webhook_deliveries d
@@ -352,6 +356,7 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit int) ([]dueDelivery, 
 	if err != nil {
 		return nil, fmt.Errorf("proofing: claim deliveries: %w", err)
 	}
+
 	defer rows.Close()
 	var out []dueDelivery
 	for rows.Next() {
@@ -376,9 +381,11 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit int) ([]dueDelivery, 
 		d.URL, d.Secret = *url, string(secret)
 		out = append(out, d)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("proofing: claim deliveries: %w", err)
 	}
+
 	return out, nil
 }
 
@@ -420,4 +427,15 @@ func (s *WebhookStore) recordAttempt(ctx context.Context, d dueDelivery, statusC
 		return fmt.Errorf("proofing: record delivery %s: %w", d.ID, err)
 	}
 	return nil
+}
+
+// PruneDeliveries drops delivered and failed deliveries older than
+// DeliveryRetention; a pending one stays until it is sent or fails.
+func (s *WebhookStore) PruneDeliveries(ctx context.Context) (int64, error) {
+	tag, err := s.db.Exec(ctx, `DELETE FROM identity_proofing_webhook_deliveries
+		WHERE status <> $1 AND created_at < now() - $2::interval`, DeliveryPending, DeliveryRetention.String())
+	if err != nil {
+		return 0, fmt.Errorf("proofing: prune webhook deliveries: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }

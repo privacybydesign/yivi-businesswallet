@@ -1,36 +1,18 @@
-// Package mrtdverify performs independent, server-side ICAO 9303 Passive
-// Authentication (verifying the EF.SOD's signature against a CSCA trust
-// anchor, then checking every submitted data group's hash against the
-// signed hash list inside it) and Active Authentication (verifying the
-// chip's signed challenge response against the public key carried in DG15,
-// or in DG13 for EU driving licences — both encode the same "tag 0x6F wraps
-// a SubjectPublicKeyInfo" shape).
+// Package mrtdverify runs ICAO 9303 chip checks server side, with gmrtd (as
+// go-passport-issuer does): Passive Authentication (EF.SOD's signature against a
+// CSCA anchor, then every data group's hash against its signed list) and
+// Active Authentication (the chip's signed challenge against the key in DG15,
+// or DG13 for a driving licence).
 //
-// This exists because api.chipChecksInfo was, until now, whatever the app
-// self-reported: nothing this server had independently confirmed (see
-// docs/session-model.md). This package is that confirmation. Reuses the
-// same gmrtd library (github.com/privacybydesign/gmrtd, imported here under
-// its github.com/gmrtd/gmrtd module path via a go.mod replace) that
-// go-passport-issuer already relies on for the same checks, rather than
-// hand-rolling CMS/ASN.1/X.509 chain verification.
+// Two Passive Authentication entry points:
 //
-// Two Passive Authentication entry points, for two different document
-// shapes:
-//
-//   - VerifyPassive is generic and document-type-agnostic: it hash-checks
-//     whatever data groups were submitted and verifies EF.SOD's signature
-//     against the whole trust pool, unfiltered. This is the only option for
-//     EU driving licences, whose DG1/DG6/DG13 use a non-ICAO encoding that
-//     gmrtd's typed document parsers cannot read at all (matches
-//     go-passport-issuer's own separate, un-country-filtered EDL path).
-//   - VerifyPassiveICAO is for passports/ID cards specifically: it builds a
-//     typed document.Document and calls gmrtd's passiveauth.PassiveAuth,
-//     which additionally cross-checks that EF.SOD's signing certificate's
-//     country matches DG1 MRZ's declared issuing country and narrows the
-//     trust pool to just that country's CSCAs before verifying — catching a
-//     document whose signer's country doesn't match what it claims to be,
-//     which VerifyPassive cannot. Mirrors go-passport-issuer's
-//     PassiveAuthenticationPassport.
+//   - VerifyPassive is generic: it checks whatever data groups were sent
+//     against the whole trust pool. The only option for EU driving licences,
+//     whose DG1/DG6/DG13 encodings gmrtd's typed parsers cannot read.
+//   - VerifyPassiveICAO is for passports and ID cards: gmrtd's
+//     passiveauth.PassiveAuth on a typed document, which also checks the
+//     signer's country against DG1's and narrows the pool to that country's
+//     CSCAs, as go-passport-issuer's PassiveAuthenticationPassport does.
 package mrtdverify
 
 import (
@@ -50,37 +32,24 @@ import (
 	"github.com/gmrtd/gmrtd/passiveauth"
 )
 
-// PassiveResult is the outcome of Passive Authentication: whether the EF.SOD
-// signature chains to a trusted CSCA, and whether every submitted data
-// group's hash matches what the signed EF.SOD says it should be.
+// PassiveResult is Passive Authentication's outcome.
 type PassiveResult struct {
 	SODSignatureValid   bool
 	CSCATrustChainValid bool
-	// IssuingCSCA is the trusted CSCA certificate's subject, best-effort —
-	// empty when the chain couldn't be parsed for a display name even
-	// though verification succeeded.
+	// IssuingCSCA is the trusted CSCA's subject, best effort: empty when it could
+	// not be read, even after a successful verification.
 	IssuingCSCA string
-	// DataGroupHashesValid is false if ANY submitted data group's hash
-	// doesn't match EF.SOD, or isn't listed in EF.SOD at all (the latter
-	// means a data group was injected that the signed hash list never
-	// covered — data tampering, not just a mismatch).
+	// DataGroupHashesValid is false when any submitted data group's hash differs
+	// from EF.SOD's, or EF.SOD does not list it (an injected group).
 	DataGroupHashesValid bool
-	// InvalidDataGroups names which submitted groups failed (e.g. ["DG2"]),
-	// sorted for stable output. Empty when DataGroupHashesValid is true.
+	// InvalidDataGroups are the groups that failed, sorted.
 	InvalidDataGroups []string
-	// DocumentComplete is false when gmrtd's own document.Document.Verify()
-	// (VerifyPassiveICAO only — see there) found the submission structurally
-	// incomplete relative to what EF.SOD itself expects: most importantly,
-	// DG14 or DG15 referenced by EF.SOD's hash list but never submitted at
-	// all. checkDataGroupHashes alone can't catch this — it only validates
-	// data groups that WERE submitted, so an app (or a MITM) could otherwise
-	// silently drop DG15 to dodge Active Authentication while still passing
-	// every check that only looks at what's present. Always true for
-	// VerifyPassive, which never builds a typed document.Document to run
-	// this check against.
+	// DocumentComplete is false when gmrtd's Document.Verify (VerifyPassiveICAO
+	// only) finds a data group EF.SOD lists missing, DG14 or DG15 above all: the
+	// hash check only sees what was sent, so dropping DG15 would otherwise dodge
+	// Active Authentication. Always true for VerifyPassive.
 	DocumentComplete bool
-	// DocumentVerifyErr is doc.Verify()'s error text when DocumentComplete is
-	// false, for diagnostics. Empty otherwise.
+	// DocumentVerifyErr is Document.Verify's error, for diagnostics.
 	DocumentVerifyErr string
 }
 
@@ -91,22 +60,11 @@ type ActiveResult struct {
 	Passed    bool
 }
 
-// VerifyPassive checks efSODHex (hex-encoded raw EF.SOD) against
-// trustedCerts, then verifies every data group in dataGroupsHex (keyed
-// "DG1".."DG16", hex-encoded raw bytes exactly as read off the chip — not
-// re-derived from parsed fields, or the hash won't match) against the
-// hashes EF.SOD lists.
-//
-// A non-nil error means verification could not even be attempted (malformed
-// input) — the caller should treat that as a bad request. A verification
-// that ran and failed (bad signature, untrusted chain, hash mismatch) is
-// reported via the returned PassiveResult's fields with a nil error: that's
-// an expected, legitimate outcome (a fraudulent or corrupted document), not
-// a request error.
+// VerifyPassive checks the hex EF.SOD against trustedCerts and every data group
+// ("DG1".."DG16", hex, raw as read) against its hashes. An error is malformed
+// input, a bad request; a check that ran and failed is in the result.
 func VerifyPassive(efSODHex string, dataGroupsHex map[string]string, trustedCerts cms.CertPool) (PassiveResult, error) {
-	// This path never builds a typed document.Document, so there's nothing
-	// to run gmrtd's completeness check (Document.Verify) against — see
-	// PassiveResult.DocumentComplete.
+	// No typed document here, so no completeness check.
 	result := PassiveResult{DocumentComplete: true}
 
 	sod, err := parseSOD(efSODHex)
@@ -123,8 +81,7 @@ func VerifyPassive(efSODHex string, dataGroupsHex map[string]string, trustedCert
 
 	certChain, err := sod.SD.Verify(trustedCerts)
 	if err != nil {
-		// The chain didn't verify — a legitimate (if unwelcome) result, not
-		// a request error.
+		// The chain did not verify: a result, not an error.
 		return result, nil
 	}
 	result.SODSignatureValid = true
@@ -133,39 +90,15 @@ func VerifyPassive(efSODHex string, dataGroupsHex map[string]string, trustedCert
 	return result, nil
 }
 
-// VerifyPassiveICAO is VerifyPassive's counterpart for ICAO passports/ID
-// cards — see the package doc comment for why this exists. Same inputs and
-// PassiveResult shape as VerifyPassive, but SODSignatureValid/
-// CSCATrustChainValid come from gmrtd's passiveauth.PassiveAuth against a
-// typed document.Document (which additionally cross-checks EF.SOD's
-// signing certificate's country against DG1's declared issuing country, and
-// narrows the trust pool to that country) instead of a raw
-// sod.SD.Verify(trustedCerts) call against the whole pool.
+// VerifyPassiveICAO is VerifyPassive for passports and ID cards, with the
+// signature checked by gmrtd's passiveauth.PassiveAuth on a typed document
+// (the country cross-check). PassiveAuth's error does not say which check
+// failed, and a bad hash also fails its signature check, so the hash result
+// comes from checkDataGroupHashes as in VerifyPassive.
 //
-// That check comes at a cost: PassiveAuth's own internal data-group-hash
-// check runs before, and gates, its signature verification, and its error
-// doesn't say *why* it failed (country mismatch vs. no CSCA for that
-// country vs. hash mismatch vs. bad signature) — so unlike VerifyPassive, a
-// single tampered/injected data group here can also pull
-// SODSignatureValid/CSCATrustChainValid down to false even though EF.SOD's
-// own signature might still be genuinely valid on its own. To keep the
-// granular diagnostic precise regardless, InvalidDataGroups/
-// DataGroupHashesValid are still computed independently via the same
-// checkDataGroupHashes helper VerifyPassive uses, not derived from
-// PassiveAuth's opaque error.
-//
-// DG1 and DG2 must be present as entries in dataGroupsHex (matches ICAO 9303
-// and go-passport-issuer's own parsePassportDGs) — an entry simply missing
-// from the map is a hard request error, same convention as VerifyPassive
-// (the app should always read and send DG1/DG2 for a passport/ID-card read;
-// not doing so is an integration bug, not something a chip read could ever
-// produce). A data group that IS present but fails to parse into its typed
-// form — a corrupted or tampered MRZ, say — is different: that's exactly
-// what a fraudulent or corrupted document looks like, so it's treated like
-// any other verification failure (see below), not a request error. Any
-// entry with an invalid name or non-hex value is still a hard error,
-// regardless — checkDataGroupHashes above already validates that for every
-// entry before this function does anything document-shape-specific.
+// DG1 and DG2 must be sent: a missing one is a bad request. A group that is
+// sent but does not parse (a tampered MRZ) is a failed verification, not an
+// error.
 func VerifyPassiveICAO(efSODHex string, dataGroupsHex map[string]string, trustedCerts cms.CertPool) (PassiveResult, error) {
 	var result PassiveResult
 
@@ -188,34 +121,23 @@ func VerifyPassiveICAO(efSODHex string, dataGroupsHex map[string]string, trusted
 		return result, fmt.Errorf("mrtdverify: DG2 is mandatory for ICAO passive authentication but was not provided")
 	}
 
-	// dataGroupsHex was already fully validated by checkDataGroupHashes
-	// above (every name matches "DG<1-16>", every value is valid hex), so
-	// the only way doc.NewDG can still fail below is the data group's
-	// *content* not parsing into its typed form.
+	// The names and hex are already validated, so a parse failure is the content's.
 	var doc document.Document
 	doc.Mf.Lds1.Sod = sod
 	for dgName, dgHex := range dataGroupsHex {
 		dgNumber, _ := dataGroupNumber(dgName)
 		dgBytes, _ := hex.DecodeString(dgHex)
-		// A parse failure here is left out of doc rather than erroring the
-		// whole function — see the doc comment above. checkDataGroupHashes
-		// already flagged it in InvalidDataGroups either way.
+		// A group that does not parse stays out of doc; it is already in
+		// InvalidDataGroups.
 		_ = doc.NewDG(dgNumber, dgBytes)
 	}
 	if doc.Mf.Lds1.Dg1 == nil {
-		// DG1 was present in the request (checked above) but failed to
-		// parse: no MRZ to cross-check a country against, and no
-		// country-narrowed pool to build — report the same as any other
-		// verification failure PassiveAuth would have caught.
+		// DG1 does not parse: no country to check, so the verification fails.
 		return result, nil
 	}
 
-	// gmrtd's own completeness check: catches EF.SOD's hash list referencing
-	// DG14/DG15 that was never submitted at all — the "app stripped DG15 to
-	// dodge Active Authentication" case checkDataGroupHashes can't see, since
-	// it only validates data groups that ARE present. Run regardless of
-	// PassiveAuth's own outcome below, since an incomplete submission is a
-	// failure on its own terms.
+	// gmrtd's completeness check (see PassiveResult.DocumentComplete), whatever
+	// PassiveAuth finds.
 	if verifyErr := doc.Verify(); verifyErr != nil {
 		result.DocumentVerifyErr = verifyErr.Error()
 	} else {
@@ -224,12 +146,8 @@ func VerifyPassiveICAO(efSODHex string, dataGroupsHex map[string]string, trusted
 
 	paResult, err := passiveauth.PassiveAuth(&doc, trustedCerts)
 	if err != nil || paResult == nil || !paResult.Success || paResult.Sod == nil {
-		// PassiveAuth ran the check and found something wrong (country
-		// mismatch, no CSCA for that country, a hash mismatch, or a bad
-		// signature) — the "verification ran and failed" case, reported via
-		// zero-value fields with a nil error, not a request error. See the
-		// doc comment above for why this can't distinguish which of those it
-		// was.
+		// PassiveAuth found something wrong (country, CSCA, hash or signature): a
+		// failed verification.
 		return result, nil
 	}
 	result.SODSignatureValid = true
@@ -238,12 +156,9 @@ func VerifyPassiveICAO(efSODHex string, dataGroupsHex map[string]string, trusted
 	return result, nil
 }
 
-// VerifyActive checks the Active/Chip Authentication challenge-response.
-// aaKeyDGHex is DG15's (or DG13's) raw bytes. Any of aaKeyDGHex/nonceHex/
-// signatureHex empty means AA wasn't attempted (Attempted: false, nil
-// error) rather than an error. A non-nil error means verification couldn't
-// be attempted at all (malformed input); a checked-but-failed signature is
-// Passed=false with a nil error.
+// VerifyActive checks the Active/Chip Authentication response against the key
+// in aaKeyDGHex (DG15, or DG13). With any input empty AA was not attempted. An
+// error is malformed input; a signature that does not verify is Passed false.
 func VerifyActive(aaKeyDGHex, nonceHex, signatureHex string) (ActiveResult, error) {
 	var result ActiveResult
 	if aaKeyDGHex == "" || nonceHex == "" || signatureHex == "" {
@@ -271,17 +186,12 @@ func VerifyActive(aaKeyDGHex, nonceHex, signatureHex string) (ActiveResult, erro
 
 	res, err := activeauth.ValidateActiveAuthSignature(dg15, signature, nonce)
 	if err != nil || res == nil || !res.Success {
-		// The signature was checked and didn't verify — legitimate result,
-		// not a request error.
 		return result, nil
 	}
 	result.Passed = true
 	return result, nil
 }
 
-// parseSOD hex-decodes and parses efSODHex into a *document.SOD, or returns
-// a hard (malformed-input) error. Shared by VerifyPassive and
-// VerifyPassiveICAO.
 func parseSOD(efSODHex string) (*document.SOD, error) {
 	sodBytes, err := hex.DecodeString(efSODHex)
 	if err != nil || len(sodBytes) == 0 {
@@ -294,14 +204,8 @@ func parseSOD(efSODHex string) (*document.SOD, error) {
 	return sod, nil
 }
 
-// checkDataGroupHashes hashes every entry in dataGroupsHex with the
-// algorithm EF.SOD declares and compares against EF.SOD's signed hash list,
-// returning the (sorted) names of any that don't match — including ones not
-// listed in EF.SOD at all, i.e. present on the chip but never covered by the
-// signed hash list: data injection, not just a mismatch. Shared by
-// VerifyPassive and VerifyPassiveICAO so both report the same granular
-// diagnostic regardless of which one computes
-// SODSignatureValid/CSCATrustChainValid.
+// checkDataGroupHashes hashes every data group with EF.SOD's algorithm and
+// returns those whose hash differs or that EF.SOD does not list, sorted.
 func checkDataGroupHashes(sod *document.SOD, dataGroupsHex map[string]string) ([]string, error) {
 	hashAlg := sod.LdsSecurityObject.HashAlgorithm.Algorithm
 
@@ -334,9 +238,7 @@ func checkDataGroupHashes(sod *document.SOD, dataGroupsHex map[string]string) ([
 	return invalid, nil
 }
 
-// issuingCSCASubject best-effort extracts the trusted CSCA certificate's
-// (the chain's root) subject for display; empty if certChain is empty or
-// the certificate can't be parsed.
+// issuingCSCASubject is the chain root's subject, "" when unreadable.
 func issuingCSCASubject(certChain [][]byte) string {
 	if len(certChain) == 0 {
 		return ""
@@ -360,9 +262,8 @@ func dataGroupNumber(dgName string) (int, error) {
 	return num, nil
 }
 
-// passportCertPoolOnce/-Pool/-Err memoize the embedded ICAO CSCA masterlist
-// gmrtd bundles (cms.DefaultMasterList) — loading it does non-trivial ASN.1
-// parsing, and it's the same trust anchor for every request.
+// The embedded ICAO masterlist (cms.DefaultMasterList) is parsed once: it is
+// the same anchor for every request.
 var (
 	passportCertPoolOnce sync.Once
 	passportCertPool     cms.CertPool
@@ -378,12 +279,9 @@ func PassportCertPool() (cms.CertPool, error) {
 	return passportCertPool, passportCertPoolErr
 }
 
-// CertPoolFor returns the trust anchor to use for Passive Authentication,
-// selected by which data group carries the Active Authentication public key
-// (see mrtdEvidenceRequest.AAKeyDataGroup in the api package): "DG13" (EU
-// driving licences) gets DrivingLicenceCertPool; anything else, including
-// empty (no AA key at all), gets the passport/ID-card masterlist — DG13 is
-// the only data group EU driving licences and passports don't share.
+// CertPoolFor is the Passive Authentication anchor for the key data group:
+// DG13 (EU driving licences) gets DrivingLicenceCertPool, anything else the
+// passport and ID-card masterlist.
 func CertPoolFor(aaKeyDataGroup string) (cms.CertPool, error) {
 	if aaKeyDataGroup == "DG13" {
 		return DrivingLicenceCertPool()
@@ -391,15 +289,10 @@ func CertPoolFor(aaKeyDataGroup string) (cms.CertPool, error) {
 	return PassportCertPool()
 }
 
-// DrivingLicenceCertPool is the trust anchor for EU driving-licence Passive
-// Authentication. PassportCertPool works because gmrtd itself bundles the
-// ICAO CSCA masterlist (Germany/Netherlands/Indonesia, checked into gmrtd's
-// own cms/csca.go via go:embed) — this project just calls into gmrtd for
-// that data. gmrtd bundles nothing equivalent for EU driving licences, and
-// there's currently nowhere else this project sources that data from
-// either, so there's nothing to load here: this returns an empty pool —
-// CSCATrustChainValid always comes back false for driving licences, rather
-// than silently skipping the check — until that changes.
+// DrivingLicenceCertPool is the EU driving-licence anchor. gmrtd bundles a
+// masterlist for passports but none for licences, and nothing else supplies
+// one, so it is empty: a licence's CSCATrustChainValid is false rather than
+// the check being skipped.
 func DrivingLicenceCertPool() (cms.CertPool, error) {
 	return &cms.GenericCertPool{}, nil
 }

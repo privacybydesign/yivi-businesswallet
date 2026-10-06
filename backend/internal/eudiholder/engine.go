@@ -305,6 +305,10 @@ func (e *Engine) Validities(ctx context.Context, orgID uuid.UUID) (map[string]He
 	// reference and bit, plus its batch's claims. A status refresh writes back only
 	// one representative instance per batch (irmago's RevocationService), so the
 	// status facts are aggregated per batch below: a batch is revoked together.
+	// irmago picks that representative from an unordered query, so a later sweep
+	// may write a different instance than the one an earlier sweep marked
+	// suspended; the most recently checked instance is therefore the batch's
+	// status, and an OR over every instance only applies while none was checked.
 	var rows []struct {
 		ID                datatypes.UUID
 		CredentialBatchID datatypes.UUID
@@ -332,17 +336,32 @@ func (e *Engine) Validities(ctx context.Context, orgID uuid.UUID) (map[string]He
 	}
 	type batchStatus struct {
 		revoked, hasStatusList bool
-		checkedAt              *time.Time
+		// uncheckedRevoked is the OR over instances never checked, the fallback
+		// while no sweep has written any instance of the batch.
+		uncheckedRevoked bool
+		checkedAt        *time.Time
 	}
 	batches := map[datatypes.UUID]batchStatus{}
 	for _, row := range rows {
 		b := batches[row.CredentialBatchID]
-		b.revoked = b.revoked || statusRevoked(row.LastKnownStatus)
 		b.hasStatusList = b.hasStatusList || row.HasStatusList
-		if row.LastStatusCheckAt != nil && (b.checkedAt == nil || row.LastStatusCheckAt.After(*b.checkedAt)) {
+		rowRevoked := statusRevoked(row.LastKnownStatus)
+		switch {
+		case row.LastStatusCheckAt == nil:
+			b.uncheckedRevoked = b.uncheckedRevoked || rowRevoked
+		case b.checkedAt == nil || row.LastStatusCheckAt.After(*b.checkedAt):
 			b.checkedAt = row.LastStatusCheckAt
+			b.revoked = rowRevoked
+		case row.LastStatusCheckAt.Equal(*b.checkedAt):
+			b.revoked = b.revoked || rowRevoked
 		}
 		batches[row.CredentialBatchID] = b
+	}
+	for id, b := range batches {
+		if b.checkedAt == nil {
+			b.revoked = b.uncheckedRevoked
+			batches[id] = b
+		}
 	}
 	validities := make(map[string]HeldValidity, len(rows))
 	for _, row := range rows {

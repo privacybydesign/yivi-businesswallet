@@ -33,10 +33,13 @@ type Handler struct {
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
 	// apiCalls and apiSessions rate-limit the public API per customer,
-	// hostedCalls the hosted page per link.
+	// hostedCalls the hosted page per customer, across all its links.
 	apiCalls    *ratelimit.Limiter
 	apiSessions *ratelimit.Limiter
 	hostedCalls *ratelimit.Limiter
+	// memberFaceFrames holds the on-screen Yivi face check's frames per org:
+	// each one is a Regula call.
+	memberFaceFrames *ratelimit.Limiter
 	// idempotency keeps customer-API POST answers by Idempotency-Key; nil
 	// runs every call.
 	idempotency *IdempotencyStore
@@ -50,8 +53,8 @@ func (h *Handler) SetIdempotencyStore(s *IdempotencyStore) { h.idempotency = s }
 func NewHandler(service *Service, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		service: service, requireUser: requireUser, authorize: authorize,
-		apiCalls: ratelimit.New(APICallLimit), apiSessions: ratelimit.New(APISessionLimit),
-		hostedCalls: ratelimit.New(HostedCallLimit),
+		apiCalls: ratelimit.New(apiCallLimit), apiSessions: ratelimit.New(APISessionLimit),
+		hostedCalls: ratelimit.New(HostedCallLimit), memberFaceFrames: ratelimit.New(MemberFaceFrameLimit),
 	}
 }
 
@@ -83,7 +86,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/claim-link", member(respond.HandlerFunc(h.claimLink)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/app", member(respond.HandlerFunc(h.app)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure", member(respond.HandlerFunc(h.yiviDisclosure)))
-	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/face", member(respond.HandlerFunc(h.faceFrame)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/face", member(respond.HandlerFunc(h.limitMemberFace(h.faceFrame))))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", admin(respond.HandlerFunc(h.decideReview)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", admin(respond.HandlerFunc(h.requestResult)))
@@ -122,8 +125,8 @@ func orgFromRequest(r *http.Request) Org {
 
 type flowResponse struct {
 	proofingprovider.Flow
-	// Completable is false for a flow a recipient cannot finish with only the
-	// vcmrtd app (see Completable); it cannot be made available to members.
+	// flowCompletable is false for a flow a recipient cannot finish with only the
+	// vcmrtd app (see flowCompletable); it cannot be made available to members.
 	Completable bool `json:"completable"`
 	// Allowed is the admin having made the flow available to members; Default
 	// is the one the request form preselects.
@@ -133,7 +136,7 @@ type flowResponse struct {
 	// identity check; absent on a single version (create, edit, versions),
 	// whose answer does not read the wallet's setting.
 	DiplomaMode DiplomaMode `json:"diplomaMode,omitempty"`
-	// NeedsReferencePhoto is a flow that matches the face without reading the
+	// flowNeedsReferencePhoto is a flow that matches the face without reading the
 	// chip: only a customer's API can send it, with its own photo.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
 	// Kind is what the flow's sessions are for (an identity check, or a
@@ -147,15 +150,15 @@ func newFlowResponse(f OrgFlow) flowResponse {
 		f.Steps = []string{}
 	}
 	return flowResponse{
-		Flow: f.Flow, Completable: Completable(f.Flow), Allowed: f.Allowed, Default: f.Default, DiplomaMode: f.Diplomas,
-		NeedsReferencePhoto: NeedsReferencePhoto(f.Flow), Kind: f.Kind,
+		Flow: f.Flow, Completable: flowCompletable(f.Flow), Allowed: f.Allowed, Default: f.Default, DiplomaMode: f.Diplomas,
+		NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind,
 	}
 }
 
 // listFlows shows an admin every flow of the org and a member the ones the admin
 // made available to them.
 func (h *Handler) listFlows(w http.ResponseWriter, r *http.Request) error {
-	flows, err := h.service.Flows(r.Context(), orgFromRequest(r), organization.IsAdmin(r.Context()))
+	flows, err := h.service.Flows(r.Context(), orgFromRequest(r), flowView(r))
 	if err != nil {
 		return mapError(err)
 	}
@@ -252,11 +255,9 @@ type requestResponse struct {
 	FlowID      string `json:"flowId"`
 	FlowName    string `json:"flowName"`
 	FlowVersion int    `json:"flowVersion,omitempty"`
-	// Method is the app the session was created for, then the one IPS reports
+	// Method is the app the session was created for, then the one the engine reports
 	// the subject used; absent on a request from before the choice existed.
-	Method string `json:"method,omitempty"`
-	// Mode is test for a test key's scripted request, else live.
-	Mode           Mode       `json:"mode"`
+	Method         string     `json:"method,omitempty"`
 	Status         Status     `json:"status"`
 	AssuranceLevel string     `json:"assuranceLevel,omitempty"`
 	EIDASLevel     string     `json:"eidasLevel,omitempty"`
@@ -296,7 +297,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		ID: req.ID, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		CustomerID: req.CustomerID, CustomerName: req.CustomerName,
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
-		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Mode: req.mode(), Status: req.EffectiveStatus(now),
+		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Status: req.EffectiveStatus(now),
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject,
@@ -305,7 +306,8 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 }
 
 // listRequests shows an admin every request of the org and a member the ones they
-// sent; ?customerId= narrows either to one customer's.
+// sent; ?customerId= narrows either to one customer's, ?subjectUserId= to the
+// ones proofing one member.
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	var filter RequestFilter
@@ -319,6 +321,13 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid customer id"}
 		}
 		filter.CustomerID = &id
+	}
+	if raw := r.URL.Query().Get("subjectUserId"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid subject user id"}
+		}
+		filter.SubjectUserID = &id
 	}
 	reqs, err := h.service.Requests(r.Context(), org.ID, filter)
 	if err != nil {
@@ -341,9 +350,6 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// requestEvents is one request's timeline, oldest first: every audit event
-// about it (sent, session created and started, outcome, expiry). An admin sees
-// any request's, a member only one they sent.
 // parseRequestID reads a request id as the dashboard has it (a UUID) or as the
 // customer API and webhooks show it (a ps_ id), so either can be looked up.
 func parseRequestID(s string) (uuid.UUID, error) {
@@ -368,7 +374,7 @@ func sentRequestTarget(r *http.Request) (uuid.UUID, *uuid.UUID, error) {
 	return id, &caller, nil
 }
 
-// getRequest is one request, re-checked at IPS: what the on-screen page polls.
+// getRequest is one request, re-checked in the engine: what the on-screen page polls.
 func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	id, requestedBy, err := sentRequestTarget(r)
 	if err != nil {
@@ -513,6 +519,21 @@ func writeYiviDisclosure(w http.ResponseWriter, r *http.Request, disclosure proo
 	return nil
 }
 
+// MemberFaceFrameLimit holds the on-screen Yivi face check's frames per org,
+// as HostedCallLimit holds a customer's hosted links, and per API replica. It
+// fits some ten members at a face check at once, a frame every 400 ms each.
+var MemberFaceFrameLimit = ratelimit.Limit{Burst: 1500, Per: time.Minute}
+
+// limitMemberFace counts a face frame against its org's MemberFaceFrameLimit.
+func (h *Handler) limitMemberFace(next respond.HandlerFunc) respond.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		if err := rateLimited(w, h.memberFaceFrames, orgFromRequest(r).ID); err != nil {
+			return err
+		}
+		return next(w, r)
+	}
+}
+
 // maxFaceFrameBytes caps one camera frame as the page sends it: a JPEG data
 // URL of a few hundred kilobytes at most.
 const maxFaceFrameBytes = 2 << 20
@@ -569,6 +590,9 @@ func newFaceVerdictResponse(verdict proofingprovider.FaceVerdict) faceFrameRespo
 	}
 }
 
+// requestEvents is one request's timeline, oldest first: every audit event
+// about it (sent, session created and started, outcome, expiry). An admin sees
+// any request's, a member only one they sent.
 func (h *Handler) requestEvents(w http.ResponseWriter, r *http.Request) error {
 	id, requestedBy, err := sentRequestTarget(r)
 	if err != nil {
@@ -613,7 +637,7 @@ type createRequestResponse struct {
 	DeepLink          string     `json:"deepLink,omitempty"`
 	DeepLinkExpiresAt *time.Time `json:"deepLinkExpiresAt,omitempty"`
 	// HostedURL is a hosted request's link (channel hosted), for the member
-	// to hand the customer's subject; valid HostedLinkTTL.
+	// to hand the customer's subject; valid hostedLinkTTL.
 	HostedURL string `json:"hostedUrl,omitempty"`
 }
 
@@ -668,7 +692,7 @@ type customerResponse struct {
 	// AllowedRedirectOrigins are where a hosted page may send its subject back
 	// to and be embedded on.
 	AllowedRedirectOrigins []string  `json:"allowedRedirectOrigins"`
-	HasLiveKey             bool      `json:"hasLiveKey"`
+	HasAPIKey              bool      `json:"hasApiKey"`
 	CreatedAt              time.Time `json:"createdAt"`
 	UpdatedAt              time.Time `json:"updatedAt"`
 }
@@ -687,7 +711,7 @@ func newCustomerResponse(slug string, c Customer, health map[uuid.UUID]WebhookHe
 		DataRetentionDays: c.Settings.DataRetentionDays,
 		Webhook:           newWebhookHealthResponse(health[c.ID]),
 		Branding:          newBrandingResponse(slug, c),
-		HasLiveKey:        c.HasLiveKey,
+		HasAPIKey:         c.HasAPIKey,
 		// Never null: the admin UI edits it as a list.
 		AllowedRedirectOrigins: append([]string{}, c.RedirectOrigins...),
 		CreatedAt:              c.CreatedAt,
@@ -778,14 +802,17 @@ func (h *Handler) updateCustomer(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+
 	var body updateCustomerRequest
 	if err := decode(r, &body); err != nil {
 		return err
 	}
+
 	if body.Name == nil && body.Paused == nil && body.SessionTTLSeconds == nil && body.DataRetentionDays == nil &&
 		body.AllowedRedirectOrigins == nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "nothing to update"}
 	}
+
 	orgID := orgFromRequest(r).ID
 	var c Customer
 	if body.Name != nil {
@@ -793,11 +820,17 @@ func (h *Handler) updateCustomer(w http.ResponseWriter, r *http.Request) error {
 			return mapError(err)
 		}
 	}
+
 	if body.Paused != nil {
-		if c, err = h.service.SetCustomerPaused(r.Context(), orgID, id, *body.Paused); err != nil {
+		status := CustomerActive
+		if *body.Paused {
+			status = CustomerPaused
+		}
+		if c, err = h.service.SetCustomerStatus(r.Context(), orgID, id, status); err != nil {
 			return mapError(err)
 		}
 	}
+
 	if body.SessionTTLSeconds != nil || body.DataRetentionDays != nil {
 		current, err := h.service.Customer(r.Context(), orgID, id)
 		if err != nil {
@@ -814,11 +847,13 @@ func (h *Handler) updateCustomer(w http.ResponseWriter, r *http.Request) error {
 			return mapError(err)
 		}
 	}
+
 	if body.AllowedRedirectOrigins != nil {
 		if c, err = h.service.SaveCustomerRedirectOrigins(r.Context(), orgID, id, *body.AllowedRedirectOrigins); err != nil {
 			return mapError(err)
 		}
 	}
+
 	return h.respondCustomer(w, r, c)
 }
 
@@ -842,6 +877,7 @@ type statsRowResponse struct {
 	Rejected    int       `json:"rejected"`
 	NeedsReview int       `json:"needsReview"`
 	Expired     int       `json:"expired"`
+	Cancelled   int       `json:"cancelled"`
 }
 
 type statsResponse struct {
@@ -849,7 +885,7 @@ type statsResponse struct {
 	Rows  []statsRowResponse `json:"rows"`
 }
 
-// stats counts the customer requests of the last StatsWindow per customer and
+// stats counts the customer requests of the last statsWindow per customer and
 // flow: an admin's over every request of the org, a member's over the ones they
 // sent, as listRequests shows them.
 func (h *Handler) stats(w http.ResponseWriter, r *http.Request) error {
@@ -879,11 +915,14 @@ type customerFlowResponse struct {
 	Assigned    bool        `json:"assigned"`
 	Default     bool        `json:"default"`
 	DiplomaMode DiplomaMode `json:"diplomaMode"`
-	// NeedsReferencePhoto: see flowResponse. Completable counts it as
-	// finishable (CustomerCompletable), sent through the customer's API.
+	// NeedsReferencePhoto: see flowResponse. flowCompletable counts it as
+	// finishable (customerCompletable), sent through the customer's API.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
 	// Kind: see flowResponse.
 	Kind FlowKind `json:"kind"`
+	// RetentionDays is how many days a subject's data is kept at most on this
+	// flow for the customer, as the on-screen page tells them.
+	RetentionDays int `json:"retentionDays"`
 }
 
 // listCustomerFlows shows an admin every flow of the org with the customer's
@@ -893,7 +932,7 @@ func (h *Handler) listCustomerFlows(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
-	flows, err := h.service.CustomerFlows(r.Context(), orgFromRequest(r), id, organization.IsAdmin(r.Context()))
+	flows, err := h.service.CustomerFlows(r.Context(), orgFromRequest(r), id, flowView(r))
 	if err != nil {
 		return mapError(err)
 	}
@@ -903,8 +942,8 @@ func (h *Handler) listCustomerFlows(w http.ResponseWriter, r *http.Request) erro
 			f.Steps = []string{}
 		}
 		out = append(out, customerFlowResponse{
-			Flow: f.Flow, Completable: CustomerCompletable(f.Flow), Assigned: f.Assigned, Default: f.Default, DiplomaMode: f.Diplomas,
-			NeedsReferencePhoto: NeedsReferencePhoto(f.Flow), Kind: f.Kind,
+			Flow: f.Flow, Completable: customerCompletable(f.Flow), Assigned: f.Assigned, Default: f.Default, DiplomaMode: f.Diplomas,
+			NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind, RetentionDays: f.RetentionDays,
 		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)
@@ -980,6 +1019,10 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_assigned", Message: "this flow is not assigned to the customer"}
 	case errors.Is(err, ErrCustomerPaused):
 		return &respond.APIError{Status: http.StatusConflict, Code: "customer_paused", Message: "proofing is paused for this customer"}
+	case errors.Is(err, ErrCustomerHasOpenReviews):
+		return &respond.APIError{Status: http.StatusConflict, Code: "customer_has_open_reviews", Message: "decide this customer's sessions waiting for review first"}
+	case errors.Is(err, ErrCustomerSessionsLeft):
+		return &respond.APIError{Status: http.StatusConflict, Code: "customer_sessions_left", Message: "sessions were sent for this customer while it was being removed; try again"}
 	case errors.Is(err, ErrCustomerNoAPIKey):
 		return &respond.APIError{Status: http.StatusConflict, Code: "customer_no_api_key", Message: "create a live API key for this customer first"}
 	case errors.Is(err, ErrAPIKeyNotFound):
@@ -1031,10 +1074,19 @@ func mapError(err error) error {
 	case errors.Is(err, proofingprovider.ErrMethodUnavailable):
 		return &respond.APIError{Status: http.StatusConflict, Code: "method_unavailable", Message: "Yivi app sessions need the Regula face check, which this deployment has not configured"}
 	case errors.As(err, &rejected):
-		// IPS's own validation message (e.g. which check a step requires) is what
+		// The engine's own validation message (e.g. which check a step requires) is what
 		// the admin needs to fix the flow.
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "rejected_by_provider", Message: rejected.Message}
 	default:
 		return fmt.Errorf("identity proofing: %w", err)
 	}
+}
+
+// flowView is the flows a caller sees: every one for an admin, the ones
+// members may send on for a member.
+func flowView(r *http.Request) FlowView {
+	if organization.IsAdmin(r.Context()) {
+		return FlowsAll
+	}
+	return FlowsAllowed
 }

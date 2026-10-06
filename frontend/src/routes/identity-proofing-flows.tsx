@@ -37,9 +37,7 @@ import {
   flowDraftError,
   flowSpecFromDraft,
   isProofingStep,
-  levelRequirement,
   proofingErrorMessage,
-  withAssuranceLevel,
 } from "../lib/identity-proofing";
 import type {
   EditableFlow,
@@ -428,9 +426,19 @@ export function FlowEditor({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const editing = mode.kind === "edit" ? mode.flow : null;
+  // The flow this editor already saved, with the spec it was saved with. When
+  // a follow-up save (diplomas, kind) fails, a retry must not save the flow
+  // again: a create would make a second flow, an edit another version.
+  const [saved, setSaved] = useState<{
+    flow: ProofingFlow;
+    spec: string;
+  } | null>(null);
   const create = useCreateProofingFlowMutation(slug);
-  const edit = useEditProofingFlowMutation(slug, editing?.id ?? "");
-  const save = editing ? edit : create;
+  const edit = useEditProofingFlowMutation(
+    slug,
+    saved?.flow.id ?? editing?.id ?? "",
+  );
+  const save = editing || saved ? edit : create;
   // Kept by the wallet, not the proofing service: saved after the flow.
   const saveDiplomas = useSaveProofingFlowDiplomasMutation(slug);
   const savedDiplomas: DiplomaMode = editing?.diplomaMode ?? "off";
@@ -444,8 +452,6 @@ export function FlowEditor({
   const [touched, setTouched] = useState(false);
   const invalid = flowDraftError(draft);
   const steps = draftSteps(draft);
-
-  const required = levelRequirement(draft.assuranceLevel);
 
   function update(patch: Partial<ProofingFlowDraft>): void {
     setDraft((current) => ({ ...current, ...patch }));
@@ -467,32 +473,42 @@ export function FlowEditor({
     if (invalid !== null) {
       return;
     }
-    save.mutate(flowSpecFromDraft(draft), {
-      onSuccess: (flow) => {
-        const finish = (): void => {
-          onSaved?.(flow);
-          onDone();
-        };
-        const kindThenFinish = (): void => {
-          if (flowKind === savedKind) {
-            finish();
-            return;
-          }
-          saveKind.mutate(
-            { flowId: flow.id, kind: flowKind },
-            { onSuccess: finish },
-          );
-        };
-        // A data request asks for no diplomas.
-        const diplomas = isDataRequest(flowKind) ? "off" : diplomaMode;
-        if (diplomas === savedDiplomas) {
-          kindThenFinish();
+    const spec = flowSpecFromDraft(draft);
+    const specKey = JSON.stringify(spec);
+    const followUps = (flow: ProofingFlow): void => {
+      const finish = (): void => {
+        onSaved?.(flow);
+        onDone();
+      };
+      const kindThenFinish = (): void => {
+        if (flowKind === savedKind) {
+          finish();
           return;
         }
-        saveDiplomas.mutate(
-          { flowId: flow.id, mode: diplomas },
-          { onSuccess: kindThenFinish },
+        saveKind.mutate(
+          { flowId: flow.id, kind: flowKind },
+          { onSuccess: finish },
         );
+      };
+      // A data request asks for no diplomas.
+      const diplomas = isDataRequest(flowKind) ? "off" : diplomaMode;
+      if (diplomas === savedDiplomas) {
+        kindThenFinish();
+        return;
+      }
+      saveDiplomas.mutate(
+        { flowId: flow.id, mode: diplomas },
+        { onSuccess: kindThenFinish },
+      );
+    };
+    if (saved !== null && saved.spec === specKey) {
+      followUps(saved.flow);
+      return;
+    }
+    save.mutate(spec, {
+      onSuccess: (flow) => {
+        setSaved({ flow, spec: specKey });
+        followUps(flow);
       },
     });
   }
@@ -566,7 +582,6 @@ export function FlowEditor({
           <Checkbox
             id="proofing-flow-step-document"
             checked={draft.documentAndChip}
-            disabled={required.documentAndChip === true}
             label={t("identityProofingFlows.steps.document_capture")}
             hint={t("identityProofingFlows.new.documentCaptureHint")}
             onChange={(checked) => update({ documentAndChip: checked })}
@@ -574,7 +589,6 @@ export function FlowEditor({
           <Checkbox
             id="proofing-flow-step-nfc"
             checked={draft.documentAndChip}
-            disabled={required.documentAndChip === true}
             label={t("identityProofingFlows.steps.nfc_read")}
             hint={t("identityProofingFlows.new.nfcReadHint")}
             onChange={(checked) => update({ documentAndChip: checked })}
@@ -589,7 +603,6 @@ export function FlowEditor({
           <Checkbox
             id="proofing-flow-step-face"
             checked={draft.faceVerification}
-            disabled={required.faceVerification === true}
             label={t("identityProofingFlows.steps.face_verification")}
             hint={t("identityProofingFlows.new.faceVerificationHint")}
             onChange={(checked) => update({ faceVerification: checked })}
@@ -636,7 +649,6 @@ export function FlowEditor({
                 id="proofing-flow-face-provider"
                 className={SELECT_CLASS}
                 value={draft.faceProvider}
-                disabled={required.faceProvider !== undefined}
                 onChange={(event) =>
                   update({
                     faceProvider: event.target
@@ -697,9 +709,7 @@ export function FlowEditor({
             <Checkbox
               id="proofing-flow-check-chip-auth"
               checked={draft.documentAndChip && draft.chipAuthentication}
-              disabled={
-                !draft.documentAndChip || required.chipAuthentication === true
-              }
+              disabled={!draft.documentAndChip}
               label={t("identityProofingFlows.checks.chipAuth")}
               onChange={(checked) => update({ chipAuthentication: checked })}
             />
@@ -713,7 +723,7 @@ export function FlowEditor({
             <Checkbox
               id="proofing-flow-check-liveness"
               checked={draft.faceVerification && draft.liveness}
-              disabled={!draft.faceVerification || required.liveness === true}
+              disabled={!draft.faceVerification}
               label={t("identityProofingFlows.checks.liveness")}
               onChange={(checked) => update({ liveness: checked })}
             />
@@ -763,6 +773,7 @@ export function FlowEditor({
             id="proofing-flow-countries"
             label={t("identityProofingFlows.new.issuingCountries")}
             hint={t("identityProofingFlows.new.issuingCountriesHint")}
+            error={fieldError("issuingCountries")}
           >
             <Input
               id="proofing-flow-countries"
@@ -787,18 +798,17 @@ export function FlowEditor({
                 ? "identityProofingFlows.new.assuranceLevelHint"
                 : `identityProofingFlows.new.assuranceLevelNeeds.${draft.assuranceLevel}`,
             )}
+            error={fieldError("assuranceLevel")}
           >
             <select
               id="proofing-flow-assurance"
               className={SELECT_CLASS}
               value={draft.assuranceLevel}
               onChange={(event) =>
-                setDraft((current) =>
-                  withAssuranceLevel(
-                    current,
-                    event.target.value as ProofingFlowDraft["assuranceLevel"],
-                  ),
-                )
+                update({
+                  assuranceLevel: event.target
+                    .value as ProofingFlowDraft["assuranceLevel"],
+                })
               }
             >
               <option value="">{t("identityProofingFlows.new.none")}</option>
@@ -827,7 +837,7 @@ export function FlowEditor({
               <option value="">{t("identityProofingFlows.new.inherit")}</option>
               {BSN_POLICIES.map((policy) => (
                 <option key={policy} value={policy}>
-                  {policy}
+                  {t(`identityProofingFlows.bsnPolicies.${policy}`)}
                 </option>
               ))}
             </select>

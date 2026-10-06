@@ -46,24 +46,24 @@ func TestNeedsReferencePhoto(t *testing.T) {
 		"chip only":      {chipFlow, false, true, true},
 		"browser selfie": {browserFlow, false, false, true},
 	} {
-		if got := NeedsReferencePhoto(tc.flow); got != tc.needs {
-			t.Errorf("%s: NeedsReferencePhoto = %v, want %v", name, got, tc.needs)
+		if got := flowNeedsReferencePhoto(tc.flow); got != tc.needs {
+			t.Errorf("%s: flowNeedsReferencePhoto = %v, want %v", name, got, tc.needs)
 		}
-		if got := CustomerCompletable(tc.flow); got != tc.completes {
-			t.Errorf("%s: CustomerCompletable = %v, want %v", name, got, tc.completes)
+		if got := customerCompletable(tc.flow); got != tc.completes {
+			t.Errorf("%s: customerCompletable = %v, want %v", name, got, tc.completes)
 		}
-		if got := YiviAppAvailable(tc.flow); got != tc.yiviOffers {
-			t.Errorf("%s: YiviAppAvailable = %v, want %v", name, got, tc.yiviOffers)
+		if got := yiviAppAvailable(tc.flow); got != tc.yiviOffers {
+			t.Errorf("%s: yiviAppAvailable = %v, want %v", name, got, tc.yiviOffers)
 		}
 	}
-	if Completable(faceOnlyFlow) {
+	if flowCompletable(faceOnlyFlow) {
 		t.Error("a face-only flow is completable for a member, who has no photo to send")
 	}
 }
 
 // The photo goes to the engine's session, which matches the live face
 // against it; it is never stored on a request that starts its session at once.
-func TestReferencePhotoReachesTheSession(t *testing.T) {
+func TestRefPhotoReachesSession(t *testing.T) {
 	f := newFixture()
 	f.withFaceOnlyFlow()
 	sent, err := f.sendWithPhoto(faceOnlyFlow.ID, " "+jpegPhoto+"\n", ChannelEmail)
@@ -83,7 +83,7 @@ func TestReferencePhotoReachesTheSession(t *testing.T) {
 }
 
 func TestReferencePhotoIsChecked(t *testing.T) {
-	big := base64.StdEncoding.EncodeToString(append([]byte{0xff, 0xd8, 0xff, 0xe0}, make([]byte, MaxReferencePhotoBytes)...))
+	big := base64.StdEncoding.EncodeToString(append([]byte{0xff, 0xd8, 0xff, 0xe0}, make([]byte, maxReferencePhotoBytes)...))
 	svg := base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`))
 	for name, tc := range map[string]struct {
 		flowID, photo string
@@ -109,7 +109,7 @@ func TestReferencePhotoIsChecked(t *testing.T) {
 }
 
 // A member has no photo to send: a face-only flow is never one for members.
-func TestMembersCannotUseAFaceOnlyFlow(t *testing.T) {
+func TestMembersCannotUseFaceOnly(t *testing.T) {
 	f := newFixture()
 	f.ips.flows = append(f.ips.flows, faceOnlyFlow)
 	err := f.svc.ConfigureFlows(context.Background(), testOrg, FlowSelection{FlowIDs: []string{faceOnlyFlow.ID}, DefaultFlowID: faceOnlyFlow.ID})
@@ -124,7 +124,7 @@ func TestMembersCannotUseAFaceOnlyFlow(t *testing.T) {
 
 // A hosted link holds the photo until its subject starts, then hands it to
 // the session.
-func TestHostedLinkCarriesTheReferencePhoto(t *testing.T) {
+func TestHostedLinkCarriesPhoto(t *testing.T) {
 	f := newFixture()
 	f.withFaceOnlyFlow()
 	f.svc.SetHostedBaseURL(testHostedBase)

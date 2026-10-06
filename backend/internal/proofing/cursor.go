@@ -17,8 +17,8 @@ type RequestCursor struct {
 
 // Page sizes of the customer API's session list.
 const (
-	DefaultPageSize = 50
-	MaxPageSize     = 100
+	defaultPageSize = 50
+	maxPageSize     = 100
 )
 
 func encodeRequestCursor(c RequestCursor) string {

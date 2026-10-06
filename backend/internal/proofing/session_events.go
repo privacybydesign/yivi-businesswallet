@@ -18,7 +18,7 @@ const deadlineRetry = 30 * time.Second
 
 // SessionChanged reconciles the request of a session the engine reports
 // changed (it opened, a step started, or it settled): the engine calls it,
-// off its request path, as IPS's event webhook used to.
+// off its request path, as the engine's event webhook used to.
 func (s *Service) SessionChanged(ctx context.Context, sessionID string) {
 	ctx = audit.WithoutActor(ctx)
 	req, err := s.requests.GetBySession(ctx, sessionID)

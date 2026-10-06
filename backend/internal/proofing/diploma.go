@@ -1,6 +1,7 @@
 package proofing
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -16,7 +17,7 @@ import (
 
 // DiplomaMode is whether a flow has the diploma step: once their identity is
 // approved, its subject must add their DUO diploma extracts: the PDFs DUO signs, which the
-// wallet checks itself (package diploma). Flows live at IPS, which knows
+// wallet checks itself (package diploma). Flows live in the engine, which knows
 // nothing of diplomas, so the wallet keeps this per org and flow.
 type DiplomaMode string
 
@@ -101,6 +102,10 @@ func (d Diploma) auditFields() map[string]any {
 		"dateAwarded": d.DateAwarded.Format(time.DateOnly), "nlqfLevel": d.NLQFLevel, "documentNumber": d.DocumentNumber,
 	}
 }
+
+// webhookDiplomaKey is where a session.diploma_added delivery carries the
+// extract; Purge drops it from the request's deliveries.
+const webhookDiplomaKey = "diploma"
 
 // DiplomaFile is one uploaded file.
 type DiplomaFile struct {
@@ -261,9 +266,10 @@ func (s *DiplomaStore) List(ctx context.Context, requestIDs []uuid.UUID) (map[uu
 func (s *DiplomaStore) Add(ctx context.Context, req Request, d Diploma) (Diploma, bool, error) {
 	added := false
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		// Serialises uploads on one request, so the cap holds.
-		if _, err := q.Exec(ctx, `SELECT 1 FROM identity_proofing_requests WHERE id = $1 FOR UPDATE`, req.ID); err != nil {
-			return fmt.Errorf("proofing: lock request %s: %w", req.ID, err)
+		// Serialises uploads on one request, so the cap holds; an erased one
+		// takes none.
+		if ok, err := lockUnpurged(ctx, q, req.ID); err != nil || !ok {
+			return cmp.Or(err, ErrSessionOver)
 		}
 		err := q.QueryRow(ctx, `INSERT INTO identity_proofing_request_diplomas
 				(request_id, document_type, qualification, profiles, institution, place_of_issue, date_awarded,
@@ -287,7 +293,7 @@ func (s *DiplomaStore) Add(ctx context.Context, req Request, d Diploma) (Diploma
 			return err
 		}
 		data := sessionEventData(req, req.Status)
-		data["diploma"] = map[string]any{
+		data[webhookDiplomaKey] = map[string]any{
 			"qualification": d.Qualification, "institution": d.Institution,
 			"dateAwarded": d.DateAwarded.Format(time.DateOnly), "nlqfLevel": d.NLQFLevel, "eqfLevel": d.EQFLevel,
 		}
@@ -306,9 +312,14 @@ func (s *DiplomaStore) RecordRejected(ctx context.Context, req Request, reason, 
 	if failedCheck != "" {
 		fields["failedCheck"] = failedCheck
 	}
-	return s.audit.Record(ctx, s.db, audit.IdentityProofingDiplomaRejected,
-		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-		req.auditFields(fields))
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		if ok, err := lockUnpurged(ctx, q, req.ID); err != nil || !ok {
+			return err
+		}
+		return s.audit.Record(ctx, q, audit.IdentityProofingDiplomaRejected,
+			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+			req.auditFields(fields))
+	})
 }
 
 // flowDiplomas is the flow's mode; a service without a store asks for none.
@@ -369,6 +380,17 @@ func (s *Service) AddDiplomas(ctx context.Context, orgID, id uuid.UUID, requeste
 }
 
 // HostedAddDiplomas is AddDiplomas for a hosted request, by its subject.
+// HostedDiplomasOpen reports whether a hosted link takes extracts now, the
+// same checks HostedAddDiplomas makes: what the upload route asks before it
+// reads a body of up to maxDiplomaUploadBytes from an anonymous caller.
+func (s *Service) HostedDiplomasOpen(ctx context.Context, token string) error {
+	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return err
+	}
+	return s.diplomasOpen(req)
+}
+
 func (s *Service) HostedAddDiplomas(ctx context.Context, token string, files []DiplomaFile) ([]DiplomaVerdict, error) {
 	req, err := s.hostedRequest(ctx, token)
 	if err != nil {
@@ -377,24 +399,33 @@ func (s *Service) HostedAddDiplomas(ctx context.Context, token string, files []D
 	return s.addDiplomas(audit.ContextWithActor(ctx, hostedSubjectActor), req, files)
 }
 
-// addDiplomas checks each file against the identity IPS approved for req:
+// diplomasOpen reports whether req takes extracts now: it asks for them, is
+// approved, not erased or cancelled, and within DiplomaUploadWindow.
+func (s *Service) diplomasOpen(req Request) error {
+	if s.diplomaChecker == nil || s.diplomas == nil {
+		return ErrNoDiplomaChecker
+	}
+	if !req.Diplomas.asked() {
+		return ErrDiplomasNotAsked
+	}
+	if req.PurgedAt != nil || req.CancelledAt != nil {
+		return ErrSessionOver
+	}
+	now := s.now()
+	if req.EffectiveStatus(now) != StatusApproved || req.CompletedAt == nil || now.Sub(*req.CompletedAt) > DiplomaUploadWindow {
+		return ErrDiplomasClosed
+	}
+	return nil
+}
+
+// addDiplomas checks each file against the identity the engine approved for req:
 // DUO's signature, then the printed holder's name and date of birth. An
 // accepted extract is kept, a refused one only audited with its reason. A
 // file the checker cannot decide on fails the whole call, with what was
 // decided before it kept.
 func (s *Service) addDiplomas(ctx context.Context, req Request, files []DiplomaFile) ([]DiplomaVerdict, error) {
-	if s.diplomaChecker == nil || s.diplomas == nil {
-		return nil, ErrNoDiplomaChecker
-	}
-	if !req.Diplomas.asked() || req.mode() == ModeTest {
-		return nil, ErrDiplomasNotAsked
-	}
-	if req.PurgedAt != nil || req.CancelledAt != nil {
-		return nil, ErrSessionOver
-	}
-	now := s.now()
-	if req.EffectiveStatus(now) != StatusApproved || req.CompletedAt == nil || now.Sub(*req.CompletedAt) > DiplomaUploadWindow {
-		return nil, ErrDiplomasClosed
+	if err := s.diplomasOpen(req); err != nil {
+		return nil, err
 	}
 	held, err := s.diplomas.List(ctx, []uuid.UUID{req.ID})
 	if err != nil {

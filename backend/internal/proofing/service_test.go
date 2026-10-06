@@ -1,6 +1,7 @@
 package proofing
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"maps"
@@ -61,6 +62,10 @@ type fakeRequests struct {
 	// actors is the audit actor label of each start and outcome recorded, ""
 	// for the system.
 	actors []string
+	// createErr fails storing a request; refuseAttach makes attaching a
+	// session find the request moved on.
+	createErr    error
+	refuseAttach bool
 }
 
 // actorLabel is the audit actor label ctx carries, "" for none.
@@ -70,12 +75,15 @@ func actorLabel(ctx context.Context) string {
 }
 
 func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, error) {
+	if f.createErr != nil {
+		return Request{}, f.createErr
+	}
 	f.created = append(f.created, in)
 	req := Request{
 		ID: in.ID, OrganizationID: in.OrgID, SubjectUserID: in.Subject.UserID, CustomerID: in.Subject.CustomerID,
 		SubjectName:  in.Subject.Name,
 		SubjectEmail: in.Subject.Email, FlowID: in.Flow.ID, FlowName: in.Flow.Name, FlowVersion: in.Flow.Version,
-		Status: StatusPending, LinkExpiresAt: in.LinkExpiresAt, Method: in.Method, Mode: in.Mode,
+		Status: StatusPending, LinkExpiresAt: in.LinkExpiresAt, Method: in.Method,
 		Hosted:                 in.LinkTokenHash != nil,
 		RequiredAssuranceLevel: in.Flow.RequiredAssuranceLevel,
 		RedirectURL:            in.RedirectURL, Language: in.Language, Diplomas: in.Diplomas,
@@ -88,7 +96,7 @@ func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, 
 }
 
 func (f *fakeRequests) AttachSession(_ context.Context, req Request, sess proofingprovider.Session) (bool, error) {
-	if f.stored.session != nil {
+	if f.stored.session != nil || f.refuseAttach {
 		return false, nil
 	}
 	f.attached = append(f.attached, sess)
@@ -159,11 +167,11 @@ func (f *fakeRequests) Cancel(context.Context, Request) (bool, error) {
 	return true, nil
 }
 
-func (f *fakeRequests) ListPage(_ context.Context, _, customerID uuid.UUID, after *RequestCursor, limit int) ([]Request, error) {
+func (f *fakeRequests) ListPage(_ context.Context, scope CustomerScope, after *RequestCursor, limit int) ([]Request, error) {
 	f.pages = append(f.pages, after)
 	out := []Request{}
 	for _, r := range f.page {
-		if len(out) < limit && r.CustomerID != nil && *r.CustomerID == customerID {
+		if len(out) < limit && r.CustomerID != nil && *r.CustomerID == scope.CustomerID {
 			out = append(out, r)
 		}
 	}
@@ -180,6 +188,27 @@ func (f *fakeRequests) Purge(context.Context, Request) error {
 	f.stored.PurgedAt, f.stored.ProofedName = &now, ""
 	f.stored.SubjectName, f.stored.SubjectEmail = "", ""
 	return nil
+}
+
+func (f *fakeRequests) ClearExpiredProofedNames(context.Context) (int64, error) { return 0, nil }
+
+func (f *fakeRequests) ListOpenReviews(_ context.Context, _ uuid.UUID, customerID *uuid.UUID) ([]Request, error) {
+	if f.stored == nil || f.stored.Status != StatusNeedsReview ||
+		customerID != nil && (f.stored.CustomerID == nil || *f.stored.CustomerID != *customerID) {
+		return nil, nil
+	}
+	return []Request{*f.stored}, nil
+}
+
+func (f *fakeRequests) LockReview(context.Context, uuid.UUID) (func(), error) {
+	return func() {}, nil
+}
+
+func (f *fakeRequests) ListUnpurgedForCustomer(_ context.Context, _, customerID uuid.UUID) ([]Request, error) {
+	if f.stored == nil || f.stored.PurgedAt != nil || f.stored.CustomerID == nil || *f.stored.CustomerID != customerID {
+		return nil, nil
+	}
+	return []Request{*f.stored}, nil
 }
 
 func (f *fakeRequests) ListPurgeDue(context.Context, int) ([]Request, error) {
@@ -211,8 +240,8 @@ func (f *fakeRequests) RecordOutcome(ctx context.Context, _ Request, _ string, s
 	return nil
 }
 
-func (f *fakeRequests) GetForCustomer(_ context.Context, _, customerID, id uuid.UUID) (Request, error) {
-	if f.stored == nil || f.stored.ID != id || f.stored.CustomerID == nil || *f.stored.CustomerID != customerID {
+func (f *fakeRequests) GetForCustomer(_ context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {
+	if f.stored == nil || f.stored.ID != id || f.stored.CustomerID == nil || *f.stored.CustomerID != scope.CustomerID {
 		return Request{}, ErrRequestNotFound
 	}
 	return *f.stored, nil
@@ -258,8 +287,8 @@ func (f *fakeRequests) Stats(context.Context, uuid.UUID, *uuid.UUID, time.Time) 
 // fakeAPIKeys stores nothing: Create answers the key it was asked for.
 type fakeAPIKeys struct{}
 
-func (fakeAPIKeys) Create(_ context.Context, orgID, customerID, _ uuid.UUID, name string, mode Mode, scopes []string) (APIKey, string, error) {
-	return APIKey{ID: uuid.New(), OrganizationID: orgID, CustomerID: customerID, Name: name, Mode: mode, Scopes: scopes}, "yp_live_x", nil
+func (fakeAPIKeys) Create(_ context.Context, orgID, customerID, _ uuid.UUID, name string, scopes []string) (APIKey, string, error) {
+	return APIKey{ID: uuid.New(), OrganizationID: orgID, CustomerID: customerID, Name: name, Scopes: scopes}, "yp_live_x", nil
 }
 
 func (fakeAPIKeys) List(context.Context, uuid.UUID, uuid.UUID) ([]APIKey, error) { return nil, nil }
@@ -277,6 +306,11 @@ type fakeCustomers struct {
 	gets  int
 	saved []FlowSelection
 	logo  CustomerLogo
+	// requests is what a pause checks for open reviews, as the store does.
+	requests *fakeRequests
+	// sentDuringRemove is how many removals find a request sent meanwhile
+	// and refuse, each adding one unpurged request first.
+	sentDuringRemove int
 }
 
 func (f *fakeCustomers) List(context.Context, uuid.UUID) ([]Customer, error) {
@@ -317,10 +351,15 @@ func (f *fakeCustomers) SaveFlows(_ context.Context, _, id uuid.UUID, sel FlowSe
 	return c, nil
 }
 
-func (f *fakeCustomers) SetPaused(_ context.Context, _, id uuid.UUID, paused bool) (Customer, error) {
+func (f *fakeCustomers) SetStatus(ctx context.Context, orgID, id uuid.UUID, status CustomerStatus) (Customer, error) {
+	if status == CustomerPaused && f.requests != nil {
+		if open, _ := f.requests.ListOpenReviews(ctx, orgID, &id); len(open) > 0 {
+			return Customer{}, ErrCustomerHasOpenReviews
+		}
+	}
 	c := f.byID[id]
 	c.PausedAt = nil
-	if paused {
+	if status == CustomerPaused {
 		now := time.Now()
 		c.PausedAt = &now
 	}
@@ -335,9 +374,22 @@ func (f *fakeCustomers) SaveSettings(_ context.Context, _, id uuid.UUID, setting
 	return c, nil
 }
 
-func (f *fakeCustomers) Remove(_ context.Context, _, id uuid.UUID) error {
+func (f *fakeCustomers) Remove(_ context.Context, orgID, id uuid.UUID) error {
 	if _, ok := f.byID[id]; !ok {
 		return ErrCustomerNotFound
+	}
+	if f.sentDuringRemove > 0 {
+		f.sentDuringRemove--
+		sent := Request{
+			ID: uuid.New(), OrganizationID: orgID, CustomerID: &id, Status: StatusPending,
+			session: &ipsSession{ID: "ses-sent-meanwhile", Token: "tok"},
+		}
+		f.requests.stored = &sent
+		return ErrCustomerSessionsLeft
+	}
+	if f.requests != nil && f.requests.stored != nil && f.requests.stored.PurgedAt == nil &&
+		f.requests.stored.CustomerID != nil && *f.requests.stored.CustomerID == id {
+		return ErrCustomerSessionsLeft
 	}
 	delete(f.byID, id)
 	return nil
@@ -371,14 +423,17 @@ func (f *fakeCustomers) Logo(_ context.Context, _, id uuid.UUID) (CustomerLogo, 
 }
 
 type fakeIPS struct {
-	flows          []proofingprovider.Flow
-	flowLists      int
-	decisions      []proofingprovider.ReviewDecision
-	sessionKeys    []proofingprovider.Tenant
-	statusReads    int
-	resultReads    int
-	result         proofingprovider.Result
-	resultErr      error
+	flows       []proofingprovider.Flow
+	flowLists   int
+	decisions   []proofingprovider.ReviewDecision
+	sessionKeys []proofingprovider.Tenant
+	statusReads int
+	resultReads int
+	result      proofingprovider.Result
+	resultErr   error
+	// identityErr fails SessionIdentity alone, after a status read succeeded.
+	identityErr    error
+	identityReads  int
 	sessions       []proofingprovider.SessionInput
 	sessionExpires time.Time
 	createdFlows   []proofingprovider.FlowSpec
@@ -397,13 +452,16 @@ type fakeIPS struct {
 	cancelErr error
 	deletes   int
 	deleteErr error
+	// decideErr fails a review decision.
+	decideErr error
 }
 
 func (f *fakeIPS) SessionIdentity(_ context.Context, _ proofingprovider.Tenant, _, _ string) (proofingprovider.Identity, error) {
 	f.resultReads++
+	f.identityReads++
 	return proofingprovider.Identity{
 		Result: f.result, GivenName: "Anna", FamilyName: "Jansen", BirthDate: testBirthDate,
-	}, f.resultErr
+	}, cmp.Or(f.identityErr, f.resultErr)
 }
 
 func (f *fakeIPS) CancelSession(context.Context, proofingprovider.Tenant, string, string) error {
@@ -509,6 +567,9 @@ func (*fakeIPS) SubmitFaceFrame(context.Context, string, string) (proofingprovid
 
 // DecideReview settles the session the way IPS does: the next read has the outcome.
 func (f *fakeIPS) DecideReview(_ context.Context, _ proofingprovider.Tenant, _, _ string, d proofingprovider.ReviewDecision) error {
+	if f.decideErr != nil {
+		return f.decideErr
+	}
 	f.decisions = append(f.decisions, d)
 	if f.result.Status != proofingprovider.StatusNeedsReview {
 		return &proofingprovider.RejectedError{Status: 409, Message: "not under review"}
@@ -538,9 +599,15 @@ func (f *fakeMailer) SendIdentityProofingRequested(_ context.Context, _ uuid.UUI
 	return f.err
 }
 
+// testFlow is a flow on steps that requests the document data when its steps
+// scan the document, as a flow the editor saves with everything ticked.
 func testFlow(id, name string, steps []string, selfieLocation string) proofingprovider.Flow {
+	var attributes []string
+	if slices.Contains(steps, "document_capture") {
+		attributes = []string{attributeDocument}
+	}
 	return proofingprovider.Flow{
-		FlowSpec: proofingprovider.FlowSpec{Name: name, Steps: steps, SelfieLocation: selfieLocation},
+		FlowSpec: proofingprovider.FlowSpec{Name: name, Steps: steps, SelfieLocation: selfieLocation, RequestedAttributes: attributes},
 		ID:       id, Version: 1, Active: true,
 	}
 }
@@ -561,8 +628,10 @@ var (
 	alex    = Member{UserID: uuid.New(), Name: "Alex Jansen", Email: "alex@example.org", Role: "admin", MemberType: "employee"}
 	// initech is a customer with chipFlow assigned (a flow members may not use)
 	// as its default.
-	initech     = Customer{ID: uuid.New(), OrganizationID: testOrg.ID, Name: "Initech", Flows: FlowSelection{FlowIDs: []string{chipFlow.ID}, DefaultFlowID: chipFlow.ID}, HasLiveKey: true}
+	initech     = Customer{ID: uuid.New(), OrganizationID: testOrg.ID, Name: "Initech", Flows: FlowSelection{FlowIDs: []string{chipFlow.ID}, DefaultFlowID: chipFlow.ID}, HasAPIKey: true}
 	testSession = SessionTTL
+	// initechScope is what an API key of initech reaches.
+	initechScope = CustomerScope{OrgID: testOrg.ID, CustomerID: initech.ID}
 )
 
 // testPinnedVersion is the flow version the fake IPS pins a session to, newer
@@ -593,6 +662,7 @@ func newFixture() fixture {
 		verifier:  &fakeVerifier{},
 		mailer:    &fakeMailer{},
 	}
+	f.customers.requests = f.requests
 	f.svc = NewService(Stores{Settings: f.settings, Requests: f.requests, Customers: f.customers, APIKeys: fakeAPIKeys{}},
 		f.ips, f.verifier, f.mailer)
 	return f
@@ -625,14 +695,14 @@ func (f fixture) reconcile(t *testing.T) Request {
 
 func TestFlowsAppliesSelection(t *testing.T) {
 	f := newFixture()
-	all, err := f.svc.Flows(context.Background(), testOrg, true)
+	all, err := f.svc.Flows(context.Background(), testOrg, FlowsAll)
 	if err != nil {
 		t.Fatalf("Flows(all): %v", err)
 	}
 	if len(all) != 3 || !all[0].Allowed || !all[0].Default || all[1].Allowed || all[1].Default {
 		t.Errorf("admin view = %+v; want every flow with only appFlow allowed and default", all)
 	}
-	members, err := f.svc.Flows(context.Background(), testOrg, false)
+	members, err := f.svc.Flows(context.Background(), testOrg, FlowsAllowed)
 	if err != nil {
 		t.Fatalf("Flows(members): %v", err)
 	}
@@ -669,7 +739,7 @@ func TestConfigureFlowsValidates(t *testing.T) {
 	}
 }
 
-func TestConfigureFlowsDropsDuplicates(t *testing.T) {
+func TestConfigureFlowsDedupes(t *testing.T) {
 	f := newFixture()
 	sel := FlowSelection{FlowIDs: []string{chipFlow.ID, chipFlow.ID}, DefaultFlowID: chipFlow.ID}
 	if err := f.svc.ConfigureFlows(context.Background(), testOrg, sel); err != nil {
@@ -706,7 +776,7 @@ func TestCreateRequestValidates(t *testing.T) {
 
 // Sending creates the IPS session on the request's id and flow, with the
 // session TTL, and mails its vcmrtd deep link: the mail is the session.
-func TestCreateRequestStartsTheSessionAndMailsItsDeepLink(t *testing.T) {
+func TestCreateRequestMailsDeepLink(t *testing.T) {
 	f := newFixture()
 	sent := f.send(t)
 
@@ -735,7 +805,7 @@ func TestCreateRequestStartsTheSessionAndMailsItsDeepLink(t *testing.T) {
 }
 
 // A session IPS offers no vcmrtd link for cannot be mailed, so nothing is stored.
-func TestCreateRequestWithoutADeepLinkStoresNothing(t *testing.T) {
+func TestNoDeepLinkStoresNothing(t *testing.T) {
 	f := newFixture()
 	f.ips.noClaim = true
 	_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()},
@@ -746,7 +816,7 @@ func TestCreateRequestWithoutADeepLinkStoresNothing(t *testing.T) {
 	}
 }
 
-func TestCreateRequestReportsAFailedMail(t *testing.T) {
+func TestCreateRequestFailedMail(t *testing.T) {
 	f := newFixture()
 	f.mailer.err = errors.New("smtp down")
 	if sent := f.send(t); sent.MailSent {
@@ -759,7 +829,7 @@ func TestCreateRequestReportsAFailedMail(t *testing.T) {
 
 // A session IPS ends undecided (expired, or cancelled) ends the request with
 // it: the mail was the session, so there is nothing to start again.
-func TestASessionThatEndsUndecidedExpiresTheRequest(t *testing.T) {
+func TestUndecidedEndExpiresRequest(t *testing.T) {
 	for _, status := range []proofingprovider.Status{proofingprovider.StatusExpired, proofingprovider.StatusCancelled} {
 		t.Run(string(status), func(t *testing.T) {
 			f := newFixture()
@@ -777,7 +847,7 @@ func TestASessionThatEndsUndecidedExpiresTheRequest(t *testing.T) {
 	}
 }
 
-func TestAReviewIPSEndsExpiresTheRequest(t *testing.T) {
+func TestReviewEndExpiresRequest(t *testing.T) {
 	f := newFixture()
 	f.send(t)
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
@@ -791,7 +861,7 @@ func TestAReviewIPSEndsExpiresTheRequest(t *testing.T) {
 	}
 }
 
-func TestReconcileMarksStartedThenRecordsOutcomeOnce(t *testing.T) {
+func TestReconcileOutcomeOnce(t *testing.T) {
 	f := newFixture()
 	f.send(t)
 
@@ -821,7 +891,7 @@ func withRequiredAssurance(f proofingprovider.Flow, level string) proofingprovid
 
 // IPS approves on its checks alone; the wallet holds the approval to the
 // level the flow demanded and rejects one that falls short.
-func TestApprovalBelowRequiredAssuranceIsRejected(t *testing.T) {
+func TestApprovalBelowLevelRejected(t *testing.T) {
 	for name, tc := range map[string]struct {
 		required, achieved string
 		want               Status
@@ -830,9 +900,9 @@ func TestApprovalBelowRequiredAssuranceIsRejected(t *testing.T) {
 		"no requirement":      {"", "", StatusApproved, ""},
 		"met exactly":         {"substantial", "substantial", StatusApproved, ""},
 		"exceeded":            {"low", "substantial", StatusApproved, ""},
-		"below":               {"substantial", "low", StatusRejected, ErrorAssuranceNotMet},
-		"no level achieved":   {"low", "", StatusRejected, ErrorAssuranceNotMet},
-		"unknown requirement": {"extreme", "substantial", StatusRejected, ErrorAssuranceNotMet},
+		"below":               {"substantial", "low", StatusRejected, errorAssuranceNotMet},
+		"no level achieved":   {"low", "", StatusRejected, errorAssuranceNotMet},
+		"unknown requirement": {"extreme", "substantial", StatusRejected, errorAssuranceNotMet},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture()
@@ -880,7 +950,7 @@ func TestMeetsAssurance(t *testing.T) {
 		{"bogus", "low", false},
 		{"high", "bogus", false},
 	} {
-		if got := MeetsAssurance(tc.achieved, tc.required); got != tc.want {
+		if got := meetsAssurance(tc.achieved, tc.required); got != tc.want {
 			t.Errorf("MeetsAssurance(%q, %q) = %v, want %v", tc.achieved, tc.required, got, tc.want)
 		}
 	}
@@ -895,7 +965,7 @@ func TestRequestsSurviveIPSOutage(t *testing.T) {
 	}
 }
 
-func TestEffectiveStatusExpiresUnfinishedOnly(t *testing.T) {
+func TestEffectiveStatusExpiry(t *testing.T) {
 	over := &ipsSession{ID: "s", ExpiresAt: time.Now().Add(-time.Minute)}
 	for status, want := range map[Status]Status{
 		StatusPending: StatusExpired, StatusInProgress: StatusExpired,
@@ -917,21 +987,21 @@ func TestEffectiveStatusExpiresUnfinishedOnly(t *testing.T) {
 }
 
 func TestCompletable(t *testing.T) {
-	if !Completable(testFlow("a", "a", []string{"document_capture", "nfc_read"}, selfieLocationBrowser)) {
+	if !flowCompletable(testFlow("a", "a", []string{"document_capture", "nfc_read"}, selfieLocationBrowser)) {
 		t.Error("a flow without face steps needs no browser")
 	}
-	if Completable(testFlow("b", "b", []string{"nfc_read", "face_match"}, selfieLocationBrowser)) {
+	if flowCompletable(testFlow("b", "b", []string{"nfc_read", "face_match"}, selfieLocationBrowser)) {
 		t.Error("a browser face step cannot be reached by a recipient")
 	}
-	if Completable(testFlow("c", "c", []string{"face_verification"}, selfieLocationNative)) {
+	if flowCompletable(testFlow("c", "c", []string{"face_verification"}, selfieLocationNative)) {
 		t.Error("a face step without the chip needs a reference photo the wallet does not have")
 	}
-	if !Completable(testFlow("d", "d", []string{"document_capture", "nfc_read", "document_photo"}, "")) {
+	if !flowCompletable(testFlow("d", "d", []string{"document_capture", "nfc_read", "document_photo"}, "")) {
 		t.Error("the Idem app photographs the document")
 	}
 }
 
-func TestCreateAndEditFlowCaptureFaceInApp(t *testing.T) {
+func TestFlowCaptureFaceInApp(t *testing.T) {
 	f := newFixture()
 	face := proofingprovider.FlowSpec{Name: "Face", Steps: []string{"document_capture", "nfc_read", "face_verification"}, SelfieLocation: selfieLocationBrowser}
 	if _, err := f.svc.CreateFlow(context.Background(), testOrg, face); err != nil {
@@ -956,15 +1026,15 @@ func TestCreateAndEditFlowCaptureFaceInApp(t *testing.T) {
 
 func TestCreateFlowFaceProvider(t *testing.T) {
 	f := newFixture()
-	face := proofingprovider.FlowSpec{Name: "Face", Steps: []string{"document_capture", "nfc_read", "face_verification"}, FaceProvider: faceProviderIris}
+	face := proofingprovider.FlowSpec{Name: "Face", Steps: []string{"document_capture", "nfc_read", "face_verification"}, FaceProvider: faceProviderRegula}
 	chip := proofingprovider.FlowSpec{Name: "Chip", Steps: []string{"document_capture", "nfc_read"}, FaceProvider: "regula"}
 	for _, spec := range []proofingprovider.FlowSpec{face, chip} {
 		if _, err := f.svc.CreateFlow(context.Background(), testOrg, spec); err != nil {
 			t.Fatalf("CreateFlow(%s): %v", spec.Name, err)
 		}
 	}
-	if got := f.ips.createdFlows[0].FaceProvider; got != faceProviderIris {
-		t.Errorf("face flow faceProvider = %q, want Iris", got)
+	if got := f.ips.createdFlows[0].FaceProvider; got != faceProviderRegula {
+		t.Errorf("face flow faceProvider = %q, want regula", got)
 	}
 	if got := f.ips.createdFlows[1].FaceProvider; got != "" {
 		t.Errorf("chip-only flow faceProvider = %q, want none", got)
@@ -978,7 +1048,7 @@ func TestCreateFlowFaceProvider(t *testing.T) {
 		t.Errorf("face flow without a provider = %q, want regula", got)
 	}
 	// The wallet runs no face engine of its own.
-	for _, provider := range []string{"iris", faceProviderEngine} {
+	for _, provider := range []string{"iris", "Iris", faceProviderEngine} {
 		bad := face
 		bad.FaceProvider = provider
 		if _, err := f.svc.CreateFlow(context.Background(), testOrg, bad); !errors.Is(err, ErrInvalidInput) {
@@ -1007,7 +1077,7 @@ func (f fixture) sendForCustomer(t *testing.T, email, name string) Sent {
 
 // A customer's subject is not a member: it is reached by the address the sender
 // typed, on a flow assigned to the customer even when members may not use it.
-func TestCreateRequestForCustomerSubject(t *testing.T) {
+func TestRequestForCustomerSubject(t *testing.T) {
 	f := newFixture()
 	sent := f.sendForCustomer(t, "  Anna@Example.ORG ", "  ")
 
@@ -1023,7 +1093,7 @@ func TestCreateRequestForCustomerSubject(t *testing.T) {
 	}
 }
 
-func TestCreateRequestForCustomerValidates(t *testing.T) {
+func TestCustomerRequestValidates(t *testing.T) {
 	unknown := uuid.New()
 	cases := map[string]struct {
 		in   NewRequest
@@ -1066,7 +1136,7 @@ func TestReconcileRecordsTheMethod(t *testing.T) {
 // What the subject's app causes (joining the session, the outcome its evidence
 // led to) is audited with that app as actor, whoever's read triggered it; an
 // outcome after review is not the app's.
-func TestReconcileAuditsTheAppAsActor(t *testing.T) {
+func TestReconcileAuditsAppActor(t *testing.T) {
 	f := newFixture()
 	f.send(t)
 	ctx := audit.ContextWithActor(context.Background(), audit.Actor{UserID: uuid.New()})
@@ -1083,11 +1153,11 @@ func TestReconcileAuditsTheAppAsActor(t *testing.T) {
 }
 
 // A paused customer takes no new request, and resuming it takes them again.
-func TestCreateRequestForPausedCustomerIsRefused(t *testing.T) {
+func TestPausedCustomerRefused(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
-	if _, err := f.svc.SetCustomerPaused(ctx, testOrg.ID, initech.ID, true); err != nil {
-		t.Fatalf("SetCustomerPaused: %v", err)
+	if _, err := f.svc.SetCustomerStatus(ctx, testOrg.ID, initech.ID, CustomerPaused); err != nil {
+		t.Fatalf("SetCustomerStatus: %v", err)
 	}
 	in := NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID}
 	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()}, in); !errors.Is(err, ErrCustomerPaused) {
@@ -1096,20 +1166,20 @@ func TestCreateRequestForPausedCustomerIsRefused(t *testing.T) {
 	if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 {
 		t.Errorf("a refused request created a session or sent mail")
 	}
-	if _, err := f.svc.SetCustomerPaused(ctx, testOrg.ID, initech.ID, false); err != nil {
-		t.Fatalf("SetCustomerPaused: %v", err)
+	if _, err := f.svc.SetCustomerStatus(ctx, testOrg.ID, initech.ID, CustomerActive); err != nil {
+		t.Fatalf("SetCustomerStatus: %v", err)
 	}
 	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()}, in); err != nil {
 		t.Errorf("CreateRequest after resume: %v", err)
 	}
 }
 
-// A customer without a live API key takes no live request; a test one runs.
-func TestCreateRequestForCustomerWithoutLiveKeyIsRefused(t *testing.T) {
+// A customer without an API key takes no request.
+func TestCustomerRequestNeedsAPIKey(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
 	c := f.customers.byID[initech.ID]
-	c.HasLiveKey = false
+	c.HasAPIKey = false
 	f.customers.byID[initech.ID] = c
 	in := NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID}
 	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()}, in); !errors.Is(err, ErrCustomerNoAPIKey) {
@@ -1118,14 +1188,10 @@ func TestCreateRequestForCustomerWithoutLiveKeyIsRefused(t *testing.T) {
 	if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 {
 		t.Errorf("a refused request created a session or sent mail")
 	}
-	in.Mode, in.ScriptedOutcome = ModeTest, "approve"
-	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()}, in); err != nil {
-		t.Errorf("test CreateRequest: %v", err)
-	}
 }
 
 // A customer's session lifetime is what IPS is asked for and what the mail says.
-func TestCreateRequestForCustomerUsesItsSessionLifetime(t *testing.T) {
+func TestCustomerRequestLifetime(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
 	short := CustomerSettings{SessionTTL: 2 * time.Minute, DataRetentionDays: 7}
@@ -1141,7 +1207,7 @@ func TestCreateRequestForCustomerUsesItsSessionLifetime(t *testing.T) {
 	}
 }
 
-func TestSaveCustomerSettingsOffersOnlyItsOptions(t *testing.T) {
+func TestSaveSettingsOwnOptionsOnly(t *testing.T) {
 	f := newFixture()
 	for _, settings := range []CustomerSettings{
 		{SessionTTL: 3 * time.Minute, DataRetentionDays: 30},
@@ -1156,7 +1222,7 @@ func TestSaveCustomerSettingsOffersOnlyItsOptions(t *testing.T) {
 
 // A customer's subject's mail is signed and styled as the customer; a member's
 // stays the org's.
-func TestCustomerSubjectMailCarriesTheCustomersBranding(t *testing.T) {
+func TestCustomerMailBranding(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
 	logo := LogoChange{Replace: true, Logo: CustomerLogo{Bytes: []byte("\x89PNG"), ContentType: "image/png"}}
@@ -1180,7 +1246,7 @@ func TestCustomerSubjectMailCarriesTheCustomersBranding(t *testing.T) {
 	}
 }
 
-func TestSaveCustomerBrandingValidates(t *testing.T) {
+func TestSaveBrandingValidates(t *testing.T) {
 	f := newFixture()
 	for name, b := range map[string]CustomerBranding{
 		"colour":       {PrimaryColor: "green"},
@@ -1195,7 +1261,7 @@ func TestSaveCustomerBrandingValidates(t *testing.T) {
 
 // The proofed name is kept for a customer's approved subject only: a member has
 // a name already, and a rejected document's name is not the subject's.
-func TestReconcileKeepsProofedNameForApprovedCustomerSubjectOnly(t *testing.T) {
+func TestReconcileKeepsProofedName(t *testing.T) {
 	cases := map[string]struct {
 		customer bool
 		outcome  proofingprovider.Status
@@ -1224,7 +1290,7 @@ func TestReconcileKeepsProofedNameForApprovedCustomerSubjectOnly(t *testing.T) {
 
 // Any flow of the org a recipient can finish may be assigned to a customer,
 // including one members may not use.
-func TestAssignCustomerFlowsValidates(t *testing.T) {
+func TestAssignFlowsValidates(t *testing.T) {
 	cases := map[string]struct {
 		sel  FlowSelection
 		want error
@@ -1253,16 +1319,16 @@ func TestAssignCustomerFlowsValidates(t *testing.T) {
 	}
 }
 
-func TestCustomerFlowsAppliesAssignment(t *testing.T) {
+func TestCustomerFlowsAssignment(t *testing.T) {
 	f := newFixture()
-	all, err := f.svc.CustomerFlows(context.Background(), testOrg, initech.ID, true)
+	all, err := f.svc.CustomerFlows(context.Background(), testOrg, initech.ID, FlowsAll)
 	if err != nil {
 		t.Fatalf("CustomerFlows(all): %v", err)
 	}
 	if len(all) != 3 || all[0].Assigned || !all[1].Assigned || !all[1].Default {
 		t.Errorf("admin view = %+v; want every flow with only chipFlow assigned and default", all)
 	}
-	assigned, err := f.svc.CustomerFlows(context.Background(), testOrg, initech.ID, false)
+	assigned, err := f.svc.CustomerFlows(context.Background(), testOrg, initech.ID, FlowsAllowed)
 	if err != nil {
 		t.Fatalf("CustomerFlows(assigned): %v", err)
 	}
@@ -1304,21 +1370,54 @@ func TestCustomerRequestPage(t *testing.T) {
 	for i := range 3 {
 		f.requests.page = append(f.requests.page, Request{ID: uuid.New(), CustomerID: &initech.ID, CreatedAt: base.Add(-time.Duration(i) * time.Minute)})
 	}
-	page, next, err := f.svc.CustomerRequestPage(ctx, testOrg.ID, initech.ID, "", 2)
+	page, next, err := f.svc.CustomerRequestPage(ctx, initechScope, "", 2)
 	if err != nil || len(page) != 2 || next == "" {
 		t.Fatalf("first page = %d rows, %q, %v; want 2 and a cursor", len(page), next, err)
 	}
-	if _, _, err := f.svc.CustomerRequestPage(ctx, testOrg.ID, initech.ID, next, 2); err != nil {
+	if _, _, err := f.svc.CustomerRequestPage(ctx, initechScope, next, 2); err != nil {
 		t.Fatalf("next page: %v", err)
 	}
 	if got := f.requests.pages[1]; got == nil || got.ID != page[1].ID || !got.CreatedAt.Equal(page[1].CreatedAt) {
 		t.Errorf("next page asked after %+v, want the first page's last row", got)
 	}
-	if _, next, _ := f.svc.CustomerRequestPage(ctx, testOrg.ID, initech.ID, "", 10); next != "" {
+	if _, next, _ := f.svc.CustomerRequestPage(ctx, initechScope, "", 10); next != "" {
 		t.Errorf("last page cursor = %q, want none", next)
 	}
-	if _, _, err := f.svc.CustomerRequestPage(ctx, testOrg.ID, initech.ID, "not-a-cursor", 2); !errors.Is(err, ErrInvalidInput) {
+	if _, _, err := f.svc.CustomerRequestPage(ctx, initechScope, "not-a-cursor", 2); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("bad cursor = %v, want %v", err, ErrInvalidInput)
+	}
+}
+
+// A session the caller shows its own QR for needs no address; a mailed one does.
+func TestNoMailNeedsNoAddress(t *testing.T) {
+	f := newFixture()
+	ctx := context.Background()
+	in := NewRequest{CustomerID: &initech.ID, FlowID: chipFlow.ID, SkipMail: true}
+	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{Name: "key"}, in)
+	if err != nil || sent.DeepLink == "" || sent.MailSent {
+		t.Fatalf("CreateRequest without mail = %+v, %v; want a deep link and no mail", sent, err)
+	}
+	in.SkipMail = false
+	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{Name: "key"}, in); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("mailed request without an address = %v, want %v", err, ErrInvalidInput)
+	}
+}
+
+// Removing a customer erases each of its requests first, at the engine too,
+// as a purge does: the rows go, but their audit trail stays.
+func TestRemoveCustomerPurges(t *testing.T) {
+	f := newFixture()
+	ctx := context.Background()
+	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()},
+		NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID}); err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if err := f.svc.RemoveCustomer(ctx, testOrg.ID, initech.ID); err != nil {
+		t.Fatalf("RemoveCustomer: %v", err)
+	}
+	if f.requests.stored.PurgedAt == nil || f.requests.stored.SubjectEmail != "" || f.ips.deletes != 1 {
+		t.Errorf("request purged %v, e-mail %q, engine deletes %d; want it erased first",
+			f.requests.stored.PurgedAt, f.requests.stored.SubjectEmail, f.ips.deletes)
 	}
 }
 
@@ -1332,18 +1431,18 @@ func TestRequestResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
-	if _, _, err := f.svc.RequestResult(ctx, testOrg.ID, initech.ID, sent.Request.ID); !errors.Is(err, ErrResultNotReady) {
+	if _, _, err := f.svc.RequestResult(ctx, initechScope, sent.Request.ID); !errors.Is(err, ErrResultNotReady) {
 		t.Errorf("RequestResult while pending = %v, want %v", err, ErrResultNotReady)
 	}
 	f.requests.stored.Status = StatusApproved
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved}
-	_, identity, err := f.svc.RequestResult(ctx, testOrg.ID, initech.ID, sent.Request.ID)
+	_, identity, err := f.svc.RequestResult(ctx, initechScope, sent.Request.ID)
 	if err != nil || identity.FamilyName != "Jansen" || f.requests.resultReads != 1 {
 		t.Fatalf("RequestResult = %+v, %v (%d audited); want IPS's identity, audited", identity, err, f.requests.resultReads)
 	}
 	now := time.Now()
 	f.requests.stored.PurgedAt = &now
-	if _, _, err := f.svc.RequestResult(ctx, testOrg.ID, initech.ID, sent.Request.ID); !errors.Is(err, ErrRequestNotFound) {
+	if _, _, err := f.svc.RequestResult(ctx, initechScope, sent.Request.ID); !errors.Is(err, ErrRequestNotFound) {
 		t.Errorf("RequestResult after erasure = %v, want %v", err, ErrRequestNotFound)
 	}
 }
@@ -1351,7 +1450,7 @@ func TestRequestResult(t *testing.T) {
 // A new key gets every scope.
 func TestCreateAPIKeyScopes(t *testing.T) {
 	f := newFixture()
-	key, _, err := f.svc.CreateAPIKey(context.Background(), testOrg.ID, initech.ID, uuid.New(), "CI", ModeLive)
+	key, _, err := f.svc.CreateAPIKey(context.Background(), testOrg.ID, initech.ID, uuid.New(), "CI")
 	if err != nil || !slices.Equal(key.Scopes, APIKeyScopes) {
 		t.Errorf("scopes = %v, %v; want every scope", key.Scopes, err)
 	}
@@ -1367,17 +1466,17 @@ func TestCancelAndPurgeRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
-	req, err := f.svc.CancelRequest(ctx, testOrg.ID, initech.ID, sent.Request.ID)
+	req, err := f.svc.CancelRequest(ctx, initechScope, sent.Request.ID)
 	if err != nil || req.EffectiveStatus(time.Now()) != StatusCancelled || f.ips.cancels != 1 {
 		t.Fatalf("CancelRequest = %v, %v (%d IPS cancels); want cancelled at IPS once", req.EffectiveStatus(time.Now()), err, f.ips.cancels)
 	}
-	if _, err := f.svc.CancelRequest(ctx, testOrg.ID, initech.ID, sent.Request.ID); !errors.Is(err, ErrSessionOver) || f.ips.cancels != 1 {
+	if _, err := f.svc.CancelRequest(ctx, initechScope, sent.Request.ID); !errors.Is(err, ErrSessionOver) || f.ips.cancels != 1 {
 		t.Errorf("second CancelRequest = %v, want %v without IPS", err, ErrSessionOver)
 	}
-	if err := f.svc.PurgeRequest(ctx, testOrg.ID, initech.ID, sent.Request.ID); err != nil || f.ips.deletes != 1 || f.requests.stored.PurgedAt == nil {
+	if err := f.svc.PurgeRequest(ctx, initechScope, sent.Request.ID); err != nil || f.ips.deletes != 1 || f.requests.stored.PurgedAt == nil {
 		t.Fatalf("PurgeRequest = %v (%d IPS deletes); want erased at IPS and marked", err, f.ips.deletes)
 	}
-	if err := f.svc.PurgeRequest(ctx, testOrg.ID, initech.ID, sent.Request.ID); err != nil || f.ips.deletes != 1 {
+	if err := f.svc.PurgeRequest(ctx, initechScope, sent.Request.ID); err != nil || f.ips.deletes != 1 {
 		t.Errorf("second PurgeRequest = %v (%d deletes); want a no-op", err, f.ips.deletes)
 	}
 }
@@ -1479,28 +1578,9 @@ func TestApp(t *testing.T) {
 	}
 }
 
-// Only a face provider the Yivi app does not have keeps a flow from it; Regula
-// and an unset provider run there.
-func TestYiviNeedsAFaceProviderItHas(t *testing.T) {
-	for provider, wantErr := range map[string]bool{
-		faceProviderRegula: false, "": false, faceProviderIris: true,
-	} {
-		f := newFixture()
-		f.ips.flows[0] = withFaceProvider(appFlow, provider)
-		_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
-			NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID, Method: proofingprovider.MethodYivi, Channel: ChannelOnScreen})
-		if gotErr := errors.Is(err, ErrInvalidInput); gotErr != wantErr || !wantErr && err != nil {
-			t.Errorf("CreateRequest(Yivi, provider %q) = %v, want refused %v", provider, err, wantErr)
-		}
-	}
-	if !YiviAppAvailable(withFaceProvider(chipFlow, faceProviderIris)) {
-		t.Error("a flow without a face step should run in the Yivi app")
-	}
-}
-
 // The Yivi disclosure runs over OpenID4VP at the wallet's verifier; its photo
 // goes to IPS as the face reference, apart from the other claims.
-func TestYiviDisclosureRunsOverOpenID4VP(t *testing.T) {
+func TestYiviDisclosureOpenID4VP(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
 	sent := f.sendYivi(t)
@@ -1543,7 +1623,7 @@ func TestYiviDisclosureRunsOverOpenID4VP(t *testing.T) {
 	}
 }
 
-func TestYiviStepsRefuseAnIdemRequest(t *testing.T) {
+func TestYiviStepsRefuseIdem(t *testing.T) {
 	f := newFixture()
 	sent := f.send(t)
 	if _, err := f.svc.StartYivi(context.Background(), testOrg.ID, sent.Request.ID, nil); !errors.Is(err, ErrWrongMethod) {
@@ -1567,7 +1647,7 @@ func TestListReadsNeverCallIPS(t *testing.T) {
 	}
 }
 
-func TestARequestReadRechecksIPSAtMostOncePerInterval(t *testing.T) {
+func TestReadRechecksAtMostOnce(t *testing.T) {
 	f := newFixture()
 	sent := f.send(t)
 	now := time.Now()
@@ -1590,7 +1670,7 @@ func TestARequestReadRechecksIPSAtMostOncePerInterval(t *testing.T) {
 	}
 }
 
-func TestCreateRequestResolvesEachDependencyOnce(t *testing.T) {
+func TestCreateRequestResolvesOnce(t *testing.T) {
 	f := newFixture()
 	customer := initech
 	customer.Flows = FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: appFlow.ID}
@@ -1608,7 +1688,7 @@ func TestCreateRequestResolvesEachDependencyOnce(t *testing.T) {
 
 // Reconciling reads the status only; the full result, with personal data, is
 // read just for an approved customer subject, whose name is kept.
-func TestReconcileReadsTheFullResultOnlyForTheName(t *testing.T) {
+func TestReconcileFullResultForName(t *testing.T) {
 	for name, tc := range map[string]struct {
 		customer bool
 		status   proofingprovider.Status
@@ -1648,54 +1728,6 @@ func (f fixture) testCustomer() Customer {
 	return customer
 }
 
-func TestATestRequestRunsScriptedOnTheTestKey(t *testing.T) {
-	f := newFixture()
-	customer := f.testCustomer()
-	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial}
-	for range 2 {
-		sent, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{Name: "CI key", APIKeyID: new(uuid.UUID)},
-			NewRequest{CustomerID: &customer.ID, SubjectEmail: "anna@example.org", Mode: ModeTest})
-		if err != nil {
-			t.Fatalf("CreateRequest(test): %v", err)
-		}
-		if sent.Request.Status != StatusApproved || sent.Request.Mode != ModeTest || sent.MailSent || sent.DeepLink != "" {
-			t.Errorf("sent = %+v; want an approved, unmailed test request", sent)
-		}
-	}
-	in := f.ips.sessions[0]
-	if f.ips.sessionKeys[0] != orgTenant(testOrg.ID, ModeTest) || in.FlowID != "" || in.ScriptedOutcome != defaultScriptedOutcome {
-		t.Errorf("session on tenant %+v with %+v; want the org in test mode, no flow, scripted %q",
-			f.ips.sessionKeys[0], in, defaultScriptedOutcome)
-	}
-	if len(f.mailer.sent) != 0 {
-		t.Errorf("mails = %d, want none for a test request", len(f.mailer.sent))
-	}
-}
-
-func TestOnlyATestRequestScriptsAValidOutcome(t *testing.T) {
-	f := newFixture()
-	customer := f.testCustomer()
-	for name, in := range map[string]NewRequest{
-		"live with a script":  {ScriptedOutcome: "approve"},
-		"unknown script":      {Mode: ModeTest, ScriptedOutcome: "approve-all"},
-		"reject without code": {Mode: ModeTest, ScriptedOutcome: "reject:"},
-	} {
-		in.CustomerID, in.SubjectEmail = &customer.ID, "anna@example.org"
-		if _, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{Name: "key"}, in); !errors.Is(err, ErrInvalidInput) {
-			t.Errorf("%s: %v, want ErrInvalidInput", name, err)
-		}
-	}
-}
-
-func TestWebhookDataCarriesLivemode(t *testing.T) {
-	if live := sessionEventData(Request{}, StatusApproved)["livemode"]; live != true {
-		t.Errorf("live request livemode = %v, want true", live)
-	}
-	if test := sessionEventData(Request{Mode: ModeTest}, StatusApproved)["livemode"]; test != false {
-		t.Errorf("test request livemode = %v, want false", test)
-	}
-}
-
 const testHostedBase = "https://wallet.test/p/"
 
 // sendHosted creates a hosted request for initech's subject and returns its
@@ -1716,7 +1748,7 @@ func (f fixture) sendHosted(t *testing.T) (Sent, string) {
 	return sent, token
 }
 
-func TestAHostedLinkStartsOneSessionWhenTheSubjectPicksAnApp(t *testing.T) {
+func TestHostedLinkStartsOneSession(t *testing.T) {
 	f := newFixture()
 	sent, token := f.sendHosted(t)
 	if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 || sent.DeepLink != "" {
@@ -1745,10 +1777,10 @@ func TestAHostedLinkStartsOneSessionWhenTheSubjectPicksAnApp(t *testing.T) {
 	}
 }
 
-func TestAHostedLinkCannotBeStartedOnceItExpired(t *testing.T) {
+func TestExpiredHostedLinkNoStart(t *testing.T) {
 	f := newFixture()
 	sent, token := f.sendHosted(t)
-	later := time.Now().Add(HostedLinkTTL + time.Minute)
+	later := time.Now().Add(hostedLinkTTL + time.Minute)
 	f.svc.now = func() time.Time { return later }
 	if _, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem); !errors.Is(err, ErrSessionOver) {
 		t.Errorf("start after the link expired = %v, want ErrSessionOver", err)
@@ -1758,7 +1790,7 @@ func TestAHostedLinkCannotBeStartedOnceItExpired(t *testing.T) {
 	}
 }
 
-func TestAHostedLinkRunsTheYiviAppFromTheSubjectsBrowser(t *testing.T) {
+func TestHostedLinkRunsYiviApp(t *testing.T) {
 	f := newFixture()
 	_, token := f.sendHosted(t)
 	if _, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodYivi); err != nil {
@@ -1770,21 +1802,16 @@ func TestAHostedLinkRunsTheYiviAppFromTheSubjectsBrowser(t *testing.T) {
 	}
 }
 
-func TestAHostedRequestNeedsACustomerAndALiveKey(t *testing.T) {
+func TestHostedRequestNeedsCustomer(t *testing.T) {
 	f := newFixture()
-	customer := f.testCustomer()
 	f.svc.SetHostedBaseURL(testHostedBase)
-	for name, in := range map[string]NewRequest{
-		"member":    {SubjectUserID: alex.UserID, FlowID: appFlow.ID, Channel: ChannelHosted},
-		"test mode": {CustomerID: &customer.ID, Channel: ChannelHosted, Mode: ModeTest},
-	} {
-		if _, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{Name: "x"}, in); !errors.Is(err, ErrInvalidInput) {
-			t.Errorf("%s: %v, want ErrInvalidInput", name, err)
-		}
+	in := NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID, Channel: ChannelHosted}
+	if _, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{Name: "x"}, in); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("a member's hosted request: %v, want ErrInvalidInput", err)
 	}
 }
 
-func TestAReviewDecisionSettlesTheRequestThroughItsOutcome(t *testing.T) {
+func TestReviewDecisionSettles(t *testing.T) {
 	f := newFixture()
 	sent := f.send(t)
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
@@ -1812,5 +1839,150 @@ func TestAReviewDecisionSettlesTheRequestThroughItsOutcome(t *testing.T) {
 	if _, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, "sam@acme.test",
 		ReviewInput{Reason: "again"}); !errors.Is(err, ErrNotUnderReview) {
 		t.Errorf("a second decision = %v, want ErrNotUnderReview", err)
+	}
+}
+
+// A review reason is held to its length in characters, not bytes: 500
+// accented characters are fine, 501 are not.
+func TestReviewReasonCountsChars(t *testing.T) {
+	f := newFixture()
+	ctx := context.Background()
+	if _, err := f.svc.DecideReview(ctx, testOrg.ID, uuid.New(), "r", ReviewInput{Reason: strings.Repeat("é", maxReviewReasonLength+1)}); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("501 characters = %v, want %v", err, ErrInvalidInput)
+	}
+	if _, err := f.svc.DecideReview(ctx, testOrg.ID, uuid.New(), "r", ReviewInput{Reason: strings.Repeat("é", maxReviewReasonLength)}); errors.Is(err, ErrInvalidInput) {
+		t.Errorf("500 characters refused as invalid: %v", err)
+	}
+}
+
+// A session is kept for its flow's own retention when the flow set one, else
+// the customer's data retention, plus the grace that lets the wallet purge
+// first.
+func TestEngineRetentionPrefersFlow(t *testing.T) {
+	customer := Customer{Settings: CustomerSettings{DataRetentionDays: 30}}
+	week, year := 7*24*time.Hour, 365*24*time.Hour
+	if got := engineRetention(&customer, week); got != week+retentionGrace {
+		t.Errorf("a week's override = %v, want a week plus grace", got)
+	}
+	if got := engineRetention(&customer, year); got != year+retentionGrace {
+		t.Errorf("a year's override = %v, want a year plus grace", got)
+	}
+	if got := engineRetention(&customer, 0); got != customer.Settings.DataRetention()+retentionGrace {
+		t.Errorf("no override = %v, want the customer's retention plus grace", got)
+	}
+}
+
+func TestSubjectRetentionDays(t *testing.T) {
+	customer := Customer{Settings: CustomerSettings{DataRetentionDays: 30}}
+	cases := map[string]struct {
+		override time.Duration
+		want     int
+	}{
+		// The engine keeps its copy a day past the wallet's: that day counts.
+		"the customer's": {0, 31},
+		"a week's flow":  {7 * 24 * time.Hour, 8},
+		// Part of a day is told as a whole one.
+		"an hour's flow": {time.Hour, 2},
+	}
+	for name, tc := range cases {
+		if got := subjectRetentionDays(customer, tc.override); got != tc.want {
+			t.Errorf("%s: %d days, want %d", name, got, tc.want)
+		}
+	}
+}
+
+func TestCustomerFlowsRetention(t *testing.T) {
+	f := newFixture()
+	customer := initech
+	customer.Settings.DataRetentionDays = 30
+	f.customers.byID[customer.ID] = customer
+	week := 7 * 24 * time.Hour
+	f.ips.flows[1].RetentionOverrideSeconds = int(week.Seconds())
+	flows, err := f.svc.CustomerFlows(context.Background(), testOrg, customer.ID, FlowsAll)
+	if err != nil {
+		t.Fatalf("CustomerFlows: %v", err)
+	}
+	want := map[string]int{
+		appFlow.ID:  subjectRetentionDays(customer, 0),
+		chipFlow.ID: subjectRetentionDays(customer, week),
+	}
+	seen := 0
+	for _, fl := range flows {
+		days, ok := want[fl.ID]
+		if !ok {
+			continue
+		}
+		seen++
+		if fl.RetentionDays != days {
+			t.Errorf("%s: %d days, want %d", fl.ID, fl.RetentionDays, days)
+		}
+	}
+	if seen != len(want) {
+		t.Errorf("listed %d of the %d flows checked", seen, len(want))
+	}
+}
+
+// A session whose request fails to store, or to attach it, is erased at the
+// engine again: it may hold the reference photo.
+func TestFailedSendErasesSession(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		breakIt func(fixture)
+	}{
+		{"store fails", func(f fixture) { f.requests.createErr = errors.New("db down") }},
+		{"attach refused", func(f fixture) { f.requests.refuseAttach = true }},
+		{"no vcmrtd link", func(f fixture) { f.ips.noClaim = true }},
+	} {
+		f := newFixture()
+		tc.breakIt(f)
+		if _, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()},
+			NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID}); err == nil {
+			t.Fatalf("%s: CreateRequest succeeded", tc.name)
+		}
+		if len(f.ips.sessions) != 1 || f.ips.deletes != 1 {
+			t.Errorf("%s: sessions %d, erased %d; want the one erased", tc.name, len(f.ips.sessions), f.ips.deletes)
+		}
+	}
+}
+
+// A hosted start that loses the race to attach erases its session, and a
+// failure to erase it is reported with the refusal.
+func TestLostHostedStartErases(t *testing.T) {
+	f := newFixture()
+	_, token := f.sendHosted(t)
+	f.requests.refuseAttach = true
+	if _, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem); !errors.Is(err, ErrLinkStarted) {
+		t.Fatalf("StartHosted = %v, want %v", err, ErrLinkStarted)
+	}
+	if f.ips.deletes != 1 {
+		t.Errorf("erased %d sessions, want the lost one", f.ips.deletes)
+	}
+	f.ips.deleteErr = errors.New("engine down")
+	_, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem)
+	if !errors.Is(err, ErrLinkStarted) || !errors.Is(err, f.ips.deleteErr) {
+		t.Errorf("StartHosted with the erase failing = %v, want both errors", err)
+	}
+}
+
+// A request sent while its customer is being removed is purged too before
+// the removal goes through; one that keeps coming refuses the removal.
+func TestRemoveCustomerPurgesLate(t *testing.T) {
+	f := newFixture()
+	ctx := context.Background()
+	f.customers.sentDuringRemove = 1
+	if err := f.svc.RemoveCustomer(ctx, testOrg.ID, initech.ID); err != nil {
+		t.Fatalf("RemoveCustomer: %v", err)
+	}
+	if f.requests.stored == nil || f.requests.stored.PurgedAt == nil || f.ips.deletes != 1 {
+		t.Errorf("late request purged %v, engine deletes %d; want it erased first", f.requests.stored, f.ips.deletes)
+	}
+	if _, err := f.customers.Get(ctx, testOrg.ID, initech.ID); !errors.Is(err, ErrCustomerNotFound) {
+		t.Errorf("customer after removal = %v, want it gone", err)
+	}
+
+	f = newFixture()
+	f.customers.sentDuringRemove = removeCustomerAttempts
+	if err := f.svc.RemoveCustomer(ctx, testOrg.ID, initech.ID); !errors.Is(err, ErrCustomerSessionsLeft) {
+		t.Errorf("RemoveCustomer while requests keep coming = %v, want %v", err, ErrCustomerSessionsLeft)
 	}
 }

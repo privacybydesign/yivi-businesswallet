@@ -55,13 +55,15 @@ tags:
     description: >-
       Identity document and face verification, run by the wallet's own proofing engine:
       the wallet's own routes (flows, customers, requests) and the hosted page.
+
+      The Idem app's own session routes (`/api/v1/app/...`, the `api=` of its deep link) are
+      left out on purpose: only that app calls them, its client is their contract, and an
+      integrator never does; the customer API below is what a customer uses.
   - name: identity-proofing-api
-    x-displayName: Identity proofing — customer API
+    x-displayName: 'Identity proofing: customer API'
     description: |
       The API a proofing customer's own backend calls, with one of its API keys as a
-      Bearer token (`Authorization: Bearer yp_live_…`). A `yp_test_…` key runs the same
-      calls in test mode: sessions resolve at once to a `scriptedOutcome`, and their
-      identity is always `Sandbox Testperson`, born 1990-01-01.
+      Bearer token (`Authorization: Bearer yp_live_…`).
 
       An organisation admin first creates a flow (what is checked) in the wallet and
       assigns it to the customer; `GET /proofing/flows` lists the customer's flows.
@@ -82,7 +84,7 @@ tags:
       `IDENTITY_MISMATCH`. Use a flow at assurance level `substantial` (chip, face match,
       liveness).
 
-      **One known person must identify** (e.g. Dibran Mulder): any channel, with `name`
+      **One known person must identify** (e.g. Anna de Vries): any channel, with `name`
       and `birthDate`. Only that person's document is `approved`; the session reads
       `expectedSubject: true`.
 
@@ -97,8 +99,10 @@ tags:
       ### Outcomes
 
       `status` ends as `approved`, `rejected` (`errorCode` says why; the wallet itself
-      sets `IDENTITY_MISMATCH` and `ASSURANCE_NOT_MET`), `needs_review` (an admin
-      decides), `expired` or `cancelled`.
+      sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET` and `REVIEW_LAPSED`; the session
+      itself is rejected for `FACE_NO_MATCH`, `LIVENESS_FAILED`, `DOC_EXPIRED`,
+      `DOC_TAMPERED` and `ASSURANCE_NOT_MET`), `needs_review` (an admin decides), `expired` or
+      `cancelled`.
 paths:
   /api/v1/admin/identity-proofing/pauses:
     get:
@@ -142,8 +146,13 @@ paths:
         Requires the platform administrator role. Body `{paused}`. While paused, the org's
         identity-proofing routes, its customers' API keys and its hosted links answer 403
         `proofing_paused`; sessions already running still settle and their webhooks still go
-        out. The org's admin cannot lift a platform pause. Audited `identity_proofing.paused`
-        or `identity_proofing.resumed` with `by: platform`. `paused` is whether identity proofing is stopped for the org; `platformPausedAt` and `orgPausedAt` say who paused it.
+        out. Pausing first rejects every session of the org waiting for review, `errorCode`
+        `ORG_PAUSED` with a reason saying so: nothing can be decided while it is paused. A
+        review that cannot be rejected refuses the pause (500); a session that reaches review
+        while paused is rejected the same way as it arrives. The org's admin cannot lift a platform pause. Audited `identity_proofing.paused` or
+        `identity_proofing.resumed` with `by: platform`. `paused` is whether identity proofing
+        is stopped for the org; `platformPausedAt` and `orgPausedAt` say which level paused it,
+        `platformPausedBy` and `orgPausedBy` who.
       requestBody:
         required: true
         content:
@@ -1196,7 +1205,9 @@ paths:
       description: >-
         Requires organisation membership. The audit events about the held credential,
         oldest first: received, each status change its issuer's status list reported,
-        removal.
+        removal. As on the organisation audit log, a member who is not an administrator
+        gets each event with `detailHidden: true` and its actor, actor label and
+        metadata withheld.
       responses:
         '2XX':
           description: Successful response.
@@ -2105,7 +2116,10 @@ paths:
     get:
       tags: [organizations]
       summary: List organisation audit events
-      description: Requires an administrator role in the organisation.
+      description: >-
+        Requires organisation membership. An administrator sees every event in full;
+        any other member gets each event with `detailHidden: true` and its actor,
+        actor label and metadata withheld.
       responses:
         '2XX':
           description: Successful response.
@@ -4492,6 +4506,8 @@ paths:
                     - id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
                       name: Onboarding
                       steps: [document_capture, nfc_read, face_verification]
+                      requiredChecks: [nfc.passive_auth, nfc.chip_auth, face.match, face.liveness]
+                      selfieLocation: native
                       requestedAttributes: [dg1, dg2, selfie]
                       faceProvider: regula
                       requiredAssuranceLevel: substantial
@@ -4514,7 +4530,7 @@ paths:
       description: >-
         Requires an administrator role in the organisation. The flow configuration: `name`,
         `steps`, and optionally `faceProvider` (`regula`, the default for a flow with a face
-        step, or `Iris`, which runs only in the Idem app; `engine` is refused),
+        step and the only provider; anything else is refused),
         `requestedAttributes`, `acceptedDocumentTypes`, `acceptedIssuingCountries`,
         `requiredChecks`, `checkThresholds`, `requiredAssuranceLevel`, `bsnPolicy`, `blurFace`,
         `blurBsn`, `retentionOverrideSeconds`, `assuranceTiers`, `legalBasis` and
@@ -4535,6 +4551,9 @@ paths:
                 value:
                   name: Onboarding
                   steps: [document_capture, nfc_read, face_verification]
+                  requiredChecks: [nfc.passive_auth, nfc.chip_auth, face.match, face.liveness]
+                  faceProvider: regula
+                  selfieLocation: native
                   requiredAssuranceLevel: substantial
       responses:
         '201':
@@ -4550,6 +4569,8 @@ paths:
                     id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
                     name: Onboarding
                     steps: [document_capture, nfc_read, face_verification]
+                    requiredChecks: [nfc.passive_auth, nfc.chip_auth, face.match, face.liveness]
+                    selfieLocation: native
                     requestedAttributes: [dg1, dg2, selfie]
                     faceProvider: regula
                     requiredAssuranceLevel: substantial
@@ -4607,6 +4628,8 @@ paths:
                     - id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
                       name: Onboarding
                       steps: [document_capture, nfc_read, face_verification]
+                      requiredChecks: [nfc.passive_auth, nfc.chip_auth, face.match, face.liveness]
+                      selfieLocation: native
                       requestedAttributes: [dg1, dg2, selfie]
                       faceProvider: regula
                       requiredAssuranceLevel: substantial
@@ -4621,6 +4644,8 @@ paths:
                     - id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
                       name: Onboarding
                       steps: [document_capture, nfc_read, face_verification]
+                      requiredChecks: [nfc.passive_auth, nfc.chip_auth, face.match, face.liveness]
+                      selfieLocation: native
                       requestedAttributes: [dg1, dg2, selfie]
                       faceProvider: regula
                       requiredAssuranceLevel: substantial
@@ -4662,6 +4687,9 @@ paths:
                 value:
                   name: Onboarding
                   steps: [document_capture, nfc_read, document_photo, face_verification]
+                  requiredChecks: [nfc.passive_auth, nfc.chip_auth, face.match, face.liveness]
+                  faceProvider: regula
+                  selfieLocation: native
                   requiredAssuranceLevel: substantial
       responses:
         '201':
@@ -4677,6 +4705,8 @@ paths:
                     id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
                     name: Onboarding
                     steps: [document_capture, nfc_read, document_photo, face_verification]
+                    requiredChecks: [nfc.passive_auth, nfc.chip_auth, face.match, face.liveness]
+                    selfieLocation: native
                     requestedAttributes: [dg1, dg2, selfie]
                     faceProvider: regula
                     requiredAssuranceLevel: substantial
@@ -4741,6 +4771,8 @@ paths:
                     id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
                     name: Onboarding
                     steps: [document_capture, nfc_read, face_verification]
+                    requiredChecks: [nfc.passive_auth, nfc.chip_auth, face.match, face.liveness]
+                    selfieLocation: native
                     requestedAttributes: [dg1, dg2, selfie]
                     faceProvider: regula
                     requiredAssuranceLevel: substantial
@@ -4825,7 +4857,8 @@ paths:
       description: >-
         Requires organisation membership. An administrator sees every request of the
         organisation, a member the requests they sent; `?customerId=` narrows either to one
-        customer's (a malformed one is 400 `invalid_id`). At most the 200 newest, as stored:
+        customer's, `?subjectUserId=` to the ones proofing one member (a malformed id is 400
+        `invalid_id`). At most the 200 newest, as stored:
         outcomes land as the engine reports them, and a list read does not re-check it. Only the
         outcome and assurance level are returned, and for a customer's approved subject the name
         read off the document (`proofedName`), until the customer's data retention
@@ -4838,6 +4871,13 @@ paths:
             type: string
             format: uuid
           description: Only the requests sent for this customer.
+        - name: subjectUserId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Only the requests proofing this member, newest first.
       responses:
         '200':
           description: The requests, newest first.
@@ -4860,7 +4900,6 @@ paths:
                       flowName: Onboarding
                       flowVersion: 3
                       method: idem_app
-                      mode: live
                       status: approved
                       assuranceLevel: substantial
                       eidasLevel: substantial
@@ -4906,8 +4945,8 @@ paths:
         answers the vcmrtd link as `deepLink` (scannable until `deepLinkExpiresAt`), and a Yivi
         one must be on-screen (an e-mailed one is 400), its disclosure started through
         `yivi/start`. A Yivi request needs Regula on the deployment (else 409
-        `method_unavailable`), and a flow that takes no document photos, whose face provider is
-        not Idem-only (Iris), and that is not matched against a reference photo (else 400
+        `method_unavailable`), and a flow that takes no document photos and is not matched
+        against a reference photo (else 400
         `invalid_input`). A flow that asks for diplomas cannot be e-mailed (422
         `diplomas_need_page`), and a customer flow matched against a reference photo cannot be
         sent from here, which takes no photo (422 `reference_photo_required`). A customer's
@@ -4970,7 +5009,6 @@ paths:
                     flowName: Onboarding
                     flowVersion: 3
                     method: idem_app
-                    mode: live
                     status: pending
                     linkExpiresAt: "2026-10-02T09:40:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
@@ -4991,7 +5029,6 @@ paths:
                     flowName: Onboarding
                     flowVersion: 3
                     method: idem_app
-                    mode: live
                     status: pending
                     linkExpiresAt: "2026-10-02T09:40:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
@@ -5007,8 +5044,14 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          description: The `customerId` is not one of the organisation's customers (`customer_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
-          description: The deployment has no identity proofing encryption key (`no_encryption_key`), proofing is paused for the customer (`customer_paused`), the request is for a customer without a live API key (`customer_no_api_key`), or the deployment cannot run Yivi sessions (`method_unavailable`).
+          description: The deployment has no identity proofing encryption key (`no_encryption_key`), proofing is paused for the customer (`customer_paused`), the request is for a customer without an API key (`customer_no_api_key`), the deployment cannot run Yivi sessions (`method_unavailable`), or a link is asked on a flow whose hosted page is off (`hosted_disabled`).
           content:
             application/json:
               schema:
@@ -5062,7 +5105,6 @@ paths:
                     flowName: Onboarding
                     flowVersion: 3
                     method: idem_app
-                    mode: live
                     status: approved
                     assuranceLevel: substantial
                     eidasLevel: substantial
@@ -5606,7 +5648,10 @@ paths:
       summary: Switch the org's identity proofing off or on
       description: >-
         Requires an administrator role in the organisation. Body `{paused}`: the org's own
-        switch, beside a platform admin's pause, which it cannot lift. Audited
+        switch, beside a platform admin's pause, which it cannot lift. Pausing first rejects
+        every session waiting for review with `errorCode` `ORG_PAUSED`; one that cannot be
+        rejected refuses the pause (500), and a session that reaches review while paused is
+        rejected the same way as it arrives. Audited
         `identity_proofing.paused` or `identity_proofing.resumed` with `by: organization`.
       requestBody:
         required: true
@@ -5698,7 +5743,6 @@ paths:
                         activeAuth: valid
                         faceMatch: 0.97
                         liveness: passed
-                    livemode: true
                     diplomas: []
                     photo:
                       mimeType: image/jpeg
@@ -5884,7 +5928,9 @@ paths:
         subject disclosed. The frame is matched by Regula and not kept; the answer is only the
         progress (`faceDetected`, `matched`, `consecutive`, `stableFrames`, `attempts`,
         `maxAttempts`) and the `decision` (pending, approved, rejected), which is recorded on
-        the request at once.
+        the request at once. A session sends at most twice `maxAttempts` frames to Regula, a
+        frame without a face included (a resent frame costs none); spending that budget rejects
+        it. Frames count against the organisation's budget of 1500 a minute.
       requestBody:
         required: true
         content:
@@ -5932,6 +5978,19 @@ paths:
           $ref: '#/components/responses/ProofingForbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          description: >-
+            The organisation spent its face-frame budget (code `rate_limited`): 1500 frames a
+            minute. `Retry-After` says in how many seconds to try again.
+          headers:
+            Retry-After:
+              description: Seconds until the next call is allowed.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           description: The request does not run in the Yivi app (`wrong_method`), its session has ended (`session_over`), or the deployment cannot run the Yivi face check (`method_unavailable`, no Regula configured).
           content:
@@ -5965,7 +6024,9 @@ paths:
         Requires an administrator role in the organisation. What a data request's review shows
         beside the person's identity (`GET .../result`): its `flowKind` and the customer's
         sessions whose proofed identity is the person's (`strong` on the same document,
-        `probable` on name and date of birth alone). Empty for any other request.
+        `probable` on name and date of birth alone), and its unfinished sessions (pending,
+        in progress, expired or cancelled) to the same e-mail address (`email`), listed apart
+        and never approved unless chosen. Empty for any other request.
       responses:
         '200':
           description: The matches.
@@ -6120,6 +6181,7 @@ paths:
                         rejected: 3
                         needsReview: 1
                         expired: 2
+                        cancelled: 1
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -6141,7 +6203,7 @@ paths:
         (`active` or `paused`, since `pausedAt`), `sessionTtlSeconds`, `dataRetentionDays`,
         `webhook` (the endpoint's health, `state`, `lastStatusCode`, `failingSince` and
         `pendingRetries`), `branding` (with `logoUri` and `hidePoweredBy`),
-        `allowedRedirectOrigins`, `hasLiveKey`, `createdAt` and `updatedAt`. A customer has no
+        `allowedRedirectOrigins`, `hasApiKey`, `createdAt` and `updatedAt`. A customer has no
         login; members send requests for it.
       responses:
         '200':
@@ -6173,7 +6235,7 @@ paths:
                         logoUri: /api/v1/orgs/acme/customers/8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f/logo?v=1759397400
                         hidePoweredBy: false
                       allowedRedirectOrigins: [https://portal.acme.example]
-                      hasLiveKey: true
+                      hasApiKey: true
                       createdAt: "2026-09-01T10:00:00Z"
                       updatedAt: "2026-10-02T09:30:00Z"
         '401':
@@ -6225,7 +6287,7 @@ paths:
                       logoUri: ""
                       hidePoweredBy: false
                     allowedRedirectOrigins: []
-                    hasLiveKey: false
+                    hasApiKey: false
                     createdAt: "2026-10-02T09:30:00Z"
                     updatedAt: "2026-10-02T09:30:00Z"
         '400':
@@ -6290,7 +6352,7 @@ paths:
                       logoUri: /api/v1/orgs/acme/customers/8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f/logo?v=1759397400
                       hidePoweredBy: false
                     allowedRedirectOrigins: [https://portal.acme.example]
-                    hasLiveKey: true
+                    hasApiKey: true
                     createdAt: "2026-09-01T10:00:00Z"
                     updatedAt: "2026-10-02T09:30:00Z"
         '400':
@@ -6307,7 +6369,8 @@ paths:
       description: >-
         Requires an administrator role in the organisation. `name`, as on create, and/or
         `paused`: while a customer is paused (`status` `paused`), no request can be sent for it;
-        requests already sent run out as usual. An absent field is left as it is; a body with
+        requests already sent run out as usual. A customer with a session waiting for review
+        cannot be paused until it is decided (409 `customer_has_open_reviews`). An absent field is left as it is; a body with
         none is 400 `invalid_body`. `sessionTtlSeconds` (120, 300 or 600) is how long each of
         the customer's sessions runs; `dataRetentionDays` (7, 30, 90, 180 or 365; default 30)
         how long an approved subject's name is kept. `allowedRedirectOrigins` replaces the
@@ -6346,7 +6409,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The organisation already has a customer with this name.
+          description: The organisation already has a customer with this name (`customer_exists`), or a pause is asked while one of the customer's sessions waits for review (`customer_has_open_reviews`).
           content:
             application/json:
               schema:
@@ -6356,9 +6419,8 @@ paths:
       summary: Remove a customer
       description: >-
         Requires an administrator role in the organisation. Deletes the customer with every
-        session sent for it (its subjects' addresses, names and outcomes), its API keys and
-        webhook endpoint. The audit trail stays. Only the wallet's records go; the engine's
-        copies of the sessions are left to their retention.
+        session sent for it, its API keys and webhook endpoint. Each session is purged first,
+        in the engine too: its subject's address and name leave the audit trail, which stays.
       responses:
         '204':
           description: Deleted.
@@ -6370,6 +6432,12 @@ paths:
           $ref: '#/components/responses/ProofingForbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: Sessions kept being sent for the customer while it was being removed (`customer_sessions_left`); the customer stays, try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/customers/{customerID}/api-keys:
     parameters:
       - name: slug
@@ -6401,12 +6469,11 @@ paths:
                 $ref: '#/components/schemas/ProofingApiKeyList'
               examples:
                 keys:
-                  summary: One live key
+                  summary: One key
                   value:
                     - id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                       name: Production backend
                       prefix: yp_live_3kq7
-                      mode: live
                       scopes: [sessions:write, sessions:read, results:read, flows:read]
                       createdAt: "2026-09-01T10:05:00Z"
                       lastUsedAt: "2026-10-02T09:30:00Z"
@@ -6422,15 +6489,13 @@ paths:
       tags: [identity-proofing]
       summary: Create a customer API key
       description: >-
-        Requires an administrator role in the organisation. `name` labels the key and `mode` is
-        `live` (the default) or `test`. The answer carries the key's `secret` (`yp_live_…` or
-        `yp_test_…`), the one time it is readable: only its SHA-256 is kept. The customer's
-        backend sends it as a Bearer token to the public `/api/v1/proofing` routes. A test key's
-        sessions run in the org's sandbox: see `POST /api/v1/proofing/sessions`. A key gets
-        every scope: `sessions:write` (create, cancel, erase), `sessions:read`, `results:read`
-        (the verified identity) and `flows:read`. A route the key lacks the scope for answers
-        403 `insufficient_scope`. An empty `name` or one over 100 characters, or a `mode` other
-        than `live` or `test`, is 400 `invalid_input`.
+        Requires an administrator role in the organisation. `name` labels the key. The answer
+        carries the key's `secret` (`yp_live_…`), the one time it is readable: only its SHA-256
+        is kept. The customer's backend sends it as a Bearer token to the public
+        `/api/v1/proofing` routes. A key gets every scope: `sessions:write` (create, cancel,
+        erase), `sessions:read`, `results:read` (the verified identity) and `flows:read`. A
+        route the key lacks the scope for answers 403 `insufficient_scope`. An empty `name` or
+        one over 100 characters is 400 `invalid_input`.
       requestBody:
         required: true
         content:
@@ -6438,15 +6503,10 @@ paths:
             schema:
               $ref: '#/components/schemas/ProofingCreateApiKey'
             examples:
-              live:
-                summary: A live key
+              key:
+                summary: A key
                 value:
                   name: Production backend
-              test:
-                summary: A test key
-                value:
-                  name: Staging
-                  mode: test
       responses:
         '201':
           description: Created; the only answer that carries the secret.
@@ -6456,12 +6516,11 @@ paths:
                 $ref: '#/components/schemas/ProofingCreatedApiKey'
               examples:
                 created:
-                  summary: A new live key
+                  summary: A new key
                   value:
                     id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                     name: Production backend
                     prefix: yp_live_3kq7
-                    mode: live
                     scopes: [sessions:write, sessions:read, results:read, flows:read]
                     createdAt: "2026-09-01T10:05:00Z"
                     secret: yp_live_3kq7Vb9xR2mT8nW4cZ6hJ1pL5sD0fG7a
@@ -6516,7 +6575,6 @@ paths:
                     id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                     name: Production backend
                     prefix: yp_live_3kq7
-                    mode: live
                     scopes: [sessions:write, sessions:read, results:read, flows:read]
                     createdAt: "2026-09-01T10:05:00Z"
                     lastUsedAt: "2026-10-02T09:30:00Z"
@@ -6693,7 +6751,7 @@ paths:
         `session.diploma_added`. A
         new endpoint's answer carries its signing `secret` (`whsec_…`), the one time it is
         readable. Each event is a POST of `{id, type, createdAt, data}`; `data` holds
-        `sessionId` (`ps_…`), `status`, `flowId`, `livemode`, and when known `method`,
+        `sessionId` (`ps_…`), `status`, `flowId`, and when known `method`,
         `assuranceLevel`, `eidasLevel`, `errorCode` (such as `IDENTITY_MISMATCH`) and
         `expectedSubject: true`; never the person's name, address or photo. It is signed in the
         `Yivi-Signature` header as `t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`, with
@@ -6958,7 +7016,8 @@ paths:
         The hosted page, unauthenticated: the token is the whole authorization, and every route
         is rate-limited per link. `customer` (its `name`, `branding`, whose `logoUri` is this
         link's logo route, and `dataRetentionDays`), `flow` (its `name`, `requestedAttributes`,
-        `requiredAssuranceLevel`, `yiviAvailable` and `diplomaMode`), the extracts added so far
+        `requiredAssuranceLevel`, `yiviAvailable`, `diplomaMode` and `retentionDays`, the most
+        days the session's data is kept), the extracts added so far
         (`diplomas`), and the progress: `status`, `errorCode`, `method`, `started`,
         `completedAt`, `diplomasUntil` and `linkExpiresAt` (the link's end until started, then
         the session's). `sessionId` is the customer's id for the session; `redirectUrl` (absent
@@ -6966,7 +7025,9 @@ paths:
         `embedOrigins` the customer's allowed redirect origins, the only ones the page posts its
         `proofing.completed` message to; `language` (`en` or `nl`, absent for the browser's) the
         page's language, and `locales` the languages the flow's page offers (empty is every
-        one). No personal data. A flow no longer in the organisation is 422 `flow_not_found`.
+        one). No identity data; `diplomas` lists each extract the person added by
+        `qualification`, `institution`, `dateAwarded` and `nlqfLevel` only, never its document
+        number, since whoever holds the link can read it. A flow no longer in the organisation is 422 `flow_not_found`.
       responses:
         '200':
           description: What the page shows.
@@ -7002,6 +7063,7 @@ paths:
                       requestedAttributes: [dg1, dg2, selfie]
                       yiviAvailable: true
                       diplomaMode: "off"
+                      retentionDays: 31
                     diplomas: []
         '403':
           $ref: '#/components/responses/ProofingForbidden'
@@ -7014,7 +7076,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/HostedTooManyRequests'
   /api/v1/proof/{token}/status:
     parameters:
       - name: token
@@ -7057,7 +7119,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/HostedTooManyRequests'
   /api/v1/proof/{token}/start:
     parameters:
       - name: token
@@ -7114,7 +7176,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/HostedTooManyRequests'
         '409':
           description: The link was started already (`link_started`), its session ended (`session_over`), the customer is paused (`customer_paused`), or the deployment cannot run Yivi sessions (`method_unavailable`).
           content:
@@ -7155,7 +7217,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/HostedTooManyRequests'
         '409':
           description: The link was started already or its session ended.
           content:
@@ -7189,7 +7251,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/HostedTooManyRequests'
   /api/v1/proof/{token}/claim-link:
     parameters:
       - name: token
@@ -7222,7 +7284,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/HostedTooManyRequests'
         '409':
           description: The link does not run in the Idem app (`wrong_method`), its session has ended (`session_over`), or the app holding it is still active (`device_active`).
           content:
@@ -7261,7 +7323,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/HostedTooManyRequests'
         '409':
           description: The link does not run in the Yivi app (`wrong_method`) or its session has ended (`session_over`).
           content:
@@ -7308,7 +7370,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/HostedTooManyRequests'
         '409':
           description: The link does not run in the Yivi app (`wrong_method`) or its session has ended (`session_over`), or the deployment cannot run the Yivi face check (`method_unavailable`).
           content:
@@ -7371,7 +7433,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/HostedTooManyRequests'
         '409':
           description: The link does not run in the Yivi app (`wrong_method`) or its session has ended (`session_over`), or the deployment cannot run the Yivi face check (`method_unavailable`).
           content:
@@ -7392,8 +7454,9 @@ paths:
       security: []
       description: >-
         For the person who asked: an approved `data_access` session's data, as a JSON
-        attachment, while `dataExportUntil` (in the link's progress) has not passed. Audited
-        `identity_proofing.data_exported`.
+        attachment, while `dataExportUntil` (in the link's progress) has not passed: 24 hours
+        from the approval, since the link's token alone guards it (the organisation's own
+        download stays open 7 days). Audited `identity_proofing.data_exported`.
       responses:
         '200':
           description: The data.
@@ -7412,7 +7475,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/HostedTooManyRequests'
   /api/v1/proof/{token}/diplomas:
     parameters:
       - name: token
@@ -7466,7 +7529,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          $ref: '#/components/responses/HostedTooManyRequests'
         '409':
           description: The session asks for no diplomas (`diplomas_not_asked`), the upload window is closed (`diplomas_closed`), or the link was cancelled or erased (`session_over`).
           content:
@@ -7525,7 +7588,6 @@ paths:
                         expiresAt: "2026-10-02T09:40:00Z"
                         createdAt: "2026-10-02T09:30:00Z"
                         completedAt: "2026-10-02T09:34:12Z"
-                        livemode: true
                         expectedSubject: false
                     nextCursor: MjAyNi0xMC0wMlQwOTozMDowMFp8M2Y2YjQ0YTAtOWQ2Yi00YjE4LWE1N2EtMmI3ZTRhMGE5YzEx
         '400':
@@ -7547,20 +7609,20 @@ paths:
         Send an `Idempotency-Key` header to make a retry safe: the same key and body
         within 24 hours get the first answer again (`Idempotent-Replayed: true`), the
         key with another body is 422 `idempotency_key_reused`, and while the first call
-        still runs 409 `idempotency_in_flight`. `cancel` takes the header too.
+        still runs 409 `idempotency_in_flight`. A call whose outcome is unknown (the
+        server lost it mid-call) keeps answering 409 until the key expires after 24
+        hours, so that a retry can never create a second session; look the session up
+        with `GET /proofing/sessions` or use a new key. Purging a session drops the
+        answers stored for it. `cancel` takes the header too.
         Authenticated with a customer API key as a Bearer token. `email` and an optional
         `name` of the subject, `flowId` (absent is the customer's default flow) and
         `sendMail` (absent or true mails the subject as a member's request would), and
         `language` (`en` or `nl`: the mail's and the Idem app's; absent is the deployment
         default for the mail and the phone's language in the app). The answer carries the session's vcmrtd `deepLink`, for a caller that shows the QR code
-        itself, and `mailSent`. Refused while the customer is paused. With a test key
-        the session runs in the org's sandbox and resolves at once to `scriptedOutcome`
-        (`approve`, the default; `reject:<CODE>`; `needs_review`; or `expire`): it is not
-        mailed, has no `deepLink`, is left out of the stats, and carries `livemode:
-        false`, as do its webhooks. A live key may not set `scriptedOutcome` (400).
+        itself, and `mailSent`. Refused while the customer is paused.
         With `hosted: true` no session is created yet: the answer carries `hostedUrl`,
         a link to the public page the subject opens on their own device (valid 72 hours)
-        and starts once from; nothing is mailed. Not with a test key. `redirectUrl`, only with
+        and starts once from; nothing is mailed. `redirectUrl`, only with
         `hosted: true`, is where the page sends the subject once the session settles, with
         `?session=<id>&status=<status>` added; its origin must be one of the customer's
         `allowedRedirectOrigins` (else 400 `redirect_not_allowed`). `birthDate`
@@ -7568,8 +7630,7 @@ paths:
         account recovery: the name and birth date read off the document must match, else
         the session is `rejected` with `errorCode` `IDENTITY_MISMATCH`. The session and its
         webhooks then carry `expectedSubject: true`. The flow must read the document data
-        (400 otherwise). A test session's identity is `Sandbox Testperson`, born
-        1990-01-01. On a flow whose face check runs without the chip read
+        (400 otherwise). On a flow whose face check runs without the chip read
         (`needsReferencePhoto` in the flow list), `referencePhoto` is required (422
         `reference_photo_required` otherwise): the customer's own photo of the person,
         standard base64 of a PNG, JPEG or WebP of at most 512 KiB, which the live face
@@ -7606,15 +7667,15 @@ paths:
                 value:
                   hosted: true
                   redirectUrl: https://portal.example.nl/reset/return
-                  name: Dibran Mulder
-                  birthDate: "1984-07-21"
+                  name: Anna de Vries
+                  birthDate: "1990-04-12"
                   flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
               knownPerson:
-                summary: Only Dibran Mulder can pass
+                summary: Only Anna de Vries can pass
                 value:
-                  email: dibran@example.org
-                  name: Dibran Mulder
-                  birthDate: "1984-07-21"
+                  email: anna.devries@example.org
+                  name: Anna de Vries
+                  birthDate: "1990-04-12"
               bankAccountReferencePhoto:
                 summary: Liveness check against your own photo (face-only flow)
                 value:
@@ -7622,13 +7683,6 @@ paths:
                   redirectUrl: https://portal.example.nl/policy/bank-account/return
                   flowId: 9a2b4c6d-1e3f-4a5b-8c7d-0e1f2a3b4c5d
                   referencePhoto: /9j/4AAQSkZJRgABAQAAAQABAAD
-              testMismatch:
-                summary: Test key, scripted approval of someone else
-                value:
-                  email: test@example.org
-                  name: Dibran Mulder
-                  birthDate: "1984-07-21"
-                  scriptedOutcome: approve
       responses:
         '201':
           description: Created.
@@ -7655,7 +7709,6 @@ paths:
                     subjectName: Anna Jansen
                     expiresAt: "2026-10-02T09:40:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
-                    livemode: true
                     expectedSubject: false
                     deepLink: vcmrtd://verify?handover=hv_3m8x2kq7&api=https%3A%2F%2Fwallet.example.nl
                     mailSent: true
@@ -7667,32 +7720,13 @@ paths:
                     flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
                     flowName: Onboarding
                     subjectEmail: ""
-                    subjectName: Dibran Mulder
+                    subjectName: Anna de Vries
                     expiresAt: "2026-10-05T09:30:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
-                    livemode: true
                     expectedSubject: true
                     deepLink: ""
                     mailSent: false
                     hostedUrl: https://wallet.example.nl/p/BwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSY
-                test:
-                  summary: Test key, resolved at once
-                  value:
-                    id: ps_t3st7z2mxk3vbn6hw5jc2dfa7e
-                    status: approved
-                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
-                    flowName: Onboarding
-                    subjectEmail: test@example.org
-                    proofedName: Sandbox Testperson
-                    assuranceLevel: substantial
-                    eidasLevel: substantial
-                    expiresAt: "2026-10-02T09:40:00Z"
-                    createdAt: "2026-10-02T09:30:00Z"
-                    completedAt: "2026-10-02T09:30:00Z"
-                    livemode: false
-                    expectedSubject: false
-                    deepLink: ""
-                    mailSent: false
         '400':
           description: >-
             The body is not valid JSON or has an unknown field (`invalid_body`), a field
@@ -7703,7 +7737,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                error: enter the person's email address
+                error: enter a valid e-mail address
                 code: invalid_input
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
@@ -7713,10 +7747,11 @@ paths:
           $ref: '#/components/responses/ApiForbidden'
         '409':
           description: >-
-            The customer is paused (`customer_paused`), a live key's customer has no live
-            key (`customer_no_api_key`), the flow's hosted page is off (`hosted_disabled`),
+            The customer is paused (`customer_paused`), the customer has no API key
+            (`customer_no_api_key`), the flow's hosted page is off (`hosted_disabled`),
             the deployment has no encryption key (`no_encryption_key`), or a call with this
-            `Idempotency-Key` is still running (`idempotency_in_flight`).
+            `Idempotency-Key` is still running or its outcome is unknown
+            (`idempotency_in_flight`).
           content:
             application/json:
               schema:
@@ -7757,8 +7792,17 @@ paths:
         read off the document (`proofedName`) until the customer's data retention clears
         it. `expectedSubject: true` is a session created for one person (`name` with
         `birthDate`). Rejection codes the wallet itself sets: `IDENTITY_MISMATCH` (the
-        document is another person's) and `ASSURANCE_NOT_MET` (the checks fell short of
-        the flow's required level).
+        document is another person's), `ASSURANCE_NOT_MET` (the checks fell short of the
+        flow's required level) and `REVIEW_LAPSED` (a data request nobody reviewed within 30
+        days) and `ORG_PAUSED` (a review left open when the organisation paused proofing). The
+        session itself is rejected, on any flow, for a face that did not match (`FACE_NO_MATCH`),
+        `DOC_EXPIRED`, `DOC_TAMPERED`, and for an achieved eIDAS level below the flow's
+        (`ASSURANCE_NOT_MET`). A failed liveness (`LIVENESS_FAILED`) rejects it when the flow
+        requires a level or lists `face.liveness`; otherwise the match alone decides, and a
+        face that failed liveness never counts as matched. `CHIP_CLONE_DETECTED` is an Active
+        Authentication that failed, or, on a flow listing `nfc.chip_auth`, a chip with an AA key
+        whose response is missing (a recorded chip read replayed). `CHIP_AUTH_MISSING` appears
+        only on sessions decided under an earlier rule.
       security:
         - customerApiKey: []
       responses:
@@ -7786,7 +7830,6 @@ paths:
                     expiresAt: "2026-10-02T09:40:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
                     completedAt: "2026-10-02T09:34:12Z"
-                    livemode: true
                     expectedSubject: false
                 mismatch:
                   summary: Someone else's document on a session for one person
@@ -7798,12 +7841,11 @@ paths:
                     flowVersion: 3
                     method: idem_app
                     subjectEmail: ""
-                    subjectName: Dibran Mulder
+                    subjectName: Anna de Vries
                     errorCode: IDENTITY_MISMATCH
                     expiresAt: "2026-10-02T09:40:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
                     completedAt: "2026-10-02T09:33:05Z"
-                    livemode: true
                     expectedSubject: true
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
@@ -7930,7 +7972,6 @@ paths:
                         activeAuth: valid
                         faceMatch: 0.97
                         liveness: passed
-                    livemode: true
                     diplomas:
                       - documentType: Diploma
                         qualification: Master Computer Science
@@ -7959,7 +8000,6 @@ paths:
                         activeAuth: valid
                         faceMatch: 0.21
                         liveness: passed
-                    livemode: true
                     diplomas: []
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
@@ -8057,7 +8097,7 @@ paths:
             (`link_started`), or ended (`session_over`); the customer is paused
             (`customer_paused`); the deployment has no Regula face check for the Yivi app
             (`method_unavailable`); or a call with this `Idempotency-Key` is still running
-            (`idempotency_in_flight`).
+            or its outcome is unknown (`idempotency_in_flight`).
           content:
             application/json:
               schema:
@@ -8179,7 +8219,6 @@ paths:
                     expiresAt: "2026-10-02T09:40:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
                     cancelledAt: "2026-10-02T09:31:45Z"
-                    livemode: true
                     expectedSubject: false
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
@@ -8192,7 +8231,8 @@ paths:
         '409':
           description: >-
             The session already has an outcome, ended, or was erased (`session_over`), or
-            a call with this `Idempotency-Key` is still running (`idempotency_in_flight`).
+            a call with this `Idempotency-Key` is still running or its outcome is unknown
+            (`idempotency_in_flight`).
           content:
             application/json:
               schema:
@@ -8276,8 +8316,8 @@ paths:
       description: >-
         Requires organisation membership. An administrator sees every flow of the organisation
         with `assigned` and `default` for this customer; a member only the assigned flows a
-        recipient can finish. Each also carries `completable`, `needsReferencePhoto` and
-        `diplomaMode`.
+        recipient can finish. Each also carries `completable`, `needsReferencePhoto`,
+        `diplomaMode` and `retentionDays`.
       responses:
         '200':
           description: The flows, with the customer's assignment.
@@ -8292,6 +8332,8 @@ paths:
                     - id: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
                       name: Onboarding
                       steps: [document_capture, nfc_read, face_verification]
+                      requiredChecks: [nfc.passive_auth, nfc.chip_auth, face.match, face.liveness]
+                      selfieLocation: native
                       requestedAttributes: [dg1, dg2, selfie]
                       faceProvider: regula
                       requiredAssuranceLevel: substantial
@@ -8303,6 +8345,7 @@ paths:
                       default: true
                       diplomaMode: "off"
                       needsReferencePhoto: false
+                      retentionDays: 31
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -10066,7 +10109,7 @@ components:
           type: array
           items:
             type: string
-          description: What the result may carry (`dg1` the document data with name and birth date, `dg2` the chip photo, `selfie`, …).
+          description: What the result may carry (`dg1` the document data with name and birth date, `dg2` the chip photo, `selfie`, …); empty is the outcome only.
         default:
           type: boolean
           description: The flow a session without `flowId` runs.
@@ -10097,7 +10140,7 @@ components:
         birthDate:
           type: string
           format: date
-          example: "1984-07-21"
+          example: "1990-04-12"
           description: >-
             With `name`, makes the session one for that person only: the name and birth date
             on the document must match, or the session is `rejected` with `IDENTITY_MISMATCH`.
@@ -10131,10 +10174,6 @@ components:
             With `hosted`, where the page sends the person once the session settles, with
             `?session=<id>&status=<status>` added. Its origin must be one of the customer's
             allowed redirect origins.
-        scriptedOutcome:
-          type: string
-          example: approve
-          description: Test keys only. `approve` (default), `reject:<CODE>`, `needs_review` or `expire`.
     ProofingApiSession:
       type: object
       description: A session as stored, with its outcome. Never document data beyond the proofed name.
@@ -10167,15 +10206,19 @@ components:
         eidasLevel:
           type: string
           enum: [low, substantial, high]
-          description: The eIDAS level reached; absent when the flow sets none.
+          description: >-
+            The eIDAS level the checks reached, whether or not the flow requires one; a face
+            step lifts it past low only with Regula. Absent when no level was reached.
         errorCode:
           type: string
           example: IDENTITY_MISMATCH
           description: >-
             Why a session was rejected. The wallet itself sets `IDENTITY_MISMATCH` (the
-            document is not the expected person's) and `ASSURANCE_NOT_MET` (the checks fell
-            short of the flow's level); others come from the checks (`FACE_NO_MATCH`,
-            `DOC_EXPIRED`, `CHIP_CLONE_DETECTED`, …).
+            document is not the expected person's), `ASSURANCE_NOT_MET` (the checks fell
+            short of the flow's level) and `REVIEW_LAPSED` (a data request nobody reviewed
+            within 30 days); others come from the session itself
+            (`FACE_NO_MATCH`, `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
+            `CHIP_CLONE_DETECTED`, `ASSURANCE_NOT_MET`, …).
         expiresAt:
           type: string
           format: date-time
@@ -10193,9 +10236,6 @@ components:
           type: string
           format: date-time
           description: When its personal data was erased.
-        livemode:
-          type: boolean
-          description: False for a test key's session.
         expectedSubject:
           type: boolean
           description: Created for one known person (`name` with `birthDate`).
@@ -10210,7 +10250,7 @@ components:
           type: string
           format: date-time
           description: Until when an approved `data_access` session's data downloads.
-      required: [id, status, flowId, flowName, subjectEmail, expiresAt, createdAt, livemode, expectedSubject]
+      required: [id, status, flowId, flowName, subjectEmail, expiresAt, createdAt, expectedSubject]
     ProofingApiCreatedSession:
       allOf:
         - $ref: '#/components/schemas/ProofingApiSession'
@@ -10305,14 +10345,12 @@ components:
                 type: string
                 enum: [passed, failed, not_performed]
             required: [type, passiveAuth, activeAuth]
-        livemode:
-          type: boolean
         diplomas:
           type: array
           description: The DUO diploma extracts the person added, each checked against DUO's signature and the proofed identity.
           items:
             $ref: '#/components/schemas/ProofingDiploma'
-      required: [id, status, evidence, livemode, diplomas]
+      required: [id, status, evidence, diplomas]
     ProofingApiMethodStart:
       type: object
       properties:
@@ -10354,7 +10392,7 @@ components:
         What a customer's webhook endpoint receives: a POST signed in `Yivi-Signature`
         (`t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">` with the endpoint's `whsec_…`
         secret), with `Yivi-Event` and `Yivi-Delivery` headers. Answer 2xx; anything else
-        is retried up to 8 times over about 24 hours.
+        is tried up to 8 times in all over about 24 hours.
       properties:
         id:
           type: string
@@ -10380,8 +10418,6 @@ components:
               enum: [pending, in_progress, approved, rejected, needs_review, expired, cancelled]
             flowId:
               type: string
-            livemode:
-              type: boolean
             method:
               type: string
             assuranceLevel:
@@ -10421,7 +10457,6 @@ components:
           sessionId: ps_q4r7tz2mxk3vbn6hw5jc2dfa7e
           status: approved
           flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
-          livemode: true
           method: idem_app
           assuranceLevel: substantial
           eidasLevel: substantial
@@ -10457,6 +10492,23 @@ components:
           type: string
           format: date-time
       required: [documentType, qualification, profiles, institution, placeOfIssue, dateAwarded, documentNumber, addedAt]
+    ProofingHostedDiploma:
+      type: object
+      description: >-
+        A DUO diploma extract as the hosted page lists it: only what the subject needs to
+        recognise it. The link's token alone opens the page, so the document number and the
+        rest of `ProofingDiploma` are left out.
+      properties:
+        qualification:
+          type: string
+        institution:
+          type: string
+        dateAwarded:
+          type: string
+          format: date
+        nlqfLevel:
+          type: string
+      required: [qualification, institution, dateAwarded]
     ProofingDiplomaVerdictList:
       type: array
       description: What became of each uploaded file, in upload order.
@@ -10505,22 +10557,31 @@ components:
           items:
             type: string
             enum: [dg1, dg11, dg2, selfie, chip_checks, biometrics, document_image]
-          description: What a session's result may carry; absent lets the engine derive it from the steps.
+          description: What a session's result may carry; absent or empty releases the outcome only (the assurance summary, no data).
         selfieLocation:
           type: string
           description: Ignored; the wallet always sets the face capture to the app.
         faceProvider:
           type: string
-          enum: [regula, Iris]
-          description: What verifies the face step; absent is `regula`. `Iris` runs only in the Idem app.
+          enum: [regula]
+          description: What verifies the face step; absent is `regula`, the only one.
         acceptedDocumentTypes:
           type: array
           items:
             type: string
+          description: >-
+            Document codes accepted (the MRZ document code, such as `P`); empty accepts any.
+            An EU driving licence, `drivers_license` or `eu_driving_licence`, is refused (422 `rejected_by_provider`):
+            the engine has no CSCA source to verify a licence's chip, so it refuses every one.
         acceptedIssuingCountries:
           type: array
           items:
             type: string
+            pattern: '^[A-Z]{3}$'
+          description: >-
+            3-letter ICAO 9303 codes (ISO 3166-1 alpha-3, or an ICAO-only code such as `EUE`
+            or `UNO`); an unknown code is refused (422 `rejected_by_provider`). A German
+            document's `D` counts as `DEU`. Empty accepts any country.
         requiredChecks:
           type: array
           items:
@@ -10531,7 +10592,7 @@ components:
             type: number
         requiredAssuranceLevel:
           type: string
-          enum: [low, substantial, high]
+          enum: [low, substantial]
         bsnPolicy:
           type: string
           enum: [retrieve, mask, omit]
@@ -10544,6 +10605,11 @@ components:
           description: Absent inherits the organisation's redaction policy.
         retentionOverrideSeconds:
           type: integer
+          minimum: 1
+          maximum: 31536000
+          description: >-
+            How long the flow's finished sessions keep their data, at most a year. Set, it
+            applies in place of a customer's data retention; absent, the customer's applies.
         assuranceTiers:
           type: array
           items:
@@ -10636,7 +10702,14 @@ components:
             kind:
               type: string
               enum: [identity, data_access, data_erasure]
-          required: [id, version, active, createdAt, completable, assigned, default, diplomaMode, needsReferencePhoto]
+            retentionDays:
+              type: integer
+              description: >-
+                The most days a subject's data is kept on this flow for this customer: the flow's
+                retention when it sets one, else the customer's `dataRetentionDays`, plus the day
+                the proofing engine keeps its copy longer, rounded up to whole days. What the
+                on-screen page tells the subject.
+          required: [id, version, active, createdAt, completable, assigned, default, diplomaMode, needsReferencePhoto, retentionDays]
     ProofingCustomerFlowList:
       type: array
       items:
@@ -10731,8 +10804,10 @@ components:
                 format: date-time
               level:
                 type: string
-                enum: [strong, probable]
-                description: strong when proven with the same document, probable on name and date of birth alone.
+                enum: [strong, probable, email]
+                description: >-
+                  strong when proven with the same document, probable on name and date of birth
+                  alone, email an unfinished session to the same address (no proofed identity).
               approved:
                 type: boolean
                 description: The reviewer's choice; absent until the decision.
@@ -10855,9 +10930,6 @@ components:
         method:
           type: string
           enum: [idem_app, yivi_app, browser]
-        mode:
-          type: string
-          enum: [live, test]
         status:
           type: string
           enum: [pending, in_progress, approved, rejected, needs_review, expired, cancelled]
@@ -10906,7 +10978,7 @@ components:
           type: string
           format: date-time
           description: Until when an approved `data_access` session's data downloads.
-      required: [id, requestedByName, subjectName, subjectEmail, flowId, flowName, mode, status, linkExpiresAt, createdAt, diplomaMode, diplomas, expectedSubject]
+      required: [id, requestedByName, subjectName, subjectEmail, flowId, flowName, status, linkExpiresAt, createdAt, diplomaMode, diplomas, expectedSubject]
     ProofingRequestList:
       type: array
       items:
@@ -10983,8 +11055,10 @@ components:
             type: string
             format: uuid
           description: >-
-            Only on a data request: the matched sessions an approval takes (absent takes them
-            all). An erasure purges them; an access request opens their data for download.
+            Only on a data request: the matched sessions an approval takes (absent takes only
+            the `strong` ones, proven with the same document; a `probable` or `email` match is
+            taken only when listed). An erasure purges them; an access request opens their data
+            for download.
       required: [decision, reason]
     ProofingClaimLink:
       type: object
@@ -11128,7 +11202,10 @@ components:
                 type: integer
               expired:
                 type: integer
-            required: [customerId, flowId, sessions, approved, rejected, needsReview, expired]
+              cancelled:
+                type: integer
+                description: Cancelled before an outcome; not counted in `expired`.
+            required: [customerId, flowId, sessions, approved, rejected, needsReview, expired, cancelled]
       required: [since, rows]
     ProofingImage:
       type: object
@@ -11172,7 +11249,21 @@ components:
           type: string
           format: date-time
           description: Set while the organisation's administrator paused it.
+        platformPausedBy:
+          $ref: '#/components/schemas/ProofingPausedBy'
+        orgPausedBy:
+          $ref: '#/components/schemas/ProofingPausedBy'
       required: [organizationId, paused]
+    ProofingPausedBy:
+      type: object
+      description: Who set a pause, while it holds; absent when unknown (set before this was kept, or the user was removed).
+      properties:
+        userId:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required: [userId, name]
     ProofingPauseList:
       type: object
       properties:
@@ -11252,15 +11343,16 @@ components:
           type: array
           items:
             type: string
-        hasLiveKey:
+        hasApiKey:
           type: boolean
+          description: Whether the customer holds an unrevoked API key; a request for it needs one.
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
-      required: [id, name, flowIds, status, sessionTtlSeconds, dataRetentionDays, webhook, branding, allowedRedirectOrigins, hasLiveKey, createdAt, updatedAt]
+      required: [id, name, flowIds, status, sessionTtlSeconds, dataRetentionDays, webhook, branding, allowedRedirectOrigins, hasApiKey, createdAt, updatedAt]
     ProofingCustomerList:
       type: array
       items:
@@ -11327,9 +11419,6 @@ components:
         prefix:
           type: string
           description: The key's public start, to recognise it by.
-        mode:
-          type: string
-          enum: [live, test]
         scopes:
           type: array
           items:
@@ -11344,7 +11433,7 @@ components:
         revokedAt:
           type: string
           format: date-time
-      required: [id, name, prefix, mode, scopes, createdAt]
+      required: [id, name, prefix, scopes, createdAt]
     ProofingApiKeyList:
       type: array
       items:
@@ -11356,10 +11445,6 @@ components:
         name:
           type: string
           maxLength: 100
-        mode:
-          type: string
-          enum: [live, test]
-          default: live
       required: [name]
     ProofingCreatedApiKey:
       allOf:
@@ -11422,8 +11507,8 @@ components:
             type: string
           sessionId:
             type: string
-            format: uuid
-            description: The request's UUID; absent for a `test` event.
+            example: ps_q4r7tz2mxk3vbn6hw5jc2dfa7e
+            description: The session's `ps_` id, as the delivery's payload carries it; absent for a `test` event.
           endpointUrl:
             type: string
             description: Absent for the wallet's default endpoint.
@@ -11472,7 +11557,7 @@ components:
         dataExportUntil:
           type: string
           format: date-time
-          description: Until when an approved "see my data" session's data downloads (`GET /api/v1/proof/{token}/data-export`).
+          description: Until when an approved "see my data" session's data downloads through the link (`GET /api/v1/proof/{token}/data-export`), 24 hours from the approval.
       required: [status, linkExpiresAt, started]
     ProofingHostedView:
       allOf:
@@ -11525,11 +11610,18 @@ components:
                 kind:
                   type: string
                   enum: [identity, data_access, data_erasure]
-              required: [name, requestedAttributes, yiviAvailable, diplomaMode]
+                retentionDays:
+                  type: integer
+                  description: >-
+                    The most days the session's data is kept: the flow's retention when it set
+                    one, else the customer's `dataRetentionDays`, plus the day the proofing engine
+                    keeps its copy longer, rounded up to whole days. What the page tells the subject.
+              required: [name, requestedAttributes, yiviAvailable, diplomaMode, retentionDays]
             diplomas:
               type: array
+              description: The extracts the subject added, as the page lists them.
               items:
-                $ref: '#/components/schemas/ProofingDiploma'
+                $ref: '#/components/schemas/ProofingHostedDiploma'
           required: [sessionId, embedOrigins, locales, customer, flow, diplomas]
     ProofingHostedStart:
       type: object
@@ -11596,6 +11688,20 @@ components:
       description: >-
         The customer spent its public API budget (code `rate_limited`): 120 calls a
         minute, and of those 10 session creations. `Retry-After` says in how many
+        seconds to try again.
+      headers:
+        Retry-After:
+          description: Seconds until the next call is allowed.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    HostedTooManyRequests:
+      description: >-
+        The link spent its budget (code `rate_limited`, "too many requests for this
+        link"): 300 calls a minute per hosted link. `Retry-After` says in how many
         seconds to try again.
       headers:
         Retry-After:

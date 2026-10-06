@@ -86,6 +86,10 @@ const (
 	envDiplomaValidatorProvider = "DIPLOMA_VALIDATOR_PROVIDER"
 	envDiplomaTrustSource       = "DIPLOMA_TRUST_SOURCE"
 	envDiplomaTrustCacheDir     = "DIPLOMA_TRUST_CACHE_DIR"
+	// envDiplomaOCSP ("true") also checks the signer certificate online
+	// against DUO's OCSP responder per upload; off by default, as in
+	// go-diploma-issuer (validation.ocsp).
+	envDiplomaOCSP = "DIPLOMA_OCSP"
 
 	// Identity proofing: the wallet's own proofing engine
 	// (internal/proofingengine) runs document + face verification for an org.
@@ -288,12 +292,13 @@ const (
 	defaultVogValidatorProvider = ProviderStub
 	defaultVogValidatorURL      = "https://validatie.nl/api/valideer/"
 
-	// ProviderDUO checks a diploma extract's DUO signature for real;
-	// ProviderStub accepts every extract's signature (dev/CI: nobody holds a
-	// DUO-signed extract of a test person). DiplomaTrustEUTL and
+	// ProviderDUO checks a diploma extract's DUO signature for real, and is the
+	// default, as in go-diploma-issuer; ProviderStub accepts every extract's
+	// signature and runs only when set explicitly (the dev stack sets it:
+	// nobody holds a DUO-signed extract of a test person). DiplomaTrustEUTL and
 	// DiplomaTrustPinned are where its trust anchors come from.
 	ProviderDUO                     = "duo"
-	defaultDiplomaValidatorProvider = ProviderStub
+	defaultDiplomaValidatorProvider = ProviderDUO
 	DiplomaTrustEUTL                = "eutl"
 	DiplomaTrustPinned              = "pinned"
 	defaultDiplomaTrustSource       = DiplomaTrustEUTL
@@ -404,6 +409,9 @@ type Config struct {
 	DiplomaValidatorProvider string
 	DiplomaTrustSource       string
 	DiplomaTrustCacheDir     string
+	// DiplomaOCSP enables the online revocation check of DUO's signing
+	// certificate (envDiplomaOCSP).
+	DiplomaOCSP bool
 
 	IdentityProofingProvider string
 	// IdentityProofingPublicURL is the origin in every vcmrtd deep link.
@@ -729,6 +737,7 @@ func Load() (Config, error) {
 
 		DiplomaValidatorProvider: diplomaValidatorProvider,
 		DiplomaTrustSource:       diplomaTrustSource,
+		DiplomaOCSP:              strings.EqualFold(os.Getenv(envDiplomaOCSP), "true"),
 		DiplomaTrustCacheDir:     os.Getenv(envDiplomaTrustCacheDir),
 
 		IdentityProofingProvider:          identityProofingProvider,

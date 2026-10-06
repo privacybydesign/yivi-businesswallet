@@ -1,6 +1,7 @@
 package diploma
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,7 +20,7 @@ var ErrNotADiploma = errors.New("document is not a DUO diploma extract")
 
 // Parser extracts the printed data from a diploma extract PDF.
 type Parser interface {
-	Parse(pdf []byte) (*Document, error)
+	Parse(ctx context.Context, pdf []byte) (*Document, error)
 }
 
 // Word is a positioned piece of text on a page. Coordinates are PDF user
@@ -33,8 +34,14 @@ type Word struct {
 	Bottom float64
 }
 
-// pdfiumInstanceTimeout bounds how long a parse waits for a free instance.
-const pdfiumInstanceTimeout = 30 * time.Second
+const (
+	// pdfiumInstanceTimeout bounds how long a parse waits for a free instance.
+	pdfiumInstanceTimeout = 30 * time.Second
+	// pdfiumParseTimeout bounds one parse once it has an instance. A genuine
+	// extract parses in well under a second; past this the instance is killed,
+	// so a crafted PDF cannot hold one of the pool's few instances indefinitely.
+	pdfiumParseTimeout = 20 * time.Second
+)
 
 // PDFiumParser parses diploma extracts with PDFium running in a WebAssembly
 // sandbox (pure Go, no cgo). It borrows a pool another parser owns (the VOG
@@ -57,25 +64,50 @@ type Pages struct {
 }
 
 // Parse extracts the diploma data from the PDF bytes.
-func (p *PDFiumParser) Parse(pdf []byte) (*Document, error) {
-	pages, err := p.extract(pdf)
+func (p *PDFiumParser) Parse(ctx context.Context, pdf []byte) (*Document, error) {
+	pages, err := p.extract(ctx, pdf)
 	if err != nil {
 		return nil, err
 	}
 	return ExtractDocument(pages)
 }
 
-func (p *PDFiumParser) extract(pdf []byte) (*Pages, error) {
+// extract reads the pages on a pooled instance, killing the instance when the
+// parse outlives pdfiumParseTimeout or ctx. Kill interrupts the WebAssembly
+// call in flight only because the pool's runtime closes on context done
+// (vog.NewPDFiumParser).
+func (p *PDFiumParser) extract(ctx context.Context, pdf []byte) (*Pages, error) {
 	instance, err := p.pool.GetInstance(pdfiumInstanceTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("diploma: get pdfium instance: %w", err)
 	}
-	defer func() {
+	ctx, cancel := context.WithTimeout(ctx, pdfiumParseTimeout)
+	defer cancel()
+
+	type result struct {
+		pages *Pages
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		pages, err := readPages(instance, pdf)
+		done <- result{pages, err}
+	}()
+	select {
+	case r := <-done:
 		if err := instance.Close(); err != nil {
 			slog.Warn("diploma: return pdfium instance to pool", slog.String("error", err.Error()))
 		}
-	}()
+		return r.pages, r.err
+	case <-ctx.Done():
+		if err := instance.Kill(); err != nil {
+			slog.Warn("diploma: kill pdfium instance", slog.String("error", err.Error()))
+		}
+		return nil, fmt.Errorf("diploma: parse pdf: %w", ctx.Err())
+	}
+}
 
+func readPages(instance pdfium.Pdfium, pdf []byte) (*Pages, error) {
 	doc, err := instance.OpenDocument(&requests.OpenDocument{File: &pdf})
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to open pdf: %v", ErrNotADiploma, err)

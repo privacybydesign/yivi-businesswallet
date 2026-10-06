@@ -17,6 +17,7 @@ import (
 type fakeDataRequests struct {
 	kinds      map[string]FlowKind
 	candidates []Request
+	emailed    []Request
 	matched    []Request
 	matches    []DataMatch
 	saved      []NewDataMatch
@@ -43,6 +44,10 @@ func (f *fakeDataRequests) SaveFlowKind(_ context.Context, _ uuid.UUID, flowID s
 
 func (f *fakeDataRequests) Candidates(context.Context, Request) ([]Request, error) {
 	return f.candidates, nil
+}
+
+func (f *fakeDataRequests) EmailCandidates(context.Context, Request) ([]Request, error) {
+	return f.emailed, nil
 }
 
 func (f *fakeDataRequests) SaveMatches(_ context.Context, _ Request, matches []NewDataMatch) error {
@@ -140,7 +145,7 @@ func TestNameHolds(t *testing.T) {
 
 // A proven person's data request is not approved: it goes to review with the
 // customer's sessions of that person.
-func TestDataRequestGoesToReviewWithItsMatches(t *testing.T) {
+func TestDataRequestReviewMatches(t *testing.T) {
 	f, data := newDataFixture(FlowDataErasure)
 	anna, piet := heldSession("Anna Jansen"), heldSession("Piet de Vries")
 	data.candidates = []Request{anna, piet}
@@ -167,7 +172,40 @@ func TestDataRequestGoesToReviewWithItsMatches(t *testing.T) {
 	}
 }
 
-func TestDataRequestFlowIsForCustomers(t *testing.T) {
+// An unfinished session sent to the request's address is matched by e-mail,
+// after the identity matches; one already matched on identity is not listed
+// twice.
+func TestDataRequestMatchesByEmail(t *testing.T) {
+	f, data := newDataFixture(FlowDataErasure)
+	anna := heldSession("Anna Jansen")
+	pending := Request{ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusPending}
+	data.candidates, data.emailed = []Request{anna}, []Request{pending, anna}
+	f.sendForCustomer(t, "anna@example.org", "")
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
+
+	f.reconcile(t)
+	want := []NewDataMatch{{RequestID: anna.ID, Level: MatchProbable}, {RequestID: pending.ID, Level: MatchEmail}}
+	if !slices.Equal(data.saved, want) {
+		t.Errorf("matches = %+v; want %+v", data.saved, want)
+	}
+}
+
+// A decision that names no sessions takes every identity match, never an
+// e-mail one: those only a reviewer's own tick takes.
+func TestApprovedSkipsEmailMatches(t *testing.T) {
+	strong, email := uuid.New(), uuid.New()
+	matches := []DataMatch{{RequestID: strong, Level: MatchStrong}, {RequestID: email, Level: MatchEmail}}
+	got, err := approvedMatches(matches, nil)
+	if err != nil || !slices.Equal(got, []uuid.UUID{strong}) {
+		t.Errorf("approvedMatches(nil) = %v, %v; want only the identity match", got, err)
+	}
+	got, err = approvedMatches(matches, []uuid.UUID{email})
+	if err != nil || !slices.Equal(got, []uuid.UUID{email}) {
+		t.Errorf("approvedMatches(email) = %v, %v; want the ticked e-mail match", got, err)
+	}
+}
+
+func TestDataRequestFlowCustomers(t *testing.T) {
 	f, _ := newDataFixture(FlowDataAccess)
 	f.settings.selection = FlowSelection{FlowIDs: []string{appFlow.ID, chipFlow.ID}, DefaultFlowID: appFlow.ID}
 	_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()},
@@ -180,7 +218,7 @@ func TestDataRequestFlowIsForCustomers(t *testing.T) {
 	}
 }
 
-func TestSaveFlowKindNeedsAnIdentityFlow(t *testing.T) {
+func TestSaveFlowKindNeedsIdentity(t *testing.T) {
 	f, data := newDataFixture(FlowIdentity)
 	ctx := context.Background()
 	if _, err := f.svc.SaveFlowKind(ctx, testOrg, appFlow.ID, FlowDataErasure); !errors.Is(err, ErrFlowNoIdentity) {
@@ -214,7 +252,7 @@ func inReview(t *testing.T, kind FlowKind) (fixture, *fakeDataRequests, Request,
 	return f, data, first, second
 }
 
-func TestDecideDataErasurePurgesTheApprovedSessions(t *testing.T) {
+func TestDataErasurePurgesApproved(t *testing.T) {
 	f, data, first, _ := inReview(t, FlowDataErasure)
 	deletes := f.ips.deletes
 	req, err := f.svc.DecideReview(context.Background(), testOrg.ID, f.requests.stored.ID, "reviewer@example.org",
@@ -235,20 +273,74 @@ func TestDecideDataErasurePurgesTheApprovedSessions(t *testing.T) {
 	}
 }
 
-func TestDecideDataAccessOpensTheExport(t *testing.T) {
+// Approving without choosing takes only the matches proven with the same
+// document: a probable or e-mail one needs the reviewer's own tick.
+func TestApprovedTakesStrongOnly(t *testing.T) {
+	strong, probable, email := uuid.New(), uuid.New(), uuid.New()
+	matches := []DataMatch{{RequestID: strong, Level: MatchStrong}, {RequestID: probable, Level: MatchProbable}, {RequestID: email, Level: MatchEmail}}
+	got, err := approvedMatches(matches, nil)
+	if err != nil || !slices.Equal(got, []uuid.UUID{strong}) {
+		t.Errorf("approvedMatches(nil) = %v, %v; want only the strong match", got, err)
+	}
+	if got, err := approvedMatches(matches, []uuid.UUID{probable, email}); err != nil || len(got) != 2 {
+		t.Errorf("approvedMatches(ticked) = %v, %v; want both ticked", got, err)
+	}
+}
+
+// Every given name and the family name must match, in order, with the birth
+// date: a shared family name or one given name of two is someone else.
+func TestSamePersonIsAFullMatch(t *testing.T) {
+	for _, tc := range []struct {
+		given, family, other string
+		want                 bool
+	}{
+		{"Anna Maria", "Müller", "ANNA MARIA MUELLER", true},
+		{"Anna", "Smit", "Anna Jansen Smit", false},
+		{"Jan Willem", "de Vries", "Jan Pieter de Vries", false},
+		{"Anna Maria", "Jansen", "Anna Jansen", false},
+	} {
+		if got := samePerson(tc.given, tc.family, testBirthDate, tc.other, testBirthDate); got != tc.want {
+			t.Errorf("samePerson(%s %s, %s) = %v, want %v", tc.given, tc.family, tc.other, got, tc.want)
+		}
+	}
+	if samePerson("Anna", "Jansen", testBirthDate, "Anna Jansen", "1990-04-13") {
+		t.Error("another birth date matched")
+	}
+}
+
+func TestDataAccessOpensExport(t *testing.T) {
 	f, data, first, second := inReview(t, FlowDataAccess)
 	deletes := f.ips.deletes
 	req, err := f.svc.DecideReview(context.Background(), testOrg.ID, f.requests.stored.ID, "reviewer@example.org",
-		ReviewInput{Approve: true, Reason: "identity matches"})
+		ReviewInput{Approve: true, Reason: "identity matches", RequestIDs: []uuid.UUID{first.ID, second.ID}})
 	if err != nil {
 		t.Fatalf("DecideReview: %v", err)
 	}
 	if req.Status != StatusApproved || !slices.Equal(data.approved, []uuid.UUID{first.ID, second.ID}) || data.exportTill == nil ||
 		data.exportTill.Sub(time.Now().Add(DataExportWindow)).Abs() > time.Minute {
-		t.Errorf("decision: %q, approved %v, export %v; want every match approved, the export open", req.Status, data.approved, data.exportTill)
+		t.Errorf("decision: %q, approved %v, export %v; want the chosen matches approved, the export open", req.Status, data.approved, data.exportTill)
 	}
 	if f.ips.deletes != deletes {
 		t.Errorf("an access request erased %d sessions; want none", f.ips.deletes-deletes)
+	}
+}
+
+// An approved access request that is then erased exports nothing more,
+// though its window is still open.
+func TestErasedAccessExportsNothing(t *testing.T) {
+	f, _, _, _ := inReview(t, FlowDataAccess)
+	ctx := context.Background()
+	req, err := f.svc.DecideReview(ctx, testOrg.ID, f.requests.stored.ID, "reviewer@example.org", ReviewInput{Approve: true, Reason: "ok"})
+	if err != nil {
+		t.Fatalf("DecideReview: %v", err)
+	}
+	until := time.Now().Add(DataExportWindow)
+	f.requests.stored.DataExportUntil = &until
+	if err := f.svc.PurgeRequest(ctx, initechScope, req.ID); err != nil {
+		t.Fatalf("PurgeRequest: %v", err)
+	}
+	if _, err := f.svc.CustomerDataExport(ctx, initechScope, req.ID); !errors.Is(err, ErrExportUnavailable) {
+		t.Errorf("export after erasure = %v, want %v", err, ErrExportUnavailable)
 	}
 }
 
@@ -271,5 +363,34 @@ func TestDecideDataRequestRefusals(t *testing.T) {
 	}
 	if _, err := f.svc.DecideReview(ctx, testOrg.ID, id, "r", ReviewInput{Approve: true, Reason: "again"}); !errors.Is(err, ErrNotUnderReview) {
 		t.Errorf("deciding again = %v; want ErrNotUnderReview", err)
+	}
+}
+
+// A data request nobody reviewed in time is rejected before it is purged,
+// so it does not stay purged in review.
+func TestPurgeRejectsLapsedReview(t *testing.T) {
+	f, _, _, _ := inReview(t, FlowDataErasure)
+	lapsed := time.Now().Add(-time.Hour)
+	f.requests.stored.PurgeAt = &lapsed
+
+	if purged, err := f.svc.PurgeDue(context.Background()); err != nil || purged != 1 {
+		t.Fatalf("PurgeDue = %d, %v; want the lapsed request purged", purged, err)
+	}
+	if got := f.requests.stored; got.Status != StatusRejected || got.ErrorCode != errorReviewLapsed || got.PurgedAt == nil {
+		t.Errorf("after PurgeDue = %q %q purged %v; want rejected %s and purged", got.Status, got.ErrorCode, got.PurgedAt, errorReviewLapsed)
+	}
+}
+
+// Through the hosted link, which only its token guards, the data downloads for
+// a day after the approval, not the whole DataExportWindow.
+func TestHostedExportIsOpenADay(t *testing.T) {
+	approved := time.Now()
+	until := approved.Add(DataExportWindow)
+	req := Request{Status: StatusApproved, DataExportUntil: &until}
+	if got := openExport(req, approved.Add(hostedExportWindow-time.Minute)); got == nil {
+		t.Error("closed within the first day")
+	}
+	if got := openExport(req, approved.Add(hostedExportWindow+time.Minute)); got != nil {
+		t.Errorf("open until %v after the first day", got)
 	}
 }

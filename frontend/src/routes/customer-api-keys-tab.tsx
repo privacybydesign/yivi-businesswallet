@@ -90,14 +90,7 @@ export function ApiKeysTab({
             ) : (
               keys.data.map((key) => (
                 <Table.Row key={key.id}>
-                  <Table.Cell className="font-semibold">
-                    {key.name}{" "}
-                    {key.mode === "test" ? (
-                      <Tag tone="amber">{t("customers.apiKeys.test")}</Tag>
-                    ) : (
-                      <Tag tone="blue">{t("customers.apiKeys.live")}</Tag>
-                    )}
-                  </Table.Cell>
+                  <Table.Cell className="font-semibold">{key.name}</Table.Cell>
                   <Table.Cell className="text-ink-soft font-mono text-[12.5px]">
                     {t("customers.apiKeys.prefix", { prefix: key.prefix })}
                   </Table.Cell>
@@ -160,10 +153,16 @@ export function ApiKeysTab({
           message={t("customers.apiKeys.revokeConfirm.message")}
           confirmLabel={t("customers.apiKeys.revoke")}
           busy={revoke.isPending}
+          error={
+            revoke.isError ? proofingErrorMessage(revoke.error, t) : undefined
+          }
           onConfirm={() =>
             revoke.mutate(revoking.id, { onSuccess: () => setRevoking(null) })
           }
-          onClose={() => setRevoking(null)}
+          onClose={() => {
+            revoke.reset();
+            setRevoking(null);
+          }}
         />
       )}
     </>
@@ -184,7 +183,6 @@ function NewKeyModal({
   const { t } = useTranslation();
   const create = useCreateProofingApiKeyMutation(slug, customerId);
   const [name, setName] = useState("");
-  const [test, setTest] = useState(false);
   const [touched, setTouched] = useState(false);
   const missing = name.trim() === "";
 
@@ -195,19 +193,32 @@ function NewKeyModal({
       return;
     }
     create.mutate(
-      { name: name.trim(), mode: test ? "test" : "live" },
+      { name: name.trim() },
       { onSuccess: (key) => onCreated(key.secret) },
     );
+  }
+
+  // The secret arrives once, in the answer to the POST, and only this modal
+  // hands it on: closing it mid-request would drop the key's only copy.
+  function close(): void {
+    if (!create.isPending) {
+      onClose();
+    }
   }
 
   return (
     <Modal
       title={t("customers.apiKeys.create")}
       closeLabel={t("common.close")}
-      onClose={onClose}
+      onClose={close}
       footer={
         <>
-          <Button variant="secondary" size="sm" onClick={onClose}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={close}
+            disabled={create.isPending}
+          >
             {t("customers.new.cancel")}
           </Button>
           <Button
@@ -243,21 +254,6 @@ function NewKeyModal({
         {touched && missing && (
           <p className={ERROR}>{t("customers.new.nameRequired")}</p>
         )}
-        <div className="mt-3 flex items-start gap-2.5">
-          <input
-            id="proofing-api-key-test"
-            type="checkbox"
-            className="mt-0.5 h-4 w-4"
-            checked={test}
-            onChange={(e) => setTest(e.target.checked)}
-          />
-          <label htmlFor="proofing-api-key-test" className="flex flex-col">
-            <span className="text-[13px] font-semibold">
-              {t("customers.apiKeys.testLabel")}
-            </span>
-            <span className={HINT}>{t("customers.apiKeys.testHint")}</span>
-          </label>
-        </div>
         {create.isError && (
           <p className={ERROR}>{proofingErrorMessage(create.error, t)}</p>
         )}

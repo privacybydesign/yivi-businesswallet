@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
+import { modalDismissal } from "../lib/modal-dismiss";
 import { Icon } from "./icon";
 
 // Selector for the elements a keyboard user can Tab between inside the dialog.
@@ -15,6 +16,9 @@ interface ModalProps {
   footer?: ReactNode;
   // Widens the dialog for multi-column content such as the issue wizard.
   wide?: boolean;
+  // False keeps the dialog open on a click outside it and on Escape: only its
+  // own controls close it (a one-time secret must not vanish by a stray click).
+  dismissible?: boolean;
 }
 
 export function Modal({
@@ -24,8 +28,10 @@ export function Modal({
   children,
   footer,
   wide = false,
+  dismissible = true,
 }: ModalProps): React.JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const dismiss = modalDismissal({ dismissible, onClose });
 
   // Move focus into the dialog on open and restore it to the trigger on close.
   useEffect(() => {
@@ -40,7 +46,7 @@ export function Modal({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
-        onClose();
+        dismiss?.();
         return;
       }
       const dialog = dialogRef.current;
@@ -66,12 +72,12 @@ export function Modal({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [dismiss]);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-6"
-      onClick={onClose}
+      onClick={dismiss}
     >
       <div
         ref={dialogRef}

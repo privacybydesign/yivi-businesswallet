@@ -1,7 +1,6 @@
-// Package privacy holds the privacy knobs a proofing flow sets on what a
-// session keeps: the BSN policy, image redaction and the GDPR processing
-// basis. They lived on IPS's tenant model; in the wallet a flow carries them
-// and an unset one falls back to the defaults here.
+// Package privacy holds the privacy settings a flow sets on what a session
+// keeps: the BSN policy, image redaction and the GDPR processing basis. Unset,
+// the defaults here apply.
 package privacy
 
 // BSNPolicy controls what happens to a Dutch document's BSN (read off DG11

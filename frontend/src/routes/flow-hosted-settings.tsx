@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
+  useProofingCustomerFlowsQuery,
   useProofingCustomersQuery,
   useProofingFlowHostedQuery,
   useSaveProofingFlowHostedMutation,
@@ -177,6 +178,11 @@ function HostedPreview({
   const choices = assigned.length > 0 ? assigned : all;
   const [picked, setPicked] = useState("");
   const customer = choices.find((c) => c.id === picked) ?? choices.at(0);
+  // The retention a subject is told is the server's: this flow for this customer.
+  const customerFlows = useProofingCustomerFlowsQuery(slug, customer?.id ?? "");
+  const retentionDays = customerFlows.data?.find(
+    (f) => f.id === flow.id,
+  )?.retentionDays;
   const selectId = `hosted-preview-${flow.id}`;
 
   if (customer === undefined) {
@@ -213,12 +219,24 @@ function HostedPreview({
             {customer.branding.displayName || customer.name}
           </span>
         </div>
-        <Overview
-          customer={customer}
-          flow={flow}
-          onContinue={() => undefined}
-          starting={false}
-        />
+        {customerFlows.isError ? (
+          <p className={ERROR}>
+            {proofingErrorMessage(customerFlows.error, t)}
+          </p>
+        ) : customerFlows.isPending ? (
+          <p className={HINT}>{t("common.loading")}</p>
+        ) : (
+          // A flow the customer's list lacks (not the active version) has no
+          // retention to tell: no preview of it.
+          retentionDays !== undefined && (
+            <Overview
+              customer={customer}
+              flow={{ ...flow, retentionDays }}
+              onContinue={() => undefined}
+              starting={false}
+            />
+          )
+        )}
       </Card>
     </section>
   );

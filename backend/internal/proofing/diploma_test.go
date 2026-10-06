@@ -131,7 +131,7 @@ func TestDiplomaFlowIsNotMailed(t *testing.T) {
 	}
 }
 
-func TestDiplomaModeIsKeptOnTheRequest(t *testing.T) {
+func TestDiplomaModeKeptOnRequest(t *testing.T) {
 	d := newDiplomaFixture(DiplomasRequired)
 	req := d.sendApproved(t, 0)
 	if req.Diplomas != DiplomasRequired || d.requests.created[0].Diplomas != DiplomasRequired {
@@ -139,7 +139,7 @@ func TestDiplomaModeIsKeptOnTheRequest(t *testing.T) {
 	}
 }
 
-func TestAddDiplomasKeepsTheHoldersOnly(t *testing.T) {
+func TestAddDiplomasHoldersOnly(t *testing.T) {
 	d := newDiplomaFixture(DiplomasRequired)
 	req := d.sendApproved(t, time.Minute)
 	verdicts, err := d.upload(req, "Anna Maria Jansen", "Piet de Vries", "not a pdf", "Anna Maria Jansen")

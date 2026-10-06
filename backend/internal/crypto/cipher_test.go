@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestDeriveSecretIsStablePerPurpose(t *testing.T) {
+func TestDeriveSecretPerPurpose(t *testing.T) {
 	key := strings.Repeat("ab", keyBytes)
 	a, _ := NewCipher(key)
 	b, _ := NewCipher(key)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,6 +30,15 @@ const (
 	inviteCount      = 35
 	revokeCount      = 22
 	roleChangeCount  = 8
+)
+
+// The orgs that run identity proofing for their own customers (proofing.go).
+// use cases examples
+const (
+	radboudSlug = "radboud-universiteit"
+	asrSlug     = "asr"
+	unibetSlug  = "unibet"
+	cmSlug      = "cm"
 )
 
 // demoOrganization is a seeded business wallet: an org with KVK identity, a QERDS
@@ -169,7 +179,7 @@ var kvkRegisterOrg = demoOrganization{
 var demoOrganizations = []demoOrganization{
 	yiviOrg,
 	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NL.KVK.90000020", addressLocal: "firsty", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly", repDOB: "1985-11-22"},
-	{name: "Radboud Universiteit", slug: "radboud-universiteit", kvkNumber: "90000030", euid: "NL.KVK.90000030", addressLocal: "radboud", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
+	{name: "Radboud Universiteit (Demo)", slug: radboudSlug, kvkNumber: "90000030", euid: "NL.KVK.90000030", addressLocal: "radboud", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
 	{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NL.KVK.09220932", addressLocal: "nijmegen", repGiven: "Dibran", repFamily: "Mulder", repKind: "bestuurder", repAuth: "sole", repDOB: "1991-05-14"},
 }
 
@@ -270,6 +280,19 @@ func expandTeams(groups []sdvbTeamGroup, extras []string) []string {
 // run by its own kerkenraad; the wijkgemeente is the unit a member belongs to, so
 // each is a department. SDV Barneveld is the local football club with every youth
 // and senior team as a department (see sdvbTeamGroups).
+// proofingOrganizations run identity proofing for their own customers
+// (demoProofingOrgs); Radboud Universiteit, the fourth, is a demo company.
+// Their names say "(Demo)": they are real organisations' names, used only to
+// show the use cases.
+// Like the community organisations they carry no representative and are
+// absent from the register dataset, so their KVK numbers are placeholders in
+// the same range that collide with no register entry.
+var proofingOrganizations = []demoOrganization{
+	{name: "a.s.r. verzekeringen (Demo)", slug: asrSlug, kvkNumber: "90000110", euid: "NL.KVK.90000110", addressLocal: "asr"},
+	{name: "Unibet (Demo)", slug: unibetSlug, kvkNumber: "90000120", euid: "NL.KVK.90000120", addressLocal: "unibet"},
+	{name: "CM.com (Demo)", slug: cmSlug, kvkNumber: "90000130", euid: "NL.KVK.90000130", addressLocal: "cm"},
+}
+
 var communityOrganizations = []communityOrganization{
 	{
 		org: demoOrganization{
@@ -328,7 +351,7 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 	}
 
 	orgsBySlug := map[string]organization.Organization{}
-	for _, o := range demoOrganizations {
+	for _, o := range slices.Concat(demoOrganizations, proofingOrganizations) {
 		org, err := ensureOrg(ctx, pool, o, addressDomain)
 		if err != nil {
 			return err
@@ -390,8 +413,8 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 	if err := seedHeldAttestations(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
-	// The identity proofing use cases the demo org runs for its customers.
-	if err := seedProofing(ctx, pool, demoOrg.ID, usersByEmail["admin@yivi.app"].ID); err != nil {
+	// The identity proofing use cases the proofing orgs run for their customers.
+	if err := seedProofing(ctx, pool, orgsBySlug, usersByEmail["admin@yivi.app"].ID); err != nil {
 		return err
 	}
 

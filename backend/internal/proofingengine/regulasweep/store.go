@@ -3,7 +3,9 @@ package regulasweep
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
@@ -26,6 +28,17 @@ func (s *Store) Add(ctx context.Context, tag string, dueAt time.Time) error {
 		WHERE identity_proofing_regula_sweeps.attempts = 0`, tag, dueAt)
 	if err != nil {
 		return fmt.Errorf("regulasweep: queue: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) Settle(ctx context.Context, tag string, dueAt time.Time) error {
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO identity_proofing_regula_sweeps (tag, due_at) VALUES ($1, $2)
+		ON CONFLICT (tag) DO UPDATE SET due_at = LEAST(identity_proofing_regula_sweeps.due_at, EXCLUDED.due_at)
+		WHERE identity_proofing_regula_sweeps.attempts = 0`, tag, dueAt)
+	if err != nil {
+		return fmt.Errorf("regulasweep: settle: %w", err)
 	}
 	return nil
 }
@@ -65,9 +78,7 @@ func (s *Store) Done(ctx context.Context, tag string) error {
 }
 
 func (s *Store) Retry(ctx context.Context, tag string, next time.Time, lastError string) error {
-	if len(lastError) > maxErrorLength {
-		lastError = lastError[:maxErrorLength]
-	}
+	lastError = truncateUTF8(lastError, maxErrorLength)
 	_, err := s.db.Exec(ctx, `
 		UPDATE identity_proofing_regula_sweeps SET due_at = $2, attempts = attempts + 1, last_error = $3
 		WHERE tag = $1`, tag, next, lastError)
@@ -75,4 +86,18 @@ func (s *Store) Retry(ctx context.Context, tag string, next time.Time, lastError
 		return fmt.Errorf("regulasweep: retry: %w", err)
 	}
 	return nil
+}
+
+// truncateUTF8 is s as valid UTF-8 (a Regula or proxy error body need not
+// be: Postgres refuses invalid UTF-8 in TEXT) of at most max bytes, cut on a
+// character boundary.
+func truncateUTF8(s string, maxBytes int) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	if len(s) <= maxBytes {
+		return s
+	}
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	return s[:maxBytes]
 }

@@ -84,9 +84,9 @@ func (sel FlowSelection) auditFields() map[string]any {
 	return map[string]any{"flowIds": sel.FlowIDs, "defaultFlowId": sel.DefaultFlowID}
 }
 
-// RecordFlowEvent audits a flow change at IPS (created, a version added or
+// RecordFlowEvent audits a flow change in the engine (created, a version added or
 // activated), with the flow's configuration as it now stands. The flow lives at
-// IPS, not in this database, so there is no local write to share a transaction
+// the engine, not in this database, so there is no local write to share a transaction
 // with. A flow holds no personal data, so the whole configuration is audited.
 func (s *SettingsStore) RecordFlowEvent(ctx context.Context, orgID uuid.UUID, action string, flow proofingprovider.Flow) error {
 	raw, err := json.Marshal(flow.FlowSpec)

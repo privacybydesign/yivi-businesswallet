@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"time"
 )
@@ -28,6 +29,24 @@ var (
 	ErrPrivateNetwork = errors.New("host resolves to a non-public address")
 	ErrRedirect       = errors.New("redirects are not followed")
 )
+
+// nonPublicPrefixes are the special-purpose ranges the net.IP predicates do not
+// cover. NAT64, 6to4, Teredo and IPv4-compatible IPv6 are refused whole: the
+// IPv4 address they embed could be a private one, and no legitimate endpoint is
+// reached only through them. IsPublic unmaps ::ffff:a.b.c.d to plain IPv4 before
+// matching, so the IPv4-mapped form is checked as the IPv4 address it carries
+// and is not caught by ::/96.
+var nonPublicPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),      // "this network"
+	netip.MustParsePrefix("100.64.0.0/10"),  // shared address space (CGNAT)
+	netip.MustParsePrefix("198.18.0.0/15"),  // benchmarking
+	netip.MustParsePrefix("240.0.0.0/4"),    // reserved, includes broadcast
+	netip.MustParsePrefix("64:ff9b::/96"),   // NAT64
+	netip.MustParsePrefix("64:ff9b:1::/48"), // local-use NAT64
+	netip.MustParsePrefix("2002::/16"),      // 6to4
+	netip.MustParsePrefix("2001::/32"),      // Teredo
+	netip.MustParsePrefix("::/96"),          // IPv4-compatible IPv6 (deprecated)
+}
 
 // Policy is the trust posture for an externally supplied URL. The zero value
 // is production: https only, public addresses only. AllowInsecureHTTP is the
@@ -105,15 +124,22 @@ func NewClient(p Policy) *http.Client {
 }
 
 // IsPublic reports whether ip is a globally routable unicast address — not
-// loopback, private, link-local, multicast, unspecified, or the shared/CGNAT
-// range (which Go does not classify as private).
+// loopback, private, link-local, multicast, unspecified, or one of the
+// special-purpose ranges in nonPublicPrefixes (which Go does not classify).
 func IsPublic(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
 		ip.IsMulticast() || ip.IsUnspecified() || ip.IsInterfaceLocalMulticast() {
 		return false
 	}
-	if v4 := ip.To4(); v4 != nil && v4[0] == 100 && v4[1]&0xc0 == 64 {
-		return false // 100.64.0.0/10
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	addr = addr.Unmap()
+	for _, prefix := range nonPublicPrefixes {
+		if prefix.Contains(addr) {
+			return false
+		}
 	}
 	return true
 }

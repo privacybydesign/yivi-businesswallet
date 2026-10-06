@@ -73,7 +73,7 @@ func (h *Handler) dataMatches(w http.ResponseWriter, r *http.Request) error {
 	out := dataMatchesResponse{FlowKind: req.FlowKind, Matches: make([]dataMatchResponse, 0, len(matches))}
 	for _, m := range matches {
 		out.Matches = append(out.Matches, dataMatchResponse{
-			RequestID: m.RequestID.String(), SessionID: PublicSessionID(m.RequestID), FlowName: m.FlowName,
+			RequestID: m.RequestID.String(), SessionID: publicSessionID(m.RequestID), FlowName: m.FlowName,
 			Status: m.Status, Method: m.Method, AssuranceLevel: m.AssuranceLevel, EIDASLevel: m.EIDASLevel,
 			CreatedAt: m.CreatedAt, CompletedAt: m.CompletedAt, PurgedAt: m.PurgedAt, Level: m.Level, Approved: m.Approved,
 		})
@@ -152,14 +152,14 @@ func writeDataExport(w http.ResponseWriter, r *http.Request, export DataExport, 
 		return mapError(err)
 	}
 	out := dataExportResponse{
-		RequestID: PublicSessionID(export.RequestID), ExportedAt: export.ExportedAt,
+		RequestID: publicSessionID(export.RequestID), ExportedAt: export.ExportedAt,
 		Sessions: make([]dataExportSessionResponse, 0, len(export.Sessions)),
 	}
 	now := time.Now()
 	for _, s := range export.Sessions {
 		req := s.Request
 		session := dataExportSessionResponse{
-			SessionID: PublicSessionID(req.ID), Flow: req.FlowName, Status: req.EffectiveStatus(now),
+			SessionID: publicSessionID(req.ID), Flow: req.FlowName, Status: req.EffectiveStatus(now),
 			Method: string(req.Method), AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel,
 			CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt, PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt,
 			Diplomas: newDiplomaResponses(s.Diplomas),
@@ -170,8 +170,8 @@ func writeDataExport(w http.ResponseWriter, r *http.Request, export DataExport, 
 		}
 		out.Sessions = append(out.Sessions, session)
 	}
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", dataExportFilename))
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set(headerContentDisposition, fmt.Sprintf("attachment; filename=%q", dataExportFilename))
+	w.Header().Set(headerCacheControl, "no-store")
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }
@@ -191,7 +191,7 @@ func (h *Handler) apiDataExport(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	export, err := h.service.CustomerDataExport(r.Context(), caller.Org.ID, caller.CustomerID, id)
+	export, err := h.service.CustomerDataExport(r.Context(), caller.Scope(), id)
 	return writeDataExport(w, r, export, err)
 }
 

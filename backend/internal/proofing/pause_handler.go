@@ -48,28 +48,53 @@ type pauseResponse struct {
 	Paused           bool       `json:"paused"`
 	PlatformPausedAt *time.Time `json:"platformPausedAt,omitempty"`
 	OrgPausedAt      *time.Time `json:"orgPausedAt,omitempty"`
+	// PlatformPausedBy and OrgPausedBy are who set each pause, when known.
+	PlatformPausedBy *pausedByResponse `json:"platformPausedBy,omitempty"`
+	OrgPausedBy      *pausedByResponse `json:"orgPausedBy,omitempty"`
+}
+
+type pausedByResponse struct {
+	UserID uuid.UUID `json:"userId"`
+	Name   string    `json:"name"`
+}
+
+func newPausedBy(p *PausedBy) *pausedByResponse {
+	if p == nil {
+		return nil
+	}
+	return &pausedByResponse{UserID: p.UserID, Name: p.Name}
 }
 
 func newPauseResponse(p OrgPause) pauseResponse {
 	return pauseResponse{
 		OrganizationID: p.OrganizationID, Paused: p.Paused(),
 		PlatformPausedAt: p.PlatformPausedAt, OrgPausedAt: p.OrgPausedAt,
+		PlatformPausedBy: newPausedBy(p.PlatformPausedBy), OrgPausedBy: newPausedBy(p.OrgPausedBy),
 	}
+}
+
+// pausedByCaller is the signed-in user setting a pause.
+func pausedByCaller(r *http.Request) *uuid.UUID {
+	id := auth.UserFromContext(r.Context()).ID
+	return &id
 }
 
 type setPauseRequest struct {
 	Paused *bool `json:"paused"`
 }
 
-func decodePause(r *http.Request) (bool, error) {
+func decodePause(r *http.Request) (PauseState, error) {
 	var body setPauseRequest
 	if err := decode(r, &body); err != nil {
-		return false, err
+		return "", err
 	}
 	if body.Paused == nil {
-		return false, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "paused is required"}
+		return "", &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "paused is required"}
 	}
-	return *body.Paused, nil
+	if *body.Paused {
+		return PauseOn, nil
+	}
+	return PauseOff, nil
 }
 
 func (h *Handler) getPause(w http.ResponseWriter, r *http.Request) error {
@@ -82,11 +107,11 @@ func (h *Handler) getPause(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *Handler) setOrgPause(w http.ResponseWriter, r *http.Request) error {
-	paused, err := decodePause(r)
+	state, err := decodePause(r)
 	if err != nil {
 		return err
 	}
-	p, err := h.service.SetProofingPaused(r.Context(), orgFromRequest(r).ID, PauseOrganization, paused)
+	p, err := h.service.SetProofingPaused(r.Context(), orgFromRequest(r).ID, PauseOrganization, state, pausedByCaller(r))
 	if err != nil {
 		return mapError(err)
 	}
@@ -116,11 +141,11 @@ func (h *Handler) setPlatformPause(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid organisation id"}
 	}
-	paused, err := decodePause(r)
+	state, err := decodePause(r)
 	if err != nil {
 		return err
 	}
-	p, err := h.service.SetProofingPaused(r.Context(), orgID, PausePlatform, paused)
+	p, err := h.service.SetProofingPaused(r.Context(), orgID, PausePlatform, state, pausedByCaller(r))
 	if err != nil {
 		return mapError(err)
 	}

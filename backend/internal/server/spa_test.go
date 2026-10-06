@@ -151,7 +151,7 @@ func (*framePolicy) PageHeaders(r *http.Request, h http.Header) {
 	}
 }
 
-func TestSPA_AppliesAFeaturesPageHeadersToItsRoutesOnly(t *testing.T) {
+func TestSPAFeatureHeadersScoped(t *testing.T) {
 	h := New(stubPinger{}, writeStaticSite(t), &framePolicy{})
 
 	for path, want := range map[string]string{

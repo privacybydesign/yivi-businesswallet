@@ -1,7 +1,9 @@
 package flow
 
 import (
+	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +19,7 @@ func validFlow() FlowDefinition {
 	}
 }
 
-func TestValidateAcceptsAMinimalFlow(t *testing.T) {
+func TestValidateMinimalFlow(t *testing.T) {
 	if err := Validate(validFlow()); err != nil {
 		t.Fatalf("Validate(minimal valid flow) = %v, want nil", err)
 	}
@@ -26,49 +28,37 @@ func TestValidateAcceptsAMinimalFlow(t *testing.T) {
 func TestValidateRequiresName(t *testing.T) {
 	fd := validFlow()
 	fd.Name = "  "
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a blank name")
-	}
+	wantRefused(t, fd, "name is required")
 }
 
-func TestValidateRequiresAtLeastOneStep(t *testing.T) {
+func TestValidateNeedsAStep(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = nil
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted zero steps")
-	}
+	wantRefused(t, fd, "at least one step")
 }
 
 func TestValidateRejectsUnknownStep(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{"not_a_real_step"}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted an unknown step")
-	}
+	wantRefused(t, fd, "unknown step")
 }
 
-func TestValidateRejectsDuplicateStep(t *testing.T) {
+func TestValidateDuplicateStep(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepSelfie, StepSelfie}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a duplicate step")
-	}
+	wantRefused(t, fd, "duplicate step")
 }
 
-func TestValidateRejectsUnknownCheck(t *testing.T) {
+func TestValidateUnknownCheck(t *testing.T) {
 	fd := validFlow()
 	fd.RequiredChecks = []Check{"not_a_real_check"}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted an unknown check")
-	}
+	wantRefused(t, fd, "unknown check")
 }
 
-func TestValidateRejectsDuplicateCheck(t *testing.T) {
+func TestValidateDuplicateCheck(t *testing.T) {
 	fd := validFlow()
 	fd.RequiredChecks = []Check{CheckFaceMatch, CheckFaceMatch}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a duplicate check")
-	}
+	wantRefused(t, fd, "duplicate check")
 }
 
 func TestValidateAcceptsKnownChecks(t *testing.T) {
@@ -79,15 +69,13 @@ func TestValidateAcceptsKnownChecks(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsUnknownAssuranceLevel(t *testing.T) {
+func TestValidateUnknownLevel(t *testing.T) {
 	fd := validFlow()
 	fd.RequiredAssuranceLevel = "extreme"
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted an unknown assurance level")
-	}
+	wantRefused(t, fd, "unknown assurance level")
 }
 
-func TestValidateAcceptsEmptyAssuranceLevel(t *testing.T) {
+func TestValidateAllowsEmptyLevel(t *testing.T) {
 	fd := validFlow()
 	fd.RequiredAssuranceLevel = ""
 	if err := Validate(fd); err != nil {
@@ -95,12 +83,10 @@ func TestValidateAcceptsEmptyAssuranceLevel(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsRequiredAssuranceLevelHigh(t *testing.T) {
+func TestValidateRejectsHigh(t *testing.T) {
 	fd := validFlow()
 	fd.RequiredAssuranceLevel = AssuranceLevelHigh
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted requiredAssuranceLevel \"high\" - no check this codebase computes reaches it (face.liveness is a heuristic, issue #7)")
-	}
+	wantRefused(t, fd, "not achievable")
 }
 
 // substantialFlow requires everything LevelRequirements asks of substantial.
@@ -113,51 +99,43 @@ func substantialFlow() FlowDefinition {
 	return fd
 }
 
-func TestValidateAcceptsRequiredAssuranceLevelSubstantialWithEveryCheck(t *testing.T) {
+func TestSubstantialAcceptsAll(t *testing.T) {
 	if err := Validate(substantialFlow()); err != nil {
 		t.Fatalf("Validate(substantial with every check and Regula) = %v, want nil", err)
 	}
 }
 
-func TestValidateRejectsRequiredAssuranceLevelSubstantialMissingACheck(t *testing.T) {
+func TestSubstantialNeedsCheck(t *testing.T) {
 	for _, missing := range []Check{CheckNFCChipAuth, CheckFaceLiveness} {
 		fd := substantialFlow()
 		fd.RequiredChecks = slices.DeleteFunc(slices.Clone(fd.RequiredChecks), func(c Check) bool { return c == missing })
-		if err := Validate(fd); err == nil {
-			t.Errorf("Validate accepted requiredAssuranceLevel \"substantial\" without %s", missing)
-		}
+		wantRefused(t, fd, "requiredAssuranceLevel \"substantial\" requires requiredChecks")
 	}
 }
 
-func TestValidateRejectsRequiredAssuranceLevelSubstantialWithoutRegula(t *testing.T) {
+func TestSubstantialNeedsRegula(t *testing.T) {
 	fd := substantialFlow()
 	fd.FaceProvider = FaceProviderEngine
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted requiredAssuranceLevel \"substantial\" on a face provider other than Regula")
-	}
+	wantRefused(t, fd, "requires faceProvider")
 }
 
-func TestValidateRejectsRequiredAssuranceLevelSubstantialWithoutEvidence(t *testing.T) {
+func TestSubstantialNeedsEvidence(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepSelfie, StepFaceMatch}
 	fd.RequiredChecks = []Check{CheckFaceMatch}
 	fd.RequiredAssuranceLevel = AssuranceLevelSubstantial
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted requiredAssuranceLevel \"substantial\" with binding but no evidence-validation check required")
-	}
+	wantRefused(t, fd, "requiredAssuranceLevel \"substantial\" requires requiredChecks")
 }
 
-func TestValidateRejectsRequiredAssuranceLevelSubstantialWithoutBinding(t *testing.T) {
+func TestSubstantialNeedsBinding(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepDocumentCapture, StepNFCRead}
 	fd.RequiredChecks = []Check{CheckNFCPassiveAuth}
 	fd.RequiredAssuranceLevel = AssuranceLevelSubstantial
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted requiredAssuranceLevel \"substantial\" with evidence but no face.match required")
-	}
+	wantRefused(t, fd, "requiredAssuranceLevel \"substantial\" requires requiredChecks")
 }
 
-func TestValidateAcceptsRequiredAssuranceLevelLowWithChipReadOnly(t *testing.T) {
+func TestValidateLowChipReadOnly(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepDocumentCapture, StepNFCRead}
 	fd.RequiredChecks = []Check{CheckNFCPassiveAuth}
@@ -167,33 +145,27 @@ func TestValidateAcceptsRequiredAssuranceLevelLowWithChipReadOnly(t *testing.T) 
 	}
 }
 
-func TestValidateRejectsRequiredAssuranceLevelLowWithoutChipRead(t *testing.T) {
+func TestValidateLowNoChipRead(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepSelfie, StepFaceMatch}
 	fd.RequiredChecks = []Check{CheckFaceMatch}
 	fd.RequiredAssuranceLevel = AssuranceLevelLow
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted requiredAssuranceLevel \"low\" without the chip read's nfc.passive_auth")
-	}
+	wantRefused(t, fd, "requiredAssuranceLevel \"low\" requires requiredChecks")
 }
 
-func TestValidateRejectsFaceVerificationWithoutFaceMatchRequiredCheck(t *testing.T) {
+func TestValidateFaceNoMatchCheck(t *testing.T) {
 	fd := validFlow()
 	fd.RequiredChecks = []Check{CheckNFCPassiveAuth}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted face_verification steps with no face.match in requiredChecks")
-	}
+	wantRefused(t, fd, "face_verification requires requiredChecks to include face.match")
 }
 
-func TestValidateRejectsUnknownBSNPolicy(t *testing.T) {
+func TestValidateUnknownBSNPolicy(t *testing.T) {
 	fd := validFlow()
 	fd.BSNPolicy = "delete-immediately"
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted an unknown BSN policy")
-	}
+	wantRefused(t, fd, "unknown BSN policy")
 }
 
-func TestValidateAcceptsKnownBSNPolicy(t *testing.T) {
+func TestValidateKnownBSNPolicy(t *testing.T) {
 	fd := validFlow()
 	fd.BSNPolicy = privacy.BSNPolicyMask
 	if err := Validate(fd); err != nil {
@@ -201,15 +173,13 @@ func TestValidateAcceptsKnownBSNPolicy(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsUnknownLegalBasis(t *testing.T) {
+func TestValidateUnknownLegalBasis(t *testing.T) {
 	fd := validFlow()
 	fd.LegalBasis = "marketing"
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted an unknown legal basis")
-	}
+	wantRefused(t, fd, "unknown legal basis")
 }
 
-func TestValidateAcceptsKnownLegalBasis(t *testing.T) {
+func TestValidateKnownLegalBasis(t *testing.T) {
 	fd := validFlow()
 	fd.LegalBasis = privacy.LegalBasisConsent
 	fd.ProcessingPurpose = "AML/KYC customer onboarding"
@@ -218,7 +188,7 @@ func TestValidateAcceptsKnownLegalBasis(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsEmptyLegalBasis(t *testing.T) {
+func TestValidateAllowsNoLegalBasis(t *testing.T) {
 	fd := validFlow()
 	fd.LegalBasis = ""
 	if err := Validate(fd); err != nil {
@@ -226,57 +196,57 @@ func TestValidateAcceptsEmptyLegalBasis(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsEmptyDocumentTypeEntry(t *testing.T) {
+func TestValidateEmptyDocTypeEntry(t *testing.T) {
 	fd := validFlow()
 	fd.AcceptedDocumentTypes = []string{"P", ""}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a blank accepted document type")
+	wantRefused(t, fd, "accepted document type entries must not be empty")
+}
+
+// The engine refuses every EU driving licence, so a flow accepting one could
+// only fail.
+func TestValidateRefusesLicence(t *testing.T) {
+	for _, licence := range []string{DocumentTypeDrivingLicence, DocumentTypeEUDrivingLicence} {
+		fd := validFlow()
+		fd.AcceptedDocumentTypes = []string{"P", licence}
+		wantRefused(t, fd, "is not supported yet")
 	}
 }
 
-func TestValidateRejectsDuplicateIssuingCountry(t *testing.T) {
+func TestValidateDuplicateCountry(t *testing.T) {
 	fd := validFlow()
 	fd.AcceptedIssuingCountries = []string{"NLD", "NLD"}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a duplicate issuing country")
-	}
+	wantRefused(t, fd, "duplicate accepted issuing country")
 }
 
-func TestValidateRejectsNFCReadWithoutDocumentCapture(t *testing.T) {
+func TestValidateNFCNoCapture(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepNFCRead}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted an nfc_read step without document_capture")
-	}
+	wantRefused(t, fd, "must be included together")
 }
 
-func TestValidateRejectsNFCReadWithoutMatchingRequiredCheck(t *testing.T) {
+func TestValidateNFCNoCheck(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepDocumentCapture, StepNFCRead}
 	fd.RequiredChecks = nil
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted an nfc_read step with no nfc.passive_auth in requiredChecks")
-	}
+	wantRefused(t, fd, "nfc_read requires requiredChecks to include nfc.passive_auth")
 }
 
-// TestValidateRejectsNFCReadWithOnlyChipAuth checks that nfc.chip_auth alone
+// TestValidateNFCOnlyChipAuth checks that nfc.chip_auth alone
 // no longer satisfies nfc_read's requirement - nfc.passive_auth is
 // unconditionally mandatory now (nfc.chip_auth remains optional, since not
 // every document carries an Active/Chip Authentication key).
-func TestValidateRejectsNFCReadWithOnlyChipAuth(t *testing.T) {
+func TestValidateNFCOnlyChipAuth(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepDocumentCapture, StepNFCRead}
 	fd.RequiredChecks = []Check{CheckNFCChipAuth}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted an nfc_read step with only nfc.chip_auth (no nfc.passive_auth) in requiredChecks")
-	}
+	wantRefused(t, fd, "nfc_read requires requiredChecks to include nfc.passive_auth")
 }
 
-// TestValidateAcceptsNFCReadWithChipAuthRequiredCheck checks that
+// TestValidateNFCWithChipAuth checks that
 // nfc.chip_auth may additionally be selected on top of the always-mandatory
 // nfc.passive_auth - selecting it alone (without passive_auth) is rejected
-// by TestValidateRejectsNFCReadWithOnlyChipAuth above.
-func TestValidateAcceptsNFCReadWithChipAuthRequiredCheck(t *testing.T) {
+// by TestValidateNFCOnlyChipAuth above.
+func TestValidateNFCWithChipAuth(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepDocumentCapture, StepNFCRead}
 	fd.RequiredChecks = []Check{CheckNFCPassiveAuth, CheckNFCChipAuth}
@@ -285,7 +255,7 @@ func TestValidateAcceptsNFCReadWithChipAuthRequiredCheck(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsNFCReadWithDocumentCapture(t *testing.T) {
+func TestValidateNFCWithCapture(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepDocumentCapture, StepNFCRead}
 	fd.RequiredChecks = []Check{CheckNFCPassiveAuth}
@@ -294,7 +264,7 @@ func TestValidateAcceptsNFCReadWithDocumentCapture(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsFaceMatchWithoutNFCRead(t *testing.T) {
+func TestValidateFaceMatchNoNFC(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepSelfie, StepFaceMatch}
 	fd.RequiredChecks = []Check{CheckFaceMatch}
@@ -303,7 +273,7 @@ func TestValidateAcceptsFaceMatchWithoutNFCRead(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsFaceMatchWithNFCRead(t *testing.T) {
+func TestValidateFaceMatchWithNFC(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepDocumentCapture, StepNFCRead, StepSelfie, StepLiveness, StepFaceMatch}
 	if err := Validate(fd); err != nil {
@@ -311,7 +281,7 @@ func TestValidateAcceptsFaceMatchWithNFCRead(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsSelfieAndLivenessWithoutNFCRead(t *testing.T) {
+func TestValidateSelfieNoNFC(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepSelfie, StepLiveness}
 	fd.RequiredChecks = nil
@@ -320,20 +290,18 @@ func TestValidateAcceptsSelfieAndLivenessWithoutNFCRead(t *testing.T) {
 	}
 }
 
-// TestValidateRejectsDocumentCaptureWithoutNFCRead checks the reciprocal of
-// TestValidateRejectsNFCReadWithoutDocumentCapture: document_capture is only
+// TestValidateCaptureNoNFC checks the reciprocal of
+// TestValidateNFCNoCapture: document_capture is only
 // ever fulfilled via the native nfc_read hand-off (there is no browser-side
 // capture and no standalone native submission path either), so asking for
 // it without nfc_read is unsatisfiable.
-func TestValidateRejectsDocumentCaptureWithoutNFCRead(t *testing.T) {
+func TestValidateCaptureNoNFC(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepDocumentCapture}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted document_capture without nfc_read")
-	}
+	wantRefused(t, fd, "must be included together")
 }
 
-func TestValidateAcceptsEmptyDocumentTypesAndCountries(t *testing.T) {
+func TestValidateAllowsNoDocTypes(t *testing.T) {
 	fd := validFlow()
 	fd.AcceptedDocumentTypes = nil
 	fd.AcceptedIssuingCountries = nil
@@ -342,7 +310,7 @@ func TestValidateAcceptsEmptyDocumentTypesAndCountries(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsThresholdForRequiredThresholdableCheck(t *testing.T) {
+func TestValidateThresholdRequired(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepSelfie, StepFaceMatch}
 	fd.RequiredChecks = []Check{CheckFaceMatch}
@@ -352,42 +320,39 @@ func TestValidateAcceptsThresholdForRequiredThresholdableCheck(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsThresholdForCheckNotRequired(t *testing.T) {
+func TestThresholdNeedsItsCheck(t *testing.T) {
 	fd := validFlow()
+	fd.Steps = []Step{StepSelfie, StepLiveness}
 	fd.RequiredChecks = nil
 	fd.CheckThresholds = map[Check]float64{CheckFaceMatch: 0.8}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a threshold for a check not in RequiredChecks")
-	}
+	wantRefused(t, fd, "which is not in requiredChecks")
 }
 
-func TestValidateRejectsThresholdForUnsupportedCheck(t *testing.T) {
+func TestValidateThresholdBadCheck(t *testing.T) {
 	fd := validFlow()
-	fd.RequiredChecks = []Check{CheckNFCPassiveAuth}
 	fd.CheckThresholds = map[Check]float64{CheckNFCPassiveAuth: 0.5}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a threshold for a check that doesn't support one")
-	}
+	wantRefused(t, fd, "does not support a threshold")
 }
 
-func TestValidateRejectsOutOfRangeThreshold(t *testing.T) {
+func TestValidateThresholdRange(t *testing.T) {
 	fd := validFlow()
-	fd.RequiredChecks = []Check{CheckFaceMatch}
 	fd.CheckThresholds = map[Check]float64{CheckFaceMatch: 1.5}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a threshold above 1")
-	}
+	wantRefused(t, fd, "must be between 0 and 1")
 }
 
-func TestValidateRejectsNegativeRetentionOverride(t *testing.T) {
+func TestValidateNegativeRetention(t *testing.T) {
 	fd := validFlow()
 	fd.RetentionOverride = -time.Hour
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a negative retentionOverride")
-	}
+	wantRefused(t, fd, "retentionOverride must be between")
 }
 
-func TestValidateAcceptsPositiveRetentionOverride(t *testing.T) {
+func TestValidateRetentionOverYear(t *testing.T) {
+	fd := validFlow()
+	fd.RetentionOverride = MaxRetentionOverride + time.Second
+	wantRefused(t, fd, "retentionOverride must be between")
+}
+
+func TestValidatePositiveRetention(t *testing.T) {
 	fd := validFlow()
 	fd.RetentionOverride = 24 * time.Hour
 	if err := Validate(fd); err != nil {
@@ -395,25 +360,21 @@ func TestValidateAcceptsPositiveRetentionOverride(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsUnknownSelfieLocation(t *testing.T) {
+func TestValidateUnknownSelfie(t *testing.T) {
 	fd := validFlow()
 	fd.SelfieLocation = "phone"
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted an unknown selfieLocation")
-	}
+	wantRefused(t, fd, "unknown selfieLocation")
 }
 
-func TestValidateRejectsSelfieLocationWithoutTheStep(t *testing.T) {
+func TestValidateSelfieNoStep(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepDocumentCapture, StepNFCRead}
 	fd.RequiredChecks = []Check{CheckNFCPassiveAuth}
 	fd.SelfieLocation = LocationNative
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted selfieLocation without selfie/liveness/face_match in steps")
-	}
+	wantRefused(t, fd, "selfieLocation set without face_verification")
 }
 
-func TestValidateAcceptsNativeSelfieLocation(t *testing.T) {
+func TestValidateNativeSelfie(t *testing.T) {
 	fd := validFlow()
 	fd.SelfieLocation = LocationNative
 	if err := Validate(fd); err != nil {
@@ -421,7 +382,7 @@ func TestValidateAcceptsNativeSelfieLocation(t *testing.T) {
 	}
 }
 
-func TestEffectiveSelfieLocationDefaultsToBrowser(t *testing.T) {
+func TestEffectiveSelfieDefault(t *testing.T) {
 	fd := validFlow()
 	if fd.EffectiveSelfieLocation() != LocationBrowser {
 		t.Fatalf("EffectiveSelfieLocation() = %q, want browser", fd.EffectiveSelfieLocation())
@@ -434,13 +395,13 @@ func TestEffectiveSelfieLocationDefaultsToBrowser(t *testing.T) {
 
 // ---- assurance tiers -----------------------------------------------------
 
-func TestValidateAcceptsEmptyAssuranceTiers(t *testing.T) {
+func TestValidateAllowsEmptyTiers(t *testing.T) {
 	if err := Validate(validFlow()); err != nil {
 		t.Fatalf("Validate(no assuranceTiers) = %v, want nil", err)
 	}
 }
 
-func TestValidateAcceptsAWellFormedCustomLadder(t *testing.T) {
+func TestValidateCustomLadder(t *testing.T) {
 	fd := validFlow()
 	fd.AssuranceTiers = []AssuranceTier{
 		{Level: "gold", MinPercent: 0.9},
@@ -452,46 +413,36 @@ func TestValidateAcceptsAWellFormedCustomLadder(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsAssuranceTierMissingCatchAll(t *testing.T) {
+func TestValidateTierNoCatchAll(t *testing.T) {
 	fd := validFlow()
 	fd.AssuranceTiers = []AssuranceTier{{Level: "gold", MinPercent: 0.9}}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted assuranceTiers with no minPercent-0 catch-all")
-	}
+	wantRefused(t, fd, "must include a tier with minPercent 0")
 }
 
-func TestValidateRejectsAssuranceTierEmptyLevel(t *testing.T) {
+func TestValidateTierEmptyLevel(t *testing.T) {
 	fd := validFlow()
 	fd.AssuranceTiers = []AssuranceTier{{Level: "  ", MinPercent: 0}}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted an assurance tier with a blank level")
-	}
+	wantRefused(t, fd, "tier level must not be empty")
 }
 
-func TestValidateRejectsDuplicateAssuranceTierLevel(t *testing.T) {
+func TestValidateDuplicateTier(t *testing.T) {
 	fd := validFlow()
 	fd.AssuranceTiers = []AssuranceTier{
 		{Level: "gold", MinPercent: 0.9},
 		{Level: "gold", MinPercent: 0},
 	}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a duplicate assurance tier level")
-	}
+	wantRefused(t, fd, "duplicate assurance tier level")
 }
 
-func TestValidateRejectsOutOfRangeAssuranceTierMinPercent(t *testing.T) {
+func TestValidateTierPercentRange(t *testing.T) {
 	fd := validFlow()
 	fd.AssuranceTiers = []AssuranceTier{{Level: "gold", MinPercent: 1.1}, {Level: "base", MinPercent: 0}}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a minPercent above 1")
-	}
+	wantRefused(t, fd, "minPercent must be between 0 and 1")
 	fd.AssuranceTiers = []AssuranceTier{{Level: "gold", MinPercent: -0.1}}
-	if err := Validate(fd); err == nil {
-		t.Fatal("Validate accepted a negative minPercent")
-	}
+	wantRefused(t, fd, "minPercent must be between 0 and 1")
 }
 
-func TestEffectiveAssuranceTiersDefaultsWhenUnset(t *testing.T) {
+func TestEffectiveTiersDefault(t *testing.T) {
 	fd := validFlow()
 	got := fd.EffectiveAssuranceTiers()
 	if len(got) != len(DefaultAssuranceTiers) {
@@ -504,11 +455,11 @@ func TestEffectiveAssuranceTiersDefaultsWhenUnset(t *testing.T) {
 	}
 }
 
-// TestLevelForScoreMatchesDefaultLadderAtEveryAnchor pins
+// TestLevelForScoreDefaultLadder pins
 // DefaultAssuranceTiers against the exact worked example the ladder was
 // derived from (see docs/session-model.md's "Assurance level" section):
 // checksPassed/checksTotal of 0,1,2,3,4,5,6,7,8,9,10 out of 10.
-func TestLevelForScoreMatchesDefaultLadderAtEveryAnchor(t *testing.T) {
+func TestLevelForScoreDefaultLadder(t *testing.T) {
 	cases := []struct {
 		passed, total int
 		want          string
@@ -533,7 +484,7 @@ func TestLevelForScoreMatchesDefaultLadderAtEveryAnchor(t *testing.T) {
 	}
 }
 
-func TestLevelForScoreUsesACustomLadderInAnyOrder(t *testing.T) {
+func TestLevelForScoreCustomLadder(t *testing.T) {
 	tiers := []AssuranceTier{
 		{Level: "base", MinPercent: 0},
 		{Level: "gold", MinPercent: 0.9}, // deliberately not sorted
@@ -550,8 +501,8 @@ func TestLevelForScoreUsesACustomLadderInAnyOrder(t *testing.T) {
 	}
 }
 
-func TestLevelForScoreFallsBackToSuperLowWithoutACatchAll(t *testing.T) {
-	// Validate rejects this at save time (TestValidateRejectsAssuranceTierMissingCatchAll),
+func TestLevelForScoreNoCatchAll(t *testing.T) {
+	// Validate rejects this at save time (TestValidateTierNoCatchAll),
 	// but LevelForScore itself must still degrade safely for a caller that
 	// bypasses Validate (e.g. an older persisted flow version).
 	tiers := []AssuranceTier{{Level: "gold", MinPercent: 0.9}}
@@ -583,6 +534,86 @@ func TestValidateFaceProvider(t *testing.T) {
 	for name, fd := range invalid {
 		if err := Validate(fd); err == nil {
 			t.Errorf("%s: Validate accepted it", name)
+		}
+	}
+}
+
+// wantRefused fails t unless Validate refuses fd by the rule whose message
+// holds rule: another rule refusing it would let rule be deleted unnoticed.
+func wantRefused(t *testing.T, fd FlowDefinition, rule string) {
+	t.Helper()
+	err := Validate(fd)
+	var invalid *ValidationError
+	if !errors.As(err, &invalid) || !strings.Contains(err.Error(), rule) {
+		t.Errorf("Validate = %v, want a ValidationError by %q", err, rule)
+	}
+}
+
+// A check needs a step that produces it: nfc.chip_auth without nfc_read is
+// scored on nothing.
+func TestValidateCheckWithoutStep(t *testing.T) {
+	fd := validFlow()
+	fd.Steps = []Step{StepSelfie, StepFaceMatch}
+	fd.RequiredChecks = []Check{CheckFaceMatch, CheckNFCChipAuth}
+	wantRefused(t, fd, `check "nfc.chip_auth" requires one of steps`)
+}
+
+func TestValidIssuingCountry(t *testing.T) {
+	for code, want := range map[string]bool{
+		"NLD": true, "DEU": true, "BEL": true, "ATA": true, "EUE": true, "UNO": true, "RKS": true, "GBD": true,
+		"NL": false, "nld": false, "D": false, "ZZZ": false, "XXX": false, "QQQ": false, "NLDD": false, "": false,
+	} {
+		if got := ValidIssuingCountry(code); got != want {
+			t.Errorf("ValidIssuingCountry(%q) = %v, want %v", code, got, want)
+		}
+	}
+}
+
+// A flow naming a country code no document carries is refused, so it cannot
+// be saved and then reject every document.
+func TestValidateUnknownCountry(t *testing.T) {
+	for _, code := range []string{"NL", "ZZZ", "nld"} {
+		fd := validFlow()
+		fd.AcceptedIssuingCountries = []string{"NLD", code}
+		var verr *ValidationError
+		if err := Validate(fd); !errors.As(err, &verr) {
+			t.Errorf("Validate with %q = %v, want a ValidationError", code, err)
+		}
+	}
+	fd := validFlow()
+	fd.AcceptedIssuingCountries = []string{"NLD", "DEU"}
+	if err := Validate(fd); err != nil {
+		t.Errorf("Validate with NLD, DEU = %v, want nil", err)
+	}
+}
+
+func TestIssuingStateCode(t *testing.T) {
+	for in, want := range map[string]string{"D": "DEU", "D<<": "DEU", "NLD": "NLD", "DEU": "DEU"} {
+		if got := IssuingStateCode(in); got != want {
+			t.Errorf("IssuingStateCode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// An achieved level meets every requirement at or below it; nothing achieved
+// meets none but the absent one, and a level the service cannot claim is
+// never met.
+func TestMeetsLevel(t *testing.T) {
+	for _, tc := range []struct {
+		achieved, required AssuranceLevel
+		want               bool
+	}{
+		{"", "", true},
+		{AssuranceLevelSubstantial, "", true},
+		{"", AssuranceLevelLow, false},
+		{AssuranceLevelLow, AssuranceLevelLow, true},
+		{AssuranceLevelSubstantial, AssuranceLevelLow, true},
+		{AssuranceLevelLow, AssuranceLevelSubstantial, false},
+		{AssuranceLevelSubstantial, AssuranceLevelSubstantial, true},
+		{AssuranceLevelSubstantial, AssuranceLevelHigh, false},
+	} {
+		if got := MeetsLevel(tc.achieved, tc.required); got != tc.want {
+			t.Errorf("MeetsLevel(%q, %q) = %v, want %v", tc.achieved, tc.required, got, tc.want)
 		}
 	}
 }

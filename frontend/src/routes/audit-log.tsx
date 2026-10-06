@@ -28,7 +28,7 @@ export default function AuditLog(): React.JSX.Element {
 
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
-  const audit = useOrganizationAuditEventsQuery(slug, isAdmin);
+  const audit = useOrganizationAuditEventsQuery(slug, org.isSuccess);
   const events = audit.data?.pages.flatMap((page) => page.events) ?? [];
 
   const dateFormatter = React.useMemo(
@@ -76,12 +76,6 @@ export default function AuditLog(): React.JSX.Element {
               {accessMessage(org.error, t)}
             </p>
           </Card>
-        ) : !org.isPending && !isAdmin ? (
-          <Card className="p-6">
-            <p className="text-ink-soft text-[14px]">
-              {t("auditLog.adminOnly")}
-            </p>
-          </Card>
         ) : audit.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
@@ -90,6 +84,11 @@ export default function AuditLog(): React.JSX.Element {
           </Card>
         ) : (
           <>
+            {org.isSuccess && !isAdmin && (
+              <p className="text-ink-soft mb-4 text-[13px]">
+                {t("auditLog.detailHidden")}
+              </p>
+            )}
             <Card className="overflow-hidden">
               <Table>
                 <Table.Head>
@@ -147,10 +146,12 @@ export default function AuditLog(): React.JSX.Element {
                                 />
                               )}
                               <span className="text-ink truncate">
-                                {event.actor
-                                  ? fullName(event.actor)
-                                  : (auditActorLabel(event.actorLabel, t) ??
-                                    t("auditLog.system"))}
+                                {event.detailHidden
+                                  ? t("auditLog.hiddenActor")
+                                  : event.actor
+                                    ? fullName(event.actor)
+                                    : (auditActorLabel(event.actorLabel, t) ??
+                                      t("auditLog.system"))}
                               </span>
                             </div>
                           </Table.Cell>

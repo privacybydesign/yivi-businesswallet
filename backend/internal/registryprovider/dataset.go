@@ -55,7 +55,7 @@ var DemoRegistrations = []Registration{
 		},
 	},
 	{
-		KVKNumber: "90000030", LegalName: "Radboud Universiteit", EUID: "NL.KVK.90000030",
+		KVKNumber: "90000030", LegalName: "Radboud Universiteit (Demo)", EUID: "NL.KVK.90000030",
 		Representatives: []Representative{
 			{Kind: KindGevolmachtigde, GivenNames: "Anke", FamilyName: "Bakker", DateOfBirth: "1990-02-17", Authority: AuthorityBeperkt},
 			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},

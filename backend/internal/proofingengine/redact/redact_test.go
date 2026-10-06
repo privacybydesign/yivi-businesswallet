@@ -76,7 +76,7 @@ func TestImageBlursWholeImage(t *testing.T) {
 	}
 }
 
-func TestRegionOnlyBlursTheGivenRect(t *testing.T) {
+func TestRegionBlursOnlyItsRect(t *testing.T) {
 	src := checkerboardPNG(t, 64)
 	// Redact only the left half.
 	out, _, err := Region(src, "image/png", Rect{X: 0, Y: 0, W: 0.5, H: 1})
@@ -90,19 +90,23 @@ func TestRegionOnlyBlursTheGivenRect(t *testing.T) {
 	if hasVariance(got, left) {
 		t.Error("left half (the redacted region) still shows checkerboard variance")
 	}
+	// Covered, not pixelated: a mosaic of a printed number can be read back.
+	if c := got.RGBAAt(0, 0); c != redactionColor {
+		t.Errorf("redacted region = %v, want it covered in %v", c, redactionColor)
+	}
 	if !hasVariance(got, right) {
 		t.Error("right half (outside the region) was unexpectedly redacted")
 	}
 }
 
-func TestRegionClampsOutOfRangeCoordinates(t *testing.T) {
+func TestRegionClampsCoordinates(t *testing.T) {
 	src := checkerboardPNG(t, 32)
 	if _, _, err := Region(src, "image/png", Rect{X: -0.5, Y: -0.5, W: 2, H: 2}); err != nil {
 		t.Fatalf("out-of-range rect should clamp, not error: %v", err)
 	}
 }
 
-func TestImageEmptyInputIsPassthrough(t *testing.T) {
+func TestImageEmptyPassesThrough(t *testing.T) {
 	out, mime, err := Image("", "image/jpeg")
 	if err != nil || out != "" || mime != "image/jpeg" {
 		t.Fatalf("Image(\"\", ...) = %q, %q, %v, want passthrough", out, mime, err)

@@ -202,9 +202,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/members/{userId}/request-identification", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentification))))
 	mux.Handle("POST /orgs/{slug}/members/request-identification", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentificationBulk))))
 
-	// Parked with requestIdentityProofing (members_identity.go) until it is implemented.
-	// mux.Handle("POST /orgs/{slug}/members/{userId}/request-identity-proofing", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentityProofing))))
-
 	// Any member may mint their own re-identification link (the in-app banner);
 	// it is scoped to the caller's own membership, so no admin gate is needed.
 	mux.Handle("POST /orgs/{slug}/me/reidentify-token", orgScoped(respond.HandlerFunc(h.mintOwnReverifyToken)))
@@ -239,7 +236,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/mandates", orgScoped(RequireMandateAuthority(respond.HandlerFunc(h.grantMandate))))
 	mux.Handle("POST /orgs/{slug}/mandates/{id}/revoke", orgScoped(RequireMandateAuthority(respond.HandlerFunc(h.revokeMandate))))
 
-	mux.Handle("GET /orgs/{slug}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.auditEvents))))
+	// Any member reads the log; only an admin sees who acted and what changed.
+	mux.Handle("GET /orgs/{slug}/audit-events", orgScoped(respond.HandlerFunc(h.auditEvents)))
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {

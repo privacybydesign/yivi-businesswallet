@@ -1,6 +1,7 @@
 package proofing
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -89,15 +90,29 @@ func (s *DataRequestStore) SaveFlowKind(ctx context.Context, orgID uuid.UUID, fl
 	return kind, nil
 }
 
-// Candidates is every session of req's customer, in req's mode, that still
+// Candidates is every session of req's customer that still
 // holds personal data and has an outcome: what a data request is matched
-// against. Another data request is never one.
+// against. The person's earlier data requests are among them, since each
+// holds who asked (an erasure covers them too), but only once decided: one
+// still in review is the wallet's to decide, and is not purged under it.
 func (s *DataRequestStore) Candidates(ctx context.Context, req Request) ([]Request, error) {
 	return s.scanRequests(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.id <> $3 AND r.mode = $4
-			AND r.flow_kind = $5 AND r.purged_at IS NULL AND r.ips_session_id IS NOT NULL
-			AND r.status IN ('approved', 'rejected', 'needs_review')
-		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID, string(req.mode()), string(FlowIdentity))
+		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.id <> $3
+			AND r.purged_at IS NULL AND r.ips_session_id IS NOT NULL
+			AND (r.status IN ('approved', 'rejected') OR (r.status = 'needs_review' AND r.flow_kind = $4))
+		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID, string(FlowIdentity))
+}
+
+// EmailCandidates is every unfinished session of req's customer (pending, in
+// progress, expired or cancelled) that still holds personal data and was sent
+// to exactly req's e-mail address, case aside: what a data request matches by
+// address (MatchEmail), there being no proofed identity in them.
+func (s *DataRequestStore) EmailCandidates(ctx context.Context, req Request) ([]Request, error) {
+	return s.scanRequests(ctx, `SELECT `+requestColumns+requestFrom+`
+		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.id <> $3
+			AND r.purged_at IS NULL AND r.status IN ('pending', 'in_progress', 'expired', 'cancelled')
+			AND lower(trim(r.subject_email)) = lower(trim($4)) AND trim(r.subject_email) <> ''
+		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID, req.SubjectEmail)
 }
 
 // SaveMatches replaces req's matches.
@@ -172,6 +187,9 @@ func (s *DataRequestStore) scanRequests(ctx context.Context, query string, args 
 // when an approved "see my data" request's data downloads (nil for none).
 func (s *DataRequestStore) RecordDecision(ctx context.Context, req Request, approved []uuid.UUID, exportUntil *time.Time) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		if ok, err := lockUnpurged(ctx, q, req.ID); err != nil || !ok {
+			return cmp.Or(err, ErrNotUnderReview)
+		}
 		if _, err := q.Exec(ctx, `UPDATE identity_proofing_request_matches SET approved = (matched_request_id = ANY($2))
 			WHERE request_id = $1`, req.ID, approved); err != nil {
 			return fmt.Errorf("proofing: decide matches request %s: %w", req.ID, err)
@@ -189,5 +207,5 @@ func (s *DataRequestStore) RecordDecision(ctx context.Context, req Request, appr
 func (s *DataRequestStore) RecordExported(ctx context.Context, req Request, sessions int) error {
 	return s.audit.Record(ctx, s.db, audit.IdentityProofingDataExported,
 		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-		map[string]any{"sessions": sessions})
+		audit.Created(map[string]any{"sessions": sessions}))
 }

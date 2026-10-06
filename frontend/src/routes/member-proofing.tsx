@@ -5,14 +5,14 @@ import * as React from "react";
 import {
   useCreateProofingRequestMutation,
   useProofingFlowsQuery,
-  useProofingRequestsQuery,
+  useMemberProofingRequestsQuery,
 } from "../api/identity-proofing.queries";
 import { useWhenFormatter } from "../lib/format-when";
 import {
-  latestRequestByMember,
   proofingErrorMessage,
   proofingStatusLabel,
   proofingStatusTone,
+  sendableByMail,
   sendableFlows,
 } from "../lib/identity-proofing";
 import { Button, Tag } from "../ui";
@@ -35,15 +35,21 @@ export function MemberProofing({
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const flows = useProofingFlowsQuery(slug);
-  const requests = useProofingRequestsQuery(slug);
+  // Asked for this member alone: the org-wide list is capped, so a member whose
+  // last request is older than its newest entries would show none.
+  const requests = useMemberProofingRequestsQuery(slug, userId);
   const create = useCreateProofingRequestMutation(slug);
-  const { sendable, initial } = sendableFlows(flows.data ?? []);
+  // A member is only ever mailed, so a flow that needs the browser page for
+  // diploma uploads is not offered (nor started on as the default).
+  const { sendable, initial } = sendableFlows(
+    (flows.data ?? []).filter(sendableByMail),
+  );
   // Unset, or a flow no longer available, falls back to the admin's default.
   const [picked, setPicked] = useState("");
   const flowId = sendable.some((f) => f.id === picked)
     ? picked
     : (initial?.id ?? "");
-  const latest = latestRequestByMember(requests.data ?? []).get(userId);
+  const latest = requests.data?.at(0);
   const selectId = `member-proofing-flow-${userId}`;
 
   if (flows.isError) {

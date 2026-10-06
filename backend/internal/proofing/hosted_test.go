@@ -3,19 +3,22 @@ package proofing
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
-func TestRedirectOriginsAreOriginsOnHTTPS(t *testing.T) {
+func TestRedirectOriginsAreHTTPS(t *testing.T) {
 	f := newFixture()
 	customer := f.testCustomer()
 	saved, err := f.svc.SaveCustomerRedirectOrigins(context.Background(), testOrg.ID, customer.ID,
@@ -45,7 +48,7 @@ func TestRedirectOriginsAreOriginsOnHTTPS(t *testing.T) {
 	}
 }
 
-func TestAHostedRequestRedirectsOnlyToAnAllowedOrigin(t *testing.T) {
+func TestHostedRedirectAllowedOnly(t *testing.T) {
 	f := newFixture()
 	customer := f.testCustomer()
 	f.svc.SetHostedBaseURL(testHostedBase)
@@ -92,7 +95,7 @@ func TestAHostedRequestRedirectsOnlyToAnAllowedOrigin(t *testing.T) {
 	}
 }
 
-func TestADeclinedHostedLinkIsCancelledAndCannotStart(t *testing.T) {
+func TestDeclinedHostedLinkCancels(t *testing.T) {
 	f := newFixture()
 	_, token := f.sendHosted(t)
 	declined, err := f.svc.DeclineHosted(context.Background(), token)
@@ -113,7 +116,7 @@ func TestADeclinedHostedLinkIsCancelledAndCannotStart(t *testing.T) {
 	}
 }
 
-func TestAStartedHostedLinkCannotBeDeclined(t *testing.T) {
+func TestStartedHostedLinkNoDecline(t *testing.T) {
 	f := newFixture()
 	_, token := f.sendHosted(t)
 	if _, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem); err != nil {
@@ -124,7 +127,7 @@ func TestAStartedHostedLinkCannotBeDeclined(t *testing.T) {
 	}
 }
 
-func TestAHostedPageIsFramedOnlyByItsCustomersOrigins(t *testing.T) {
+func TestHostedPageFrameOrigins(t *testing.T) {
 	f := newFixture()
 	_, token := f.sendHosted(t)
 	h := NewHandler(f.svc, nil, nil)
@@ -168,7 +171,7 @@ func (f *fakeFlowHosted) Save(_ context.Context, _ uuid.UUID, flowID string, s F
 	return s, nil
 }
 
-func TestAFlowsHostedSettingsGovernItsLinks(t *testing.T) {
+func TestFlowHostedSettingsLinks(t *testing.T) {
 	f := newFixture()
 	f.svc.flowHostedSettings = &fakeFlowHosted{byFlow: map[string]FlowHosted{}}
 	customer := f.testCustomer()
@@ -217,5 +220,49 @@ func TestAFlowsHostedSettingsGovernItsLinks(t *testing.T) {
 	}
 	if err := create(NewRequest{}); !errors.Is(err, ErrHostedDisabled) {
 		t.Errorf("a link on a flow with its hosted page off: %v, want ErrHostedDisabled", err)
+	}
+}
+
+// unreadBody fails the test when the handler reads it.
+type unreadBody struct{ t *testing.T }
+
+func (b unreadBody) Read([]byte) (int, error) {
+	b.t.Error("the upload body was read before the link was checked")
+	return 0, io.EOF
+}
+
+// A diploma upload to an unknown link is refused before its body is read.
+func TestHostedDiplomaChecksLink(t *testing.T) {
+	f := newFixture()
+	h := NewHandler(f.svc, nil, nil)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/proof/unknown/diplomas", unreadBody{t})
+	r.SetPathValue("token", "unknown")
+	r.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+	var apiErr *respond.APIError
+	if err := h.hostedAddDiplomas(httptest.NewRecorder(), r); !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound {
+		t.Errorf("upload to an unknown link = %v, want 404", err)
+	}
+}
+
+func TestHostedViewHidesDocNumber(t *testing.T) {
+	d := newDiplomaFixture(DiplomasOff)
+	sent, token := d.sendHosted(t)
+	const documentNumber = "DUO-1234567890"
+	d.diplomas.held[sent.Request.ID] = []Diploma{{
+		Qualification: "HBO Bachelor Verpleegkunde", Institution: "Hogeschool Utrecht",
+		DateAwarded: time.Date(2020, time.July, 1, 0, 0, 0, 0, time.UTC), DocumentNumber: documentNumber,
+	}}
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+token, nil)
+	r.SetPathValue("token", token)
+	w := httptest.NewRecorder()
+	if err := NewHandler(d.svc, nil, nil).hostedView(w, r); err != nil {
+		t.Fatalf("hostedView: %v", err)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "HBO Bachelor Verpleegkunde") {
+		t.Fatalf("hosted view = %s, want the extract listed", body)
+	}
+	if strings.Contains(body, "documentNumber") || strings.Contains(body, documentNumber) {
+		t.Errorf("hosted view = %s, want no document number", body)
 	}
 }

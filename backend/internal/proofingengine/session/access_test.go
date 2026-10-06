@@ -20,7 +20,7 @@ func claimSlot(t *testing.T, a *Access, role DeviceRole, now time.Time) string {
 	return device
 }
 
-func TestAccessFirstClaimThenHandoverRevokesPreviousDevice(t *testing.T) {
+func TestAccessHandoverRevokes(t *testing.T) {
 	now := time.Now().UTC()
 	var a Access
 	if a.Bound() {
@@ -59,7 +59,7 @@ func TestAccessFirstClaimThenHandoverRevokesPreviousDevice(t *testing.T) {
 	}
 }
 
-func TestAccessHistoryKeepsHandedOverDevices(t *testing.T) {
+func TestAccessHistoryKeepsDevices(t *testing.T) {
 	now := time.Now().UTC()
 	var a Access
 	claimSlot(t, &a, DeviceRoleNative, now)
@@ -85,7 +85,7 @@ func TestAccessHistoryKeepsHandedOverDevices(t *testing.T) {
 	}
 }
 
-func TestAccessGrantExpiresAndIsReplacedByNewMintOfTheSameSlot(t *testing.T) {
+func TestAccessGrantExpiryRemint(t *testing.T) {
 	now := time.Now().UTC()
 	var a Access
 	old, _ := a.MintHandover(DeviceRoleNative, now.Add(time.Minute))
@@ -101,7 +101,7 @@ func TestAccessGrantExpiresAndIsReplacedByNewMintOfTheSameSlot(t *testing.T) {
 	}
 }
 
-func TestAccessWebAndNativeGrantsAreIndependent(t *testing.T) {
+func TestAccessWebNativeIndependent(t *testing.T) {
 	now := time.Now().UTC()
 	var a Access
 	web, _ := a.MintHandover(DeviceRoleWeb, now.Add(time.Minute))

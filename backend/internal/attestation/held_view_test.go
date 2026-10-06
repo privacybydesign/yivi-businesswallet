@@ -238,7 +238,7 @@ func TestHeldClaimsCarriesValidity(t *testing.T) {
 
 // A re-check audits exactly the credentials whose revoked state the issuer's
 // status list moved, in either direction; a re-confirmed one is not audited.
-func TestRecheckHeldAuditsOnlyStatusChanges(t *testing.T) {
+func TestRecheckAuditsStatusChange(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	flipped := attestation.HeldAttestation{ID: uuid.New(), CredentialRef: "ref-flipped", VCT: "eaa.supplier"}

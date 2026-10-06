@@ -155,6 +155,9 @@ type testEnv struct {
 	// verifier is the relying-party identity the router's inbound OpenID4VP
 	// validator trusts; the fake inbound verifier signs its request objects with it.
 	verifier devverifier.Identity
+	// proofing stands in for the proofing engine: a test sets its Outcome,
+	// before creating a session, to have the subject finish it.
+	proofing *proofingprovider.Stub
 }
 
 // presenterMode picks which posture newTestEnv wires the inbound OpenID4VP
@@ -255,6 +258,7 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 	if err != nil {
 		t.Fatalf("proofing cipher: %v", err)
 	}
+	proofingStub := proofingprovider.NewStub()
 	proofingService := proofing.NewService(proofing.Stores{
 		Settings:  proofing.NewSettingsStore(pool, audit.NewDBRecorder()),
 		Requests:  proofing.NewRequestStore(pool, audit.NewDBRecorder(), proofingCipher),
@@ -262,10 +266,10 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 		APIKeys:   proofing.NewAPIKeyStore(pool, audit.NewDBRecorder()),
 		Webhooks:  proofing.NewWebhookStore(pool, audit.NewDBRecorder(), proofingCipher),
 		Events:    audit.NewReader(pool),
-	}, proofingprovider.NewStub(), fake, nil)
+	}, proofingStub, fake, nil)
 	proofingService.SetHostedBaseURL("http://wallet.test/p/")
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
-	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool))
+	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool, proofingCipher))
 
 	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler, proofingHandler))
 	t.Cleanup(srv.Close)
@@ -282,6 +286,7 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 		pool:     pool,
 		fake:     fake,
 		verifier: verifierIdentity,
+		proofing: proofingStub,
 	}
 }
 

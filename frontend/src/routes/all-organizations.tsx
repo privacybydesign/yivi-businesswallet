@@ -10,7 +10,16 @@ import {
   useSetPlatformProofingPauseMutation,
 } from "../api/identity-proofing.queries";
 import type { ProofingPause } from "../api/identity-proofing";
-import { Avatar, Button, Card, Input, Table, Tag, TopBar } from "../ui";
+import {
+  Avatar,
+  Button,
+  Card,
+  ConfirmDialog,
+  Input,
+  Table,
+  Tag,
+  TopBar,
+} from "../ui";
 import * as React from "react";
 
 const COLUMNS = 5;
@@ -140,7 +149,10 @@ export default function AllOrganizations(): React.JSX.Element {
                       <Table.Cell>
                         <ProofingPauseCell
                           orgId={org.id}
+                          orgName={org.name}
                           pause={pauseOf.get(org.id)}
+                          loaded={pauses.isSuccess}
+                          failed={pauses.isError}
                         />
                       </Table.Cell>
                       <Table.Cell className="text-right">
@@ -169,13 +181,30 @@ export default function AllOrganizations(): React.JSX.Element {
 // The org's own switch shows but is theirs to lift.
 function ProofingPauseCell({
   orgId,
+  orgName,
   pause,
+  loaded,
+  failed,
 }: {
   orgId: string;
+  orgName: string;
   pause: ProofingPause | undefined;
+  // An org without a pause row is active only once the list has loaded:
+  // while it loads, or when it failed, its state is not known.
+  loaded: boolean;
+  failed: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const set = useSetPlatformProofingPauseMutation();
+  // Pausing stops a whole organisation's proofing, so it is confirmed first.
+  const [confirmingPause, setConfirmingPause] = useState(false);
+  if (!loaded) {
+    return failed ? (
+      <Tag tone="default">{t("identityProofing.pause.unknown")}</Tag>
+    ) : (
+      <span className="text-ink-soft text-[12.5px]">{t("common.loading")}</span>
+    );
+  }
   const byPlatform = pause?.platformPausedAt !== undefined;
   const byOrganization = pause?.orgPausedAt !== undefined;
 
@@ -186,7 +215,13 @@ function ProofingPauseCell({
       onClick={(event) => event.stopPropagation()}
     >
       {byPlatform ? (
-        <Tag tone="amber">{t("identityProofing.pause.pausedByPlatform")}</Tag>
+        <Tag tone="amber">
+          {pause?.platformPausedBy
+            ? t("identityProofing.pause.pausedByPlatform", {
+                name: pause.platformPausedBy.name,
+              })
+            : t("identityProofing.pause.pausedByPlatformAdmin")}
+        </Tag>
       ) : byOrganization ? (
         <Tag tone="default">
           {t("identityProofing.pause.pausedByOrganization")}
@@ -198,12 +233,36 @@ function ProofingPauseCell({
         size="sm"
         variant="secondary"
         loading={set.isPending}
-        onClick={() => set.mutate({ orgId, paused: !byPlatform })}
+        onClick={() =>
+          byPlatform
+            ? set.mutate({ orgId, paused: false })
+            : setConfirmingPause(true)
+        }
       >
         {byPlatform
           ? t("identityProofing.pause.platformResume")
           : t("identityProofing.pause.platformPause")}
       </Button>
+      {confirmingPause && (
+        <ConfirmDialog
+          title={t("identityProofing.pause.platformConfirmTitle", {
+            name: orgName,
+          })}
+          message={t("identityProofing.pause.whatStops")}
+          confirmLabel={t("identityProofing.pause.platformPause")}
+          busy={set.isPending}
+          onConfirm={() =>
+            set.mutate(
+              { orgId, paused: true },
+              { onSuccess: () => setConfirmingPause(false) },
+            )
+          }
+          onClose={() => {
+            set.reset();
+            setConfirmingPause(false);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -1,15 +1,10 @@
-// Package proofingprovider holds the value types of the identity-proofing
-// seam: what internal/proofing hands the proofing engine and gets back.
-// Document and face verification run on the subject's phone in the Idem
-// (vcmrtd) app, or as a Yivi disclosure plus a live face check; the engine
-// itself is internal/proofingengine, which runs in the wallet (it replaced
-// the identity-proofing-service the wallet used to call over HTTP). An org
-// is the engine's tenant, under the org's own id.
+// Package proofingprovider holds the value types between internal/proofing and
+// the proofing engine (internal/proofingengine, in-process): flows, sessions,
+// results. An org is the engine's tenant, under the org's own id.
 //
-// This package imports no other internal/* package (leaf level, like
-// signingprovider). It exports the value types and an in-memory Stub for
-// tests; the orchestration lives in internal/proofing behind a
-// consumer-defined interface there.
+// It imports no other internal package (a leaf, like signingprovider). Besides
+// the types it has an in-memory Stub for tests; internal/proofing uses the
+// engine through its own interface.
 package proofingprovider
 
 import (
@@ -18,11 +13,9 @@ import (
 	"time"
 )
 
-// Tenant is which org a call is for. Sandbox runs it in the org's test
-// mode: a session there only resolves to a scripted outcome.
+// Tenant is which org a call is for.
 type Tenant struct {
-	ID      string
-	Sandbox bool
+	ID string
 }
 
 // FlowSpec is everything an org admin sets on a flow: the body of both a new
@@ -33,8 +26,8 @@ type FlowSpec struct {
 	Name  string   `json:"name"`
 	Steps []string `json:"steps"`
 	// RequestedAttributes limits what a session result may carry (dg1, dg11, dg2,
-	// selfie, chip_checks, biometrics, document_image). Nil lets the engine derive them
-	// from the steps. The wallet never reads the data itself, only the outcome.
+	// selfie, chip_checks, biometrics, document_image). Empty releases the outcome
+	// only. The wallet never reads the data itself, only the outcome.
 	RequestedAttributes []string `json:"requestedAttributes,omitempty"`
 	// SelfieLocation is which client captures the face: "native" (the vcmrtd
 	// app) or "browser". The engine defaults an empty value to browser.
@@ -94,9 +87,6 @@ type SessionInput struct {
 	// face is matched against it instead of the chip's DG2. Required exactly
 	// for such a flow, refused for any other.
 	ReferencePhoto *Image
-	// ScriptedOutcome resolves the session at once, without a subject: approve,
-	// reject:<code>, needs_review or expire. Only test mode (Tenant.Sandbox) accepts it.
-	ScriptedOutcome string
 }
 
 // Session is a created proofing session. Token is the relying-party bearer token every

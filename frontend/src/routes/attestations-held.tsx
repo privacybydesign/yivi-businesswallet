@@ -524,6 +524,12 @@ function historyText(
       };
     }
     case "statusChanged":
+      if (entry.revoked === undefined) {
+        return {
+          title: t("attestations.held.history.statusChanged"),
+          detail: t("attestations.held.history.detailHidden"),
+        };
+      }
       return entry.revoked
         ? {
             title: t("attestations.held.history.revoked"),
@@ -573,7 +579,8 @@ function ProvenanceCard({
       : t("attestations.held.detail.doesNotExpire"),
   ]
     .filter(Boolean)
-    .join(" — ");
+    // A range takes an en dash, not an em dash.
+    .join(" – ");
   const rows: [string, string, boolean?][] = [
     [
       t("attestations.held.fields.issuer"),

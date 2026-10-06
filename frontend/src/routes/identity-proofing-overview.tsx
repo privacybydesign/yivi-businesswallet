@@ -148,7 +148,7 @@ function StatsRow({
   const value = (n: number): string => (stats ? String(n) : "—");
 
   return (
-    <Card className="divide-line grid grid-cols-2 lg:grid-cols-5 lg:divide-x">
+    <Card className="divide-line grid grid-cols-2 lg:grid-cols-6 lg:divide-x">
       <StatCell
         label={t("identityProofing.overview.stats.sessions")}
         value={value(totals.sessions)}
@@ -181,6 +181,11 @@ function StatsRow({
         label={t("identityProofing.overview.stats.expired")}
         value={value(totals.expired)}
         hint={t("identityProofing.overview.stats.expiredHint")}
+      />
+      <StatCell
+        label={t("identityProofing.overview.stats.cancelled")}
+        value={value(totals.cancelled)}
+        hint={t("identityProofing.overview.stats.cancelledHint")}
       />
     </Card>
   );

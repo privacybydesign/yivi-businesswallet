@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/i18n"
@@ -19,12 +20,11 @@ import (
 	pp "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
-// The relying-party side, as Go methods: what internal/proofing called over
-// IPS's /api/v1/sessions and /api/v1/flows. Errors keep the shapes the
-// wallet already branches on: pp.ErrNotFound, *pp.RejectedError (with
-// IPS's status and message) and pp.ErrMethodUnavailable.
+// The relying-party side, called in-process by internal/proofing: flows and
+// sessions. Errors are pp.ErrNotFound, *pp.RejectedError (status and message)
+// and pp.ErrMethodUnavailable.
 
-// rejected is a refused request, as IPS answered it.
+// rejected is a refused request.
 func rejected(status int, msg string) error {
 	return &pp.RejectedError{Status: status, Message: msg}
 }
@@ -53,11 +53,7 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 	for _, t := range in.AssuranceTiers {
 		fd.AssuranceTiers = append(fd.AssuranceTiers, flow.AssuranceTier{Level: t.Level, MinPercent: t.MinPercent})
 	}
-	// IPS's wire format dropped an empty list, so only a non-empty one is
-	// the admin's own choice; otherwise the steps decide.
-	if len(in.RequestedAttributes) > 0 {
-		fd.RequestedAttributes, fd.RequestedAttributesConfigured = in.RequestedAttributes, true
-	}
+	fd.RequestedAttributes = in.RequestedAttributes
 	return fd
 }
 
@@ -90,7 +86,8 @@ func toFlow(fd flow.FlowDefinition) pp.Flow {
 			spec.CheckThresholds[string(c)] = v
 		}
 	}
-	for _, t := range fd.EffectiveAssuranceTiers() {
+	// Only the flow's own tiers: a flow without keeps DefaultAssuranceTiers.
+	for _, t := range fd.AssuranceTiers {
 		spec.AssuranceTiers = append(spec.AssuranceTiers, pp.AssuranceTier{Level: t.Level, MinPercent: t.MinPercent})
 	}
 	return pp.Flow{FlowSpec: spec, ID: fd.ID, Version: fd.Version, Active: fd.Active, CreatedAt: fd.CreatedAt}
@@ -117,13 +114,25 @@ func flowError(op string, err error) error {
 	}
 }
 
-// isValidation is a flow.Validate refusal ("flow: ..."), as opposed to a
-// storage failure the store wrapped.
+// isValidation is a flow.Validate refusal, as opposed to a storage failure.
 func isValidation(err error) bool {
-	msg := err.Error()
-	return strings.HasPrefix(msg, "flow: ") && !strings.HasPrefix(msg, "flow: save:") &&
-		!strings.HasPrefix(msg, "flow: list:") && !strings.HasPrefix(msg, "flow: read:") &&
-		!strings.HasPrefix(msg, "flow: decode:") && !strings.HasPrefix(msg, "flow: activate:")
+	var invalid *flow.ValidationError
+	return errors.As(err, &invalid)
+}
+
+// maxRetentionOverrideSeconds is flow.MaxRetentionOverride in the spec's
+// seconds.
+const maxRetentionOverrideSeconds = int(flow.MaxRetentionOverride / time.Second)
+
+// checkFlowSpec refuses what toDefinition cannot carry over faithfully, and a
+// face provider this server lacks. A retention past the bound is refused on
+// the seconds: converted first, a huge value would wrap to a Duration that
+// flow.Validate accepts.
+func (s *Server) checkFlowSpec(in pp.FlowSpec) error {
+	if in.RetentionOverrideSeconds < 0 || in.RetentionOverrideSeconds > maxRetentionOverrideSeconds {
+		return rejected(http.StatusBadRequest, fmt.Sprintf("flow: retentionOverride must be between 0 and %d days", flow.MaxRetentionOverrideDays))
+	}
+	return s.checkFaceProvider(in)
 }
 
 func (s *Server) checkFaceProvider(in pp.FlowSpec) error {
@@ -149,7 +158,7 @@ func (s *Server) ListFlows(ctx context.Context, t pp.Tenant) ([]pp.Flow, error) 
 
 // CreateFlow creates a flow at version 1, active.
 func (s *Server) CreateFlow(ctx context.Context, t pp.Tenant, in pp.FlowSpec) (pp.Flow, error) {
-	if err := s.checkFaceProvider(in); err != nil {
+	if err := s.checkFlowSpec(in); err != nil {
 		return pp.Flow{}, err
 	}
 	fd, err := s.flows.Save(ctx, toDefinition(t.ID, "", in))
@@ -161,7 +170,7 @@ func (s *Server) CreateFlow(ctx context.Context, t pp.Tenant, in pp.FlowSpec) (p
 
 // CreateFlowVersion saves the next version of flow id, active at once.
 func (s *Server) CreateFlowVersion(ctx context.Context, t pp.Tenant, id string, in pp.FlowSpec) (pp.Flow, error) {
-	if err := s.checkFaceProvider(in); err != nil {
+	if err := s.checkFlowSpec(in); err != nil {
 		return pp.Flow{}, err
 	}
 	fd, err := s.flows.Save(ctx, toDefinition(t.ID, id, in))
@@ -197,15 +206,14 @@ func (s *Server) ActivateFlowVersion(ctx context.Context, t pp.Tenant, id string
 
 // ---- sessions ---------------------------------------------------------------
 
-// Bounds on what a session is created with, as IPS enforced them.
+// Bounds on what a session is created with.
 const (
 	maxClientReferenceLength = 200
 	maxFlowIDLength          = 100
 	maxLanguageLength        = 35
 )
 
-// CreateSession starts a session on flow in.FlowID. A sandbox tenant (the
-// org's test mode) only creates scripted sessions, resolved at once.
+// CreateSession starts a session on flow in.FlowID.
 func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionInput) (pp.Session, error) {
 	switch {
 	case len(in.ClientReference) > maxClientReferenceLength:
@@ -226,19 +234,6 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	default:
 		return pp.Session{}, fmt.Errorf("proofingengine: no session can be started for method %q", in.Method)
 	}
-	if t.Sandbox && in.ScriptedOutcome == "" {
-		return pp.Session{}, rejected(http.StatusBadRequest, "a test session needs a scriptedOutcome")
-	}
-	var outcome scriptedOutcome
-	if in.ScriptedOutcome != "" {
-		if !t.Sandbox {
-			return pp.Session{}, rejected(http.StatusBadRequest, "scriptedOutcome is only available in test mode")
-		}
-		var err error
-		if outcome, err = parseScriptedOutcome(in.ScriptedOutcome); err != nil {
-			return pp.Session{}, rejected(http.StatusBadRequest, err.Error())
-		}
-	}
 	var resolvedFlow *flow.FlowDefinition
 	if in.FlowID != "" {
 		fd, err := s.flows.Get(ctx, t.ID, in.FlowID, 0)
@@ -254,13 +249,14 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	var retention time.Duration
 	if resolvedFlow != nil {
 		requestedAttributes, flowVersion, retention = resolvedFlow.RequestedAttributes, resolvedFlow.Version, resolvedFlow.RetentionOverride
-		if !resolvedFlow.RequestedAttributesConfigured {
-			requestedAttributes = attributesForSteps(resolvedFlow.Steps)
+		// A flow that requests no data releases the outcome only, as the subject is
+		// told. An empty list on the session would mean everything (attrRequested).
+		if len(requestedAttributes) == 0 {
+			requestedAttributes = []string{attrOutcomeOnly}
 		}
 	}
-	// A face match without nfc_read has no chip photo to compare against: the
-	// relying party supplies one per session (IPS's referencePhoto). Any
-	// other flow takes none, so a chip flow is never matched against it.
+	// A face match without nfc_read has no chip photo: the customer sends a
+	// reference photo with each session, and only such a flow takes one.
 	needsReference := resolvedFlow != nil && flowNeedsFaceMatch(resolvedFlow) && !slices.Contains(resolvedFlow.Steps, flow.StepNFCRead)
 	hasReference := in.ReferencePhoto != nil && in.ReferencePhoto.Base64 != ""
 	switch {
@@ -290,11 +286,6 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 		return pp.Session{}, fmt.Errorf("proofingengine: create session: %w", err)
 	}
 	s.auditProofing(sess, eventSessionCreated, nil)
-	if in.ScriptedOutcome != "" {
-		if sess, err = s.resolveScriptedOutcome(sess, resolvedFlow, outcome); err != nil {
-			return pp.Session{}, fmt.Errorf("proofingengine: resolve scripted outcome: %w", err)
-		}
-	}
 	out := pp.Session{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, FlowVersion: sess.FlowVersion}
 	if sess.Method == session.MethodNFCPassport && sessionOpenForDevices(sess) == nil {
 		updated, claims, err := s.mintClaimTokens(sess, "create", session.DeviceRoleNative)
@@ -625,7 +616,7 @@ func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, 
 		return rejected(http.StatusBadRequest, "errorCode is only for a rejection")
 	case d.ErrorCode != "" && !reviewErrorCodePattern.MatchString(d.ErrorCode):
 		return rejected(http.StatusBadRequest, "errorCode must be 1-64 of A-Z, 0-9 and _")
-	case reason == "" || len(reason) > maxReviewReasonLength:
+	case reason == "" || utf8.RuneCountInString(reason) > maxReviewReasonLength:
 		return rejected(http.StatusBadRequest, "reason is required (max 500 characters)")
 	case reviewer == "" || len(reviewer) > maxReviewReviewerLength:
 		return rejected(http.StatusBadRequest, "reviewer is required (max 200 characters)")
@@ -670,7 +661,7 @@ func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, 
 // errDeviceActive refuses a handover of a slot whose device is still there.
 var errDeviceActive = errors.New("the device holding this slot is still active; only it can hand the session over")
 
-// SessionHandover gives a fresh vcmrtd link for the native slot: its claim
+// SessionHandover gives a fresh Idem app link for the native slot: its claim
 // while empty, a handover once its app left (inactive or stale). An app
 // still active is refused with pp.CodeDeviceActive.
 func (s *Server) SessionHandover(_ context.Context, t pp.Tenant, id, token string) (pp.Claim, error) {
@@ -752,7 +743,8 @@ func (s *Server) CancelSession(_ context.Context, t pp.Tenant, id, token string)
 }
 
 // DeleteSession erases a session and its evidence; one already gone is fine.
-func (s *Server) DeleteSession(_ context.Context, t pp.Tenant, id, token string) error {
+// The Regula transactions under its tag are swept now, not after the grace.
+func (s *Server) DeleteSession(ctx context.Context, t pp.Tenant, id, token string) error {
 	sess, err := s.session(t, id, token)
 	if errors.Is(err, pp.ErrNotFound) {
 		return nil
@@ -763,6 +755,7 @@ func (s *Server) DeleteSession(_ context.Context, t pp.Tenant, id, token string)
 	if err := s.sessions.Delete(sess.TenantID, sess.ID); err != nil && !errors.Is(err, session.ErrNotFound) {
 		return fmt.Errorf("proofingengine: delete session: %w", err)
 	}
+	s.sweepRegulaNow(ctx, sess)
 	s.auditProofing(sess, eventSessionPurged, map[string]any{"priorStatus": string(sess.Status)})
 	return nil
 }

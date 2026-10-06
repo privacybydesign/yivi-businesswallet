@@ -417,7 +417,7 @@ export const en = {
       byOrganization:
         "An administrator of this organisation switched identity proofing off.",
       whatStops:
-        "While paused, nothing new starts: no requests, no customer API calls and no hosted links. Sessions already running still finish, and their webhooks still go out.",
+        "While paused, nothing new starts: no requests, no customer API calls and no hosted links. Sessions waiting for review are rejected, and their subjects told to try again later. Sessions already running still finish, and their webhooks still go out.",
       turnOn: "Switch identity proofing on",
       turnOff: "Switch off",
       switchTitle: "Switch off identity proofing",
@@ -426,7 +426,12 @@ export const en = {
       confirmTitle: "Switch off identity proofing?",
       platformColumn: "Identity proofing",
       active: "Active",
-      pausedByPlatform: "Paused by you",
+      unknown: "Unknown",
+      pausedByPlatform: "Paused by {{name}}",
+      pausedByPlatformAdmin: "Paused by a platform admin",
+      platformConfirmTitle: "Pause identity proofing for {{name}}?",
+      byOrganizationMember:
+        "{{name}}, an administrator of this organisation, switched identity proofing off.",
       pausedByOrganization: "Switched off by the organisation",
       platformPause: "Pause",
       platformResume: "Resume",
@@ -447,6 +452,8 @@ export const en = {
         needsReview: "Needs review",
         needsReviewHint: "Waiting for your decision",
         expiredHint: "Not finished within 10 minutes",
+        cancelled: "Cancelled",
+        cancelledHint: "Withdrawn before they finished",
         noSessions: "No sessions yet",
       },
       recent: {
@@ -505,10 +512,15 @@ export const en = {
       documentCountryNotAccepted: "issuing country not accepted by the flow",
       faceStepNotCompleted: "face verification not completed",
       faceNoMatch: "face did not match the document",
+      livenessFailed: "liveness check failed",
+      chipAuthMissing: "the chip check this flow requires did not pass",
       docTampered: "document chip data was tampered with",
       chipCloneDetected: "cloned document chip detected",
       docExpired: "document expired",
       assuranceNotMet: "below the flow's required assurance level",
+      reviewLapsed: "not reviewed within 30 days",
+      orgPaused:
+        "identity proofing was paused for this organisation while the session waited for review; try again later",
       identityMismatch:
         "a different person: the name or date of birth on the document is not the one the request was for",
     },
@@ -528,9 +540,24 @@ export const en = {
         "That flow is no longer assigned to this customer. Pick another one.",
       customerPaused:
         "Proofing is paused for this customer. An admin can resume it on the customer's page.",
+      customerHasOpenReviews:
+        "This customer has sessions waiting for review. Decide them before pausing.",
+      customerSessionsLeft:
+        "Sessions were sent for this customer while it was being removed. Try removing it again.",
       proofingPaused: "Identity proofing is paused for this organisation.",
       customerNoApiKey:
-        "This customer has no live API key yet. An admin can create one on the customer's API keys tab.",
+        "This customer has no API key yet. An admin can create one on the customer's API keys tab.",
+      apiKeyNotFound: "That API key no longer exists.",
+      sessionNotFound: "That session no longer exists.",
+      notUnderReview:
+        "This session is no longer waiting for review: someone may have decided it already.",
+      referencePhotoRequired:
+        "This flow compares the face with your own photo of the person, which can only be sent through the customer API. Pick another flow.",
+      organizationNotFound: "That organisation does not exist.",
+      webhookNotFound:
+        "This customer's webhook no longer exists: someone may have removed it. Reload the page.",
+      linkStarted:
+        "This link was already opened somewhere else. Carry on there.",
       sessionOver: "This session has ended. Start a new one.",
       deviceActive:
         "The Idem app still has this session open: carry on there, or close it first.",
@@ -630,10 +657,10 @@ export const en = {
       resume: "Resume proofing",
       pausedNotice:
         "Proofing is paused for this customer: no new request can be sent until an admin resumes it.",
-      noLiveKeyNotice:
-        "This customer has no live API key yet: create one before sending requests. Test keys run in the sandbox only.",
-      noLiveKeyNoticeMember:
-        "This customer has no live API key yet, so no request can be sent. Ask an admin to create one.",
+      noApiKeyNotice:
+        "This customer has no API key yet: create one before sending requests.",
+      noApiKeyNoticeMember:
+        "This customer has no API key yet, so no request can be sent. Ask an admin to create one.",
       createApiKey: "Create API key",
       pauseConfirm: {
         title: "Pause proofing for {{name}}?",
@@ -746,9 +773,9 @@ export const en = {
         flow: "Flow",
         assurance: "Assurance level",
         retention_one:
-          "The name on your document is kept for {{count}} day after verification, then deleted.",
+          "What the verification collects (your name and the other data and photos listed above) is deleted at most {{count}} day after it ends.",
         retention_other:
-          "The name on your document is kept for {{count}} days after verification, then deleted.",
+          "What the verification collects (your name and the other data and photos listed above) is deleted at most {{count}} days after it ends.",
         support: "Questions? {{contact}}",
         privacy: "Privacy statement",
         cancel: "Cancel",
@@ -812,7 +839,7 @@ export const en = {
       },
       face: {
         heading: "Look into the camera",
-        hint: "Keep your face in the frame. It is compared with the photo from your Yivi app; nothing is stored.",
+        hint: "Keep your face in the frame. It is compared with the photo from your Yivi app. A matching image is kept only when your selfie was asked for.",
         progress: "Match {{count}} of {{total}}",
         noFace: "No face found. Move closer to the camera.",
         cameraError:
@@ -852,6 +879,7 @@ export const en = {
         reason: "Reason",
         reasonPlaceholder: "What you checked, and why you decided so",
         reasonRequired: "Give a reason: it is kept in the audit log.",
+        reasonTooLong: "Keep the reason to {{max}} characters or fewer.",
         approve: "Approve",
         reject: "Reject",
       },
@@ -867,6 +895,12 @@ export const en = {
           hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to erase: their personal data is deleted at once, the sessions stay as a record, and the customer is told per session.",
           approve_one: "Approve: erase {{count}} session",
           approve_other: "Approve: erase {{count}} sessions",
+          confirm: {
+            title_one: "Erase {{count}} session?",
+            title_other: "Erase {{count}} sessions?",
+            message:
+              "The personal data in the sessions you ticked, and in this request, is deleted at once and cannot be restored. The sessions stay as a record without it.",
+          },
         },
         reasonPlaceholder:
           "What you checked, and why, e.g. a legal duty to keep the data",
@@ -874,17 +908,25 @@ export const en = {
           "No other sessions of this person were found at this customer.",
         matches_one: "{{count}} session of this person found",
         matches_other: "{{count}} sessions of this person found",
+        emailMatches_one:
+          "{{count}} unfinished session sent to the same address",
+        emailMatches_other:
+          "{{count}} unfinished sessions sent to the same address",
+        emailMatchesHint:
+          "These never finished, so there is no proven identity to compare: only the e-mail address matches. Tick the ones that are this person's.",
         levels: {
           strong: "Same document",
           probable: "Name and date of birth",
+          email: "Same e-mail address",
         },
         untickHint:
-          "Untick what must be kept, for example under a legal retention duty.",
+          "Sessions proven with the same document are ticked; one that only shares the name and date of birth is not, so tick it only when you are sure it is this person's. Untick what must be kept, for example under a legal retention duty.",
         erased: "Erased",
         approved: "Approved",
         kept: "Kept",
         download: "Download the data",
         downloadUntil: "Available until {{date}}",
+        downloadClosed: "The download was available until {{date}}.",
       },
       method: "Method",
       timeline: "Timeline",
@@ -963,7 +1005,7 @@ export const en = {
       minutes_other: "{{count}} min",
       retention: "Data retention",
       retentionHint:
-        "A session's personal data (name, e-mail address, the name read off the document) is purged this long after it ends. The result and the audit trail stay.",
+        "A session's personal data (the name and e-mail address it was sent to, everything read off the document and chip, the photos, and any diplomas) is purged this long after it ends. The result and the audit trail stay.",
       days_one: "{{count}} day",
       days_other: "{{count}} days",
       nameTitle: "Name",
@@ -1047,11 +1089,6 @@ export const en = {
       active: "Active",
       revoked: "Revoked",
       revoke: "Revoke",
-      live: "Live",
-      test: "Test",
-      testLabel: "Test key",
-      testHint:
-        "Sessions made with a test key run in a sandbox: they resolve at once to a scripted outcome (approve by default), send no e-mail and stay out of the counts.",
       revokeConfirm: {
         title: "Revoke {{name}}?",
         message:
@@ -1060,9 +1097,6 @@ export const en = {
       createdTitle: "Your new API key",
       createdHint:
         "Copy it now and store it somewhere safe, like your backend's secret store: it is not shown again. Only a hash of it is kept.",
-      usageTitle: "Using the API",
-      usageHint:
-        "Send the key as a Bearer token. Without a flowId the customer's default flow is used; with sendMail false the answer's deepLink is yours to show as a QR code.",
     },
     webhooks: {
       endpoint: "Endpoint",
@@ -1160,13 +1194,17 @@ export const en = {
       face_verification: "Face check",
       diploma_upload: "Upload diplomas (DUO)",
     },
+    bsnPolicies: {
+      retrieve: "Release the BSN",
+      mask: "Release it masked",
+      omit: "Leave it out",
+    },
     assuranceLevels: {
       low: "Low",
       substantial: "Substantial",
     },
     faceProviders: {
       regula: "Regula",
-      Iris: "Iris SDK",
     },
     checks: {
       passiveAuth: "The chip's data is genuine and unaltered",
@@ -1235,7 +1273,7 @@ export const en = {
         "The face check runs in the app: the person has no browser step.",
       faceProvider: "Face check provider",
       faceProviderHint:
-        "Regula checks liveness in the app and the wallet matches the face against the chip photo; in the Yivi app Regula matches the camera against the credential's photo. Iris runs in the Idem app only.",
+        "Regula checks liveness in the app and the wallet matches the face against the chip photo; in the Yivi app Regula matches the camera against the credential's photo.",
       faceWithoutChip:
         "Without reading the chip there is no chip photo: the face is matched against the customer's own photo of the person, which its system sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
       dataTitle: "Requested result data",
@@ -1252,28 +1290,33 @@ export const en = {
       documentTypesHint: "Comma-separated, blank accepts any.",
       issuingCountries: "Accepted issuing countries",
       issuingCountriesHint:
-        "3-letter country codes such as NLD, comma-separated, blank accepts any.",
+        "3-letter ICAO country codes such as NLD or DEU, comma-separated; blank accepts any. A code no country has is refused.",
       policyTitle: "Assurance and privacy",
       assuranceLevel: "Required assurance level",
       assuranceLevelHint:
-        "With a required level the session is held to it: one that falls short is rejected. Without one no level is calculated.",
+        "With a required level the session is held to it: one that falls short is rejected. Without one the session still reports the level its checks reached. A face step whose liveness check or face match fails rejects the session either way. A session can reach a higher level than required. Only a face checked by Regula can reach Substantial.",
       assuranceLevelNeeds: {
-        low: "Low needs the chip read with its data verified. Those settings are locked on.",
+        low: "Low needs the chip read with its data verified. Turn those settings on to save the flow.",
         substantial:
-          "Substantial needs the chip read with its data and copy check verified, and a live face matched by Regula against the chip photo. Those settings are locked on.",
+          "Substantial needs the chip read with its data and copy check verified, and a live face matched by Regula against the chip photo. Turn those settings on to save the flow.",
       },
       none: "(none)",
       inherit: "(inherit organization)",
-      yes: "true",
-      no: "false",
+      yes: "Yes",
+      no: "No",
       bsnPolicy: "BSN policy override",
       retentionSeconds: "Retention override (seconds)",
-      retentionSecondsHint: "Blank or 0 is no override.",
+      retentionSecondsHint:
+        "Set, it replaces the customer's retention for this flow's sessions; blank or 0 keeps the customer's.",
       blurFace: "Blur face override",
       blurBsn: "Blur BSN override",
       errors: {
         name: "Give the flow a name.",
         steps: "Pick at least one step.",
+        assuranceLevel:
+          "This flow cannot reach the required level: turn on what the level needs, or lower it.",
+        issuingCountries:
+          "Use 3-letter country codes such as NLD, separated by commas.",
         faceMatchThreshold: "Enter a number from 0 to 1.",
         retentionSeconds: "Enter a whole number of seconds.",
       },
@@ -1493,10 +1536,12 @@ export const en = {
     identityProofingRequestSent: "Request sent",
     identityProofingCustomerCreated: "Customer added",
     identityProofingCustomerRenamed: "Customer renamed",
+    identityProofingCustomerSettingsSaved: "Settings saved",
     identityProofingCustomerPaused: "Proofing paused",
     identityProofingCustomerResumed: "Proofing resumed",
     identityProofingCustomerRemoved: "Customer removed",
     identityProofingBrandingSaved: "Branding saved",
+    identityProofingHostedSettingsSaved: "Hosted page settings saved",
     identityProofingApiKeyRevoked: "API key revoked",
     identityProofingWebhookSaved: "Webhook saved",
     identityProofingWebhookRemoved: "Webhook removed",
@@ -1595,7 +1640,8 @@ export const en = {
       "Every issuance, disclosure, signature and configuration change is recorded.",
     filter: "Filter",
     export: "Export",
-    adminOnly: "Only organization admins can view the audit log.",
+    detailHidden: "Who acted and what changed is visible to admins only.",
+    hiddenActor: "Hidden",
     loadError: "Could not load the audit log: {{message}}",
     loadMore: "Load more",
     empty: "No activity has been recorded yet.",
@@ -1783,7 +1829,13 @@ export const en = {
       identityProofingSessionCancelled: "Identity proofing session cancelled",
       identityProofingSessionPurged: "Identity proofing session erased",
       identityProofingResultRead: "Read identity proofing result",
-      identityProofingCompleted: "Identity proofing completed",
+      identityProofingDeviceClaimed: "Device claimed identity proofing session",
+      identityProofingDeviceHandedOver:
+        "Identity proofing session handed over to another device",
+      identityProofingHandoverIssued: "Handover to another device offered",
+      identityProofingHandoverClaimFailed: "Handover to another device refused",
+      identityProofingAccessDenied:
+        "Device refused access to identity proofing session",
       identityProofingApproved: "Identity verified",
       identityProofingRejected: "Identity verification rejected",
       identityProofingNeedsReview: "Identity verification needs review",
@@ -1879,7 +1931,6 @@ export const en = {
       loadMore: "Load more",
     },
     active: "Active member",
-    verified: "Verified",
     identifiedOn: "Identified on",
     never: "Never",
     identityDueOn: "Re-identify before",
@@ -3261,6 +3312,8 @@ export const en = {
         checkedRevoked: "revoked",
         checkedValid: "not revoked",
         removed: "Removed",
+        statusChanged: "Status changed",
+        detailHidden: "details visible to admins only",
       },
       checks: {
         signature: "Signature valid",

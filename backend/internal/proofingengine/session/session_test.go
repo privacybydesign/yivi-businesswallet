@@ -1,6 +1,7 @@
 package session
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -29,7 +30,7 @@ func TestStatusMachineHappyPath(t *testing.T) {
 	}
 }
 
-func TestStatusMachineRejectsInvalidTransition(t *testing.T) {
+func TestStatusMachineInvalid(t *testing.T) {
 	now := time.Now().UTC()
 	s := Session{Status: StatusCreated}
 	// created cannot jump straight to approved; opened/in_progress must happen first.
@@ -41,7 +42,7 @@ func TestStatusMachineRejectsInvalidTransition(t *testing.T) {
 	}
 }
 
-func TestStatusMachineTerminalIsFinal(t *testing.T) {
+func TestStatusMachineTerminal(t *testing.T) {
 	now := time.Now().UTC()
 	s := Session{Status: StatusRejected}
 	if err := s.SetStatus(StatusInProgress, now); err == nil {
@@ -49,7 +50,7 @@ func TestStatusMachineTerminalIsFinal(t *testing.T) {
 	}
 }
 
-func TestStatusMachineNoopSameStatus(t *testing.T) {
+func TestStatusMachineSameIsNoop(t *testing.T) {
 	now := time.Now().UTC()
 	s := Session{Status: StatusInProgress, UpdatedAt: now.Add(-time.Hour)}
 	if err := s.SetStatus(StatusInProgress, now); err != nil {
@@ -90,7 +91,7 @@ func TestFace1Vocabulary(t *testing.T) {
 }
 
 // A reference photo is stored only while the face step can still run.
-func TestForStorageDropsTheReferencePhoto(t *testing.T) {
+func TestForStorageDropsRefPhoto(t *testing.T) {
 	for status, kept := range map[Status]bool{
 		StatusCreated: true, StatusOpened: true, StatusInProgress: true,
 		StatusNeedsReview: false, StatusApproved: false, StatusRejected: false, StatusExpired: false, StatusCancelled: false,
@@ -99,5 +100,36 @@ func TestForStorageDropsTheReferencePhoto(t *testing.T) {
 		if got := sess.ReferencePhoto != "" && sess.ReferencePhotoMime != ""; got != kept {
 			t.Errorf("%s: photo kept = %v, want %v", status, got, kept)
 		}
+	}
+}
+
+// A session that ended without an outcome keeps no step evidence and no Yivi
+// face check; a decided one keeps its (already redacted) evidence.
+func TestForStorageDropsUnfinished(t *testing.T) {
+	for status, kept := range map[Status]bool{
+		StatusInProgress: true, StatusApproved: true, StatusRejected: true, StatusNeedsReview: true,
+		StatusExpired: false, StatusCancelled: false,
+	} {
+		sess := Session{
+			Status: status,
+			Steps: StepEvidence{
+				NFC:    &NFCStepEvidence{Raw: map[string]any{"photo": "cGhvdG8="}},
+				Selfie: &SelfieStepEvidence{Image: "c2VsZmll"},
+			},
+			Yivi: &YiviState{LastFrame: "ZnJhbWU="},
+		}.ForStorage()
+		if got := sess.Steps.NFC != nil && sess.Steps.Selfie != nil; got != kept {
+			t.Errorf("%s: evidence kept = %v, want %v", status, got, kept)
+		}
+		if wantYivi := !status.Terminal() && status != StatusNeedsReview; (sess.Yivi != nil) != wantYivi {
+			t.Errorf("%s: Yivi state kept = %v, want %v", status, sess.Yivi != nil, wantYivi)
+		}
+	}
+}
+
+func TestCompletedStepsDocPhoto(t *testing.T) {
+	s := Session{Steps: StepEvidence{DocumentPhoto: &DocumentPhotoStepEvidence{}}}
+	if got := s.CompletedSteps(); !slices.Equal(got, []string{"document_photo"}) {
+		t.Errorf("CompletedSteps = %v, want [document_photo]", got)
 	}
 }

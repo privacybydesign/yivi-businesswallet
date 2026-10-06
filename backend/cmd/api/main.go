@@ -159,7 +159,7 @@ func newDiplomaValidator(ctx context.Context, cfg config.Config) (diploma.Valida
 		if err != nil {
 			return nil, fmt.Errorf("diploma trust anchors: %w", err)
 		}
-		return diploma.NewPadesValidator(store, false), nil
+		return diploma.NewPadesValidator(store, cfg.DiplomaOCSP), nil
 	default:
 		return nil, fmt.Errorf("diploma validator provider %q is not implemented", cfg.DiplomaValidatorProvider)
 	}
@@ -179,7 +179,7 @@ func newVogValidatorProvider(cfg config.Config) (vogValidatorProvider, error) {
 // newProofingProvider builds what the proofing service drives: the wallet's
 // own engine (on the pool, sealing under cipher), or the in-memory stub. The
 // engine is also returned on its own so its app routes and jobs get wired.
-func newProofingProvider(cfg config.Config, pool *pgxpool.Pool, cipher *crypto.Cipher, orgStore *organization.Store) (proofing.Provider, *proofingengine.Engine, error) {
+func newProofingProvider(cfg config.Config, pool *pgxpool.Pool, cipher *crypto.Cipher, orgStore *organization.Store, trail proofingengine.DeviceTrail) (proofing.Provider, *proofingengine.Engine, error) {
 	switch cfg.IdentityProofingProvider {
 	case config.ProviderStub:
 		stub := proofingprovider.NewStub()
@@ -188,6 +188,7 @@ func newProofingProvider(cfg config.Config, pool *pgxpool.Pool, cipher *crypto.C
 	case config.ProviderEngine:
 		engineCfg := proofingengine.DefaultConfig()
 		engineCfg.PublicBaseURL = cfg.IdentityProofingPublicURL
+		engineCfg.DeviceTrail = trail
 		if cfg.RegulaFaceAPIURL != "" {
 			regulaClient := regula.New(cfg.RegulaFaceAPIURL)
 			engineCfg.Regula = regulaClient
@@ -205,6 +206,14 @@ func newProofingProvider(cfg config.Config, pool *pgxpool.Pool, cipher *crypto.C
 	default:
 		return nil, nil, fmt.Errorf("identity proofing provider %q is not implemented", cfg.IdentityProofingProvider)
 	}
+}
+
+// deviceTrail writes the engine's device events into the org's audit log, on
+// the session's request.
+type deviceTrail struct{ requests *proofing.RequestStore }
+
+func (d deviceTrail) RecordDeviceEvent(ctx context.Context, tenantID, sessionID string, event proofingengine.DeviceEvent, details map[string]any) error {
+	return d.requests.RecordDeviceEvent(ctx, tenantID, sessionID, string(event), details)
 }
 
 // attestationIssuer is the boot-time issuer surface: the readiness probe plus the
@@ -847,11 +856,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	ips, proofingEngine, err := newProofingProvider(cfg, pool, proofingCipher, orgStore)
+	proofingRequests := proofing.NewRequestStore(pool, recorder, proofingCipher)
+	ips, proofingEngine, err := newProofingProvider(cfg, pool, proofingCipher, orgStore, deviceTrail{proofingRequests})
 	if err != nil {
 		return err
 	}
-	proofingRequests := proofing.NewRequestStore(pool, recorder, proofingCipher)
 	proofingWebhooks := proofing.NewWebhookStore(pool, recorder, proofingCipher)
 	proofingWebhooks.SetDefaultEndpoint(cfg.IdentityProofingDefaultWebhookURL)
 	proofingService := proofing.NewService(proofing.Stores{
@@ -900,10 +909,11 @@ func run() error {
 	database.RunOnNotify(ctx, pool, proofing.WebhookChannel, "identity_proofing_webhooks",
 		proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).Run)
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
-	proofingIdempotency := proofing.NewIdempotencyStore(pool)
+	proofingIdempotency := proofing.NewIdempotencyStore(pool, proofingCipher)
 	proofingHandler.SetIdempotencyStore(proofingIdempotency)
 	proofingHandler.SetPlatformAdmins(platformAdmins)
 	startPruner(ctx, "identity_proofing_idempotency_keys", cfg.SessionPruneEvery, proofingIdempotency.Prune)
+	startPruner(ctx, "identity_proofing_webhook_deliveries", cfg.SessionPruneEvery, proofingWebhooks.PruneDeliveries)
 
 	handler := server.New(
 		pool,

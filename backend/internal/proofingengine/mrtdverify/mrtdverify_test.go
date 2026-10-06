@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/mrtdverify/mrtdtestfixtures"
+
 	"github.com/gmrtd/gmrtd/cms"
 	"github.com/gmrtd/gmrtd/tlv"
 )
@@ -17,9 +19,9 @@ import (
 // guaranteed not to verify against it.
 func syntheticDg15FromCscaHex(t *testing.T) string {
 	t.Helper()
-	cert, err := x509.ParseCertificate(TestCsca)
+	cert, err := x509.ParseCertificate(mrtdtestfixtures.TestCsca)
 	if err != nil {
-		t.Fatalf("parse TestCsca: %v", err)
+		t.Fatalf("parse mrtdtestfixtures.TestCsca: %v", err)
 	}
 	node := tlv.NewTlvSimpleNode(tlv.TlvTag(0x6F), cert.RawSubjectPublicKeyInfo)
 	return hex.EncodeToString(node.Encode())
@@ -28,16 +30,16 @@ func syntheticDg15FromCscaHex(t *testing.T) string {
 func trustedTestCertPool(t *testing.T) cms.CertPool {
 	t.Helper()
 	var pool cms.GenericCertPool
-	if err := pool.Add(TestCsca); err != nil {
-		t.Fatalf("Add(TestCsca): %v", err)
+	if err := pool.Add(mrtdtestfixtures.TestCsca); err != nil {
+		t.Fatalf("Add(mrtdtestfixtures.TestCsca): %v", err)
 	}
 	return &pool
 }
 
-func TestVerifyPassive_validDocumentPasses(t *testing.T) {
-	result, err := VerifyPassive(TestSodHex, map[string]string{
-		"DG1": TestDg1Hex,
-		"DG2": Dg2Hex,
+func TestVerifyPassiveValid(t *testing.T) {
+	result, err := VerifyPassive(mrtdtestfixtures.TestSodHex, map[string]string{
+		"DG1": mrtdtestfixtures.TestDg1Hex,
+		"DG2": mrtdtestfixtures.Dg2Hex,
 	}, trustedTestCertPool(t))
 	if err != nil {
 		t.Fatalf("VerifyPassive: %v", err)
@@ -59,20 +61,20 @@ func TestVerifyPassive_validDocumentPasses(t *testing.T) {
 	}
 }
 
-func TestVerifyPassive_tamperedDataGroupFailsHashCheckButStillVerifiesSignature(t *testing.T) {
+func TestVerifyPassiveTamperedDG(t *testing.T) {
 	// Flip a byte in DG1 so it no longer matches the hash EF.SOD signed —
 	// tampering with the data after the chip was signed should be caught,
 	// independent of the signature itself still being valid.
-	dg1Bytes, err := hex.DecodeString(TestDg1Hex)
+	dg1Bytes, err := hex.DecodeString(mrtdtestfixtures.TestDg1Hex)
 	if err != nil {
-		t.Fatalf("decode TestDg1Hex: %v", err)
+		t.Fatalf("decode mrtdtestfixtures.TestDg1Hex: %v", err)
 	}
 	dg1Bytes[len(dg1Bytes)-1] ^= 0xFF
 	tamperedDg1 := hex.EncodeToString(dg1Bytes)
 
-	result, err := VerifyPassive(TestSodHex, map[string]string{
+	result, err := VerifyPassive(mrtdtestfixtures.TestSodHex, map[string]string{
 		"DG1": tamperedDg1,
-		"DG2": Dg2Hex,
+		"DG2": mrtdtestfixtures.Dg2Hex,
 	}, trustedTestCertPool(t))
 	if err != nil {
 		t.Fatalf("VerifyPassive: %v", err)
@@ -88,12 +90,12 @@ func TestVerifyPassive_tamperedDataGroupFailsHashCheckButStillVerifiesSignature(
 	}
 }
 
-func TestVerifyPassive_injectedDataGroupNotInSodFailsHashCheck(t *testing.T) {
+func TestVerifyPassiveInjectedDG(t *testing.T) {
 	// DG11 was never part of this fixture's signed hash list — submitting
 	// it anyway must be caught as data injection, not silently ignored.
-	result, err := VerifyPassive(TestSodHex, map[string]string{
-		"DG1":  TestDg1Hex,
-		"DG2":  Dg2Hex,
+	result, err := VerifyPassive(mrtdtestfixtures.TestSodHex, map[string]string{
+		"DG1":  mrtdtestfixtures.TestDg1Hex,
+		"DG2":  mrtdtestfixtures.Dg2Hex,
 		"DG11": "aabbcc",
 	}, trustedTestCertPool(t))
 	if err != nil {
@@ -107,12 +109,12 @@ func TestVerifyPassive_injectedDataGroupNotInSodFailsHashCheck(t *testing.T) {
 	}
 }
 
-func TestVerifyPassive_untrustedCertPoolFailsSignatureCheck(t *testing.T) {
+func TestVerifyPassiveUntrusted(t *testing.T) {
 	// An empty pool (no CSCA at all trusted) must fail closed, not silently
 	// skip the signature check.
-	result, err := VerifyPassive(TestSodHex, map[string]string{
-		"DG1": TestDg1Hex,
-		"DG2": Dg2Hex,
+	result, err := VerifyPassive(mrtdtestfixtures.TestSodHex, map[string]string{
+		"DG1": mrtdtestfixtures.TestDg1Hex,
+		"DG2": mrtdtestfixtures.Dg2Hex,
 	}, &cms.GenericCertPool{})
 	if err != nil {
 		t.Fatalf("VerifyPassive: %v", err)
@@ -122,21 +124,21 @@ func TestVerifyPassive_untrustedCertPoolFailsSignatureCheck(t *testing.T) {
 	}
 }
 
-func TestVerifyPassive_malformedInputsAreRequestErrors(t *testing.T) {
+func TestVerifyPassiveMalformed(t *testing.T) {
 	pool := trustedTestCertPool(t)
 
 	if _, err := VerifyPassive("not hex", map[string]string{}, pool); err == nil {
 		t.Error("expected an error for invalid EF.SOD hex")
 	}
-	if _, err := VerifyPassive(TestSodHex, map[string]string{"DGx": "aabb"}, pool); err == nil {
+	if _, err := VerifyPassive(mrtdtestfixtures.TestSodHex, map[string]string{"DGx": "aabb"}, pool); err == nil {
 		t.Error("expected an error for an invalid data group name")
 	}
-	if _, err := VerifyPassive(TestSodHex, map[string]string{"DG1": "not hex"}, pool); err == nil {
+	if _, err := VerifyPassive(mrtdtestfixtures.TestSodHex, map[string]string{"DG1": "not hex"}, pool); err == nil {
 		t.Error("expected an error for invalid data group hex")
 	}
 }
 
-func TestVerifyActive_noKeyMeansNotAttempted(t *testing.T) {
+func TestVerifyActiveNoKey(t *testing.T) {
 	result, err := VerifyActive("", "", "")
 	if err != nil {
 		t.Fatalf("VerifyActive: %v", err)
@@ -146,7 +148,7 @@ func TestVerifyActive_noKeyMeansNotAttempted(t *testing.T) {
 	}
 }
 
-func TestVerifyActive_keyPresentButMissingNonceOrSignatureIsNotAttempted(t *testing.T) {
+func TestVerifyActiveNoNonceOrSig(t *testing.T) {
 	const someKeyHex = "6f050101010101" // arbitrary non-empty bytes; returns before parsing
 
 	result, err := VerifyActive(someKeyHex, "", "aabb")
@@ -166,7 +168,7 @@ func TestVerifyActive_keyPresentButMissingNonceOrSignatureIsNotAttempted(t *test
 	}
 }
 
-func TestVerifyActive_malformedKeyIsARequestError(t *testing.T) {
+func TestVerifyActiveMalformedKey(t *testing.T) {
 	if _, err := VerifyActive("not hex", "aabb", "ccdd"); err == nil {
 		t.Error("expected an error for invalid AA key hex")
 	}
@@ -176,7 +178,7 @@ func TestVerifyActive_malformedKeyIsARequestError(t *testing.T) {
 	}
 }
 
-func TestVerifyActive_wrongSignatureFailsWithoutError(t *testing.T) {
+func TestVerifyActiveWrongSig(t *testing.T) {
 	// A structurally valid DG15 (tag 0x6F wrapping a real SubjectPublicKeyInfo,
 	// reusing the fixture CSCA's own SPKI as a stand-in RSA key) but a
 	// signature that cannot possibly be a valid AA response — this must be
@@ -195,7 +197,7 @@ func TestVerifyActive_wrongSignatureFailsWithoutError(t *testing.T) {
 	}
 }
 
-func TestDrivingLicenceCertPool_isEmpty(t *testing.T) {
+func TestLicenceCertPoolIsEmpty(t *testing.T) {
 	// Unlike PassportCertPool, gmrtd bundles nothing for EU driving licences
 	// (see DrivingLicenceCertPool's doc comment) — this stays empty until
 	// this project has an actual source of trust-anchor certs to point at.

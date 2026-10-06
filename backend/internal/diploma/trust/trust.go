@@ -26,8 +26,8 @@ var rootG3PEM []byte
 // DUO's PDFs are timestamped by certSIGN, a Romanian qualified trust service
 // provider listed on the EU Trusted List. Its root is pinned separately: the
 // signer trust (PKIoverheid) and the timestamp trust (EU qualified TSA) are
-// different questions. A production verifier would load these anchors from
-// the EU List of Trusted Lists (LOTL) instead of embedding them.
+// different questions. These are the fallback; the EU lists are the default
+// source (package eutl).
 //
 // SHA-256: B6:A8:0A:71:14:6B:C1:5F:8A:9C:CA:6B:57:A7:93:B0:C5:02:DD:C3:34:D6:24:82:66:9C:34:58:54:04:0B:E6
 //

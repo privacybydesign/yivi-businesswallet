@@ -58,25 +58,23 @@ step) + `routes/proofing-verify-steps.tsx` (the upload) (DUO diplomas, §12),
 `matchSubject` in `service.go` (one known person, §13).
 **Depends on:** the Regula Face API (`REGULA_FACE_API_URL`) for every face
 check, and the Idem app's `/api/v1/app/{token}/...` contract
-(`vcmrtd/idem/lib/services/proofing_session_client.dart`). It no longer depends
-on `privacybydesign/identity-proofing-service` ("IPS"); "IPS" below names the
-behaviour the engine kept from it.
+(`vcmrtd/idem/lib/services/proofing_session_client.dart`).
 
 ---
 
 ## 0. The engine
 
-`internal/proofingengine` is IPS's session engine folded into the wallet
-(ported at IPS `6ef3e19`), minus what the wallet already owns (tenants, API
-keys, webhooks, audit, admin pages) and minus IPS's TFLite face engine.
+`internal/proofingengine` runs the proofing sessions: their state machine, the
+flow definitions and versions, chip verification, the result with its BSN and
+image redaction, assurance scoring and the Regula face checks. Tenants, API
+keys, webhooks, the audit log and the admin pages are the wallet's.
 `proofing.Service` drives it through Go methods (`rp.go`: flows, create
 session, status/result/identity, review, handover, cancel, delete) with a
-`proofingprovider.Tenant{ID: org id, Sandbox: test mode}`; nothing goes over
-HTTP. The Idem app talks to the routes `Engine.Register` mounts under
-`/api/v1/app/...` (claim, view, events, steps, submit; left out of the API
-docs on purpose, only the app calls them), unchanged from IPS, so
-the vcmrtd deep link's `api=` is `IDENTITY_PROOFING_PUBLIC_URL` (default
-`APP_BASE_URL`).
+`proofingprovider.Tenant{ID: org id}`; nothing goes over HTTP. The Idem app
+talks to the routes `Engine.Register` mounts under `/api/v1/app/...` (claim,
+view, events, steps, submit; left out of the API docs on purpose, since only
+the app calls them), and the deep link's `api=` is
+`IDENTITY_PROOFING_PUBLIC_URL` (default `APP_BASE_URL`).
 
 - **Storage.** Flow versions in `identity_proofing_flow_versions` (definition as
   JSON, one active version per flow); sessions in `identity_proofing_sessions`,
@@ -84,18 +82,47 @@ the vcmrtd deep link's `api=` is `IDENTITY_PROOFING_PUBLIC_URL` (default
   `IDENTITY_PROOFING_ENCRYPTION_KEY`, only token and grant hashes in the clear;
   Regula tags to delete in `identity_proofing_regula_sweeps`. Without the key
   every session is refused (`ErrNoEncryptionKey`); flows still work.
-- **Changes reach the wallet in process.** Where IPS pushed a signed webhook,
-  the engine calls `Service.SessionChanged` (opened, step started, outcome,
-  expiry). A lazy expiry is noticed by whichever read finds the deadline past.
+- **Changes reach the wallet in process.** The engine calls
+  `Service.SessionChanged` (opened, step started, outcome, expiry). A lazy
+  expiry is noticed by whichever read finds the deadline past.
 - **Faces.** Only Regula: the native face step (liveness transaction + match
-  against DG2) and the Yivi method's per-frame match. The `engine` face
-  provider is refused; a JPEG2000 chip portrait is converted to PNG only in a
-  `-tags jpeg2000` build (ImageMagick via cgo), so the default build hands
-  Regula and the browser the original bytes.
-- **Retention.** A finished session is deleted 90 days after it ended
-  (IPS's default). A customer's session carries the customer's data retention
-  plus a day (`engineRetention`), so `PurgeDue` erases it first.
-  `Engine.Purge` and `Engine.SweepRegula` run on `SESSION_PRUNE_EVERY`.
+  against DG2) and the Yivi method's per-frame match. A frame already scored
+  is counted as a replay without calling Regula again.
+  - A face step that failed liveness or did not match may be submitted again:
+    how often is the app's call; the engine bounds it at 3 attempts a session
+    (`maxFaceStepAttempts`), after which the last failed evidence stands and
+    the submit decides on it. Each attempt's transaction is released as usual.
+  - A Yivi-method session sends at most twice `BoundLoginMaxAttempts` frames
+    to Regula, faceless ones included (`boundLoginFrameBudget`); spending it
+    rejects the session `FACE_NO_MATCH`.
+    - Each frame reserves its call under the row lock before Regula is
+      asked, so concurrent frames cannot overshoot the budget; a frame past
+      it decides the session without a call.
+  - The member route `yivi/face` counts each frame against its org's
+    `MemberFaceFrameLimit` (1500 a minute); past it 429 `rate_limited`. A JPEG2000 chip
+  portrait is converted to PNG in pure Go (`images`, go-jpeg2000), refused
+  past 4 megapixels (`images.MaxJPEG2000Pixels`) before its raster is decoded.
+- **Regula clean-up.** Every Regula tag the app is handed is queued for
+  deletion (`identity_proofing_regula_sweeps`): 15 minutes after the session's
+  expiry while it runs, moved forward to 15 minutes after its end once it ends,
+  whatever the outcome (`Queue.Settle`). An erased session (`DeleteSession`)
+  is due at once. `Engine.SweepRegula` deletes them.
+- **Retention.** A finished session is deleted 90 days after it ended, unless
+  it carries its own retention: a customer's session carries its flow's
+  retention override when set, else the customer's data retention, plus a day
+  (`engineRetention`), so `PurgeDue` erases it first. `Engine.Purge` (removal
+  in batches of 100, each with its own timeout) and `Engine.SweepRegula` run on
+  `SESSION_PRUNE_EVERY`.
+- **Device trail.** Which device claimed a session, handovers, and refused app
+  requests go to the org's audit log (`Config.DeviceTrail` →
+  `RequestStore.RecordDeviceEvent`: `identity_proofing.device_claimed`,
+  `.device_handed_over`, `.handover_issued`, `.handover_claim_failed`,
+  `.access_denied`, target the request; device ids, roles and reasons only).
+  Reconnects and device states stay in the server log.
+- **Chip access key.** The MRZ-derived key that opens the chip is handed to a
+  device only while the chip read is the current step, and dropped once the
+  chip evidence lands, so a device taking the session over later never gets
+  it.
 - **Yivi state is in the session**, sealed (`session.YiviState`: the disclosed
   photo and the run of frames), not in memory, so any API replica scores the
   next frame; it is cleared as the session settles.
@@ -113,13 +140,10 @@ the vcmrtd deep link's `api=` is `IDENTITY_PROOFING_PUBLIC_URL` (default
 
 - **The org is the engine's tenant: one tenant id, the org's.** A session and a
   flow carry `organizations.id`; there is nothing to provision, no key to hold
-  and no enable step. (Under IPS the wallet created a tenant per org with a live
-  and a test key, audited `identity_proofing.provisioned`; the schema keeps
-  none of it, and old audit rows keep the action.)
-- **Customers are the wallet's, not IPS sub-tenants.** IPS sub-tenants only
-  override privacy knobs (BSN policy, blurring), share the parent's keys and
-  cannot own flows, so a customer (`identity_proofing_customers`) is a wallet row
-  under the org and every session still runs on the org's IPS tenant. A customer
+  and no enable step.
+- **Customers are the wallet's, not engine tenants.** A customer
+  (`identity_proofing_customers`) is a wallet row under the org, and every
+  session runs on the org's tenant in the engine. A customer
   has no login: members act for it in the UI (the design plan's "org is the only
   party in the UI"), and its own backend uses the customer API with its keys (§4). Flows stay the org's; a customer gets an
   allow-list over them with one default (`identity_proofing_customer_flows`,
@@ -127,24 +151,22 @@ the vcmrtd deep link's `api=` is `IDENTITY_PROOFING_PUBLIC_URL` (default
   members' list: any completable org flow may be assigned. Customers are created,
   renamed and paused or resumed (`customer_created`; `customer_updated` with the
   `name` or `status` before and after; `paused_at` on the row), and removed
-  (`customer_removed`), which first deletes its requests: a request references
-  its customer `ON DELETE RESTRICT`, so nothing is deleted by cascade (§4). This deliberately differs from
-  `.ai/plans/identity-proofing.md`, where each customer owns its flows.
-- **Flows live at IPS**, versioned, managed like IPS's own admin page
-  (`/api/v1/db-test/admin`): that page, not the tenant API docs, is the editor
-  the wallet's "Proofing flows" tab mirrors. It calls `/api/v1/flows` with the
-  org's tenant key (IPS has no admin-key flow routes), and it is `RequireOrgAdmin`
-  in the wallet. The rules copy IPS (`flow.Validate` + the admin page's
-  `syncStageDependencies`):
+  (`customer_removed`), which first purges each of its requests as an erasure
+  does (engine session deleted, subject scrubbed from their audit events), then
+  deletes them (§4).
+- **Flows live in the engine** (`proofingengine/flow`), versioned per org; the
+  wallet's "Proofing flows" tab edits them through `proofing.Service`, and it is
+  `RequireOrgAdmin`. The rules are `flow.Validate`'s, mirrored in the editor:
   - Steps: `document_capture` (vcmrtd scans the MRZ to unlock the chip) and
     `nfc_read` (NFC chip read) toggle as a pair; `document_photo` (a photo of
-    the printed page, IPS `POST /app/{token}/steps/document_photo`) stands
+    the printed page, `POST /app/{token}/steps/document_photo`) stands
     alone; `face_verification` is one step. `draftSteps` lists
     `document_photo` between `document_capture` and `nfc_read`: the Idem app
     photographs the side it reads the MRZ from as it reads it, cut to the
     frame, and shows it for review (use or retake) right after the scan,
     whatever the listed order: a passport's photo page is then the whole
-    photo; a card's MRZ side is its back, so the front is taken next. IPS does not enforce order.
+    photo; a card's MRZ side is its back, so the front is taken next. The engine
+    does not enforce the order.
   - Checks: `nfc.passive_auth` is locked on with `nfc_read`, and `face.match`
     with `face_verification`; `nfc.chip_auth` and `face.liveness` are optional;
     a check without its step is unavailable; the threshold is only for
@@ -152,51 +174,86 @@ the vcmrtd deep link's `api=` is `IDENTITY_PROOFING_PUBLIC_URL` (default
   - Requested data: `dg1` comes from the document scan; `dg11`, `dg2` and
     `chip_checks` from NFC; `document_image` from `document_photo`; `selfie`
     and `biometrics` from face. The editor shows plain labels, never these
-    codes. Each item is
-    available only with its step and cleared otherwise. None is forced on (IPS
-    forces nothing).
-  - Assurance level: none/low/substantial; high is not offered (no certified
-    anti-spoofing). One table says what each level needs,
-    `flow.LevelRequirements`, mirrored in the editor's `LEVEL_REQUIREMENTS`:
-    low = chip read with `nfc.passive_auth` verified (genuine evidence held);
-    substantial = low plus `nfc.chip_auth`, `face.match` and `face.liveness`,
-    the face verified by Regula against the chip's DG2. Picking a level turns
-    those steps, checks and the provider on and locks them
-    (`withAssuranceLevel`; `draftFromFlow` applies it to an older version
-    too), and `flow.Validate` refuses a flow whose checks or provider do not
-    meet its level. A session's eIDAS level is the highest whose every check
-    verified (`computeEIDASAssuranceLevel`), and is only calculated when the
-    flow sets a level: without one it is empty, sandbox included. A check that
-    did not apply (a chip without an Active Authentication key) has not
-    verified, so such a document reaches low at most. In a session the Idem app follows the
-    flow, never its own settings: Active Authentication exactly when the
-    flow lists `nfc.chip_auth`, active liveness when it lists
-    `face.liveness` (IPS's app view carries `requiredChecks`), and the
-    face engine the flow's provider names (`faceProvider`: Regula, or the
-    on-device engine for `engine`). IPS only
-    *declares* it: it approves on its checks and never compares the eIDAS level
-    a session achieved with it. The wallet does: a request stores its flow's
-    level at send (`required_assurance_level`), and an approval below it is
-    recorded as `rejected` with `ASSURANCE_NOT_MET` (`enforceAssurance`,
-    `MeetsAssurance`; an unknown level fails closed). IPS scores a Yivi
-    session itself; for an IPS that reports no level the wallet counts an
-    approved one as `low` (`yiviEIDASLevel`: face match, no liveness, IPS's
-    own rule). Whether Yivi is offered stays the face
-    provider's call alone (`YiviAppAvailable`).
-  - Overrides: BSN policy, blur face and blur BSN (inherit/true/false),
-    retention in seconds.
-  - Legal basis, purpose and assurance tiers are not on IPS's editor, so not on
-    the wallet's: they are carried over unchanged when a version is saved.
-  Face capture is forced to `native` (§11). The face provider (`faceProvider`:
-  `regula`, `engine` or `Iris`) is chosen per flow and always named, `regula`
-  when none is given: IPS's empty default silently falls back to its engine
-  when Regula is not configured there. IPS fails the face step closed on any
-  other capture. The provider also decides the subject's app choice on the
-  verify page: a flow whose face step is on a provider the Yivi app does not
-  have (`idemOnlyFaceProviders`: Iris) skips the method step and starts the
-  Idem app; every other flow lets the subject pick Yivi or Idem
-  (`YiviAppAvailable`, mirrored by `yiviAppAvailable`). IPS's Yivi face check
-  (bound login) always scores on its own engine, whatever the flow names. A face step without `nfc_read` needs a
+    codes. Each item is available only with its step and cleared otherwise;
+    none is forced on. A flow that requests no data releases the outcome only
+    (status and assurance), as the subject is told: the session then carries
+    `outcome_only`.
+  - Countries: `acceptedIssuingCountries` takes 3-letter ICAO 9303 codes only,
+    and a code no country has is refused, so the flow cannot be saved
+    (`flow.ValidIssuingCountry`: ISO 3166-1 alpha-3, plus ICAO's own EUE, UNO,
+    UNA, UNK, XOM, XPO, XCC, XES, XMP, RKS and the GBD/GBN/GBO/GBP/GBS
+    variants). A German document writes "D", which counts as DEU
+    (`flow.IssuingStateCode`). The editor checks the 3-letter form first.
+  - **Whose identity:** the engine reads the document (name, number, dates,
+    nationality, DG11's full name, BSN and place of birth) off the chip
+    evidence itself, `documentFromEvidence` in `proofingengine/chipdocument.go`:
+    a passport's or ID card's DG1 MRZ and DG11 through gmrtd. The `document`
+    the app posts on `/steps/nfc` is ignored: nothing binds it to the chip, so
+    a modified app could pair a genuine chip with another person's name. A DG1
+    that does not parse is a 400. A driving licence never gets this far: see
+    §11.
+  - **Assurance level**: none, low or substantial; high is not offered (no
+    certified anti-spoofing). `flow.LevelRequirements` (mirrored in the
+    editor's `LEVEL_REQUIREMENTS`) says what each needs:
+    - low: the chip read, `nfc.passive_auth` verified.
+    - substantial: low plus `nfc.chip_auth`, `face.match` and `face.liveness`,
+      the face matched by Regula against the chip's DG2.
+  - **The level is a minimum, nothing more.** Picking one turns no step, check
+    or provider on. A flow whose settings cannot reach it is not saved
+    (`reachesAssuranceLevel` in the editor, `flow.Validate` in the engine).
+    `draftFromFlow` loads a version as stored.
+  - **The level a session achieves** is the highest whose checks all verified
+    on the evidence it produced (`computeEIDASAssuranceLevel`):
+    - computed without the required level, so it can come out higher;
+    - only Regula lifts a face past low;
+    - a check that did not apply or run (no AA key, AA not attempted, no
+      liveness result) has not verified: low at most.
+  - **`requiredChecks` decide no outcome.** They are what the steps perform
+    and the score counts. The Idem app follows them, never its own settings:
+    Active Authentication only when `nfc.chip_auth` is listed; Regula liveness
+    always; the face engine the flow names.
+  - **What rejects a session** (`sessionOutcome` in `steps.go`), first match
+    wins:
+
+    | Cause | `errorCode` | Audit `reason` |
+    |---|---|---|
+    | Tampered or cloned chip | `DOC_TAMPERED`, `CHIP_CLONE_DETECTED` | `tamper_detected` |
+    | Outside the flow: document type, country, expiry, face step without server evidence (`flowComplianceFailure`) | `DOC_EXPIRED`, … | `flow_policy_violation` |
+    | Face step did not verify the person (`faceStepFailure`) | `FACE_NO_MATCH`, `LIVENESS_FAILED` | `check_failed` |
+    | Achieved level below the flow's (`flow.MeetsLevel`, fails closed) | `ASSURANCE_NOT_MET` | `assurance_not_met` |
+
+    - **Clone** (`authenticityFailure`):
+      - a failed Active Authentication, on any flow;
+      - with `nfc.chip_auth` listed and an AA key on the chip, a missing
+        response too: a recorded chip read replayed without the chip;
+      - without `nfc.chip_auth` the app runs no AA, so a missing response
+        only keeps the session from substantial;
+      - leaving out a DG15 the EF.SOD lists is `DOC_TAMPERED`
+        (`DocumentComplete`, passports and ID cards).
+    - **Face step:**
+      - `FACE_NO_MATCH` gates at any level;
+      - `LIVENESS_FAILED` gates only when the flow requires a level or lists
+        `face.liveness`; otherwise the match alone decides;
+      - a face that failed liveness never counts as matched, whatever its
+        score, and never reaches substantial.
+    - `CHIP_AUTH_MISSING` appears only on sessions decided under an earlier
+      rule.
+  - **The wallet re-checks the level** against the one the request stored at
+    send (`required_assurance_level`, `enforceAssurance`): an approval below it
+    becomes `rejected` with `ASSURANCE_NOT_MET`. This catches Yivi-method
+    sessions, which the engine approves without comparing; one it reports no
+    level for counts as low (`yiviEIDASLevel`).
+  - Overrides: BSN policy, blur face and blur BSN (inherit/true/false), and
+    retention in seconds, which replaces the customer's retention for the
+    flow's sessions.
+  - Legal basis, purpose and assurance tiers are not in the editor: they are
+    carried over unchanged when a version is saved.
+  Face capture is forced to `native` (§11). The face provider is always
+  `regula` (anything else is 400): the engine has no face engine of its own.
+  The subject picks the Yivi app or the Idem app on the verify page
+  (`yiviAppAvailable`, the same name in the backend and the frontend), unless the flow
+  photographs the document or matches against a reference photo, which only
+  the Idem app does. A face step without `nfc_read` needs a
   per-session reference photo (§14): such a flow is not `completable` for
   members, but a customer may be assigned it and send it through its API. A flow with
   `document_photo` (front and back, or a passport's photo page) runs in the
@@ -213,16 +270,16 @@ the vcmrtd deep link's `api=` is `IDENTITY_PROOFING_PUBLIC_URL` (default
   three leaves the others alone, and no row reads as every default.
   `PUT /flow-selection` replaces it whole, audited `identity_proofing.flows_configured`
   with before/after. A new flow starts unselected. A request is refused
-  (`flow_not_allowed`) on any flow outside the list, for admins too. An id IPS no
-  longer lists is ignored on read. With the stub provider, flows live in memory, so
+  (`flow_not_allowed`) on any flow outside the list, for admins too. An id the
+  engine does not list is ignored on read. With the stub provider, flows live in memory, so
   a backend restart empties the list while the settings rows stay (and are ignored).
   Stub sessions never decide unless `IDENTITY_PROOFING_STUB_OUTCOME` is set
-  (`approved`, `rejected` or `needs_review`); then the stub pushes the change
-  (`SessionChanged`) 2 s after creation, as IPS would.
+  (`approved`, `rejected` or `needs_review`); then the stub reports the change
+  (`SessionChanged`) 2 s after creation, as the engine would.
 - **Language.** A request carries the sender's wallet language (`language`,
   `en`/`nl`, sent by the frontend from its i18n state; optional on the public
-  API). It is the request mail's locale and the IPS session's `language`, which
-  IPS hands the Idem app, so the app shows the same language. Absent, the mail
+  API). It is the request mail's locale and the engine session's `language`,
+  which the Idem app gets, so the app shows the same language. Absent, the mail
   uses the deployment default and the app the phone's language.
 - **Recipients: a member, or a customer's subject.** A request names either a
   `userId` of the org (`subject_user_id`; any role, employees and externals
@@ -239,27 +296,31 @@ the vcmrtd deep link's `api=` is `IDENTITY_PROOFING_PUBLIC_URL` (default
 
 ## 2. The mail is the session
 
-This copies IPS's own timing (`identity-proofing-service`,
-`backend/internal/api/api.go` `DefaultConfig`): a session runs
-`SessionCreateTTL` (10 minutes) within the hard cap `SessionMaxLifetime`
-(15), and its claim, the `handover` token in the `vcmrtd://verify?handover=…&api=…`
-deep link, is claimable for `ClaimTokenTTL`, single use. IPS keeps a claim
-claimable as long as a default session (10 minutes, never past the session's
-own expiry), so the mailed QR works for the whole session.
+A session runs the customer's session lifetime (2, 5 or 10 minutes) within the
+engine's hard cap `SessionMaxLifetime` (15), and its claim, the `handover`
+token in the `vcmrtd://verify?handover=…&api=…` deep link, is single use and
+claimable for `ClaimTokenTTL` (10 minutes, never past the session's own
+expiry), so the mailed QR works for the whole session.
 
-**Send.** `CreateRequest` creates the IPS session (`ttlSeconds` = the
+**Send.** `CreateRequest` creates the engine session (`ttlSeconds` = the
 customer's `session_ttl_seconds`, else `proofing.SessionTTL` (600); client
 reference = the request id), stores the request
 with `link_expires_at` = the session's expiry, attaches the session
 (`AttachSession`, audited `identity_proofing.session_created`; `flow_version`
-becomes the version IPS pinned), and mails the create response's native claim:
+becomes the version the engine pinned), and mails the create response's native claim:
 the `qr` block and the button carry the **same** vcmrtd deep link, and the text
 states `validMinutes`. A live Idem session with no native claim is an error and
-nothing is stored (a Yivi session has none: it starts from the screen). A session whose request then fails to store lapses unused at IPS. Scan
+nothing is stored (a Yivi session has none: it starts from the screen). Scan
 the QR from inside vcmrtd; the button is for a mail read on the phone.
+- **An engine session no request holds is erased** (`discardSession`), since it
+  may carry the reference photo:
+  - a send whose request fails to store or to attach it, or that got no vcmrtd link;
+  - a hosted start that lost the race to attach (409 `link_started`).
+  - It runs on its own context (`WithoutCancel`); a failed erase is logged and
+    joined to the error returned.
 
-The mail cannot re-mint the claim, and nothing restarts a session: when IPS
-reports it `expired` or `cancelled` undecided, `EndSession` stamps
+The mail cannot re-mint the claim, and nothing restarts a session: when the
+engine reports it `expired` or `cancelled` undecided, `EndSession` stamps
 `ips_session_ended_at` (audited `identity_proofing.session_ended`) and the
 request reads as expired. A new request means a new mail.
 
@@ -278,32 +339,37 @@ machine until an admin sets a real server under e-mail settings.
 
 ## 3. Outcomes: notified by the engine, never polled
 
+**Deployment:** the jobs here and the webhook deliverer wait on Postgres
+`LISTEN`/`NOTIFY` (`database.RunOnNotify`, one connection held per job). That
+needs a direct or session-mode connection: behind a transaction-mode pooler
+(PgBouncer's default) a `LISTEN` is lost, and changes are then picked up only
+at the next timed wake.
+
 The engine calls `Service.SessionChanged` off its request path on each change
 (opened, in_progress, verified, rejected, needs_review, cancelled, expired);
 it reconciles that one request (`tryReconcile`, `SessionStatus`, §11). A session nobody finishes is reconciled at its cap by the deadline
 job (`ReconcileDue`), which sleeps until the earliest cap and is woken by
-`pg_notify` on `identity_proofing_sessions` when a session is attached; one IPS
-still reports open past its cap is asked again after 30 s. The job leases what
-it re-checks (`ips_reconcile_leased_until`, `FOR UPDATE SKIP LOCKED`), so API
-replicas never ask IPS about the same session at once. Nothing runs on a fixed
-interval. List reads never call IPS; a single-request read (the on-screen page,
+`pg_notify` on `identity_proofing_sessions` when a session is attached; one the
+engine still reports open past its cap is asked again after 30 s. The job leases
+what it re-checks (`ips_reconcile_leased_until`, `FOR UPDATE SKIP LOCKED`), so
+API replicas never re-check the same session at once. Nothing runs on a fixed
+interval. List reads never call the engine; a single-request read (the on-screen page,
 the customer API's `GET sessions/{id}`) re-checks a live request at most once
-per `readReconcileEvery` (10 s), as a fallback for a missed push. A change for a
-session not attached yet is dropped; its deadline or next change reconciles it. `needs_review` is not final: IPS decides it,
-or ends it (expired/cancelled), which ends the request as expired and sends
+per `readReconcileEvery` (10 s), as a fallback for a missed notice. A change for a
+session not attached yet is dropped; its deadline or next change reconciles it. `needs_review` is not final: a reviewer decides it, or the engine ends it (expired/cancelled), which ends the request as expired and sends
 `session.expired`. The UI treats it as not live: it stops polling and shows
-"waiting for review". IPS `opened`/`in_progress` moves the request from `pending` to
+"waiting for review". The engine's `opened`/`in_progress` moves the request from `pending` to
 `in_progress` (audited `session_started`); an attached session is reconciled
 until it is seen to end or decide, also past its cap, so a last-moment outcome
 is never lost. `expired` is
-derived (no live session and no outcome), never stored. An IPS failure during a read is
-logged and the last known status is shown.
+derived (no live session and no outcome), never stored. An engine failure during
+a read is logged and the last known status is shown.
 
 **Counts.** `GET /identity-proofing/stats` counts the customer requests of the
 last `StatsWindow` (30 days) per customer and flow, by outcome, scoped like the
 request list (an admin's the org's, a member's their own). Expired is derived
-in SQL exactly as `EffectiveStatus` does. The counts are as last reconciled:
-they read the rows, never IPS, so an outcome no list read has picked up yet is
+in SQL exactly as `EffectiveStatus` does; cancelled requests have their own
+count. The counts are as last reconciled: they read the rows, never the engine, so an outcome no list read has picked up yet is
 not in them. The stats query key sits under the requests key, so whatever
 refreshes the request lists refreshes the counts.
 
@@ -312,8 +378,8 @@ NOTIFY or at the deadline the job returns, never on a ticker; the deadline job
 and the customer-webhook deliverer both use it.
 
 **Method and timeline.** `proofingprovider` derives the app a subject used
-from the `/status` (or `/result`) answer, reading only each device's `role` and whether a
-Yivi `disclosure` exists: `yivi_app` (a Yivi disclosure), `idem_app` (IPS's
+from the session's status, reading only each device's `role` and whether a
+Yivi `disclosure` exists: `yivi_app` (a Yivi disclosure), `idem_app` (the
 native device; vcmrtd is the Idem app), `browser` (the web device alone), or
 none while no device claimed the session. It is stored on the request
 (`method`) by `MarkStarted`, `RecordOutcome` and `EndSession`, and carried in
@@ -321,8 +387,7 @@ their audit snapshots. `GET /identity-proofing/requests/{id}/events` is the
 request's timeline: its audit events (target `identity_proofing_request`),
 oldest first, for an admin or the member who sent it. Everything `reconcile`
 records runs under `audit.WithoutActor`: the outcome is the subject's doing,
-not that of whoever's read triggered the check (rows written before this
-still name the reader). What the subject's app caused, `session_started` and
+not that of whoever's read triggered the check. What the subject's app caused, `session_started` and
 an outcome not decided in review, names that app instead (`subjectAppContext`,
 actor label `app:<method>`, shown as "Idem app"/"Yivi app"); an expiry and a
 post-review outcome stay the system's.
@@ -332,24 +397,24 @@ post-review outcome stay the system's.
 - **API keys** (`identity_proofing_api_keys`): `yp_live_` + 32 random bytes,
   stored as SHA-256 only, shown once; `prefix` tells keys apart. Revoke is
   permanent; removing the customer removes them. Audited `api_key_created` /
-  `api_key_revoked` (with its scopes) on the customer. Test keys: §5. A customer takes no live
-  request, from the dashboard or otherwise, until it holds an unrevoked live key
-  (409 `customer_no_api_key`; `hasLiveKey` on the customer, "Setup needed" in
-  the UI); test requests need only their test key.
+  `api_key_revoked` (with its scopes) on the customer. There are no test keys
+  (§5). A customer takes no request, from the dashboard or otherwise, until it
+  holds an unrevoked key (409 `customer_no_api_key`; `hasApiKey` on the
+  customer, "Setup needed" in the UI).
 - **Public API** (`/api/v1/proofing/{flows,sessions,sessions/{id}}`, Bearer
   key, no cookie): acts exactly as a member sending for the customer, on its
   assigned flows (no `flowId` is its default), refused while paused. `sendMail:
   false` skips the mail; the create answer always carries the `deepLink`. A
   request made this way has `requested_by` NULL and `api_key_id` set, and every
   mail for a customer's subject names the customer as requester, never the key.
-  `POST /proofing/sessions/{id}/cancel` ends a `pending`/`in_progress` session at
-  IPS too (`cancelled_at`; status reads `cancelled`; audited `session_cancelled`).
-  `DELETE /proofing/sessions/{id}` erases it at IPS and clears its personal data
+  `POST /proofing/sessions/{id}/cancel` ends a `pending`/`in_progress` session in
+  the engine too (`cancelled_at`; status reads `cancelled`; audited `session_cancelled`).
+  `DELETE /proofing/sessions/{id}` erases it in the engine and clears its personal data
   (subject name and address, proofed name, the subject in its audit events;
   `purged_at`, audited `session_purged`, webhook `session.purged`); the row
   stays readable with `purgedAt` and its outcome.
   `GET /proofing/sessions/{id}/result` (scope `results:read`) reads a settled
-  session's identity and evidence from IPS on each call (`SessionIdentity`
+  session's identity and evidence from the engine on each call (`SessionIdentity`
   decodes only name, birth date, nationality, the checks and the `photo` and
   `selfie` images; never the document number), audited `result_read`; 404 once
   erased. The customer API never returns an image.
@@ -359,8 +424,8 @@ post-review outcome stay the system's.
   admin as actor; a member's request is 404. For an approval this response adds
   `photo` (the document's portrait, DG2 or the disclosed credential's) and
   `selfie`, `{mimeType, data}`, only PNG/JPEG/WebP (anything else, like an
-  unconverted JPEG2000, is dropped in `proofingprovider`). The customer's
-  Sessions tab reads it when an admin opens an approved or rejected row and folds
+  unconverted JPEG2000, is dropped). The customer's Sessions tab reads it when
+  an admin opens an approved, rejected or in-review row and folds
   it into the row's detail list with the two photos: one audited read per open
   (`staleTime: Infinity`), and the timeline then shows it.
   Keys carry `scopes` (`sessions:write`, `sessions:read`, `results:read`,
@@ -369,11 +434,17 @@ post-review outcome stay the system's.
   `insufficient_scope`.
   `GET /proofing/sessions?limit=&cursor=` pages a customer's sessions newest
   first from stored state (cursor: created_at + id), `{sessions, nextCursor}`.
-  `Idempotency-Key` on create and cancel (`idempotency.go`,
-  `identity_proofing_idempotency_keys`, pruned after 24 h): the same key and body
-  replay the first successful answer (`Idempotent-Replayed: true`), another
-  body is 422 `idempotency_key_reused`, a call still running 409
-  `idempotency_in_flight`; a call that errs keeps nothing, so it can be retried.
+  `Idempotency-Key` on create, cancel and the headless start (`idempotency.go`,
+  `identity_proofing_idempotency_keys`, pruned after 24 h):
+  - the same key and body replay the first successful answer
+    (`Idempotent-Replayed: true`); another body is 422 `idempotency_key_reused`;
+    a call still running is 409 `idempotency_in_flight`.
+  - a call that errs or panics releases the key, so it can be retried.
+  - a key is never run again once the call may have had its effect: an answer
+    that fails to store, or a replica lost mid-call, keeps the key in flight
+    (409) until the 24 h prune. There is no timeout release.
+  - the stored answer is sealed and linked to its session (`request_id`, read
+    from the answer's `id`); `RequestStore.Purge` deletes it.
   Headless: `POST /proofing/sessions/{id}/methods/{idem_app|yivi_app}` starts a
   `hosted: true` session in that app from the customer's own UI (`appLink` or
   `walletLink`; not hosted is 409 `not_hosted`); `GET …/methods/{m}/status`
@@ -386,11 +457,11 @@ post-review outcome stay the system's.
   `api_key:<prefix>`, no `actor_user_id`; the audit log shows "API key <prefix>…".
   Rate-limited per customer (`internal/ratelimit`, in-process token buckets,
   so per API replica): `APICallLimit` 120 calls a minute, and of those
-  `APISessionLimit` 10 session creations, since IPS's session limit (§11) is
-  shared by every customer. Past it: 429 `rate_limited` with `Retry-After`.
+  `APISessionLimit` 10 session creations, so one customer cannot use up the
+  deployment's capacity. Past it: 429 `rate_limited` with `Retry-After`.
 - **Webhooks**: a customer's results show in Sessions, the API and the audit
-  log whatever its webhook. Like IPS, every event is really sent: without an
-  endpoint of its own it goes to the
+  log whatever its webhook. Every event is really sent: without an endpoint of
+  its own it goes to the
   wallet's default endpoint (`endpoint_url` NULL, the tab's "Wallet default"),
   `POST /api/v1/identity-proofing/default-webhook` at
   `IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL` (default `APP_BASE_URL` + that path;
@@ -408,9 +479,18 @@ post-review outcome stay the system's.
   `EndSession`, `LapseLinks`, `Cancel`, `Purge`); an
   endpoint saved before an event existed is not subscribed to it. `test` is sent on
   request whatever is subscribed. The payload is the session id, status, flow,
-  `livemode`, method, assurance and error code: never a name or address (the API has those). Each outbox insert
+  method, assurance and error code: never a name or address (the API has those).
+  A delivery's `sessionId` is the `ps_` id (absent for a `test` delivery). Each outbox insert
   `pg_notify`s `identity_proofing_webhooks`, so the deliverer sends as the change
-  commits; it then sleeps until the next retry or lapsed lease. It leases due rows (`FOR UPDATE SKIP LOCKED`, 5-minute lease), POSTs
+  commits; it then sleeps until the next retry or lapsed lease. It leases due rows (`FOR UPDATE SKIP LOCKED`, 5-minute lease).
+  - Per batch (`deliveryBatch` 20): `deliveryWorkers` (10) sends at once, at
+    most `endpointWorkers` (2) to one URL (`sendFair`), so an endpoint that
+    never answers holds two workers, not other orgs' deliveries.
+  - Worst batch: 10 sends deep on one endpoint plus 2 rounds of all workers,
+    12 x `safehttp.RequestTimeout` = 120 s, inside the lease
+    (`TestDeliveryBatchFitsLease`).
+
+  It POSTs
   through `safehttp` (https, public addresses only, dialed IP = vetted IP, no
   redirects) with `Yivi-Signature: t=<unix>,v1=<hex HMAC-SHA256("<t>.<body>")>`,
   `Yivi-Event`, `Yivi-Delivery`; 8 attempts over about 24 h, then `failed`.
@@ -428,53 +508,57 @@ post-review outcome stay the system's.
   lists by `lib/identity-proofing.test.ts`.
 - **Remove customer** deletes its requests (addresses, names, outcomes), keys,
   endpoint and deliveries; the audit trail stays (`customer_removed`).
+  - Each request is purged first (§10), then `CustomerStore.Remove` locks the
+    customer row (a request's insert waits on it) and refuses while any request
+    is unpurged: one sent meanwhile.
+  - The service purges and tries again, `removeCustomerAttempts` (3) times, then
+    answers 409 `customer_sessions_left`.
 
-## 5. Test mode
+## 5. No test mode
 
-A customer key is `live` (`yp_live_`) or `test` (`yp_test_`), fixed at creation
-(`identity_proofing_api_keys.mode`, audited on `api_key_created`). A test key's
-`POST /proofing/sessions` runs on the org's own tenant in test mode
-(`Tenant.Sandbox`), the engine's sandbox: it only creates
-scripted-outcome sessions, and a live key never can. The session is created
-without a flow and resolves at once to `scriptedOutcome` (`approve` by default,
-`reject:<CODE>`, `needs_review`, `expire`; IPS's own sandbox): the wallet still
-checks the flow is assigned to the customer and records it on the request. A
-test request (`mode = test`) is reconciled right away, never mailed, has no
-deep link, is left out of the stats, and carries `livemode: false` in the API
-answer and its webhooks. A live key sending `scriptedOutcome` is refused
-(400). The request's mode picks the tenant it is reconciled under.
+There are no test keys, scripted outcomes or `livemode`: every key and session
+is real. `IDENTITY_PROOFING_PROVIDER=stub` is the only stand-in, for dev and
+tests (§0).
 
 ## 6. A new Idem code mid-session
 
 `POST …/requests/{id}/claim-link` and `POST /proof/{token}/claim-link` call the
 engine's `SessionHandover`. An unclaimed slot gets a new claim (the first
 lapsed after 10 minutes); a slot whose app went inactive or silent gets a
-handover, and the phone that scans takes the session over. Only a handover (IPS
-answers `slotClaimed`) is audited `identity_proofing.session_handover` (the
+handover, and the phone that scans takes the session over. Only a handover (the
+engine answers `slotClaimed`) is audited `identity_proofing.session_handover` (the
 member, or `hosted_link`) and sends `session.handover`; a fresh claim is not. An
-app still active is 409 `device_active`. A Yivi or test request has none
+app still active is 409 `device_active`. A Yivi request has none
 (`wrong_method`).
 
 The on-screen page follows the phone by itself: `GET …/requests/{id}/app` reads
-IPS's status live (`devices[].current`/`away`) as `waiting`, `connected` or
+the engine's status live (`devices[].current`/`away`) as `waiting`, `connected` or
 `away`, polled every 2 s. It shows the claim QR while `waiting` (renewed once
 `deepLinkExpiresAt` or the last code lapses), hides it while `connected`, and
 mints a handover QR the moment the app is `away`; the app coming back drops that
-code (IPS cancels the grant). If `app` cannot be read it falls back to the
+code (the engine cancels the grant). If `app` cannot be read it falls back to the
 manual "Show a new code", which the hosted page still uses.
 
 ## 7. Hosted link
 
-`POST /proofing/sessions` with `hosted: true` (customer API, live keys only)
-creates no IPS session: it stores the request with a link token (only its
+`POST /proofing/sessions` with `hosted: true` (customer API)
+creates no engine session: it stores the request with a link token (only its
 SHA-256, `link_token_hash`) valid `HostedLinkTTL` (72 h) and answers
 `hostedUrl` = `APP_BASE_URL/p/<token>`, which the customer hands its subject.
 Nothing is mailed. The public page `/p/:token` (`routes/proof.tsx`) runs the
 same steps as the on-screen page (`routes/proofing-verify-steps.tsx`, shared):
 what is collected, the app, then its session. Its API is `/api/v1/proof/{token}`
-(`hosted_handler.go`), unauthenticated like `/vog/{token}` and limited per link
-(`HostedCallLimit`, keyed by the token's hash; the wallet has no trusted
-client IP): the page, `status`, `start` (once: a second start is 409
+(`hosted_handler.go`), unauthenticated like `/vog/{token}` and rate-limited as
+the API is:
+
+- The link is looked up, then the call counts against its customer's
+  `HostedCallLimit` across all its links (a member's link counts against its
+  org). Past it: 429 `rate_limited` with `Retry-After`.
+- Its own bucket, not the API's, sized for the page (face frames every 400 ms).
+- As with an unknown API key, a token that matches no link is a 404 and counts
+  against nothing.
+
+Its routes: the page, `status`, `start` (once: a second start is 409
 `link_started`), the customer's `logo`, and the Yivi `start`/`disclosure`/`face`
 routes, which share their implementation with the org routes. The session is
 created at `start` for the app the subject picked (`AttachSession` records it)
@@ -491,7 +575,10 @@ A link that lapses unstarted is ended by the deadline job (`LapseLinks`,
 audited `session_ended` with `reason: link_lapsed`, webhook `session.expired`).
 
 **Consent and completion.** The overview step is the consent screen (who asks,
-what is collected, retention, privacy link). Its Decline calls
+what is collected, retention, privacy link). The retention it states is the
+server's `retentionDays` (hosted view `flow`, customer flow list):
+`subjectRetentionDays`, the flow's override else the customer's days, plus the
+engine's day of grace, rounded up ("deleted at most N days after"). Its Decline calls
 `POST /proof/{token}/decline`, which cancels a link not yet started
 (`DeclineHosted` → `RequestStore.Cancel`, audited `session_cancelled` with the
 actor label `hosted_link`); a started link is 409 `link_started`. A customer
@@ -504,14 +591,15 @@ on a loopback host, at most 10, normalised lowercase. A hosted create may carry
 (`onSettled`), `proof.tsx` posts `{type: "proofing.completed", session, status}`
 to its parent for each allowed origin (never `*`), then redirects with
 `?session=&status=` when there is a redirect; otherwise it shows its own
-outcome (`cancelled` included). The page's language is the request's
-`language` (also passed to IPS at start), then the browser's, then English
+outcome (`cancelled` included). A data request in review is not handed back:
+the page says it is in review. The page's language is the request's
+`language` (also passed to the engine at start), then the browser's, then English
 (`lib/hosted-completion.ts`). It switches i18n without persisting the wallet's
 stored choice. Framing: the proofing handler is a `server.PageHeaderer`, so the
 SPA handler asks it for headers on each index fallback; on `/p/<token>` it sets
 `Content-Security-Policy: frame-ancestors <allowed origins>`, or `'none'` for no
 origins, an unknown or throttled link, or a failed read (counted against the
-link's `HostedCallLimit`). Only where the API serves the SPA (`STATIC_DIR`); in
+link's customer's `HostedCallLimit`). Only where the API serves the SPA (`STATIC_DIR`); in
 dev Vite serves it without the header. The rest of the SPA still sends no CSP.
 Not built: the full-theme endpoint, and an automated
 accessibility test (axe, WCAG 2.2 AA): it needs a rendered DOM, and the frontend
@@ -543,32 +631,49 @@ bottom of the overview). Default: never paused. Audited `identity_proofing.pause
 (`requireAPIKey`) and every hosted link (`hostedRequest`, so the page, its start
 and its `frame-ancestors`) answers 403 `proofing_paused`; the overview shows why
 instead. Only the pause routes stay reachable. Running sessions still settle
-(IPS events, the deadline job) and webhooks still go out. `Stores.Pauses` nil
+(engine notices, the deadline job) and webhooks still go out. Pausing (either
+level) rejects every open review of the org with `ORG_PAUSED` (reviewer
+"system: organisation paused"), so nothing waits on a decision nobody can
+make; both pause dialogs say so. No review stays open under a pause:
+
+| When | What |
+|---|---|
+| Before the pause is set | Every open review is rejected; one that fails refuses the pause. |
+| Right after it is set | Open reviews are listed and rejected again (one reached in between). |
+| A session reaches review while paused | `tryReconcile` rejects it at once (`rejectIfPaused`). The pause is read after the review is written, and the pause lists reviews after it is set, so one of the two sees the other. |
+| A rejection there failed | The hourly `PurgeDue` rejects the reviews still open in every paused org (`rejectPausedReviews`). |
+
+The platform pause asks for confirmation, and both levels record who paused (`platformPausedBy`, `orgPausedBy`). A customer
+cannot be paused while one of its sessions waits for review (409
+`customer_has_open_reviews`), checked in the pause's own transaction under the
+customer row's lock. A review reached after a customer pause stays decidable:
+a customer pause refuses only new requests. `Stores.Pauses` nil
 (unit tests) never pauses.
 
 ## 9. Manual review
 
-A session IPS sends to review (`needs_review`) waits for a decision (or for IPS
-to end it, §3). An admin decides it on the customer's Sessions tab (filter
+A session in review (`needs_review`) waits for a decision (or for the engine to
+end it, §3). The reviewer sees the person's identity and check results (an
+audited result read). An admin decides it on the customer's Sessions tab (filter
 "Needs review", also counted on the overview): approve or reject (optionally
 with an error code), with a required reason. `POST .../requests/{id}/review` calls the engine's
 `DecideReview` (the admin's e-mail as `reviewer`), audits
 `identity_proofing.review_decided` with the admin as actor, then reconciles:
 the outcome lands like any other, so an approval still has to meet the flow's
 assurance level and the customer's webhook is sent. A request no longer under
-review is 409 `not_under_review`. When IPS sends a real session to review is
-still a product decision; test mode's `scriptedOutcome: needs_review` exercises
-the path meanwhile.
+review is 409 `not_under_review`. Two reviewers deciding at once are
+serialised (`LockReview`). When an identity session goes to review is still a
+product decision; today only data requests (§15) do.
 
 ## 10. Data minimisation
 
-Stored and audited: status, IPS assurance tier, achieved eIDAS level, IPS error
-code (the reason, shown in words by `proofingRejectionReason`). Each outcome is
-its own action, `identity_proofing.approved` / `.rejected` / `.needs_review`, so
-a rejection never reads as a success; `identity_proofing.completed` is only on
-rows written before that split. Every request event names its subject
-(`subjectName` when sent with one, `subjectEmail`). Never the other document fields, BSN or images. `proofingprovider` decodes
-only `status/errorCode/completedAt/result.assurance` and the document's name
+Stored and audited: status, the engine's assurance tier, achieved eIDAS level,
+error code (the reason, shown in words by `proofingRejectionReason`). Each
+outcome is its own action, `identity_proofing.approved` / `.rejected` /
+`.needs_review`, so a rejection never reads as a success. Every request event
+names its subject
+(`subjectName` when sent with one, `subjectEmail`). Never the other document fields, BSN or images: the wallet reads only the
+status, error code, completion time, assurance and the document's name
 (`displayName`, else `firstName lastName`).
 
 The name is the one exception, and only for a **customer's subject** once the
@@ -578,26 +683,88 @@ under `IDENTITY_PROOFING_ENCRYPTION_KEY` in `proofed_name_ciphertext`, shown as
 `needs_review` one, keeps no name.
 
 A customer's session is purged by the `identity_proofing_purge` pruner
-(`Service.PurgeDue`) its customer's `data_retention_days` (§4) after it ends
+(`Service.PurgeDue`) its flow's retention override (kept on the request,
+`retention_override_seconds`) or, without one, its customer's
+`data_retention_days` (§4) after it ends
 (completed, cancelled, expired; not while it awaits review): as `DELETE`
-above, erased in the engine, then its personal data cleared here. The dashboard shows
-the time as `purgeAt`. A member's request is not purged.
+above, erased in the engine, then its personal data cleared here, the
+reviewer's reason in its audit events included. The expected birth date
+(§13) goes as soon as the session ends, is cancelled or its link lapses. The
+dashboard shows the time as `purgeAt`. A member's request is not purged.
+- **`purge_at` is stored** (migration `20261005113000`), so the hourly
+  `ListPurgeDue` reads a partial index (`purged_at IS NULL`) instead of
+  computing the time for every unpurged row.
+  - The store computes it, not a trigger: `setPurgeAt` in
+    `request_store.go` is the one rule (retention after settling, a data
+    request's review lapse after `dataRequestReviewDays`, NULL for a member's).
+  - Every write to one of its inputs calls `refreshPurgeAt` on the same
+    transaction, after the write:
+
+    | Write | Input it changes |
+    |---|---|
+    | `Create` | the row (link lapse, flow retention) |
+    | `AttachSession`, `MarkStarted` | session cap, status |
+    | `EndSession`, `LapseLinks`, `Purge` | `ips_session_ended_at` |
+    | `Cancel` | `cancelled_at` |
+    | `RecordOutcome` | status, `completed_at` |
+
+    A new write to one of those columns must call it too;
+    `TestPurgeAtSetOnEveryWrite` checks each against the rule.
+  - A customer's changed `data_retention_days` (`SaveSettings`) recomputes its
+    unpurged requests (`refreshCustomerPurgeAt`). Lock order (rule at
+    `lockCustomer`):
+
+    | Transaction | Customer row | Request rows |
+    |---|---|---|
+    | `SaveSettings` | `FOR NO KEY UPDATE`, first | then all unpurged, `FOR NO KEY UPDATE` in id order |
+    | `RequestStore.Create` | `FOR SHARE`, before the insert | its new row |
+    | Request writers (`Cancel`, `RecordOutcome`, `Purge`, ...) | `FOR KEY SHARE` (webhook delivery's foreign key), after | their row, first |
+    | `SetStatus`, `Remove` | `FOR UPDATE` | read only (`Remove` deletes purged ones) |
+    | `ClearExpiredProofedNames` | none | due rows in id order |
+
+    - `FOR SHARE` and `FOR NO KEY UPDATE` conflict, so no request is created
+      against the old retention and left stale (`TestRetentionWaitsForInsert`).
+    - `FOR KEY SHARE` passes `FOR NO KEY UPDATE`, so a request writer holding
+      a row the retention change waits on still enqueues its webhook and
+      commits. With `FOR UPDATE` that was a deadlock (40P01,
+      `TestRetentionBesideWrite`).
+    - Statements that wait on several request rows lock them in id order;
+      `LapseLinks` and `ListDue` use `SKIP LOCKED` and never wait.
+  - Migration `20261005113000` backfilled existing rows with the same rule, as
+    a one-off `UPDATE`.
+  - A running session's cap is stored before it passes; the purge asks
+    `purge_at <= now()`, which holds only after it anyway. `purgeAt` in the API
+    stays empty while the session runs.
+- **A purge of a stale read is refused** (`errPurgeSessionMoved`): a request
+  read before a hosted start attached its session. `Service.purge` reads it
+  again and erases that session first.
 
 ## 11. Known gaps to track
 
-- **No end-user web page.** The engine keeps IPS's web slot but the wallet has
-  no browser proofing page, so only flows whose face capture runs in the app
-  (`selfieLocation: native`) can be sent; the wallet forces `native` and refuses
-  others (`flow_not_completable`).
-- **Deep link tap does not open vcmrtd yet**; scanning the QR from inside the app
-  works.
+- **No browser face step.** The engine has a web slot, but the wallet has no
+  browser proofing page for it, so only flows whose face capture runs in the
+  app (`selfieLocation: native`) can be sent; the wallet forces `native` and
+  refuses others (`flow_not_completable`).
 - **Reconciling reads `SessionStatus`**, which carries no personal data; the full
   result is read only for an approved customer subject, whose name is kept.
-- **No face engine.** A flow's face step and the Yivi method need Regula; IPS
-  flows on its `engine` provider cannot run here.
-- **Flows did not move.** Flows created at IPS were not copied into the engine:
-  an org recreates them, with their member, hosted and diploma settings and
-  customer assignments. Requests keep their flow id and name as history.
+- **No face engine of its own.** A flow's face step and the Yivi method need
+  Regula.
+- **EU driving licences** are refused, 422 `document_unsupported`
+  (`proofingengine/steps.go`, `flow.DrivingLicence`):
+  - at `document_capture`: a `document.type` or `chipAccess.documentType` of
+    `drivers_license`;
+  - at `nfc_read`: an `mrtdEvidence.documentType` of `eu_driving_licence`,
+    before the chip is verified.
+  - A flow may not accept one: `flow.Validate` refuses either spelling,
+    `drivers_license` or `eu_driving_licence` (`flow.DrivingLicence`), in
+    `acceptedDocumentTypes`, so the
+    editor's save is a 422 `rejected_by_provider`. The seeded flows accept any
+    document type and do not name it.
+  - Why: there is no CSCA source for them (`mrtdverify.DrivingLicenceCertPool`
+    is empty), so a genuine licence would end `DOC_TAMPERED`.
+  - The licence parsing (`drivingLicenceDocument`, `mrtdverify.VerifyPassive`)
+    stays, for when a source exists.
+- Open product questions are in `.ai/plans/identity-proofing.md`.
 
 ## 12. Diplomas (DUO extracts)
 
@@ -610,13 +777,13 @@ only: the engine knows nothing of it.
   audited `flow_diplomas_configured`. A step is in the flow or not, so there is
   no optional diploma step.
   The flow editor shows it as the last step, "Upload diplomas (DUO)": a step
-  for the admin, never sent to IPS (its steps are the app's, and it would
-  refuse one it does not know). It is saved after the flow, so a new flow
-  gets it once it has an id; the flow list's summary appends it to the IPS
-  steps. The flow list carries it as
+  for the admin, never sent to the engine (its steps are the app's, and it
+  would refuse one it does not know). It is saved after the flow, so a new flow
+  gets it once it has an id; the flow list's summary appends it to the
+  engine's steps. The flow list carries it as
   `diplomaMode`; a single version's answer (create, edit, versions) omits it.
   A request snapshots it at send (`identity_proofing_requests.diplomas`), as
-  it does the assurance level; a test request is always `off`.
+  it does the assurance level.
 - **A page, never a mail.** The extracts are uploaded on the page that ran the
   session, so a diploma flow is refused on the mail channel and as a bare
   deep link (`diplomas_need_page`, 422): on screen or hosted only. The send
@@ -628,17 +795,23 @@ only: the engine knows nothing of it.
   shows the step after an approval and hands back (`onSettled`, the hosted
   redirect) only once the subject is done: at least one extract held, or the
   window closed.
-- **The check** (`internal/diploma`, ported from `privacybydesign/go-diploma-issuer`,
-  which has the detail): PDFium (the VOG parser's pool, `vog.PDFiumParser.Pool`)
-  reads the extract; DUO's PAdES signature must cover the whole file, carry a
-  qualified timestamp and chain on the EU Trusted Lists to DUO's qualified
-  e-seal; the printed holder (one line, `MatchFullName`) and birth date must
-  match the identity IPS approved, read with `SessionIdentity` at upload.
-  `DIPLOMA_VALIDATOR_PROVIDER=stub` (default; dev/CI hold no DUO-signed
-  extract of a test person) accepts every signature but still parses and
-  matches for real; `duo` checks it, with `DIPLOMA_TRUST_SOURCE`
-  `eutl` (default, lists cached in `DIPLOMA_TRUST_CACHE_DIR`, reloaded on use
-  once 24 h old, pinned roots as fallback) or `pinned`. OCSP is off.
+- **The check** (`internal/diploma`, as in `privacybydesign/go-diploma-issuer`,
+  which has the detail): DUO's PAdES signature is verified first, on the raw
+  bytes: it must cover the whole file, carry a qualified timestamp (the
+  timestamp's own signer must be trusted) and chain on the EU Trusted Lists to
+  DUO's qualified e-seal. An unsigned file is `not_a_diploma`, and only a file
+  that passed reaches PDFium (the VOG parser's pool, `vog.PDFiumParser.Pool`),
+  which is killed past 20 s. The printed holder (one line, `MatchFullName`)
+  and birth date must match the identity the engine approved, read with
+  `SessionIdentity` at upload; each name word matches plain or ICAO 9303
+  transliterated, so "Müller" matches MUELLER and MULLER.
+  `DIPLOMA_VALIDATOR_PROVIDER=duo` is the default; `stub` (set by the dev
+  stack, which holds no DUO-signed extract of a test person) accepts every
+  signature but still parses and matches for real. `DIPLOMA_TRUST_SOURCE` is
+  `eutl` (default: lists cached in `DIPLOMA_TRUST_CACHE_DIR`, reloaded once
+  24 h old under their own timeout, a stale cache used when a fetch fails,
+  pinned roots as fallback) or `pinned`. `DIPLOMA_OCSP=true` adds an online
+  revocation check; off by default.
 - **Kept**: what DUO printed about the qualification (type, name, profiles,
   institution, place and date, NLQF/EQF, the number duo.nl/diplomacontrole
   checks, signing time) in `identity_proofing_request_diplomas`. Never the
@@ -648,7 +821,7 @@ only: the engine knows nothing of it.
   Shown in the request responses, the customer API's `result`, and the
   Sessions tab. `Purge` deletes them with the rest.
 - **Not built**: mailing a hosted link for a diploma flow (the mail is the
-  vcmrtd session, §2); diplomas on a member's request page; no real DUO
+  Idem session, §2); diplomas on a member's request page; no real DUO
   extract is in the test suite (personal data), so the parser is covered by
   synthetic layouts only, as upstream verified it against real ones.
 
@@ -665,18 +838,19 @@ proofs whoever scans, and the wallet holds the outcome to the person.
   the document data), `POST .../requests`, and the customer API's
   `POST /proofing/sessions`, on every channel. A member's request cannot
   (`ErrInvalidInput`: the wallet holds no birth date of a member), nor a flow
-  whose result lacks the document data (`ReadsIdentity`, mirrored by
-  `readsIdentity`: `dg1` requested, or `document_capture` when the flow
-  lists no data). Without a birth date the name stays a label.
+  whose result lacks the document data (`readsIdentity`, the same name in the
+  backend and the frontend: `dg1` requested). Without a birth date the name stays a
+  label.
 - **Kept.** `expects_subject` on the request, and the birth date sealed under
   `IDENTITY_PROOFING_ENCRYPTION_KEY` in `expected_birth_date_ciphertext`
-  until the request is decided (`RecordOutcome` approved/rejected) or
-  purged; `needs_review` keeps it for the decision. Audited only as
+  until the request is decided (`RecordOutcome` approved/rejected), its
+  session ends, is cancelled or its link lapses, or it is purged;
+  `needs_review` keeps it for the decision. Audited only as
   `expectsSubject: true` on `requested`, never the date.
 - **The match** (`matchSubject`, in `tryReconcile` after `enforceAssurance`):
-  on an approval it reads `SessionIdentity` and runs
-  `diploma.MatchFullName(subjectName, birthDate, identity)`, the DUO holder
-  match (diacritics, prefixes, given-name order). A mismatch is recorded as
+  on an approval it reads `SessionIdentity` and requires the same full name,
+  word for word (`diploma.SameName`, plain or ICAO-transliterated; no missing
+  or extra name), and the same birth date. A mismatch is recorded as
   `rejected` with `IDENTITY_MISMATCH` (no proofed name kept); a failed
   identity read leaves the request undecided for the next reconcile. A
   review approval is matched too. The engine still holds its approval, so
@@ -685,9 +859,7 @@ proofs whoever scans, and the wallet holds the outcome to the person.
   images: the other person is never shown (`ASSURANCE_NOT_MET` likewise).
 - **Shown.** `expectedSubject` on the request, the customer API's session
   and its webhooks; "Expected person" in the Sessions tab's details; the
-  reason in words (`proofingRejectionReason`). A test session's identity is
-  the sandbox fixture, `Sandbox Testperson` born 1990-01-01, so an
-  integrator can script a match and a mismatch.
+  reason in words (`proofingRejectionReason`).
 - **Not built:** the hosted and on-screen pages do not name the expected
   person to the subject.
 
@@ -695,13 +867,13 @@ proofs whoever scans, and the wallet holds the outcome to the person.
 
 For a customer that already holds a photo of the person and wants a live face
 check against it without the document (an insurer confirming a policy
-holder's change of bank account). IPS's `referencePhoto`, ported back.
+holder's change of bank account).
 
 - **Flow.** A face step without `nfc_read` (`NeedsReferencePhoto`; the
   editor's "Face check" alone). `Completable` stays false for it (a member
   has no photo to send); `CustomerCompletable` is true, so it can be
   assigned to a customer, and the flow lists carry `needsReferencePhoto`.
-  It runs in the Idem app only (`YiviAppAvailable` false: the Yivi app
+  It runs in the Idem app only (`yiviAppAvailable` false: the Yivi app
   matches against its credential's photo) and reaches no eIDAS level (the
   levels need the chip; the engine scores it with `chipReference` false).
   The send form leaves it out.
@@ -710,8 +882,7 @@ holder's change of bank account). IPS's `referencePhoto`, ported back.
   the create body is capped at 1 MiB, an idempotent one past that is 413
   `body_too_large`). Required on such a flow (422
   `reference_photo_required`), refused on any other (400), so a chip flow is
-  never matched against a supplied photo. A test request checks it and
-  drops it (a scripted session runs no flow). Audited as `referencePhoto:
+  never matched against a supplied photo. Audited as `referencePhoto:
   true`, never the image.
 - **Held.** The engine's session keeps it sealed (`session.ReferencePhoto`)
   and hands it to the app as `faceReference` for the face step
@@ -752,28 +923,37 @@ editor's Type, and the hosted page.
   name like an approval. From then on the wallet owns the decision: a later
   engine read (approved, or the session purged at the engine) changes nothing.
 - **Matches.** `findDataMatches` reads the person's identity and every
-  `Candidates` session of the **same customer** (identity kind, same mode, not
-  purged, settled), skipping one whose kept proofed name lacks the family
-  name, and matches with `diploma.MatchFullName` on name and date of birth:
-  `strong` when document type, issuing state and expiry also agree (the same
-  document; the document number is never read), `probable` otherwise. Stored
-  in `identity_proofing_request_matches`. No HMAC or other deterministic
+  `Candidates` session of the **same customer** (not purged, settled; the
+  person's earlier data requests too once decided, as each holds who asked, so
+  an erasure clears them; one still in review never), skipping one whose kept
+  proofed name lacks the family name. A match needs the same full name word for
+  word (`diploma.SameName`) and birth date: `strong` when document type,
+  issuing state and expiry also agree (the same document; the document number
+  is never read), `probable` otherwise. The customer's unfinished sessions
+  (pending, in progress, expired, cancelled) sent to exactly the same e-mail
+  address are listed apart as `email` matches: they hold no proofed identity.
+  Stored in `identity_proofing_request_matches`. No HMAC or other deterministic
   identifier: it would link a person's sessions for anyone reading the
   database.
 - **Review.** The session's panel shows the person's identity and proof (name,
   date of birth, document, chip, face match, liveness, eIDAS level; the
   result read allows a data request in review, `heldToVerdict`) and the
-  matches to untick. `DecideReview` → `decideDataRequest` (decided at the
-  engine too if it holds a review there): approve takes `requestIds` (all when
-  absent). Erasure purges each approved match through `Service.purge` (row
-  stays, personal data goes, `session.purged` per session), then the request
-  itself. Access sets `data_export_until` (`DataExportWindow`, 7 days).
-  Reject records `MANUAL_REVIEW_REJECTED` unless a code is given.
+  matches. Only `strong` matches start ticked; `probable` and `email` ones are
+  taken only when ticked, and the API's approve without `requestIds` takes the
+  `strong` ones alone. `DecideReview` → `decideDataRequest` (decided in the
+  engine too if it holds a review there). Approving an erasure asks to confirm
+  the number of sessions, then purges each approved match through
+  `Service.purge` (row stays, personal data goes, `session.purged` per
+  session), then the request itself. Access sets `data_export_until`
+  (`DataExportWindow`, 7 days; 24 h through the hosted link). Reject records
+  `MANUAL_REVIEW_REJECTED` unless a code is given.
+- **Nobody reviews it.** A data request left in review 30 days (GDPR Art.
+  12(3)) is rejected `REVIEW_LAPSED` and purged by `PurgeDue`.
 - **Export.** An approved access request's data: per approved session the
   outcome, the contact the customer gave, identity and evidence, diplomas;
   images named in `imagesHeld`, never included. For the person on their
   hosted link (`GET /proof/{token}/data-export`, `dataExportUntil` in the
-  progress), for the admin (`…/requests/{id}/data-export`) and for the
+  progress; 24 h), for the admin (`…/requests/{id}/data-export`) and for the
   customer (`GET /proofing/sessions/{id}/data-export`). Audited
   `identity_proofing.data_exported`.
 - **Not built:** matching across customers or orgs (each customer is the

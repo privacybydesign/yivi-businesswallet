@@ -433,7 +433,7 @@ export const nl: Translation<typeof en> = {
       byOrganization:
         "Een beheerder van deze organisatie heeft identiteitsverificatie uitgezet.",
       whatStops:
-        "Zolang het gepauzeerd is, start er niets nieuws: geen verzoeken, geen API-aanroepen van klanten en geen gehoste links. Sessies die al lopen worden afgerond en hun webhooks gaan nog uit.",
+        "Zolang het gepauzeerd is, start er niets nieuws: geen verzoeken, geen API-aanroepen van klanten en geen gehoste links. Sessies die op beoordeling wachten worden afgewezen, met het verzoek het later opnieuw te proberen. Sessies die al lopen worden afgerond en hun webhooks gaan nog uit.",
       turnOn: "Identiteitsverificatie aanzetten",
       turnOff: "Uitzetten",
       switchTitle: "Identiteitsverificatie uitzetten",
@@ -442,7 +442,12 @@ export const nl: Translation<typeof en> = {
       confirmTitle: "Identiteitsverificatie uitzetten?",
       platformColumn: "Identiteitsverificatie",
       active: "Actief",
-      pausedByPlatform: "Door jou gepauzeerd",
+      unknown: "Onbekend",
+      pausedByPlatform: "Gepauzeerd door {{name}}",
+      pausedByPlatformAdmin: "Gepauzeerd door een platformbeheerder",
+      platformConfirmTitle: "Identiteitsverificatie pauzeren voor {{name}}?",
+      byOrganizationMember:
+        "{{name}}, beheerder van deze organisatie, heeft identiteitsverificatie uitgezet.",
       pausedByOrganization: "Uitgezet door de organisatie",
       platformPause: "Pauzeren",
       platformResume: "Hervatten",
@@ -464,6 +469,8 @@ export const nl: Translation<typeof en> = {
         needsReview: "Te beoordelen",
         needsReviewHint: "Wacht op jouw besluit",
         expiredHint: "Niet binnen 10 minuten afgerond",
+        cancelled: "Geannuleerd",
+        cancelledHint: "Ingetrokken voordat ze klaar waren",
         noSessions: "Nog geen sessies",
       },
       recent: {
@@ -523,10 +530,15 @@ export const nl: Translation<typeof en> = {
         "land van uitgifte niet toegestaan in de flow",
       faceStepNotCompleted: "gezichtsverificatie niet afgerond",
       faceNoMatch: "gezicht komt niet overeen met het document",
+      livenessFailed: "levendheidscontrole mislukt",
+      chipAuthMissing: "de chipcontrole die deze flow vereist is niet geslaagd",
       docTampered: "chipgegevens van het document zijn gemanipuleerd",
       chipCloneDetected: "gekloonde documentchip gedetecteerd",
       docExpired: "document verlopen",
       assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",
+      reviewLapsed: "niet binnen 30 dagen beoordeeld",
+      orgPaused:
+        "identiteitsverificatie werd gepauzeerd terwijl de sessie op beoordeling wachtte; probeer het later opnieuw",
       identityMismatch:
         "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
     },
@@ -545,10 +557,24 @@ export const nl: Translation<typeof en> = {
         "Die flow is niet meer aan deze klant toegewezen. Kies een andere.",
       customerPaused:
         "Verificatie is gepauzeerd voor deze klant. Een beheerder kan het hervatten op de pagina van de klant.",
+      customerHasOpenReviews:
+        "Deze klant heeft sessies die op beoordeling wachten. Beoordeel die eerst voordat je pauzeert.",
+      customerSessionsLeft:
+        "Er zijn sessies voor deze klant verstuurd terwijl hij werd verwijderd. Probeer hem opnieuw te verwijderen.",
       proofingPaused:
         "Identiteitsverificatie is gepauzeerd voor deze organisatie.",
       customerNoApiKey:
-        "Deze klant heeft nog geen live API-sleutel. Een beheerder kan er een aanmaken op het tabblad API-sleutels van de klant.",
+        "Deze klant heeft nog geen API-sleutel. Een beheerder kan er een aanmaken op het tabblad API-sleutels van de klant.",
+      apiKeyNotFound: "Die API-sleutel bestaat niet meer.",
+      sessionNotFound: "Die sessie bestaat niet meer.",
+      notUnderReview:
+        "Deze sessie wacht niet meer op beoordeling: misschien heeft iemand haar al beoordeeld.",
+      referencePhotoRequired:
+        "Deze flow vergelijkt het gezicht met je eigen foto van de persoon, die alleen via de klant-API kan worden meegestuurd. Kies een andere flow.",
+      organizationNotFound: "Die organisatie bestaat niet.",
+      webhookNotFound:
+        "De webhook van deze klant bestaat niet meer: misschien heeft iemand hem verwijderd. Laad de pagina opnieuw.",
+      linkStarted: "Deze link is al ergens anders geopend. Ga daar verder.",
       sessionOver: "Deze sessie is afgelopen. Start een nieuwe.",
       deviceActive:
         "De Idem-app heeft deze sessie nog open: ga daar verder, of sluit hem eerst.",
@@ -648,10 +674,10 @@ export const nl: Translation<typeof en> = {
       resume: "Verificatie hervatten",
       pausedNotice:
         "Verificatie is gepauzeerd voor deze klant: er kan geen nieuw verzoek worden verstuurd totdat een beheerder het hervat.",
-      noLiveKeyNotice:
-        "Deze klant heeft nog geen live API-sleutel: maak er een aan voordat je verzoeken verstuurt. Testsleutels werken alleen in de sandbox.",
-      noLiveKeyNoticeMember:
-        "Deze klant heeft nog geen live API-sleutel, dus er kan geen verzoek worden verstuurd. Vraag een beheerder er een aan te maken.",
+      noApiKeyNotice:
+        "Deze klant heeft nog geen API-sleutel: maak er een aan voordat je verzoeken verstuurt.",
+      noApiKeyNoticeMember:
+        "Deze klant heeft nog geen API-sleutel, dus er kan geen verzoek worden verstuurd. Vraag een beheerder er een aan te maken.",
       createApiKey: "API-sleutel aanmaken",
       pauseConfirm: {
         title: "Verificatie pauzeren voor {{name}}?",
@@ -765,9 +791,9 @@ export const nl: Translation<typeof en> = {
         flow: "Flow",
         assurance: "Betrouwbaarheidsniveau",
         retention_one:
-          "De naam op je document wordt na verificatie {{count}} dag bewaard en daarna verwijderd.",
+          "Wat de verificatie verzamelt (je naam en de andere gegevens en foto's hierboven) wordt uiterlijk {{count}} dag na afloop verwijderd.",
         retention_other:
-          "De naam op je document wordt na verificatie {{count}} dagen bewaard en daarna verwijderd.",
+          "Wat de verificatie verzamelt (je naam en de andere gegevens en foto's hierboven) wordt uiterlijk {{count}} dagen na afloop verwijderd.",
         support: "Vragen? {{contact}}",
         privacy: "Privacyverklaring",
         cancel: "Annuleren",
@@ -832,7 +858,7 @@ export const nl: Translation<typeof en> = {
       },
       face: {
         heading: "Kijk in de camera",
-        hint: "Houd je gezicht in beeld. Het wordt vergeleken met de foto uit je Yivi-app; er wordt niets bewaard.",
+        hint: "Houd je gezicht in beeld. Het wordt vergeleken met de foto uit je Yivi-app. Een passend beeld wordt alleen bewaard als om je selfie is gevraagd.",
         progress: "Match {{count}} van {{total}}",
         noFace: "Geen gezicht gevonden. Kom dichter bij de camera.",
         cameraError:
@@ -873,6 +899,7 @@ export const nl: Translation<typeof en> = {
         reason: "Reden",
         reasonPlaceholder: "Wat je hebt gecontroleerd, en waarom je zo besluit",
         reasonRequired: "Geef een reden: die wordt bewaard in het auditlog.",
+        reasonTooLong: "Houd de reden op maximaal {{max}} tekens.",
         approve: "Goedkeuren",
         reject: "Afwijzen",
       },
@@ -889,6 +916,12 @@ export const nl: Translation<typeof en> = {
           hint: "De persoon heeft met deze sessie bewezen wie hij of zij is. Controleer de identiteit en keur de sessies goed die je verwijdert: de persoonsgegevens worden direct gewist, de sessies blijven als registratie staan en de klant krijgt per sessie bericht.",
           approve_one: "Goedkeuren: {{count}} sessie verwijderen",
           approve_other: "Goedkeuren: {{count}} sessies verwijderen",
+          confirm: {
+            title_one: "{{count}} sessie wissen?",
+            title_other: "{{count}} sessies wissen?",
+            message:
+              "De persoonsgegevens in de aangevinkte sessies, en in dit verzoek, worden direct verwijderd en zijn niet te herstellen. De sessies blijven zonder die gegevens bewaard.",
+          },
         },
         reasonPlaceholder:
           "Wat je hebt gecontroleerd, en waarom, bv. een wettelijke bewaarplicht",
@@ -896,17 +929,24 @@ export const nl: Translation<typeof en> = {
           "Er zijn geen andere sessies van deze persoon gevonden bij deze klant.",
         matches_one: "{{count}} sessie van deze persoon gevonden",
         matches_other: "{{count}} sessies van deze persoon gevonden",
+        emailMatches_one: "{{count}} onafgeronde sessie naar hetzelfde adres",
+        emailMatches_other:
+          "{{count}} onafgeronde sessies naar hetzelfde adres",
+        emailMatchesHint:
+          "Deze zijn nooit afgerond, dus er is geen bewezen identiteit om te vergelijken: alleen het e-mailadres komt overeen. Vink aan welke van deze persoon zijn.",
         levels: {
           strong: "Zelfde document",
           probable: "Naam en geboortedatum",
+          email: "Zelfde e-mailadres",
         },
         untickHint:
-          "Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
+          "Sessies met hetzelfde document zijn aangevinkt; een sessie met alleen dezelfde naam en geboortedatum niet, dus vink die alleen aan als je zeker weet dat hij van deze persoon is. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
         erased: "Verwijderd",
         approved: "Goedgekeurd",
         kept: "Bewaard",
         download: "Gegevens downloaden",
         downloadUntil: "Beschikbaar tot {{date}}",
+        downloadClosed: "De download was beschikbaar tot {{date}}.",
       },
       method: "Methode",
       timeline: "Tijdlijn",
@@ -986,7 +1026,7 @@ export const nl: Translation<typeof en> = {
       minutes_other: "{{count}} min",
       retention: "Bewaartermijn",
       retentionHint:
-        "De persoonsgegevens van een sessie (naam, e-mailadres, de naam van het document) worden zo lang na afloop gewist. Het resultaat en het auditspoor blijven.",
+        "De persoonsgegevens van een sessie (de naam en het e-mailadres waarheen hij is verstuurd, alles wat van het document en de chip is gelezen, de foto's en eventuele diploma's) worden zo lang na afloop gewist. Het resultaat en het auditspoor blijven.",
       days_one: "{{count}} dag",
       days_other: "{{count}} dagen",
       nameTitle: "Naam",
@@ -1071,11 +1111,6 @@ export const nl: Translation<typeof en> = {
       active: "Actief",
       revoked: "Ingetrokken",
       revoke: "Intrekken",
-      live: "Live",
-      test: "Test",
-      testLabel: "Testsleutel",
-      testHint:
-        "Sessies met een testsleutel draaien in een sandbox: ze krijgen meteen een gescripte uitkomst (standaard goedgekeurd), sturen geen e-mail en tellen niet mee.",
       revokeConfirm: {
         title: "{{name}} intrekken?",
         message:
@@ -1084,9 +1119,6 @@ export const nl: Translation<typeof en> = {
       createdTitle: "Je nieuwe API-sleutel",
       createdHint:
         "Kopieer hem nu en bewaar hem veilig, bijvoorbeeld in de geheimenopslag van je backend: hij wordt niet opnieuw getoond. Alleen een hash ervan wordt bewaard.",
-      usageTitle: "De API gebruiken",
-      usageHint:
-        "Stuur de sleutel mee als Bearer-token. Zonder flowId wordt de standaardflow van de klant gebruikt; met sendMail false toon je de deepLink uit het antwoord zelf als QR-code.",
     },
     webhooks: {
       endpoint: "Endpoint",
@@ -1187,13 +1219,17 @@ export const nl: Translation<typeof en> = {
       face_verification: "Gezichtscontrole",
       diploma_upload: "Diploma's uploaden (DUO)",
     },
+    bsnPolicies: {
+      retrieve: "BSN vrijgeven",
+      mask: "Gemaskeerd vrijgeven",
+      omit: "Weglaten",
+    },
     assuranceLevels: {
       low: "Laag",
       substantial: "Substantieel",
     },
     faceProviders: {
       regula: "Regula",
-      Iris: "Iris SDK",
     },
     checks: {
       passiveAuth: "De gegevens op de chip zijn echt en ongewijzigd",
@@ -1263,7 +1299,7 @@ export const nl: Translation<typeof en> = {
         "De gezichtscontrole gebeurt in de app: de persoon heeft geen browserstap.",
       faceProvider: "Aanbieder gezichtscontrole",
       faceProviderHint:
-        "Regula doet de levendheidscontrole in de app en de wallet vergelijkt het gezicht met de chipfoto; in de Yivi-app vergelijkt Regula de camera met de foto uit het credential. Iris werkt alleen in de Idem-app.",
+        "Regula doet de levendheidscontrole in de app en de wallet vergelijkt het gezicht met de chipfoto; in de Yivi-app vergelijkt Regula de camera met de foto uit het credential.",
       faceWithoutChip:
         "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met de eigen foto van de klant van deze persoon, die het systeem van de klant bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
       dataTitle: "Gevraagde resultaatgegevens",
@@ -1280,28 +1316,33 @@ export const nl: Translation<typeof en> = {
       documentTypesHint: "Gescheiden door komma's, leeg accepteert alles.",
       issuingCountries: "Geaccepteerde landen van uitgifte",
       issuingCountriesHint:
-        "Landcodes van drie letters zoals NLD, gescheiden door komma's, leeg accepteert alles.",
+        "ICAO-landcodes van drie letters zoals NLD of DEU, gescheiden door komma's; leeg accepteert alles. Een code die geen land heeft wordt geweigerd.",
       policyTitle: "Betrouwbaarheid en privacy",
       assuranceLevel: "Vereist betrouwbaarheidsniveau",
       assuranceLevelHint:
-        "Met een vereist niveau wordt de sessie daaraan gehouden: een sessie die tekortschiet wordt afgewezen. Zonder niveau wordt er geen niveau berekend.",
+        "Met een vereist niveau wordt de sessie daaraan gehouden: een sessie die tekortschiet wordt afgewezen. Zonder vereist niveau meldt de sessie nog steeds welk niveau de controles haalden. Een gezichtsstap waarvan de levendheidscontrole of de gezichtsvergelijking mislukt, wijst de sessie hoe dan ook af. Een sessie kan een hoger niveau halen dan vereist. Alleen een gezicht dat Regula controleert kan Substantieel halen.",
       assuranceLevelNeeds: {
-        low: "Laag vereist het lezen van de chip met geverifieerde chipgegevens. Die instellingen staan vast aan.",
+        low: "Laag vereist het lezen van de chip met geverifieerde chipgegevens. Zet die instellingen aan om de flow op te slaan.",
         substantial:
-          "Substantieel vereist het lezen van de chip met geverifieerde chipgegevens en kopiecontrole, en een levend gezicht dat Regula met de chipfoto vergelijkt. Die instellingen staan vast aan.",
+          "Substantieel vereist het lezen van de chip met geverifieerde chipgegevens en kopiecontrole, en een levend gezicht dat Regula met de chipfoto vergelijkt. Zet die instellingen aan om de flow op te slaan.",
       },
       none: "(geen)",
       inherit: "(organisatie overnemen)",
-      yes: "true",
-      no: "false",
+      yes: "Ja",
+      no: "Nee",
       bsnPolicy: "BSN-beleid overschrijven",
       retentionSeconds: "Bewaartermijn overschrijven (seconden)",
-      retentionSecondsHint: "Leeg of 0 is niet overschrijven.",
+      retentionSecondsHint:
+        "Ingevuld vervangt dit de bewaartermijn van de klant voor de sessies van deze flow; leeg of 0 houdt die van de klant aan.",
       blurFace: "Gezicht vervagen overschrijven",
       blurBsn: "BSN vervagen overschrijven",
       errors: {
         name: "Geef de flow een naam.",
         steps: "Kies minstens één stap.",
+        assuranceLevel:
+          "Deze flow kan het vereiste niveau niet halen: zet aan wat het niveau vereist, of verlaag het.",
+        issuingCountries:
+          "Gebruik landcodes van drie letters zoals NLD, gescheiden door komma's.",
         faceMatchThreshold: "Vul een getal van 0 tot 1 in.",
         retentionSeconds: "Vul een heel aantal seconden in.",
       },
@@ -1523,10 +1564,13 @@ export const nl: Translation<typeof en> = {
     identityProofingRequestSent: "Verzoek verstuurd",
     identityProofingCustomerCreated: "Klant toegevoegd",
     identityProofingCustomerRenamed: "Klant hernoemd",
+    identityProofingCustomerSettingsSaved: "Instellingen opgeslagen",
     identityProofingCustomerPaused: "Verificatie gepauzeerd",
     identityProofingCustomerResumed: "Verificatie hervat",
     identityProofingCustomerRemoved: "Klant verwijderd",
     identityProofingBrandingSaved: "Huisstijl opgeslagen",
+    identityProofingHostedSettingsSaved:
+      "Instellingen van de gehoste pagina opgeslagen",
     identityProofingApiKeyRevoked: "API-sleutel ingetrokken",
     identityProofingWebhookSaved: "Webhook opgeslagen",
     identityProofingWebhookRemoved: "Webhook verwijderd",
@@ -1626,7 +1670,8 @@ export const nl: Translation<typeof en> = {
       "Elke uitgifte, vrijgave, ondertekening en configuratiewijziging wordt vastgelegd.",
     filter: "Filteren",
     export: "Exporteren",
-    adminOnly: "Alleen organisatiebeheerders kunnen het auditlogboek bekijken.",
+    detailHidden: "Wie iets deed en wat er veranderde, zien alleen beheerders.",
+    hiddenActor: "Verborgen",
     loadError: "Auditlogboek laden mislukt: {{message}}",
     loadMore: "Meer laden",
     empty: "Er is nog geen activiteit vastgelegd.",
@@ -1817,7 +1862,16 @@ export const nl: Translation<typeof en> = {
         "Identiteitsverificatiesessie geannuleerd",
       identityProofingSessionPurged: "Identiteitsverificatiesessie gewist",
       identityProofingResultRead: "Resultaat identiteitsverificatie gelezen",
-      identityProofingCompleted: "Identiteitsverificatie afgerond",
+      identityProofingDeviceClaimed:
+        "Apparaat nam identiteitsverificatie-sessie over",
+      identityProofingDeviceHandedOver:
+        "Identiteitsverificatie-sessie overgedragen aan ander apparaat",
+      identityProofingHandoverIssued:
+        "Overdracht naar ander apparaat aangeboden",
+      identityProofingHandoverClaimFailed:
+        "Overdracht naar ander apparaat geweigerd",
+      identityProofingAccessDenied:
+        "Apparaat geweigerd voor identiteitsverificatie-sessie",
       identityProofingApproved: "Identiteit geverifieerd",
       identityProofingRejected: "Identiteitsverificatie afgewezen",
       identityProofingNeedsReview:
@@ -1917,7 +1971,6 @@ export const nl: Translation<typeof en> = {
       loadMore: "Meer laden",
     },
     active: "Actief lid",
-    verified: "Geverifieerd",
     identifiedOn: "Geïdentificeerd op",
     never: "Nooit",
     identityDueOn: "Heridentificeren vóór",
@@ -3332,6 +3385,8 @@ export const nl: Translation<typeof en> = {
         checked: "Statuslijst gecontroleerd",
         checkedRevoked: "ingetrokken",
         checkedValid: "niet ingetrokken",
+        statusChanged: "Status gewijzigd",
+        detailHidden: "details alleen zichtbaar voor beheerders",
         removed: "Verwijderd",
       },
       checks: {

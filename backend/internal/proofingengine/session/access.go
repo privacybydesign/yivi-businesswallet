@@ -78,8 +78,8 @@ type Access struct {
 	// native QR stay valid side by side.
 	WebGrant    *HandoverGrant `json:"webGrant,omitempty"`
 	NativeGrant *HandoverGrant `json:"nativeGrant,omitempty"`
-	// Generation goes up on every claim, so a waiting client (the
-	// /events long-poll) notices a handover - see api.appSessionChangeKey.
+	// Generation goes up on every claim, so a waiting long-poll notices a
+	// handover.
 	Generation int `json:"generation,omitempty"`
 	// History is every device that held a slot, including handed-over ones,
 	// for the audit/result view - never used for authorization.
@@ -123,43 +123,6 @@ type HandoverGrant struct {
 	TokenHash string     `json:"tokenHash"`
 	ExpiresAt time.Time  `json:"expiresAt"`
 	UsedAt    *time.Time `json:"usedAt,omitempty"`
-}
-
-// Clone returns a deep copy of a, so a change made through the copy's
-// pointers and slices (touching a slot's LastActiveAt, RecordStep appending
-// to a History entry) never reaches a. The in-memory Store needs this:
-// its Update hands fn a copy of the stored Session, and without a deep copy
-// those writes would land in the stored session - and in snapshots other
-// goroutines are reading - before the update is even committed, and survive
-// a failed flush's rollback. Time pointers are copied as pointers: callers
-// replace them (d.DisconnectedAt = &now), never write through them.
-func (a Access) Clone() Access {
-	out := a
-	if a.Web != nil {
-		d := *a.Web
-		out.Web = &d
-	}
-	if a.Native != nil {
-		d := *a.Native
-		out.Native = &d
-	}
-	if a.WebGrant != nil {
-		g := *a.WebGrant
-		out.WebGrant = &g
-	}
-	if a.NativeGrant != nil {
-		g := *a.NativeGrant
-		out.NativeGrant = &g
-	}
-	out.Revoked = slices.Clone(a.Revoked)
-	if a.History != nil {
-		out.History = make([]DeviceParticipation, len(a.History))
-		for i, p := range a.History {
-			p.Steps = slices.Clone(p.Steps)
-			out.History[i] = p
-		}
-	}
-	return out
 }
 
 // Bound reports whether any device has claimed this session yet.

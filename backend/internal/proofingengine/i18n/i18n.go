@@ -17,9 +17,8 @@ const Default = "en"
 // Supported lists the shipped languages, Default first.
 var Supported = []string{"en", "nl"}
 
-// Valid reports whether tag is a well-formed BCP 47 language tag. It says
-// nothing about whether a catalog exists for it — an unshipped language is
-// accepted and simply resolves to something else (see Resolve).
+// Valid reports whether tag is well-formed BCP 47; an unshipped language is
+// valid and resolves to another (Resolve).
 func Valid(tag string) bool {
 	_, err := language.Parse(tag)
 	return err == nil

@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -60,8 +59,8 @@ type stubSession struct {
 	flowVersion int
 	method      Method
 	expiresAt   time.Time
-	// scripted is the outcome a ScriptedOutcome session resolved to at once.
-	scripted *Result
+	// decided is the outcome a review decision settled the session on.
+	decided *Result
 }
 
 // stubDecisionDelay is how long the stub's subject takes to finish, so the
@@ -173,16 +172,6 @@ func stubValidate(in FlowSpec) error {
 func (s *Stub) CreateSession(_ context.Context, t Tenant, in SessionInput) (Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// As the engine does: test mode only runs scripted outcomes, live never.
-	switch {
-	case t.Sandbox && in.ScriptedOutcome == "":
-		return Session{}, &RejectedError{Status: http.StatusBadRequest, Message: "a test session needs a scriptedOutcome"}
-	case !t.Sandbox && in.ScriptedOutcome != "":
-		return Session{}, &RejectedError{Status: http.StatusBadRequest, Message: "scriptedOutcome is only available in test mode"}
-	}
-	if in.ScriptedOutcome != "" {
-		return s.createScriptedLocked(t, in)
-	}
 	version := 0
 	for _, f := range s.flows[t.ID] {
 		if f.ID == in.FlowID && f.Active {
@@ -226,52 +215,13 @@ func (s *Stub) createLocked(t Tenant, flowID string, version int, ttl time.Durat
 	return sess, nil
 }
 
-// createScriptedLocked resolves a ScriptedOutcome session at once, as the engine
-// does in test mode: no flow, no subject, no claim.
-func (s *Stub) createScriptedLocked(t Tenant, in SessionInput) (Session, error) {
-	res, err := scriptedResult(in.ScriptedOutcome)
-	if err != nil {
-		return Session{}, err
-	}
-	id, err := stubID("ses")
-	if err != nil {
-		return Session{}, err
-	}
-	token, err := stubID("tok")
-	if err != nil {
-		return Session{}, err
-	}
-	now := time.Now().UTC()
-	s.sessions[id] = stubSession{tenant: t.ID, token: token, method: in.Method, expiresAt: now.Add(stubSessionTTL), scripted: &res}
-	return Session{ID: id, Token: token, ExpiresAt: now.Add(stubSessionTTL)}, nil
-}
-
-// scriptedResult is what the engine resolves a scripted outcome to.
-func scriptedResult(outcome string) (Result, error) {
-	now := time.Now().UTC()
-	switch {
-	case outcome == "approve":
-		return Result{
-			Status: StatusApproved, CompletedAt: &now, AssuranceLevel: stubAssuranceLevel,
-			EIDASLevel: stubAssuranceLevel, Name: stubProofedName,
-		}, nil
-	case outcome == "needs_review":
-		return Result{Status: StatusNeedsReview, CompletedAt: &now}, nil
-	case outcome == "expire":
-		return Result{Status: StatusExpired}, nil
-	case strings.HasPrefix(outcome, "reject:") && len(outcome) > len("reject:"):
-		return Result{Status: StatusRejected, ErrorCode: strings.TrimPrefix(outcome, "reject:"), CompletedAt: &now}, nil
-	}
-	return Result{}, &RejectedError{Status: http.StatusBadRequest, Message: "invalid scriptedOutcome"}
-}
-
 func (s *Stub) SessionResult(_ context.Context, t Tenant, sessionID, sessionToken string) (Result, error) {
 	sess, err := s.session(t, sessionID, sessionToken)
 	if err != nil {
 		return Result{}, err
 	}
-	if sess.scripted != nil {
-		return *sess.scripted, nil
+	if sess.decided != nil {
+		return *sess.decided, nil
 	}
 	if time.Now().After(sess.expiresAt) {
 		return Result{Status: StatusExpired}, nil
@@ -358,7 +308,7 @@ func (s *Stub) DecideReview(ctx context.Context, t Tenant, sessionID, sessionTok
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess := s.sessions[sessionID]
-	sess.scripted = &res
+	sess.decided = &res
 	s.sessions[sessionID] = sess
 	return nil
 }

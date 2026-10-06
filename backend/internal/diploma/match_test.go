@@ -67,10 +67,38 @@ func TestMatchFullName(t *testing.T) {
 	}
 }
 
-func TestMatchFullNameUnreadableDate(t *testing.T) {
+func TestMatchNameUnreadableDate(t *testing.T) {
 	got := MatchFullName("Piet Jansen", "onbekend", Person{GivenNames: "Piet", Surname: "Jansen", DateOfBirth: "1980-02-03"})
 	if got.Matched || got.DateOfBirthMatch || len(got.Reasons) == 0 {
 		t.Errorf("MatchFullName = %+v, want an unmatched date of birth with a reason", got)
+	}
+}
+
+// A DUO extract prints the name with its diacritics; a passport's MRZ spells
+// them out per ICAO 9303 or drops them. Each spelling must match the extract.
+func TestMatchNameICAOTransliterate(t *testing.T) {
+	cases := []struct {
+		printed   string
+		disclosed Person
+	}{
+		{"Jürgen Müller", Person{GivenNames: "JUERGEN", Surname: "MUELLER"}},
+		{"Jürgen Müller", Person{GivenNames: "JURGEN", Surname: "MULLER"}},
+		{"Jürgen Müller", Person{GivenNames: "Jürgen", Surname: "Müller"}},
+		{"Søren Strauß", Person{GivenNames: "SOEREN", Surname: "STRAUSS"}},
+		{"Søren Strauß", Person{GivenNames: "SOREN", Surname: "STRAUSS"}},
+		{"Åsa Bjørk", Person{GivenNames: "AASA", Surname: "BJOERK"}},
+		{"Ægir Ångström", Person{GivenNames: "AEGIR", Surname: "AANGSTROEM"}},
+	}
+	for _, tc := range cases {
+		tc.disclosed.DateOfBirth = "1980-02-03"
+		if got := MatchFullName(tc.printed, "3 februari 1980", tc.disclosed); !got.Matched {
+			t.Errorf("MatchFullName(%q, %+v) = %+v, want a match", tc.printed, tc.disclosed, got)
+		}
+	}
+	// A transliteration matches its own letter only: MUELLER is not MOLLER.
+	got := MatchFullName("Jürgen Möller", "3 februari 1980", Person{GivenNames: "JUERGEN", Surname: "MUELLER", DateOfBirth: "1980-02-03"})
+	if got.SurnameMatch {
+		t.Errorf("MatchFullName(Möller, MUELLER) = %+v, want the surname to differ", got)
 	}
 }
 
@@ -79,6 +107,8 @@ func TestNormalize(t *testing.T) {
 		"  van   der\tBerg ":  "VAN DER BERG",
 		"Müller-Lüdenscheidt": "MULLER LUDENSCHEIDT",
 		"O'Brien":             "O BRIEN",
+		"Strauß":              "STRAUSS",
+		"Søren Ærø":           "SOREN AERO",
 		"":                    "",
 	} {
 		if got := Normalize(in); got != want {
@@ -98,6 +128,26 @@ func TestParseDate(t *testing.T) {
 	for _, in := range []string{"", "14-13-1980", "yesterday"} {
 		if _, err := ParseDate(in); err == nil {
 			t.Errorf("ParseDate(%q) succeeded, want an error", in)
+		}
+	}
+}
+
+func TestSameName(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{"Anna Maria Müller", "ANNA MARIA MUELLER", true},
+		{"Anna Maria Müller", "anna maria muller", true},
+		{"Søren Strauß", "SOEREN STRAUSS", true},
+		{"Anna Smit", "Anna Jansen Smit", false},
+		{"Anna Jansen-Smit", "Anna Smit", false},
+		{"Jan Willem de Vries", "Jan Pieter de Vries", false},
+		{"Jan de Vries", "de Vries Jan", false},
+		{"", "", false},
+	} {
+		if got := SameName(tc.a, tc.b); got != tc.want {
+			t.Errorf("SameName(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
 		}
 	}
 }

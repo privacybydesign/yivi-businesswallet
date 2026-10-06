@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
@@ -63,7 +62,7 @@ type requestStore interface {
 	List(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error)
 	MarkStarted(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error
 	EndSession(ctx context.Context, req Request, sessionID string, ipsStatus proofingprovider.Status, method proofingprovider.Method) error
-	ListPage(ctx context.Context, orgID, customerID uuid.UUID, after *RequestCursor, limit int) ([]Request, error)
+	ListPage(ctx context.Context, scope CustomerScope, after *RequestCursor, limit int) ([]Request, error)
 	Cancel(ctx context.Context, req Request) (bool, error)
 	RecordResultRead(ctx context.Context, req Request) error
 	Purge(ctx context.Context, req Request) error
@@ -72,7 +71,7 @@ type requestStore interface {
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	ReferencePhoto(ctx context.Context, req Request) (*proofingprovider.Image, error)
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
-	GetForCustomer(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, error)
+	GetForCustomer(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error)
 	Get(ctx context.Context, orgID, id uuid.UUID) (Request, error)
 	ListDue(ctx context.Context, now time.Time, limit int) ([]Request, error)
 	NextDeadline(ctx context.Context, now time.Time) (time.Time, error)
@@ -82,6 +81,10 @@ type requestStore interface {
 	RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode string) error
 	RecordHandover(ctx context.Context, req Request, expiresAt time.Time) error
 	ListPurgeDue(ctx context.Context, limit int) ([]Request, error)
+	ListUnpurgedForCustomer(ctx context.Context, orgID, customerID uuid.UUID) ([]Request, error)
+	ClearExpiredProofedNames(ctx context.Context) (int64, error)
+	ListOpenReviews(ctx context.Context, orgID uuid.UUID, customerID *uuid.UUID) ([]Request, error)
+	LockReview(ctx context.Context, id uuid.UUID) (func(), error)
 }
 
 // eventReader reads the audit trail (implemented by *audit.Reader).
@@ -101,7 +104,7 @@ type webhookStore interface {
 }
 
 type apiKeyStore interface {
-	Create(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string, mode Mode, scopes []string) (APIKey, string, error)
+	Create(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string, scopes []string) (APIKey, string, error)
 	List(ctx context.Context, orgID, customerID uuid.UUID) ([]APIKey, error)
 	Revoke(ctx context.Context, orgID, customerID, id uuid.UUID) (APIKey, error)
 	Authenticate(ctx context.Context, raw string) (APIKeyCaller, error)
@@ -113,7 +116,7 @@ type customerStore interface {
 	Create(ctx context.Context, orgID, createdBy uuid.UUID, name string) (Customer, error)
 	Rename(ctx context.Context, orgID, id uuid.UUID, name string) (Customer, error)
 	SaveFlows(ctx context.Context, orgID, id uuid.UUID, sel FlowSelection) (Customer, error)
-	SetPaused(ctx context.Context, orgID, id uuid.UUID, paused bool) (Customer, error)
+	SetStatus(ctx context.Context, orgID, id uuid.UUID, status CustomerStatus) (Customer, error)
 	SaveSettings(ctx context.Context, orgID, id uuid.UUID, settings CustomerSettings) (Customer, error)
 	SaveBranding(ctx context.Context, orgID, id uuid.UUID, b CustomerBranding, logo LogoChange) (Customer, error)
 	SaveRedirectOrigins(ctx context.Context, orgID, id uuid.UUID, origins []string) (Customer, error)
@@ -121,11 +124,10 @@ type customerStore interface {
 	Remove(ctx context.Context, orgID, id uuid.UUID) error
 }
 
-// Mailer sends the proofing-request e-mail (implemented by *email.Service).
 type pauseStore interface {
 	Get(ctx context.Context, orgID uuid.UUID) (OrgPause, error)
 	List(ctx context.Context) ([]OrgPause, error)
-	Set(ctx context.Context, orgID uuid.UUID, level PauseLevel, paused bool) (OrgPause, error)
+	Set(ctx context.Context, orgID uuid.UUID, level PauseLevel, state PauseState, by *uuid.UUID) (OrgPause, error)
 }
 
 type flowHostedStore interface {
@@ -133,11 +135,12 @@ type flowHostedStore interface {
 	Save(ctx context.Context, orgID uuid.UUID, flowID string, f FlowHosted) (FlowHosted, error)
 }
 
+// Mailer sends the proofing-request e-mail (implemented by *email.Service).
 type Mailer interface {
 	SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, m email.ProofingMail) error
 }
 
-// Service orchestrates IPS, the settings, request and customer stores, and the mailer.
+// Service orchestrates the engine, the settings, request and customer stores, and the mailer.
 type Service struct {
 	settings  settingsStore
 	requests  requestStore
@@ -157,7 +160,7 @@ type Service struct {
 	verifier            verifier
 	mailer              Mailer
 	now                 func() time.Time
-	// readChecks throttles the IPS re-check of a single-request read.
+	// readChecks throttles the engine re-check of a single-request read.
 	readChecks *readThrottle
 	// hostedBaseURL is the public page a hosted link's token is appended to.
 	hostedBaseURL string
@@ -166,7 +169,6 @@ type Service struct {
 	dataRequests dataRequestStore
 }
 
-// NewService builds the proofing service. A nil mailer skips the e-mail (tests).
 // Stores are the service's persistence, one store per concern.
 type Stores struct {
 	Settings  settingsStore
@@ -188,6 +190,7 @@ type Stores struct {
 	DataRequests dataRequestStore
 }
 
+// NewService builds the proofing service. A nil mailer skips the e-mail (tests).
 func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *Service {
 	return &Service{
 		settings: stores.Settings, requests: stores.Requests, customers: stores.Customers, apiKeys: stores.APIKeys,
@@ -198,11 +201,10 @@ func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *
 	}
 }
 
-// orgTenant is the org as the engine's tenant: its own id, in the org's test
-// mode (a sandbox that only runs scripted outcomes) for ModeTest. An org
-// needs no enable step before it can proof.
-func orgTenant(orgID uuid.UUID, mode Mode) proofingprovider.Tenant {
-	return proofingprovider.Tenant{ID: orgID.String(), Sandbox: mode == ModeTest}
+// orgTenant is the org as the engine's tenant: its own id. An org needs no
+// enable step before it can proof.
+func orgTenant(orgID uuid.UUID) proofingprovider.Tenant {
+	return proofingprovider.Tenant{ID: orgID.String()}
 }
 
 // retentionGrace is how much longer the engine keeps a customer's session
@@ -210,31 +212,44 @@ func orgTenant(orgID uuid.UUID, mode Mode) proofingprovider.Tenant {
 // engine too) always runs first.
 const retentionGrace = 24 * time.Hour
 
-// engineRetention is how long the engine keeps a session once it ended: a
-// customer's data retention (plus grace); a member's request leaves it to
-// the engine's default.
-func engineRetention(customer *Customer) time.Duration {
+// engineRetention is how long the engine keeps a session once it ended: the
+// flow's own override when it set one, else the customer's data retention,
+// plus grace; a member's request leaves it to the engine (the flow's
+// override, or its default).
+func engineRetention(customer *Customer, override time.Duration) time.Duration {
 	if customer == nil {
 		return 0
 	}
-	return customer.Settings.DataRetention() + retentionGrace
+	retention := customer.Settings.DataRetention()
+	if override > 0 {
+		retention = override
+	}
+	return retention + retentionGrace
+}
+
+// subjectRetentionDays is what the subject is told about their session's data
+// on a customer's flow: how long it is kept anywhere at most, the retention
+// that applies (engineRetention: the flow's override, else the customer's)
+// with the engine's grace, rounded up to whole days.
+func subjectRetentionDays(customer Customer, override time.Duration) int {
+	day := hoursPerDay * time.Hour
+	return int((engineRetention(&customer, override) + day - 1) / day)
 }
 
 // requestTenant is the tenant req's session runs under.
 func requestTenant(req Request) proofingprovider.Tenant {
-	return orgTenant(req.OrganizationID, req.mode())
+	return orgTenant(req.OrganizationID)
 }
 
-// Flows returns the org's active IPS flows with the admin's selection applied.
-// all lists every flow (the admin's view); otherwise only the flows members may
-// send a request on.
-func (s *Service) Flows(ctx context.Context, org Org, all bool) ([]OrgFlow, error) {
-	tenant := orgTenant(org.ID, ModeLive)
-	return s.orgFlows(ctx, org, tenant, all)
+// Flows returns the org's active flows with the admin's selection applied:
+// every flow for FlowsAll, else only the ones members may send a request on.
+func (s *Service) Flows(ctx context.Context, org Org, view FlowView) ([]OrgFlow, error) {
+	tenant := orgTenant(org.ID)
+	return s.orgFlows(ctx, org, tenant, view)
 }
 
-// orgFlows is Flows with the org's IPS key already resolved.
-func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider.Tenant, all bool) ([]OrgFlow, error) {
+// orgFlows is Flows with the org's engine key already resolved.
+func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider.Tenant, view FlowView) ([]OrgFlow, error) {
 	flows, err := s.ips.ListFlows(ctx, tenant)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
@@ -254,7 +269,7 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	out := make([]OrgFlow, 0, len(flows))
 	for _, f := range flows {
 		of := OrgFlow{
-			Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && Completable(f), Default: f.ID == sel.DefaultFlowID,
+			Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && flowCompletable(f), Default: f.ID == sel.DefaultFlowID,
 			Diplomas: DiplomasOff, Kind: FlowIdentity,
 		}
 		if kind, ok := kinds[f.ID]; ok {
@@ -263,7 +278,7 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 		if mode, ok := diplomas[f.ID]; ok {
 			of.Diplomas = mode
 		}
-		if all || of.Allowed {
+		if view == FlowsAll || of.Allowed {
 			out = append(out, of)
 		}
 	}
@@ -271,10 +286,10 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 }
 
 // ConfigureFlows replaces the org's allow-list. Every chosen flow must be an
-// active IPS flow a recipient can finish, and a non-empty selection needs a
+// active the engine flow a recipient can finish, and a non-empty selection needs a
 // default among it.
 func (s *Service) ConfigureFlows(ctx context.Context, org Org, sel FlowSelection) error {
-	sel, err := s.validSelection(ctx, org, sel, Completable)
+	sel, err := s.validSelection(ctx, org, sel, flowCompletable)
 	if err != nil {
 		return err
 	}
@@ -284,11 +299,11 @@ func (s *Service) ConfigureFlows(ctx context.Context, org Org, sel FlowSelection
 	return s.settings.SaveFlowSelection(ctx, org.ID, sel)
 }
 
-// validSelection deduplicates sel and checks it: every flow an active IPS flow
+// validSelection deduplicates sel and checks it: every flow an active the engine flow
 // of the org a recipient can finish, and a non-empty selection has its default
 // among it. Both the members' allow-list and a customer's assignment are one;
-// completable is what the recipients can finish (Completable for members,
-// CustomerCompletable for a customer's subjects).
+// completable is what the recipients can finish (flowCompletable for members,
+// customerCompletable for a customer's subjects).
 func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection, completable func(proofingprovider.Flow) bool) (FlowSelection, error) {
 	ids := make([]string, 0, len(sel.FlowIDs))
 	for _, id := range sel.FlowIDs {
@@ -303,7 +318,7 @@ func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection
 	if len(ids) > 0 && !slices.Contains(ids, sel.DefaultFlowID) {
 		return sel, fmt.Errorf("%w: choose which of the available flows is the default", ErrInvalidInput)
 	}
-	flows, err := s.Flows(ctx, org, true)
+	flows, err := s.Flows(ctx, org, FlowsAll)
 	if err != nil {
 		return sel, err
 	}
@@ -319,7 +334,7 @@ func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection
 	return sel, nil
 }
 
-// CreateFlow defines a flow at IPS (version 1) and audits it. IPS validates the
+// CreateFlow defines a flow in the engine (version 1) and audits it. The engine validates the
 // combination of steps, checks and assurance level; its refusal comes back as a
 // *proofingprovider.RejectedError.
 func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
@@ -327,7 +342,7 @@ func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.F
 	if err != nil {
 		return proofingprovider.Flow{}, err
 	}
-	tenant := orgTenant(org.ID, ModeLive)
+	tenant := orgTenant(org.ID)
 	flow, err := s.ips.CreateFlow(ctx, tenant, in)
 	if err != nil {
 		return proofingprovider.Flow{}, err
@@ -338,14 +353,14 @@ func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.F
 	return flow, nil
 }
 
-// EditFlow saves in as the next version of flow id. IPS makes it the active
+// EditFlow saves in as the next version of flow id. The engine makes it the active
 // version at once; requests already sent keep the version their session pinned.
 func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
 	in, err := normalizeFlow(in)
 	if err != nil {
 		return proofingprovider.Flow{}, err
 	}
-	tenant := orgTenant(org.ID, ModeLive)
+	tenant := orgTenant(org.ID)
 	flow, err := s.ips.CreateFlowVersion(ctx, tenant, id, in)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
 		return proofingprovider.Flow{}, ErrFlowNotFound
@@ -361,7 +376,7 @@ func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingp
 
 // FlowVersions returns every version of flow id, oldest first.
 func (s *Service) FlowVersions(ctx context.Context, org Org, id string) ([]proofingprovider.Flow, error) {
-	tenant := orgTenant(org.ID, ModeLive)
+	tenant := orgTenant(org.ID)
 	versions, err := s.ips.ListFlowVersions(ctx, tenant, id)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
 		return nil, ErrFlowNotFound
@@ -375,7 +390,7 @@ func (s *Service) FlowVersions(ctx context.Context, org Org, id string) ([]proof
 // ActivateFlowVersion makes an earlier (or later) version of flow id the one new
 // requests run, and audits it.
 func (s *Service) ActivateFlowVersion(ctx context.Context, org Org, id string, version int) (proofingprovider.Flow, error) {
-	tenant := orgTenant(org.ID, ModeLive)
+	tenant := orgTenant(org.ID)
 	flow, err := s.ips.ActivateFlowVersion(ctx, tenant, id, version)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
 		return proofingprovider.Flow{}, ErrFlowNotFound
@@ -390,8 +405,8 @@ func (s *Service) ActivateFlowVersion(ctx context.Context, org Org, id string, v
 }
 
 // normalizeFlow checks what the wallet itself requires of a flow and fixes the
-// face capture to the app: a recipient only has vcmrtd/idem (IPS has no end-user
-// web page yet), while IPS's own default is the browser.
+// face capture to the app: a recipient only has vcmrtd/idem (the engine has no end-user
+// web page yet), while the engine's own default is the browser.
 func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || len(in.Steps) == 0 {
@@ -444,12 +459,12 @@ type Sent struct {
 
 // CreateRequest sends a proofing request: to a member, on one of the flows the
 // org admin made available to members, or for a customer to its subject, on one
-// of the flows assigned to that customer. It creates the request's IPS session
+// of the flows assigned to that customer. It creates the request's engine session
 // for the chosen app, stores the request with it, and, for a mailed request,
 // mails the subject the session's vcmrtd deep link: SessionTTL runs from the
 // send. An on-screen request is created only once the subject accepted what is
 // collected, so its session starts then. A session whose request then fails to
-// store lapses unused at IPS.
+// store is erased again (discardSession).
 func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in NewRequest) (Sent, error) {
 	in, err := normalizeRequest(in)
 	if err != nil {
@@ -463,15 +478,15 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if customer != nil && customer.Settings.SessionTTL != 0 {
 		ttl = customer.Settings.SessionTTL
 	}
-	tenant := orgTenant(org.ID, ModeLive)
+	tenant := orgTenant(org.ID)
 	flow, err := s.sendableFlow(ctx, org, tenant, in.FlowID, customer)
 	if err != nil {
 		return Sent{}, err
 	}
-	if in.Method == proofingprovider.MethodYivi && !YiviAppAvailable(flow) {
+	if in.Method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
 		return Sent{}, fmt.Errorf("%w: this flow's face provider only runs in the Idem app", ErrInvalidInput)
 	}
-	if subject.BirthDate != "" && !ReadsIdentity(flow) {
+	if subject.BirthDate != "" && !readsIdentity(flow) {
 		return Sent{}, fmt.Errorf("%w: this flow does not read the name and date of birth, so it cannot check for one person", ErrInvalidInput)
 	}
 	photo, err := referencePhotoFor(flow, in.ReferencePhoto)
@@ -494,11 +509,6 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 		}
 		diplomas = DiplomasOff
 	}
-	// The extracts are uploaded on the page that ran the session; a test
-	// request runs none and asks for none.
-	if in.Mode == ModeTest {
-		diplomas = DiplomasOff
-	}
 	if diplomas.asked() && in.Channel != ChannelHosted && in.Channel != ChannelOnScreen {
 		return Sent{}, ErrDiplomasNeedPage
 	}
@@ -509,50 +519,37 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	id := uuid.New()
 	input := proofingprovider.SessionInput{
 		FlowID: flow.ID, ClientReference: id.String(), TTL: ttl, Method: in.Method,
-		Language: string(in.Language), Retention: engineRetention(customer),
+		Language: string(in.Language), Retention: engineRetention(customer, time.Duration(flow.RetentionOverrideSeconds)*time.Second), ReferencePhoto: photo,
 	}
-	if in.Mode == ModeTest {
-		// A test session runs no flow: its outcome is scripted by the engine,
-		// so a reference photo is checked above but has no face to match.
-		input.FlowID, input.ScriptedOutcome = "", in.ScriptedOutcome
-	} else {
-		input.ReferencePhoto = photo
-	}
-	sess, err := s.ips.CreateSession(ctx, orgTenant(org.ID, in.Mode), input)
+	sess, err := s.ips.CreateSession(ctx, tenant, input)
 	if err != nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", id, err)
 	}
 	// An Idem session is the vcmrtd link; a Yivi one is started from the screen.
-	// A scripted one is resolved already and has neither.
-	if in.Mode == ModeLive && in.Method == proofingprovider.MethodIdem && sess.Claim == nil {
-		return Sent{}, fmt.Errorf("proofing: create session request %s: IPS offered no vcmrtd link", id)
+	if in.Method == proofingprovider.MethodIdem && sess.Claim == nil {
+		return Sent{}, s.discardSession(ctx, tenant, sess,
+			fmt.Errorf("proofing: create session request %s: IPS offered no vcmrtd link", id))
 	}
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: id, OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
-		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: in.Method, Channel: in.Channel, Mode: in.Mode,
+		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: in.Method, Channel: in.Channel,
 		Diplomas: diplomas, FlowKind: kind,
 	})
 	if err != nil {
-		return Sent{}, err
+		return Sent{}, s.discardSession(ctx, tenant, sess, err)
 	}
 	attached, err := s.requests.AttachSession(ctx, req, sess)
 	if err != nil {
-		return Sent{}, err
+		return Sent{}, s.discardSession(ctx, tenant, sess, err)
 	}
 	if !attached {
-		return Sent{}, fmt.Errorf("proofing: attach session request %s: the new request moved on", id)
+		return Sent{}, s.discardSession(ctx, tenant, sess,
+			fmt.Errorf("proofing: attach session request %s: the new request moved on", id))
 	}
 	if sess.FlowVersion != 0 {
 		req.FlowVersion = sess.FlowVersion
 	}
 	req.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt}
-	if in.Mode == ModeTest {
-		// Record the scripted outcome now rather than on the engine's notice;
-		// a failure is logged and the notice or the deadline job records it.
-		req, _ = s.tryReconcile(ctx, orgTenant(org.ID, in.Mode), req)
-		return Sent{Request: req}, nil
-	}
-
 	out := Sent{Request: req}
 	if sess.Claim == nil {
 		return out, nil
@@ -569,8 +566,23 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	return out, nil
 }
 
-// createHosted stores a hosted request with its link and no IPS session yet:
-// the subject starts one from the page (StartHosted) until HostedLinkTTL. Its
+// discardSession erases sess, an engine session no request holds (its
+// request failed to store, or to attach it): it may carry the reference
+// photo. It runs to the end even when ctx was cancelled (a client timeout is
+// one way to get here). Its own failure is logged and joined to cause, which
+// it returns.
+func (s *Service) discardSession(ctx context.Context, tenant proofingprovider.Tenant, sess proofingprovider.Session, cause error) error {
+	err := s.ips.DeleteSession(context.WithoutCancel(ctx), tenant, sess.ID, sess.Token)
+	if err == nil {
+		return cause
+	}
+	slog.ErrorContext(ctx, "identity proofing: unattached engine session not erased",
+		slog.String("session_id", sess.ID), slog.Any("error", err))
+	return errors.Join(cause, fmt.Errorf("proofing: erase unattached session %s: %w", sess.ID, err))
+}
+
+// createHosted stores a hosted request with its link and no the engine session yet:
+// the subject starts one from the page (StartHosted) until hostedLinkTTL. Its
 // redirect must be on one of the customer's allowed origins.
 func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in NewRequest, subject Subject,
 	customer Customer, flow proofingprovider.Flow, diplomas DiplomaMode, kind FlowKind, photo *proofingprovider.Image,
@@ -602,8 +614,8 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 	}
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: uuid.New(), OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
-		Flow: flow, LinkExpiresAt: s.now().Add(HostedLinkTTL), Method: in.Method, Channel: in.Channel,
-		Mode: in.Mode, LinkTokenHash: hash, RedirectURL: in.RedirectURL, Language: in.Language,
+		Flow: flow, LinkExpiresAt: s.now().Add(hostedLinkTTL), Method: in.Method, Channel: in.Channel,
+		LinkTokenHash: hash, RedirectURL: in.RedirectURL, Language: in.Language,
 		Diplomas: diplomas, FlowKind: kind, ReferencePhoto: photo,
 	})
 	if err != nil {
@@ -618,17 +630,6 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 func normalizeRequest(in NewRequest) (NewRequest, error) {
 	if in.Method == "" {
 		in.Method = proofingprovider.MethodIdem
-	}
-	if in.Mode == "" {
-		in.Mode = ModeLive
-	}
-	switch {
-	case in.Mode == ModeTest && in.ScriptedOutcome == "":
-		in.ScriptedOutcome = defaultScriptedOutcome
-	case in.Mode == ModeTest && !scriptedOutcomePattern.MatchString(in.ScriptedOutcome):
-		return NewRequest{}, fmt.Errorf("%w: scriptedOutcome is approve, reject:<CODE>, needs_review or expire", ErrInvalidInput)
-	case in.Mode != ModeTest && in.ScriptedOutcome != "":
-		return NewRequest{}, fmt.Errorf("%w: only a test key can script an outcome", ErrInvalidInput)
 	}
 	if in.Channel == "" {
 		in.Channel = ChannelEmail
@@ -649,8 +650,6 @@ func normalizeRequest(in NewRequest) (NewRequest, error) {
 		return NewRequest{}, fmt.Errorf("%w: a Yivi app session runs on this screen and cannot be e-mailed", ErrInvalidInput)
 	case in.Channel == ChannelHosted && in.CustomerID == nil:
 		return NewRequest{}, fmt.Errorf("%w: a link goes to a customer's subject", ErrInvalidInput)
-	case in.Channel == ChannelHosted && in.Mode == ModeTest:
-		return NewRequest{}, fmt.Errorf("%w: a test session resolves at once and has no link", ErrInvalidInput)
 	case in.RedirectURL != "" && in.Channel != ChannelHosted:
 		return NewRequest{}, fmt.Errorf("%w: only a hosted session redirects its subject", ErrInvalidInput)
 	}
@@ -681,7 +680,7 @@ func (s *Service) subject(ctx context.Context, org Org, in NewRequest) (Subject,
 	if customer.Paused() {
 		return Subject{}, nil, ErrCustomerPaused
 	}
-	if in.Mode == ModeLive && !customer.HasLiveKey {
+	if !customer.HasAPIKey {
 		return Subject{}, nil, ErrCustomerNoAPIKey
 	}
 	name := strings.TrimSpace(in.SubjectName)
@@ -693,7 +692,9 @@ func (s *Service) subject(ctx context.Context, org Org, in NewRequest) (Subject,
 		return Subject{}, nil, err
 	}
 	subject := Subject{CustomerID: in.CustomerID, Name: name, BirthDate: birthDate}
-	if in.Channel != ChannelEmail && strings.TrimSpace(in.SubjectEmail) == "" {
+	// No address is needed when nothing is mailed: on screen, a hosted link,
+	// or a session the caller shows its own QR for (SkipMail).
+	if (in.Channel != ChannelEmail || in.SkipMail) && strings.TrimSpace(in.SubjectEmail) == "" {
 		return subject, &customer, nil
 	}
 	email, err := user.ParseEmail(in.SubjectEmail)
@@ -705,13 +706,13 @@ func (s *Service) subject(ctx context.Context, org Org, in NewRequest) (Subject,
 }
 
 // referencePhotoFor checks the reference photo a request on flow carries: one
-// is required exactly when the flow NeedsReferencePhoto, so a chip flow is
+// is required exactly when the flow flowNeedsReferencePhoto, so a chip flow is
 // never matched against anything but the chip. It must be a PNG, JPEG or WebP
 // image (sniffed, not trusted from the caller) of at most
-// MaxReferencePhotoBytes; nil for a flow that takes none.
+// maxReferencePhotoBytes; nil for a flow that takes none.
 func referencePhotoFor(flow proofingprovider.Flow, raw string) (*proofingprovider.Image, error) {
 	raw = strings.TrimSpace(raw)
-	switch needs := NeedsReferencePhoto(flow); {
+	switch needs := flowNeedsReferencePhoto(flow); {
 	case needs && raw == "":
 		return nil, ErrReferencePhotoRequired
 	case !needs && raw != "":
@@ -723,8 +724,8 @@ func referencePhotoFor(flow proofingprovider.Flow, raw string) (*proofingprovide
 	if err != nil {
 		return nil, fmt.Errorf("%w: the reference photo is not standard base64", ErrInvalidInput)
 	}
-	if len(data) > MaxReferencePhotoBytes {
-		return nil, fmt.Errorf("%w: the reference photo is larger than %d KiB", ErrInvalidInput, MaxReferencePhotoBytes>>10)
+	if len(data) > maxReferencePhotoBytes {
+		return nil, fmt.Errorf("%w: the reference photo is larger than %d KiB", ErrInvalidInput, maxReferencePhotoBytes>>10)
 	}
 	mime := http.DetectContentType(data)
 	if !slices.Contains(referencePhotoTypes, mime) {
@@ -751,13 +752,10 @@ func expectedBirthDate(raw, name string, now time.Time) (string, error) {
 	return date.Format(birthDateLayout), nil
 }
 
-// ReadsIdentity reports whether flow f's result carries the holder's name and
+// readsIdentity reports whether flow f's result carries the holder's name and
 // date of birth (the document data, dg1): what a request for one known person
-// is matched against. A flow that lists no data gets what its steps collect.
-func ReadsIdentity(f proofingprovider.Flow) bool {
-	if len(f.RequestedAttributes) == 0 {
-		return slices.Contains(f.Steps, stepDocumentCapture)
-	}
+// is matched against. A flow that lists no data releases the outcome only.
+func readsIdentity(f proofingprovider.Flow) bool {
 	return slices.Contains(f.RequestedAttributes, attributeDocument)
 }
 
@@ -795,7 +793,7 @@ func (s *Service) proofingMail(ctx context.Context, org Org, customer *Customer,
 // empty. Either way it must be one a recipient can finish.
 func (s *Service) sendableFlow(ctx context.Context, org Org, tenant proofingprovider.Tenant, flowID string, customer *Customer) (proofingprovider.Flow, error) {
 	if customer == nil {
-		flows, err := s.orgFlows(ctx, org, tenant, true)
+		flows, err := s.orgFlows(ctx, org, tenant, FlowsAll)
 		if err != nil {
 			return proofingprovider.Flow{}, err
 		}
@@ -803,8 +801,11 @@ func (s *Service) sendableFlow(ctx context.Context, org Org, tenant proofingprov
 		if i < 0 {
 			return proofingprovider.Flow{}, ErrFlowNotFound
 		}
-		if err := sendable(Completable(flows[i].Flow), flows[i].Allowed, ErrFlowNotAllowed); err != nil {
-			return proofingprovider.Flow{}, err
+		if !flowCompletable(flows[i].Flow) {
+			return proofingprovider.Flow{}, ErrFlowNotCompletable
+		}
+		if !flows[i].Allowed {
+			return proofingprovider.Flow{}, ErrFlowNotAllowed
 		}
 		return flows[i].Flow, nil
 	}
@@ -822,34 +823,25 @@ func (s *Service) sendableFlow(ctx context.Context, org Org, tenant proofingprov
 	if i < 0 {
 		return proofingprovider.Flow{}, ErrFlowNotFound
 	}
-	if err := sendable(CustomerCompletable(flows[i]), slices.Contains(customer.Flows.FlowIDs, flowID), ErrFlowNotAssigned); err != nil {
-		return proofingprovider.Flow{}, err
+	if !customerCompletable(flows[i]) {
+		return proofingprovider.Flow{}, ErrFlowNotCompletable
+	}
+	if !slices.Contains(customer.Flows.FlowIDs, flowID) {
+		return proofingprovider.Flow{}, ErrFlowNotAssigned
 	}
 	return flows[i], nil
 }
 
-// sendable refuses a flow no recipient can finish (completable false), then
-// one the sender may not use (notPermitted).
-func sendable(completable, permitted bool, notPermitted error) error {
-	if !completable {
-		return ErrFlowNotCompletable
-	}
-	if !permitted {
-		return notPermitted
-	}
-	return nil
-}
-
 // Requests lists the org's requests narrowed by filter, as stored: outcomes
-// land by IPS's push and the deadline job, so a list read never calls IPS.
+// land by the engine's notice and the deadline job, so a list read never calls the engine.
 func (s *Service) Requests(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error) {
 	return s.requests.List(ctx, orgID, filter)
 }
 
-// reconcile reads the request's IPS session and records what IPS decided,
-// with no actor: the audit trail shows it as the system's. An IPS
+// reconcile reads the request's engine session and records what the engine decided,
+// with no actor: the audit trail shows it as the system's. An the engine
 // failure is logged and the row is shown as last known: a read must not fail
-// because IPS is briefly away.
+// because the engine is briefly away.
 func (s *Service) reconcile(ctx context.Context, tenant proofingprovider.Tenant, req Request) Request {
 	req, _ = s.tryReconcile(ctx, tenant, req)
 	return req
@@ -857,7 +849,7 @@ func (s *Service) reconcile(ctx context.Context, tenant proofingprovider.Tenant,
 
 // tryReconcile is reconcile that also returns the (already logged) failure.
 func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tenant, req Request) (Request, error) {
-	// What IPS reports is the subject's doing and the wallet's record of it, not
+	// What the engine reports is the subject's doing and the wallet's record of it, not
 	// that of whoever's read happened to trigger the check.
 	ctx = audit.WithoutActor(ctx)
 	sess := req.session
@@ -869,7 +861,7 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 		if req.FlowKind.dataRequest() && req.Status.Settled() {
 			return req, nil
 		}
-		// IPS purged or erased the session: treat it like a lapsed one.
+		// The engine purged or erased the session: treat it like a lapsed one.
 		res, err = proofingprovider.Result{Status: proofingprovider.StatusExpired}, nil
 	}
 	if err != nil {
@@ -899,7 +891,7 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 		req.Method = methodOr(res.Method, req.Method)
 		return req, nil
 	case proofingprovider.StatusExpired, proofingprovider.StatusCancelled:
-		// needs_review is still open at IPS, so it can end there too.
+		// needs_review is still open in the engine, so it can end there too.
 		if req.Status == StatusApproved || req.Status == StatusRejected {
 			return req, nil
 		}
@@ -982,29 +974,40 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 		completedAt = *res.CompletedAt
 	}
 	req.CompletedAt = &completedAt
-	return req, nil
+	if next != StatusNeedsReview {
+		return req, nil
+	}
+	// A paused org can decide nothing, so a review it reaches is rejected at once.
+	decided, err := s.rejectIfPaused(ctx, req)
+	if err != nil {
+		slog.WarnContext(ctx, "identity proofing: reject the review of a paused org failed",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
+		return req, err
+	}
+	return decided, nil
 }
 
-// enforceAssurance holds an approval IPS reported to the level the request's
-// flow demanded: IPS approves on its checks alone and never compares the level
-// achieved with the required one. An approval that falls short is a rejection
-// with ErrorAssuranceNotMet. A Yivi session an older IPS did not score counts
+// enforceAssurance holds an approval the engine reported to the level the
+// request's flow demanded at send. The engine's Idem flow already rejects a
+// session below its flow's level; the Yivi method's sessions are approved
+// without that comparison. An approval that falls short is a rejection
+// with errorAssuranceNotMet. A Yivi session an older the engine did not score counts
 // as yiviEIDASLevel.
 func enforceAssurance(req Request, res proofingprovider.Result) (Status, proofingprovider.Result) {
 	if res.EIDASLevel == "" && methodOr(res.Method, req.Method) == proofingprovider.MethodYivi {
 		res.EIDASLevel = yiviEIDASLevel
 	}
-	if MeetsAssurance(res.EIDASLevel, req.RequiredAssuranceLevel) {
+	if meetsAssurance(res.EIDASLevel, req.RequiredAssuranceLevel) {
 		return StatusApproved, res
 	}
-	res.ErrorCode = ErrorAssuranceNotMet
+	res.ErrorCode = errorAssuranceNotMet
 	return StatusRejected, res
 }
 
 // matchSubject holds an approval of a request for one known person to that
-// person: the identity read off the document must be the request's name, born
-// on its birth date (diploma.MatchFullName, as a DUO extract's holder is
-// matched), or the request is rejected with ErrorIdentityMismatch. A request
+// person: the identity read off the document must be the request's full name,
+// every word in order (samePerson), born on its birth date, or the request is
+// rejected with errorIdentityMismatch. A request
 // already decided holds no birth date any more, and is never matched again.
 func (s *Service) matchSubject(ctx context.Context, tenant proofingprovider.Tenant, req Request, res proofingprovider.Result) (Status, proofingprovider.Result, error) {
 	if req.expectedBirthDate == "" {
@@ -1014,11 +1017,10 @@ func (s *Service) matchSubject(ctx context.Context, tenant proofingprovider.Tena
 	if err != nil {
 		return "", res, fmt.Errorf("proofing: identity to match request %s: %w", req.ID, err)
 	}
-	holder := diploma.Person{GivenNames: identity.GivenName, Surname: identity.FamilyName, DateOfBirth: identity.BirthDate}
-	if diploma.MatchFullName(req.SubjectName, req.expectedBirthDate, holder).Matched {
+	if samePerson(identity.GivenName, identity.FamilyName, identity.BirthDate, req.SubjectName, req.expectedBirthDate) {
 		return StatusApproved, res, nil
 	}
-	res.ErrorCode = ErrorIdentityMismatch
+	res.ErrorCode = errorIdentityMismatch
 	return StatusRejected, res, nil
 }
 
@@ -1036,7 +1038,7 @@ func subjectAppContext(ctx context.Context, method proofingprovider.Method) cont
 	return audit.ContextWithActor(ctx, audit.Actor{Label: SubjectAppActorPrefix + string(method)})
 }
 
-// methodOr is the method IPS reported, or the one already known: a later read
+// methodOr is the method the engine reported, or the one already known: a later read
 // that no longer lists the devices does not forget it.
 func methodOr(reported, known proofingprovider.Method) proofingprovider.Method {
 	if reported != "" {
@@ -1058,12 +1060,12 @@ func (s *Service) Customer(ctx context.Context, orgID, id uuid.UUID) (Customer, 
 // CustomerFlows is the org's flows with the customer's assignment applied: every
 // flow (the admin's view, to assign from) or only the assigned ones a recipient
 // can finish (what a member may send on for the customer).
-func (s *Service) CustomerFlows(ctx context.Context, org Org, id uuid.UUID, all bool) ([]CustomerFlow, error) {
+func (s *Service) CustomerFlows(ctx context.Context, org Org, id uuid.UUID, view FlowView) ([]CustomerFlow, error) {
 	customer, err := s.customers.Get(ctx, org.ID, id)
 	if err != nil {
 		return nil, err
 	}
-	flows, err := s.Flows(ctx, org, true)
+	flows, err := s.Flows(ctx, org, FlowsAll)
 	if err != nil {
 		return nil, err
 	}
@@ -1071,12 +1073,14 @@ func (s *Service) CustomerFlows(ctx context.Context, org Org, id uuid.UUID, all 
 	for _, f := range flows {
 		cf := CustomerFlow{
 			Flow:     f.Flow,
-			Assigned: slices.Contains(customer.Flows.FlowIDs, f.ID) && CustomerCompletable(f.Flow),
+			Assigned: slices.Contains(customer.Flows.FlowIDs, f.ID) && customerCompletable(f.Flow),
 			Default:  f.ID == customer.Flows.DefaultFlowID,
 			Diplomas: f.Diplomas,
 			Kind:     f.Kind,
+			RetentionDays: subjectRetentionDays(customer,
+				time.Duration(f.RetentionOverrideSeconds)*time.Second),
 		}
-		if all || cf.Assigned {
+		if view == FlowsAll || cf.Assigned {
 			out = append(out, cf)
 		}
 	}
@@ -1101,15 +1105,19 @@ func (s *Service) RenameCustomer(ctx context.Context, orgID, id uuid.UUID, name 
 	return s.customers.Rename(ctx, orgID, id, name)
 }
 
-// SetCustomerPaused pauses or resumes proofing for a customer: while paused, no
-// request can be sent for it.
-func (s *Service) SetCustomerPaused(ctx context.Context, orgID, id uuid.UUID, paused bool) (Customer, error) {
-	return s.customers.SetPaused(ctx, orgID, id, paused)
+// SetCustomerStatus pauses or resumes proofing for a customer: while paused,
+// no request can be sent for it. One with a session waiting for review is
+// ErrCustomerHasOpenReviews, checked with the pause in one transaction.
+func (s *Service) SetCustomerStatus(ctx context.Context, orgID, id uuid.UUID, status CustomerStatus) (Customer, error) {
+	if status != CustomerActive && status != CustomerPaused {
+		return Customer{}, fmt.Errorf("%w: a customer is active or paused", ErrInvalidInput)
+	}
+	return s.customers.SetStatus(ctx, orgID, id, status)
 }
 
 // CustomerRequest is one of a customer's requests; see readReconciled.
-func (s *Service) CustomerRequest(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, error) {
-	req, err := s.requests.GetForCustomer(ctx, orgID, customerID, id)
+func (s *Service) CustomerRequest(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {
+	req, err := s.requests.GetForCustomer(ctx, scope, id)
 	if err != nil {
 		return Request{}, err
 	}
@@ -1117,19 +1125,19 @@ func (s *Service) CustomerRequest(ctx context.Context, orgID, customerID, id uui
 }
 
 // StoredCustomerRequest is one of a customer's requests as stored, without
-// re-checking IPS: what a headless poll answers from.
-func (s *Service) StoredCustomerRequest(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, error) {
-	return s.requests.GetForCustomer(ctx, orgID, customerID, id)
+// re-checking the engine: what a headless poll answers from.
+func (s *Service) StoredCustomerRequest(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {
+	return s.requests.GetForCustomer(ctx, scope, id)
 }
 
 // CustomerRequestPage is a page of a customer's requests, newest first, from
-// stored state (no IPS call), and the cursor of the next page ("" at the end).
+// stored state (no the engine call), and the cursor of the next page ("" at the end).
 // A cursor that does not decode is ErrInvalidInput.
-func (s *Service) CustomerRequestPage(ctx context.Context, orgID, customerID uuid.UUID, cursor string, limit int) ([]Request, string, error) {
+func (s *Service) CustomerRequestPage(ctx context.Context, scope CustomerScope, cursor string, limit int) ([]Request, string, error) {
 	if limit <= 0 {
-		limit = DefaultPageSize
+		limit = defaultPageSize
 	}
-	limit = min(limit, MaxPageSize)
+	limit = min(limit, maxPageSize)
 	var after *RequestCursor
 	if cursor != "" {
 		c, ok := decodeRequestCursor(cursor)
@@ -1139,7 +1147,7 @@ func (s *Service) CustomerRequestPage(ctx context.Context, orgID, customerID uui
 		after = &c
 	}
 	// One extra row tells whether a next page exists.
-	reqs, err := s.requests.ListPage(ctx, orgID, customerID, after, limit+1)
+	reqs, err := s.requests.ListPage(ctx, scope, after, limit+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1151,10 +1159,10 @@ func (s *Service) CustomerRequestPage(ctx context.Context, orgID, customerID uui
 	return reqs, encodeRequestCursor(RequestCursor{CreatedAt: last.CreatedAt, ID: last.ID}), nil
 }
 
-// CancelRequest ends a customer's request that has no outcome yet, at IPS too,
+// CancelRequest ends a customer's request that has no outcome yet, in the engine too,
 // and marks it cancelled. One that has an outcome or ended is ErrSessionOver.
-func (s *Service) CancelRequest(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, error) {
-	req, err := s.CustomerRequest(ctx, orgID, customerID, id)
+func (s *Service) CancelRequest(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {
+	req, err := s.CustomerRequest(ctx, scope, id)
 	if err != nil {
 		return Request{}, err
 	}
@@ -1166,7 +1174,7 @@ func (s *Service) CancelRequest(ctx context.Context, orgID, customerID, id uuid.
 		if err := s.ips.CancelSession(ctx, tenant, sess.ID, sess.Token); err != nil {
 			var rejected *proofingprovider.RejectedError
 			if errors.As(err, &rejected) {
-				// IPS decided it first; the pushed outcome records that.
+				// The engine decided it first; the notified outcome records that.
 				return Request{}, ErrSessionOver
 			}
 			return Request{}, fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
@@ -1179,14 +1187,14 @@ func (s *Service) CancelRequest(ctx context.Context, orgID, customerID, id uuid.
 	if !cancelled {
 		return Request{}, ErrSessionOver
 	}
-	return s.requests.GetForCustomer(ctx, orgID, customerID, id)
+	return s.requests.GetForCustomer(ctx, scope, id)
 }
 
-// RequestResult reads a settled customer request's result from IPS, the
+// RequestResult reads a settled customer request's result from the engine, the
 // wallet storing no identity, and audits identity_proofing.result_read. One
-// not settled yet is ErrResultNotReady; one erased or gone at IPS is not found.
-func (s *Service) RequestResult(ctx context.Context, orgID, customerID, id uuid.UUID) (Request, proofingprovider.Identity, error) {
-	req, err := s.CustomerRequest(ctx, orgID, customerID, id)
+// not settled yet is ErrResultNotReady; one erased or gone in the engine is not found.
+func (s *Service) RequestResult(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, proofingprovider.Identity, error) {
+	req, err := s.CustomerRequest(ctx, scope, id)
 	if err != nil {
 		return Request{}, proofingprovider.Identity{}, err
 	}
@@ -1230,7 +1238,7 @@ func (s *Service) requestResult(ctx context.Context, req Request) (Request, proo
 }
 
 // heldToVerdict holds the engine's identity to the wallet's verdict on req: an
-// approval the wallet rejected (ErrorAssuranceNotMet, ErrorIdentityMismatch)
+// approval the wallet rejected (errorAssuranceNotMet, errorIdentityMismatch)
 // is read as that rejection, without the person or their images. A mismatch
 // is someone other than the expected person, whose identity is never shown.
 func heldToVerdict(req Request, identity proofingprovider.Identity) proofingprovider.Identity {
@@ -1247,10 +1255,10 @@ func heldToVerdict(req Request, identity proofingprovider.Identity) proofingprov
 	}
 }
 
-// PurgeRequest erases a customer's request at IPS and every personal detail
+// PurgeRequest erases a customer's request in the engine and every personal detail
 // the wallet holds of it, whatever its state; the row stays, marked purged.
-func (s *Service) PurgeRequest(ctx context.Context, orgID, customerID, id uuid.UUID) error {
-	req, err := s.requests.GetForCustomer(ctx, orgID, customerID, id)
+func (s *Service) PurgeRequest(ctx context.Context, scope CustomerScope, id uuid.UUID) error {
+	req, err := s.requests.GetForCustomer(ctx, scope, id)
 	if err != nil {
 		return err
 	}
@@ -1264,8 +1272,22 @@ func (s *Service) PurgeRequest(ctx context.Context, orgID, customerID, id uuid.U
 const purgeBatch = 100
 
 // PurgeDue purges every request past its customer's retention, for the
-// pruner. One that IPS fails to erase is left for the next run.
+// pruner. One that the engine fails to erase is left for the next run. It
+// first rejects the reviews left open in a paused org (rejectPausedReviews),
+// whose failure is reported once the purge ran.
 func (s *Service) PurgeDue(ctx context.Context) (int64, error) {
+	sweepErr := s.rejectPausedReviews(ctx)
+	purged, err := s.purgeDue(ctx)
+	return purged, errors.Join(err, sweepErr)
+}
+
+// purgeDue is PurgeDue's purge.
+func (s *Service) purgeDue(ctx context.Context) (int64, error) {
+	// A proofed name goes at its own retention, whether or not the request
+	// is due yet (one still under review is not).
+	if _, err := s.requests.ClearExpiredProofedNames(ctx); err != nil {
+		return 0, err
+	}
 	var purged int64
 	for {
 		due, err := s.requests.ListPurgeDue(ctx, purgeBatch)
@@ -1274,6 +1296,12 @@ func (s *Service) PurgeDue(ctx context.Context) (int64, error) {
 		}
 		failed := 0
 		for _, req := range due {
+			if err := s.lapseReview(ctx, req); err != nil {
+				failed++
+				slog.WarnContext(ctx, "identity proofing: lapse review failed",
+					slog.String("request_id", req.ID.String()), slog.Any("error", err))
+				continue
+			}
 			if err := s.purge(ctx, req); err != nil {
 				failed++
 				slog.WarnContext(ctx, "identity proofing: purge failed",
@@ -1289,8 +1317,38 @@ func (s *Service) PurgeDue(ctx context.Context) (int64, error) {
 	}
 }
 
+// errorReviewLapsed is the error code of a data request nobody reviewed in
+// time: dataRequestReviewDays after it went to review (purge_at,
+// refreshPurgeAt).
+const errorReviewLapsed = "REVIEW_LAPSED"
+
+// lapseReview rejects a data request whose review is due for purge: nobody
+// decided it in time, and it is not left purged in review. Any other request
+// is left as it is.
+func (s *Service) lapseReview(ctx context.Context, req Request) error {
+	if !req.FlowKind.dataRequest() || req.Status != StatusNeedsReview || req.session == nil {
+		return nil
+	}
+	return s.requests.RecordOutcome(ctx, req, req.session.ID, StatusRejected,
+		proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: errorReviewLapsed})
+}
+
 // purge erases req's session in the engine, then what the wallet holds of it.
+// A session attached since req was read (a hosted start racing the purge) is
+// read back and erased too, before the row is purged.
 func (s *Service) purge(ctx context.Context, req Request) error {
+	if err := s.purgeOnce(ctx, req); !errors.Is(err, errPurgeSessionMoved) {
+		return err
+	}
+	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	if err != nil {
+		return err
+	}
+	// A session is attached once, so the second read holds the last one.
+	return s.purgeOnce(ctx, fresh)
+}
+
+func (s *Service) purgeOnce(ctx context.Context, req Request) error {
 	if req.session != nil {
 		if err := s.ips.DeleteSession(ctx, requestTenant(req), req.session.ID, req.session.Token); err != nil {
 			return fmt.Errorf("proofing: purge request %s: %w", req.ID, err)
@@ -1310,9 +1368,9 @@ func (s *Service) Request(ctx context.Context, orgID, id uuid.UUID, requestedBy 
 	return s.readReconciled(ctx, req)
 }
 
-// readReconciled re-checks a request that may have moved on at IPS, at most
-// once per readReconcileEvery: a fallback for a missed push, so a poller
-// never turns into one IPS read per poll.
+// readReconciled re-checks a request that may have moved on in the engine, at most
+// once per readReconcileEvery: a fallback for a missed notice, so a poller
+// never turns into one the engine read per poll.
 func (s *Service) readReconciled(ctx context.Context, req Request) (Request, error) {
 	if !req.needsReconcile() || !s.readChecks.allow(req.ID, s.now()) {
 		return req, nil
@@ -1334,7 +1392,7 @@ func (s *Service) sentRequest(ctx context.Context, orgID, id uuid.UUID, requeste
 	return req, nil
 }
 
-// yiviSession is the running IPS session of a request created for the Yivi app.
+// yiviSession is the running the engine session of a request created for the Yivi app.
 func (s *Service) yiviSession(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (Request, *ipsSession, error) {
 	req, err := s.sentRequest(ctx, orgID, id, requestedBy)
 	if err != nil {
@@ -1343,7 +1401,7 @@ func (s *Service) yiviSession(ctx context.Context, orgID, id uuid.UUID, requeste
 	return s.yiviSessionOf(req)
 }
 
-// yiviSessionOf is req's running IPS session, if req is for the Yivi app.
+// yiviSessionOf is req's running the engine session, if req is for the Yivi app.
 func (s *Service) yiviSessionOf(req Request) (Request, *ipsSession, error) {
 	if req.Method != proofingprovider.MethodYivi {
 		return Request{}, nil, ErrWrongMethod
@@ -1355,14 +1413,14 @@ func (s *Service) yiviSessionOf(req Request) (Request, *ipsSession, error) {
 	return req, sess, nil
 }
 
-// App is where a running Idem request's phone is, read live from IPS: what the
+// App is where a running Idem request's phone is, read live from the engine: what the
 // on-screen page polls to hide its QR once scanned and show one once the app left.
 func (s *Service) App(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (proofingprovider.App, error) {
 	req, err := s.sentRequest(ctx, orgID, id, requestedBy)
 	if err != nil {
 		return "", err
 	}
-	if req.Method != proofingprovider.MethodIdem || req.mode() == ModeTest {
+	if req.Method != proofingprovider.MethodIdem {
 		return "", ErrWrongMethod
 	}
 	sess := req.liveSession(s.now())
@@ -1389,8 +1447,7 @@ func (s *Service) ClaimLink(ctx context.Context, orgID, id uuid.UUID, requestedB
 }
 
 func (s *Service) claimLink(ctx context.Context, req Request) (proofingprovider.Claim, error) {
-	// A test request resolved at once and never had a link.
-	if req.Method != proofingprovider.MethodIdem || req.mode() == ModeTest {
+	if req.Method != proofingprovider.MethodIdem {
 		return proofingprovider.Claim{}, ErrWrongMethod
 	}
 	sess := req.liveSession(s.now())
@@ -1447,9 +1504,9 @@ func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) 
 	return YiviStart{WalletLink: started.WalletLink, ExpiresAt: sess.ExpiresAt}, nil
 }
 
-// YiviDisclosure hands the subject's finished disclosure to IPS as the face
+// YiviDisclosure hands the subject's finished disclosure to the engine as the face
 // check's reference, or answers ErrDisclosurePending while the subject has not
-// finished in the Yivi app. A disclosure IPS cannot use (no photo, no face in
+// finished in the Yivi app. A disclosure the engine cannot use (no photo, no face in
 // it) ends the session, which is recorded at once. The photo and claims pass
 // through and are not kept.
 func (s *Service) YiviDisclosure(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (proofingprovider.YiviDisclosure, error) {
@@ -1489,7 +1546,7 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 }
 
 // FaceFrame scores one live camera frame of an on-screen Yivi request against
-// the disclosed photo. The frame passes through to IPS and is not kept; a
+// the disclosed photo. The frame passes through to the engine and is not kept; a
 // decision is recorded at once rather than on the next list read.
 func (s *Service) FaceFrame(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID, image string) (proofingprovider.FaceVerdict, error) {
 	req, sess, err := s.yiviSession(ctx, orgID, id, requestedBy)
@@ -1510,7 +1567,7 @@ func (s *Service) faceFrame(ctx context.Context, req Request, sess *ipsSession, 
 	return verdict, nil
 }
 
-// yiviStepError reads IPS no longer knowing the session (purged, or the stub
+// yiviStepError reads the engine no longer knowing the session (purged, or the stub
 // restarted) or answering it gone as the session being over; the request's
 // row catches up on the next reconcile.
 func yiviStepError(err error) error {
@@ -1521,7 +1578,7 @@ func yiviStepError(err error) error {
 	return err
 }
 
-// reconcileNow records what IPS decided for req. A failure is logged: the
+// reconcileNow records what the engine decided for req. A failure is logged: the
 // background reconciler picks the outcome up later.
 func (s *Service) reconcileNow(ctx context.Context, req Request) {
 	s.reconcile(ctx, requestTenant(req), req)
@@ -1541,20 +1598,14 @@ func (s *Service) RequestEvents(ctx context.Context, orgID, id uuid.UUID, reques
 	return page.Events, nil
 }
 
-// CreateAPIKey adds a live or test key (mode empty is live) with every scope to
-// a customer; the returned secret is shown once.
-func (s *Service) CreateAPIKey(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string, mode Mode) (APIKey, string, error) {
+// CreateAPIKey adds a key with every scope to a customer; the returned secret
+// is shown once.
+func (s *Service) CreateAPIKey(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string) (APIKey, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > maxAPIKeyNameLength {
 		return APIKey{}, "", fmt.Errorf("%w: an API key needs a name of at most %d characters", ErrInvalidInput, maxAPIKeyNameLength)
 	}
-	if mode == "" {
-		mode = ModeLive
-	}
-	if mode != ModeLive && mode != ModeTest {
-		return APIKey{}, "", fmt.Errorf("%w: an API key is live or test", ErrInvalidInput)
-	}
-	return s.apiKeys.Create(ctx, orgID, customerID, createdBy, name, mode, slices.Clone(APIKeyScopes))
+	return s.apiKeys.Create(ctx, orgID, customerID, createdBy, name, slices.Clone(APIKeyScopes))
 }
 
 // APIKeys lists a customer's keys, revoked ones included.
@@ -1648,9 +1699,36 @@ func (s *Service) WebhookHealth(ctx context.Context, orgID uuid.UUID) (map[uuid.
 	return s.webhooks.Health(ctx, orgID)
 }
 
-// RemoveCustomer deletes a customer and every request sent for it.
+// removeCustomerAttempts is how often RemoveCustomer purges and tries again
+// when requests keep being sent for the customer meanwhile.
+const removeCustomerAttempts = 3
+
+// RemoveCustomer deletes a customer and every request sent for it. Each
+// request is erased as a purge erases it first: its engine session, and the
+// subject's name, e-mail and diplomas in its audit trail, which stays once
+// the rows are gone. The removal itself refuses while a request is left
+// unpurged (one sent meanwhile), so this purges again, up to
+// removeCustomerAttempts times, then answers ErrCustomerSessionsLeft.
 func (s *Service) RemoveCustomer(ctx context.Context, orgID, id uuid.UUID) error {
-	return s.customers.Remove(ctx, orgID, id)
+	if _, err := s.customers.Get(ctx, orgID, id); err != nil {
+		return err
+	}
+	var err error
+	for range removeCustomerAttempts {
+		reqs, listErr := s.requests.ListUnpurgedForCustomer(ctx, orgID, id)
+		if listErr != nil {
+			return listErr
+		}
+		for _, req := range reqs {
+			if err := s.purge(ctx, req); err != nil {
+				return err
+			}
+		}
+		if err = s.customers.Remove(ctx, orgID, id); !errors.Is(err, ErrCustomerSessionsLeft) {
+			return err
+		}
+	}
+	return err
 }
 
 // SaveCustomerBranding replaces a customer's branding. The colour is a
@@ -1695,10 +1773,10 @@ func (s *Service) SaveCustomerSettings(ctx context.Context, orgID, id uuid.UUID,
 	return s.customers.SaveSettings(ctx, orgID, id, settings)
 }
 
-// Stats counts the customer requests sent within StatsWindow, per customer and
+// Stats counts the customer requests sent within statsWindow, per customer and
 // flow, narrowed to one member's when requestedBy is set.
 func (s *Service) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID) ([]StatsRow, time.Time, error) {
-	since := s.now().Add(-StatsWindow)
+	since := s.now().Add(-statsWindow)
 	rows, err := s.requests.Stats(ctx, orgID, requestedBy, since)
 	return rows, since, err
 }
@@ -1709,7 +1787,7 @@ func (s *Service) AssignCustomerFlows(ctx context.Context, org Org, id uuid.UUID
 	if _, err := s.customers.Get(ctx, org.ID, id); err != nil {
 		return Customer{}, err
 	}
-	sel, err := s.validSelection(ctx, org, sel, CustomerCompletable)
+	sel, err := s.validSelection(ctx, org, sel, customerCompletable)
 	if err != nil {
 		return Customer{}, err
 	}

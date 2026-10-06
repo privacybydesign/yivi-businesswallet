@@ -22,9 +22,10 @@ type FaceVerifier interface {
 	// Verify never falls back to another provider. ref is nil when the flow
 	// has no face match.
 	Verify(ctx context.Context, sess session.Session, ref *faceReference, live liveCapture) (faceOutcome, error)
-	// Release discards whatever the provider still holds for live. The caller
-	// defers it on every path, including a refused request.
-	Release(ctx context.Context, live liveCapture)
+	// Release discards whatever the provider still holds for live, when it is
+	// sess's own. The caller defers it, once sess is authenticated, on every
+	// path, including a refused request.
+	Release(ctx context.Context, sess session.Session, live liveCapture)
 }
 
 // liveCapture is what the client sent: a selfie (engine) or a Regula
@@ -99,12 +100,25 @@ type regulaFaceVerifier struct {
 
 func (regulaFaceVerifier) Provider() flow.FaceProvider { return flow.FaceProviderRegula }
 
-func (v regulaFaceVerifier) Release(ctx context.Context, live liveCapture) {
+func (v regulaFaceVerifier) Release(ctx context.Context, sess session.Session, live liveCapture) {
 	if live.TransactionID == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), regula.DefaultTimeout)
 	defer cancel()
+	// Only sess's own transaction: one tagged for another session is that
+	// session's to finish. One left over is the sweep's (regulasweep).
+	tx, err := v.client.GetLiveness(ctx, live.TransactionID)
+	if errors.Is(err, regula.ErrTransactionNotFound) {
+		return
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "identity proofing: look up Regula liveness transaction to delete", slog.String("session_id", sess.ID), slog.Any("error", err))
+		return
+	}
+	if tag := regulaTag(sess); tag == "" || tx.Tag != tag {
+		return
+	}
 	if err := v.client.DeleteLiveness(ctx, live.TransactionID); err != nil {
 		slog.WarnContext(ctx, "identity proofing: delete Regula liveness transaction", slog.Any("error", err))
 	}
@@ -175,11 +189,10 @@ func regulaSelfie(sess session.Session, crop string) (image, mime string) {
 }
 
 // regulaTag is the liveness tag that binds a Regula transaction to sess: its
-// tenant reference, random and not the session id, prefixed so the wallet's
-// transactions stand out on a Face API shared with other services. Regula
-// allows only [A-Za-z0-9_-], up to 127 characters, which "ips-tref_<hex>" is.
-// The prefix is kept from the identity-proofing-service so a sweep still
-// matches transactions it tagged.
+// tenant reference (random, not the session id), prefixed so the wallet's
+// transactions stand out on a shared Face API. Regula allows [A-Za-z0-9_-], up
+// to 127 characters. The "ips-" prefix stays as it is: changing it would stop
+// the sweep matching transactions already tagged.
 func regulaTag(sess session.Session) string {
 	if sess.TenantReference == "" {
 		return ""

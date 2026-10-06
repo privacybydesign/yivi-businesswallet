@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,8 +48,12 @@ type harness struct {
 	changed  chan string
 }
 
-// fakeRegula matches every frame that is not "noface" with similarity.
-type fakeRegula struct{ similarity float64 }
+// fakeRegula matches every frame that is not "noface" with similarity, and
+// counts the image matches it is asked for when calls is set.
+type fakeRegula struct {
+	similarity float64
+	calls      *atomic.Int32
+}
 
 func (fakeRegula) GetLiveness(context.Context, string) (regula.LivenessTransaction, error) {
 	return regula.LivenessTransaction{}, regula.ErrTransactionNotFound
@@ -59,6 +64,9 @@ func (fakeRegula) Match(context.Context, string, string) (regula.MatchResult, er
 }
 
 func (f fakeRegula) MatchImages(_ context.Context, _, live string) (regula.ImageMatch, error) {
+	if f.calls != nil {
+		f.calls.Add(1)
+	}
 	if live == base64.StdEncoding.EncodeToString([]byte("noface")) {
 		return regula.ImageMatch{}, nil
 	}
@@ -145,16 +153,22 @@ func chipPortrait(t *testing.T) string {
 	return base64.StdEncoding.EncodeToString(dg2.Images[0].Image)
 }
 
+// chipFlow releases what its steps collect: a flow that lists no data
+// releases the outcome only.
 var chipFlow = pp.FlowSpec{
 	Name: "Passport", Steps: []string{"document_capture", "nfc_read"},
-	RequiredChecks: []string{"nfc.passive_auth"},
+	RequestedAttributes: []string{"dg1", "document_image", "dg11", "dg2", "chip_checks"},
+	RequiredChecks:      []string{"nfc.passive_auth"},
 }
 
 // The Idem app's whole run, as the vcmrtd client drives it: claim the
 // mailed link, scan the MRZ, read the chip, submit; the wallet then reads
 // the outcome and the identity.
-func TestIdemAppRunsAFlowToItsOutcome(t *testing.T) {
-	h := newHarness(t)
+func TestIdemAppFlow(t *testing.T) {
+	// The fixture passport expired on 2022-07-17: read it while it was valid.
+	h := newHarness(t, func(c *proofingengine.Config) {
+		c.Now = func() time.Time { return time.Date(2021, time.June, 1, 0, 0, 0, 0, time.UTC) }
+	})
 	ctx := context.Background()
 	f, err := h.engine.CreateFlow(ctx, h.tenant, chipFlow)
 	if err != nil {
@@ -190,6 +204,11 @@ func TestIdemAppRunsAFlowToItsOutcome(t *testing.T) {
 	}
 	if code, _ := h.do(t, http.MethodGet, "/app/"+token, "", nil); code != http.StatusUnauthorized {
 		t.Errorf("read without device token = %d, want 401", code)
+	}
+	// The flow reads the chip only: a face step is not part of it.
+	if code, _ := h.do(t, http.MethodPost, "/app/"+token+"/steps/selfie", device,
+		map[string]any{"livenessTransactionId": "tx"}); code != http.StatusBadRequest {
+		t.Errorf("selfie on a chip-only flow = %d, want 400", code)
 	}
 
 	doc := map[string]any{"type": "P", "number": "X1234567", "issuingState": "NLD", "firstName": "Anna", "lastName": "Eriksson"}
@@ -229,6 +248,11 @@ func TestIdemAppRunsAFlowToItsOutcome(t *testing.T) {
 	id, err := h.engine.SessionIdentity(ctx, h.tenant, sess.ID, sess.Token)
 	if err != nil || id.Evidence == nil || id.Evidence.Type != pp.EvidenceEMRTD || id.Evidence.PassiveAuth == pp.CheckNotPerformed {
 		t.Errorf("identity = %+v, %v; want chip evidence with passive authentication run", id, err)
+	}
+	// The identity is the chip's (the fixture's DG1), not the "Anna Eriksson"
+	// the app posted as its document.
+	if id.FamilyName != "SANDERSON" || id.GivenName != "OSCAR CHARLES EDWARD" || id.BirthDate != "1978-04-05" || id.Nationality != "GBR" {
+		t.Errorf("identity = %s %s, %s, %s; want the chip's SANDERSON", id.GivenName, id.FamilyName, id.BirthDate, id.Nationality)
 	}
 	// The chip's portrait comes back in a type a browser shows (this
 	// fixture's DG2 is a JPEG labelled image/jp2).
@@ -287,50 +311,41 @@ func TestFlowsAreVersionedPerOrg(t *testing.T) {
 	}
 }
 
-func TestTestModeOnlyRunsScriptedSessions(t *testing.T) {
-	h := newHarness(t)
-	ctx := context.Background()
-	sandbox := pp.Tenant{ID: h.tenant.ID, Sandbox: true}
-	if _, err := h.engine.CreateSession(ctx, sandbox, pp.SessionInput{ClientReference: "r"}); err == nil {
-		t.Error("a test session without a scripted outcome must be refused")
-	}
-	if _, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{ScriptedOutcome: "approve"}); err == nil {
-		t.Error("a live session must refuse a scripted outcome")
-	}
-	sess, err := h.engine.CreateSession(ctx, sandbox, pp.SessionInput{ClientReference: "r", ScriptedOutcome: "reject:DOC_EXPIRED"})
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	res, err := h.engine.SessionStatus(ctx, sandbox, sess.ID, sess.Token)
-	if err != nil || res.Status != pp.StatusRejected || res.ErrorCode != "DOC_EXPIRED" {
-		t.Errorf("scripted = %+v, %v; want rejected DOC_EXPIRED", res, err)
-	}
-}
-
 func TestReviewAndCancel(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	sandbox := pp.Tenant{ID: h.tenant.ID, Sandbox: true}
-	sess, err := h.engine.CreateSession(ctx, sandbox, pp.SessionInput{ScriptedOutcome: "needs_review"})
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	if err := h.engine.DecideReview(ctx, sandbox, sess.ID, sess.Token, pp.ReviewDecision{Reason: "ok", Reviewer: "sam"}); err != nil {
-		t.Fatalf("DecideReview: %v", err)
-	}
-	res, err := h.engine.SessionStatus(ctx, sandbox, sess.ID, sess.Token)
-	if err != nil || res.Status != pp.StatusRejected || res.ErrorCode != "MANUAL_REVIEW_REJECTED" {
-		t.Errorf("after review = %+v, %v", res, err)
-	}
-	var rejected *pp.RejectedError
-	if err := h.engine.CancelSession(ctx, sandbox, sess.ID, sess.Token); !errors.As(err, &rejected) || rejected.Status != http.StatusConflict {
-		t.Errorf("cancel a decided session = %v, want 409", err)
-	}
-
 	f, err := h.engine.CreateFlow(ctx, h.tenant, chipFlow)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Nothing in the engine sends a session to review yet: put one there.
+	sess, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{FlowID: f.ID})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, err := h.sessions.Update(h.tenant.ID, sess.ID, func(s *session.Session) error {
+		now := time.Now().UTC()
+		for _, to := range []session.Status{session.StatusOpened, session.StatusInProgress, session.StatusNeedsReview} {
+			if err := s.SetStatus(to, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("send to review: %v", err)
+	}
+	if err := h.engine.DecideReview(ctx, h.tenant, sess.ID, sess.Token, pp.ReviewDecision{Reason: "ok", Reviewer: "sam"}); err != nil {
+		t.Fatalf("DecideReview: %v", err)
+	}
+	res, err := h.engine.SessionStatus(ctx, h.tenant, sess.ID, sess.Token)
+	if err != nil || res.Status != pp.StatusRejected || res.ErrorCode != "MANUAL_REVIEW_REJECTED" {
+		t.Errorf("after review = %+v, %v", res, err)
+	}
+	var rejected *pp.RejectedError
+	if err := h.engine.CancelSession(ctx, h.tenant, sess.ID, sess.Token); !errors.As(err, &rejected) || rejected.Status != http.StatusConflict {
+		t.Errorf("cancel a decided session = %v, want 409", err)
+	}
+
 	live, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{FlowID: f.ID})
 	if err != nil {
 		t.Fatal(err)
@@ -357,13 +372,15 @@ func TestYiviNeedsRegula(t *testing.T) {
 
 // The Yivi method's face check lives in the session, not in one replica's
 // memory: a second engine on the same database scores the next frames.
-func TestYiviFaceCheckRunsAcrossReplicas(t *testing.T) {
-	withRegula := func(c *proofingengine.Config) { c.Regula = fakeRegula{similarity: 0.9} }
+func TestYiviFaceAcrossReplicas(t *testing.T) {
+	var regulaCalls atomic.Int32
+	withRegula := func(c *proofingengine.Config) { c.Regula = fakeRegula{similarity: 0.9, calls: &regulaCalls} }
 	h := newHarness(t, withRegula)
 	ctx := context.Background()
 	f, err := h.engine.CreateFlow(ctx, h.tenant, pp.FlowSpec{
 		Name: "Yivi", Steps: []string{"document_capture", "nfc_read", "face_verification"},
-		FaceProvider: "regula", SelfieLocation: "native", RequiredChecks: []string{"nfc.passive_auth", "face.match"},
+		RequestedAttributes: []string{"dg1"},
+		FaceProvider:        "regula", SelfieLocation: "native", RequiredChecks: []string{"nfc.passive_auth", "face.match"},
 	})
 	if err != nil {
 		t.Fatalf("CreateFlow: %v", err)
@@ -401,6 +418,10 @@ func TestYiviFaceCheckRunsAcrossReplicas(t *testing.T) {
 	frame(h.engine, "c")
 	if v := frame(other, "d"); v.Decision != pp.FaceDecisionApproved {
 		t.Fatalf("after three matches = %+v, want approved", v)
+	}
+	// The replayed "a" never reached Regula: four distinct frames, four calls.
+	if got := regulaCalls.Load(); got != 4 {
+		t.Errorf("Regula matched %d frames, want 4: a replay must not be sent again", got)
 	}
 	res, err := h.engine.SessionResult(ctx, h.tenant, sess.ID, sess.Token)
 	if err != nil || res.Status != pp.StatusApproved || res.Method != pp.MethodYivi || res.Name != "Anna" {
@@ -466,5 +487,58 @@ func TestReferencePhotoFaceCheck(t *testing.T) {
 	}
 	if stored.ReferencePhoto != "" || stored.ReferencePhotoMime != "" {
 		t.Error("a cancelled session still holds the reference photo")
+	}
+}
+
+// A chip read whose DG1 no longer hashes to what EF.SOD signed is tampered:
+// the session still finishes, rejected DOC_TAMPERED, whatever else held.
+func TestIdemTamperedChip(t *testing.T) {
+	h := newHarness(t, func(c *proofingengine.Config) {
+		c.Now = func() time.Time { return time.Date(2021, time.June, 1, 0, 0, 0, 0, time.UTC) }
+	})
+	ctx := context.Background()
+	f, err := h.engine.CreateFlow(ctx, h.tenant, chipFlow)
+	if err != nil {
+		t.Fatalf("CreateFlow: %v", err)
+	}
+	sess, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{FlowID: f.ID, ClientReference: "req-t"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	link, err := url.Parse(sess.Claim.DeepLink)
+	if err != nil {
+		t.Fatalf("deep link: %v", err)
+	}
+	code, claim := h.do(t, http.MethodPost, "/app/handover/"+link.Query().Get("handover")+"/claim", "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("claim = %d %v", code, claim)
+	}
+	token, device := claim["token"].(string), claim["deviceToken"].(string)
+	if code, step := h.do(t, http.MethodPost, "/app/"+token+"/steps/document_capture", device, map[string]any{
+		"document":   map[string]any{"type": "P", "number": "099250692", "issuingState": "GBR"},
+		"chipAccess": map[string]any{"documentType": "passport", "documentNumber": "099250692", "countryCode": "GBR", "dateOfBirth": "1978-04-05", "dateOfExpiry": "2022-07-17"},
+	}); code != http.StatusOK {
+		t.Fatalf("document_capture = %d %v", code, step)
+	}
+	// One letter of the holder's name changed: the MRZ still parses, its hash
+	// no longer matches EF.SOD.
+	tampered := strings.Replace(mrtdtestfixtures.TestDg1Hex, "53414E444552534F4E", "53414E444552534F4D", 1)
+	if tampered == mrtdtestfixtures.TestDg1Hex {
+		t.Fatal("fixture DG1 does not hold SANDERSON")
+	}
+	if code, step := h.do(t, http.MethodPost, "/app/"+token+"/steps/nfc", device, map[string]any{
+		"mrtdEvidence": map[string]any{
+			"efSod":      mrtdtestfixtures.TestSodHex,
+			"dataGroups": map[string]string{"DG1": tampered, "DG2": mrtdtestfixtures.Dg2Hex},
+		},
+	}); code != http.StatusOK {
+		t.Fatalf("nfc = %d %v", code, step)
+	}
+	if code, step := h.do(t, http.MethodPost, "/app/"+token+"/submit", device, nil); code != http.StatusOK {
+		t.Fatalf("submit = %d %v", code, step)
+	}
+	res, err := h.engine.SessionResult(ctx, h.tenant, sess.ID, sess.Token)
+	if err != nil || res.Status != pp.StatusRejected || res.ErrorCode != "DOC_TAMPERED" {
+		t.Errorf("result = %+v, %v; want rejected DOC_TAMPERED", res, err)
 	}
 }

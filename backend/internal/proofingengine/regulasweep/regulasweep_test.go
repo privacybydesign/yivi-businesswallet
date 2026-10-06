@@ -6,6 +6,7 @@ import (
 	"sort"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // memQueue is Queue in memory.
@@ -14,6 +15,17 @@ type memQueue struct{ entries map[string]*Entry }
 func (q *memQueue) Add(_ context.Context, tag string, dueAt time.Time) error {
 	if e, ok := q.entries[tag]; ok {
 		if dueAt.After(e.DueAt) {
+			e.DueAt = dueAt
+		}
+		return nil
+	}
+	q.entries[tag] = &Entry{Tag: tag, DueAt: dueAt}
+	return nil
+}
+
+func (q *memQueue) Settle(_ context.Context, tag string, dueAt time.Time) error {
+	if e, ok := q.entries[tag]; ok {
+		if dueAt.Before(e.DueAt) {
 			e.DueAt = dueAt
 		}
 		return nil
@@ -61,7 +73,7 @@ func (d *fakeDeleter) DeleteLivenessByTag(_ context.Context, tag string) error {
 	return nil
 }
 
-func TestASweepDeletesOnlyDueTagsAndRetriesFailures(t *testing.T) {
+func TestSweepDeletesDueAndRetries(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	q := &memQueue{entries: map[string]*Entry{}}
@@ -135,5 +147,48 @@ func TestDedupSkipsRepeatedAdds(t *testing.T) {
 	_ = d.Add(ctx, "ips-a", now)
 	if inner.adds != 3 {
 		t.Errorf("a tag queued again after its sweep was skipped (%d adds)", inner.adds)
+	}
+}
+
+// An error kept for a retry is valid UTF-8 within the bound, whatever the
+// body was: cut on a character, and a non-UTF-8 body (Latin-1) repaired.
+func TestTruncateUTF8(t *testing.T) {
+	for in, want := range map[string]string{
+		"abc":          "abc",
+		"ab€":          "ab",
+		"caf\xe9 page": "caf",
+	} {
+		got := truncateUTF8(in, 4)
+		if got != want || !utf8.ValidString(got) {
+			t.Errorf("truncateUTF8(%q, 4) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A session that ends moves its sweep forward to its end, and a later Add for
+// the same tag (an app view read after the end) does not move it back through
+// Settle; polling Settle with the same end costs one write.
+func TestSettleSweepsFromTheEnd(t *testing.T) {
+	ctx := context.Background()
+	expiry := time.Now().Add(time.Hour)
+	end := time.Now()
+	inner := &countingQueue{memQueue: memQueue{entries: map[string]*Entry{}}}
+	d := NewDedup(inner)
+	if err := d.Add(ctx, "tag", expiry); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if err := d.Settle(ctx, "tag", end); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := inner.entries["tag"].DueAt; !got.Equal(end) {
+		t.Errorf("due at %v, want the session's end %v", got, end)
+	}
+	if err := d.Settle(ctx, "tag", expiry); err != nil {
+		t.Fatal(err)
+	}
+	if got := inner.entries["tag"].DueAt; !got.Equal(end) {
+		t.Errorf("a later settle moved the sweep to %v, want it kept at %v", got, end)
 	}
 }

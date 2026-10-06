@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import { ApiError } from "../api/http";
 import type {
   DiplomaMode,
+  FlowKind,
   ProofingFlow,
   ProofingFlowSelection,
   ProofingFlowSpec,
@@ -30,6 +31,22 @@ export function isProofingLive(status: string): boolean {
   return LIVE_STATUSES.has(status);
 }
 
+// Statuses a poll never recovers from: the caller may not read this session
+// (403), or it is gone (404). Polling on would only repeat the refusal.
+const FINAL_POLL_STATUSES: readonly number[] = [403, 404];
+
+// Whether a verify page keeps polling its progress: until the first read, and
+// while the session is live, unless a read was refused for good.
+export function progressPollContinues(
+  progress: { status: string } | undefined,
+  error: Error | null,
+): boolean {
+  if (error instanceof ApiError && FINAL_POLL_STATUSES.includes(error.status)) {
+    return false;
+  }
+  return progress === undefined || isProofingLive(progress.status);
+}
+
 export function proofingStatusTone(status: string): ProofingStatusTone {
   return TONES[status] ?? "default";
 }
@@ -55,9 +72,8 @@ export function proofingStatusLabel(status: string, t: TFunction): string {
   }
 }
 
-// The flow editor follows the identity-proofing-service's own admin page and
-// its flow validation (flow.Validate), so the wallet can only build a flow the
-// service accepts:
+// The flow editor follows the engine's flow validation (flow.Validate), so it
+// can only build a flow the engine accepts:
 //
 //   - Steps: document_capture (the document scan: vcmrtd reads the MRZ with the
 //     camera to derive the chip access key) and nfc_read (the NFC chip read) are
@@ -72,8 +88,11 @@ export function proofingStatusLabel(status: string, t: TFunction): string {
 //     only for face.match.
 //   - Requested data: each item is available only when the step that produces
 //     it is in the flow, and cleared otherwise; none is forced on.
-//   - Assurance: substantial needs (nfc.passive_auth or nfc.chip_auth) plus
-//     face.match; high is always refused today. The service explains a refusal.
+//   - Assurance (flow.LevelRequirements): low needs nfc.passive_auth;
+//     substantial also nfc.chip_auth, face.match and face.liveness with Regula.
+//     The level is only a minimum and turns nothing on: a draft whose settings
+//     cannot reach it is refused. High is never reachable. The engine explains
+//     a refusal.
 export const STEP_DOCUMENT_CAPTURE = "document_capture";
 export const STEP_NFC_READ = "nfc_read";
 export const STEP_DOCUMENT_PHOTO = "document_photo";
@@ -102,34 +121,45 @@ export const REQUESTED_ATTRIBUTES = [
 export const ASSURANCE_LEVELS = ["low", "substantial"] as const;
 export type AssuranceLevel = (typeof ASSURANCE_LEVELS)[number];
 
+function isAssuranceLevel(value: string): value is AssuranceLevel {
+  return (ASSURANCE_LEVELS as readonly string[]).includes(value);
+}
+
+// An eIDAS level in words; one the wallet does not know is shown as is.
+export function assuranceLevelLabel(level: string, t: TFunction): string {
+  return isAssuranceLevel(level)
+    ? t(`identityProofingFlows.assuranceLevels.${level}`)
+    : level;
+}
+
 export const BSN_POLICIES = ["retrieve", "mask", "omit"] as const;
 
 // What verifies the face step; a new flow starts on the first, Regula. The
-// wallet runs no face engine of its own, so there is no "engine".
-export const FACE_PROVIDERS = ["regula", "Iris"] as const;
+// wallet runs no face engine of its own, so there is no "engine", and the
+// proofing engine verifies faces with Regula only, so Iris is not offered.
+export const FACE_PROVIDERS = ["regula"] as const;
 export type FaceProvider = (typeof FACE_PROVIDERS)[number];
 
 // The service's steps that capture the face (proofing.faceSteps).
 const FACE_STEPS = ["face_verification", "selfie", "liveness", "face_match"];
+// The selfie location that takes the face in the browser
+// (proofing.selfieLocationBrowser).
+const SELFIE_LOCATION_BROWSER = "browser";
 
-// The face providers the Yivi app does not have
-// (proofing.idemOnlyFaceProviders): such a flow runs in the Idem app only.
-const IDEM_ONLY_FACE_PROVIDERS: readonly string[] = ["Iris"];
-
-// Whether the Yivi app can run a flow (proofing.YiviAppAvailable): unless it
-// photographs the document, which only the Idem app does, or its face step is
-// on a provider the Yivi app does not have.
+// Whether the Yivi app can run a flow (proofing.yiviAppAvailable): unless it
+// photographs the document, which only the Idem app does, or matches the face
+// against a customer's reference photo (proofing.NeedsReferencePhoto: a face
+// step without the chip read, outside the browser), where the Yivi app
+// matches against its credential's photo instead.
 export function yiviAppAvailable(flow: {
   steps: readonly string[];
-  faceProvider?: string;
+  selfieLocation?: string | undefined;
 }): boolean {
-  if (flow.steps.includes(STEP_DOCUMENT_PHOTO)) {
-    return false;
-  }
-  return (
-    !flow.steps.some((step) => FACE_STEPS.includes(step)) ||
-    !IDEM_ONLY_FACE_PROVIDERS.includes(flow.faceProvider ?? "")
-  );
+  const needsReferencePhoto =
+    flow.steps.some((step) => FACE_STEPS.includes(step)) &&
+    !flow.steps.includes(STEP_NFC_READ) &&
+    flow.selfieLocation !== SELFIE_LOCATION_BROWSER;
+  return !flow.steps.includes(STEP_DOCUMENT_PHOTO) && !needsReferencePhoto;
 }
 
 // "" inherits the tenant's policy at the proofing service.
@@ -209,19 +239,19 @@ const LEVEL_REQUIREMENTS: Record<AssuranceLevel, LevelRequirement> = {
   },
 };
 
-// What a draft's assurance level locks on; nothing without a level.
+// What a draft's assurance level needs; nothing without a level.
 export function levelRequirement(
   level: Inherit<AssuranceLevel>,
 ): LevelRequirement {
   return level === "" ? {} : LEVEL_REQUIREMENTS[level];
 }
 
-// The draft with level selected and every setting it needs turned on.
-export function withAssuranceLevel(
-  draft: ProofingFlowDraft,
-  level: Inherit<AssuranceLevel>,
-): ProofingFlowDraft {
-  return { ...draft, assuranceLevel: level, ...levelRequirement(level) };
+// Whether the draft's own settings can reach its required level. The level
+// changes no setting: a draft that cannot reach it is not saved.
+export function reachesAssuranceLevel(draft: ProofingFlowDraft): boolean {
+  return Object.entries(levelRequirement(draft.assuranceLevel)).every(
+    ([setting, value]) => draft[setting as keyof LevelRequirement] === value,
+  );
 }
 
 // Whether a requested-data item's step is in the draft.
@@ -273,9 +303,7 @@ function tristate(value: boolean | undefined): Tristate {
 // list's own selection flags: what the editor needs to seed a new version.
 export type EditableFlow = Omit<ProofingFlow, "allowed" | "default">;
 
-// The editor state for a new version of an existing flow, with whatever its
-// assurance level needs turned on: a version saved before the level required
-// it would otherwise show a locked setting off.
+// The editor state for a new version of an existing flow, as stored.
 export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
   const checks = new Set(flow.requiredChecks ?? []);
   const threshold = flow.checkThresholds?.[CHECK_FACE_MATCH];
@@ -306,7 +334,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
       assuranceTiers: flow.assuranceTiers,
     },
   };
-  return withAssuranceLevel(draft, draft.assuranceLevel);
+  return draft;
 }
 
 function list(raw: string): string[] {
@@ -321,8 +349,14 @@ function list(raw: string): string[] {
 export type FlowDraftError =
   | "name"
   | "steps"
+  | "assuranceLevel"
+  | "issuingCountries"
   | "faceMatchThreshold"
   | "retentionSeconds";
+
+// An issuing country as a flow takes it: three letters (ICAO 9303). Whether
+// a country has the code is the engine's check (flow.ValidIssuingCountry).
+const ISSUING_COUNTRY = /^[A-Z]{3}$/;
 
 export function flowDraftError(
   draft: ProofingFlowDraft,
@@ -332,6 +366,16 @@ export function flowDraftError(
   }
   if (draftSteps(draft).length === 0) {
     return "steps";
+  }
+  if (!reachesAssuranceLevel(draft)) {
+    return "assuranceLevel";
+  }
+  if (
+    !list(draft.acceptedIssuingCountries).every((country) =>
+      ISSUING_COUNTRY.test(country.toUpperCase()),
+    )
+  ) {
+    return "issuingCountries";
   }
   if (draft.faceVerification && draft.faceMatchThreshold.trim() !== "") {
     const value = Number(draft.faceMatchThreshold);
@@ -406,20 +450,6 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
   return spec;
 }
 
-// The newest request sent to each member, keyed by user id: what the member
-// table shows as their proofing status. Requests arrive newest first.
-export function latestRequestByMember<
-  T extends { subjectUserId?: string | undefined },
->(requests: readonly T[]): Map<string, T> {
-  const out = new Map<string, T>();
-  for (const request of requests) {
-    if (request.subjectUserId && !out.has(request.subjectUserId)) {
-      out.set(request.subjectUserId, request);
-    }
-  }
-  return out;
-}
-
 // The flows a member may send a request on, and the one the form starts on:
 // the admin's default, else the first available (a default the proofing
 // service no longer lists is simply absent).
@@ -473,6 +503,34 @@ export function requestSubject(request: {
   };
 }
 
+// The engine's bound on a reviewer's reason, in characters (code points, as
+// the backend counts them): an emoji is one, not the two UTF-16 units a
+// textarea's maxLength would count.
+export const REVIEW_REASON_MAX_CHARS = 500;
+
+export function reviewReasonTooLong(reason: string): boolean {
+  return [...reason.trim()].length > REVIEW_REASON_MAX_CHARS;
+}
+
+// What submitting a data request's decision does next. Approving an erasure
+// cannot be undone, so it first asks the reviewer to confirm how many sessions
+// it erases; submitting from that confirmation then decides.
+export type ReviewSubmitStep = "confirm" | "decide";
+
+export function reviewSubmitStep({
+  decision,
+  kind,
+  confirming,
+}: {
+  decision: "approve" | "reject";
+  kind: FlowKind;
+  confirming: boolean;
+}): ReviewSubmitStep {
+  return decision === "approve" && kind === "data_erasure" && !confirming
+    ? "confirm"
+    : "decide";
+}
+
 // The backend's own message for an error whose text is meant for the reader:
 // invalid input, or the proofing service's explanation of why it refused a flow.
 function serverMessage(error: unknown): string | null {
@@ -500,6 +558,10 @@ export function proofingRejectionReason(code: string, t: TFunction): string {
       return t("identityProofing.rejectionReasons.faceStepNotCompleted");
     case "FACE_NO_MATCH":
       return t("identityProofing.rejectionReasons.faceNoMatch");
+    case "LIVENESS_FAILED":
+      return t("identityProofing.rejectionReasons.livenessFailed");
+    case "CHIP_AUTH_MISSING":
+      return t("identityProofing.rejectionReasons.chipAuthMissing");
     case "DOC_TAMPERED":
       return t("identityProofing.rejectionReasons.docTampered");
     case "CHIP_CLONE_DETECTED":
@@ -510,6 +572,10 @@ export function proofingRejectionReason(code: string, t: TFunction): string {
       return t("identityProofing.rejectionReasons.assuranceNotMet");
     case "IDENTITY_MISMATCH":
       return t("identityProofing.rejectionReasons.identityMismatch");
+    case "REVIEW_LAPSED":
+      return t("identityProofing.rejectionReasons.reviewLapsed");
+    case "ORG_PAUSED":
+      return t("identityProofing.rejectionReasons.orgPaused");
     default:
       return code;
   }
@@ -520,10 +586,13 @@ export function proofingRejectionReason(code: string, t: TFunction): string {
 // flow has that step).
 export type VerifyStage = "overview" | "method" | "session" | "diplomas";
 
-export function verifyStages(
-  appChoice: boolean,
-  diplomas: boolean,
-): VerifyStage[] {
+export function verifyStages({
+  appChoice,
+  diplomas,
+}: {
+  appChoice: boolean;
+  diplomas: boolean;
+}): VerifyStage[] {
   return [
     "overview",
     ...(appChoice ? (["method"] as const) : []),
@@ -543,15 +612,12 @@ export function sendableByMail(
 
 // Whether flow's result carries the holder's name and date of birth (the
 // document data, dg1), which a request for one known person is matched
-// against (proofing.ReadsIdentity). A flow listing no data gets what its
-// steps collect.
+// against (proofing.readsIdentity). A flow listing no data releases the
+// outcome only.
 export function readsIdentity(
-  flow: { steps: string[]; requestedAttributes?: string[] } | undefined,
+  flow: { requestedAttributes?: string[] } | undefined,
 ): boolean {
-  if (flow === undefined) return false;
-  const attributes = flow.requestedAttributes ?? [];
-  if (attributes.length === 0) return flow.steps.includes("document_capture");
-  return attributes.includes("dg1");
+  return flow?.requestedAttributes?.includes("dg1") ?? false;
 }
 
 // Why an uploaded diploma extract was not kept, from its verdict's reason.
@@ -598,10 +664,28 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.flowNotAssigned");
     case "customer_paused":
       return t("identityProofing.errors.customerPaused");
+    case "customer_has_open_reviews":
+      return t("identityProofing.errors.customerHasOpenReviews");
+    case "customer_sessions_left":
+      return t("identityProofing.errors.customerSessionsLeft");
     case "proofing_paused":
       return t("identityProofing.errors.proofingPaused");
     case "customer_no_api_key":
       return t("identityProofing.errors.customerNoApiKey");
+    case "api_key_not_found":
+      return t("identityProofing.errors.apiKeyNotFound");
+    case "session_not_found":
+      return t("identityProofing.errors.sessionNotFound");
+    case "not_under_review":
+      return t("identityProofing.errors.notUnderReview");
+    case "reference_photo_required":
+      return t("identityProofing.errors.referencePhotoRequired");
+    case "organization_not_found":
+      return t("identityProofing.errors.organizationNotFound");
+    case "webhook_not_found":
+      return t("identityProofing.errors.webhookNotFound");
+    case "link_started":
+      return t("identityProofing.errors.linkStarted");
     case "session_over":
       return t("identityProofing.errors.sessionOver");
     case "device_active":
@@ -622,7 +706,9 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.dataFlowForMember");
     case "export_unavailable":
       return t("identityProofing.errors.exportUnavailable");
+    // too_large is a diploma upload's, payload_too_large a branding logo's.
     case "too_large":
+    case "payload_too_large":
       return t("identityProofing.errors.tooLarge");
     case "too_many_files":
     case "invalid_input":
@@ -640,6 +726,7 @@ export interface ProofingTotals {
   rejected: number;
   needsReview: number;
   expired: number;
+  cancelled: number;
 }
 
 const NO_SESSIONS: ProofingTotals = {
@@ -648,6 +735,7 @@ const NO_SESSIONS: ProofingTotals = {
   rejected: 0,
   needsReview: 0,
   expired: 0,
+  cancelled: 0,
 };
 
 export function sumProofingStats(
@@ -660,6 +748,7 @@ export function sumProofingStats(
       rejected: sum.rejected + row.rejected,
       needsReview: sum.needsReview + row.needsReview,
       expired: sum.expired + row.expired,
+      cancelled: sum.cancelled + row.cancelled,
     }),
     NO_SESSIONS,
   );
@@ -701,7 +790,7 @@ export function searchCustomers<T extends { name: string }>(
   return customers.filter((c) => c.name.toLocaleLowerCase().includes(needle));
 }
 
-// A requested-data value the wallet has copy for; IPS may add others.
+// A requested-data value the wallet has copy for; the backend may add others.
 export type RequestedAttribute = (typeof REQUESTED_ATTRIBUTES)[number]["value"];
 
 export function isRequestedAttribute(
@@ -837,12 +926,12 @@ export type CustomerDisplayStatus =
 export function customerDisplayStatus(customer: {
   status: string;
   webhook: { state: string };
-  hasLiveKey: boolean;
+  hasApiKey: boolean;
 }): CustomerDisplayStatus {
   if (customer.status === "paused") {
     return "paused";
   }
-  if (!customer.hasLiveKey) {
+  if (!customer.hasApiKey) {
     return "setup_needed";
   }
   return customer.webhook.state === "failing" ? "needs_attention" : "active";

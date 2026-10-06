@@ -44,6 +44,21 @@ type Event struct {
 	Actor      *EventActor     `json:"actor"`
 	// ActorLabel names a non-user actor, e.g. `api_key:<prefix>`.
 	ActorLabel *string `json:"actorLabel"`
+	// DetailHidden marks an event read by an ordinary member: Actor,
+	// ActorLabel and Metadata are withheld, so who acted and what changed is
+	// visible to admins only.
+	DetailHidden bool `json:"detailHidden,omitempty"`
+}
+
+// HideDetail withholds who acted and what changed from each event, leaving
+// what happened, to what and when: the audit log as an ordinary member reads it.
+func HideDetail(events []Event) {
+	for i := range events {
+		events[i].Metadata = json.RawMessage(`{}`)
+		events[i].Actor = nil
+		events[i].ActorLabel = nil
+		events[i].DetailHidden = true
+	}
 }
 
 type Page struct {

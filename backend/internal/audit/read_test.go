@@ -41,3 +41,32 @@ func TestWithoutActorClearsTheActor(t *testing.T) {
 		t.Error("an actor survived WithoutActor")
 	}
 }
+
+func TestHideDetailKeepsEventOnly(t *testing.T) {
+	label := "api_key:abc"
+	events := []Event{{
+		ID:         uuid.New(),
+		Action:     MembershipInvited,
+		TargetType: "membership",
+		TargetID:   "newhire@example.test",
+		Metadata:   []byte(`{"after":{"role":"member"}}`),
+		Actor:      &EventActor{GivenNames: "Boss"},
+		ActorLabel: &label,
+	}}
+
+	HideDetail(events)
+
+	got := events[0]
+	if got.Actor != nil || got.ActorLabel != nil {
+		t.Errorf("actor = %+v, label = %v, want both withheld", got.Actor, got.ActorLabel)
+	}
+	if string(got.Metadata) != `{}` {
+		t.Errorf("metadata = %s, want {}", got.Metadata)
+	}
+	if !got.DetailHidden {
+		t.Error("DetailHidden = false, want true")
+	}
+	if got.Action != MembershipInvited || got.TargetID != "newhire@example.test" {
+		t.Errorf("event = %+v, want action and target kept", got)
+	}
+}

@@ -57,8 +57,18 @@ export default function Proof(): React.JSX.Element {
   return (
     <div className="bg-surface-2 flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-xl">
-        {page.isPending ? (
-          <p className={HINT}>{t("common.loading")}</p>
+        {/* Data first: a background refetch that fails (the tab regaining
+            focus on return from the Idem app) keeps the page it already has
+            rather than replacing the session with an error card. */}
+        {page.data !== undefined ? (
+          <>
+            <HostedFlow token={token} page={page.data} />
+            {!page.data.customer.branding.hidePoweredBy && (
+              <p className="text-muted mt-4 text-center text-[12px]">
+                {t("proofLink.poweredBy")}
+              </p>
+            )}
+          </>
         ) : page.isError ? (
           <Card className="p-6">
             <p role="alert" className="text-error text-[13.5px]">
@@ -68,14 +78,7 @@ export default function Proof(): React.JSX.Element {
             </p>
           </Card>
         ) : (
-          <>
-            <HostedFlow token={token} page={page.data} />
-            {!page.data.customer.branding.hidePoweredBy && (
-              <p className="text-muted mt-4 text-center text-[12px]">
-                {t("proofLink.poweredBy")}
-              </p>
-            )}
-          </>
+          <p className={HINT}>{t("common.loading")}</p>
         )}
       </div>
     </div>
@@ -93,7 +96,10 @@ function HostedFlow({
   const { customer, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
   const choice = flow.yiviAvailable;
-  const stages = verifyStages(choice, flow.diplomaMode === "required");
+  const stages = verifyStages({
+    appChoice: choice,
+    diplomas: flow.diplomaMode === "required",
+  });
   const [inDiplomas, setInDiplomas] = useState(false);
   // A link started before (another tab, a reload) goes straight to its session.
   const [step, setStep] = useState<Step>(
@@ -131,7 +137,9 @@ function HostedFlow({
   const settle = useCallback(
     (status: string) => {
       setSettledStatus(status);
-      if (handedBack.current) {
+      // A data request in review is not answered yet: the page says so
+      // (DataRequestOutcome) instead of handing the person back as if it was.
+      if (handedBack.current || (dataRequest && status === "needs_review")) {
         return;
       }
       handedBack.current = true;
@@ -147,7 +155,7 @@ function HostedFlow({
         window.location.assign(to);
       }
     },
-    [page.sessionId, page.embedOrigins, page.redirectUrl],
+    [page.sessionId, page.embedOrigins, page.redirectUrl, dataRequest],
   );
 
   function begin(): void {

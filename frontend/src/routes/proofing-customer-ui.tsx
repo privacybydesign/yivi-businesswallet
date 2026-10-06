@@ -126,7 +126,7 @@ export function ResultTag({
 export function CustomerStatusTag({
   customer,
 }: {
-  customer: Pick<ProofingCustomer, "status" | "webhook" | "hasLiveKey">;
+  customer: Pick<ProofingCustomer, "status" | "webhook" | "hasApiKey">;
 }): React.JSX.Element {
   const { t } = useTranslation();
   switch (customerDisplayStatus(customer)) {
@@ -210,11 +210,13 @@ export function SecretReveal({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   return (
     <Modal
       title={title}
       closeLabel={t("common.close")}
       onClose={onClose}
+      dismissible={false}
       footer={
         <Button size="sm" onClick={onClose}>
           {doneLabel ?? t("customers.secret.done")}
@@ -230,14 +232,29 @@ export function SecretReveal({
           size="sm"
           variant="secondary"
           onClick={() => {
-            void navigator.clipboard
-              .writeText(secret)
-              .then(() => setCopied(true));
+            // Inside a promise, so a browser without navigator.clipboard (an
+            // insecure context) lands in the failure as well: the secret is
+            // shown once, so the admin must know to copy it by hand.
+            void Promise.resolve()
+              .then(() => navigator.clipboard.writeText(secret))
+              .then(() => {
+                setCopyFailed(false);
+                setCopied(true);
+              })
+              .catch(() => {
+                setCopied(false);
+                setCopyFailed(true);
+              });
           }}
         >
           {copied ? t("customers.secret.copied") : t("customers.secret.copy")}
         </Button>
       </div>
+      {copyFailed && (
+        <p role="alert" className="text-error mt-2 text-[12.5px]">
+          {t("common.copyFailed")}
+        </p>
+      )}
     </Modal>
   );
 }

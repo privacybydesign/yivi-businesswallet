@@ -11,6 +11,7 @@ import {
 } from "./api/organization.queries";
 import { qerdsMessageQueryKey } from "./api/qerds.queries";
 import { proofingCustomerQueryKey } from "./api/identity-proofing.queries";
+import { heldAttestationClaimsBaseQueryKey } from "./api/attestations.queries";
 import { fullName } from "./lib/name";
 import Root from "./routes/root";
 import RootRedirect from "./routes/root-redirect";
@@ -124,22 +125,16 @@ const qerdsMessageCrumb: RouteHandle = {
 const attestationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("attestations.title"),
 };
-// The credential's own name is only known once its claims load, and the page's
-// title already carries it, so the crumb stays a static label.
 // The credential's name once its detail is cached (in whichever language it was
 // read), else a generic label.
 const heldCredentialCrumb: RouteHandle = {
   crumb: ({ params, queryClient, t }: CrumbContext) => {
     const cached = queryClient
       .getQueriesData<HeldAttestationClaims>({
-        queryKey: [
-          "organizations",
-          "detail",
+        queryKey: heldAttestationClaimsBaseQueryKey(
           params.orgSlug ?? "",
-          "attestations",
-          "held",
           params.heldId ?? "",
-        ],
+        ),
       })
       .map(([, data]) => data)
       .find((data) => data?.vct !== undefined);

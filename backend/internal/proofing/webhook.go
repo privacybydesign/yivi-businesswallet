@@ -23,7 +23,7 @@ import (
 // Webhook events a customer can subscribe to. EventTest is sent on request and
 // reaches the endpoint whatever it subscribed to.
 const (
-	// EventSessionCreated is sent when a request's IPS session is created: the
+	// EventSessionCreated is sent when a request's engine session is created: the
 	// subject can now open it in their app.
 	EventSessionCreated = "session.created"
 	// EventSessionStarted is sent when the subject's app joins the session.
@@ -168,7 +168,7 @@ func webhookBody(id uuid.UUID, event string, createdAt time.Time, data json.RawM
 // never who it is about.
 func sessionEventData(req Request, status Status) map[string]any {
 	data := map[string]any{
-		"sessionId": PublicSessionID(req.ID), "status": string(status), "flowId": req.FlowID, "livemode": req.mode() == ModeLive,
+		"sessionId": publicSessionID(req.ID), "status": string(status), "flowId": req.FlowID,
 	}
 	for key, value := range map[string]string{
 		"assuranceLevel": req.AssuranceLevel, "eidasLevel": req.EIDASLevel, "errorCode": req.ErrorCode,

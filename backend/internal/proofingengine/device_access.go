@@ -1,26 +1,25 @@
 // Device binding and handover for the app routes (/api/v1/app/{token}/...).
-// The engine decides which device may drive a session: each session has one
-// slot per client (session.DeviceRoleNative is the Idem app; the web slot
-// is IPS's browser flow, which the wallet does not offer), each slot holds
-// at most one device, and every app request is authorized by its
-// X-Device-Token. The session token in the path only names the session.
+// Each session has one slot per client (the Idem app is the native slot, the
+// browser the web slot), each slot holds at most one device, and every app
+// request is authorized by its X-Device-Token; the path token only names the
+// session.
 //
-//   - Claim: a slot is taken with a short-lived, single-use grant
-//     (POST /api/v1/app/handover/{grantToken}/claim): the mailed or shown
-//     vcmrtd link's claim token, or a fresh one the wallet asks for
-//     (SessionHandover) once the first lapsed.
-//   - Handover: the device holding a slot can mint a grant for it
-//     (POST /api/v1/app/{token}/handover), and the wallet can once that
-//     device is inactive or stale; redeeming it moves the slot to the new
-//     device and revokes the old one (403 device_handed_over from then on).
+//   - Claim: a slot is taken with a short-lived, single-use grant (POST
+//     /api/v1/app/handover/{grantToken}/claim): the link's claim token, or a
+//     fresh one the wallet asks for (SessionHandover) once it lapsed.
+//   - Handover: the device holding a slot can mint a grant for it (POST
+//     /api/v1/app/{token}/handover), and the wallet can once that device is
+//     inactive or stale. Redeeming it moves the slot and revokes the old device
+//     (403 device_handed_over).
 //
 // Every write re-checks the caller's slot and the session's state inside its
-// own Update (checkAppWrite), so a request authorized before a handover,
-// expiry or completion can't write after it.
+// own Update (checkAppWrite), so a request overtaken by a handover, expiry or
+// completion cannot write.
 package proofingengine
 
 import (
 	"errors"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -53,7 +52,8 @@ const (
 )
 
 // The rest of the device trail: every grant, state change, connection drop
-// and refused request lands in the tenant's audit log too.
+// and refused request is logged; which devices took part, handovers and
+// refusals also reach the org's audit log (deviceTrailEvents).
 const (
 	eventClaimTokenIssued    = "proofing.claim_token.issued"
 	eventHandoverClaimFailed = "proofing.handover.claim_failed"
@@ -73,16 +73,20 @@ const (
 	lifecycleCancelled = "CANCELLED"
 )
 
-// writeErrorCode is writeError plus a machine-readable code, for the errors
-// a client has to react to differently (show "handed over", wipe its local
-// session, ...) rather than just display.
+// writeErrorCode is writeError with a code for errors a client reacts to
+// (shows "handed over", wipes its local session).
 func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
-// writeAccessError maps session's device/handover errors to their status
-// and code.
-func writeAccessError(w http.ResponseWriter, err error) {
+// writeInternalError answers a 500 naming what failed; the error itself, with
+// store detail, goes to the log.
+func writeInternalError(w http.ResponseWriter, r *http.Request, what string, err error) {
+	slog.ErrorContext(r.Context(), "identity proofing: "+what, slog.String("route", r.Pattern), slog.Any("error", err))
+	writeError(w, http.StatusInternalServerError, what)
+}
+
+func writeAccessError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, session.ErrDeviceHandedOver):
 		writeErrorCode(w, http.StatusForbidden, errCodeDeviceHandedOver, "this verification session has been handed over to another device")
@@ -102,13 +106,18 @@ func writeAccessError(w http.ResponseWriter, err error) {
 		writeErrorCode(w, http.StatusConflict, errCodeSessionComplete, "session already finished")
 	case errors.Is(err, session.ErrInvalidDeviceRole), errors.Is(err, session.ErrInvalidDeviceState):
 		writeError(w, http.StatusBadRequest, err.Error())
-	default:
+	case errors.Is(err, errNothingToMark), errors.Is(err, errStepAlreadyStarted):
 		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, session.ErrNotFound):
+		writeError(w, http.StatusNotFound, "session not found")
+	default:
+		// A store or other internal failure: not a conflict the app should
+		// give up on, and not text it should see.
+		slog.ErrorContext(r.Context(), "identity proofing: app request failed", slog.Any("error", err))
+		writeError(w, http.StatusInternalServerError, "internal error")
 	}
 }
 
-// accessErrorCode is err's machine-readable code when it's an access or
-// session-state refusal, "" otherwise.
 func accessErrorCode(err error) string {
 	switch {
 	case errors.Is(err, session.ErrDeviceHandedOver):
@@ -153,7 +162,7 @@ func (s *Server) denyApp(w http.ResponseWriter, r *http.Request, sess session.Se
 		details["reason"], details["route"] = code, r.Pattern
 		s.auditProofing(sess, eventAccessDenied, details)
 	}
-	writeAccessError(w, err)
+	writeAccessError(w, r, err)
 }
 
 var (
@@ -161,8 +170,8 @@ var (
 	errSessionComplete = errors.New("session already finished")
 )
 
-// sessionOpenForDevices reports why sess can no longer be claimed or handed
-// over: an expired session rejects both, as does one that has an outcome.
+// sessionOpenForDevices refuses a claim or handover on an expired or decided
+// session.
 func sessionOpenForDevices(sess session.Session) error {
 	switch {
 	case sess.Status == session.StatusExpired:
@@ -180,10 +189,9 @@ type appCaller struct {
 	deviceToken string
 }
 
-// appSessionByPathToken is sessionByPathToken plus device authorization:
-// the request must carry the X-Device-Token of a device currently holding
-// one of the session's slots. biometric_bound_login has no device slots;
-// its routes stay session-token-only (caller.role is "").
+// appSessionByPathToken is sessionByPathToken plus device authorization: the
+// X-Device-Token of a device holding one of the session's slots. A bound login
+// has no slots; its routes take the session token alone.
 func (s *Server) appSessionByPathToken(w http.ResponseWriter, r *http.Request) (session.Session, appCaller, bool) {
 	sess, ok := s.sessionByPathToken(w, r)
 	if !ok {
@@ -202,10 +210,8 @@ func (s *Server) appSessionByPathToken(w http.ResponseWriter, r *http.Request) (
 	return s.touchDevice(sess, role), caller, true
 }
 
-// checkAppWrite is what every app write checks inside its own Update, so it
-// holds at the moment of the write: the caller still holds its slot (not
-// handed over meanwhile) and the session can still take writes (not
-// expired, not finished).
+// checkAppWrite runs inside every app write's Update: the caller still holds
+// its slot and the session can still take writes.
 func checkAppWrite(sess *session.Session, caller appCaller) error {
 	if caller.role != "" || sess.Access.Bound() {
 		if err := sess.Access.AuthorizeAs(caller.deviceToken, caller.role); err != nil {
@@ -215,15 +221,12 @@ func checkAppWrite(sess *session.Session, caller appCaller) error {
 	return sessionOpenForDevices(*sess)
 }
 
-// deviceTouchInterval throttles touchDevice's write: a device's
-// lastActiveAt only needs to be fresh to well within DeviceStaleAfter, not
-// rewritten on every long-poll tick.
+// deviceTouchInterval throttles touchDevice: lastActiveAt only needs to be
+// fresh within DeviceStaleAfter.
 const deviceTouchInterval = 10 * time.Second
 
-// touchDevice stamps role's lastActiveAt - any authorized request is a sign
-// of life, so a client that crashed or was killed (and can't report itself
-// inactive) goes stale on its own. A failed write only means a staler
-// timestamp, so errors are ignored.
+// touchDevice stamps role's lastActiveAt: any request is a sign of life, so a
+// killed app goes stale on its own. A failed write only leaves a staler time.
 func (s *Server) touchDevice(sess session.Session, role session.DeviceRole) session.Session {
 	now := time.Now().UTC()
 	d := sess.Access.Slot(role)
@@ -254,9 +257,8 @@ func (s *Server) touchDevice(sess session.Session, role session.DeviceRole) sess
 	return updated
 }
 
-// claimResponse is what a claim returns. Token is the session token for
-// the /api/v1/app/{token} paths - it identifies the session, it doesn't
-// authorize anything - and DeviceToken the X-Device-Token to send from now on.
+// claimResponse is a claim's answer: Token names the session in the app paths
+// (it authorizes nothing), DeviceToken is the X-Device-Token from now on.
 type claimResponse struct {
 	Token       string             `json:"token"`
 	DeviceToken string             `json:"deviceToken"`
@@ -264,37 +266,24 @@ type claimResponse struct {
 	Session     appSessionView     `json:"session"`
 }
 
-// handleSessionTokenClaim answers the removed session-token claim: the
-// session token no longer authorizes taking a slot, only a claim token does.
+// handleSessionTokenClaim refuses a claim by session token: only a claim token
+// takes a slot.
 func (s *Server) handleSessionTokenClaim(w http.ResponseWriter, r *http.Request) {
 	writeErrorCode(w, http.StatusGone, errCodeClaimTokenRequired,
 		"claiming with the session token is no longer supported; scan the claim or handover QR instead")
 }
 
-// handleClaimHandover redeems a grant token (from a claim or handover
-// QR/deep link): the grant's slot moves to this device and the previous one,
-// if any, is revoked. It is the same session - nothing but the slot's device
-// changes.
-//
-//	@Summary	Claim a device slot, or continue a session on this device, with a grant token
-//	@Tags		proofing-app
-//	@Produce	json
-//	@Param		handoverToken	path		string	true	"Claim or handover token from the QR"
-//	@Success	200				{object}	api.claimResponse
-//	@Failure	404				{object}	map[string]string
-//	@Failure	409				{object}	map[string]string
-//	@Failure	410				{object}	map[string]string
-//	@Failure	429				{object}	map[string]string
-//	@Router		/api/v1/app/handover/{handoverToken}/claim [post]
+// handleClaimHandover redeems a grant from a claim or handover link: the slot
+// moves to this device, and a previous one is revoked.
 func (s *Server) handleClaimHandover(w http.ResponseWriter, r *http.Request) {
 	handoverToken := r.PathValue("handoverToken")
 	sess, err := s.sessions.FindByHandover(session.HashAccessToken(handoverToken))
 	if err != nil {
-		writeAccessError(w, session.ErrHandoverInvalid)
+		writeAccessError(w, r, session.ErrHandoverInvalid)
 		return
 	}
 	if ok, retry := s.claimLimit.Allow(sess.ID); !ok {
-		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(retry.Seconds()))))
+		w.Header().Set(headerRetryAfter, strconv.Itoa(int(math.Ceil(retry.Seconds()))))
 		writeError(w, http.StatusTooManyRequests, "too many claims for this session, try again later")
 		return
 	}
@@ -327,7 +316,7 @@ func (s *Server) handleClaimHandover(w http.ResponseWriter, r *http.Request) {
 			details["role"] = string(g.Role)
 		}
 		s.auditProofing(sess, eventHandoverClaimFailed, details)
-		writeAccessError(w, err)
+		writeAccessError(w, r, err)
 		return
 	}
 	if opened {
@@ -346,7 +335,7 @@ func (s *Server) handleClaimHandover(w http.ResponseWriter, r *http.Request) {
 func (s *Server) writeClaimResponse(w http.ResponseWriter, r *http.Request, sess session.Session, caller appCaller, deviceToken string) {
 	view, err := s.buildAppSessionView(r, sess, caller.role)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not resolve flow: "+err.Error())
+		writeInternalError(w, r, "could not resolve flow", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, claimResponse{Token: sess.Token, DeviceToken: deviceToken, Role: caller.role, Session: view})
@@ -358,10 +347,8 @@ type mintHandoverRequest struct {
 	Role session.DeviceRole `json:"role,omitempty"`
 }
 
-// handoverResponse is a freshly minted handover. QR is what to render: the
-// Web App URL for the web slot, the vcmrtd deep link for the native one.
-// Neither carries the session token or any session data - only the
-// handover token.
+// handoverResponse is a minted handover. QR is what to render: the Idem app's
+// deep link, carrying only the grant.
 type handoverResponse struct {
 	HandoverToken string             `json:"handoverToken"`
 	Role          session.DeviceRole `json:"role"`
@@ -375,30 +362,15 @@ type handoverResponse struct {
 }
 
 // handleMintHandover issues a short-lived, single-use grant for one of the
-// session's slots, replacing that slot's pending one: a handover token for
-// an occupied slot, the claim token for an empty one. Only a device that
-// currently controls the session may do this.
-//
-//	@Summary	Create a handover QR for continuing on another device
-//	@Tags		proofing-app
-//	@Accept		json
-//	@Produce	json
-//	@Param		token	path		string					true	"Session token"
-//	@Param		request	body		api.mintHandoverRequest	false	"Slot to hand over"
-//	@Success	200		{object}	api.handoverResponse
-//	@Failure	400		{object}	map[string]string
-//	@Failure	401		{object}	map[string]string
-//	@Failure	403		{object}	map[string]string
-//	@Failure	409		{object}	map[string]string
-//	@Failure	410		{object}	map[string]string
-//	@Router		/api/v1/app/{token}/handover [post]
+// session's slots, replacing its pending one, to a device that controls the
+// session.
 func (s *Server) handleMintHandover(w http.ResponseWriter, r *http.Request) {
 	sess, caller, ok := s.appSessionByPathToken(w, r)
 	if !ok {
 		return
 	}
 	if caller.role == "" {
-		writeAccessError(w, session.ErrDeviceUnauthorized)
+		writeAccessError(w, r, session.ErrDeviceUnauthorized)
 		return
 	}
 	var req mintHandoverRequest
@@ -444,8 +416,8 @@ func (s *Server) grantExpiry(sess session.Session, ttl time.Duration) time.Time 
 	return expiresAt
 }
 
-// grantResponse is the vcmrtd deep link a phone scans to redeem a grant for
-// the native slot. It carries no session token or data, only the grant.
+// grantResponse is the deep link a phone scans to redeem a grant for the native
+// slot.
 func (s *Server) grantResponse(role session.DeviceRole, token string, expiresAt time.Time) handoverResponse {
 	link := "vcmrtd://verify?handover=" + url.QueryEscape(token) + "&api=" + url.QueryEscape(s.apiBaseURL())
 	return handoverResponse{HandoverToken: token, Role: role, ExpiresAt: expiresAt, QR: link, DeepLink: link}
@@ -503,40 +475,25 @@ type deviceStateRequest struct {
 	State string `json:"state"`
 }
 
-// handleDeviceState records the calling device's self-reported state
-// (active/inactive, e.g. the app went to the background) and stamps its
-// lastActiveAt, so the other client can offer a handover when this one
-// dropped out.
-//
-//	@Summary	Report this device as active or inactive
-//	@Tags		proofing-app
-//	@Accept		json
-//	@Produce	json
-//	@Param		token	path		string					true	"Session token"
-//	@Param		request	body		api.deviceStateRequest	true	"active or inactive"
-//	@Success	200		{object}	api.appSessionView
-//	@Failure	400		{object}	map[string]string
-//	@Failure	401		{object}	map[string]string
-//	@Failure	403		{object}	map[string]string
-//	@Router		/api/v1/app/{token}/device/state [post]
+// handleDeviceState records the device's own state (active, inactive when the
+// app went to the background), so the other client can offer a handover.
 func (s *Server) handleDeviceState(w http.ResponseWriter, r *http.Request) {
 	sess, caller, ok := s.appSessionByPathToken(w, r)
 	if !ok {
 		return
 	}
 	if caller.role == "" {
-		writeAccessError(w, session.ErrDeviceUnauthorized)
+		writeAccessError(w, r, session.ErrDeviceUnauthorized)
 		return
 	}
 	var req deviceStateRequest
 	if !s.decode(w, r, &req) {
 		return
 	}
-	// A finished or expired session takes no more writes of any kind - not
-	// even a presence change - so it's refused without an audit row: the
-	// audit trail of a completed session ends with its outcome.
+	// A finished or expired session takes no more writes, not even a state
+	// change, and its audit trail ends with the outcome.
 	if err := sessionOpenForDevices(sess); err != nil {
-		writeAccessError(w, err)
+		writeAccessError(w, r, err)
 		return
 	}
 	previous, cancelled := "", false
@@ -558,7 +515,7 @@ func (s *Server) handleDeviceState(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, errSessionComplete) || errors.Is(err, errSessionExpired) {
 		// Finished while this request was on its way - same as above.
-		writeAccessError(w, err)
+		writeAccessError(w, r, err)
 		return
 	}
 	if err != nil {
@@ -573,15 +530,14 @@ func (s *Server) handleDeviceState(w http.ResponseWriter, r *http.Request) {
 	s.auditProofing(updated, eventDeviceStateChanged, details)
 	view, err := s.buildAppSessionView(r, updated, caller.role)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not resolve flow: "+err.Error())
+		writeInternalError(w, r, "could not resolve flow", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
 }
 
-// openLocked is handleAppSession's created -> opened move, for use inside
-// an Update: it reports whether it transitioned. The expiry gets a fresh
-// SessionOpenTTL window, capped by the hard maximum lifetime.
+// openLocked moves a created session to opened inside an Update, with a fresh
+// SessionOpenTTL capped by the maximum lifetime.
 func (s *Server) openLocked(sess *session.Session, now time.Time) (bool, error) {
 	if sess.Status != session.StatusCreated {
 		return false, nil
@@ -593,9 +549,8 @@ func (s *Server) openLocked(sess *session.Session, now time.Time) (bool, error) 
 	return true, nil
 }
 
-// extendExpiry moves sess.ExpiresAt to until if that's later, but never
-// past the hard maximum lifetime (Config.SessionMaxLifetime) counted from
-// creation.
+// extendExpiry moves sess.ExpiresAt later to until, never past the maximum
+// lifetime from creation.
 func (s *Server) extendExpiry(sess *session.Session, until time.Time) {
 	until = s.capExpiry(sess.CreatedAt, until)
 	if until.After(sess.ExpiresAt) {
@@ -618,9 +573,8 @@ func (s *Server) capExpiry(createdAt, t time.Time) time.Time {
 type deviceView struct {
 	Claimed bool   `json:"claimed"`
 	State   string `json:"state,omitempty"`
-	// Stale is set when the device made no request for
-	// Config.DeviceStaleAfter - it may have crashed or been killed without
-	// reporting itself inactive. Treat it like state "inactive".
+	// Stale: no request for DeviceStaleAfter, so it may have been killed without
+	// reporting. Treat it as inactive.
 	Stale        bool       `json:"stale,omitempty"`
 	ClaimedAt    *time.Time `json:"claimedAt,omitempty"`
 	LastActiveAt *time.Time `json:"lastActiveAt,omitempty"`
@@ -677,9 +631,8 @@ func (s *Server) markDisconnected(sess session.Session, role session.DeviceRole,
 
 var errNothingToMark = errors.New("device changed")
 
-// stepResultView is one completed step's server-side result, as the app
-// clients see it: whether it's done and its verdicts - never the evidence
-// itself (images, chip data, document identity).
+// stepResultView is a completed step's verdicts as the app sees them, never its
+// evidence.
 type stepResultView struct {
 	Step        string         `json:"step"`
 	Completed   bool           `json:"completed"`
@@ -729,11 +682,9 @@ func stepResults(sess session.Session, fd *flow.FlowDefinition) map[string]stepR
 	return out
 }
 
-// currentStep is the server-defined step the user is on: the first of fd's
-// steps without a result yet, "" once the session is no longer active. nil
-// when no flow governs the session - there is no step model to say which
-// step is current, and "" would tell a client (vcmrtd reads it that way)
-// there's nothing left to do on a session that hasn't even started.
+// currentStep is the first step without a result, "" once the session is no
+// longer active. nil without a flow: "" would tell the Idem app there is
+// nothing left to do.
 func currentStep(sess session.Session, fd *flow.FlowDefinition) *string {
 	if fd == nil {
 		return nil
@@ -762,10 +713,9 @@ func sessionLifecycle(sess session.Session) string {
 	return lifecycleActive
 }
 
-// deviceParticipationView is one device's part in the session, as the
-// relying party sees it (sessionView.Devices): which slot it held, how it
-// got there, when it stopped and which steps it submitted. Only the random
-// device id and timestamps - no device details, never a token hash.
+// deviceParticipationView is a device's part in the session for the relying
+// party: its slot, how it got there, when it stopped and which steps it
+// submitted. Random device ids and times only.
 type deviceParticipationView struct {
 	DeviceID     string             `json:"deviceId"`
 	Role         session.DeviceRole `json:"role"`

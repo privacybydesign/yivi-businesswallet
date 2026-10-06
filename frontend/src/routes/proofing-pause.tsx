@@ -37,7 +37,11 @@ export function ProofingPausedNotice({
       <p className={HINT}>
         {byPlatform
           ? t("identityProofing.pause.byPlatform")
-          : t("identityProofing.pause.byOrganization")}
+          : pause.orgPausedBy
+            ? t("identityProofing.pause.byOrganizationMember", {
+                name: pause.orgPausedBy.name,
+              })
+            : t("identityProofing.pause.byOrganization")}
       </p>
       <p className={HINT}>{t("identityProofing.pause.whatStops")}</p>
       {isAdmin && !byPlatform && (

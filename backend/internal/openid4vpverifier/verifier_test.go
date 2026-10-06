@@ -121,7 +121,7 @@ func TestQueryForScope(t *testing.T) {
 
 // Proofing asks for the passport or id-card with its photo, and no email or
 // phone.
-func TestProofingQueryAsksForTheDocumentPhoto(t *testing.T) {
+func TestProofingQueryAsksForPhoto(t *testing.T) {
 	q := queryFor(ScopeProofing, nil)
 	if len(q.Credentials) != 2 || len(q.CredentialSets) != 1 || len(q.CredentialSets[0].Options) != 2 {
 		t.Fatalf("proofing query = %+v, want passport OR idcard only", q)
@@ -133,7 +133,7 @@ func TestProofingQueryAsksForTheDocumentPhoto(t *testing.T) {
 	}
 }
 
-func TestPresentationDocumentPrefersThePassport(t *testing.T) {
+func TestDocumentPrefersPassport(t *testing.T) {
 	p := Presentation{ByCredential: map[string]map[string]string{
 		credIDIDCard:   {ClaimGivenNames: "Card"},
 		credIDPassport: {ClaimGivenNames: "Passport"},

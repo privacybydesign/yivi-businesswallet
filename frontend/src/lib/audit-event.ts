@@ -111,8 +111,14 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "identity_proofing.session_cancelled": { icon: "close", tone: "slate" },
   "identity_proofing.session_purged": { icon: "delete", tone: "red" },
   "identity_proofing.result_read": { icon: "view", tone: "slate" },
-  // Written before outcomes had their own actions; its status says which.
-  "identity_proofing.completed": { icon: "valid", tone: "blue" },
+  "identity_proofing.device_claimed": { icon: "scan_qrcode", tone: "blue" },
+  "identity_proofing.device_handed_over": {
+    icon: "scan_qrcode",
+    tone: "slate",
+  },
+  "identity_proofing.handover_issued": { icon: "scan_qrcode", tone: "slate" },
+  "identity_proofing.handover_claim_failed": { icon: "warning", tone: "amber" },
+  "identity_proofing.access_denied": { icon: "warning", tone: "red" },
   "identity_proofing.approved": { icon: "valid", tone: "green" },
   "identity_proofing.rejected": { icon: "close", tone: "red" },
   "identity_proofing.needs_review": { icon: "warning", tone: "amber" },
@@ -427,8 +433,16 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingSessionPurged");
     case "identity_proofing.result_read":
       return t("auditLog.actions.identityProofingResultRead");
-    case "identity_proofing.completed":
-      return t("auditLog.actions.identityProofingCompleted");
+    case "identity_proofing.device_claimed":
+      return t("auditLog.actions.identityProofingDeviceClaimed");
+    case "identity_proofing.device_handed_over":
+      return t("auditLog.actions.identityProofingDeviceHandedOver");
+    case "identity_proofing.handover_issued":
+      return t("auditLog.actions.identityProofingHandoverIssued");
+    case "identity_proofing.handover_claim_failed":
+      return t("auditLog.actions.identityProofingHandoverClaimFailed");
+    case "identity_proofing.access_denied":
+      return t("auditLog.actions.identityProofingAccessDenied");
     case "identity_proofing.approved":
       return t("auditLog.actions.identityProofingApproved");
     case "identity_proofing.rejected":

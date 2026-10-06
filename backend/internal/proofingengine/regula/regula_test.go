@@ -21,6 +21,8 @@ func TestGetLiveness(t *testing.T) {
 			_, _ = w.Write([]byte(`{"code":0,"status":0,"tag":"ips-s1","transactionId":"tx 1"}`))
 		case "unlive":
 			_, _ = w.Write([]byte(`{"code":243,"status":1,"tag":"ips-s1"}`))
+		case "no status":
+			_, _ = w.Write([]byte(`{"code":0,"tag":"ips-s1"}`))
 		case "missing":
 			w.WriteHeader(http.StatusNotFound)
 		default:
@@ -38,6 +40,10 @@ func TestGetLiveness(t *testing.T) {
 	tx, err = c.GetLiveness(ctx, "unlive")
 	if err != nil || tx.Confirmed() || tx.Code != 243 {
 		t.Fatalf("GetLiveness(unlive) = %+v, %v; want unconfirmed, code 243", tx, err)
+	}
+	tx, err = c.GetLiveness(ctx, "no status")
+	if err != nil || tx.Confirmed() {
+		t.Fatalf("GetLiveness(no status) = %+v, %v; want unconfirmed", tx, err)
 	}
 	if _, err := c.GetLiveness(ctx, "missing"); !errors.Is(err, regula.ErrTransactionNotFound) {
 		t.Fatalf("GetLiveness(missing) err = %v, want ErrTransactionNotFound", err)

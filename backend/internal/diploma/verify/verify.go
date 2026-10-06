@@ -6,7 +6,7 @@
 //     file. Anything outside the ByteRange is unsigned, so a file that has been
 //     "updated" after signing is rejected.
 //  2. The CMS SignedData in /Contents is a valid detached signature over the
-//     signed bytes (message digest and RSA signature check).
+//     signed bytes (message digest and signature check).
 //  3. The signer certificate chains to a trust anchor, evaluated at the
 //     signing time. Anchors come from a TrustSource: by default the EU
 //     Trusted Lists (eIDAS), or the pinned PKIoverheid root when offline.
@@ -14,7 +14,8 @@
 //     (and the token's hash must match the signature value); otherwise the
 //     signer-claimed time is used and reported as untrusted.
 //  5. The signer's subject matches the expected issuer (DUO's KvK number).
-//  6. Optionally, an online OCSP check of the signer certificate.
+//  6. Optionally (DIPLOMA_OCSP), an online OCSP check of the signer
+//     certificate.
 package verify
 
 import (
@@ -229,8 +230,8 @@ func PDF(ctx context.Context, pdf []byte, opts Options) (*Result, error) {
 			if match {
 				res.SigningTime = ts.Time
 				res.TimestampTrusted = true
-				res.TSA = tsaLeaf(ts)
-				res.add(CheckTimestampAuthority, "timestamp authority trusted", verifyTSA(ts, opts.Trust.TSARoots(), p7.Certificates),
+				res.TSA = tsaSigner(tok)
+				res.add(CheckTimestampAuthority, "timestamp authority trusted", verifyTSA(ts, res.TSA, opts.Trust.TSARoots(), p7.Certificates),
 					tsaDetail(res.TSA, ts))
 			}
 		}
@@ -291,6 +292,9 @@ func PDF(ctx context.Context, pdf []byte, opts Options) (*Result, error) {
 			res.add(CheckRevocation, "OCSP", false, "no issuer certificate available")
 		} else {
 			status, err := checkOCSP(ctx, opts.HTTPClient, signer, res.Chain[1])
+			if err != nil {
+				status = err.Error()
+			}
 			res.add(CheckRevocation, "OCSP", err == nil, status)
 		}
 	} else {
@@ -368,25 +372,23 @@ func qcStatements(c *x509.Certificate) qcInfo {
 	return info
 }
 
-// tsaLeaf picks the end-entity certificate out of a timestamp token. Token
-// producers are free to order the certificates however they like.
-func tsaLeaf(ts *timestamp.Timestamp) *x509.Certificate {
-	for _, c := range ts.Certificates {
-		if !c.IsCA {
-			return c
-		}
+// tsaSigner is the certificate that signed the timestamp token: the one its
+// SignerInfo names by issuer and serial, which timestamp.Parse checked the
+// token's signature against. Not any other certificate the token carries:
+// the token sits outside the PDF's signed bytes, so its certificate list is
+// the uploader's to fill. Nil when the token has no single signer.
+func tsaSigner(tok []byte) *x509.Certificate {
+	p7, err := pkcs7.Parse(tok)
+	if err != nil {
+		return nil
 	}
-	if len(ts.Certificates) > 0 {
-		return ts.Certificates[0]
-	}
-	return nil
+	return p7.GetOnlySigner()
 }
 
-// verifyTSA checks that the timestamp token's signing certificate chains to a
+// verifyTSA checks that leaf, the token's signer (tsaSigner), chains to a
 // pinned TSA root, was valid at the asserted time, and is allowed to
 // timestamp. timestamp.Parse already checked the token signature itself.
-func verifyTSA(ts *timestamp.Timestamp, roots *x509.CertPool, extra []*x509.Certificate) bool {
-	leaf := tsaLeaf(ts)
+func verifyTSA(ts *timestamp.Timestamp, leaf *x509.Certificate, roots *x509.CertPool, extra []*x509.Certificate) bool {
 	if leaf == nil {
 		return false
 	}
