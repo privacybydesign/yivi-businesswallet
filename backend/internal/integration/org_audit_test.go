@@ -63,8 +63,8 @@ func TestOrgAuditDetailIsAdminOnly(t *testing.T) {
 		t.Fatalf("admin sees %d %s events, want 1", invited, audit.MembershipInvited)
 	}
 
-	me := env.login("member@example.test")
-	env.addMembership(me.ID, orgID, organization.RoleMember)
+	memberID := env.loginAs("member@example.test")
+	env.addMembership(memberID, orgID, organization.RoleMember)
 
 	member := env.orgAuditEvents("acme")
 	if len(member.Events) != len(admin.Events) {

@@ -58,6 +58,24 @@ sections are in this file's git history (`git log -p -- .ai/plans/identity-proof
   by the right party.
 - [ ] API security: can the API be spammed, and how to prevent it; limit what can be sent, and send it
   once.
+- [ ] **Rate limits as an org budget with customers inside it.** Today every customer has its own
+  fixed bucket (`apiCallLimit` 120/min, `APISessionLimit` 10/min, `HostedCallLimit` 3000/min) and an org
+  has no total, so an org with ten customers gets ten times the API.
+  - Two levels, both must have room for a call to pass:
+    - the customer's bucket (a hosted page: its link's), so one customer cannot take everything;
+    - the org's bucket: all its customers' calls plus its own member identity proofing.
+  - Step 1: both levels with fixed defaults in code, still in-process (`internal/ratelimit`); no
+    migration.
+  - Step 2: an org admin sets a lower limit per customer, within the org's budget (a customer setting,
+    audited).
+  - Optional: `RateLimit-Limit` / `-Remaining` / `-Reset` headers on every API response, not only
+    `Retry-After` on a 429.
+  - Still per replica (in-memory); a shared counter only once the API runs on several replicas.
+- [ ] **API usage per org, ranked.** An org admin sees who uses the org's budget, most usage at the top:
+  each customer, and the org's own member identity proofing. Pure idea, nothing decided:
+  - per customer the calls, sessions created and 429s over a period (today, 7 days, 30 days);
+  - per API key under its customer, so a misbehaving integration is found;
+  - needs usage counted somewhere durable: the in-memory buckets keep nothing.
 
 ## Before launch
 
