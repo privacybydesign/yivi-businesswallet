@@ -9,7 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
-  useCreateProofingRequestMutation,
+  useCreateRequestMutation,
   useProofingCustomerFlowsQuery,
   useProofingCustomerQuery,
 } from "../api/identity-proofing.queries";
@@ -129,7 +129,7 @@ function VerifyFlow({
   });
   const [inDiplomas, setInDiplomas] = useState(false);
   const [sent, setSent] = useState<ProofingSent>();
-  const create = useCreateProofingRequestMutation(slug);
+  const create = useCreateRequestMutation(slug);
   const name = customer.branding.displayName || customer.name;
 
   function start(): void {

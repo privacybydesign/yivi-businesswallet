@@ -91,11 +91,11 @@ func icaoDocument(dg1Bytes []byte, ev *mrtdEvidenceRequest, now time.Time) (*doc
 	}
 	m := dg1.Mrz
 	given, surname := mrzNameParts(m.NameOfHolder)
-	birth, err := mrzDate(m.DateOfBirth, now, false)
+	birth, err := mrzDate(m.DateOfBirth, now, mrzBirthDate)
 	if err != nil {
 		return nil, fmt.Errorf("DG1 date of birth: %w", err)
 	}
-	expiry, err := mrzDate(m.DateOfExpiry, now, true)
+	expiry, err := mrzDate(m.DateOfExpiry, now, mrzExpiryDate)
 	if err != nil {
 		return nil, fmt.Errorf("DG1 date of expiry: %w", err)
 	}
@@ -175,10 +175,20 @@ func mrzNameParts(n *mrz.MrzName) (given, surname string) {
 	return strings.TrimSpace(n.Secondary), strings.TrimSpace(n.Primary)
 }
 
+// mrzDateKind is which MRZ date mrzDate reads: each resolves its century its
+// own way.
+type mrzDateKind int
+
+const (
+	mrzBirthDate mrzDateKind = iota
+	mrzExpiryDate
+)
+
 // mrzDate turns an MRZ YYMMDD into YYYY-MM-DD. A date of birth is never in
 // the future, so one after today is the previous century; an expiry is this
 // century unless that puts it more than expiryCenturyWindow years ahead.
-func mrzDate(yymmdd string, now time.Time, expiry bool) (string, error) {
+func mrzDate(yymmdd string, now time.Time, kind mrzDateKind) (string, error) {
+	expiry := kind == mrzExpiryDate
 	if len(yymmdd) != mrzDateLength {
 		return "", fmt.Errorf("%q is not YYMMDD", yymmdd)
 	}

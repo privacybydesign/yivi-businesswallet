@@ -4,6 +4,7 @@ package proofingengine
 const (
 	headerRetryAfter  = "Retry-After"
 	headerContentType = "Content-Type"
+	headerAcceptLang  = "Accept-Language"
 	contentTypeJSON   = "application/json"
 )
 

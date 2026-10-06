@@ -836,6 +836,7 @@ export const en = {
       yiviCodes: {
         photoMissing: "the shared card has no photo.",
         referenceNoFace: "no face was found on the shared photo.",
+        documentNotAccepted: "this flow does not accept the shared document.",
       },
       face: {
         heading: "Look into the camera",

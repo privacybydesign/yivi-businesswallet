@@ -6,8 +6,8 @@ import * as React from "react";
 import {
   useDeleteHeldAttestationMutation,
   useHeldAttestationClaimsQuery,
-  useHeldAttestationHistoryQuery,
-  useRecheckHeldAttestationsMutation,
+  useHeldHistoryQuery,
+  useRecheckHeldMutation,
 } from "../api/attestations.queries";
 import type { HeldAttestationClaims } from "../api/attestations";
 import { useOrganizationQuery } from "../api/organization.queries";
@@ -290,7 +290,7 @@ function StatusBanner({
   formatDate: (iso: string) => string;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const recheck = useRecheckHeldAttestationsMutation(slug);
+  const recheck = useRecheckHeldMutation(slug);
   const look = BANNER_LOOK[status];
   const expiry = credential.expiresAt ? formatDate(credential.expiresAt) : "";
   const { title, body } = bannerText(
@@ -448,7 +448,7 @@ function HistoryCard({
   credential: HeldAttestationClaims;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const history = useHeldAttestationHistoryQuery(slug, credential.id);
+  const history = useHeldHistoryQuery(slug, credential.id);
   const formatWhen = useWhenFormatter();
   const entries = history.data ? heldHistory(history.data, credential) : [];
 

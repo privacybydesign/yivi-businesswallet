@@ -5,16 +5,16 @@ import * as React from "react";
 import { ApiError } from "../api/http";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
-  useCreateProofingRequestMutation,
-  useDecideProofingReviewMutation,
+  useCreateRequestMutation,
+  useDecideReviewMutation,
   useProofingCustomerFlowsQuery,
   useProofingCustomerQuery,
   useProofingRequestsQuery,
   useProofingRequestEventsQuery,
   useProofingRequestResultQuery,
   useProofingStatsQuery,
-  useSetProofingCustomerFlowsMutation,
-  useUpdateProofingCustomerMutation,
+  useSetCustomerFlowsMutation,
+  useUpdateCustomerMutation,
 } from "../api/identity-proofing.queries";
 import type {
   ProofingCustomer,
@@ -145,8 +145,11 @@ export default function CustomerDetail(): React.JSX.Element {
   const formatDate = useDateFormatter();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sending, setSending] = useState(false);
+  // A sent link, shown once outside the send dialog so closing that dialog
+  // cannot discard it.
+  const [link, setLink] = useState<string>();
   const [confirmingPause, setConfirmingPause] = useState(false);
-  const update = useUpdateProofingCustomerMutation(slug, id);
+  const update = useUpdateCustomerMutation(slug, id);
 
   const tabs = isAdmin ? ADMIN_TABS : MEMBER_TABS;
   const requested = searchParams.get("tab");
@@ -229,6 +232,19 @@ export default function CustomerDetail(): React.JSX.Element {
           customer={customer.data}
           isAdmin={isAdmin}
           onClose={() => setSending(false)}
+          onLink={(url) => {
+            setSending(false);
+            setLink(url);
+          }}
+        />
+      )}
+      {link !== undefined && (
+        <SecretReveal
+          title={t("customers.send.linkTitle")}
+          hint={t("customers.send.linkHint")}
+          secret={link}
+          doneLabel={t("customers.send.linkDone")}
+          onClose={() => setLink(undefined)}
         />
       )}
       {customer.data && confirmingPause && (
@@ -389,7 +405,7 @@ function FlowsTab({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const flows = useProofingCustomerFlowsQuery(slug, customer.id);
-  const assign = useSetProofingCustomerFlowsMutation(slug, customer.id);
+  const assign = useSetCustomerFlowsMutation(slug, customer.id);
   const [view, setView] = useState<FlowsView>({ kind: "list" });
 
   if (flows.isPending) {
@@ -593,11 +609,13 @@ function SendModal({
   customer,
   isAdmin,
   onClose,
+  onLink,
 }: {
   slug: string;
   customer: ProofingCustomer;
   isAdmin: boolean;
   onClose: () => void;
+  onLink: (url: string) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const flows = useProofingCustomerFlowsQuery(slug, customer.id);
@@ -619,6 +637,7 @@ function SendModal({
           flows={flows.data}
           isAdmin={isAdmin}
           onSent={onClose}
+          onLink={onLink}
           onCancel={onClose}
         />
       )}
@@ -636,7 +655,7 @@ function AssignedFlowsCard({
   flows: ProofingCustomerFlow[];
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const save = useSetProofingCustomerFlowsMutation(slug, customerId);
+  const save = useSetCustomerFlowsMutation(slug, customerId);
   const [assigned, setAssigned] = useState<ReadonlySet<string>>(
     () => new Set(flows.filter((f) => f.assigned).map((f) => f.id)),
   );
@@ -770,6 +789,7 @@ function SendForm({
   flows,
   isAdmin,
   onSent,
+  onLink,
   onCancel,
 }: {
   slug: string;
@@ -777,10 +797,11 @@ function SendForm({
   flows: ProofingCustomerFlow[];
   isAdmin: boolean;
   onSent: () => void;
+  onLink: (url: string) => void;
   onCancel: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const create = useCreateProofingRequestMutation(slug);
+  const create = useCreateRequestMutation(slug);
   // A flow matched against the customer's own photo is the customer API's
   // to send: this form has no photo to give it.
   const { sendable, initial } = assignedFlows(
@@ -793,7 +814,6 @@ function SendForm({
   const [picked, setPicked] = useState("");
   const [touched, setTouched] = useState(false);
   const [channel, setChannel] = useState<ProofingChannel>("email");
-  const [link, setLink] = useState<string>();
   const navigate = useNavigate();
   // A pick that is no longer assigned falls back to the default.
   const flowId = sendable.some((f) => f.id === picked)
@@ -848,24 +868,12 @@ function SendForm({
         channel: delivery,
       },
       {
-        // A link is shown to copy before the form closes.
+        // A link is shown to copy once the form closes.
         onSuccess: (sent) =>
           delivery === "hosted" && sent.hostedUrl
-            ? setLink(sent.hostedUrl)
+            ? onLink(sent.hostedUrl)
             : onSent(),
       },
-    );
-  }
-
-  if (link !== undefined) {
-    return (
-      <SecretReveal
-        title={t("customers.send.linkTitle")}
-        hint={t("customers.send.linkHint")}
-        secret={link}
-        doneLabel={t("customers.send.linkDone")}
-        onClose={onSent}
-      />
     );
   }
 
@@ -1467,7 +1475,7 @@ function ReviewDecision({
   requestId: string;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const decide = useDecideProofingReviewMutation(slug, requestId);
+  const decide = useDecideReviewMutation(slug, requestId);
   const [reason, setReason] = useState("");
   const [touched, setTouched] = useState(false);
   const missing = reason.trim() === "";

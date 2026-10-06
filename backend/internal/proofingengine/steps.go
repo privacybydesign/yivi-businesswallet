@@ -329,7 +329,7 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 	resp := selfieStepResponse{stepResponse: s.stepResponseFor(updated, resolvedFlow)}
 	resp.Biometrics = &biometricsInfo{
 		FaceMatchScore: out.MatchScore, FaceVerified: out.Matched,
-		LivenessResult: livenessResult(out.LivenessPassed), LivenessScore: out.LivenessScore,
+		LivenessResult: livenessResults[out.LivenessPassed], LivenessScore: out.LivenessScore,
 		Engine: selfieEngine(updated.Steps.Selfie), Threshold: out.Threshold,
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -367,12 +367,14 @@ func writeFaceProviderUnavailable(w http.ResponseWriter) {
 	writeErrorCode(w, http.StatusServiceUnavailable, errCodeFaceProviderUnavailable, errCodeFaceProviderUnavailable)
 }
 
-func livenessResult(passed bool) string {
-	if passed {
-		return "passed"
-	}
-	return "failed"
-}
+// A liveness result as reported, and livenessResults the one a check's
+// outcome reports.
+const (
+	livenessPassed = "passed"
+	livenessFailed = "failed"
+)
+
+var livenessResults = map[bool]string{true: livenessPassed, false: livenessFailed}
 
 // faceMatchReference is what the face is matched against: the customer's
 // reference photo (a flow without nfc_read), or the chip's DG2 portrait. ok is
@@ -419,8 +421,14 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 		writeDocumentUnsupported(w)
 		return
 	}
-	if _, err := verifyMrtdEvidence(req.MrtdEvidence, sess.AAChallenge); err != nil {
+	checks, err := verifyMrtdEvidence(req.MrtdEvidence, sess.AAChallenge)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid mrtdEvidence: "+err.Error())
+		return
+	}
+	// The BSN policy may drop DG11 below, so the finish never re-checks it.
+	if slices.Contains(checks.PassiveAuthentication.InvalidDataGroups, dataGroupPersonalDetails) {
+		writeError(w, http.StatusBadRequest, "invalid mrtdEvidence: DG11 does not match EF.SOD")
 		return
 	}
 	// The document is read off the chip evidence, never taken from the
@@ -932,7 +940,7 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 		// "not_performed".
 		req.Biometrics = &biometricsInfo{
 			FaceMatchScore: sess.Steps.Selfie.FaceMatchScore, FaceVerified: sess.Steps.Selfie.FaceVerified,
-			LivenessResult: livenessResult(sess.Steps.Selfie.LivenessPassed), LivenessScore: sess.Steps.Selfie.LivenessScore,
+			LivenessResult: livenessResults[sess.Steps.Selfie.LivenessPassed], LivenessScore: sess.Steps.Selfie.LivenessScore,
 			Engine: selfieEngine(sess.Steps.Selfie),
 		}
 	}
@@ -962,7 +970,7 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 	bsnPolicy, redactionPolicy := effectivePrivacyPolicy(fd)
 	result := buildResult(sess, req, verifiedChecks, fd, bsnPolicy, redactionPolicy)
 
-	achieved := computeEIDASAssuranceLevel(fd, req, verifiedChecks, sess.ReferencePhoto == "")
+	achieved := computeEIDASAssuranceLevel(fd, req, verifiedChecks, faceMatchSourceOf(sess))
 	finalStatus, finalErrorCode, reason := sessionOutcome(fd, sess, req, verifiedChecks, achieved, s.cfg.Now())
 
 	snapshotResets, snapshotFaceAttempts := sess.ResetCount, faceStepAttempts(sess.Steps.Selfie)

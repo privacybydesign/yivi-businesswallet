@@ -14,7 +14,7 @@ import (
 
 // syntheticDg15FromCscaHex builds a structurally valid DG15/DG13-shaped blob
 // (tag 0x6F wrapping a real SubjectPublicKeyInfo) by reusing the fixture
-// CSCA certificate's own public key — good enough to exercise
+// CSCA certificate's own public key: good enough to exercise
 // ValidateActiveAuthSignature's parsing path with a signature that's
 // guaranteed not to verify against it.
 func syntheticDg15FromCscaHex(t *testing.T) string {
@@ -62,7 +62,7 @@ func TestVerifyPassiveValid(t *testing.T) {
 }
 
 func TestVerifyPassiveTamperedDG(t *testing.T) {
-	// Flip a byte in DG1 so it no longer matches the hash EF.SOD signed —
+	// Flip a byte in DG1 so it no longer matches the hash EF.SOD signed:
 	// tampering with the data after the chip was signed should be caught,
 	// independent of the signature itself still being valid.
 	dg1Bytes, err := hex.DecodeString(mrtdtestfixtures.TestDg1Hex)
@@ -80,7 +80,7 @@ func TestVerifyPassiveTamperedDG(t *testing.T) {
 		t.Fatalf("VerifyPassive: %v", err)
 	}
 	if !result.SODSignatureValid {
-		t.Error("SOD signature itself should still verify — only DG1's content changed")
+		t.Error("SOD signature itself should still verify: only DG1's content changed")
 	}
 	if result.DataGroupHashesValid {
 		t.Error("expected DataGroupHashesValid=false for a tampered data group")
@@ -91,7 +91,7 @@ func TestVerifyPassiveTamperedDG(t *testing.T) {
 }
 
 func TestVerifyPassiveInjectedDG(t *testing.T) {
-	// DG11 was never part of this fixture's signed hash list — submitting
+	// DG11 was never part of this fixture's signed hash list, so submitting
 	// it anyway must be caught as data injection, not silently ignored.
 	result, err := VerifyPassive(mrtdtestfixtures.TestSodHex, map[string]string{
 		"DG1":  mrtdtestfixtures.TestDg1Hex,
@@ -181,7 +181,7 @@ func TestVerifyActiveMalformedKey(t *testing.T) {
 func TestVerifyActiveWrongSig(t *testing.T) {
 	// A structurally valid DG15 (tag 0x6F wrapping a real SubjectPublicKeyInfo,
 	// reusing the fixture CSCA's own SPKI as a stand-in RSA key) but a
-	// signature that cannot possibly be a valid AA response — this must be
+	// signature that cannot possibly be a valid AA response: this must be
 	// reported as Attempted=true, Passed=false, not a request error.
 	dg15Hex := syntheticDg15FromCscaHex(t)
 
@@ -199,7 +199,7 @@ func TestVerifyActiveWrongSig(t *testing.T) {
 
 func TestLicenceCertPoolIsEmpty(t *testing.T) {
 	// Unlike PassportCertPool, gmrtd bundles nothing for EU driving licences
-	// (see DrivingLicenceCertPool's doc comment) — this stays empty until
+	// (see DrivingLicenceCertPool's doc comment): this stays empty until
 	// this project has an actual source of trust-anchor certs to point at.
 	// CSCATrustChainValid always comes back false for driving licences as a
 	// result, rather than silently skipping the check.

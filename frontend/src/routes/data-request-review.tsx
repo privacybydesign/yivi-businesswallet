@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
-  useDecideProofingReviewMutation,
+  useDecideReviewMutation,
   useProofingDataMatchesQuery,
 } from "../api/identity-proofing.queries";
 import { isDataRequest, proofingDataExportUrl } from "../api/identity-proofing";
@@ -106,7 +106,7 @@ function Review({
   matches: ProofingDataMatch[];
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const decide = useDecideProofingReviewMutation(slug, request.id);
+  const decide = useDecideReviewMutation(slug, request.id);
   // A match proven with the same document starts ticked; the reviewer
   // unticks what must be kept. A match on name and date of birth alone, or on
   // the e-mail address, starts unticked: only the reviewer's tick takes it.

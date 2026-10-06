@@ -191,7 +191,7 @@ func (h *Handler) idempotent(next respond.HandlerFunc) respond.HandlerFunc {
 			return err
 		case replay != nil:
 			w.Header().Set(headerContentType, contentTypeJSON)
-			w.Header().Set("Idempotent-Replayed", "true")
+			w.Header().Set(headerIdempotentReplayed, "true")
 			w.WriteHeader(replay.Status)
 			_, err := w.Write(replay.Body)
 			return err

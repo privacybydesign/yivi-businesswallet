@@ -230,6 +230,7 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 		}
 		photoMime = &in.ReferencePhoto.MimeType
 	}
+
 	var birthDateCT []byte
 	if in.Subject.BirthDate != "" {
 		if s.cipher == nil {
@@ -240,6 +241,7 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 			return Request{}, fmt.Errorf("proofing: encrypt expected birth date org %s: %w", in.OrgID, err)
 		}
 	}
+
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		// Before the row: a retention change in flight finishes first, and the
 		// next waits for this insert (lockCustomer's lock order).
@@ -248,6 +250,7 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 				return err
 			}
 		}
+
 		const insert = `INSERT INTO identity_proofing_requests
 			(id, organization_id, requested_by, subject_user_id, customer_id, subject_name, subject_email,
 			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method, required_assurance_level,
@@ -263,9 +266,11 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 			photoCT, photoMime, string(in.FlowKind), in.Flow.RetentionOverrideSeconds); err != nil {
 			return fmt.Errorf("proofing: create request org %s: %w", in.OrgID, err)
 		}
+
 		if err := refreshPurgeAt(ctx, q, in.ID); err != nil {
 			return err
 		}
+
 		fields := withAuditSubject(map[string]any{
 			"flowId": in.Flow.ID, "flowName": in.Flow.Name, "flowVersion": in.Flow.Version,
 			"channel": string(in.Channel),
@@ -289,12 +294,14 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 		if in.APIKeyID != nil {
 			fields["apiKeyId"] = in.APIKeyID.String()
 		}
+
 		// A hosted link lapses unstarted at link_expires_at: wake the deadline job.
 		if in.LinkTokenHash != nil {
 			if err := database.Notify(ctx, q, SessionChannel); err != nil {
 				return err
 			}
 		}
+
 		return s.audit.Record(ctx, q, audit.IdentityProofingRequested,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: in.ID.String(), OrgID: &in.OrgID},
 			audit.Created(fields))
@@ -832,17 +839,30 @@ func (s *RequestStore) EndSession(ctx context.Context, req Request, sessionID st
 // Cancel marks a request without an outcome cancelled and its session ended,
 // audited identity_proofing.session_cancelled. False when it moved on first.
 func (s *RequestStore) Cancel(ctx context.Context, req Request) (bool, error) {
+	var sessionID *string
+	if req.session != nil {
+		sessionID = &req.session.ID
+	}
 	var done bool
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		const cancellable = `id = $1 AND cancelled_at IS NULL AND purged_at IS NULL AND status IN ('pending', 'in_progress')`
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
 			SET cancelled_at = now(), ips_session_ended_at = COALESCE(ips_session_ended_at, now()),
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL,
 				expected_birth_date_ciphertext = NULL, updated_at = now()
-			WHERE id = $1 AND cancelled_at IS NULL AND purged_at IS NULL AND status IN ('pending', 'in_progress')`, req.ID)
+			WHERE `+cancellable+` AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID)
 		if err != nil {
 			return fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
 		}
 		if done = tag.RowsAffected() == 1; !done {
+			var moved bool
+			if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM identity_proofing_requests
+				WHERE `+cancellable+` AND ips_session_id IS DISTINCT FROM $2)`, req.ID, sessionID).Scan(&moved); err != nil {
+				return fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
+			}
+			if moved {
+				return errCancelSessionMoved
+			}
 			return nil
 		}
 		if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
@@ -904,14 +924,8 @@ func (s *RequestStore) Purge(ctx context.Context, req Request) error {
 		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_diplomas WHERE request_id = $1`, req.ID); err != nil {
 			return fmt.Errorf("proofing: purge diplomas request %s: %w", req.ID, err)
 		}
-		if _, err := q.Exec(ctx, `UPDATE audit_events
-			SET metadata = (metadata - $4::text[])
-				|| CASE WHEN jsonb_typeof(metadata->'before') = 'object'
-					THEN jsonb_build_object('before', (metadata->'before') - $4::text[]) ELSE '{}'::jsonb END
-				|| CASE WHEN jsonb_typeof(metadata->'after') = 'object'
-					THEN jsonb_build_object('after', (metadata->'after') - $4::text[]) ELSE '{}'::jsonb END
-			WHERE organization_id = $1 AND target_type = $2 AND target_id = $3`,
-			req.OrganizationID, audit.TargetIdentityProofingRequest, req.ID.String(), auditPersonalKeys); err != nil {
+		if err := audit.StripFields(ctx, q, req.OrganizationID, audit.TargetIdentityProofingRequest,
+			req.ID.String(), audit.IdentityProofingPersonalKeys); err != nil {
 			return fmt.Errorf("proofing: purge audit subject request %s: %w", req.ID, err)
 		}
 		// A retry with one of these keys then runs as a new call: the session
@@ -933,20 +947,13 @@ func (s *RequestStore) Purge(ctx context.Context, req Request) error {
 	})
 }
 
+// errCancelSessionMoved is a cancel of a request read before a session was
+// attached to it: read it again, and end that session first.
+var errCancelSessionMoved = errors.New("proofing: the request got a session since it was read")
+
 // errPurgeSessionMoved is a purge of a request read before a session was
 // attached to it: read it again, and erase that session first.
 var errPurgeSessionMoved = errors.New("proofing: the request got a session since it was read")
-
-// auditPersonalKeys are the fields of a request's audit events that name or
-// describe its subject: who it is (withAuditSubject) and their diplomas
-// (Diploma.auditFields), and a reviewer's reason. Purge strips them wherever
-// an event holds them, at the top or in its before and after.
-var auditPersonalKeys = []string{
-	"subjectName", "subjectEmail",
-	// A reviewer's free-text reason may name the subject.
-	"reason",
-	"documentType", "qualification", "institution", "dateAwarded", "nlqfLevel", "documentNumber",
-}
 
 // outcomeActions is the audit action each the engine outcome is recorded under.
 var outcomeActions = map[Status]string{

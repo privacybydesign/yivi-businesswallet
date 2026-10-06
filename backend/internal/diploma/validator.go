@@ -210,10 +210,18 @@ type PadesValidator struct {
 	httpClient *http.Client
 }
 
-// NewPadesValidator creates a validator. With ocsp the signer certificate is
-// also checked online against DUO's OCSP responder.
-func NewPadesValidator(store *TrustStore, ocsp bool) *PadesValidator {
-	return &PadesValidator{trust: store, ocsp: ocsp, httpClient: &http.Client{Timeout: ocspHTTPTimeout}}
+// Revocation is whether a PadesValidator checks the signer certificate's
+// revocation: offline only, or online against DUO's OCSP responder too.
+type Revocation int
+
+const (
+	RevocationOffline Revocation = iota
+	RevocationOCSP
+)
+
+// NewPadesValidator creates a validator that checks revocation as asked.
+func NewPadesValidator(store *TrustStore, revocation Revocation) *PadesValidator {
+	return &PadesValidator{trust: store, ocsp: revocation == RevocationOCSP, httpClient: &http.Client{Timeout: ocspHTTPTimeout}}
 }
 
 // Ping fails when no anchors are loaded.

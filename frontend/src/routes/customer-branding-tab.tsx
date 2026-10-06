@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import { useSaveProofingBrandingMutation } from "../api/identity-proofing.queries";
+import { useSaveBrandingMutation } from "../api/identity-proofing.queries";
 import type { ProofingCustomer } from "../api/identity-proofing";
 import {
   isHexColor,
@@ -59,7 +59,7 @@ export function BrandingTab({
   customer: ProofingCustomer;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const save = useSaveProofingBrandingMutation(slug, customer.id);
+  const save = useSaveBrandingMutation(slug, customer.id);
   const [draft, setDraft] = useState<Draft>(() => draftFrom(customer));
   const fileInput = useRef<HTMLInputElement>(null);
   // A picked file previews from a local object URL, freed when replaced.

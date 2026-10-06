@@ -2,13 +2,15 @@
 
 Branch `docs/identity-proofing-design` (PR #267). The wallet runs identity proofing itself, in
 `backend/internal/proofingengine`, driven by `backend/internal/proofing`; how it works is in
-`.ai/features/identity-proofing.md`. Everything the PR reviews of 2026-10-02 found has been fixed or decided,
-except what is open below. The full review checklist, the decisions with their answers and the old design
+`.ai/features/identity-proofing.md`. Everything the PR reviews of 2026-10-02 and 2026-10-06 found has been
+fixed or decided, except what is open below. The full review checklist, the decisions with their answers and the old design
 sections are in this file's git history (`git log -p -- .ai/plans/identity-proofing.md`).
 
 PR state on 2026-10-06:
-- Review threads: 105 resolved; of the 4 still open, 3 are fixed in the latest changes. Only the EU
-  driving licence thread stays open (below, Later).
+- Review threads of 2026-10-02: all resolved.
+- Dobby's review of 2026-10-06 (26 threads at `05ca40d`): its 15 bugs, 2 nits and 8 of its 9 style
+  findings are fixed. The ninth, moving the held-credential status re-check and history to its own PR,
+  is decided below (Process): the PR is not split.
 - Ruben's "Questions for the author" are settled in the code.
 - The `Yivi Design System.zip` deletion is intended: the archive is not needed.
 
@@ -27,6 +29,10 @@ PR state on 2026-10-06:
 - [ ] **The Yivi app route (decision 6).** It does not work end to end yet. Then: require the device
   token on the Yivi routes, as on the Idem ones; give a failed hosted Yivi session a restart (R26); make
   the face check after the disclosure optional per flow.
+  - The proofing disclosure (`openid4vpverifier.proofingQuery`) asks no document type, issuing country
+    or expiry, so a flow that restricts the type or country refuses every Yivi disclosure
+    (`document_not_accepted`, `disclosureComplianceFailure`). Ask for those claims once the passport
+    and ID card credentials are known to carry them; a disclosed expiry is already checked.
 - [ ] **Liveness retries.** How many attempts a session gets is the Idem app's concern; the engine caps a
   face step at `maxFaceStepAttempts` (3) as a safety bound.
 - [ ] **Who may mint a handover (R14).** Decided 2026-10-05: the handover stays as it works now.
@@ -65,7 +71,7 @@ PR state on 2026-10-06:
 - [ ] API security: can the API be spammed, and how to prevent it; limit what can be sent, and send it
   once.
 - [ ] **Rate limits as an org budget with customers inside it.** Today every customer has its own
-  fixed bucket (`apiCallLimit` 120/min, `APISessionLimit` 10/min, `HostedCallLimit` 3000/min) and an org
+  fixed bucket (`apiCallLimit` 120/min, `APISessionLimit` 10/min, `hostedCallLimit` 3000/min) and an org
   has no total, so an org with ten customers gets ten times the API.
   - Two levels, both must have room for a call to pass:
     - the customer's bucket (a hosted page: its link's), so one customer cannot take everything;
@@ -109,6 +115,8 @@ PR state on 2026-10-06:
 
 - [x] Dobby's `CHANGES_REQUESTED` (not a draft PR, non-atomic commits and messages) is process only and
   gets dismissed; the PR is not split and its history stays as it is.
+- [x] Dobby's 2026-10-06 minimal-diff finding (the held-credential re-check and history in their own PR)
+  falls under the same decision: they stay in this PR.
 
 ## Harvest
 

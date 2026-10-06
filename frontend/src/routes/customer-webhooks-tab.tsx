@@ -2,12 +2,12 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
-  useProofingWebhookDeliveriesQuery,
+  useWebhookDeliveriesQuery,
   useProofingWebhookQuery,
-  useRemoveProofingWebhookMutation,
-  useRotateProofingWebhookSecretMutation,
-  useSaveProofingWebhookMutation,
-  useSendProofingWebhookTestMutation,
+  useRemoveWebhookMutation,
+  useNewWebhookSecretMutation,
+  useSaveWebhookMutation,
+  useSendWebhookTestMutation,
 } from "../api/identity-proofing.queries";
 import type {
   ProofingCustomer,
@@ -104,7 +104,7 @@ function EndpointForm({
   onSaved: (saved: ProofingWebhook) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const save = useSaveProofingWebhookMutation(slug, customerId);
+  const save = useSaveWebhookMutation(slug, customerId);
   const [url, setUrl] = useState(webhook.url ?? "");
   const [events, setEvents] = useState<ReadonlySet<string>>(
     () =>
@@ -238,9 +238,9 @@ function EndpointCard({
   onRotated: (secret: string) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const test = useSendProofingWebhookTestMutation(slug, customerId);
-  const rotate = useRotateProofingWebhookSecretMutation(slug, customerId);
-  const remove = useRemoveProofingWebhookMutation(slug, customerId);
+  const test = useSendWebhookTestMutation(slug, customerId);
+  const rotate = useNewWebhookSecretMutation(slug, customerId);
+  const remove = useRemoveWebhookMutation(slug, customerId);
   const [confirm, setConfirm] = useState<"rotate" | "remove" | null>(null);
   const failing = webhook.health.state === "failing";
   const error = test.error ?? rotate.error ?? remove.error;
@@ -369,7 +369,7 @@ function DeliveriesCard({
   customerId: string;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const deliveries = useProofingWebhookDeliveriesQuery(slug, customerId);
+  const deliveries = useWebhookDeliveriesQuery(slug, customerId);
   const formatWhen = useWhenFormatter();
   const rows = deliveries.data ?? [];
 

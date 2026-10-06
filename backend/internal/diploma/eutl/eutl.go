@@ -41,6 +41,12 @@ const LOTLURL = "https://ec.europa.eu/tools/lotl/eu-lotl.xml"
 
 const tslMime = "application/vnd.etsi.tsl+xml"
 
+// The User-Agent the trusted list downloads name themselves with.
+const (
+	headerUserAgent = "User-Agent"
+	userAgent       = "diplomacheck/0.1 (+eutl)"
+)
+
 // Service type identifiers from ETSI TS 119 612.
 const (
 	SvcCAQC          = "http://uri.etsi.org/TrstSvc/Svctype/CA/QC"
@@ -315,7 +321,7 @@ func (f fetcher) download(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "diplomacheck/0.1 (+eutl)")
+	req.Header.Set(headerUserAgent, userAgent)
 	resp, err := f.opts.HTTPClient.Do(req)
 	if err != nil {
 		return nil, err

@@ -18,11 +18,11 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 )
 
-// HostedCallLimit holds the hosted page per customer across all its links, as
+// hostedCallLimit holds the hosted page per customer across all its links, as
 // apiCallLimit holds the API, and per API replica. It fits some twenty people
 // at a hosted face check at once: its frames go every 400 ms, its status polls
 // every 2 s.
-var HostedCallLimit = ratelimit.Limit{Burst: 3000, Per: time.Minute}
+var hostedCallLimit = ratelimit.Limit{Burst: 3000, Per: time.Minute}
 
 // hostedPagePrefix is the SPA route of a hosted link's page, /p/:token.
 const hostedPagePrefix = "/p/"
@@ -38,7 +38,7 @@ func (h *Handler) PageHeaders(r *http.Request, header http.Header) {
 	if !ok || token == "" || strings.Contains(token, "/") {
 		return
 	}
-	header.Set("Content-Security-Policy", h.framePolicy(r, token))
+	header.Set(headerCSP, h.framePolicy(r, token))
 }
 
 func (h *Handler) framePolicy(r *http.Request, token string) string {
@@ -195,10 +195,12 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
+
 	var out hostedViewResponse
 	out.hostedProgressResponse = newHostedProgress(hosted.Request, time.Now())
 	out.SessionID = publicSessionID(hosted.Request.ID)
 	out.RedirectURL, out.Language = hosted.Request.RedirectURL, string(hosted.Request.Language)
+
 	c := hosted.Customer
 	out.EmbedOrigins = append([]string{}, c.RedirectOrigins...)
 	out.Locales = append([]email.Locale{}, hosted.Settings.Locales...)
@@ -212,6 +214,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 		out.Customer.Branding.LogoURI = fmt.Sprintf("/api/v1/proof/%s/logo?v=%d", url.PathEscape(token), c.UpdatedAt.Unix())
 	}
 	out.Customer.DataRetentionDays = c.Settings.DataRetentionDays
+
 	f := hosted.Flow
 	out.Flow.Name, out.Flow.RequiredAssuranceLevel = f.Name, f.RequiredAssuranceLevel
 	out.Flow.RequestedAttributes = f.RequestedAttributes
@@ -222,11 +225,13 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
 	out.Flow.Kind = hosted.Request.FlowKind
 	out.Flow.RetentionDays = subjectRetentionDays(c, hosted.Request.RetentionOverride)
+
 	diplomas, err := h.service.RequestDiplomas(r.Context(), []uuid.UUID{hosted.Request.ID})
 	if err != nil {
 		return mapError(err)
 	}
 	out.Diplomas = newHostedDiplomas(diplomas[hosted.Request.ID])
+
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }

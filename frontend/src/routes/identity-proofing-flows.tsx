@@ -4,14 +4,14 @@ import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
-  useActivateProofingFlowVersionMutation,
+  useActivateFlowMutation,
   useCreateProofingFlowMutation,
   useEditProofingFlowMutation,
   useProofingFlowVersionsQuery,
   useProofingFlowsQuery,
-  useSetProofingFlowSelectionMutation,
-  useSaveProofingFlowDiplomasMutation,
-  useSaveProofingFlowKindMutation,
+  useSetFlowSelectionMutation,
+  useSaveFlowDiplomasMutation,
+  useSaveFlowKindMutation,
 } from "../api/identity-proofing.queries";
 import { FLOW_KINDS, isDataRequest } from "../api/identity-proofing";
 import type {
@@ -134,7 +134,7 @@ function FlowsCard({
   onEdit: (flow: ProofingFlow) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const save = useSetProofingFlowSelectionMutation(slug);
+  const save = useSetFlowSelectionMutation(slug);
   // Seeded once from the server; a flow created later starts unselected.
   const [allowed, setAllowed] = useState<ReadonlySet<string>>(
     () => new Set(flows.filter((f) => f.allowed).map((f) => f.id)),
@@ -145,11 +145,20 @@ function FlowsCard({
   const [historyOf, setHistoryOf] = useState<string | null>(null);
   const [hostedOf, setHostedOf] = useState<string | null>(null);
 
-  // A default the admin unticked falls to the first flow still ticked.
-  const { selection, dirty } = editedFlowSelection(flows, allowed, defaultId, {
-    flowIds: flows.filter((f) => f.allowed).map((f) => f.id),
-    defaultFlowId: flows.find((f) => f.default)?.id ?? "",
-  });
+  // A default the admin unticked falls to the first flow still ticked; a flow
+  // that can no longer be ticked drops out.
+  const selectable = flows.filter(
+    (f) => f.completable && !isDataRequest(f.kind),
+  );
+  const { selection, dirty } = editedFlowSelection(
+    selectable,
+    allowed,
+    defaultId,
+    {
+      flowIds: flows.filter((f) => f.allowed).map((f) => f.id),
+      defaultFlowId: flows.find((f) => f.default)?.id ?? "",
+    },
+  );
   const effectiveDefault = selection.defaultFlowId;
 
   function toggle(id: string, on: boolean): void {
@@ -187,7 +196,7 @@ function FlowsCard({
           <ul className="border-line divide-y rounded-lg border">
             {flows.map((flow) => {
               const checkboxId = `proofing-flow-allowed-${flow.id}`;
-              const on = allowed.has(flow.id);
+              const on = allowed.has(flow.id) && selectable.includes(flow);
               return (
                 <li key={flow.id} className="flex flex-col gap-3 px-4 py-3">
                   <div className="flex flex-wrap items-start gap-x-6 gap-y-2">
@@ -356,7 +365,7 @@ function VersionHistory({
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const versions = useProofingFlowVersionsQuery(slug, flowId, true);
-  const activate = useActivateProofingFlowVersionMutation(slug, flowId);
+  const activate = useActivateFlowMutation(slug, flowId);
 
   if (versions.isPending) {
     return <p className={HINT}>{t("common.loading")}</p>;
@@ -446,10 +455,10 @@ export function FlowEditor({
   );
   const save = editing || saved ? edit : create;
   // Kept by the wallet, not the proofing service: saved after the flow.
-  const saveDiplomas = useSaveProofingFlowDiplomasMutation(slug);
+  const saveDiplomas = useSaveFlowDiplomasMutation(slug);
   const savedDiplomas: DiplomaMode = editing?.diplomaMode ?? "off";
   const [diplomaMode, setDiplomaMode] = useState<DiplomaMode>(savedDiplomas);
-  const saveKind = useSaveProofingFlowKindMutation(slug);
+  const saveKind = useSaveFlowKindMutation(slug);
   const savedKind: FlowKind = editing?.kind ?? "identity";
   const [flowKind, setFlowKind] = useState<FlowKind>(savedKind);
   const [draft, setDraft] = useState<ProofingFlowDraft>(() =>

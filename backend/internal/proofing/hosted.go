@@ -340,6 +340,9 @@ func (s *Service) DeclineHosted(ctx context.Context, token string) (Request, err
 		return Request{}, ErrSessionOver
 	}
 	cancelled, err := s.requests.Cancel(audit.ContextWithActor(ctx, hostedSubjectActor), req)
+	if errors.Is(err, errCancelSessionMoved) {
+		return Request{}, ErrLinkStarted
+	}
 	if err != nil {
 		return Request{}, err
 	}

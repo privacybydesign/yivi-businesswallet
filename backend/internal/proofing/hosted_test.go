@@ -134,7 +134,7 @@ func TestHostedPageFrameOrigins(t *testing.T) {
 	csp := func(path string) string {
 		header := http.Header{}
 		h.PageHeaders(httptest.NewRequest(http.MethodGet, path, nil), header)
-		return header.Get("Content-Security-Policy")
+		return header.Get(headerCSP)
 	}
 	if got := csp("/p/" + token); got != frameNone {
 		t.Errorf("no origins: CSP = %q, want %q", got, frameNone)

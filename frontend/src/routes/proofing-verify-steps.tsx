@@ -4,13 +4,13 @@ import QRCode from "qrcode";
 import type { TFunction } from "i18next";
 import * as React from "react";
 import {
-  useNewProofingClaimLinkMutation,
+  useNewClaimLinkMutation,
   useProofingAppQuery,
   useProofingProgressQuery,
-  useProofingYiviDisclosureQuery,
+  useYiviDisclosureQuery,
   useStartProofingYiviMutation,
-  useSubmitProofingFaceFrameMutation,
-  useUploadProofingDiplomasMutation,
+  useSubmitFaceFrameMutation,
+  useUploadDiplomasMutation,
 } from "../api/identity-proofing.queries";
 import type {
   DiplomaMode,
@@ -327,7 +327,7 @@ export function Session({
   }, [askDiplomas, onDiplomaStep]);
   const secondsLeft = useSecondsLeft(current.linkExpiresAt);
   const [link, setLink] = useState(deepLink);
-  const fresh = useNewProofingClaimLinkMutation(target);
+  const fresh = useNewClaimLinkMutation(target);
   const newCode = (
     <div className="flex flex-col items-center gap-1">
       <Button
@@ -446,7 +446,7 @@ function DiplomaStep({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const formatDate = useDateFormatter();
-  const upload = useUploadProofingDiplomasMutation(target);
+  const upload = useUploadDiplomasMutation(target);
   const fileInput = useRef<HTMLInputElement>(null);
   const [held, setHeld] = useState<HostedDiploma[]>(initial);
   const [refused, setRefused] = useState<DiplomaVerdict[]>([]);
@@ -647,7 +647,7 @@ function IdemOnScreen({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const app = useProofingAppQuery(target.slug, target.requestId, true);
-  const fresh = useNewProofingClaimLinkMutation(target);
+  const fresh = useNewClaimLinkMutation(target);
   const { mutate, isPending } = fresh;
   const [code, setCode] = useState<IdemCode | undefined>(
     deepLink
@@ -782,7 +782,7 @@ function YiviSession({
     ? Math.min(sessionSecondsLeft, yiviSecondsLeft)
     : sessionSecondsLeft;
   // Polling stops once the session has expired: nothing can finish it then.
-  const disclosure = useProofingYiviDisclosureQuery(
+  const disclosure = useYiviDisclosureQuery(
     target,
     start.isSuccess && secondsLeft > 0,
   );
@@ -855,6 +855,8 @@ function yiviEndReason(code: string | undefined, t: TFunction): string {
       return t("customers.onScreen.yiviCodes.photoMissing");
     case "reference_no_face":
       return t("customers.onScreen.yiviCodes.referenceNoFace");
+    case "document_not_accepted":
+      return t("customers.onScreen.yiviCodes.documentNotAccepted");
     default:
       return code ?? t("identityProofing.errors.generic");
   }
@@ -876,7 +878,7 @@ function FaceCheck({
   const [ready, setReady] = useState(false);
   const [verdict, setVerdict] = useState<ProofingFaceVerdict>();
   const [frameError, setFrameError] = useState<string>();
-  const submit = useSubmitProofingFaceFrameMutation(target);
+  const submit = useSubmitFaceFrameMutation(target);
   const { mutateAsync } = submit;
   const [attempt, setAttempt] = useState(0);
   const [frameTick, setFrameTick] = useState(0);

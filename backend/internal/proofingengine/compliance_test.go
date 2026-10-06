@@ -33,3 +33,31 @@ func TestComplianceRejectsExpired(t *testing.T) {
 		}
 	}
 }
+
+// A Yivi disclosure on a flow that restricts the document type or issuing
+// country is refused unless it shows a compliant one, and a disclosed expiry
+// in the past is refused; a flow without restrictions accepts it.
+func TestDisclosureCompliance(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	nldPassports := &flow.FlowDefinition{AcceptedDocumentTypes: []string{"P"}, AcceptedIssuingCountries: []string{"NLD"}}
+	for name, c := range map[string]struct {
+		fd   *flow.FlowDefinition
+		doc  documentInfo
+		want string
+	}{
+		"no flow":                {nil, documentInfo{}, ""},
+		"unrestricted":           {&flow.FlowDefinition{}, documentInfo{}, ""},
+		"type not disclosed":     {nldPassports, documentInfo{IssuingState: "NLD"}, errCodeDocTypeRefused},
+		"country not disclosed":  {nldPassports, documentInfo{Type: "P"}, errCodeCountryRefused},
+		"other country":          {nldPassports, documentInfo{Type: "P", IssuingState: "DEU"}, errCodeCountryRefused},
+		"compliant":              {nldPassports, documentInfo{Type: "P", IssuingState: "NLD"}, ""},
+		"expired":                {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "2026-10-04"}, errCodeDocExpired},
+		"expired, dd-mm-yyyy":    {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "04-10-2026"}, errCodeDocExpired},
+		"valid today":            {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "2026-10-05"}, ""},
+		"expiry in other format": {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "20261004"}, ""},
+	} {
+		if _, code := disclosureComplianceFailure(c.fd, c.doc, now); code != c.want {
+			t.Errorf("%s: error code %q, want %q", name, code, c.want)
+		}
+	}
+}

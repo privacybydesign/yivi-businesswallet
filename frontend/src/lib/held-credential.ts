@@ -286,7 +286,8 @@ function afterField(event: HistoryEvent, key: string): unknown {
 
 // heldHistory merges a credential's audit trail with what the credential itself
 // records: its receipt (for one received before the trail recorded that) and
-// its last status check, oldest first.
+// its last status check, oldest first. The check comes last: it is stamped a
+// moment before the events it causes, so its own time would sort it above them.
 export function heldHistory(
   events: readonly HistoryEvent[],
   credential: { receivedAt: string; statusCheckedAt?: string },
@@ -340,6 +341,7 @@ export function heldHistory(
   if (!entries.some((e) => e.kind === "received")) {
     entries.push({ at: credential.receivedAt, kind: "received", action: "" });
   }
+  entries.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   if (credential.statusCheckedAt) {
     entries.push({
       at: credential.statusCheckedAt,
@@ -347,7 +349,7 @@ export function heldHistory(
       action: "",
     });
   }
-  return entries.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  return entries;
 }
 
 // The formats irmago stores an SD-JWT VC under.

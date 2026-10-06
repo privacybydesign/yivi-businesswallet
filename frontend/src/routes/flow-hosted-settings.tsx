@@ -5,7 +5,7 @@ import {
   useProofingCustomerFlowsQuery,
   useProofingCustomersQuery,
   useProofingFlowHostedQuery,
-  useSaveProofingFlowHostedMutation,
+  useSaveFlowHostedMutation,
 } from "../api/identity-proofing.queries";
 import type {
   ProofingFlow,
@@ -59,7 +59,7 @@ function HostedForm({
   saved: ProofingFlowHosted;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const save = useSaveProofingFlowHostedMutation(slug, flow.id);
+  const save = useSaveFlowHostedMutation(slug, flow.id);
   const [draft, setDraft] = useState(saved);
   const dirty =
     draft.enabled !== saved.enabled ||

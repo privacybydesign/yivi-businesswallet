@@ -419,7 +419,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // requestLanguage is the language the app's flow is in: the session's when
 // shipped, else the device's Accept-Language, else English.
 func requestLanguage(r *http.Request, sessionLanguage string) string {
-	return i18n.Resolve(sessionLanguage, r.Header.Get("Accept-Language"))
+	return i18n.Resolve(sessionLanguage, r.Header.Get(headerAcceptLang))
 }
 
 func round3(v float64) float64 { return float64(int(v*1000+0.5)) / 1000 }

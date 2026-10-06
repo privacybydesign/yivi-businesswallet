@@ -64,7 +64,7 @@ type heldMutator interface {
 	ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error)
 	GetHeld(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error)
 	SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
-	RecordHeldStatusChange(ctx context.Context, orgID, id uuid.UUID, vct string, revoked bool) error
+	RecordHeldStatusChange(ctx context.Context, orgID, id uuid.UUID, vct string, status HeldStatus) error
 	HeldHistory(ctx context.Context, orgID, id uuid.UUID) ([]audit.Event, error)
 	HolderOrgs(ctx context.Context) ([]uuid.UUID, error)
 }
@@ -700,7 +700,7 @@ func (s *Service) RecheckHeld(ctx context.Context, orgID uuid.UUID) (int, error)
 		if was.Revoked == now.Revoked {
 			continue
 		}
-		if err := s.held.RecordHeldStatusChange(ctx, orgID, h.ID, h.VCT, now.Revoked); err != nil {
+		if err := s.held.RecordHeldStatusChange(ctx, orgID, h.ID, h.VCT, heldStatusOf(now.Revoked)); err != nil {
 			return changed, err
 		}
 		changed++

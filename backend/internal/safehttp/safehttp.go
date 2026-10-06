@@ -84,7 +84,7 @@ func (p Policy) CheckURL(raw string) (*url.URL, error) {
 // disabled (a redirect from a validated URL is an attempt to move the request
 // somewhere unvalidated), DNS results vetted against private ranges at dial
 // time (so a hostname cannot be a disguise for 169.254.169.254), and the dialed
-// address is the vetted one — no second resolution to rebind.
+// address is the vetted one: no second resolution to rebind.
 func NewClient(p Policy) *http.Client {
 	dialer := &net.Dialer{Timeout: RequestTimeout}
 	transport := &http.Transport{
@@ -123,7 +123,7 @@ func NewClient(p Policy) *http.Client {
 	}
 }
 
-// IsPublic reports whether ip is a globally routable unicast address — not
+// IsPublic reports whether ip is a globally routable unicast address: not
 // loopback, private, link-local, multicast, unspecified, or one of the
 // special-purpose ranges in nonPublicPrefixes (which Go does not classify).
 func IsPublic(ip net.IP) bool {

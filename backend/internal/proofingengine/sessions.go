@@ -170,6 +170,8 @@ func attributesForSteps(steps []flow.Step) []string {
 // achieved eIDAS level below the flow's required one (sessionOutcome).
 const (
 	errCodeDocExpired      = "DOC_EXPIRED"
+	errCodeDocTypeRefused  = "DOCUMENT_TYPE_NOT_ACCEPTED"
+	errCodeCountryRefused  = "DOCUMENT_COUNTRY_NOT_ACCEPTED"
 	errCodeLivenessFailed  = "LIVENESS_FAILED"
 	errCodeAssuranceNotMet = "ASSURANCE_NOT_MET"
 )
@@ -214,10 +216,10 @@ func flowComplianceFailure(fd *flow.FlowDefinition, sess session.Session, req ap
 	}
 	if req.Document != nil {
 		if len(fd.AcceptedDocumentTypes) > 0 && !slices.Contains(fd.AcceptedDocumentTypes, req.Document.Type) {
-			return true, "DOCUMENT_TYPE_NOT_ACCEPTED"
+			return true, errCodeDocTypeRefused
 		}
 		if len(fd.AcceptedIssuingCountries) > 0 && !slices.Contains(fd.AcceptedIssuingCountries, flow.IssuingStateCode(req.Document.IssuingState)) {
-			return true, "DOCUMENT_COUNTRY_NOT_ACCEPTED"
+			return true, errCodeCountryRefused
 		}
 		if req.Document.DateOfExpiry != "" && documentExpired(req.Document.DateOfExpiry, now) {
 			return true, errCodeDocExpired
@@ -543,6 +545,7 @@ func attrRequested(sess session.Session, keys ...string) bool {
 // server's own (verifiedChipChecks), never the app's.
 func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks *chipChecksInfo, fd *flow.FlowDefinition, bsnPolicy privacy.BSNPolicy, redaction privacy.RedactionPolicy) map[string]any {
 	result := map[string]any{}
+
 	if req.Document != nil && attrRequested(sess, attrDocument) {
 		doc := *req.Document
 		applyBSNPolicy(&doc, bsnPolicy)
@@ -552,6 +555,7 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 		}
 		result["document"] = doc
 	}
+
 	if req.Photo != nil && attrRequested(sess, attrDG2, attrFaceImage) {
 		photo := *req.Photo
 		// Browsers do not render JPEG2000, which DG2 portraits often are.
@@ -560,19 +564,13 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 		} else {
 			photo.ImageBase64, photo.MimeType = converted, mime
 		}
-		released := true
-		if redaction.BlurFace {
-			if blurred, mime, ok := blurFace(photo.ImageBase64, photo.MimeType); ok {
-				photo.ImageBase64, photo.MimeType = blurred, mime
-			} else {
-				slog.Warn("identity proofing: could not blur the photo; leaving it out", slog.String("session_id", sess.ID))
-				released = false
-			}
-		}
-		if released {
-			result["photo"] = &photo
+		if released, ok := releasedFace(photo, redaction); ok {
+			result["photo"] = released
+		} else {
+			slog.Warn("identity proofing: could not blur the photo; leaving it out", slog.String("session_id", sess.ID))
 		}
 	}
+
 	if req.Selfie != nil && attrRequested(sess, attrSelfie) {
 		selfie := *req.Selfie
 		if converted, mime, err := images.ToDisplayablePNG(selfie.ImageBase64, selfie.MimeType); err != nil {
@@ -580,19 +578,13 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 		} else {
 			selfie.ImageBase64, selfie.MimeType = converted, mime
 		}
-		released := true
-		if redaction.BlurFace {
-			if blurred, mime, ok := blurFace(selfie.ImageBase64, selfie.MimeType); ok {
-				selfie.ImageBase64, selfie.MimeType = blurred, mime
-			} else {
-				slog.Warn("identity proofing: could not blur the selfie; leaving it out", slog.String("session_id", sess.ID))
-				released = false
-			}
-		}
-		if released {
-			result["selfie"] = &selfie
+		if released, ok := releasedFace(selfie, redaction); ok {
+			result["selfie"] = released
+		} else {
+			slog.Warn("identity proofing: could not blur the selfie; leaving it out", slog.String("session_id", sess.ID))
 		}
 	}
+
 	// A face matched against the relying party's own photo (a flow without
 	// nfc_read) says so, and releases that photo with the selfie, so whoever
 	// reads the result sees both faces that were compared.
@@ -600,20 +592,14 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 		result["faceReference"] = faceReferenceRelyingParty
 		if attrRequested(sess, attrSelfie) {
 			ref := photoInfo{ImageBase64: sess.ReferencePhoto, MimeType: sess.ReferencePhotoMime}
-			released := true
-			if redaction.BlurFace {
-				if blurred, mime, ok := blurFace(ref.ImageBase64, ref.MimeType); ok {
-					ref.ImageBase64, ref.MimeType = blurred, mime
-				} else {
-					slog.Warn("identity proofing: could not blur the reference photo; leaving it out", slog.String("session_id", sess.ID))
-					released = false
-				}
-			}
-			if released {
-				result["referencePhoto"] = &ref
+			if released, ok := releasedFace(ref, redaction); ok {
+				result["referencePhoto"] = released
+			} else {
+				slog.Warn("identity proofing: could not blur the reference photo; leaving it out", slog.String("session_id", sess.ID))
 			}
 		}
 	}
+
 	if attrRequested(sess, attrDocumentImage) {
 		if img := releasedDocumentImage(sess, req.DocumentImage, redaction); img != nil {
 			result["documentImage"] = img
@@ -622,6 +608,7 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 			result["documentImageBack"] = img
 		}
 	}
+
 	if verifiedChipChecks != nil && attrRequested(sess, attrChipChecks) {
 		result["chipChecks"] = verifiedChipChecks
 	}
@@ -631,9 +618,10 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 	if req.Device != nil {
 		result["device"] = req.Device
 	}
+
 	// Released whatever was requested, like device: how well the session was
 	// verified, not personal data.
-	result["assurance"] = computeAssurance(fd, req, verifiedChipChecks, sess.ReferencePhoto == "")
+	result["assurance"] = computeAssurance(fd, req, verifiedChipChecks, faceMatchSourceOf(sess))
 	return result
 }
 
@@ -801,7 +789,7 @@ func checkItems(fd *flow.FlowDefinition, check flow.Check, req appResultRequest,
 			// runs no liveness): not applicable rather than a guessed verdict.
 			return []assuranceItem{{State: checkStateNotApplicable}}
 		}
-		if req.Biometrics.LivenessResult == "passed" {
+		if req.Biometrics.LivenessResult == livenessPassed {
 			return []assuranceItem{{State: checkStatePass}}
 		}
 		return []assuranceItem{{State: checkStateFail}}
@@ -851,10 +839,27 @@ func checkOutcome(fd *flow.FlowDefinition, check flow.Check, req appResultReques
 	return overallCheckState(checkItems(fd, check, req, checks))
 }
 
+// faceMatchSource is what a session's face was matched against.
+type faceMatchSource int
+
+const (
+	matchedChipPortrait faceMatchSource = iota
+	matchedRelyingPartyPhoto
+)
+
+// faceMatchSourceOf is sess's: the customer's reference photo when it sent
+// one, else the chip's own portrait.
+func faceMatchSourceOf(sess session.Session) faceMatchSource {
+	if sess.ReferencePhoto != "" {
+		return matchedRelyingPartyPhoto
+	}
+	return matchedChipPortrait
+}
+
 // computeAssurance scores the evidence against fd's checks. Sub-checks that did
-// not apply or did not run are left out of the score. chipReference is whether
-// the face was matched against the chip's own portrait.
-func computeAssurance(fd *flow.FlowDefinition, req appResultRequest, checks *chipChecksInfo, chipReference bool) assuranceInfo {
+// not apply or did not run are left out of the score. source is what the face
+// was matched against.
+func computeAssurance(fd *flow.FlowDefinition, req appResultRequest, checks *chipChecksInfo, source faceMatchSource) assuranceInfo {
 	wanted := assuranceChecksFor(fd)
 	categories := make([]assuranceCategoryInfo, 0, len(wanted))
 	passed, total := 0, 0
@@ -889,7 +894,7 @@ func computeAssurance(fd *flow.FlowDefinition, req appResultRequest, checks *chi
 	return assuranceInfo{
 		Level: flow.LevelForScore(tiers, score), Score: score,
 		ChecksPassed: passed, ChecksTotal: total, Categories: categories,
-		EIDASLevel: computeEIDASAssuranceLevel(fd, req, checks, chipReference),
+		EIDASLevel: computeEIDASAssuranceLevel(fd, req, checks, source),
 	}
 }
 
@@ -900,13 +905,13 @@ func computeAssurance(fd *flow.FlowDefinition, req appResultRequest, checks *chi
 // even low was reached. A check that did not apply or did not run (no AA key,
 // AA not performed, an engine without a liveness result) does not count as
 // verified.
-func computeEIDASAssuranceLevel(fd *flow.FlowDefinition, req appResultRequest, checks *chipChecksInfo, chipReference bool) flow.AssuranceLevel {
+func computeEIDASAssuranceLevel(fd *flow.FlowDefinition, req appResultRequest, checks *chipChecksInfo, source faceMatchSource) flow.AssuranceLevel {
 	if fd == nil {
 		return ""
 	}
 	achieved := flow.AssuranceLevel("")
 	for _, level := range flow.LevelRequirements {
-		if !meetsLevelRequirement(fd, level, req, checks, chipReference) {
+		if !meetsLevelRequirement(fd, level, req, checks, source) {
 			break
 		}
 		achieved = level.Level
@@ -917,7 +922,7 @@ func computeEIDASAssuranceLevel(fd *flow.FlowDefinition, req appResultRequest, c
 // meetsLevelRequirement reports whether every check level needs passed on the
 // evidence the session produced, whether or not fd lists it: an engine that
 // reports no liveness leaves face.liveness not applicable, which never passes.
-func meetsLevelRequirement(fd *flow.FlowDefinition, level flow.LevelRequirement, req appResultRequest, checks *chipChecksInfo, chipReference bool) bool {
+func meetsLevelRequirement(fd *flow.FlowDefinition, level flow.LevelRequirement, req appResultRequest, checks *chipChecksInfo, source faceMatchSource) bool {
 	for _, c := range level.Checks {
 		if checkOutcome(fd, c, req, checks) != checkStatePass {
 			return false
@@ -926,7 +931,7 @@ func meetsLevelRequirement(fd *flow.FlowDefinition, level flow.LevelRequirement,
 	if level.FaceProvider == "" {
 		return true
 	}
-	return chipReference && req.Biometrics != nil && req.Biometrics.Engine == string(level.FaceProvider)
+	return source == matchedChipPortrait && req.Biometrics != nil && req.Biometrics.Engine == string(level.FaceProvider)
 }
 
 // dutchIssuingState is the only issuing state whose DG11 personal number is a

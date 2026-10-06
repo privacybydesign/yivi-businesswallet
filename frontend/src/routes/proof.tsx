@@ -3,9 +3,9 @@ import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
-  useDeclineHostedProofingMutation,
+  useDeclineHostedMutation,
   useHostedProofingQuery,
-  useStartHostedProofingMutation,
+  useStartHostedMutation,
 } from "../api/identity-proofing.queries";
 import { hostedDataExportUrl, isDataRequest } from "../api/identity-proofing";
 import type {
@@ -109,8 +109,8 @@ function HostedFlow({
     page.method === "yivi_app" ? "yivi_app" : "idem_app",
   );
   const [started, setStarted] = useState<HostedStart>();
-  const start = useStartHostedProofingMutation(token);
-  const decline = useDeclineHostedProofingMutation(token);
+  const start = useStartHostedMutation(token);
+  const decline = useDeclineHostedMutation(token);
 
   useEffect(() => {
     const preferred =
@@ -147,9 +147,12 @@ function HostedFlow({
       if (window.parent !== window) {
         postCompletion(window.parent, page.embedOrigins, message);
       }
-      const to = page.redirectUrl
-        ? completionRedirect(page.redirectUrl, message)
-        : undefined;
+      // A data request's answer (a download, an erasure notice) shows here, so
+      // its page never redirects away.
+      const to =
+        page.redirectUrl && !dataRequest
+          ? completionRedirect(page.redirectUrl, message)
+          : undefined;
       if (to) {
         setRedirecting(true);
         window.location.assign(to);

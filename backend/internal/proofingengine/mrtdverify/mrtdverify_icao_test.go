@@ -17,11 +17,11 @@ import (
 // countryMismatchDg1Hex rebuilds the fixture's own DG1 with a different
 // issuing state ("NLD" instead of the fixture's "GBR"), so the resulting
 // document has a validly-signed EF.SOD (signed by mrtdtestfixtures.TestCsca, a "gb" CSCA) but
-// a DG1 that claims a different country — exactly what
+// a DG1 that claims a different country, exactly what
 // passiveauth.PassiveAuth's country cross-check exists to catch. This is
 // buildable at all only because MRZ's issuing-state field carries no check
 // digit (see mrz.decodeTD3: documentNumber/dateOfBirth/dateOfExpiry/
-// composite are check-digited, issuingState/nationality are not) — swapping
+// composite are check-digited, issuingState/nationality are not), so swapping
 // it doesn't need touching any checksum. This is deliberately a *different*
 // scenario from a tampered/injected data group (VerifyPassive's existing
 // tests): the resulting DG1 hash no longer matches mrtdtestfixtures.TestSodHex's signed hash
@@ -44,7 +44,7 @@ func countryMismatchDg1Hex(t *testing.T) string {
 	}
 
 	mrz := []byte(dg1.RawMrz)
-	copy(mrz[2:5], []byte("NLD")) // TD3 issuing-state field, mrz[2:5] — see decodeTD3.
+	copy(mrz[2:5], []byte("NLD")) // TD3 issuing-state field, mrz[2:5]; see decodeTD3.
 
 	inner := tlv.NewTlvSimpleNode(tlv.TlvTag(0x5f1f), mrz)
 	root := tlv.NewTlvConstructedNode(tlv.TlvTag(0x61))
@@ -53,7 +53,7 @@ func countryMismatchDg1Hex(t *testing.T) string {
 }
 
 // tamperedDg1Hex flips a byte within the fixture DG1's MRZ name field
-// (offset 5:44 of the 88-byte TD3 MRZ — see decodeTD3), which carries no
+// (offset 5:44 of the 88-byte TD3 MRZ; see decodeTD3), which carries no
 // check digit, so the result still parses as a structurally valid DG1 (just
 // with content that no longer matches what EF.SOD signed).
 func tamperedDg1Hex(t *testing.T) string {
@@ -192,7 +192,7 @@ func TestOmittedDG15IsIncomplete(t *testing.T) {
 
 func TestVerifyICAOCountryMismatch(t *testing.T) {
 	// EF.SOD is signed by a "gb" CSCA (mrtdtestfixtures.TestCsca); this DG1 claims "NLD".
-	// PassiveAuth's country cross-check must catch that and fail closed —
+	// PassiveAuth's country cross-check must catch that and fail closed:
 	// this is exactly the gap VerifyPassive (used unchanged for EU driving
 	// licences) cannot catch.
 	result, err := VerifyPassiveICAO(mrtdtestfixtures.TestSodHex, map[string]string{
@@ -222,13 +222,13 @@ func TestVerifyICAOUntrusted(t *testing.T) {
 
 func TestVerifyICAOTamperedDG(t *testing.T) {
 	// Unlike VerifyPassive's own tamper test (which flips the last raw byte
-	// of the whole TLV blob — fine there, since VerifyPassive never parses
+	// of the whole TLV blob, fine there, since VerifyPassive never parses
 	// MRZ semantics at all), VerifyPassiveICAO builds a typed document.DG1,
 	// which validates MRZ check digits on parse. Flipping a byte inside a
 	// check-digited field (document number/DOB/expiry/composite) would fail
 	// to parse at all rather than exercise the hash-mismatch path this test
 	// wants, so this flips a byte inside the name field (MRZ offset 5:44),
-	// which carries no check digit — see decodeTD3.
+	// which carries no check digit; see decodeTD3.
 	tamperedDg1 := tamperedDg1Hex(t)
 
 	result, err := VerifyPassiveICAO(mrtdtestfixtures.TestSodHex, map[string]string{
@@ -246,12 +246,12 @@ func TestVerifyICAOTamperedDG(t *testing.T) {
 	}
 	// Unlike VerifyPassive, PassiveAuth's own internal hash check gates its
 	// signature verification, so a tampered data group also fails the
-	// signature/trust-chain verdict here — see the VerifyPassiveICAO doc
+	// signature/trust-chain verdict here; see the VerifyPassiveICAO doc
 	// comment for why. This assertion documents that trade-off rather than
 	// asserting the (different, and arguably more useful) VerifyPassive
 	// behavior.
 	if result.SODSignatureValid || result.CSCATrustChainValid {
-		t.Error("expected SODSignatureValid=false, CSCATrustChainValid=false too — PassiveAuth's hash check gates its own signature verification")
+		t.Error("expected SODSignatureValid=false, CSCATrustChainValid=false too: PassiveAuth's hash check gates its own signature verification")
 	}
 }
 
@@ -283,7 +283,7 @@ func TestVerifyICAOMalformed(t *testing.T) {
 // TestVerifyICAOUnparseableDG
 // checks the deliberate split documented on VerifyPassiveICAO: DG1 present
 // in dataGroupsHex (structurally valid hex) but not a parseable MRZ is what
-// a corrupted/tampered document looks like, not a malformed request — so
+// a corrupted/tampered document looks like, not a malformed request, so
 // this must come back as a verification failure (nil error), not an error,
 // unlike a bad data-group *name* or non-hex value (still hard errors, see
 // TestVerifyICAOMalformed).

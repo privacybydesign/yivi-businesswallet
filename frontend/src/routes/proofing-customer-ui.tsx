@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import { useCreateProofingCustomerMutation } from "../api/identity-proofing.queries";
+import { useCreateCustomerMutation } from "../api/identity-proofing.queries";
 import type {
   ProofingCustomer,
   ProofingRequest,
@@ -270,7 +270,7 @@ export function NewCustomerModal({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const create = useCreateProofingCustomerMutation(slug);
+  const create = useCreateCustomerMutation(slug);
   const [name, setName] = useState("");
   const [touched, setTouched] = useState(false);
   const missing = name.trim() === "";

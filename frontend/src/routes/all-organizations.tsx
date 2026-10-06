@@ -7,7 +7,7 @@ import {
 } from "../api/organization.queries";
 import {
   useProofingPausesQuery,
-  useSetPlatformProofingPauseMutation,
+  useSetPlatformPauseMutation,
 } from "../api/identity-proofing.queries";
 import type { ProofingPause } from "../api/identity-proofing";
 import {
@@ -195,7 +195,7 @@ function ProofingPauseCell({
   failed: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const set = useSetPlatformProofingPauseMutation();
+  const set = useSetPlatformPauseMutation();
   // Pausing stops a whole organisation's proofing, so it is confirmed first.
   const [confirmingPause, setConfirmingPause] = useState(false);
   if (!loaded) {

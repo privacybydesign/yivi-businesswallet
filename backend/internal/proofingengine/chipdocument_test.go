@@ -89,23 +89,23 @@ func TestDocFromEvidenceNeedsDG1(t *testing.T) {
 func TestMRZDate(t *testing.T) {
 	now := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
 	cases := []struct {
-		in     string
-		expiry bool
-		want   string
+		in   string
+		kind mrzDateKind
+		want string
 	}{
-		{"780405", false, "1978-04-05"},
-		{"050101", false, "2005-01-01"},
-		{"261231", false, "1926-12-31"},
-		{"260101", false, "2026-01-01"},
-		{"340717", true, "2034-07-17"},
-		{"990101", true, "1999-01-01"},
+		{"780405", mrzBirthDate, "1978-04-05"},
+		{"050101", mrzBirthDate, "2005-01-01"},
+		{"261231", mrzBirthDate, "1926-12-31"},
+		{"260101", mrzBirthDate, "2026-01-01"},
+		{"340717", mrzExpiryDate, "2034-07-17"},
+		{"990101", mrzExpiryDate, "1999-01-01"},
 	}
 	for _, c := range cases {
-		if got, err := mrzDate(c.in, now, c.expiry); err != nil || got != c.want {
-			t.Errorf("mrzDate(%q, expiry=%v) = %q, %v; want %q", c.in, c.expiry, got, err, c.want)
+		if got, err := mrzDate(c.in, now, c.kind); err != nil || got != c.want {
+			t.Errorf("mrzDate(%q, kind=%v) = %q, %v; want %q", c.in, c.kind, got, err, c.want)
 		}
 	}
-	if _, err := mrzDate("781305", now, false); err == nil {
+	if _, err := mrzDate("781305", now, mrzBirthDate); err == nil {
 		t.Error("month 13: want an error")
 	}
 }

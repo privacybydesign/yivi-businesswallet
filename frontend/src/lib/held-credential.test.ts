@@ -390,6 +390,28 @@ describe("heldHistory", () => {
     expect(entries[1].revoked).toBe(true);
   });
 
+  it("puts the status check after the events it caused", () => {
+    const entries = heldHistory(
+      [
+        {
+          occurredAt: "2026-07-23T00:00:00.050Z",
+          action: "attestation.held_status_changed",
+          metadata: { after: { revoked: true } },
+          actor: null,
+        },
+      ],
+      {
+        receivedAt: "2026-07-23T00:00:00.040Z",
+        statusCheckedAt: "2026-07-23T00:00:00.010Z",
+      },
+    );
+    expect(entries.map((e) => e.kind)).toEqual([
+      "received",
+      "statusChanged",
+      "statusChecked",
+    ]);
+  });
+
   it("leaves the direction of a status change open when its detail is hidden", () => {
     const entries = heldHistory(
       [

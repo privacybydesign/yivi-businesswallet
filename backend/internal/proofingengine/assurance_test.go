@@ -108,39 +108,39 @@ func TestComputeEIDASAssuranceLevel(t *testing.T) {
 	noLivenessResult.Biometrics.Engine, noLivenessResult.Biometrics.LivenessResult = "iris", ""
 
 	for _, tc := range []struct {
-		name          string
-		fd            *flow.FlowDefinition
-		req           appResultRequest
-		checks        *chipChecksInfo
-		chipReference bool
-		want          flow.AssuranceLevel
+		name   string
+		fd     *flow.FlowDefinition
+		req    appResultRequest
+		checks *chipChecksInfo
+		source faceMatchSource
+		want   flow.AssuranceLevel
 	}{
-		{"no applicable checks", documentPhotoFlow(""), appResultRequest{}, nil, true, ""},
-		{"no flow claims none", nil, liveRegulaMatch(), verifiedChip(), true, ""},
-		{"passive authentication passes", chipFlow(""), appResultRequest{}, verifiedChip(), true, flow.AssuranceLevelLow},
-		{"untrusted CSCA", chipFlow(""), appResultRequest{}, untrusted, true, ""},
-		{"all substantial checks pass", substantialFlow(flow.AssuranceLevelSubstantial), liveRegulaMatch(), verifiedChip(), true, flow.AssuranceLevelSubstantial},
+		{"no applicable checks", documentPhotoFlow(""), appResultRequest{}, nil, matchedChipPortrait, ""},
+		{"no flow claims none", nil, liveRegulaMatch(), verifiedChip(), matchedChipPortrait, ""},
+		{"passive authentication passes", chipFlow(""), appResultRequest{}, verifiedChip(), matchedChipPortrait, flow.AssuranceLevelLow},
+		{"untrusted CSCA", chipFlow(""), appResultRequest{}, untrusted, matchedChipPortrait, ""},
+		{"all substantial checks pass", substantialFlow(flow.AssuranceLevelSubstantial), liveRegulaMatch(), verifiedChip(), matchedChipPortrait, flow.AssuranceLevelSubstantial},
 		// The achieved level is computed without the required one: neither
 		// capped by a lower requirement nor withheld without one.
-		{"required low, substantial evidence", substantialFlow(flow.AssuranceLevelLow), liveRegulaMatch(), verifiedChip(), true, flow.AssuranceLevelSubstantial},
-		{"no required level", substantialFlow(""), liveRegulaMatch(), verifiedChip(), true, flow.AssuranceLevelSubstantial},
-		{"chip without an AA key reaches low", substantialFlow(flow.AssuranceLevelLow), liveRegulaMatch(), chipWithoutAA(), true, flow.AssuranceLevelLow},
-		{"AA not performed", substantialFlow(""), liveRegulaMatch(), chipAANotPerformed(), true, flow.AssuranceLevelLow},
-		{"liveness failed", substantialFlow(""), notLiveButMatched, verifiedChip(), true, flow.AssuranceLevelLow},
-		{"face not by Regula", substantialFlow(""), onDevice, verifiedChip(), true, flow.AssuranceLevelLow},
-		{"face not against the chip", substantialFlow(""), liveRegulaMatch(), verifiedChip(), false, flow.AssuranceLevelLow},
+		{"required low, substantial evidence", substantialFlow(flow.AssuranceLevelLow), liveRegulaMatch(), verifiedChip(), matchedChipPortrait, flow.AssuranceLevelSubstantial},
+		{"no required level", substantialFlow(""), liveRegulaMatch(), verifiedChip(), matchedChipPortrait, flow.AssuranceLevelSubstantial},
+		{"chip without an AA key reaches low", substantialFlow(flow.AssuranceLevelLow), liveRegulaMatch(), chipWithoutAA(), matchedChipPortrait, flow.AssuranceLevelLow},
+		{"AA not performed", substantialFlow(""), liveRegulaMatch(), chipAANotPerformed(), matchedChipPortrait, flow.AssuranceLevelLow},
+		{"liveness failed", substantialFlow(""), notLiveButMatched, verifiedChip(), matchedChipPortrait, flow.AssuranceLevelLow},
+		{"face not by Regula", substantialFlow(""), onDevice, verifiedChip(), matchedChipPortrait, flow.AssuranceLevelLow},
+		{"face not against the chip", substantialFlow(""), liveRegulaMatch(), verifiedChip(), matchedRelyingPartyPhoto, flow.AssuranceLevelLow},
 		// The level follows the evidence produced, not the flow's checkbox: a
 		// liveness result that passed counts even when face.liveness is not
 		// listed, and an engine that reports no liveness leaves it not
 		// applicable.
-		{"liveness passed though not listed", chipAndFaceFlow("", flow.CheckNFCPassiveAuth, flow.CheckNFCChipAuth, flow.CheckFaceMatch), liveRegulaMatch(), verifiedChip(), true, flow.AssuranceLevelSubstantial},
-		{"engine without a liveness result", substantialFlow(""), noLivenessResult, verifiedChip(), true, flow.AssuranceLevelLow},
+		{"liveness passed though not listed", chipAndFaceFlow("", flow.CheckNFCPassiveAuth, flow.CheckNFCChipAuth, flow.CheckFaceMatch), liveRegulaMatch(), verifiedChip(), matchedChipPortrait, flow.AssuranceLevelSubstantial},
+		{"engine without a liveness result", substantialFlow(""), noLivenessResult, verifiedChip(), matchedChipPortrait, flow.AssuranceLevelLow},
 		// The app runs AA only when nfc.chip_auth is listed: without it the
 		// chip's key goes unused, and substantial is out of reach.
-		{"AA not listed, so not performed", chipAndFaceFlow("", flow.CheckNFCPassiveAuth, flow.CheckFaceMatch, flow.CheckFaceLiveness), liveRegulaMatch(), chipAANotPerformed(), true, flow.AssuranceLevelLow},
+		{"AA not listed, so not performed", chipAndFaceFlow("", flow.CheckNFCPassiveAuth, flow.CheckFaceMatch, flow.CheckFaceLiveness), liveRegulaMatch(), chipAANotPerformed(), matchedChipPortrait, flow.AssuranceLevelLow},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := computeEIDASAssuranceLevel(tc.fd, tc.req, tc.checks, tc.chipReference); got != tc.want {
+			if got := computeEIDASAssuranceLevel(tc.fd, tc.req, tc.checks, tc.source); got != tc.want {
 				t.Errorf("computeEIDASAssuranceLevel = %q, want %q", got, tc.want)
 			}
 		})
@@ -258,7 +258,7 @@ func TestSessionOutcome(t *testing.T) {
 		{"tampered chip", chipFlow(""), session.Session{}, appResultRequest{}, tampered, flow.AssuranceLevelLow, session.StatusRejected, "DOC_TAMPERED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			achieved := computeEIDASAssuranceLevel(tc.fd, tc.req, tc.checks, true)
+			achieved := computeEIDASAssuranceLevel(tc.fd, tc.req, tc.checks, matchedChipPortrait)
 			if achieved != tc.wantAchieved {
 				t.Errorf("achieved = %q, want %q", achieved, tc.wantAchieved)
 			}

@@ -383,19 +383,21 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 	if res.App == "" {
 		res.App = pp.AppWaiting
 	}
-	res.Method = methodOf(out.Disclosure, roles)
+	res.Method = methodOf(roles)
+	if out.Disclosure {
+		res.Method = pp.MethodYivi
+	}
 	if out.Assurance != nil {
 		res.AssuranceLevel, res.EIDASLevel = out.Assurance.Level, out.Assurance.EIDASLevel
 	}
 	return res, nil
 }
 
-// methodOf is how the subject took part: a Yivi disclosure in the result,
-// else the slots of the devices that claimed the session, native first.
-func methodOf(disclosed bool, roles []string) pp.Method {
+// methodOf is how the subject took part on a device: the slots of the
+// devices that claimed the session, native first. A Yivi disclosure in the
+// result is the Yivi method instead, which the caller sets.
+func methodOf(roles []string) pp.Method {
 	switch {
-	case disclosed:
-		return pp.MethodYivi
 	case slices.Contains(roles, string(session.DeviceRoleNative)):
 		return pp.MethodIdem
 	case slices.Contains(roles, string(session.DeviceRoleWeb)):
@@ -474,7 +476,10 @@ func (v resultView) base() pp.Result {
 	for _, d := range v.Devices {
 		roles = append(roles, d.Role)
 	}
-	res.Method = methodOf(v.Result != nil && v.Result.Disclosure != nil, roles)
+	res.Method = methodOf(roles)
+	if v.Result != nil && v.Result.Disclosure != nil {
+		res.Method = pp.MethodYivi
+	}
 	if v.Result != nil && v.Result.Assurance != nil {
 		res.AssuranceLevel, res.EIDASLevel = v.Result.Assurance.Level, v.Result.Assurance.EIDASLevel
 	}
@@ -516,6 +521,9 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	}
 	if res.FaceReference == faceReferenceRelyingParty {
 		ev.Type = pp.EvidenceReferencePhoto
+	}
+	if ev.Type == pp.EvidenceEMRTD && res.ChipChecks == nil {
+		ev.Type = pp.EvidenceDocumentPhoto
 	}
 	if doc := res.Document; doc != nil {
 		out.GivenName, out.FamilyName = strings.TrimSpace(doc.FirstName), strings.TrimSpace(doc.LastName)
@@ -765,7 +773,7 @@ func (s *Server) SubmitReference(ctx context.Context, t pp.Tenant, id, token str
 	if err != nil {
 		return pp.YiviDisclosure{}, err
 	}
-	return s.acceptReference(sess, ref)
+	return s.acceptReference(ctx, sess, ref)
 }
 
 // SubmitFaceFrame scores one live camera frame of a Yivi-method session.

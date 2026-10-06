@@ -2,9 +2,9 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
-  useCreateProofingApiKeyMutation,
+  useCreateApiKeyMutation,
   useProofingApiKeysQuery,
-  useRevokeProofingApiKeyMutation,
+  useRevokeApiKeyMutation,
 } from "../api/identity-proofing.queries";
 import type {
   ProofingApiKey,
@@ -40,7 +40,7 @@ export function ApiKeysTab({
   const [creating, setCreating] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<ProofingApiKey | null>(null);
-  const revoke = useRevokeProofingApiKeyMutation(slug, customer.id);
+  const revoke = useRevokeApiKeyMutation(slug, customer.id);
 
   return (
     <>
@@ -181,7 +181,7 @@ function NewKeyModal({
   onCreated: (secret: string) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const create = useCreateProofingApiKeyMutation(slug, customerId);
+  const create = useCreateApiKeyMutation(slug, customerId);
   const [name, setName] = useState("");
   const [touched, setTouched] = useState(false);
   const missing = name.trim() === "";

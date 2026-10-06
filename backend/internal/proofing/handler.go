@@ -54,7 +54,7 @@ func NewHandler(service *Service, requireUser, authorize func(http.Handler) http
 	return &Handler{
 		service: service, requireUser: requireUser, authorize: authorize,
 		apiCalls: ratelimit.New(apiCallLimit), apiSessions: ratelimit.New(APISessionLimit),
-		hostedCalls: ratelimit.New(HostedCallLimit), memberFaceFrames: ratelimit.New(MemberFaceFrameLimit),
+		hostedCalls: ratelimit.New(hostedCallLimit), memberFaceFrames: ratelimit.New(memberFaceFrameLimit),
 	}
 }
 
@@ -311,7 +311,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	var filter RequestFilter
-	if !organization.IsAdmin(r.Context()) {
+	if !organization.ActsAsAdmin(r.Context()) {
 		id := auth.UserFromContext(r.Context()).ID
 		filter.RequestedBy = &id
 	}
@@ -367,7 +367,7 @@ func sentRequestTarget(r *http.Request) (uuid.UUID, *uuid.UUID, error) {
 	if err != nil {
 		return uuid.Nil, nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
 	}
-	if organization.IsAdmin(r.Context()) {
+	if organization.ActsAsAdmin(r.Context()) {
 		return id, nil, nil
 	}
 	caller := auth.UserFromContext(r.Context()).ID
@@ -519,12 +519,12 @@ func writeYiviDisclosure(w http.ResponseWriter, r *http.Request, disclosure proo
 	return nil
 }
 
-// MemberFaceFrameLimit holds the on-screen Yivi face check's frames per org,
-// as HostedCallLimit holds a customer's hosted links, and per API replica. It
+// memberFaceFrameLimit holds the on-screen Yivi face check's frames per org,
+// as hostedCallLimit holds a customer's hosted links, and per API replica. It
 // fits some ten members at a face check at once, a frame every 400 ms each.
-var MemberFaceFrameLimit = ratelimit.Limit{Burst: 1500, Per: time.Minute}
+var memberFaceFrameLimit = ratelimit.Limit{Burst: 1500, Per: time.Minute}
 
-// limitMemberFace counts a face frame against its org's MemberFaceFrameLimit.
+// limitMemberFace counts a face frame against its org's memberFaceFrameLimit.
 func (h *Handler) limitMemberFace(next respond.HandlerFunc) respond.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		if err := rateLimited(w, h.memberFaceFrames, orgFromRequest(r).ID); err != nil {
@@ -891,7 +891,7 @@ type statsResponse struct {
 func (h *Handler) stats(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	var requestedBy *uuid.UUID
-	if !organization.IsAdmin(r.Context()) {
+	if !organization.ActsAsAdmin(r.Context()) {
 		id := auth.UserFromContext(r.Context()).ID
 		requestedBy = &id
 	}
@@ -1085,7 +1085,7 @@ func mapError(err error) error {
 // flowView is the flows a caller sees: every one for an admin, the ones
 // members may send on for a member.
 func flowView(r *http.Request) FlowView {
-	if organization.IsAdmin(r.Context()) {
+	if organization.ActsAsAdmin(r.Context()) {
 		return FlowsAll
 	}
 	return FlowsAllowed

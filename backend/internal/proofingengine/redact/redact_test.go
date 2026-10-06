@@ -48,7 +48,7 @@ func decodePNG(t *testing.T, imageBase64 string) *image.RGBA {
 }
 
 // variance reports whether the pixel block has more than one distinct
-// colour — used as a proxy for "still shows the original checkerboard".
+// colour, used as a proxy for "still shows the original checkerboard".
 func hasVariance(img *image.RGBA, r image.Rectangle) bool {
 	first := img.RGBAAt(r.Min.X, r.Min.Y)
 	for y := r.Min.Y; y < r.Max.Y; y++ {

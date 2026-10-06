@@ -17,6 +17,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
@@ -62,6 +63,9 @@ const (
 const (
 	disclosureCodePhotoMissing    = "photo_missing"
 	disclosureCodeReferenceNoFace = "reference_no_face"
+	// The flow restricts the document type, issuing country or expiry, and
+	// the disclosure does not show it complies.
+	disclosureCodeDocumentRefused = "document_not_accepted"
 )
 
 // disclosureInfo is the result's "disclosure": where the photo and claims came from.
@@ -104,7 +108,7 @@ func (s *Server) disclosureAccepted() proofingprovider.YiviDisclosure {
 
 // acceptReference takes ref as sess's reference and moves it to in_progress.
 // A repeated call once the reference is in gets the same answer.
-func (s *Server) acceptReference(sess session.Session, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error) {
+func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error) {
 	if err := boundLoginSession(sess); err != nil {
 		return proofingprovider.YiviDisclosure{}, err
 	}
@@ -114,6 +118,7 @@ func (s *Server) acceptReference(sess session.Session, ref proofingprovider.Refe
 	if sess.Status == session.StatusInProgress {
 		return proofingprovider.YiviDisclosure{}, &proofingprovider.RejectedError{Status: http.StatusConflict, Message: "disclosure already received; continue with the face check"}
 	}
+
 	credential := strings.TrimSpace(ref.Credential)
 	if credential == "" || len(credential) > maxReferenceCredentialLen {
 		return proofingprovider.YiviDisclosure{}, &proofingprovider.RejectedError{Status: http.StatusBadRequest, Message: "credential is required"}
@@ -121,6 +126,7 @@ func (s *Server) acceptReference(sess session.Session, ref proofingprovider.Refe
 	if len(ref.Attributes) > maxReferenceAttributes {
 		return proofingprovider.YiviDisclosure{}, &proofingprovider.RejectedError{Status: http.StatusBadRequest, Message: "too many attributes"}
 	}
+
 	info := disclosureInfo{
 		Source: referenceSourceOpenID4VP, Credential: credential,
 		PhotoAttribute: credential + "." + yiviPhotoAttribute, Attributes: map[string]string{},
@@ -136,11 +142,21 @@ func (s *Server) acceptReference(sess session.Session, ref proofingprovider.Refe
 		info.Attributes[k] = v
 		info.AttributeIDs = append(info.AttributeIDs, credential+"."+k)
 	}
+
 	refuse := func(errorCode, code, reason string) (proofingprovider.YiviDisclosure, error) {
 		details := map[string]any{"stage": "disclosure", "credential": info.Credential, "reason": reason}
 		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details)
 		return proofingprovider.YiviDisclosure{OK: false, Code: code}, nil
 	}
+
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: %w", err)
+	}
+	if failed, errorCode := disclosureComplianceFailure(fd, documentFromDisclosure(info), time.Now()); failed {
+		return refuse(errorCode, disclosureCodeDocumentRefused, disclosureCodeDocumentRefused)
+	}
+
 	if strings.TrimSpace(ref.Photo) == "" {
 		return refuse(errCodePhotoMissing, disclosureCodePhotoMissing, "photo_missing")
 	}
@@ -153,10 +169,12 @@ func (s *Server) acceptReference(sess session.Session, ref proofingprovider.Refe
 	if converted, convertedMime, err := images.ToDisplayablePNG(reference, mime); err == nil && converted != "" {
 		reference, mime = converted, convertedMime
 	}
+
 	disclosure, err := json.Marshal(info)
 	if err != nil {
 		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: encode disclosure: %w", err)
 	}
+
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if sess.Yivi != nil {
 			return nil
@@ -186,6 +204,7 @@ func (s *Server) acceptReference(sess session.Session, ref proofingprovider.Refe
 		}
 		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: %w", err)
 	}
+
 	if sess.Status == session.StatusCreated {
 		s.auditProofing(updated, eventSessionOpened, nil)
 	}
@@ -212,6 +231,11 @@ func (s *Server) faceFrame(ctx context.Context, sess session.Session, frame stri
 	if err != nil {
 		return proofingprovider.FaceVerdict{}, &proofingprovider.RejectedError{Status: http.StatusBadRequest, Message: err.Error()}
 	}
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return proofingprovider.FaceVerdict{}, fmt.Errorf("proofingengine: face frame: %w", err)
+	}
+	_, redaction := effectivePrivacyPolicy(fd)
 	sum := sha256.Sum256(raw)
 	hash := hex.EncodeToString(sum[:])
 	if !sess.Yivi.FaceStarted {
@@ -244,7 +268,7 @@ func (s *Server) faceFrame(ctx context.Context, sess session.Session, frame stri
 		}
 		if st.RegulaCalls >= s.boundLoginFrameBudget() {
 			verdict.Attempts = st.Attempts
-			details, err = s.decideBoundLogin(sess, st, false, &verdict)
+			details, err = s.decideBoundLogin(sess, st, proofingprovider.FaceDecisionRejected, &verdict, redaction)
 			return err
 		}
 		st.RegulaCalls++
@@ -300,7 +324,11 @@ func (s *Server) faceFrame(ctx context.Context, sess session.Session, frame stri
 		if !approved && !exhausted {
 			return nil
 		}
-		details, err = s.decideBoundLogin(sess, st, approved, &verdict)
+		decision := proofingprovider.FaceDecisionRejected
+		if approved {
+			decision = proofingprovider.FaceDecisionApproved
+		}
+		details, err = s.decideBoundLogin(sess, st, decision, &verdict, redaction)
 		return err
 	})
 	if err != nil {
@@ -337,18 +365,51 @@ func faceFrameError(err error) error {
 	return fmt.Errorf("proofingengine: face frame: %w", err)
 }
 
-// decideBoundLogin ends sess's face check: approved with a result, or
-// rejected because its attempts or Regula budget are spent. It returns the
-// outcome's audit details and sets verdict's decision.
-func (s *Server) decideBoundLogin(sess *session.Session, st *session.YiviState, approved bool, verdict *proofingprovider.FaceVerdict) (map[string]any, error) {
+// disclosureComplianceFailure is flowComplianceFailure for a disclosed
+// document: a flow restricting the type or issuing country refuses one that
+// does not show it, and a disclosed expiry in the past is refused.
+func disclosureComplianceFailure(fd *flow.FlowDefinition, doc documentInfo, now time.Time) (failed bool, errorCode string) {
+	if fd == nil {
+		return false, ""
+	}
+	if len(fd.AcceptedDocumentTypes) > 0 && !slices.Contains(fd.AcceptedDocumentTypes, doc.Type) {
+		return true, errCodeDocTypeRefused
+	}
+	if len(fd.AcceptedIssuingCountries) > 0 &&
+		(doc.IssuingState == "" || !slices.Contains(fd.AcceptedIssuingCountries, flow.IssuingStateCode(doc.IssuingState))) {
+		return true, errCodeCountryRefused
+	}
+	if expiry, ok := disclosedDate(doc.DateOfExpiry); ok && expiry.Before(now.UTC().Truncate(day)) {
+		return true, errCodeDocExpired
+	}
+	return false, ""
+}
+
+// disclosedDateLayouts are the date formats a disclosed credential uses.
+var disclosedDateLayouts = []string{time.DateOnly, "02-01-2006"}
+
+// disclosedDate parses a disclosed date; ok is false when absent or in no
+// known format, the credential's own validity then standing for it.
+func disclosedDate(raw string) (time.Time, bool) {
+	for _, layout := range disclosedDateLayouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// decideBoundLogin ends sess's face check as decision: approved with a
+// result, or rejected because its attempts or Regula budget are spent. It
+// returns the outcome's audit details and sets verdict's decision.
+func (s *Server) decideBoundLogin(sess *session.Session, st *session.YiviState, decision proofingprovider.FaceDecision, verdict *proofingprovider.FaceVerdict, redaction privacy.RedactionPolicy) (map[string]any, error) {
 	details := boundLoginOutcomeDetails(st)
 	to, errorCode := session.StatusApproved, ""
-	verdict.Decision = proofingprovider.FaceDecisionApproved
-	if !approved {
+	verdict.Decision = decision
+	if decision != proofingprovider.FaceDecisionApproved {
 		to, errorCode = session.StatusRejected, errCodeFaceNoMatch
-		verdict.Decision = proofingprovider.FaceDecisionRejected
 	} else {
-		result, err := s.buildBoundLoginResult(*sess, st)
+		result, err := s.buildBoundLoginResult(*sess, st, redaction)
 		if err != nil {
 			return nil, err
 		}
@@ -387,8 +448,9 @@ func boundLoginAssurance() assuranceInfo {
 	}
 }
 
-// buildBoundLoginResult is the released result, gated by requestedAttributes.
-func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviState) (map[string]any, error) {
+// buildBoundLoginResult is the released result, gated by requestedAttributes,
+// its faces blurred under the flow's redaction policy.
+func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviState, redaction privacy.RedactionPolicy) (map[string]any, error) {
 	var info disclosureInfo
 	if err := json.Unmarshal(st.Disclosure, &info); err != nil {
 		return nil, fmt.Errorf("proofingengine: decode disclosure: %w", err)
@@ -402,11 +464,20 @@ func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviSta
 	result["disclosure"] = info
 	result["assurance"] = boundLoginAssurance()
 	if st.KeepPhoto && attrRequested(sess, attrDG2, attrFaceImage) {
-		result["photo"] = &photoInfo{ImageBase64: st.Reference, MimeType: st.ReferenceMime}
+		if photo, ok := releasedFace(photoInfo{ImageBase64: st.Reference, MimeType: st.ReferenceMime}, redaction); ok {
+			result["photo"] = photo
+		} else {
+			slog.Warn("identity proofing: could not blur the photo; leaving it out", slog.String("session_id", sess.ID))
+		}
 	}
 	if st.LastFrame != "" && attrRequested(sess, attrSelfie) {
 		if raw, mime, err := decodeImageBase64(st.LastFrame, defaultImageMime); err == nil {
-			result["selfie"] = &photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
+			selfie := photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
+			if released, ok := releasedFace(selfie, redaction); ok {
+				result["selfie"] = released
+			} else {
+				slog.Warn("identity proofing: could not blur the selfie; leaving it out", slog.String("session_id", sess.ID))
+			}
 		}
 	}
 	if attrRequested(sess, attrBiometrics) {
@@ -418,6 +489,19 @@ func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviSta
 		}
 	}
 	return result, nil
+}
+
+// releasedFace is face as released under redaction: blurred when the policy
+// asks it, ok false when it could not be, and the face is then left out.
+func releasedFace(face photoInfo, redaction privacy.RedactionPolicy) (*photoInfo, bool) {
+	if !redaction.BlurFace {
+		return &face, true
+	}
+	blurred, mime, ok := blurFace(face.ImageBase64, face.MimeType)
+	if !ok {
+		return nil, false
+	}
+	return &photoInfo{ImageBase64: blurred, MimeType: mime}, true
 }
 
 // boundLoginOutcomeDetails is the terminal event's face-check details.

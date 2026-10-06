@@ -12,7 +12,7 @@ import (
 )
 
 // jp2SamplePhotoBase64 loads testdata/passport_photo.jp2: a real ICAO 9303
-// DG2 portrait, JPEG2000-encoded (the raw image bytes only — no DG2 TLV
+// DG2 portrait, JPEG2000-encoded (the raw image bytes only, no DG2 TLV
 // wrapper), extracted from the same sample go-passport-issuer's images
 // package tests against. This is what the vcmrtd app sends as
 // photo.imageBase64 with mimeType "image/jp2".
@@ -43,7 +43,7 @@ func TestDisplayablePNGJPEG2000(t *testing.T) {
 		t.Fatalf("output is not a valid PNG: %v", err)
 	}
 	bounds := img.Bounds()
-	// The source is a 449x599 portrait — a converter that produced a blank
+	// The source is a 449x599 portrait: a converter that produced a blank
 	// or wildly wrong-sized image (e.g. from silently falling through to a
 	// broken decode path) would fail this rather than the format check.
 	if bounds.Dx() != 449 || bounds.Dy() != 599 {
@@ -53,7 +53,7 @@ func TestDisplayablePNGJPEG2000(t *testing.T) {
 
 func TestDisplayablePNGJPEG(t *testing.T) {
 	// A minimal 1x1 white JPEG. Driving-licence DG6 portraits are typically
-	// plain JPEG already and must not be touched — no browser rendering
+	// plain JPEG already and must not be touched: no browser rendering
 	// problem to solve, and re-encoding would lose quality for no reason.
 	const jpegBase64 = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN4A/9k="
 

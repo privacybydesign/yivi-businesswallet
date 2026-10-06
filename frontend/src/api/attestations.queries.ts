@@ -122,7 +122,7 @@ export function credentialOffersQueryKey(slug: string): readonly string[] {
 
 // One held credential's detail in every language it was read in: the prefix
 // of heldAttestationClaimsQueryKey.
-export function heldAttestationClaimsBaseQueryKey(
+export function heldClaimsBaseQueryKey(
   slug: string,
   heldId: string,
 ): readonly string[] {
@@ -134,7 +134,7 @@ export function heldAttestationClaimsQueryKey(
   heldId: string,
   lang: string,
 ): readonly string[] {
-  return [...heldAttestationClaimsBaseQueryKey(slug, heldId), lang];
+  return [...heldClaimsBaseQueryKey(slug, heldId), lang];
 }
 
 // Public claim polling: re-fetches while the attestation is still offered so the
@@ -616,7 +616,7 @@ export function useDeclineCredentialOfferMutation(
   });
 }
 
-export function useHeldAttestationHistoryQuery(
+export function useHeldHistoryQuery(
   slug: string,
   heldId: string,
 ): UseQueryResult<AuditEvent[], Error> {
@@ -636,7 +636,7 @@ export function useHeldAttestationHistoryQuery(
 }
 
 // A re-check can move any credential's state, so the whole wallet is re-read.
-export function useRecheckHeldAttestationsMutation(
+export function useRecheckHeldMutation(
   slug: string,
 ): UseMutationResult<number, Error, void> {
   const queryClient = useQueryClient();

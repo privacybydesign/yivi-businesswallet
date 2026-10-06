@@ -438,6 +438,7 @@ func validate(fd FlowDefinition) error {
 	if len(fd.Steps) == 0 {
 		return errors.New("flow: at least one step is required")
 	}
+
 	seenSteps := map[Step]bool{}
 	for _, st := range fd.Steps {
 		if !ValidStep(st) {
@@ -448,14 +449,17 @@ func validate(fd FlowDefinition) error {
 		}
 		seenSteps[st] = true
 	}
+
 	// document_capture and nfc_read come together: the Idem app scans the MRZ to
 	// open the chip and sends both at once.
 	if seenSteps[StepNFCRead] != seenSteps[StepDocumentCapture] {
 		return errors.New("flow: document_capture and nfc_read must be included together (document_capture is only ever fulfilled via the native nfc_read hand-off)")
 	}
+
 	if !ValidStepLocation(fd.SelfieLocation) {
 		return fmt.Errorf("flow: unknown selfieLocation %q", fd.SelfieLocation)
 	}
+
 	hasFaceVerification := seenSteps[StepFaceVerification] || seenSteps[StepSelfie] || seenSteps[StepLiveness] || seenSteps[StepFaceMatch]
 	if fd.SelfieLocation != "" && !hasFaceVerification {
 		return errors.New("flow: selfieLocation set without face_verification in steps")
@@ -469,6 +473,7 @@ func validate(fd FlowDefinition) error {
 	if fd.FaceProvider == FaceProviderRegula && fd.EffectiveSelfieLocation() != LocationNative {
 		return errors.New("flow: faceProvider regula requires selfieLocation native")
 	}
+
 	// A face match without the chip read is valid: it matches against the
 	// customer's reference photo, which CreateSession requires per session.
 	if err := noDuplicateStrings("accepted document type", fd.AcceptedDocumentTypes); err != nil {
@@ -485,6 +490,7 @@ func validate(fd FlowDefinition) error {
 	if err := noDuplicateStrings("accepted issuing country", fd.AcceptedIssuingCountries); err != nil {
 		return err
 	}
+
 	seenChecks := map[Check]bool{}
 	for _, c := range fd.RequiredChecks {
 		if !ValidCheck(c) {
@@ -495,18 +501,21 @@ func validate(fd FlowDefinition) error {
 		}
 		seenChecks[c] = true
 	}
+
 	// nfc.passive_auth is mandatory with nfc_read: it is the chip's authenticity,
 	// which every chip read can compute, and without it a chip flow would never
 	// score it.
 	if seenSteps[StepNFCRead] && !seenChecks[CheckNFCPassiveAuth] {
 		return errors.New("flow: nfc_read requires requiredChecks to include nfc.passive_auth (mandatory for every nfc_read step - nfc.chip_auth remains optional)")
 	}
+
 	// face.match is mandatory with a face match, which binds the person to the
 	// evidence. Capture or liveness alone, without a comparison, needs no match.
 	needsFaceMatch := seenSteps[StepFaceVerification] || seenSteps[StepFaceMatch]
 	if needsFaceMatch && !seenChecks[CheckFaceMatch] {
 		return errors.New("flow: face_verification requires requiredChecks to include face.match (mandatory whenever face_verification/face_match is a step)")
 	}
+
 	// A check without any step that computes it is a configuration mistake (for
 	// example nfc.chip_auth without nfc_read).
 	for _, binding := range checkStepBindings {
@@ -524,6 +533,7 @@ func validate(fd FlowDefinition) error {
 			return fmt.Errorf("flow: check %q requires one of steps %v in Steps", binding.check, binding.anyOfSteps)
 		}
 	}
+
 	for check, threshold := range fd.CheckThresholds {
 		if !seenChecks[check] {
 			return fmt.Errorf("flow: threshold set for check %q which is not in requiredChecks", check)
@@ -535,6 +545,7 @@ func validate(fd FlowDefinition) error {
 			return fmt.Errorf("flow: threshold for check %q must be between 0 and 1", check)
 		}
 	}
+
 	if !ValidAssuranceLevel(fd.RequiredAssuranceLevel) {
 		return fmt.Errorf("flow: unknown assurance level %q", fd.RequiredAssuranceLevel)
 	}
@@ -544,6 +555,7 @@ func validate(fd FlowDefinition) error {
 	if err := validateRequiredLevel(fd, seenChecks); err != nil {
 		return err
 	}
+
 	if !privacy.ValidBSNPolicy(fd.BSNPolicy) {
 		return fmt.Errorf("flow: unknown BSN policy %q", fd.BSNPolicy)
 	}
@@ -553,6 +565,7 @@ func validate(fd FlowDefinition) error {
 	if fd.RetentionOverride < 0 || fd.RetentionOverride > MaxRetentionOverride {
 		return fmt.Errorf("flow: retentionOverride must be between 0 and %d days", MaxRetentionOverride/day)
 	}
+
 	if err := validateAssuranceTiers(fd.AssuranceTiers); err != nil {
 		return err
 	}

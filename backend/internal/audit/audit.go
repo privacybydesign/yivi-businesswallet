@@ -389,3 +389,29 @@ type NopRecorder struct{}
 func (NopRecorder) Record(context.Context, database.Querier, string, Target, map[string]any) error {
 	return nil
 }
+
+// IdentityProofingPersonalKeys are the fields of a proofing request's audit
+// events that name or describe its subject: who it is, their diplomas, and a
+// reviewer's free-text reason, which may name them.
+var IdentityProofingPersonalKeys = []string{
+	"subjectName", "subjectEmail",
+	"reason",
+	"documentType", "qualification", "institution", "dateAwarded", "nlqfLevel", "documentNumber",
+}
+
+// StripFields removes keys from orgID's audit events on targetType, at the
+// top and in their before and after: one target's events when targetID is
+// set, every one of the type's otherwise.
+func StripFields(ctx context.Context, q database.Querier, orgID uuid.UUID, targetType, targetID string, keys []string) error {
+	if _, err := q.Exec(ctx, `UPDATE audit_events
+		SET metadata = (metadata - $4::text[])
+			|| CASE WHEN jsonb_typeof(metadata->'before') = 'object'
+				THEN jsonb_build_object('before', (metadata->'before') - $4::text[]) ELSE '{}'::jsonb END
+			|| CASE WHEN jsonb_typeof(metadata->'after') = 'object'
+				THEN jsonb_build_object('after', (metadata->'after') - $4::text[]) ELSE '{}'::jsonb END
+		WHERE organization_id = $1 AND target_type = $2 AND ($3 = '' OR target_id = $3)`,
+		orgID, targetType, targetID, keys); err != nil {
+		return fmt.Errorf("audit: strip fields %s %s: %w", targetType, targetID, err)
+	}
+	return nil
+}

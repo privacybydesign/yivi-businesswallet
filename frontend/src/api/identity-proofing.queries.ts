@@ -131,7 +131,7 @@ function proofingStatsQueryKey(slug: string): readonly string[] {
   return [...proofingRequestsQueryKey(slug), "stats"];
 }
 
-function proofingCustomerRequestsQueryKey(
+function customerRequestsQueryKey(
   slug: string,
   customerId: string,
 ): readonly string[] {
@@ -219,7 +219,7 @@ export function useProofingFlowHostedQuery(
   });
 }
 
-export function useSaveProofingFlowHostedMutation(
+export function useSaveFlowHostedMutation(
   slug: string,
   flowId: string,
 ): UseMutationResult<ProofingFlowHosted, Error, ProofingFlowHosted> {
@@ -250,7 +250,7 @@ function invalidateFlow(
 }
 
 // The flow lists carry each flow's diploma mode, so they are refetched.
-export function useSaveProofingFlowDiplomasMutation(
+export function useSaveFlowDiplomasMutation(
   slug: string,
 ): UseMutationResult<
   DiplomaMode,
@@ -266,7 +266,7 @@ export function useSaveProofingFlowDiplomasMutation(
   });
 }
 
-export function useSaveProofingFlowKindMutation(
+export function useSaveFlowKindMutation(
   slug: string,
 ): UseMutationResult<FlowKind, Error, { flowId: string; kind: FlowKind }> {
   const queryClient = useQueryClient();
@@ -295,7 +295,7 @@ export function useEditProofingFlowMutation(
   });
 }
 
-export function useActivateProofingFlowVersionMutation(
+export function useActivateFlowMutation(
   slug: string,
   flowId: string,
 ): UseMutationResult<ProofingFlow, Error, number> {
@@ -317,7 +317,7 @@ export function useActivateProofingFlowVersionMutation(
 
 // The answer is the org's flow list as an admin sees it, so it replaces the
 // cached list rather than refetching it.
-export function useSetProofingFlowSelectionMutation(
+export function useSetFlowSelectionMutation(
   slug: string,
 ): UseMutationResult<ProofingFlow[], Error, ProofingFlowSelection> {
   const queryClient = useQueryClient();
@@ -339,7 +339,7 @@ export function useProofingRequestsQuery(
 ): UseQueryResult<ProofingRequest[], Error> {
   return useQuery({
     queryKey: customerId
-      ? proofingCustomerRequestsQueryKey(slug, customerId)
+      ? customerRequestsQueryKey(slug, customerId)
       : proofingRequestsQueryKey(slug),
     queryFn: ({ signal }) => getProofingRequests(slug, { customerId }, signal),
     enabled: slug !== "" && customerId !== "",
@@ -352,7 +352,7 @@ export function useProofingRequestsQuery(
 
 // The requests sent to one member, newest first. Under the requests key, so
 // everything that refreshes the org's requests refreshes these too.
-export function useMemberProofingRequestsQuery(
+export function useMemberRequestsQuery(
   slug: string,
   userId: string,
 ): UseQueryResult<ProofingRequest[], Error> {
@@ -379,7 +379,7 @@ export function useProofingStatsQuery(
 }
 
 // sending the session mail
-export function useCreateProofingRequestMutation(
+export function useCreateRequestMutation(
   slug: string,
 ): UseMutationResult<ProofingSent, Error, ProofingRequestInput> {
   const queryClient = useQueryClient();
@@ -440,7 +440,7 @@ export function useProofingCustomerQuery(
   });
 }
 
-export function useCreateProofingCustomerMutation(
+export function useCreateCustomerMutation(
   slug: string,
 ): UseMutationResult<ProofingCustomer, Error, string> {
   const queryClient = useQueryClient();
@@ -459,7 +459,7 @@ export function useCreateProofingCustomerMutation(
 
 // A new name shows in the list and in the customer's requests; a pause shows
 // in the list and closes the send form.
-export function useUpdateProofingCustomerMutation(
+export function useUpdateCustomerMutation(
   slug: string,
   customerId: string,
 ): UseMutationResult<ProofingCustomer, Error, ProofingCustomerUpdate> {
@@ -508,7 +508,7 @@ export function useProofingCustomerFlowsQuery(
 
 // The answer is the customer's flows as an admin sees them, so it replaces the
 // cached list; the customer list shows the new assignment too.
-export function useSetProofingCustomerFlowsMutation(
+export function useSetCustomerFlowsMutation(
   slug: string,
   customerId: string,
 ): UseMutationResult<ProofingCustomerFlow[], Error, ProofingFlowSelection> {
@@ -551,7 +551,7 @@ function proofingWebhookQueryKey(
 }
 
 // A removed customer leaves every list it was in, and its sessions go with it.
-export function useRemoveProofingCustomerMutation(
+export function useRemoveCustomerMutation(
   slug: string,
   customerId: string,
 ): UseMutationResult<void, Error, void> {
@@ -576,7 +576,7 @@ export function useRemoveProofingCustomerMutation(
   });
 }
 
-export function useSaveProofingBrandingMutation(
+export function useSaveBrandingMutation(
   slug: string,
   customerId: string,
 ): UseMutationResult<ProofingCustomer, Error, ProofingBrandingInput> {
@@ -612,7 +612,7 @@ export function useProofingApiKeysQuery(
 }
 
 // The secret is in the answer only; the caller shows it once.
-export function useCreateProofingApiKeyMutation(
+export function useCreateApiKeyMutation(
   slug: string,
   customerId: string,
 ): UseMutationResult<CreatedProofingApiKey, Error, { name: string }> {
@@ -633,7 +633,7 @@ export function useCreateProofingApiKeyMutation(
   });
 }
 
-export function useRevokeProofingApiKeyMutation(
+export function useRevokeApiKeyMutation(
   slug: string,
   customerId: string,
 ): UseMutationResult<ProofingApiKey, Error, string> {
@@ -666,7 +666,7 @@ export function useProofingWebhookQuery(
   });
 }
 
-export function useProofingWebhookDeliveriesQuery(
+export function useWebhookDeliveriesQuery(
   slug: string,
   customerId: string,
 ): UseQueryResult<WebhookDelivery[], Error> {
@@ -703,7 +703,7 @@ function invalidateWebhook(
 }
 
 // The answer carries a new endpoint's secret, once.
-export function useSaveProofingWebhookMutation(
+export function useSaveWebhookMutation(
   slug: string,
   customerId: string,
 ): UseMutationResult<
@@ -724,7 +724,7 @@ export function useSaveProofingWebhookMutation(
   });
 }
 
-export function useRemoveProofingWebhookMutation(
+export function useRemoveWebhookMutation(
   slug: string,
   customerId: string,
 ): UseMutationResult<void, Error, void> {
@@ -740,7 +740,7 @@ export function useRemoveProofingWebhookMutation(
   });
 }
 
-export function useRotateProofingWebhookSecretMutation(
+export function useNewWebhookSecretMutation(
   slug: string,
   customerId: string,
 ): UseMutationResult<ProofingWebhook, Error, void> {
@@ -753,7 +753,7 @@ export function useRotateProofingWebhookSecretMutation(
   });
 }
 
-export function useSendProofingWebhookTestMutation(
+export function useSendWebhookTestMutation(
   slug: string,
   customerId: string,
 ): UseMutationResult<void, Error, void> {
@@ -858,6 +858,7 @@ export function useSetProofingPauseMutation(
     onSuccess: (pause) => {
       queryClient.setQueryData(proofingPauseQueryKey(slug), pause);
       void queryClient.invalidateQueries({ queryKey: proofingQueryKey(slug) });
+      void queryClient.invalidateQueries({ queryKey: PROOFING_PAUSES_KEY });
     },
   });
 }
@@ -872,7 +873,7 @@ export function useProofingPausesQuery(): UseQueryResult<
   });
 }
 
-export function useSetPlatformProofingPauseMutation(): UseMutationResult<
+export function useSetPlatformPauseMutation(): UseMutationResult<
   ProofingPause,
   Error,
   { orgId: string; paused: boolean }
@@ -938,7 +939,7 @@ export function useProofingAppQuery(
   });
 }
 
-export function useNewProofingClaimLinkMutation(
+export function useNewClaimLinkMutation(
   target: VerifyTarget,
 ): UseMutationResult<ProofingClaimLink, Error, void> {
   return useMutation({
@@ -949,7 +950,7 @@ export function useNewProofingClaimLinkMutation(
 
 // Polled until the subject has finished in the Yivi app or a poll fails (the
 // page then shows the error); enabled only while the page shows the Yivi QR.
-export function useProofingYiviDisclosureQuery(
+export function useYiviDisclosureQuery(
   target: VerifyTarget,
   enabled: boolean,
 ): UseQueryResult<ProofingYiviDisclosure, Error> {
@@ -964,7 +965,7 @@ export function useProofingYiviDisclosureQuery(
   });
 }
 
-export function useSubmitProofingFaceFrameMutation(
+export function useSubmitFaceFrameMutation(
   target: VerifyTarget,
 ): UseMutationResult<ProofingFaceVerdict, Error, string> {
   return useMutation({
@@ -974,7 +975,7 @@ export function useSubmitProofingFaceFrameMutation(
 }
 
 // Checks uploaded diploma extracts; each verdict says what became of a file.
-export function useUploadProofingDiplomasMutation(
+export function useUploadDiplomasMutation(
   target: VerifyTarget,
 ): UseMutationResult<DiplomaVerdict[], Error, File[]> {
   return useMutation({
@@ -995,7 +996,7 @@ export function useHostedProofingQuery(
   });
 }
 
-export function useStartHostedProofingMutation(
+export function useStartHostedMutation(
   token: string,
 ): UseMutationResult<HostedStart, Error, ProofingMethod> {
   return useMutation({
@@ -1005,7 +1006,7 @@ export function useStartHostedProofingMutation(
 }
 
 // Declines a hosted link; the page's progress follows.
-export function useDeclineHostedProofingMutation(
+export function useDeclineHostedMutation(
   token: string,
 ): UseMutationResult<HostedProgress, Error, void> {
   const queryClient = useQueryClient();
@@ -1022,7 +1023,7 @@ export function useDeclineHostedProofingMutation(
 }
 
 // Decides a request under review; the lists (and counts) follow.
-export function useDecideProofingReviewMutation(
+export function useDecideReviewMutation(
   slug: string,
   requestId: string,
 ): UseMutationResult<ProofingRequest, Error, ProofingReviewInput> {

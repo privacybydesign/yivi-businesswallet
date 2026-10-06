@@ -3,6 +3,7 @@ package seed
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 // The identity proofing use cases of the demo orgs: each org runs proofing
@@ -228,6 +230,46 @@ func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID, createdBy u
 			return fmt.Errorf("seed: customer %s settings: %w", c.name, err)
 		}
 	}
+	return nil
+}
+
+// EnsureProofingDemo provisions the demo proofing orgs with their flows and
+// customers, and the Yivi team as their admins, so identity proofing can be
+// tried on staging. Idempotent; staging only (`seed --proofing-demo`).
+func EnsureProofingDemo(ctx context.Context, dsn, addressDomain string) error {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("seed: connect: %w", err)
+	}
+	defer pool.Close()
+
+	users := user.NewStore(pool)
+	orgs := organization.NewStore(pool, audit.NewDBRecorder())
+	orgsBySlug := map[string]organization.Organization{}
+	for _, o := range slices.Concat(demoOrganizations, proofingOrganizations) {
+		if !slices.ContainsFunc(demoProofingOrgs, func(p demoProofingOrg) bool { return p.slug == o.slug }) {
+			continue
+		}
+		org, err := ensureOrg(ctx, pool, o, addressDomain)
+		if err != nil {
+			return err
+		}
+		for _, m := range yiviTeam {
+			if err := ensureTeamMember(ctx, users, orgs, org.ID, m); err != nil {
+				return err
+			}
+		}
+		orgsBySlug[o.slug] = org
+	}
+
+	creator, err := ensureUser(ctx, users, yiviTeam[0].email, yiviTeam[0].givenNames, yiviTeam[0].lastName, yiviTeam[0].preferredName)
+	if err != nil {
+		return err
+	}
+	if err := seedProofing(ctx, pool, orgsBySlug, creator.ID); err != nil {
+		return err
+	}
+	slog.Info("ensured identity proofing demo", slog.Int("orgs", len(orgsBySlug)))
 	return nil
 }
 

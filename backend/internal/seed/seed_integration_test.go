@@ -51,9 +51,9 @@ func TestEnsureYiviOrganizationSeedsAndIsIdempotent(t *testing.T) {
 	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM qerds_addresses WHERE organization_id = $1", first.ID)
 	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM wallet_representations WHERE organization_id = $1", first.ID)
 
-	// The four Yivi team members are admins of the org, with real names (not the
+	// The five Yivi team members are admins of the org, with real names (not the
 	// generic platform-admin placeholder) — and not duplicated on re-run.
-	assertCount(t, ctx, pool, 4, "SELECT count(*) FROM memberships WHERE organization_id = $1 AND role = 'admin'", first.ID)
+	assertCount(t, ctx, pool, 5, "SELECT count(*) FROM memberships WHERE organization_id = $1 AND role = 'admin'", first.ID)
 	assertCount(t, ctx, pool, 1,
 		"SELECT count(*) FROM users u JOIN memberships m ON m.user_id = u.id WHERE m.organization_id = $1 AND u.email = 'd.mulder@yivi.app' AND u.given_names = 'Dibran' AND u.last_name = 'Mulder'",
 		first.ID)
@@ -62,11 +62,11 @@ func TestEnsureYiviOrganizationSeedsAndIsIdempotent(t *testing.T) {
 	assertCount(t, ctx, pool, 3, "SELECT count(*) FROM attestation_schemas WHERE organization_id = $1", first.ID)
 	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM org_issuer_settings WHERE organization_id = $1", first.ID)
 
-	// The org seed must not drag in the full dev demo data: only the four real
+	// The org seed must not drag in the full dev demo data: only the five real
 	// team members exist (no faker members), and the only audit history is the
 	// attestation catalogue provisioning (schema/template creation) — none of the
 	// invitation/membership churn the full dev seed fabricates.
-	assertCount(t, ctx, pool, 4, "SELECT count(*) FROM memberships")
+	assertCount(t, ctx, pool, 5, "SELECT count(*) FROM memberships")
 	assertCount(t, ctx, pool, 0, "SELECT count(*) FROM users WHERE email LIKE '%@example.test'")
 	assertCount(t, ctx, pool, 0,
 		"SELECT count(*) FROM audit_events WHERE action NOT IN ('attestation.schema_created', 'attestation.template_created')")

@@ -42,8 +42,8 @@ func (s *heldViewStore) SoftDeleteHeld(_ context.Context, _, _ uuid.UUID) error 
 	return nil
 }
 
-func (s *heldViewStore) RecordHeldStatusChange(_ context.Context, _, id uuid.UUID, _ string, revoked bool) error {
-	s.statusChanges = append(s.statusChanges, heldStatusChange{id: id, revoked: revoked})
+func (s *heldViewStore) RecordHeldStatusChange(_ context.Context, _, id uuid.UUID, _ string, status attestation.HeldStatus) error {
+	s.statusChanges = append(s.statusChanges, heldStatusChange{id: id, revoked: status == attestation.HeldRevoked})
 	return nil
 }
 

@@ -214,6 +214,8 @@ const (
 	// EvidenceReferencePhoto is a live face matched against the relying
 	// party's own photo: no document was read.
 	EvidenceReferencePhoto = "reference_photo"
+	// EvidenceDocumentPhoto is a document photographed, its chip not read.
+	EvidenceDocumentPhoto = "document_photo"
 
 	CheckValid        = "valid"
 	CheckInvalid      = "invalid"
@@ -256,7 +258,7 @@ type Reference struct {
 }
 
 // YiviDisclosure is the engine taking a Reference. OK false ended the session
-// (Code says why: photo_missing, reference_no_face); OK true moves on to the face check, which approves after
+// (Code says why: photo_missing, reference_no_face, document_not_accepted); OK true moves on to the face check, which approves after
 // StableFrames matching frames and rejects after MaxAttempts without them.
 type YiviDisclosure struct {
 	OK           bool

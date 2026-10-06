@@ -104,6 +104,12 @@ type Check struct {
 	Detail string `json:"detail"`
 }
 
+// The header and media type of an OCSP request (RFC 6960 appendix A).
+const (
+	headerContentType = "Content-Type"
+	ocspRequestMime   = "application/ocsp-request"
+)
+
 // Stable check identifiers, in the order the checks run.
 const (
 	CheckSignaturePresent   = "signature_present"
@@ -440,7 +446,7 @@ func checkOCSP(ctx context.Context, hc *http.Client, cert, issuer *x509.Certific
 	if err != nil {
 		return "", err
 	}
-	httpReq.Header.Set("Content-Type", "application/ocsp-request")
+	httpReq.Header.Set(headerContentType, ocspRequestMime)
 	httpResp, err := hc.Do(httpReq)
 	if err != nil {
 		return "", err

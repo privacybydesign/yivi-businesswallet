@@ -1166,8 +1166,25 @@ func (s *Service) CancelRequest(ctx context.Context, scope CustomerScope, id uui
 	if err != nil {
 		return Request{}, err
 	}
+	err = s.cancelOnce(ctx, req)
+	if errors.Is(err, errCancelSessionMoved) {
+		// A hosted start raced the cancel; a session is attached once, so the
+		// second read holds the last one.
+		if req, err = s.requests.Get(ctx, req.OrganizationID, req.ID); err != nil {
+			return Request{}, err
+		}
+		err = s.cancelOnce(ctx, req)
+	}
+	if err != nil {
+		return Request{}, err
+	}
+	return s.requests.GetForCustomer(ctx, scope, id)
+}
+
+// cancelOnce ends req's live engine session and marks req cancelled.
+func (s *Service) cancelOnce(ctx context.Context, req Request) error {
 	if st := req.EffectiveStatus(s.now()); st != StatusPending && st != StatusInProgress || req.PurgedAt != nil {
-		return Request{}, ErrSessionOver
+		return ErrSessionOver
 	}
 	if sess := req.liveSession(s.now()); sess != nil {
 		tenant := requestTenant(req)
@@ -1175,19 +1192,19 @@ func (s *Service) CancelRequest(ctx context.Context, scope CustomerScope, id uui
 			var rejected *proofingprovider.RejectedError
 			if errors.As(err, &rejected) {
 				// The engine decided it first; the notified outcome records that.
-				return Request{}, ErrSessionOver
+				return ErrSessionOver
 			}
-			return Request{}, fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
+			return fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
 		}
 	}
 	cancelled, err := s.requests.Cancel(ctx, req)
 	if err != nil {
-		return Request{}, err
+		return err
 	}
 	if !cancelled {
-		return Request{}, ErrSessionOver
+		return ErrSessionOver
 	}
-	return s.requests.GetForCustomer(ctx, scope, id)
+	return nil
 }
 
 // RequestResult reads a settled customer request's result from the engine, the

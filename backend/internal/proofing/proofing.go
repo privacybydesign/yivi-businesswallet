@@ -346,7 +346,7 @@ func (r Request) SessionExpiresAt(now time.Time) *time.Time {
 // awaitingStart reports a hosted request its subject has not started yet,
 // whose link still can be.
 func (r Request) awaitingStart(now time.Time) bool {
-	return r.Hosted && r.session == nil && r.Status == StatusPending && now.Before(r.LinkExpiresAt)
+	return r.Hosted && r.session == nil && r.PurgedAt == nil && r.Status == StatusPending && now.Before(r.LinkExpiresAt)
 }
 
 // needsReconcile reports whether the engine may hold a newer state than the row: an

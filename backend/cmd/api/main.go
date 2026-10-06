@@ -159,7 +159,11 @@ func newDiplomaValidator(ctx context.Context, cfg config.Config) (diploma.Valida
 		if err != nil {
 			return nil, fmt.Errorf("diploma trust anchors: %w", err)
 		}
-		return diploma.NewPadesValidator(store, cfg.DiplomaOCSP), nil
+		revocation := diploma.RevocationOffline
+		if cfg.DiplomaOCSP {
+			revocation = diploma.RevocationOCSP
+		}
+		return diploma.NewPadesValidator(store, revocation), nil
 	default:
 		return nil, fmt.Errorf("diploma validator provider %q is not implemented", cfg.DiplomaValidatorProvider)
 	}

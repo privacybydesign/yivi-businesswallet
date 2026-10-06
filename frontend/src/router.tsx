@@ -11,7 +11,7 @@ import {
 } from "./api/organization.queries";
 import { qerdsMessageQueryKey } from "./api/qerds.queries";
 import { proofingCustomerQueryKey } from "./api/identity-proofing.queries";
-import { heldAttestationClaimsBaseQueryKey } from "./api/attestations.queries";
+import { heldClaimsBaseQueryKey } from "./api/attestations.queries";
 import { fullName } from "./lib/name";
 import Root from "./routes/root";
 import RootRedirect from "./routes/root-redirect";
@@ -131,7 +131,7 @@ const heldCredentialCrumb: RouteHandle = {
   crumb: ({ params, queryClient, t }: CrumbContext) => {
     const cached = queryClient
       .getQueriesData<HeldAttestationClaims>({
-        queryKey: heldAttestationClaimsBaseQueryKey(
+        queryKey: heldClaimsBaseQueryKey(
           params.orgSlug ?? "",
           params.heldId ?? "",
         ),

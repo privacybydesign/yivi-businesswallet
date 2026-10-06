@@ -855,6 +855,7 @@ export const nl: Translation<typeof en> = {
       yiviCodes: {
         photoMissing: "de gedeelde kaart heeft geen foto.",
         referenceNoFace: "op de gedeelde foto is geen gezicht gevonden.",
+        documentNotAccepted: "deze flow accepteert het gedeelde document niet.",
       },
       face: {
         heading: "Kijk in de camera",

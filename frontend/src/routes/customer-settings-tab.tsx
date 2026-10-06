@@ -3,8 +3,8 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
-  useRemoveProofingCustomerMutation,
-  useUpdateProofingCustomerMutation,
+  useRemoveCustomerMutation,
+  useUpdateCustomerMutation,
 } from "../api/identity-proofing.queries";
 import type { ProofingCustomer } from "../api/identity-proofing";
 import {
@@ -31,7 +31,7 @@ export function SettingsTab({
   customer: ProofingCustomer;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const update = useUpdateProofingCustomerMutation(slug, customer.id);
+  const update = useUpdateCustomerMutation(slug, customer.id);
 
   return (
     <div className="flex max-w-3xl flex-col gap-5">
@@ -160,7 +160,7 @@ function RedirectOriginsCard({
   customer: ProofingCustomer;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const update = useUpdateProofingCustomerMutation(slug, customer.id);
+  const update = useUpdateCustomerMutation(slug, customer.id);
   const saved = customer.allowedRedirectOrigins.join("\n");
   const [text, setText] = useState(saved);
   const fieldId = `redirect-origins-${customer.id}`;
@@ -222,7 +222,7 @@ function NameCard({
   customer: ProofingCustomer;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const update = useUpdateProofingCustomerMutation(slug, customer.id);
+  const update = useUpdateCustomerMutation(slug, customer.id);
   const [name, setName] = useState(customer.name);
   const trimmed = name.trim();
 
@@ -276,7 +276,7 @@ function RemoveCard({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const remove = useRemoveProofingCustomerMutation(slug, customer.id);
+  const remove = useRemoveCustomerMutation(slug, customer.id);
   const [confirming, setConfirming] = useState(false);
 
   return (

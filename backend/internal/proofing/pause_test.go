@@ -105,7 +105,7 @@ func TestPausedOrgHostedLinkRefuses(t *testing.T) {
 	h := NewHandler(f.svc, nil, nil)
 	header := http.Header{}
 	h.PageHeaders(httptest.NewRequest(http.MethodGet, "/p/"+token, nil), header)
-	if got := header.Get("Content-Security-Policy"); got != frameNone {
+	if got := header.Get(headerCSP); got != frameNone {
 		t.Errorf("paused page CSP = %q, want %q", got, frameNone)
 	}
 }

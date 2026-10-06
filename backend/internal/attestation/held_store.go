@@ -134,9 +134,26 @@ func (s *Store) SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error {
 	})
 }
 
+// HeldStatus is a held credential's status on its issuer's status list.
+type HeldStatus int
+
+const (
+	HeldValid HeldStatus = iota
+	HeldRevoked
+)
+
+// heldStatusOf is the HeldStatus a status list's revoked flag means.
+func heldStatusOf(revoked bool) HeldStatus {
+	if revoked {
+		return HeldRevoked
+	}
+	return HeldValid
+}
+
 // RecordHeldStatusChange audits that the issuer's status list moved a held
-// credential between valid and revoked, found by a status re-check.
-func (s *Store) RecordHeldStatusChange(ctx context.Context, orgID, id uuid.UUID, vct string, revoked bool) error {
+// credential between valid and revoked, to status, found by a status re-check.
+func (s *Store) RecordHeldStatusChange(ctx context.Context, orgID, id uuid.UUID, vct string, status HeldStatus) error {
+	revoked := status == HeldRevoked
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		return s.audit.Record(ctx, q, audit.AttestationHeldStatusChanged,
 			audit.Target{Type: audit.TargetHeldAttestation, ID: id.String(), OrgID: &orgID},

@@ -6,6 +6,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
@@ -92,6 +94,34 @@ func TestSeedProofingIsIdempotent(t *testing.T) {
 		}
 		if mode, err := proofing.NewFlowDiplomaStore(pool, audit.NopRecorder{}).Get(ctx, radboudID, f.ID); err != nil || mode != proofing.DiplomasRequired {
 			t.Errorf("Radboud enrol diplomas = %q, %v; want required", mode, err)
+		}
+	}
+}
+
+// The staging proofing demo seeds the demo proofing orgs with their flows and
+// customers and the Yivi team as their admins, once however often it runs.
+func TestEnsureProofingDemoIsIdempotent(t *testing.T) {
+	pool, dsn := testdb.Fresh(t)
+	ctx := context.Background()
+	for range 2 {
+		if err := EnsureProofingDemo(ctx, dsn, "qerds.localhost"); err != nil {
+			t.Fatalf("EnsureProofingDemo: %v", err)
+		}
+	}
+
+	customerStore := proofing.NewCustomerStore(pool, audit.NopRecorder{})
+	for _, o := range demoProofingOrgs {
+		var orgID uuid.UUID
+		if err := pool.QueryRow(ctx, "SELECT id FROM organizations WHERE slug = $1", o.slug).Scan(&orgID); err != nil {
+			t.Fatalf("org %s: %v", o.slug, err)
+		}
+		var admins int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM memberships WHERE organization_id = $1 AND role = 'admin'", orgID).Scan(&admins); err != nil || admins != len(yiviTeam) {
+			t.Errorf("%s admins = %d, %v; want %d", o.slug, admins, err, len(yiviTeam))
+		}
+		customers, err := customerStore.List(ctx, orgID)
+		if err != nil || len(customers) != len(o.customers) {
+			t.Errorf("%s customers = %d, %v; want %d", o.slug, len(customers), err, len(o.customers))
 		}
 	}
 }
