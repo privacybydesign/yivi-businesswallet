@@ -116,6 +116,11 @@ export const REQUESTED_ATTRIBUTES = [
   { value: "biometrics", step: STEP_FACE_VERIFICATION },
 ] as const;
 
+// The requested data of a flow that releases nothing but the outcome
+// (proofingengine.attrOutcomeOnly): an empty list releases everything the
+// steps collect, so a flow with no data ticked sends this instead.
+export const OUTCOME_ONLY = "outcome_only";
+
 // The eIDAS levels the proofing engine can claim (flow.LevelRequirements);
 // high is not among them.
 export const ASSURANCE_LEVELS = ["low", "substantial"] as const;
@@ -408,16 +413,19 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
       requiredChecks.push(CHECK_LIVENESS);
     }
   }
+  const requestedAttributes: string[] = REQUESTED_ATTRIBUTES.map(
+    (a) => a.value,
+  ).filter(
+    (value) =>
+      draft.requestedAttributes.has(value) && attributeAvailable(draft, value),
+  );
   const spec: ProofingFlowSpec = {
     ...draft.carried,
     name: draft.name.trim(),
     steps: draftSteps(draft),
     requiredChecks,
-    requestedAttributes: REQUESTED_ATTRIBUTES.map((a) => a.value).filter(
-      (value) =>
-        draft.requestedAttributes.has(value) &&
-        attributeAvailable(draft, value),
-    ),
+    requestedAttributes:
+      requestedAttributes.length > 0 ? requestedAttributes : [OUTCOME_ONLY],
     acceptedDocumentTypes: list(draft.acceptedDocumentTypes),
     acceptedIssuingCountries: list(draft.acceptedIssuingCountries).map(
       (country) => country.toUpperCase(),
@@ -612,8 +620,8 @@ export function sendableByMail(
 
 // Whether flow's result carries the holder's name and date of birth (the
 // document data, dg1), which a request for one known person is matched
-// against (proofing.readsIdentity). A flow listing no data releases the
-// outcome only.
+// against (proofing.readsIdentity). The service hands a flow back listing
+// what it releases.
 export function readsIdentity(
   flow: { requestedAttributes?: string[] } | undefined,
 ): boolean {

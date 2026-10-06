@@ -12,6 +12,7 @@ import type {
 } from "../api/identity-proofing";
 import { useWhenFormatter } from "../lib/format-when";
 import {
+  assuranceLevelLabel,
   proofingErrorMessage,
   proofingStatusLabel,
   REVIEW_REASON_MAX_CHARS,
@@ -251,8 +252,10 @@ function MatchList({
       </p>
     );
   }
-  const identified = matches.filter((m) => m.level !== "email");
-  const emailed = matches.filter((m) => m.level === "email");
+  const unfinished = (m: ProofingDataMatch): boolean =>
+    m.level === "email" || m.level === "name";
+  const identified = matches.filter((m) => !unfinished(m));
+  const typed = matches.filter(unfinished);
   return (
     <div className="flex flex-col gap-1.5">
       {identified.length > 0 && (
@@ -270,14 +273,14 @@ function MatchList({
           )}
         </>
       )}
-      {emailed.length > 0 && (
+      {typed.length > 0 && (
         <>
           <p className="text-ink mt-2 text-[13px] font-semibold">
             {t("customers.sessions.dataRequest.emailMatches", {
-              count: emailed.length,
+              count: typed.length,
             })}
           </p>
-          <MatchRows matches={emailed} selection={selection} />
+          <MatchRows matches={typed} selection={selection} />
           {selection && (
             <p className={HINT}>
               {t("customers.sessions.dataRequest.emailMatchesHint")}
@@ -293,6 +296,7 @@ const LEVEL_TONES = {
   strong: "green",
   probable: "amber",
   email: "default",
+  name: "default",
 } as const;
 
 function MatchRows({
@@ -335,7 +339,7 @@ function MatchRows({
                   m.flowName,
                   formatWhen(m.createdAt),
                   proofingStatusLabel(m.status, t),
-                  m.eidasLevel,
+                  m.eidasLevel && assuranceLevelLabel(m.eidasLevel, t),
                 ]
                   .filter(Boolean)
                   .join(" · ")}

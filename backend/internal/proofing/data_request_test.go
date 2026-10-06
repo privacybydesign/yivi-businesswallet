@@ -17,7 +17,7 @@ import (
 type fakeDataRequests struct {
 	kinds      map[string]FlowKind
 	candidates []Request
-	emailed    []Request
+	unfinished []Request
 	matched    []Request
 	matches    []DataMatch
 	saved      []NewDataMatch
@@ -46,8 +46,8 @@ func (f *fakeDataRequests) Candidates(context.Context, Request) ([]Request, erro
 	return f.candidates, nil
 }
 
-func (f *fakeDataRequests) EmailCandidates(context.Context, Request) ([]Request, error) {
-	return f.emailed, nil
+func (f *fakeDataRequests) UnfinishedCandidates(context.Context, Request) ([]Request, error) {
+	return f.unfinished, nil
 }
 
 func (f *fakeDataRequests) SaveMatches(_ context.Context, _ Request, matches []NewDataMatch) error {
@@ -178,8 +178,9 @@ func TestDataRequestReviewMatches(t *testing.T) {
 func TestDataRequestMatchesByEmail(t *testing.T) {
 	f, data := newDataFixture(FlowDataErasure)
 	anna := heldSession("Anna Jansen")
-	pending := Request{ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusPending}
-	data.candidates, data.emailed = []Request{anna}, []Request{pending, anna}
+	pending := Request{ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusPending, SubjectEmail: "Anna@Example.org"}
+	other := Request{ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusPending, SubjectEmail: "piet@example.org"}
+	data.candidates, data.unfinished = []Request{anna}, []Request{pending, other, anna}
 	f.sendForCustomer(t, "anna@example.org", "")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
 
@@ -190,11 +191,31 @@ func TestDataRequestMatchesByEmail(t *testing.T) {
 	}
 }
 
+// An unfinished session sent without the request's address is matched by its
+// typed name when that is the requester's full name, case aside; a partial or
+// other name is not.
+func TestDataRequestMatchesByName(t *testing.T) {
+	f, data := newDataFixture(FlowDataErasure)
+	unfinished := func(name string) Request {
+		return Request{ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusPending, SubjectName: name}
+	}
+	named, partial, other, unnamed := unfinished("ANNA JANSEN"), unfinished("Jansen"), unfinished("Piet Jansen"), unfinished("")
+	data.unfinished = []Request{named, partial, other, unnamed}
+	f.sendForCustomer(t, "anna@example.org", "")
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
+
+	f.reconcile(t)
+	want := []NewDataMatch{{RequestID: named.ID, Level: MatchName}}
+	if !slices.Equal(data.saved, want) {
+		t.Errorf("matches = %+v; want %+v", data.saved, want)
+	}
+}
+
 // A decision that names no sessions takes every identity match, never an
 // e-mail one: those only a reviewer's own tick takes.
 func TestApprovedSkipsEmailMatches(t *testing.T) {
-	strong, email := uuid.New(), uuid.New()
-	matches := []DataMatch{{RequestID: strong, Level: MatchStrong}, {RequestID: email, Level: MatchEmail}}
+	strong, email, name := uuid.New(), uuid.New(), uuid.New()
+	matches := []DataMatch{{RequestID: strong, Level: MatchStrong}, {RequestID: email, Level: MatchEmail}, {RequestID: name, Level: MatchName}}
 	got, err := approvedMatches(matches, nil)
 	if err != nil || !slices.Equal(got, []uuid.UUID{strong}) {
 		t.Errorf("approvedMatches(nil) = %v, %v; want only the identity match", got, err)

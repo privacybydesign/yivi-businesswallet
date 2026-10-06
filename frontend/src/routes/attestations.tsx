@@ -772,7 +772,7 @@ function HeldTab({
   // with the section the same credential was sorted into.
   const now = new Date();
   const counts = heldStatusCounts(rows, now);
-  const sections = heldSections(rows, { query, status, source: "" }, now);
+  const sections = heldSections(rows, { query, status }, now);
   const shown = sections.attention.length + sections.valid.length;
 
   return (

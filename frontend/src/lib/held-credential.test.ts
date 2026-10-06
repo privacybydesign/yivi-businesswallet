@@ -6,7 +6,6 @@ import { HELD_SOURCES } from "../api/attestations";
 import { en } from "../i18n/locales/en";
 import {
   EXPIRING_SOON_DAYS,
-  HELD_SOURCE_FILTERS,
   heldExpiryAt,
   heldExpiryIsPast,
   heldMatchesQuery,
@@ -189,7 +188,7 @@ describe("heldMatchesQuery", () => {
 });
 
 describe("heldSections", () => {
-  const noFilters = { query: "", status: "", source: "" } as const;
+  const noFilters = { query: "", status: "" } as const;
 
   const valid = held({ id: "valid", expiresAt: daysFromNow(90) });
   const soon = held({
@@ -255,34 +254,21 @@ describe("heldSections", () => {
     expect(sections.valid).toEqual([]);
   });
 
-  it("filters by source across both sections", () => {
-    const sections = heldSections(all, { ...noFilters, source: "qerds" }, NOW);
-    expect(ids(sections.attention)).toEqual(["soon"]);
-    expect(sections.valid).toEqual([]);
-  });
-
   it("combines search with the filters", () => {
     const sections = heldSections(
       all,
-      { query: "registration", status: "attention", source: "" },
+      { query: "registration", status: "attention" },
       NOW,
     );
     expect(ids(sections.attention)).toEqual(["revoked", "expired", "soon"]);
 
     const noMatch = heldSections(
       all,
-      { query: "nothing-matches-this", status: "", source: "" },
+      { query: "nothing-matches-this", status: "" },
       NOW,
     );
     expect(noMatch.attention).toEqual([]);
     expect(noMatch.valid).toEqual([]);
-  });
-});
-
-describe("HELD_SOURCE_FILTERS", () => {
-  it("offers every source the list responses can carry, plus no filter", () => {
-    expect(HELD_SOURCE_FILTERS[0]).toBe("");
-    expect([...HELD_SOURCE_FILTERS].slice(1)).toEqual([...HELD_SOURCES]);
   });
 });
 

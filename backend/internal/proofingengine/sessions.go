@@ -123,10 +123,21 @@ func (s *Server) resolveSessionFlow(ctx context.Context, sess session.Session) (
 	return &fd, nil
 }
 
-// AttributesForSteps is every result attribute steps collect: what a flow
-// lists to release everything it gathers (the demo seed's flows do). A flow
-// that lists none releases the outcome only (attrOutcomeOnly).
-func AttributesForSteps(steps []flow.Step) []string {
+// requestedAttributesOf is what fd releases: its own list, or everything its
+// steps collect when it lists none. Only attrOutcomeOnly, chosen explicitly,
+// releases nothing but the outcome.
+func requestedAttributesOf(fd flow.FlowDefinition) []string {
+	if len(fd.RequestedAttributes) > 0 {
+		return fd.RequestedAttributes
+	}
+	if attrs := attributesForSteps(fd.Steps); len(attrs) > 0 {
+		return attrs
+	}
+	return []string{attrOutcomeOnly}
+}
+
+// attributesForSteps is every result attribute steps collect.
+func attributesForSteps(steps []flow.Step) []string {
 	var attrs []string
 	add := func(vs ...string) {
 		for _, v := range vs {
@@ -505,7 +516,7 @@ const (
 	attrBiometrics    = "biometrics"
 	attrSelfie        = "selfie"         // live selfie captured during face verification
 	attrDocumentImage = "document_image" // visual (VIZ) capture of the document
-	// attrOutcomeOnly is the session's whole list when its flow requests no
+	// attrOutcomeOnly is a flow's whole list when the admin chose to release no
 	// data: it names no result attribute, so nothing but the outcome (status,
 	// assurance) is released.
 	attrOutcomeOnly = "outcome_only"
@@ -513,7 +524,7 @@ const (
 
 // attrRequested reports whether any of keys was requested. An empty
 // RequestedAttributes list is unrestricted: only a session no flow governs
-// has one, since a flow's session lists its attributes or attrOutcomeOnly.
+// has one, since a flow's session gets requestedAttributesOf the flow.
 func attrRequested(sess session.Session, keys ...string) bool {
 	if len(sess.RequestedAttributes) == 0 {
 		return true

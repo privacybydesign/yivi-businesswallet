@@ -1315,7 +1315,11 @@ function SessionRow({
                   <dt className="text-muted">
                     {t("identityProofing.requests.assurance")}
                   </dt>
-                  <dd>{request.eidasLevel ?? "—"}</dd>
+                  <dd>
+                    {request.eidasLevel
+                      ? assuranceLevelLabel(request.eidasLevel, t)
+                      : "—"}
+                  </dd>
                   {request.errorCode && (
                     <>
                       <dt className="text-muted">

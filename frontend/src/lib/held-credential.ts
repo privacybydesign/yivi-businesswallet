@@ -6,8 +6,7 @@
 // a presentation window, not a state the engine knows, so it is derived here.
 
 import type { TFunction } from "i18next";
-import { HELD_SOURCES } from "../api/attestations";
-import type { HeldAttestation, HeldSource } from "../api/attestations";
+import type { HeldAttestation } from "../api/attestations";
 import { credentialDisplayName } from "./credential-display";
 import { fullName } from "./name";
 
@@ -32,13 +31,6 @@ export const HELD_STATUS_FILTERS = [
 ] as const;
 
 export type HeldStatusFilter = (typeof HELD_STATUS_FILTERS)[number];
-
-// Derived from the source list the API module already declares, so a source added
-// to the backend only has to be added there: a second hand-written copy would make
-// a new source silently unfilterable rather than raise anything.
-export const HELD_SOURCE_FILTERS = ["", ...HELD_SOURCES] as const;
-
-export type HeldSourceFilter = (typeof HELD_SOURCE_FILTERS)[number];
 
 // The validity fields the status derives from — a subset of HeldAttestation, so
 // the detail view (which carries the same two fields) can badge a credential too.
@@ -174,17 +166,9 @@ function heldMatchesStatus(
   return status === filter;
 }
 
-function heldMatchesSource(
-  source: HeldSource,
-  filter: HeldSourceFilter,
-): boolean {
-  return filter === "" || source === filter;
-}
-
 export interface HeldFilters {
   query: string;
   status: HeldStatusFilter;
-  source: HeldSourceFilter;
 }
 
 // A held credential paired with the status the view badges it with, so a card
@@ -212,8 +196,7 @@ export function heldSections(
     const status = heldStatus(credential, now);
     if (
       !heldMatchesQuery(credential, filters.query) ||
-      !heldMatchesStatus(status, filters.status) ||
-      !heldMatchesSource(credential.source, filters.source)
+      !heldMatchesStatus(status, filters.status)
     ) {
       continue;
     }

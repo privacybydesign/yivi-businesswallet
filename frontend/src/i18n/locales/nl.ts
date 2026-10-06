@@ -929,15 +929,17 @@ export const nl: Translation<typeof en> = {
           "Er zijn geen andere sessies van deze persoon gevonden bij deze klant.",
         matches_one: "{{count}} sessie van deze persoon gevonden",
         matches_other: "{{count}} sessies van deze persoon gevonden",
-        emailMatches_one: "{{count}} onafgeronde sessie naar hetzelfde adres",
+        emailMatches_one:
+          "{{count}} onafgeronde sessie met hetzelfde adres of dezelfde naam",
         emailMatches_other:
-          "{{count}} onafgeronde sessies naar hetzelfde adres",
+          "{{count}} onafgeronde sessies met hetzelfde adres of dezelfde naam",
         emailMatchesHint:
-          "Deze zijn nooit afgerond, dus er is geen bewezen identiteit om te vergelijken: alleen het e-mailadres komt overeen. Vink aan welke van deze persoon zijn.",
+          "Deze zijn nooit afgerond, dus er is geen bewezen identiteit om te vergelijken: alleen het e-mailadres of de ingevulde naam komt overeen. Vink aan welke van deze persoon zijn.",
         levels: {
           strong: "Zelfde document",
           probable: "Naam en geboortedatum",
           email: "Zelfde e-mailadres",
+          name: "Zelfde naam",
         },
         untickHint:
           "Sessies met hetzelfde document zijn aangevinkt; een sessie met alleen dezelfde naam en geboortedatum niet, dus vink die alleen aan als je zeker weet dat hij van deze persoon is. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
@@ -1304,7 +1306,7 @@ export const nl: Translation<typeof en> = {
         "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met de eigen foto van de klant van deze persoon, die het systeem van de klant bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
       dataTitle: "Gevraagde resultaatgegevens",
       dataHint:
-        "Bepaalt welke resultaatgegevens de verificatiedienst teruggeeft. Alleen gegevens van een stap in deze flow kunnen worden gevraagd. De wallet bewaart zelf alleen de uitkomst en het betrouwbaarheidsniveau.",
+        "Bepaalt welke resultaatgegevens de verificatiedienst teruggeeft. Alleen gegevens van een stap in deze flow kunnen worden gevraagd; zonder vinkje wordt alleen de uitkomst teruggegeven. De wallet bewaart zelf alleen de uitkomst en het betrouwbaarheidsniveau.",
       checksTitle: "Vereiste controles",
       checksHint:
         "De controle van de chipgegevens is verplicht als de chip wordt gelezen, en de gezichtsvergelijking bij de gezichtscontrole, dus die staan vast aan; de kopiecontrole en de controle op een levend persoon blijven optioneel.",
@@ -3409,16 +3411,11 @@ export const nl: Translation<typeof en> = {
       confirmDelete: "Credential “{{name}}” verwijderen?",
       viewDetail: "Details van {{name}} bekijken",
       search: "Zoek op naam, type of uitgever…",
-      reset: "Herstellen",
-      expires: "Verloopt {{date}}",
-      expiredOn: "Verlopen {{date}}",
       fields: {
         validUntil: "Geldig tot",
         issuer: "Uitgegeven door",
         source: "Ontvangen via",
         received: "Ontvangen",
-        expires: "Verloopt",
-        expired: "Verlopen",
       },
       sections: {
         attention: "Vraagt aandacht",
@@ -3433,10 +3430,6 @@ export const nl: Translation<typeof en> = {
       filters: {
         all: "Alle",
         status: "Status",
-        allStatuses: "Alle statussen",
-        attention: "Vraagt aandacht",
-        source: "Ontvangen via",
-        allSources: "Alle bronnen",
       },
       sources: {
         qerds: "QERDS",

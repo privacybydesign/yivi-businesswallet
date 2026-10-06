@@ -175,9 +175,11 @@ the app calls them), and the deep link's `api=` is
     `chip_checks` from NFC; `document_image` from `document_photo`; `selfie`
     and `biometrics` from face. The editor shows plain labels, never these
     codes. Each item is available only with its step and cleared otherwise;
-    none is forced on. A flow that requests no data releases the outcome only
-    (status and assurance), as the subject is told: the session then carries
-    `outcome_only`.
+    none is forced on. With none ticked the editor saves `outcome_only`, which
+    releases the outcome only (status and assurance), as the subject is told.
+    A flow saved without a list releases everything its steps collect
+    (`requestedAttributesOf`), and a flow read back always lists what it
+    releases.
   - Countries: `acceptedIssuingCountries` takes 3-letter ICAO 9303 codes only,
     and a code no country has is refused, so the flow cannot be saved
     (`flow.ValidIssuingCountry`: ISO 3166-1 alpha-3, plus ICAO's own EUE, UNO,
@@ -930,15 +932,18 @@ editor's Type, and the hosted page.
   word (`diploma.SameName`) and birth date: `strong` when document type,
   issuing state and expiry also agree (the same document; the document number
   is never read), `probable` otherwise. The customer's unfinished sessions
-  (pending, in progress, expired, cancelled) sent to exactly the same e-mail
-  address are listed apart as `email` matches: they hold no proofed identity.
+  (pending, in progress, expired, cancelled; `UnfinishedCandidates`) hold no
+  proofed identity, only what the sender typed, and are listed apart:
+  - `email`: sent to exactly the same e-mail address, case aside.
+  - `name`: otherwise, the typed name is the person's full name word for word
+    (`diploma.SameName`).
   Stored in `identity_proofing_request_matches`. No HMAC or other deterministic
   identifier: it would link a person's sessions for anyone reading the
   database.
 - **Review.** The session's panel shows the person's identity and proof (name,
   date of birth, document, chip, face match, liveness, eIDAS level; the
   result read allows a data request in review, `heldToVerdict`) and the
-  matches. Only `strong` matches start ticked; `probable` and `email` ones are
+  matches. Only `strong` matches start ticked; `probable`, `email` and `name` ones are
   taken only when ticked, and the API's approve without `requestIds` takes the
   `strong` ones alone. `DecideReview` → `decideDataRequest` (decided in the
   engine too if it holds a review there). Approving an erasure asks to confirm

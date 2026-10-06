@@ -754,7 +754,7 @@ func expectedBirthDate(raw, name string, now time.Time) (string, error) {
 
 // readsIdentity reports whether flow f's result carries the holder's name and
 // date of birth (the document data, dg1): what a request for one known person
-// is matched against. A flow that lists no data releases the outcome only.
+// is matched against. The engine hands a flow back listing what it releases.
 func readsIdentity(f proofingprovider.Flow) bool {
 	return slices.Contains(f.RequestedAttributes, attributeDocument)
 }

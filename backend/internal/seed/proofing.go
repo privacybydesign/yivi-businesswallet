@@ -11,7 +11,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 )
@@ -259,11 +258,6 @@ func ensureProofingFlows(ctx context.Context, pool *pgxpool.Pool, recorder audit
 			continue
 		}
 		def := f.def
-		// A flow listing no data releases only the outcome; the demo flows
-		// that list none release everything their steps collect.
-		if len(def.RequestedAttributes) == 0 {
-			def.RequestedAttributes = proofingengine.AttributesForSteps(def.Steps)
-		}
 		def.TenantID = orgID.String()
 		saved, err := flows.Save(ctx, def)
 		if err != nil {

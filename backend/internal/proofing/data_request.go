@@ -61,6 +61,10 @@ const (
 	// to match on. Listed after the others and only taken when the reviewer
 	// ticks it.
 	MatchEmail MatchLevel = "email"
+	// MatchName is an unfinished session whose typed name is the requester's
+	// full name, word for word (diploma.SameName), sent to another or no
+	// address. Taken only when the reviewer ticks it, like MatchEmail.
+	MatchName MatchLevel = "name"
 )
 
 const (
@@ -115,7 +119,7 @@ type dataRequestStore interface {
 	AllFlowKinds(ctx context.Context, orgID uuid.UUID) (map[string]FlowKind, error)
 	SaveFlowKind(ctx context.Context, orgID uuid.UUID, flowID string, kind FlowKind) (FlowKind, error)
 	Candidates(ctx context.Context, req Request) ([]Request, error)
-	EmailCandidates(ctx context.Context, req Request) ([]Request, error)
+	UnfinishedCandidates(ctx context.Context, req Request) ([]Request, error)
 	SaveMatches(ctx context.Context, req Request, matches []NewDataMatch) error
 	Matches(ctx context.Context, req Request) ([]DataMatch, error)
 	MatchedRequests(ctx context.Context, req Request) ([]Request, error)
@@ -244,28 +248,33 @@ func (s *Service) findDataMatches(ctx context.Context, tenant proofingprovider.T
 			}
 		}
 	}
-	emailed, err := s.emailMatches(ctx, req, matches)
+	unfinished, err := s.unfinishedMatches(ctx, req, requester, matches)
 	if err != nil {
 		return err
 	}
-	return s.dataRequests.SaveMatches(ctx, req, append(matches, emailed...))
+	return s.dataRequests.SaveMatches(ctx, req, append(matches, unfinished...))
 }
 
-// emailMatches are req's MatchEmail matches: the customer's unfinished
-// sessions sent to the address req was sent to, apart from those already
-// matched on identity. None when req has no address.
-func (s *Service) emailMatches(ctx context.Context, req Request, matched []NewDataMatch) ([]NewDataMatch, error) {
-	if strings.TrimSpace(req.SubjectEmail) == "" {
-		return nil, nil
-	}
-	candidates, err := s.dataRequests.EmailCandidates(ctx, req)
+// unfinishedMatches are req's matches among the customer's unfinished
+// sessions, apart from those already matched on identity: MatchEmail when sent
+// to the address req was sent to, case aside, else MatchName when its typed
+// name is the requester's.
+func (s *Service) unfinishedMatches(ctx context.Context, req Request, requester SubjectIdentity, matched []NewDataMatch) ([]NewDataMatch, error) {
+	candidates, err := s.dataRequests.UnfinishedCandidates(ctx, req)
 	if err != nil {
 		return nil, err
 	}
+	email := strings.TrimSpace(req.SubjectEmail)
 	out := []NewDataMatch{}
 	for _, c := range candidates {
-		if !slices.ContainsFunc(matched, func(m NewDataMatch) bool { return m.RequestID == c.ID }) {
+		if slices.ContainsFunc(matched, func(m NewDataMatch) bool { return m.RequestID == c.ID }) {
+			continue
+		}
+		switch {
+		case email != "" && strings.EqualFold(strings.TrimSpace(c.SubjectEmail), email):
 			out = append(out, NewDataMatch{RequestID: c.ID, Level: MatchEmail})
+		case requester.FamilyName != "" && diploma.SameName(requester.GivenName+" "+requester.FamilyName, c.SubjectName):
+			out = append(out, NewDataMatch{RequestID: c.ID, Level: MatchName})
 		}
 	}
 	return out, nil
@@ -419,7 +428,8 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 
 // approvedMatches checks a reviewer's approved sessions against the matches;
 // nil approves only the MatchStrong ones, proven with the same document: a
-// MatchProbable or MatchEmail one is taken only by a reviewer's own tick.
+// MatchProbable, MatchEmail or MatchName one is taken only by a reviewer's own
+// tick.
 func approvedMatches(matches []DataMatch, approved []uuid.UUID) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0, len(matches))
 	for _, m := range matches {

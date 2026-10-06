@@ -135,11 +135,10 @@ func newDataRequest(t *testing.T, requests *RequestStore, orgID, by, customerID 
 	return req
 }
 
-// An erasure also finds the customer's unfinished sessions sent to the same
-// address, case aside; a settled one is matched on identity instead, and one
-// to another address is not the person's. Such a match is stored and listed
-// after the identity matches.
-func TestDataRequestEmailCandidates(t *testing.T) {
+// An erasure also finds the customer's unfinished sessions, for matching by
+// address or typed name; a settled one is matched on identity instead. Such a
+// match is stored and listed after the identity matches.
+func TestDataRequestUnfinishedCandidates(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	recorder := audit.NewDBRecorder()
@@ -169,21 +168,21 @@ func TestDataRequestEmailCandidates(t *testing.T) {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
 	pending := send("Anna@Example.org")
-	send("piet@example.org")
+	other := send("piet@example.org")
 	erasure := newDataRequest(t, requests, orgID, sam, customer.ID, FlowDataErasure, "s2")
 
-	candidates, err := data.EmailCandidates(ctx, erasure)
-	if err != nil || len(candidates) != 1 || candidates[0].ID != pending.ID {
-		t.Fatalf("EmailCandidates = %+v, %v; want only the pending session to the same address", candidates, err)
+	candidates, err := data.UnfinishedCandidates(ctx, erasure)
+	if err != nil || len(candidates) != 2 || candidates[0].ID != pending.ID || candidates[1].ID != other.ID {
+		t.Fatalf("UnfinishedCandidates = %+v, %v; want both pending sessions, not the settled one", candidates, err)
 	}
 	if err := data.SaveMatches(ctx, erasure, []NewDataMatch{
-		{RequestID: pending.ID, Level: MatchEmail}, {RequestID: settled.ID, Level: MatchStrong},
+		{RequestID: pending.ID, Level: MatchEmail}, {RequestID: other.ID, Level: MatchName}, {RequestID: settled.ID, Level: MatchStrong},
 	}); err != nil {
 		t.Fatalf("SaveMatches: %v", err)
 	}
 	matches, err := data.Matches(ctx, erasure)
-	if err != nil || len(matches) != 2 || matches[0].Level != MatchStrong || matches[1].Level != MatchEmail {
-		t.Fatalf("Matches = %+v, %v; want the strong match, then the e-mail one", matches, err)
+	if err != nil || len(matches) != 3 || matches[0].Level != MatchStrong || matches[1].Level != MatchName || matches[2].Level != MatchEmail {
+		t.Fatalf("Matches = %+v, %v; want the strong match, then the name one, then the e-mail one", matches, err)
 	}
 }
 

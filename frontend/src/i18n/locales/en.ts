@@ -909,15 +909,16 @@ export const en = {
         matches_one: "{{count}} session of this person found",
         matches_other: "{{count}} sessions of this person found",
         emailMatches_one:
-          "{{count}} unfinished session sent to the same address",
+          "{{count}} unfinished session with the same address or name",
         emailMatches_other:
-          "{{count}} unfinished sessions sent to the same address",
+          "{{count}} unfinished sessions with the same address or name",
         emailMatchesHint:
-          "These never finished, so there is no proven identity to compare: only the e-mail address matches. Tick the ones that are this person's.",
+          "These never finished, so there is no proven identity to compare: only the e-mail address or the name typed in matches. Tick the ones that are this person's.",
         levels: {
           strong: "Same document",
           probable: "Name and date of birth",
           email: "Same e-mail address",
+          name: "Same name",
         },
         untickHint:
           "Sessions proven with the same document are ticked; one that only shares the name and date of birth is not, so tick it only when you are sure it is this person's. Untick what must be kept, for example under a legal retention duty.",
@@ -1278,7 +1279,7 @@ export const en = {
         "Without reading the chip there is no chip photo: the face is matched against the customer's own photo of the person, which its system sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
       dataTitle: "Requested result data",
       dataHint:
-        "Controls which result data the proofing service returns. Only data from a step in this flow can be requested. The wallet itself keeps only the outcome and assurance level.",
+        "Controls which result data the proofing service returns. Only data from a step in this flow can be requested; with none ticked, only the outcome is returned. The wallet itself keeps only the outcome and assurance level.",
       checksTitle: "Required checks",
       checksHint:
         "Checking the chip's data is required when the chip is read, and the face match with the face check, so they are locked on; the copy check and the live-person check stay optional.",
@@ -3335,16 +3336,11 @@ export const en = {
       confirmDelete: "Remove credential “{{name}}”?",
       viewDetail: "View {{name}} details",
       search: "Search by name, type or issuer…",
-      reset: "Reset",
-      expires: "Expires {{date}}",
-      expiredOn: "Expired {{date}}",
       fields: {
         validUntil: "Valid until",
         issuer: "Issued by",
         source: "Received via",
         received: "Received",
-        expires: "Expires",
-        expired: "Expired",
       },
       sections: {
         attention: "Needs attention",
@@ -3359,10 +3355,6 @@ export const en = {
       filters: {
         all: "All",
         status: "Status",
-        allStatuses: "All statuses",
-        attention: "Needs attention",
-        source: "Received via",
-        allSources: "All sources",
       },
       sources: {
         qerds: "QERDS",

@@ -67,7 +67,7 @@ func toSteps(in []string) []flow.Step {
 
 func toFlow(fd flow.FlowDefinition) pp.Flow {
 	spec := pp.FlowSpec{
-		Name: fd.Name, RequestedAttributes: fd.RequestedAttributes,
+		Name: fd.Name, RequestedAttributes: requestedAttributesOf(fd),
 		SelfieLocation: string(fd.EffectiveSelfieLocation()), FaceProvider: string(fd.FaceProvider),
 		AcceptedDocumentTypes: fd.AcceptedDocumentTypes, AcceptedIssuingCountries: fd.AcceptedIssuingCountries,
 		RequiredAssuranceLevel: string(fd.RequiredAssuranceLevel), BSNPolicy: string(fd.BSNPolicy),
@@ -248,12 +248,7 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	var flowVersion int
 	var retention time.Duration
 	if resolvedFlow != nil {
-		requestedAttributes, flowVersion, retention = resolvedFlow.RequestedAttributes, resolvedFlow.Version, resolvedFlow.RetentionOverride
-		// A flow that requests no data releases the outcome only, as the subject is
-		// told. An empty list on the session would mean everything (attrRequested).
-		if len(requestedAttributes) == 0 {
-			requestedAttributes = []string{attrOutcomeOnly}
-		}
+		requestedAttributes, flowVersion, retention = requestedAttributesOf(*resolvedFlow), resolvedFlow.Version, resolvedFlow.RetentionOverride
 	}
 	// A face match without nfc_read has no chip photo: the customer sends a
 	// reference photo with each session, and only such a flow takes one.

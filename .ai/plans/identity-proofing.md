@@ -6,6 +6,12 @@ Branch `docs/identity-proofing-design` (PR #267). The wallet runs identity proof
 except what is open below. The full review checklist, the decisions with their answers and the old design
 sections are in this file's git history (`git log -p -- .ai/plans/identity-proofing.md`).
 
+PR state on 2026-10-06:
+- Review threads: 105 resolved; of the 4 still open, 3 are fixed in the latest changes. Only the EU
+  driving licence thread stays open (below, Later).
+- Ruben's "Questions for the author" are settled in the code.
+- The `Yivi Design System.zip` deletion is intended: the archive is not needed.
+
 ## Waiting on the user
 
 - [ ] **When does the engine send a real session to review?** Today only data requests go to
@@ -71,6 +77,14 @@ sections are in this file's git history (`git log -p -- .ai/plans/identity-proof
   - Optional: `RateLimit-Limit` / `-Remaining` / `-Reset` headers on every API response, not only
     `Retry-After` on a 429.
   - Still per replica (in-memory); a shared counter only once the API runs on several replicas.
+- [ ] **Handover on the hosted link.** Later; the on-screen page is done.
+  - On-screen (`IdemOnScreen`) works: it follows the app (`waiting` / `connected` / `away`), hides
+    the QR while the app holds the session and shows a handover QR once the app is `away`.
+  - Hosted (`/p/:token`) does not: the session QR stays shown after the app took the session, because
+    the page shows `manualIdem` and does not follow the app.
+  - The handover itself stays `POST /proof/{token}/claim-link` (audited as `hosted_link`); R14 above
+    still holds: no handover from inside the Idem app.
+- [ ] **audit log filter and export.** later, buttons are in place, function for it not yet.
 - [ ] **API usage per org, ranked.** An org admin sees who uses the org's budget, most usage at the top:
   each customer, and the org's own member identity proofing. Pure idea, nothing decided:
   - per customer the calls, sessions created and 429s over a period (today, 7 days, 30 days);
@@ -93,10 +107,8 @@ sections are in this file's git history (`git log -p -- .ai/plans/identity-proof
 
 ## Process
 
-- [ ] PR #267 was not opened as a draft; retitle and update its description, or split it into design and
-  implementation.
-- [ ] Split the commits that bundle unrelated work under non-compliant messages (such as `190898e`) before
-  merge.
+- [x] Dobby's `CHANGES_REQUESTED` (not a draft PR, non-atomic commits and messages) is process only and
+  gets dismissed; the PR is not split and its history stays as it is.
 
 ## Harvest
 

@@ -123,9 +123,8 @@ func TestReadsIdentity(t *testing.T) {
 	}{
 		"steps scan the document":  {testFlow("a", "a", []string{"document_capture", "nfc_read"}, "native"), true},
 		"steps only read the chip": {testFlow("b", "b", []string{"nfc_read"}, "native"), false},
-		// A flow that requests no data releases the outcome only.
-		"requests no data": {
-			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}}}, false,
+		"releases the outcome only": {
+			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}, RequestedAttributes: []string{"outcome_only"}}}, false,
 		},
 		"requests the document data": {
 			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}, RequestedAttributes: []string{"dg1"}}}, true,

@@ -29,6 +29,7 @@ import {
   CHECK_PASSIVE_AUTH,
   FACE_PROVIDERS,
   REQUESTED_ATTRIBUTES,
+  assuranceLevelLabel,
   attributeAvailable,
   draftFromFlow,
   draftSteps,
@@ -213,7 +214,12 @@ function FlowsCard({
                             })}
                           </Tag>
                           {flow.requiredAssuranceLevel && (
-                            <Tag tone="blue">{flow.requiredAssuranceLevel}</Tag>
+                            <Tag tone="blue">
+                              {assuranceLevelLabel(
+                                flow.requiredAssuranceLevel,
+                                t,
+                              )}
+                            </Tag>
                           )}
                           {flow.kind && isDataRequest(flow.kind) && (
                             <Tag tone="amber">

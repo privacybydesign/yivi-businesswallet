@@ -26,8 +26,10 @@ type FlowSpec struct {
 	Name  string   `json:"name"`
 	Steps []string `json:"steps"`
 	// RequestedAttributes limits what a session result may carry (dg1, dg11, dg2,
-	// selfie, chip_checks, biometrics, document_image). Empty releases the outcome
-	// only. The wallet never reads the data itself, only the outcome.
+	// selfie, chip_checks, biometrics, document_image). Empty releases everything
+	// the steps collect, ["outcome_only"] the outcome only; a flow read back
+	// always lists what it releases. The wallet never reads the data itself,
+	// only the outcome.
 	RequestedAttributes []string `json:"requestedAttributes,omitempty"`
 	// SelfieLocation is which client captures the face: "native" (the vcmrtd
 	// app) or "browser". The engine defaults an empty value to browser.

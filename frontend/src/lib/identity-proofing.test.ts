@@ -8,6 +8,7 @@ import { DIPLOMA_MODES } from "../api/identity-proofing";
 import {
   diplomaRejectionReason,
   diplomaStepDone,
+  OUTCOME_ONLY,
   readsIdentity,
   sendableByMail,
   verifyStages,
@@ -839,9 +840,7 @@ describe("diploma step", () => {
   // against the document data.
   it("knows which flows read the name and date of birth", () => {
     expect(readsIdentity(undefined)).toBe(false);
-    // A flow that requests no data releases the outcome only.
-    expect(readsIdentity({})).toBe(false);
-    expect(readsIdentity({ requestedAttributes: [] })).toBe(false);
+    expect(readsIdentity({ requestedAttributes: [OUTCOME_ONLY] })).toBe(false);
     expect(
       readsIdentity({
         requestedAttributes: ["dg1"],

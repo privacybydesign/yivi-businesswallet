@@ -103,16 +103,15 @@ func (s *DataRequestStore) Candidates(ctx context.Context, req Request) ([]Reque
 		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID, string(FlowIdentity))
 }
 
-// EmailCandidates is every unfinished session of req's customer (pending, in
-// progress, expired or cancelled) that still holds personal data and was sent
-// to exactly req's e-mail address, case aside: what a data request matches by
-// address (MatchEmail), there being no proofed identity in them.
-func (s *DataRequestStore) EmailCandidates(ctx context.Context, req Request) ([]Request, error) {
+// UnfinishedCandidates is every unfinished session of req's customer
+// (pending, in progress, expired or cancelled) that still holds personal data:
+// what a data request matches by e-mail address (MatchEmail) or typed name
+// (MatchName), there being no proofed identity in them.
+func (s *DataRequestStore) UnfinishedCandidates(ctx context.Context, req Request) ([]Request, error) {
 	return s.scanRequests(ctx, `SELECT `+requestColumns+requestFrom+`
 		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.id <> $3
 			AND r.purged_at IS NULL AND r.status IN ('pending', 'in_progress', 'expired', 'cancelled')
-			AND lower(trim(r.subject_email)) = lower(trim($4)) AND trim(r.subject_email) <> ''
-		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID, req.SubjectEmail)
+		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID)
 }
 
 // SaveMatches replaces req's matches.

@@ -284,7 +284,8 @@ type FlowDefinition struct {
 	// Steps are the flow's steps in order, as the app gets them.
 	Steps []Step `json:"Steps"`
 	// RequestedAttributes are the result attributes released, independent of the
-	// steps. Empty releases the outcome only. A stored version's former
+	// steps. Empty releases everything the steps collect; ["outcome_only"]
+	// releases the outcome only. A stored version's former
 	// RequestedAttributesConfigured key is ignored.
 	RequestedAttributes []string `json:"RequestedAttributes"`
 	// SelfieLocation is who runs the face step (empty is the browser); Validate

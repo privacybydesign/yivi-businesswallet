@@ -948,9 +948,10 @@ const proofingDataMatchSchema = z.object({
   createdAt: z.string(),
   completedAt: z.string().optional(),
   purgedAt: z.string().optional(),
-  // email: an unfinished session sent to the same address, with no proofed
-  // identity to match on; never ticked by default.
-  level: z.enum(["strong", "probable", "email"]),
+  // email and name: an unfinished session sent to the same address, or with
+  // the person's name typed in, with no proofed identity to match on; never
+  // ticked by default.
+  level: z.enum(["strong", "probable", "email", "name"]),
   approved: z.boolean().optional(),
 });
 

@@ -153,8 +153,7 @@ func chipPortrait(t *testing.T) string {
 	return base64.StdEncoding.EncodeToString(dg2.Images[0].Image)
 }
 
-// chipFlow releases what its steps collect: a flow that lists no data
-// releases the outcome only.
+// chipFlow releases what its steps collect.
 var chipFlow = pp.FlowSpec{
 	Name: "Passport", Steps: []string{"document_capture", "nfc_read"},
 	RequestedAttributes: []string{"dg1", "document_image", "dg11", "dg2", "chip_checks"},
