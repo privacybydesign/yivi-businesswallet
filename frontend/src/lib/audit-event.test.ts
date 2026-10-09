@@ -5,6 +5,7 @@ import type { AuditEvent } from "../api/organization";
 import i18n from "../i18n";
 import {
   auditActionLabel,
+  auditActorLabel,
   auditSubject,
   auditTargetLabel,
 } from "./audit-event";
@@ -82,6 +83,7 @@ describe("auditSubject", () => {
         },
       }),
       dateFormatter,
+      t,
     );
     expect(subject).toBe("alice@example.test");
   });
@@ -99,6 +101,7 @@ describe("auditSubject", () => {
         },
       }),
       dateFormatter,
+      t,
     );
     expect(subject).toBe("alice@example.test, bob@example.test");
   });
@@ -108,13 +111,98 @@ describe("auditSubject", () => {
       auditSubject(
         event({ after: { name: "Acme", recipient: "acme-ref" } }),
         dateFormatter,
+        t,
       ),
     ).toBe("Acme");
     expect(
       auditSubject(
         event({ after: { email: "a@b.test", recipient: "acme-ref" } }),
         dateFormatter,
+        t,
       ),
     ).toBe("a@b.test");
+  });
+
+  // A proofing outcome names its subject, labels the fields it adds and drops
+  // the empty ones, so it never reads as "— → , — → low".
+  it("leads a proofing outcome with its subject and labels added fields", () => {
+    expect(
+      auditSubject(
+        event({
+          before: {
+            status: "in_progress",
+            subjectName: "Anna Jansen",
+            subjectEmail: "anna@example.test",
+          },
+          after: {
+            status: "approved",
+            subjectName: "Anna Jansen",
+            subjectEmail: "anna@example.test",
+            assuranceLevel: "substantial",
+            eidasLevel: "substantial",
+            errorCode: "",
+          },
+        }),
+        dateFormatter,
+        t,
+      ),
+    ).toBe(
+      "Anna Jansen: in_progress → approved, Assurance: substantial, eIDAS level: substantial",
+    );
+  });
+
+  it("gives a proofing rejection its reason in words", () => {
+    expect(
+      auditSubject(
+        event({
+          before: { status: "in_progress", subjectEmail: "anna@example.test" },
+          after: {
+            status: "rejected",
+            subjectEmail: "anna@example.test",
+            errorCode: "DOCUMENT_TYPE_NOT_ACCEPTED",
+          },
+        }),
+        dateFormatter,
+        t,
+      ),
+    ).toBe(
+      "anna@example.test: in_progress → rejected, Reason: document type not accepted by the flow",
+    );
+  });
+
+  it("falls back to the subject's e-mail when sent without a name", () => {
+    expect(
+      auditSubject(
+        event({
+          before: { status: "pending", subjectEmail: "anna@example.test" },
+          after: { status: "in_progress", subjectEmail: "anna@example.test" },
+        }),
+        dateFormatter,
+        t,
+      ),
+    ).toBe("anna@example.test: pending → in_progress");
+    expect(
+      auditSubject(
+        event({ after: { flowId: "f1", subjectEmail: "anna@example.test" } }),
+        dateFormatter,
+        t,
+      ),
+    ).toBe("anna@example.test");
+  });
+});
+
+describe("auditActorLabel", () => {
+  it("names a customer API key by its prefix", () => {
+    expect(auditActorLabel("api_key:yp_live_ab12", t)).toBe(
+      t("auditLog.apiKeyActor", { prefix: "yp_live_ab12" }),
+    );
+    expect(auditActorLabel("hosted_link", t)).toBe(
+      t("auditLog.hostedLinkActor"),
+    );
+    expect(auditActorLabel("app:idem_app", t)).toBe(
+      t("identityProofing.methods.idemApp"),
+    );
+    expect(auditActorLabel(null, t)).toBeNull();
+    expect(auditActorLabel(undefined, t)).toBeNull();
   });
 });

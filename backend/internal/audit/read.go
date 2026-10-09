@@ -64,6 +64,32 @@ func HideDetail(events []Event) {
 	}
 }
 
+// memberVisibleTargets are the target types an ordinary member reads in the
+// org log: the org's own configuration. Events about people (members,
+// invitees, proofing subjects, customers) and their messages stay admin-only.
+var memberVisibleTargets = []string{
+	TargetOrganization,
+	TargetDepartment,
+	TargetAttestationSchema,
+	TargetAttestationTemplate,
+	TargetAttestationKey,
+	TargetHeldAttestation,
+	TargetEmailSettings,
+	TargetEmailTemplate,
+	TargetIssuerSettings,
+	TargetThemeSettings,
+	TargetOnboardingSettings,
+	TargetNotificationSettings,
+	TargetIdentitySettings,
+	TargetScreeningSettings,
+	TargetSlackSettings,
+	TargetTeamsSettings,
+	TargetProvisioningSettings,
+	TargetCSCSettings,
+	TargetIdentityProofingSettings,
+	TargetIdentityProofingFlow,
+}
+
 type Page struct {
 	Events     []Event `json:"events"`
 	NextCursor *string `json:"nextCursor"`
@@ -112,6 +138,12 @@ func NewReader(db database.DB) *Reader { return &Reader{db: db} }
 // than the cursor. limit is clamped to [1, MaxListLimit].
 func (r *Reader) ListForOrganization(ctx context.Context, orgID uuid.UUID, after *Cursor, limit int) (Page, error) {
 	return r.page(ctx, "a.organization_id = $1", []any{orgID}, after, limit)
+}
+
+// ListMemberVisible is ListForOrganization narrowed to memberVisibleTargets:
+// the page an ordinary member reads, before HideDetail.
+func (r *Reader) ListMemberVisible(ctx context.Context, orgID uuid.UUID, after *Cursor, limit int) (Page, error) {
+	return r.page(ctx, "a.organization_id = $1 AND a.target_type = ANY($2)", []any{orgID, memberVisibleTargets}, after, limit)
 }
 
 // ListForMember matches both target_id keys a member's events use: email (for
