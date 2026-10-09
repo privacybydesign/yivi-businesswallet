@@ -13,6 +13,7 @@ require (
 	github.com/klippa-app/go-pdfium v1.19.8
 	github.com/lestrrat-go/jwx/v3 v3.1.1
 	github.com/pressly/goose/v3 v3.27.1
+	github.com/tetratelabs/wazero v1.12.0
 	golang.org/x/image v0.45.0
 	golang.org/x/text v0.42.0
 )
@@ -46,7 +47,6 @@ require (
 	github.com/privacybydesign/gabi v0.0.0-20221212095008-68a086907750 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
-	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/valyala/fastjson v1.6.10 // indirect
 	github.com/woodsbury/decimal128 v1.3.0 // indirect
 	gorm.io/driver/mysql v1.6.0 // indirect

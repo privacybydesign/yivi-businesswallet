@@ -19,6 +19,8 @@ import (
 type spaHandler struct {
 	staticPath string
 	indexPath  string
+	// pageHeaderers set headers on the index document per client-side route.
+	pageHeaderers []PageHeaderer
 }
 
 func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -37,6 +39,9 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if os.IsNotExist(err) || (err == nil && fi.IsDir()) {
 		// Unknown path or a directory: hand it to the SPA, which resolves the
 		// route client-side.
+		for _, ph := range h.pageHeaderers {
+			ph.PageHeaders(r, w.Header())
+		}
 		http.ServeFile(w, r, filepath.Join(h.staticPath, h.indexPath))
 		return
 	}

@@ -13,6 +13,8 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwe"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/privacybydesign/irmago/eudi/openid4vp"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 )
 
 // Responder delivers the Authorization Response to the verifier's response_uri
@@ -25,7 +27,7 @@ type Responder struct {
 }
 
 func NewResponder(policy Policy) *Responder {
-	return &Responder{policy: policy, client: newClient(policy)}
+	return &Responder{policy: policy, client: safehttp.NewClient(policy)}
 }
 
 // directPostAck is what a verifier may answer a direct_post with: where to send
@@ -48,7 +50,7 @@ type responseMetadata struct {
 // but the policy is re-applied here: the row is the only place it lives in
 // between, and a defence that depends on the row being untouched is not one.
 func (r *Responder) Send(ctx context.Context, t Transaction, token openid4vp.VpToken) (string, error) {
-	u, err := r.policy.checkURL(t.ResponseURI)
+	u, err := r.policy.CheckURL(t.ResponseURI)
 	if err != nil {
 		return "", fmt.Errorf("response_uri: %w", err)
 	}
@@ -56,7 +58,7 @@ func (r *Responder) Send(ctx context.Context, t Transaction, token openid4vp.VpT
 	if err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, safehttp.RequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), strings.NewReader(form.Encode()))
 	if err != nil {
