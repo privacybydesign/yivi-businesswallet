@@ -2629,7 +2629,13 @@ paths:
     get:
       tags: [organizations]
       summary: List organisation audit events
-      description: Requires an administrator role in the organisation.
+      description: >-
+        Requires organisation membership. An administrator sees every event in full.
+        Any other member sees only the organisation's configuration events (the
+        organisation, departments, attestation schemas, templates, keys and held
+        credentials, and the settings), each with `detailHidden: true` and its actor,
+        actor label, target id and metadata withheld; events about people stay
+        admin-only.
       responses:
         '2XX':
           description: Successful response.

@@ -34,6 +34,16 @@ func (h *Handler) auditEvents(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	org := OrgFromContext(r.Context())
+	if !ActsAsAdmin(r.Context()) {
+		page, err := h.reader.ListMemberVisible(r.Context(), org.ID, after, limit)
+		if err != nil {
+			return fmt.Errorf("listing audit events: %w", err)
+		}
+		audit.HideDetail(page.Events)
+		respond.JSON(w, r, http.StatusOK, page)
+		return nil
+	}
+
 	page, err := h.reader.ListForOrganization(r.Context(), org.ID, after, limit)
 	if err != nil {
 		return fmt.Errorf("listing audit events: %w", err)

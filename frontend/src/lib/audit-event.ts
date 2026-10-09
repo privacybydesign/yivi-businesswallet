@@ -1,6 +1,10 @@
 import type { TFunction } from "i18next";
 import type { AuditEvent } from "../api/organization";
 import type { IconName } from "../ui";
+import {
+  proofingMethodLabel,
+  proofingRejectionReason,
+} from "./identity-proofing";
 
 export type AuditTone = "green" | "blue" | "red" | "amber" | "violet" | "slate";
 
@@ -157,6 +161,36 @@ export function auditVisual(action: string): {
   tone: AuditTone;
 } {
   return ACTION_VISUAL[action] ?? DEFAULT_VISUAL;
+}
+
+const API_KEY_ACTOR_PREFIX = "api_key:";
+// hostedSubjectActor in backend/internal/proofing/hosted.go: the subject of a
+// hosted link, who has no account.
+const HOSTED_LINK_ACTOR = "hosted_link";
+// SubjectAppActorPrefix in backend/internal/proofing/service.go: the app a
+// subject proofed with, as the actor of what it caused.
+const SUBJECT_APP_ACTOR_PREFIX = "app:";
+
+// A non-user actor in words: a customer API key by its prefix, a hosted link's
+// subject, the app a subject proofed with, or the label as it is; null when
+// the event has none.
+export function auditActorLabel(
+  label: string | null | undefined,
+  t: TFunction,
+): string | null {
+  if (!label) return null;
+  if (label.startsWith(API_KEY_ACTOR_PREFIX)) {
+    return t("auditLog.apiKeyActor", {
+      prefix: label.slice(API_KEY_ACTOR_PREFIX.length),
+    });
+  }
+  if (label === HOSTED_LINK_ACTOR) {
+    return t("auditLog.hostedLinkActor");
+  }
+  if (label.startsWith(SUBJECT_APP_ACTOR_PREFIX)) {
+    return proofingMethodLabel(label.slice(SUBJECT_APP_ACTOR_PREFIX.length), t);
+  }
+  return label;
 }
 
 export function auditActionLabel(action: string, t: TFunction): string {
@@ -560,12 +594,41 @@ function fieldValue(
   return JSON.stringify(value);
 }
 
+// Fields that identify whom an event is about, most specific first. On an
+// update they ride along unchanged on both sides and lead the detail.
+const IDENTITY_KEYS = ["subjectName", "subjectEmail"] as const;
+
+function isEmpty(value: unknown): boolean {
+  return value === null || value === undefined || value === "";
+}
+
+// A field an update adds (absent before) reads as "label: value" rather than
+// "— → value" when it has a label.
+function addedFieldLabel(key: string, t: TFunction): string | null {
+  switch (key) {
+    case "assuranceLevel":
+      return t("auditLog.fields.assuranceLevel");
+    case "eidasLevel":
+      return t("auditLog.fields.eidasLevel");
+    case "errorCode":
+      return t("auditLog.fields.errorCode");
+    case "ipsStatus":
+      return t("auditLog.fields.ipsStatus");
+    case "method":
+      return t("auditLog.fields.method");
+    default:
+      return null;
+  }
+}
+
 // The human-readable detail for an event, derived from the uniform
-// {before, after} metadata: an update diffs changed fields ("old → new"); a
-// create/delete shows the snapshot's identifying field.
+// {before, after} metadata: an update diffs changed fields ("old → new"),
+// led by whom it is about; a create/delete shows the snapshot's identifying
+// field.
 export function auditSubject(
   event: AuditEvent,
   dateFormatter: Intl.DateTimeFormat,
+  t: TFunction,
 ): string | null {
   const { before, after } = event.metadata as {
     before?: Record<string, unknown> | null;
@@ -575,12 +638,31 @@ export function auditSubject(
   if (before && after) {
     const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
     const changes = keys
-      .filter((key) => before[key] !== after[key])
-      .map(
+      .filter(
         (key) =>
-          `${fieldValue(before[key], dateFormatter)} → ${fieldValue(after[key], dateFormatter)}`,
+          before[key] !== after[key] &&
+          !(isEmpty(before[key]) && isEmpty(after[key])),
+      )
+      .map((key) => {
+        const label = isEmpty(before[key]) ? addedFieldLabel(key, t) : null;
+        const value =
+          key === "errorCode" && typeof after[key] === "string"
+            ? proofingRejectionReason(after[key], t)
+            : key === "method" && typeof after[key] === "string"
+              ? proofingMethodLabel(after[key], t)
+              : fieldValue(after[key], dateFormatter);
+        return label
+          ? `${label}: ${value}`
+          : `${fieldValue(before[key], dateFormatter)} → ${value}`;
+      });
+    if (changes.length === 0) return null;
+    const who = IDENTITY_KEYS.filter((key) => before[key] === after[key])
+      .map((key) => after[key])
+      .find(
+        (value): value is string => typeof value === "string" && value !== "",
       );
-    return changes.length > 0 ? changes.join(", ") : null;
+    const detail = changes.join(", ");
+    return who ? `${who}: ${detail}` : detail;
   }
 
   const snapshot = after ?? before;
@@ -593,6 +675,10 @@ export function auditSubject(
   // `recipient` identifies an issued attestation (who it was issued to); the
   // issue handler rejects an empty ref, so it is always present on that event.
   const id =
-    snapshot.name ?? snapshot.email ?? snapshot.recipient ?? snapshot.role;
+    snapshot.name ??
+    snapshot.email ??
+    IDENTITY_KEYS.map((key) => snapshot[key]).find((v) => !isEmpty(v)) ??
+    snapshot.recipient ??
+    snapshot.role;
   return typeof id === "string" ? id : null;
 }
