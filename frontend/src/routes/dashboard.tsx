@@ -28,7 +28,7 @@ export default function Dashboard(): React.JSX.Element {
     return (
       <>
         <TopBar title={slug} />
-        <div className="p-8">
+        <div className="p-4 sm:p-8">
           <Card className="p-6">
             <p className="text-error text-[14px]">
               {accessMessage(org.error, t)}
@@ -55,7 +55,7 @@ export default function Dashboard(): React.JSX.Element {
         }
       />
 
-      <div className="flex flex-col gap-6 p-8">
+      <div className="flex flex-col gap-6 p-4 sm:p-8">
         {org.data && needsIdentityBanner(org.data.identity) && (
           <IdentityBanner
             slug={slug}
@@ -86,7 +86,7 @@ export default function Dashboard(): React.JSX.Element {
           <h2 className="text-[16px] font-semibold">
             {t("dashboard.details")}
           </h2>
-          <dl className="mt-3 grid grid-cols-[120px_1fr] gap-y-2 text-[13.5px]">
+          <dl className="mt-3 grid grid-cols-[120px_minmax(0,1fr)] gap-y-2 text-[13.5px] wrap-anywhere">
             <dt className="text-muted">{t("common.name")}</dt>
             <dd className="text-ink">{org.data?.name ?? "—"}</dd>
             <dt className="text-muted">{t("common.slug")}</dt>
@@ -114,7 +114,7 @@ export default function Dashboard(): React.JSX.Element {
             <h2 className="text-[16px] font-semibold">
               {t("dashboard.wallet.title")}
             </h2>
-            <dl className="mt-3 grid grid-cols-[140px_1fr] gap-y-2 text-[13.5px]">
+            <dl className="mt-3 grid grid-cols-[140px_minmax(0,1fr)] gap-y-2 text-[13.5px] wrap-anywhere">
               <dt className="text-muted">{t("dashboard.wallet.kvkNumber")}</dt>
               <dd className="text-ink-soft font-mono">{org.data.kvkNumber}</dd>
               <dt className="text-muted">{t("dashboard.wallet.euid")}</dt>

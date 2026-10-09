@@ -17,7 +17,7 @@ export function Table({
   return (
     // Wide tables scroll horizontally within their container on small screens
     // instead of forcing the whole page to overflow.
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table
         className={[
           "min-w-full border-collapse text-[13.5px]",
