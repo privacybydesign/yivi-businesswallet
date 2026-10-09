@@ -166,7 +166,7 @@ func TestAuthorize(t *testing.T) {
 
 	t.Run("member passes with their role", func(t *testing.T) {
 		repo := fakeRepo{org: org, membership: Membership{Role: RoleMember}}
-		rec, _ := authorizeWith(repo, nil, "user@example.com")
+		rec, _ := authorizeWith(repo, auth.PlatformAdmins{}, "user@example.com")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
@@ -177,7 +177,7 @@ func TestAuthorize(t *testing.T) {
 
 	t.Run("non-member forbidden", func(t *testing.T) {
 		repo := fakeRepo{org: org, membershipErr: ErrNotMember}
-		rec, _ := authorizeWith(repo, nil, "user@example.com")
+		rec, _ := authorizeWith(repo, auth.PlatformAdmins{}, "user@example.com")
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("status = %d, want 403", rec.Code)
 		}
@@ -197,7 +197,7 @@ func TestAuthorize(t *testing.T) {
 
 	t.Run("unknown slug is 404", func(t *testing.T) {
 		repo := fakeRepo{getBySlugErr: ErrNotFound}
-		rec, _ := authorizeWith(repo, nil, "user@example.com")
+		rec, _ := authorizeWith(repo, auth.PlatformAdmins{}, "user@example.com")
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want 404", rec.Code)
 		}
@@ -205,7 +205,7 @@ func TestAuthorize(t *testing.T) {
 
 	t.Run("store error is 500", func(t *testing.T) {
 		repo := fakeRepo{getBySlugErr: errors.New("boom")}
-		rec, _ := authorizeWith(repo, nil, "user@example.com")
+		rec, _ := authorizeWith(repo, auth.PlatformAdmins{}, "user@example.com")
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want 500", rec.Code)
 		}
@@ -217,7 +217,7 @@ func TestAuthorize(t *testing.T) {
 			membership: Membership{Role: RoleAdmin},
 			authority:  Authority{LegalRepresentative: true, FullMandate: true, Mandated: true, Granted: 1},
 		}
-		rec, got := authorizeWith(repo, nil, "boss@acme.example")
+		rec, got := authorizeWith(repo, auth.PlatformAdmins{}, "boss@acme.example")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
@@ -238,7 +238,7 @@ func TestAuthorize(t *testing.T) {
 
 	t.Run("an authority lookup failure is 500, never an open door", func(t *testing.T) {
 		repo := fakeRepo{org: org, membership: Membership{Role: RoleAdmin}, authorityErr: errors.New("boom")}
-		rec, _ := authorizeWith(repo, nil, "user@example.com")
+		rec, _ := authorizeWith(repo, auth.PlatformAdmins{}, "user@example.com")
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want 500", rec.Code)
 		}

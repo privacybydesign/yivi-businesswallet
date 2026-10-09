@@ -23,6 +23,14 @@ services:
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-admin@yivi.app}
       # Claim links in dev point at the local frontend.
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
+      # A local stack: the stub providers may run, and on a fresh database the
+      # first Yivi login becomes its admin. The backend refuses it unless
+      # APP_BASE_URL is a localhost URL.
+      DEV_MODE: "true"
+      # Diploma uploads: the real DUO signature check is the backend's default;
+      # dev accepts any extract, since nobody holds a DUO-signed one of a test
+      # person. Set DIPLOMA_VALIDATOR_PROVIDER=duo in .env to check for real.
+      DIPLOMA_VALIDATOR_PROVIDER: ${DIPLOMA_VALIDATOR_PROVIDER:-stub}
       # Attestation issuer: stub by default. Set ATTESTATION_ISSUER=veramo (+ token)
       # in .env to issue against the hosted Veramo staging issuer.
       ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}
@@ -148,6 +156,9 @@ services:
       # The dev seed provisions these accounts so the operator's own admin email
       # can log in (must match the backend service's value above).
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-admin@yivi.app}
+      # The seed loads the backend's config, so it needs the same switch for
+      # the stub settings .env may carry.
+      DEV_MODE: "true"
     depends_on:
       migrate:
         condition: service_completed_successfully

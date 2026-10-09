@@ -168,3 +168,27 @@ func TestComposePassesEudiVerifierConfigToBackend(t *testing.T) {
 		}
 	}
 }
+
+// TestComposePassesProofing holds the identity-proofing vars to
+// the passthrough rule: without them a value set in .env (the encryption key,
+// the phone-reachable URL, Regula, the stub outcome, the diploma validator)
+// never reaches the container.
+func TestComposePassesProofing(t *testing.T) {
+	backendEnvironment := backendComposeEnvironment(t)
+
+	for _, key := range []string{
+		envIdentityProofingProvider, envIdentityProofingEncryptionKey, envIdentityProofingPublicURL,
+		envIdentityProofingStubOutcome,
+		envRegulaFaceAPIURL, envRegulaFaceAPIPublicURL, envRegulaFaceMatchThreshold,
+		envDiplomaValidatorProvider, envDiplomaTrustSource, envDiplomaOCSP,
+	} {
+		value, ok := backendEnvironment[key]
+		if !ok {
+			t.Errorf("backend service does not pass %s through; setting it in .env would do nothing", key)
+			continue
+		}
+		if want := "${" + key + ":-}"; value != want {
+			t.Errorf("backend %s = %q, want %q", key, value, want)
+		}
+	}
+}
