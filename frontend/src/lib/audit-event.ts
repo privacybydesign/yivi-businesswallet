@@ -94,6 +94,57 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "presentation.request_sent": { icon: "email", tone: "blue" },
   "presentation.response_received": { icon: "valid", tone: "green" },
   "presentation.request_failed": { icon: "warning", tone: "red" },
+  "identity_proofing.provisioned": { icon: "settings", tone: "blue" },
+  "identity_proofing.flow_created": { icon: "add", tone: "green" },
+  "identity_proofing.flows_configured": { icon: "settings", tone: "blue" },
+  "identity_proofing.flow_version_created": { icon: "edit", tone: "blue" },
+  "identity_proofing.flow_version_activated": { icon: "valid", tone: "blue" },
+  "identity_proofing.requested": { icon: "email", tone: "amber" },
+  "identity_proofing.session_created": { icon: "time", tone: "blue" },
+  "identity_proofing.session_started": { icon: "scan_qrcode", tone: "blue" },
+  "identity_proofing.session_handover": { icon: "scan_qrcode", tone: "slate" },
+  "identity_proofing.session_ended": { icon: "time", tone: "amber" },
+  "identity_proofing.session_cancelled": { icon: "close", tone: "slate" },
+  "identity_proofing.session_purged": { icon: "delete", tone: "red" },
+  "identity_proofing.result_read": { icon: "view", tone: "slate" },
+  "identity_proofing.device_claimed": { icon: "scan_qrcode", tone: "blue" },
+  "identity_proofing.device_handed_over": {
+    icon: "scan_qrcode",
+    tone: "slate",
+  },
+  "identity_proofing.handover_issued": { icon: "scan_qrcode", tone: "slate" },
+  "identity_proofing.handover_claim_failed": { icon: "warning", tone: "amber" },
+  "identity_proofing.access_denied": { icon: "warning", tone: "red" },
+  "identity_proofing.approved": { icon: "valid", tone: "green" },
+  "identity_proofing.rejected": { icon: "close", tone: "red" },
+  "identity_proofing.needs_review": { icon: "warning", tone: "amber" },
+  "identity_proofing.review_decided": { icon: "valid", tone: "blue" },
+  "identity_proofing.data_exported": { icon: "view", tone: "slate" },
+  "identity_proofing.flow_kind_configured": { icon: "edit", tone: "blue" },
+  "identity_proofing.customer_created": { icon: "add", tone: "green" },
+  "identity_proofing.customer_updated": { icon: "edit", tone: "blue" },
+  "identity_proofing.customer_flows_configured": {
+    icon: "settings",
+    tone: "blue",
+  },
+  "identity_proofing.customer_removed": { icon: "delete", tone: "red" },
+  "identity_proofing.api_key_created": { icon: "add", tone: "green" },
+  "identity_proofing.api_key_revoked": { icon: "close", tone: "red" },
+  "identity_proofing.webhook_configured": { icon: "settings", tone: "blue" },
+  "identity_proofing.webhook_secret_rotated": { icon: "lock", tone: "amber" },
+  "identity_proofing.webhook_removed": { icon: "delete", tone: "red" },
+  "identity_proofing.paused": { icon: "warning", tone: "amber" },
+  "identity_proofing.flow_hosted_configured": {
+    icon: "settings",
+    tone: "blue",
+  },
+  "identity_proofing.flow_diplomas_configured": {
+    icon: "settings",
+    tone: "blue",
+  },
+  "identity_proofing.diploma_added": { icon: "add", tone: "green" },
+  "identity_proofing.diploma_rejected": { icon: "close", tone: "red" },
+  "identity_proofing.resumed": { icon: "valid", tone: "green" },
 };
 
 const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
@@ -322,6 +373,84 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.presentationResponseReceived");
     case "presentation.request_failed":
       return t("auditLog.actions.presentationRequestFailed");
+    case "identity_proofing.provisioned":
+      return t("auditLog.actions.identityProofingProvisioned");
+    case "identity_proofing.flow_created":
+      return t("auditLog.actions.identityProofingFlowCreated");
+    case "identity_proofing.flows_configured":
+      return t("auditLog.actions.identityProofingFlowsConfigured");
+    case "identity_proofing.flow_version_created":
+      return t("auditLog.actions.identityProofingFlowVersionCreated");
+    case "identity_proofing.flow_version_activated":
+      return t("auditLog.actions.identityProofingFlowVersionActivated");
+    case "identity_proofing.requested":
+      return t("auditLog.actions.identityProofingRequested");
+    case "identity_proofing.session_created":
+      return t("auditLog.actions.identityProofingSessionCreated");
+    case "identity_proofing.session_started":
+      return t("auditLog.actions.identityProofingSessionStarted");
+    case "identity_proofing.session_handover":
+      return t("auditLog.actions.identityProofingSessionHandover");
+    case "identity_proofing.session_ended":
+      return t("auditLog.actions.identityProofingSessionEnded");
+    case "identity_proofing.session_cancelled":
+      return t("auditLog.actions.identityProofingSessionCancelled");
+    case "identity_proofing.session_purged":
+      return t("auditLog.actions.identityProofingSessionPurged");
+    case "identity_proofing.result_read":
+      return t("auditLog.actions.identityProofingResultRead");
+    case "identity_proofing.device_claimed":
+      return t("auditLog.actions.identityProofingDeviceClaimed");
+    case "identity_proofing.device_handed_over":
+      return t("auditLog.actions.identityProofingDeviceHandedOver");
+    case "identity_proofing.handover_issued":
+      return t("auditLog.actions.identityProofingHandoverIssued");
+    case "identity_proofing.handover_claim_failed":
+      return t("auditLog.actions.identityProofingHandoverClaimFailed");
+    case "identity_proofing.access_denied":
+      return t("auditLog.actions.identityProofingAccessDenied");
+    case "identity_proofing.approved":
+      return t("auditLog.actions.identityProofingApproved");
+    case "identity_proofing.rejected":
+      return t("auditLog.actions.identityProofingRejected");
+    case "identity_proofing.needs_review":
+      return t("auditLog.actions.identityProofingNeedsReview");
+    case "identity_proofing.review_decided":
+      return t("auditLog.actions.identityProofingReviewDecided");
+    case "identity_proofing.data_exported":
+      return t("auditLog.actions.identityProofingDataExported");
+    case "identity_proofing.flow_kind_configured":
+      return t("auditLog.actions.identityProofingFlowKindConfigured");
+    case "identity_proofing.customer_created":
+      return t("auditLog.actions.identityProofingCustomerCreated");
+    case "identity_proofing.customer_updated":
+      return t("auditLog.actions.identityProofingCustomerUpdated");
+    case "identity_proofing.customer_flows_configured":
+      return t("auditLog.actions.identityProofingCustomerFlowsConfigured");
+    case "identity_proofing.customer_removed":
+      return t("auditLog.actions.identityProofingCustomerRemoved");
+    case "identity_proofing.api_key_created":
+      return t("auditLog.actions.identityProofingApiKeyCreated");
+    case "identity_proofing.api_key_revoked":
+      return t("auditLog.actions.identityProofingApiKeyRevoked");
+    case "identity_proofing.webhook_configured":
+      return t("auditLog.actions.identityProofingWebhookConfigured");
+    case "identity_proofing.webhook_secret_rotated":
+      return t("auditLog.actions.identityProofingWebhookSecretRotated");
+    case "identity_proofing.webhook_removed":
+      return t("auditLog.actions.identityProofingWebhookRemoved");
+    case "identity_proofing.flow_hosted_configured":
+      return t("auditLog.actions.identityProofingFlowHostedConfigured");
+    case "identity_proofing.flow_diplomas_configured":
+      return t("auditLog.actions.identityProofingFlowDiplomasConfigured");
+    case "identity_proofing.diploma_added":
+      return t("auditLog.actions.identityProofingDiplomaAdded");
+    case "identity_proofing.diploma_rejected":
+      return t("auditLog.actions.identityProofingDiplomaRejected");
+    case "identity_proofing.paused":
+      return t("auditLog.actions.identityProofingPaused");
+    case "identity_proofing.resumed":
+      return t("auditLog.actions.identityProofingResumed");
     default:
       return action;
   }
@@ -403,6 +532,14 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.presentationTransaction");
     case "outbound_presentation_request":
       return t("auditLog.targets.outboundPresentationRequest");
+    case "org_identity_proofing_settings":
+      return t("auditLog.targets.orgIdentityProofingSettings");
+    case "identity_proofing_flow":
+      return t("auditLog.targets.identityProofingFlow");
+    case "identity_proofing_request":
+      return t("auditLog.targets.identityProofingRequest");
+    case "identity_proofing_customer":
+      return t("auditLog.targets.identityProofingCustomer");
     default:
       return targetType;
   }

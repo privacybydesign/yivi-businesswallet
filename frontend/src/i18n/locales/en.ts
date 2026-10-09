@@ -728,6 +728,10 @@ export const en = {
       signingRequests: "Signing request",
       presentationTransaction: "Presentation request",
       outboundPresentationRequest: "Credential request",
+      orgIdentityProofingSettings: "Identity proofing settings",
+      identityProofingFlow: "Identity proofing flow",
+      identityProofingRequest: "Identity proofing request",
+      identityProofingCustomer: "Identity proofing customer",
     },
     actions: {
       attestationHeldReceived: "Received a credential",
@@ -835,6 +839,53 @@ export const en = {
       presentationResponseReceived:
         "Received an answer to a credential request",
       presentationRequestFailed: "Credential request failed",
+      identityProofingProvisioned: "Set up identity proofing",
+      identityProofingFlowCreated: "Created identity proofing flow",
+      identityProofingFlowsConfigured:
+        "Changed the identity proofing flows available to members",
+      identityProofingFlowVersionCreated:
+        "Saved a new version of an identity proofing flow",
+      identityProofingFlowVersionActivated:
+        "Activated a version of an identity proofing flow",
+      identityProofingRequested: "Sent identity proofing request",
+      identityProofingSessionCreated: "Created identity proofing session",
+      identityProofingSessionStarted: "Started identity proofing",
+      identityProofingSessionHandover: "Issued a new identity proofing code",
+      identityProofingSessionEnded:
+        "Identity proofing session ended unfinished",
+      identityProofingSessionCancelled: "Identity proofing session cancelled",
+      identityProofingSessionPurged: "Identity proofing session erased",
+      identityProofingResultRead: "Read identity proofing result",
+      identityProofingDeviceClaimed: "Device claimed identity proofing session",
+      identityProofingDeviceHandedOver:
+        "Identity proofing session handed over to another device",
+      identityProofingHandoverIssued: "Handover to another device offered",
+      identityProofingHandoverClaimFailed: "Handover to another device refused",
+      identityProofingAccessDenied:
+        "Device refused access to identity proofing session",
+      identityProofingApproved: "Identity verified",
+      identityProofingRejected: "Identity verification rejected",
+      identityProofingNeedsReview: "Identity verification needs review",
+      identityProofingReviewDecided: "Identity verification review decided",
+      identityProofingDataExported: "Data request data downloaded",
+      identityProofingFlowKindConfigured: "Identity proofing flow type set",
+      identityProofingCustomerCreated: "Added identity proofing customer",
+      identityProofingCustomerUpdated: "Updated identity proofing customer",
+      identityProofingCustomerFlowsConfigured:
+        "Changed the identity proofing flows assigned to a customer",
+      identityProofingCustomerRemoved: "Removed identity proofing customer",
+      identityProofingApiKeyCreated: "Created customer API key",
+      identityProofingApiKeyRevoked: "Revoked customer API key",
+      identityProofingWebhookConfigured: "Configured customer webhook",
+      identityProofingWebhookSecretRotated: "Rotated customer webhook secret",
+      identityProofingWebhookRemoved: "Removed customer webhook",
+      identityProofingPaused: "Paused identity proofing",
+      identityProofingFlowHostedConfigured: "Changed a flow's hosted page",
+      identityProofingFlowDiplomasConfigured:
+        "Changed whether a flow asks for diplomas",
+      identityProofingDiplomaAdded: "Added a diploma",
+      identityProofingDiplomaRejected: "Refused a diploma",
+      identityProofingResumed: "Resumed identity proofing",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
     },
@@ -1562,6 +1613,7 @@ export const en = {
       heading: "Heading",
       paragraph: "Paragraph",
       button: "Button",
+      qr: "QR code",
       divider: "Divider",
       footer: "Footer",
     },
@@ -1579,6 +1631,7 @@ export const en = {
       credential_offer: "Credential offer",
       event_notification: "Event notification",
       identity_overdue: "Identity overdue",
+      identity_proofing_requested: "Identity proofing requested",
       identity_reminder: "Identity reminder",
       identity_requested: "Identification requested",
       invitation: "Member invitation",
@@ -1598,6 +1651,8 @@ export const en = {
         "Sent to this organization's admins when something happens that they subscribed to.",
       identity_overdue:
         "Sent to a member whose re-identification deadline has passed, on the reminder cadence.",
+      identity_proofing_requested:
+        "Sent to a person when a member asks them to verify their identity with their document and face.",
       identity_reminder:
         "Sent to a member ahead of their re-identification deadline.",
       identity_requested:
@@ -1625,6 +1680,12 @@ export const en = {
     removeBlock: "Remove block {{number}}",
     moveBlockUp: "Move block {{number}} up",
     moveBlockDown: "Move block {{number}} down",
+    qrFields: {
+      url: "QR code link",
+      label: "Caption (optional)",
+    },
+    qrHint:
+      "The QR code encodes one link variable or a full https:// address. Use the same link as a button so both open the same page.",
     buttonHint:
       "The button link is either one link variable or a full https:// address. The link introduction is the small line above the plain link shown under the button.",
     preview: "Preview",

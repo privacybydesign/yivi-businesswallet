@@ -747,6 +747,10 @@ export const nl: Translation<typeof en> = {
       signingRequests: "Ondertekenverzoek",
       presentationTransaction: "Presentatieverzoek",
       outboundPresentationRequest: "Gegevensverzoek",
+      orgIdentityProofingSettings: "Instellingen identiteitsverificatie",
+      identityProofingFlow: "Identiteitsverificatieflow",
+      identityProofingRequest: "Identiteitsverificatieverzoek",
+      identityProofingCustomer: "Identiteitsverificatieklant",
     },
     actions: {
       attestationHeldReceived: "Credential ontvangen",
@@ -855,6 +859,61 @@ export const nl: Translation<typeof en> = {
       presentationRequestSent: "Gegevens bij een organisatie opgevraagd",
       presentationResponseReceived: "Antwoord op een gegevensverzoek ontvangen",
       presentationRequestFailed: "Gegevensverzoek mislukt",
+      identityProofingProvisioned: "Identiteitsverificatie ingericht",
+      identityProofingFlowCreated: "Identiteitsverificatieflow aangemaakt",
+      identityProofingFlowsConfigured:
+        "Voor leden beschikbare identiteitsverificatieflows gewijzigd",
+      identityProofingFlowVersionCreated:
+        "Nieuwe versie van een identiteitsverificatieflow opgeslagen",
+      identityProofingFlowVersionActivated:
+        "Versie van een identiteitsverificatieflow geactiveerd",
+      identityProofingRequested: "Identiteitsverificatieverzoek verstuurd",
+      identityProofingSessionCreated: "Identiteitsverificatiesessie aangemaakt",
+      identityProofingSessionStarted: "Identiteitsverificatie gestart",
+      identityProofingSessionHandover:
+        "Nieuwe code voor identiteitsverificatie uitgegeven",
+      identityProofingSessionEnded:
+        "Identiteitsverificatiesessie onafgerond beëindigd",
+      identityProofingSessionCancelled:
+        "Identiteitsverificatiesessie geannuleerd",
+      identityProofingSessionPurged: "Identiteitsverificatiesessie gewist",
+      identityProofingResultRead: "Resultaat identiteitsverificatie gelezen",
+      identityProofingDeviceClaimed:
+        "Apparaat nam identiteitsverificatie-sessie over",
+      identityProofingDeviceHandedOver:
+        "Identiteitsverificatie-sessie overgedragen aan ander apparaat",
+      identityProofingHandoverIssued:
+        "Overdracht naar ander apparaat aangeboden",
+      identityProofingHandoverClaimFailed:
+        "Overdracht naar ander apparaat geweigerd",
+      identityProofingAccessDenied:
+        "Apparaat geweigerd voor identiteitsverificatie-sessie",
+      identityProofingApproved: "Identiteit geverifieerd",
+      identityProofingRejected: "Identiteitsverificatie afgewezen",
+      identityProofingNeedsReview:
+        "Identiteitsverificatie moet beoordeeld worden",
+      identityProofingReviewDecided:
+        "Beoordeling identiteitsverificatie genomen",
+      identityProofingDataExported: "Gegevens van verzoek gedownload",
+      identityProofingFlowKindConfigured: "Type verificatieflow ingesteld",
+      identityProofingCustomerCreated: "Identiteitsverificatieklant toegevoegd",
+      identityProofingCustomerUpdated: "Identiteitsverificatieklant bijgewerkt",
+      identityProofingCustomerFlowsConfigured:
+        "Aan een klant toegewezen identiteitsverificatieflows gewijzigd",
+      identityProofingCustomerRemoved: "Identiteitsverificatieklant verwijderd",
+      identityProofingApiKeyCreated: "API-sleutel van klant aangemaakt",
+      identityProofingApiKeyRevoked: "API-sleutel van klant ingetrokken",
+      identityProofingWebhookConfigured: "Webhook van klant ingesteld",
+      identityProofingWebhookSecretRotated: "Webhookgeheim van klant vernieuwd",
+      identityProofingWebhookRemoved: "Webhook van klant verwijderd",
+      identityProofingPaused: "Identiteitsverificatie gepauzeerd",
+      identityProofingFlowHostedConfigured:
+        "Gehoste pagina van een flow gewijzigd",
+      identityProofingFlowDiplomasConfigured:
+        "Gewijzigd of een flow om diploma's vraagt",
+      identityProofingDiplomaAdded: "Diploma toegevoegd",
+      identityProofingDiplomaRejected: "Diploma geweigerd",
+      identityProofingResumed: "Identiteitsverificatie hervat",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
     },
@@ -1605,6 +1664,7 @@ export const nl: Translation<typeof en> = {
       heading: "Kop",
       paragraph: "Alinea",
       button: "Knop",
+      qr: "QR-code",
       divider: "Scheidingslijn",
       footer: "Voettekst",
     },
@@ -1622,6 +1682,7 @@ export const nl: Translation<typeof en> = {
       credential_offer: "Credential uitgegeven",
       event_notification: "Melding van een gebeurtenis",
       identity_overdue: "Identiteit verlopen",
+      identity_proofing_requested: "Identiteitsverificatie gevraagd",
       identity_reminder: "Herinnering identiteit",
       identity_requested: "Identificatie aangevraagd",
       invitation: "Uitnodiging voor lidmaatschap",
@@ -1641,6 +1702,8 @@ export const nl: Translation<typeof en> = {
         "Gaat naar de beheerders van deze organisatie als er iets gebeurt waarop zij zich hebben geabonneerd.",
       identity_overdue:
         "Gaat naar een lid waarvan de heridentificatietermijn is verstreken, volgens het herinneringsritme.",
+      identity_proofing_requested:
+        "Verstuurd naar een persoon als een lid vraagt de identiteit te verifiëren met document en gezicht.",
       identity_reminder:
         "Gaat naar een lid vóór het verstrijken van de heridentificatietermijn.",
       identity_requested:
@@ -1670,6 +1733,12 @@ export const nl: Translation<typeof en> = {
     removeBlock: "Blok {{number}} verwijderen",
     moveBlockUp: "Blok {{number}} omhoog verplaatsen",
     moveBlockDown: "Blok {{number}} omlaag verplaatsen",
+    qrFields: {
+      url: "Link van de QR-code",
+      label: "Onderschrift (optioneel)",
+    },
+    qrHint:
+      "De QR-code bevat één linkvariabele of een volledig https://-adres. Gebruik dezelfde link als een knop, zodat beide dezelfde pagina openen.",
     buttonHint:
       "De knoplink is één linkvariabele of een volledig https://-adres. De introductie is de korte regel boven de kale link onder de knop.",
     preview: "Voorbeeld",

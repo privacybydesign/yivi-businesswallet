@@ -17,6 +17,7 @@ require (
 	github.com/lestrrat-go/jwx/v3 v3.1.1
 	github.com/mrjoshuak/go-jpeg2000 v1.5.12
 	github.com/pressly/goose/v3 v3.27.1
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tetratelabs/wazero v1.12.0
 	golang.org/x/crypto v0.56.0
 	golang.org/x/image v0.45.0

@@ -61,6 +61,10 @@ const (
 	// KindVogExpired is sent once a member's VOG has expired, on the org's
 	// overdue reminder cadence.
 	KindVogExpired Kind = "vog_expired"
+	// KindIdentityProofingRequested asks a person to prove their identity with
+	// their identity document and face: a QR code and a button carrying the
+	// vcmrtd deep link of an IPS session created at send.
+	KindIdentityProofingRequested Kind = "identity_proofing_requested"
 )
 
 // Variable names. Every placeholder a template may use is one of these, declared
@@ -84,16 +88,29 @@ const (
 	varDueDate        = "dueDate"
 	varReason         = "reason"
 	varVogURL         = "vogUrl"
+	varRequesterName  = "requesterName"
+	varProofingURL    = "proofingUrl"
+	varValidMinutes   = "validMinutes"
+	// varSupportContact and varPrivacyURL are the proofing customer's own, and
+	// empty for a member's request: their paragraphs are then left out.
+	varSupportContact = "supportContact"
+	varPrivacyURL     = "privacyUrl"
 )
+
+// appSchemeVCMRTD is the scheme of the vcmrtd app's deep links (identity
+// proofing): the one non-http(s) URL a mail may carry.
+const appSchemeVCMRTD = "vcmrtd"
 
 // Variable is one substitutable value of a kind. URL variables are additionally
 // checked to be absolute http(s) before substitution, because they end up in an
 // href and a relative or javascript: value would be worse than a missing link. A
 // literal button URL gets the same check at save time (validateButtonURL); only a
-// URL variable may stand in for one.
+// URL variable may stand in for one. A URL variable with an AppScheme carries an
+// app deep link of exactly that scheme instead of an http(s) URL.
 type Variable struct {
-	Name  string
-	IsURL bool
+	Name      string
+	IsURL     bool
+	AppScheme string
 }
 
 // kindVariables is the allowlist per kind. A kind's caller supplies exactly these.
@@ -168,6 +185,14 @@ var kindVariables = map[Kind][]Variable{
 		{Name: varOrgName},
 		{Name: varVogURL, IsURL: true},
 		{Name: varDueDate},
+	},
+	KindIdentityProofingRequested: {
+		{Name: varOrgName},
+		{Name: varRequesterName},
+		{Name: varProofingURL, IsURL: true, AppScheme: appSchemeVCMRTD},
+		{Name: varValidMinutes},
+		{Name: varSupportContact},
+		{Name: varPrivacyURL},
 	},
 }
 
@@ -260,11 +285,15 @@ const (
 	BlockDivider BlockType = "divider"
 	// BlockFooter is small print under a rule, in muted text.
 	BlockFooter BlockType = "footer"
+	// BlockQR is a QR code of a URL, embedded as an inline image, with an optional
+	// caption. Its URL follows the button's rules, so a QR and a button in one
+	// layout can carry the same link.
+	BlockQR BlockType = "qr"
 )
 
 // BlockTypes returns every block type, in the order the editor offers them.
 func BlockTypes() []BlockType {
-	return []BlockType{BlockLogo, BlockHeading, BlockParagraph, BlockButton, BlockDivider, BlockFooter}
+	return []BlockType{BlockLogo, BlockHeading, BlockParagraph, BlockButton, BlockQR, BlockDivider, BlockFooter}
 }
 
 // Block is one building block of a template layout. Which fields apply depends
@@ -275,8 +304,9 @@ type Block struct {
 	Type BlockType `json:"type"`
 	// Text is the prose of a heading, paragraph or footer block.
 	Text string `json:"text,omitempty"`
-	// Label and URL are a button block's call to action. URL is either a single
-	// declared URL variable or an absolute http(s) literal (see validateButtonURL).
+	// Label and URL are a button block's call to action, or a QR block's caption
+	// and encoded link. URL is either a single declared URL variable or an
+	// absolute http(s) literal (see validateButtonURL).
 	Label string `json:"label,omitempty"`
 	URL   string `json:"url,omitempty"`
 	// LinkFallback introduces the bare URL printed under the button. Empty means
@@ -452,7 +482,7 @@ func validateSamples(samples map[string]string) error {
 				return fmt.Errorf("no sample value for %q (declared by kind %q)", v.Name, kind)
 			}
 			if v.IsURL {
-				if err := validateAbsoluteHTTPURL(value); err != nil {
+				if err := v.validateURL(value); err != nil {
 					return fmt.Errorf("sample for %q: %w", v.Name, err)
 				}
 			}

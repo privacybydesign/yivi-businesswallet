@@ -41,10 +41,10 @@ type templateKindSummary struct {
 	Locales   []templateSummary  `json:"locales"`
 }
 
-// templateVariable is the wire shape of one allowed placeholder. It mirrors
-// Variable field for field so the editor's palette can offer exactly what
-// ValidateTemplate will accept, and marks URL variables so the editor knows which
-// one may stand in for the call to action.
+// templateVariable is the wire shape of one allowed placeholder, so the editor's
+// palette can offer exactly what ValidateTemplate will accept. It marks URL
+// variables so the editor knows which one may stand in for the call to action;
+// an app link's scheme is checked on the server only, against the sent value.
 type templateVariable struct {
 	Name  string `json:"name"`
 	IsURL bool   `json:"isUrl"`
@@ -265,7 +265,7 @@ func variablesFor(kind Kind) []templateVariable {
 	variables, _ := VariablesFor(kind)
 	out := make([]templateVariable, 0, len(variables))
 	for _, v := range variables {
-		out = append(out, templateVariable(v))
+		out = append(out, templateVariable{Name: v.Name, IsURL: v.IsURL})
 	}
 	return out
 }
