@@ -87,7 +87,7 @@ export default function SigningExternal(): React.JSX.Element {
 
   return (
     <div className="bg-surface-2 flex min-h-screen items-center justify-center p-6">
-      <Card className="w-full max-w-md p-8">
+      <Card className="w-full max-w-md p-6 sm:p-8">
         <div className="flex justify-center">
           <Logo />
         </div>

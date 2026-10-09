@@ -42,7 +42,7 @@ export default function IdentityReviews(): React.JSX.Element {
         subtitle={t("identityReviews.subtitle")}
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
