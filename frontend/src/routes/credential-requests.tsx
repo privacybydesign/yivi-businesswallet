@@ -3,11 +3,13 @@ import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import type {
+  CredentialType,
   IncomingRequest,
   OutboundRequest,
 } from "../api/credential-requests";
 import {
   useApproveIncomingRequestMutation,
+  useCredentialTypesQuery,
   useDeclineIncomingRequestMutation,
   useIncomingRequestsQuery,
   useOutboundRequestsQuery,
@@ -26,6 +28,10 @@ import type {
 } from "../lib/credential-request";
 import {
   buildSendPayload,
+  catalogKey,
+  EMPTY_ROW,
+  findType,
+  OTHER_TYPE,
   claimValueText,
   hasErrors,
   MAX_CREDENTIALS,
@@ -455,7 +461,49 @@ function SentCard({
   );
 }
 
-const EMPTY_ROW: CredentialRow = { vct: "", claims: "" };
+// The attributes of a catalogue type as checkboxes: ticked ones are asked for.
+function TypeAttributes({
+  row,
+  catalog,
+  onChange,
+}: {
+  row: CredentialRow;
+  catalog: CredentialType[];
+  onChange: (picked: string[]) => void;
+}): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const type = findType(catalog, row.typeKey);
+  if (!type) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-muted font-mono text-[11.5px]">{type.vct}</span>
+      {type.attributes.length > 0 && (
+        <span className="text-ink-soft text-[12px]">
+          {t("credentialRequests.form.pickAttributes")}
+        </span>
+      )}
+      {type.attributes.map((attribute) => (
+        <label
+          key={attribute.key}
+          className="text-ink flex items-center gap-2 text-[13px]"
+        >
+          <input
+            type="checkbox"
+            checked={row.picked.includes(attribute.key)}
+            onChange={(event) =>
+              onChange(
+                event.target.checked
+                  ? [...row.picked, attribute.key]
+                  : row.picked.filter((key) => key !== attribute.key),
+              )
+            }
+          />
+          {attribute.label || attribute.key}
+        </label>
+      ))}
+    </div>
+  );
+}
 
 function RequestForm({
   slug,
@@ -471,6 +519,10 @@ function RequestForm({
   const { t } = useTranslation();
   const addresses = useQerdsAddressesQuery(slug);
   const contacts = useQerdsContactsQuery(slug);
+  const types = useCredentialTypesQuery(slug);
+  const catalog = types.data ?? [];
+  // The catalogue grouped by issuer, in the order the backend sorted it.
+  const issuers = [...new Set(catalog.map((type) => type.issuer))];
   const send = useSendCredentialRequestMutation(slug);
   const [from, setFrom] = useState("");
   const [recipient, setRecipient] = useState("");
@@ -488,10 +540,12 @@ function RequestForm({
 
   const handleSubmit = (event: React.FormEvent): void => {
     event.preventDefault();
-    const next = validateCredentialRequest(recipient, rows);
+    const next = validateCredentialRequest(recipient, rows, catalog);
     setErrors(next);
     if (hasErrors(next)) return;
-    send.mutate(buildSendPayload(from, recipient, rows), { onSuccess: onSent });
+    send.mutate(buildSendPayload(from, recipient, rows, catalog), {
+      onSuccess: onSent,
+    });
   };
 
   return (
@@ -587,16 +641,41 @@ function RequestForm({
               className="border-line rounded-yivi flex flex-col gap-2 border p-3"
             >
               <div className="flex items-center gap-2">
-                <input
-                  className={`${control(controlState(errors.rows[index]))} h-9 font-mono`}
-                  value={row.vct}
+                <select
+                  className={`${control(controlState(errors.rows[index]))} h-9`}
+                  value={row.typeKey}
                   onChange={(event) =>
-                    updateRow(index, { vct: event.target.value })
+                    updateRow(index, {
+                      typeKey: event.target.value,
+                      picked: [],
+                    })
                   }
-                  placeholder={t("credentialRequests.form.vctPlaceholder")}
                   aria-label={t("credentialRequests.form.vct")}
                   aria-invalid={errors.rows[index] ? true : undefined}
-                />
+                >
+                  <option value="" disabled>
+                    {types.isPending
+                      ? t("common.loading")
+                      : t("credentialRequests.form.chooseType")}
+                  </option>
+                  {issuers.map((issuer) => (
+                    <optgroup key={issuer} label={issuer}>
+                      {catalog
+                        .filter((type) => type.issuer === issuer)
+                        .map((type) => (
+                          <option
+                            key={catalogKey(type)}
+                            value={catalogKey(type)}
+                          >
+                            {type.name || type.vct}
+                          </option>
+                        ))}
+                    </optgroup>
+                  ))}
+                  <option value={OTHER_TYPE}>
+                    {t("credentialRequests.form.otherType")}
+                  </option>
+                </select>
                 {rows.length > 1 && (
                   <Button
                     variant="dangerGhost"
@@ -609,15 +688,34 @@ function RequestForm({
                   />
                 )}
               </div>
-              <input
-                className={`${control("ok")} h-9`}
-                value={row.claims}
-                onChange={(event) =>
-                  updateRow(index, { claims: event.target.value })
-                }
-                placeholder={t("credentialRequests.form.claimsPlaceholder")}
-                aria-label={t("credentialRequests.form.claims")}
-              />
+              {row.typeKey === OTHER_TYPE ? (
+                <>
+                  <input
+                    className={`${control("ok")} h-9 font-mono`}
+                    value={row.vct}
+                    onChange={(event) =>
+                      updateRow(index, { vct: event.target.value })
+                    }
+                    placeholder={t("credentialRequests.form.vctPlaceholder")}
+                    aria-label={t("credentialRequests.form.vct")}
+                  />
+                  <input
+                    className={`${control("ok")} h-9`}
+                    value={row.claims}
+                    onChange={(event) =>
+                      updateRow(index, { claims: event.target.value })
+                    }
+                    placeholder={t("credentialRequests.form.claimsPlaceholder")}
+                    aria-label={t("credentialRequests.form.claims")}
+                  />
+                </>
+              ) : (
+                <TypeAttributes
+                  row={row}
+                  catalog={catalog}
+                  onChange={(picked) => updateRow(index, { picked })}
+                />
+              )}
               {errors.rows[index] && (
                 <span role="alert" className="text-error text-[12px]">
                   {errorText(errors.rows[index])}

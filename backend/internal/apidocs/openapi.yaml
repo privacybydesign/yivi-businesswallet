@@ -2798,6 +2798,51 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/openid4vp/credential-types:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [openid4vp]
+      summary: List the credential types an organisation can request
+      description: >-
+        The trust scheme's catalogue: every active or deprecated credential
+        schema designed by an issuing organisation on this deployment, with
+        its issuer and attribute keys, for building a credential request.
+        Drafts are left out. Requires an administrator role.
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    vct:
+                      type: string
+                    name:
+                      type: string
+                    issuer:
+                      type: string
+                    attributes:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          key:
+                            type: string
+                          label:
+                            type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/openid4vp/outbound/{id}/request-object:
     parameters:
       - name: id
