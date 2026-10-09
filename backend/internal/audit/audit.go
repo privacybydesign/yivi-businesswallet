@@ -165,6 +165,13 @@ const (
 	PresentationRequestSent      = "presentation.request_sent"
 	PresentationResponseReceived = "presentation.response_received"
 	PresentationRequestFailed    = "presentation.request_failed"
+
+	// Verification (#245): an organisation asking another business wallet to
+	// present a credential and grading the disclosure against its own ledger.
+	VerificationTemplateCreated = "verification.template_created"
+	VerificationTemplateDeleted = "verification.template_deleted"
+	VerificationStarted         = "verification.started"
+	VerificationCompleted       = "verification.completed"
 )
 
 const (
@@ -221,6 +228,9 @@ const (
 
 	TargetPresentationTransaction     = "presentation_transaction"
 	TargetOutboundPresentationRequest = "outbound_presentation_request"
+
+	TargetVerificationTemplate = "verification_template"
+	TargetVerificationSession  = "verification_session"
 )
 
 type Actor struct {

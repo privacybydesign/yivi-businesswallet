@@ -51,6 +51,12 @@ tags:
       holder of an organisation's credentials. The browser-facing entry point
       GET /openid4vp and the wallet-metadata document
       /.well-known/oauth-authorization-server live outside /api/v1.
+  - name: verification
+    description: >-
+      Outbound OpenID4VP between business wallets: an organisation's verification
+      templates (which credential type and claims to ask a holder for) and the
+      verification sessions run from them, graded against the organisation's own
+      issuance ledger.
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -2968,6 +2974,179 @@ paths:
             image/gif: {}
             image/webp: {}
             image/svg+xml: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/verifications:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [verification]
+      summary: List the organisation's verification sessions (check history)
+      description: Requires membership of the organisation. Newest first; a pending session past its expiry reports expired.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [verification]
+      summary: Start a verification from a template
+      description: >-
+        Requires membership of the organisation. Creates a presentation request at
+        the hosted verifier for the template's credential type and claims and returns
+        the session with its walletLink (openid4vp://) and browserLink (this
+        deployment's /openid4vp entry) to show as a QR.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          description: The hosted verifier could not start the presentation request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/verifications/{id}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    get:
+      tags: [verification]
+      summary: Poll a verification session
+      description: >-
+        Requires membership of the organisation. While pending the verifier is polled;
+        once the holder has presented, the disclosed claims are graded (verified,
+        not expired, issued by this organisation, not revoked) and stored.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/verifications/templates:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [verification]
+      summary: List verification templates
+      description: Requires membership of the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [verification]
+      summary: Create a verification template
+      description: Requires an administrator role in the organisation. Body carries name, vct, claims (non-empty list of claim names) and purpose.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/verifications/templates/{id}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    delete:
+      tags: [verification]
+      summary: Delete a verification template
+      description: Requires an administrator role in the organisation. Sessions run from it keep the template name.
+      responses:
+        '204':
+          description: Deleted.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
