@@ -20,7 +20,12 @@
     "reidentifyUrl": "https://wallet.example.org/reidentify/voorbeeld",
     "dueDate": "2026-08-01",
     "reason": "Je laatste identiteitscontrole is verlopen.",
-    "vogUrl": "https://wallet.example.org/vog/sample"
+    "vogUrl": "https://wallet.example.org/vog/sample",
+    "requesterName": "Sam de Vries",
+    "proofingUrl": "vcmrtd://verify?handover=sample&api=https%3A%2F%2Fproofing.example.org",
+    "validMinutes": "10",
+    "supportContact": "support@example.org",
+    "privacyUrl": "https://example.org/privacy"
   },
   "events": {
     "membership.invited": "Lid uitgenodigd",
@@ -213,6 +218,20 @@
         { "type": "heading", "text": "Je VOG is verlopen" },
         { "type": "paragraph", "text": "Je Verklaring Omtrent het Gedrag voor {{orgName}} is verlopen op {{dueDate}}. Upload een nieuwe." },
         { "type": "button", "label": "Mijn VOG uploaden", "url": "{{vogUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "identity_proofing_requested": {
+      "subject": "{{orgName}} vraagt je je identiteit te verifiëren",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} vraagt je je identiteit te verifiëren" },
+        { "type": "paragraph", "text": "{{requesterName}} vraagt je je identiteit te verifiëren met je paspoort of identiteitskaart en je gezicht, in de vcmrtd-app op je telefoon." },
+        { "type": "qr", "label": "Scan met de vcmrtd-app", "url": "{{proofingUrl}}" },
+        { "type": "button", "label": "Openen in de vcmrtd-app", "url": "{{proofingUrl}}" },
+        { "type": "paragraph", "text": "Lees je dit op je telefoon? Tik dan op de knop. De QR-code en de knop starten dezelfde sessie, die {{validMinutes}} minuten geldig is vanaf het versturen van deze e-mail. Vraag daarna {{orgName}} om een nieuwe." },
+        { "type": "paragraph", "text": "Vragen over dit verzoek? Neem contact op met {{supportContact}}." },
+        { "type": "paragraph", "text": "Hoe er met je gegevens wordt omgegaan: {{privacyUrl}}" },
         { "type": "footer" }
       ]
     }

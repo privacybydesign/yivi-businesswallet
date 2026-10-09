@@ -64,6 +64,7 @@ export const MAIL_BLOCK_FIELDS: Record<
   heading: ["text"],
   paragraph: ["text"],
   button: ["label", "url", "linkFallback"],
+  qr: ["url", "label"],
   divider: [],
   footer: ["text"],
 };
@@ -206,6 +207,24 @@ export function validateMailTemplate(
             blockField: "label",
           });
         }
+        if (block.url.trim() === "") {
+          problems.push({
+            field: "blocks",
+            issue: "required",
+            blockIndex,
+            blockField: "url",
+          });
+        } else if (!buttonUrlShapeIsValid(block.url, variables)) {
+          problems.push({
+            field: "blocks",
+            issue: "buttonUrlShape",
+            blockIndex,
+            blockField: "url",
+          });
+        }
+        break;
+      // A QR block's caption is optional; its link follows the button's rules.
+      case "qr":
         if (block.url.trim() === "") {
           problems.push({
             field: "blocks",
