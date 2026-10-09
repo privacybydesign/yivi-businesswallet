@@ -27,7 +27,11 @@ const (
 	// stubProofedName stands in for the name an approved session read off the
 	// subject's document.
 	stubProofedName = "Anna Jansen"
-	stubIDBytes     = 8
+	// stubSpecimenState is the stub subject's nationality and issuing state:
+	// Utopia, ICAO 9303's specimen state, so no stub identity reads as a real
+	// person's document wherever it ends up.
+	stubSpecimenState = "UTO"
+	stubIDBytes       = 8
 	// stubAPIBaseURL stands in for IDENTITY_PROOFING_PUBLIC_URL in a stub deep link.
 	// .invalid never resolves (RFC 2606).
 	stubAPIBaseURL = "http://proofing.stub.invalid"
@@ -252,9 +256,9 @@ func (s *Stub) SessionIdentity(ctx context.Context, t Tenant, sessionID, session
 	}
 	id := Identity{Result: res}
 	if res.Status == StatusApproved {
-		id.GivenName, id.FamilyName, id.BirthDate, id.Nationality = "Anna", "Jansen", "1990-04-12", "NLD"
+		id.GivenName, id.FamilyName, id.BirthDate, id.Nationality = "Anna", "Jansen", "1990-04-12", stubSpecimenState
 		id.Evidence = &Evidence{
-			Type: EvidenceEMRTD, DocumentType: "P", IssuingState: "NLD", ExpiryDate: "2031-02-01",
+			Type: EvidenceEMRTD, DocumentType: "P", IssuingState: stubSpecimenState, ExpiryDate: "2031-02-01",
 			PassiveAuth: CheckValid, ActiveAuth: CheckValid, Liveness: "passed",
 		}
 		if res.Method == MethodYivi {

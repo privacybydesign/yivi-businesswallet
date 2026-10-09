@@ -39,6 +39,22 @@ that invokes the business wallet as a holder (see
 `devverifier` image the Delivery workflow publishes); `signer`, `domibus` and `verid` are
 the signing and QERDS benches.
 
+Identity proofing runs in the backend itself (`internal/proofingengine`): the Idem app
+claims a session and submits its steps to `/api/v1/app/...` on this backend. To test with
+a phone, set `IDENTITY_PROOFING_PUBLIC_URL` in `.env` to an address the phone reaches
+(e.g. `http://<your-LAN-IP>:8080`) and `REGULA_FACE_API_URL` for the face step;
+`IDENTITY_PROOFING_PROVIDER=stub` swaps in an in-memory stand-in no phone can reach.
+Diploma uploads accept any PDF in the dev stack (`DIPLOMA_VALIDATOR_PROVIDER=stub`, set by
+`compose.override.yaml`); set it to `duo` in `.env` to check real DUO extracts.
+
+The dev stack runs with `DEV_MODE=true` (`compose.override.yaml`):
+
+- The stub settings above work only with it; a deployment refuses them at boot.
+- On a fresh database the first person to log in with Yivi whose e-mail address the
+  wallet does not know becomes the platform admin. Every later unknown address is
+  refused as usual. No `PLATFORM_ADMIN_EMAILS` entry is needed.
+- The backend refuses to start with it unless `APP_BASE_URL` is a localhost URL.
+
 On first run `npm run dev` creates a root `.env` from `.env.example` if one does
 not exist. Compose **requires** `POSTGRES_PASSWORD` (there is no weak default), so
 without this file it would abort with `required variable POSTGRES_PASSWORD is
