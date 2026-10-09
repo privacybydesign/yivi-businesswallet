@@ -108,8 +108,12 @@ const (
 	AttestationKeySuspended    = "attestation.key_suspended"
 	AttestationKeyRevoked      = "attestation.key_revoked"
 	AttestationHeldDeleted     = "attestation.held_deleted"
-	AttestationOfferAccepted   = "attestation.offer_accepted"
-	AttestationOfferDeclined   = "attestation.offer_declined"
+	// A credential the organization holds entered the wallet (an accepted offer),
+	// and the issuer's status list changed its state; target is the held id.
+	AttestationHeldReceived      = "attestation.held_received"
+	AttestationHeldStatusChanged = "attestation.held_status_changed"
+	AttestationOfferAccepted     = "attestation.offer_accepted"
+	AttestationOfferDeclined     = "attestation.offer_declined"
 
 	EmailSettingsUpdated = "email.settings_updated"
 	EmailTemplateUpdated = "email.template_updated"

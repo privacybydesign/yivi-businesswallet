@@ -142,9 +142,20 @@ func (h *StubHolder) Validities(_ context.Context, orgID uuid.UUID) (map[string]
 	defer h.mu.Unlock()
 	validities := make(map[string]HeldValidity, len(h.creds[orgID]))
 	for ref, cred := range h.creds[orgID] {
-		validities[ref] = HeldValidity{ExpiresAt: cred.ExpiresAt}
+		issuedAt := cred.IssuedAt
+		validities[ref] = HeldValidity{ExpiresAt: cred.ExpiresAt, IssuedAt: &issuedAt, Format: stubFormat}
 	}
 	return validities, nil
+}
+
+// stubFormat is the format the stub reports: every credential it holds is an
+// SD-JWT VC, like the engine's.
+const stubFormat = "dc+sd-jwt"
+
+// RefreshStatuses is a no-op: the stub holds no status references, so there is
+// nothing to re-check and nothing changes.
+func (h *StubHolder) RefreshStatuses(context.Context, uuid.UUID) (int, error) {
+	return 0, nil
 }
 
 // Delete removes the credential; an absent ref is a no-op (matches the engine
