@@ -1,8 +1,9 @@
 /* ==========================================================================
    Yivi Business Wallet — global stylesheet.
 
-   Design tokens are lifted verbatim from the Yivi Design System
-   (`colors_and_type.css` + `ui_kits/business/tokens.css`). They live as plain
+   Design tokens were lifted verbatim from the Yivi Design System
+   (`colors_and_type.css` + `ui_kits/business/tokens.css`, no longer kept in
+   this repository). They live as plain
    CSS custom properties on :root so they remain a single source of truth, and
    `@theme inline` maps them onto Tailwind utilities (bg-*, text-*, font-*, …).
 
