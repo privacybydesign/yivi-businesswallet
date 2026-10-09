@@ -223,14 +223,24 @@ const (
 	TargetOutboundPresentationRequest = "outbound_presentation_request"
 )
 
+// Actor is who a request acts for: a user, or a non-user caller named by Label
+// (a customer API key, `api_key:<prefix>`), with UserID uuid.Nil.
 type Actor struct {
 	UserID uuid.UUID
+	Label  string
 }
 
 type ctxKey struct{}
 
 func ContextWithActor(ctx context.Context, a Actor) context.Context {
 	return context.WithValue(ctx, ctxKey{}, a)
+}
+
+// WithoutActor clears the actor for what ctx records next: a change the system
+// makes on its own account while serving someone (e.g. an outcome read from an
+// external service during a list read) is not that person's doing.
+func WithoutActor(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxKey{}, nil)
 }
 
 // ActorFromContext returns the actor behind the current request, if one was
@@ -280,8 +290,14 @@ func (DBRecorder) Record(ctx context.Context, q database.Querier, action string,
 	}
 
 	var actorID *uuid.UUID
+	var actorLabel *string
 	if a, ok := ActorFromContext(ctx); ok {
-		actorID = &a.UserID
+		if a.UserID != uuid.Nil {
+			actorID = &a.UserID
+		}
+		if a.Label != "" {
+			actorLabel = &a.Label
+		}
 	}
 
 	var requestID *string
@@ -290,9 +306,9 @@ func (DBRecorder) Record(ctx context.Context, q database.Querier, action string,
 	}
 
 	const insert = `INSERT INTO audit_events
-		(actor_user_id, organization_id, action, target_type, target_id, metadata, request_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	if _, err := q.Exec(ctx, insert, actorID, target.OrgID, action, target.Type, target.ID, meta, requestID); err != nil {
+		(actor_user_id, organization_id, action, target_type, target_id, metadata, request_id, actor_label)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	if _, err := q.Exec(ctx, insert, actorID, target.OrgID, action, target.Type, target.ID, meta, requestID, actorLabel); err != nil {
 		return fmt.Errorf("audit: record %s: %w", action, err)
 	}
 	return nil

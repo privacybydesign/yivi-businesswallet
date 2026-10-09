@@ -12,6 +12,7 @@ import (
 	"github.com/klippa-app/go-pdfium"
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/webassembly"
+	"github.com/tetratelabs/wazero"
 )
 
 // The parser is a port of go-vog-issuer's (#242), the implementation that was
@@ -51,6 +52,9 @@ func NewPDFiumParser() (*PDFiumParser, error) {
 		MinIdle:  poolMinIdle,
 		MaxIdle:  poolMaxIdle,
 		MaxTotal: poolMaxTotal,
+		// Lets an instance's Kill interrupt the WebAssembly call in flight, which
+		// the diploma parser relies on to bound a parse of an untrusted PDF.
+		RuntimeConfig: wazero.NewRuntimeConfig().WithCloseOnContextDone(true),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("vog: initialise pdfium: %w", err)
@@ -375,4 +379,11 @@ func ParseDutchDate(s string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid day in %q", s)
 	}
 	return t, nil
+}
+
+// Pool is the PDFium pool the parser owns, for another PDF parser in the
+// process to borrow (diploma.NewPDFiumParser): each instance is a full PDFium
+// heap, so a process keeps one pool. Close still closes it.
+func (p *PDFiumParser) Pool() pdfium.Pool {
+	return p.pool
 }

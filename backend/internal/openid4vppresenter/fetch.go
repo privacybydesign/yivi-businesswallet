@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 )
 
 // requestObjectMediaType is the JAR media type (RFC 9101 §10.2).
@@ -20,18 +22,18 @@ type Fetcher struct {
 }
 
 func NewFetcher(policy Policy) *Fetcher {
-	return &Fetcher{policy: policy, client: newClient(policy)}
+	return &Fetcher{policy: policy, client: safehttp.NewClient(policy)}
 }
 
 // Fetch returns the raw Request Object at requestURI, wrapped in
 // ErrRequestURIUnreachable on any failure so the handler maps it uniformly and
 // the reason stays in the log, not the response.
 func (f *Fetcher) Fetch(ctx context.Context, requestURI string) ([]byte, error) {
-	u, err := f.policy.checkURL(requestURI)
+	u, err := f.policy.CheckURL(requestURI)
 	if err != nil {
 		return nil, fmt.Errorf("%w: request_uri: %w", ErrInvalidRequest, err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, safehttp.RequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
