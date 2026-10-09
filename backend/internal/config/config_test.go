@@ -309,3 +309,66 @@ func TestLoadRejectsHalfConfiguredRequesterCA(t *testing.T) {
 		})
 	}
 }
+
+// The real DUO signature check is the default, as in go-diploma-issuer: a
+// deployment that forgets the setting never accepts any PDF as a diploma.
+func TestLoadDiplomaDefaultsToDUO(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DiplomaValidatorProvider != ProviderDUO {
+		t.Errorf("diploma validator = %q, want %q", cfg.DiplomaValidatorProvider, ProviderDUO)
+	}
+	stub, err := loadWith(t, map[string]string{envDiplomaValidatorProvider: ProviderStub, envDevMode: "true"})
+	if err != nil || stub.DiplomaValidatorProvider != ProviderStub {
+		t.Errorf("explicit stub = %q, %v; want %q", stub.DiplomaValidatorProvider, err, ProviderStub)
+	}
+}
+
+// The online revocation check is on unless switched off: off, only the
+// revocation information embedded in an extract counts.
+func TestLoadDiplomaOCSPIsDefault(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil || !cfg.DiplomaOCSP {
+		t.Errorf("default DiplomaOCSP = %v, %v; want on", cfg.DiplomaOCSP, err)
+	}
+	cfg, err = loadWith(t, map[string]string{envDiplomaOCSP: "false"})
+	if err != nil || cfg.DiplomaOCSP {
+		t.Errorf("DIPLOMA_OCSP=false: DiplomaOCSP = %v, %v; want off", cfg.DiplomaOCSP, err)
+	}
+}
+
+// A stub that passes a real check runs only on a local stack (DEV_MODE), and
+// DEV_MODE only with a localhost APP_BASE_URL.
+func TestLoadStubsNeedDevMode(t *testing.T) {
+	for key, value := range map[string]string{
+		envIdentityProofingProvider:    ProviderStub,
+		envIdentityProofingStubOutcome: "approved",
+		envDiplomaValidatorProvider:    ProviderStub,
+	} {
+		t.Run(key+" without", func(t *testing.T) {
+			if _, err := loadWith(t, map[string]string{key: value}); err == nil {
+				t.Errorf("%s=%s without %s loaded, want an error", key, value, envDevMode)
+			}
+		})
+		t.Run(key+" with", func(t *testing.T) {
+			if _, err := loadWith(t, map[string]string{key: value, envDevMode: "true"}); err != nil {
+				t.Errorf("%s=%s with %s: %v", key, value, envDevMode, err)
+			}
+		})
+	}
+	for base, ok := range map[string]bool{
+		"http://localhost:5173":                    true,
+		"http://127.0.0.1:8080":                    true,
+		"https://business-wallet.staging.yivi.app": false,
+		"http://192.168.1.20:5173":                 false,
+	} {
+		t.Run(base, func(t *testing.T) {
+			_, err := loadWith(t, map[string]string{envDevMode: "true", envAppBaseURL: base})
+			if (err == nil) != ok {
+				t.Errorf("DEV_MODE with APP_BASE_URL %s: %v, want ok %v", base, err, ok)
+			}
+		})
+	}
+}
