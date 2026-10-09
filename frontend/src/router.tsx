@@ -8,6 +8,9 @@ import {
 } from "./api/organization.queries";
 import { qerdsMessageQueryKey } from "./api/qerds.queries";
 import { fullName } from "./lib/name";
+import type { HeldAttestationClaims } from "./api/attestations";
+import { credentialDisplayName } from "./lib/credential-display";
+import { heldClaimsBaseQueryKey } from "./api/attestations.queries";
 import Root from "./routes/root";
 import RootRedirect from "./routes/root-redirect";
 import ProtectedRoute from "./routes/protected-route";
@@ -94,10 +97,23 @@ const qerdsMessageCrumb: RouteHandle = {
 const attestationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("attestations.title"),
 };
-// The credential's own name is only known once its claims load, and the page's
-// title already carries it, so the crumb stays a static label.
+// The credential's name once its detail is cached (in whichever language it was
+// read), else a generic label.
 const heldCredentialCrumb: RouteHandle = {
-  crumb: ({ t }) => t("attestations.held.detail.title"),
+  crumb: ({ params, queryClient, t }: CrumbContext) => {
+    const cached = queryClient
+      .getQueriesData<HeldAttestationClaims>({
+        queryKey: heldClaimsBaseQueryKey(
+          params.orgSlug ?? "",
+          params.heldId ?? "",
+        ),
+      })
+      .map(([, data]) => data)
+      .find((data) => data?.vct !== undefined);
+    return cached
+      ? cached.displayName || credentialDisplayName(cached.vct)
+      : t("attestations.held.detail.title");
+  },
 };
 const postguardCrumb: RouteHandle = { crumb: ({ t }) => t("postguard.title") };
 const postguardSendCrumb: RouteHandle = {

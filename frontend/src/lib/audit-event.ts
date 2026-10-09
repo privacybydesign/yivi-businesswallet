@@ -52,6 +52,8 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "user.identity_review_rejected": { icon: "close", tone: "red" },
   "user.purged": { icon: "delete", tone: "red" },
   "attestation.schema_created": { icon: "add", tone: "green" },
+  "attestation.held_received": { icon: "add", tone: "green" },
+  "attestation.held_status_changed": { icon: "warning", tone: "amber" },
   "attestation.schema_updated": { icon: "edit", tone: "blue" },
   "attestation.schema_deleted": { icon: "delete", tone: "red" },
   "attestation.template_created": { icon: "add", tone: "green" },
@@ -252,6 +254,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.attestationKeySuspended");
     case "attestation.key_revoked":
       return t("auditLog.actions.attestationKeyRevoked");
+    case "attestation.held_received":
+      return t("auditLog.actions.attestationHeldReceived");
+    case "attestation.held_status_changed":
+      return t("auditLog.actions.attestationHeldStatusChanged");
     case "attestation.held_deleted":
       return t("auditLog.actions.attestationHeldDeleted");
     case "attestation.offer_accepted":

@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 )
@@ -63,6 +64,9 @@ type heldMutator interface {
 	ListHeld(ctx context.Context, orgID uuid.UUID) ([]HeldAttestation, error)
 	GetHeld(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error)
 	SoftDeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
+	RecordHeldStatusChange(ctx context.Context, orgID, id uuid.UUID, vct string, status HeldStatus) (bool, error)
+	HeldHistory(ctx context.Context, orgID, id uuid.UUID) ([]audit.Event, error)
+	HolderOrgs(ctx context.Context) ([]uuid.UUID, error)
 }
 
 // offerStore is the pending-offer queue the service coordinates for the
@@ -86,6 +90,7 @@ type holderEngine interface {
 	Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (eudiholder.HeldCredential, error)
 	Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]eudiholder.HeldDisplay, error)
 	Validities(ctx context.Context, orgID uuid.UUID) (map[string]eudiholder.HeldValidity, error)
+	RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, error)
 }
 
 // emailNotifier delivers a person-facing "your credential is ready" e-mail.
@@ -445,17 +450,34 @@ func (s *Service) DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error {
 // stored (absent expiry means the credential does not expire); see
 // eudiholder.HeldValidity for what Revoked does and does not observe.
 type HeldClaimsView struct {
-	ID          uuid.UUID                  `json:"id"`
-	VCT         string                     `json:"vct"`
-	Issuer      string                     `json:"issuer"`
-	IssuerName  string                     `json:"issuerName"`
-	DisplayName string                     `json:"displayName"`
-	LogoURI     string                     `json:"logoUri"`
-	Source      string                     `json:"source"`
-	ReceivedAt  time.Time                  `json:"receivedAt"`
-	ExpiresAt   *time.Time                 `json:"expiresAt,omitempty"`
-	Revoked     bool                       `json:"revoked"`
-	Attributes  []eudiholder.HeldAttribute `json:"attributes"`
+	ID          uuid.UUID  `json:"id"`
+	VCT         string     `json:"vct"`
+	Issuer      string     `json:"issuer"`
+	IssuerName  string     `json:"issuerName"`
+	DisplayName string     `json:"displayName"`
+	LogoURI     string     `json:"logoUri"`
+	Source      string     `json:"source"`
+	ReceivedAt  time.Time  `json:"receivedAt"`
+	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+	Revoked     bool       `json:"revoked"`
+	HeldChecks
+	Attributes []eudiholder.HeldAttribute `json:"attributes"`
+}
+
+// HeldChecks are what the wallet knows about a held credential's integrity:
+// its iat and format, whether it carries a status list (so it can be revoked at
+// all) and when that was last read. The signature and the issuer's trust chain
+// were verified when it was received; a credential failing either is never
+// stored.
+type HeldChecks struct {
+	IssuedAt        *time.Time `json:"issuedAt,omitempty"`
+	Format          string     `json:"format,omitempty"`
+	HasStatusList   bool       `json:"hasStatusList"`
+	StatusCheckedAt *time.Time `json:"statusCheckedAt,omitempty"`
+}
+
+func heldChecks(v eudiholder.HeldValidity) HeldChecks {
+	return HeldChecks{IssuedAt: v.IssuedAt, Format: v.Format, HasStatusList: v.HasStatusList, StatusCheckedAt: v.StatusCheckedAt}
 }
 
 // HeldListView is one held-credential index row enriched with the credential's
@@ -478,6 +500,7 @@ type HeldListView struct {
 	IssuerName  string     `json:"issuerName"`
 	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
 	Revoked     bool       `json:"revoked"`
+	HeldChecks
 }
 
 // HeldClaims returns a held credential's disclosed attributes for the detail view,
@@ -517,6 +540,7 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang stri
 		ReceivedAt:  held.ReceivedAt,
 		ExpiresAt:   validity.ExpiresAt,
 		Revoked:     validity.Revoked,
+		HeldChecks:  heldChecks(validity),
 		Attributes:  cred.Attributes,
 	}, nil
 }
@@ -556,6 +580,7 @@ func (s *Service) ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([
 			IssuerName:      issuerName,
 			ExpiresAt:       v.ExpiresAt,
 			Revoked:         v.Revoked,
+			HeldChecks:      heldChecks(v),
 		}
 	}
 	return views, nil
@@ -639,4 +664,101 @@ func newClaimToken() (string, error) {
 		return "", fmt.Errorf("attestation: claim token: %w", err)
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// HeldHistory is a held credential's trail, oldest first, after confirming the
+// organization holds it.
+func (s *Service) HeldHistory(ctx context.Context, orgID, id uuid.UUID) ([]audit.Event, error) {
+	if _, err := s.held.GetHeld(ctx, orgID, id); err != nil {
+		return nil, err
+	}
+	return s.held.HeldHistory(ctx, orgID, id)
+}
+
+// heldRecheckTimeout bounds a status re-check, which outlives the request
+// that started it: see recheckHeld.
+const heldRecheckTimeout = 2 * time.Minute
+
+// RecheckHeld re-reads the issuer status list of every credential the
+// organization holds and audits each one whose state moved between valid and
+// revoked. It reports how many changed.
+func (s *Service) RecheckHeld(ctx context.Context, orgID uuid.UUID) (int, error) {
+	changed, err := s.recheckHeld(ctx, orgID)
+	return len(changed), err
+}
+
+// RecheckHeldOne re-checks the organization's credentials for one of them, the
+// re-check a credential's own page asks for, and reports whether that one
+// changed state. The issuer status lists are re-read for the whole org, since
+// the holder refreshes them per org; every change is audited.
+func (s *Service) RecheckHeldOne(ctx context.Context, orgID, id uuid.UUID) (bool, error) {
+	if _, err := s.held.GetHeld(ctx, orgID, id); err != nil {
+		return false, err
+	}
+	changed, err := s.recheckHeld(ctx, orgID)
+	if err != nil {
+		return false, err
+	}
+	_, ok := changed[id]
+	return ok, nil
+}
+
+// recheckHeld is RecheckHeld returning the ids of the credentials that
+// changed. It runs detached from ctx's cancellation: the holder keeps a status
+// flip it has read, so a re-check cut off between that and the audit (a
+// closed tab, a shutdown) would leave the change unaudited for good.
+func (s *Service) recheckHeld(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]struct{}, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), heldRecheckTimeout)
+	defer cancel()
+
+	before, err := s.holder.Validities(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("attestation: validities before recheck org %s: %w", orgID, err)
+	}
+	if _, err := s.holder.RefreshStatuses(ctx, orgID); err != nil {
+		return nil, fmt.Errorf("attestation: recheck org %s: %w", orgID, err)
+	}
+	after, err := s.holder.Validities(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("attestation: validities after recheck org %s: %w", orgID, err)
+	}
+	held, err := s.held.ListHeld(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	changed := map[uuid.UUID]struct{}{}
+	for _, h := range held {
+		was, now := before[h.CredentialRef], after[h.CredentialRef]
+		if was.Revoked == now.Revoked {
+			continue
+		}
+		recorded, err := s.held.RecordHeldStatusChange(ctx, orgID, h.ID, h.VCT, heldStatusOf(now.Revoked))
+		if err != nil {
+			return changed, err
+		}
+		if recorded {
+			changed[h.ID] = struct{}{}
+		}
+	}
+	return changed, nil
+}
+
+// RecheckAllHeld re-checks every holder organization's credentials, for the
+// scheduled sweep. An org that fails is logged and skipped. It reports how many
+// credentials changed state.
+func (s *Service) RecheckAllHeld(ctx context.Context) (int64, error) {
+	orgs, err := s.held.HolderOrgs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var changed int64
+	for _, orgID := range orgs {
+		n, err := s.RecheckHeld(ctx, orgID)
+		changed += int64(n)
+		if err != nil {
+			slog.WarnContext(ctx, "attestation: held status recheck failed", slog.String("org_id", orgID.String()), slog.Any("error", err))
+		}
+	}
+	return changed, nil
 }

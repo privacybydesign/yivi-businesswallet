@@ -73,6 +73,10 @@ const (
 	// client timeout has to outlast that whole sequence, not one attempt.
 	vogHTTPTimeout = 2 * time.Minute
 
+	// heldStatusRecheckEvery is how often held credentials' status lists are
+	// re-read: issuers publish revocations on the scale of hours, not seconds.
+	heldStatusRecheckEvery = 6 * time.Hour
+
 	issuerProbeTimeout = 10 * time.Second
 	issuerHTTPTimeout  = 15 * time.Second
 
@@ -670,6 +674,10 @@ func run() error {
 	attestationService := attestation.NewService(
 		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
 	)
+	// Re-read the issuer status list of every held credential, so a credential
+	// revoked after it was received stops reading as valid. Deploys come more
+	// often than the interval, so it also runs at boot.
+	startPrunerAtBoot(ctx, "attestation_held_status", heldStatusRecheckEvery, attestationService.RecheckAllHeld)
 	// Auto-issue an org's configured onboarding attestations when a member accepts
 	// an invitation. Wired via a setter (like the inbound QERDS consumer) because
 	// the org service is constructed before the attestation service.

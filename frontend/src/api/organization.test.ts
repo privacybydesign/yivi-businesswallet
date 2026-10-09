@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./http";
-import { vogOutcomeFromError } from "./organization";
+import { auditEventSchema, vogOutcomeFromError } from "./organization";
 import type { Organization } from "./organization";
 
 // withAbsoluteLogos turns each org's API-relative logo path into an absolute URL
@@ -98,5 +98,23 @@ describe("vogOutcomeFromError", () => {
 
   it("returns null for a non-ApiError", () => {
     expect(vogOutcomeFromError(new Error("network down"))).toBeNull();
+  });
+});
+
+describe("auditEventSchema", () => {
+  // A member's view of a revocation reads as an unknown move, not as
+  // "reinstated": the flag must survive parsing.
+  it("keeps detailHidden", () => {
+    const event = auditEventSchema.parse({
+      id: "ev-1",
+      occurredAt: "2026-10-09T10:00:00Z",
+      action: "attestation.held_status_changed",
+      targetType: "held_attestation",
+      targetId: "",
+      metadata: {},
+      actor: null,
+      detailHidden: true,
+    });
+    expect(event.detailHidden).toBe(true);
   });
 });
