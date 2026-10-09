@@ -53,6 +53,17 @@ const (
 // cid:orglogo and the transport attaches it under Content-ID: <orglogo>.
 const logoContentID = "orglogo"
 
+const (
+	// qrContentIDPrefix keys a QR block's inline image: cid:qr0, cid:qr1, ...
+	qrContentIDPrefix = "qr"
+	qrContentType     = "image/png"
+	// qrPixels is the rendered QR image's edge, sized to scan from a screen.
+	qrPixels = 480
+	// qrDisplayPixels is the edge the HTML shows it at (a 2x image for sharp
+	// rendering on high-density screens).
+	qrDisplayPixels = 240
+)
+
 // blockSpacing is the vertical gap above each block type, tuned so a heading
 // reads as a section start and a button gets room to be a target. The first
 // block of the layout gets none.
@@ -60,7 +71,7 @@ func blockSpacing(typ BlockType) string {
 	switch typ {
 	case BlockHeading:
 		return "20px"
-	case BlockButton, BlockFooter:
+	case BlockButton, BlockFooter, BlockQR:
 		return "24px"
 	case BlockDivider, BlockLogo:
 		return "20px"
@@ -177,6 +188,19 @@ func renderBlockHTML(body *strings.Builder, blk resolvedBlock, c content, b Bran
 			linkMargin, attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), linkPrefix,
 			href, attr(b.Link), html.EscapeString(blk.url),
 		)
+	case BlockQR:
+		// The QR is an inline image (cid:) like the logo, so it shows in clients that
+		// block remote images. The caption doubles as its alt text.
+		fmt.Fprintf(body,
+			`<img src="cid:%s" alt="%s" width="%d" height="%d" style="display:block;width:%dpx;height:%dpx;border:0;outline:none;" />`,
+			attr(blk.contentID), attr(blk.label.text), qrDisplayPixels, qrDisplayPixels, qrDisplayPixels, qrDisplayPixels,
+		)
+		if !blk.label.empty() {
+			fmt.Fprintf(body,
+				`<p style="margin:8px 0 0 0;font-family:%s;font-size:%s;line-height:%s;color:%s;">%s</p>`,
+				attr(b.FontFamily), smallFontSize, smallLineHeight, attr(b.Muted), blk.label.html,
+			)
+		}
 	case BlockDivider:
 		fmt.Fprintf(body, `<div style="border-top:1px solid %s;font-size:1px;line-height:1px;">&nbsp;</div>`, attr(b.Border))
 	case BlockFooter:
@@ -201,6 +225,13 @@ func renderText(c content) string {
 		case BlockButton:
 			// Same reasoning as renderBlockHTML: a collapsed label loses its line,
 			// not the link.
+			if blk.label.empty() {
+				writeParagraph(&out, blk.url)
+			} else {
+				writeParagraph(&out, fmt.Sprintf("%s:\n%s", blk.label.text, blk.url))
+			}
+		case BlockQR:
+			// A text client cannot show the image; the link it encodes stands in.
 			if blk.label.empty() {
 				writeParagraph(&out, blk.url)
 			} else {

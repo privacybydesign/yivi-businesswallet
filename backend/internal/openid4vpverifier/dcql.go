@@ -76,6 +76,10 @@ const (
 	// and is asked for a VOG, one scan establishes the identity the VOG is then
 	// matched against. Its vog claim list is dynamic like ScopeVog's.
 	ScopeIdentityVog
+	// ScopeProofing discloses a passport OR id-card with its photo, for the
+	// identity proofing Yivi method: the photo is the reference the subject's
+	// live face is checked against (internal/proofing).
+	ScopeProofing
 )
 
 func queryFor(scope Scope, claims []string) dcqlQuery {
@@ -86,6 +90,8 @@ func queryFor(scope Scope, claims []string) dcqlQuery {
 		return vogQuery(claims)
 	case ScopeIdentityVog:
 		return identityVogQuery(claims)
+	case ScopeProofing:
+		return proofingQuery()
 	default:
 		return loginQuery()
 	}
@@ -149,4 +155,20 @@ func identityVogQuery(aspectClaims []string) dcqlQuery {
 	q.Credentials = append(q.Credentials, vogCredential(aspectClaims))
 	q.CredentialSets = append(q.CredentialSets, dcqlCredentialSet{Options: [][]string{{credIDVog}}})
 	return q
+}
+
+// proofingQuery discloses a verified identity (passport OR id-card) with the
+// credential's photo, and nothing else: no email or phone, which proofing a
+// person does not need.
+func proofingQuery() dcqlQuery {
+	claims := claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality, ClaimPhoto)
+	return dcqlQuery{
+		Credentials: []dcqlCredential{
+			{ID: credIDPassport, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPassport}}, Claims: claims},
+			{ID: credIDIDCard, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctIDCard}}, Claims: claims},
+		},
+		CredentialSets: []dcqlCredentialSet{
+			{Options: [][]string{{credIDPassport}, {credIDIDCard}}},
+		},
+	}
 }

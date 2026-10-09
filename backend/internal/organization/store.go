@@ -104,6 +104,12 @@ func (s *Store) GetBySlug(ctx context.Context, slug string) (Organization, error
 // ON DELETE CASCADE; audit events survive with a null org id.
 func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		// The proofing requests go with the org, but their audit events stay
+		// (org id set null), out of every purge's reach: strip whom they name now.
+		if err := audit.StripFields(ctx, q, id, audit.TargetIdentityProofingRequest, "",
+			audit.IdentityProofingPersonalKeys); err != nil {
+			return err
+		}
 		const del = `DELETE FROM organizations WHERE id = $1 RETURNING name, slug`
 		var name, slug string
 		err := q.QueryRow(ctx, del, id).Scan(&name, &slug)

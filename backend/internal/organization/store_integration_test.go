@@ -250,3 +250,37 @@ func TestStoreListForUserResolvesThemeLogoURI(t *testing.T) {
 		t.Errorf("ListForUser LogoURI = %q, want prefix %q with a version", got, wantPrefix)
 	}
 }
+
+// Deleting an org strips whom its proofing requests' audit events name: the
+// events outlive the org (org id set null), beyond every later purge.
+func TestStoreDeleteStripsProofingSubjects(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := organization.NewStore(pool, audit.NewDBRecorder())
+	ctx := context.Background()
+	org := makeOrg(t, pool, "Acme", "acme")
+	requestID := uuid.NewString()
+	if err := (audit.DBRecorder{}).Record(ctx, pool, audit.IdentityProofingSessionCancelled,
+		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: requestID, OrgID: &org.ID},
+		audit.Updated(map[string]any{"status": "pending", "subjectName": "Anna", "subjectEmail": "anna@example.org"},
+			map[string]any{"status": "cancelled", "subjectName": "Anna", "subjectEmail": "anna@example.org"})); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	if err := store.Delete(ctx, org.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	var named int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE target_id = $1
+		AND (metadata::text LIKE '%Anna%' OR metadata::text LIKE '%anna@example.org%')`, requestID).Scan(&named); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if named != 0 {
+		t.Errorf("%d audit events still name the subject after the org was deleted", named)
+	}
+	var kept int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE target_id = $1
+		AND metadata->'after'->>'status' = 'cancelled'`, requestID).Scan(&kept); err != nil || kept != 1 {
+		t.Errorf("event without its subject = %d, %v; want the event kept", kept, err)
+	}
+}
