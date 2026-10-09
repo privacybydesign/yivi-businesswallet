@@ -9,11 +9,13 @@ require (
 	github.com/digitorus/pkcs7 v0.0.0-20230818184609-3a137a874352
 	github.com/digitorus/timestamp v0.0.0-20231217203849-220c5c2851b7
 	github.com/getkin/kin-openapi v0.144.0
+	github.com/gmrtd/gmrtd v0.48.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/klippa-app/go-pdfium v1.19.8
 	github.com/lestrrat-go/jwx/v3 v3.1.1
+	github.com/mrjoshuak/go-jpeg2000 v1.5.12
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/tetratelabs/wazero v1.12.0
 	golang.org/x/crypto v0.56.0
@@ -22,7 +24,9 @@ require (
 )
 
 require (
+	github.com/aead/cmac v0.0.0-20160719120800-7af84192f0b1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
@@ -44,12 +48,14 @@ require (
 	github.com/mr-tron/base58 v1.1.3 // indirect
 	github.com/oasdiff/yaml v0.1.1 // indirect
 	github.com/oasdiff/yaml3 v0.0.14 // indirect
+	github.com/osanderson/brainpool v1.0.0 // indirect
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
 	github.com/privacybydesign/gabi v0.0.0-20221212095008-68a086907750 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
 	github.com/valyala/fastjson v1.6.10 // indirect
 	github.com/woodsbury/decimal128 v1.3.0 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	gorm.io/driver/mysql v1.6.0 // indirect
 )
 
@@ -327,3 +333,7 @@ tool (
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	github.com/pressly/goose/v3/cmd/goose
 )
+
+// gmrtd's maintained fork, as go-passport-issuer uses: the chip verification
+// in internal/proofingengine/mrtdverify.
+replace github.com/gmrtd/gmrtd => github.com/privacybydesign/gmrtd v1.0.1
