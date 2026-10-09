@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +35,38 @@ var requestIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`)
 type ShouldLog func(status int, duration time.Duration) bool
 
 func AlwaysLog(_ int, _ time.Duration) bool { return true }
+
+// tokenSegment is a path segment that is a bearer token: a session's, a
+// hosted link's, an invitation's. It is long, random and so has a digit, which
+// a route's own words ("request-identification") do not; a UUID (an id, not a
+// credential) is left alone.
+var (
+	tokenSegment = regexp.MustCompile(`^[A-Za-z0-9_-]{20,}$`)
+	digit        = regexp.MustCompile(`[0-9]`)
+)
+
+// redactedSegment stands in for a token in a logged path.
+const redactedSegment = "{token}"
+
+// loggedPath is path with its token segments replaced: a path token is the
+// credential of a session or link, and the request log outlives it.
+func loggedPath(path string) string {
+	segments := strings.Split(path, "/")
+	for i, seg := range segments {
+		if tokenSegment.MatchString(seg) && digit.MatchString(seg) && !canonicalUUID(seg) {
+			segments[i] = redactedSegment
+		}
+	}
+	return strings.Join(segments, "/")
+}
+
+// canonicalUUIDLen is a UUID's length in its dashed form: uuid.Validate also
+// takes 32 bare hex digits, which a token may be.
+const canonicalUUIDLen = 36
+
+func canonicalUUID(seg string) bool {
+	return len(seg) == canonicalUUIDLen && uuid.Validate(seg) == nil
+}
 
 var skipPaths = map[string]struct{}{
 	livePath:  {},
@@ -74,7 +107,7 @@ func recoverer(next http.Handler) http.Handler {
 					slog.Any(attrPanic, v),
 					slog.String(attrStack, stack),
 					slog.String(attrMethod, r.Method),
-					slog.String(attrPath, r.URL.Path),
+					slog.String(attrPath, loggedPath(r.URL.Path)),
 				)
 				respond.Error(w, r, http.StatusInternalServerError, "internal_error", "internal server error")
 			}
@@ -103,7 +136,7 @@ func requestLogger(shouldLog ShouldLog) func(http.Handler) http.Handler {
 			if shouldLog(rec.status, duration) {
 				slog.InfoContext(r.Context(), "request",
 					slog.String(attrMethod, r.Method),
-					slog.String(attrPath, r.URL.Path),
+					slog.String(attrPath, loggedPath(r.URL.Path)),
 					slog.Int(attrStatus, rec.status),
 					slog.Float64(attrDurationMS, float64(duration.Microseconds())/1000.0),
 				)

@@ -20,6 +20,10 @@ from handler annotations. Two tests in this package fail CI when it drifts:
 - `TestSpecIsValidOpenAPI` — validates `openapi.yaml` against the OpenAPI 3
   schema.
 
+The one exception is the Idem (vcmrtd) app's session routes, `/api/v1/app/...`
+(`undocumentedPrefixes` in the test): only that app calls them, its client is
+the contract, and the spec must not list them.
+
 So adding or removing an endpoint without updating `openapi.yaml` breaks the
 build. When that happens, edit `openapi.yaml` to match: add or remove the path
 item, keeping the existing shape (tags, `security`, path parameters, and the

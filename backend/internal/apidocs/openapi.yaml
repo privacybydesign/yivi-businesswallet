@@ -51,6 +51,12 @@ tags:
       holder of an organisation's credentials. The browser-facing entry point
       GET /openid4vp and the wallet-metadata document
       /.well-known/oauth-authorization-server live outside /api/v1.
+  - name: idem-app
+    description: >-
+      The Idem (vcmrtd) app's proofing session routes. The path token names the
+      session and the X-Device-Token header authorizes the device holding one of
+      its slots; there is no wallet login. Only the app calls them: integrators
+      use the customer proofing API.
 paths:
   /api/v1/admin/identity-reviews:
     get:
@@ -136,6 +142,502 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/app/handover/{handoverToken}/claim:
+    parameters:
+      - name: handoverToken
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The single-use grant from the claim or handover link.
+    post:
+      tags: [idem-app]
+      summary: Claim a session slot with a claim or handover link
+      description: >-
+        Moves the slot the grant is for to this device and returns its device token. Single use; a previous device is revoked.
+      security: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+        '429':
+          description: Too many requests; see Retry-After.
+  /api/v1/app/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+    get:
+      tags: [idem-app]
+      summary: Read the session as the app sees it
+      description: >-
+        What to collect, who asks and how long the session has. Opening it marks a created session opened.
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+  /api/v1/app/{token}/claim:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+    post:
+      tags: [idem-app]
+      summary: Claim with the session token (retired)
+      description: >-
+        Always answers 410 claim_token_required: scan the claim or handover QR instead.
+      security: []
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Gone.
+  /api/v1/app/{token}/device/state:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+    post:
+      tags: [idem-app]
+      summary: Report the device state
+      description: >-
+        Records whether the app is active or in the background, so the other device can offer a handover.
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+  /api/v1/app/{token}/events:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+    get:
+      tags: [idem-app]
+      summary: Wait for a change to the session
+      description: >-
+        Long-polls until the app view changes (status, steps, devices) or SessionEventsWait passes, then answers the view. `since` is the change key the client last saw. Capped per session and per server.
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+        '429':
+          description: Too many requests; see Retry-After.
+  /api/v1/app/{token}/handover:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+    post:
+      tags: [idem-app]
+      summary: Mint a handover link
+      description: >-
+        Issues a short-lived, single-use grant for one of the session slots, replacing its pending one.
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+  /api/v1/app/{token}/result:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+    post:
+      tags: [idem-app]
+      summary: Submit a whole result (retired)
+      description: >-
+        Always answers 409 flow_steps_required: every session runs a flow, submitted step by step.
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+  /api/v1/app/{token}/steps/document_capture:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+    post:
+      tags: [idem-app]
+      summary: Submit the document_capture step
+      description: >-
+        The MRZ reading and, for a chip read, its access data.
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+        '422':
+          description: The document is not supported.
+  /api/v1/app/{token}/steps/document_photo:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+    post:
+      tags: [idem-app]
+      summary: Submit the document_photo step
+      description: >-
+        Photos of the document, with the located BSN region of a Dutch document.
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+  /api/v1/app/{token}/steps/nfc:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+    post:
+      tags: [idem-app]
+      summary: Submit the nfc_read step
+      description: >-
+        The raw chip data, which the server verifies itself (Passive and Active or Chip Authentication).
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+        '422':
+          description: The document is not supported.
+  /api/v1/app/{token}/steps/selfie:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+    post:
+      tags: [idem-app]
+      summary: Submit the face steps
+      description: >-
+        The Regula liveness transaction of the live capture; the face is matched against the reference here.
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+        '503':
+          description: The face provider is unavailable.
+  /api/v1/app/{token}/steps/{step}/result:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+      - name: step
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow step, e.g. selfie or nfc_read.
+    get:
+      tags: [idem-app]
+      summary: Read a step result
+      description: >-
+        The recorded outcome of one step.
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+  /api/v1/app/{token}/steps/{step}/start:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+      - name: step
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow step, e.g. selfie or nfc_read.
+    post:
+      tags: [idem-app]
+      summary: Start a step
+      description: >-
+        Marks the step started, for its timing.
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+  /api/v1/app/{token}/submit:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The session token from the claim or handover link.
+    post:
+      tags: [idem-app]
+      summary: Submit the session
+      description: >-
+        Once every step has evidence the session gets its outcome; a repeat answers the current state.
+      security: []
+      parameters:
+        - name: X-Device-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: The device token the claim or handover returned.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
   /api/v1/attestations/claim/{token}:
     parameters:
       - name: token

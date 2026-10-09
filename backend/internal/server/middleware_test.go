@@ -233,3 +233,21 @@ func TestRecoverer_ReturnsInternalServerError(t *testing.T) {
 		t.Errorf("expected error=%q, got %q", "internal server error", body["error"])
 	}
 }
+
+// A bearer token in the path never reaches the request log; ids and route
+// words do.
+func TestLoggedPathRedactsTokens(t *testing.T) {
+	cases := map[string]string{
+		"/api/v1/app/Zq3xY9vK2mN8pL4rT6wB1cD5/steps/nfc":                 "/api/v1/app/{token}/steps/nfc",
+		"/api/v1/proof/0123456789abcdef0123456789abcdef":                 "/api/v1/proof/{token}",
+		"/api/v1/orgs/acme/members/0f8fad5b-d9cb-469f-a165-70867728950e": "/api/v1/orgs/acme/members/0f8fad5b-d9cb-469f-a165-70867728950e",
+		"/api/v1/app/handover/abcdefghijklmnopqrstuvwxyz0/claim":         "/api/v1/app/handover/{token}/claim",
+		"/api/v1/orgs/acme/members/request-identification":               "/api/v1/orgs/acme/members/request-identification",
+		"/livez": "/livez",
+	}
+	for in, want := range cases {
+		if got := loggedPath(in); got != want {
+			t.Errorf("loggedPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
