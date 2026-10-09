@@ -41,6 +41,10 @@ export const nl: Translation<typeof en> = {
   nav: {
     dashboard: "Dashboard",
     members: "Leden",
+    identityProofing: "Identiteitsverificatie",
+    identityProofingOverview: "Overzicht",
+    identityProofingFlows: "Flows",
+    customers: "Klanten",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
     postguard: "PostGuard-bestanden",
@@ -421,6 +425,957 @@ export const nl: Translation<typeof en> = {
       error: "Heridentificatie starten mislukt: {{message}}",
     },
   },
+  identityProofing: {
+    title: "Identiteitsverificatie",
+    pause: {
+      pausedTitle: "Identiteitsverificatie is gepauzeerd",
+      byPlatform:
+        "De platformbeheerder heeft identiteitsverificatie voor deze organisatie gepauzeerd. Neem contact met hen op om het te hervatten.",
+      byOrganization:
+        "Een beheerder van deze organisatie heeft identiteitsverificatie uitgezet.",
+      whatStops:
+        "Zolang het gepauzeerd is, start er niets nieuws: geen verzoeken, geen API-aanroepen van klanten en geen gehoste links. Sessies die op beoordeling wachten worden afgewezen, met het verzoek het later opnieuw te proberen. Sessies die al lopen worden afgerond en hun webhooks gaan nog uit.",
+      turnOn: "Identiteitsverificatie aanzetten",
+      turnOff: "Uitzetten",
+      switchTitle: "Identiteitsverificatie uitzetten",
+      switchHint:
+        "Stopt identiteitsverificatie voor deze organisatie totdat een beheerder het weer aanzet.",
+      confirmTitle: "Identiteitsverificatie uitzetten?",
+      platformColumn: "Identiteitsverificatie",
+      active: "Actief",
+      unknown: "Onbekend",
+      pausedByPlatform: "Gepauzeerd door {{name}}",
+      pausedByPlatformAdmin: "Gepauzeerd door een platformbeheerder",
+      platformConfirmTitle: "Identiteitsverificatie pauzeren voor {{name}}?",
+      byOrganizationMember:
+        "{{name}}, beheerder van deze organisatie, heeft identiteitsverificatie uitgezet.",
+      pausedByOrganization: "Uitgezet door de organisatie",
+      platformPause: "Pauzeren",
+      platformResume: "Hervatten",
+    },
+    overview: {
+      apiDocs: "API-documentatie",
+      title: "Overzicht",
+      subtitle:
+        "Identiteitscontroles die je voor je klanten uitvoert. Laatste 30 dagen.",
+      stats: {
+        sessions: "Sessies",
+        sessionsHint_one: "voor {{count}} klant",
+        sessionsHint_other: "voor {{count}} klanten",
+        verified: "Geverifieerd",
+        verifiedHint: "{{share}} van de sessies",
+        failed: "Mislukt",
+        failedHint: "Niet door de controles gekomen",
+        expired: "Verlopen",
+        needsReview: "Te beoordelen",
+        needsReviewHint: "Wacht op jouw besluit",
+        expiredHint: "Niet binnen 10 minuten afgerond",
+        cancelled: "Geannuleerd",
+        cancelledHint: "Ingetrokken voordat ze klaar waren",
+        noSessions: "Nog geen sessies",
+      },
+      recent: {
+        title: "Recente sessies",
+        scope: "alle klanten",
+        scopeOwn: "door jou verstuurd",
+        customer: "Klant",
+        flow: "Flow",
+        result: "Resultaat",
+        started: "Gestart",
+        empty: "Nog geen sessies.",
+        emptyCustomer: "Nog geen sessies voor deze klant.",
+        filterLabel: "Sessies tonen van",
+        allCustomers: "Alle klanten",
+      },
+      customers: {
+        title: "Klanten",
+        viewAll: "Alles bekijken",
+        empty: "Nog geen klanten.",
+        summary: "{{count}} sessies · {{share}} geverifieerd",
+        noSessions: "Geen sessies in 30 dagen",
+        webhookAlertNoAnswer_one:
+          "{{name}}: webhook antwoordt niet sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
+        webhookAlertNoAnswer_other:
+          "{{name}}: webhook antwoordt niet sinds {{since}}. {{count}} resultaten wachten op een nieuwe poging.",
+        webhookAlert_one:
+          "{{name}}: webhook geeft {{code}} sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
+        webhookAlert_other:
+          "{{name}}: webhook geeft {{code}} sinds {{since}}. {{count}} resultaten wachten op een nieuwe poging.",
+      },
+    },
+    requests: {
+      empty: "Nog geen verzoeken.",
+      subject: "Persoon",
+      flow: "Flow",
+      requestedBy: "Aangevraagd door",
+      assurance: "Betrouwbaarheid",
+      verifiedAs: "Geverifieerd als {{name}}",
+    },
+    methods: {
+      idemApp: "Idem-app",
+      yiviApp: "Yivi-app",
+      browser: "Browser",
+    },
+    status: {
+      pending: "Link verstuurd",
+      inProgress: "Bezig",
+      approved: "Geverifieerd",
+      rejected: "Mislukt",
+      needsReview: "Wordt beoordeeld",
+      expired: "Verlopen",
+      cancelled: "Geannuleerd",
+    },
+    rejectionReasons: {
+      documentTypeNotAccepted: "documenttype niet toegestaan in de flow",
+      documentCountryNotAccepted:
+        "land van uitgifte niet toegestaan in de flow",
+      faceStepNotCompleted: "gezichtsverificatie niet afgerond",
+      faceNoMatch: "gezicht komt niet overeen met het document",
+      livenessFailed: "levendheidscontrole mislukt",
+      chipAuthMissing: "de chipcontrole die deze flow vereist is niet geslaagd",
+      docTampered: "chipgegevens van het document zijn gemanipuleerd",
+      chipCloneDetected: "gekloonde documentchip gedetecteerd",
+      docExpired: "document verlopen",
+      assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",
+      reviewLapsed: "niet binnen 30 dagen beoordeeld",
+      orgPaused:
+        "identiteitsverificatie werd gepauzeerd terwijl de sessie op beoordeling wachtte; probeer het later opnieuw",
+      identityMismatch:
+        "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
+    },
+    errors: {
+      noEncryptionKey:
+        "Deze server heeft geen versleutelingssleutel voor identiteitsverificatie. Vraag je beheerder IDENTITY_PROOFING_ENCRYPTION_KEY in te stellen.",
+      flowNotFound: "Die flow bestaat niet meer. Kies een andere.",
+      flowNotCompletable:
+        "Die flow legt het gezicht vast in een browser, en daar kan de persoon nog niet bij. Kies een flow die in de app werkt.",
+      flowNotAllowed:
+        "Die flow is niet meer beschikbaar voor leden. Kies een andere.",
+      memberNotFound: "Die persoon is geen lid van deze organisatie.",
+      customerNotFound: "Die klant bestaat niet.",
+      customerExists: "Je organisatie heeft al een klant met deze naam.",
+      flowNotAssigned:
+        "Die flow is niet meer aan deze klant toegewezen. Kies een andere.",
+      customerPaused:
+        "Verificatie is gepauzeerd voor deze klant. Een beheerder kan het hervatten op de pagina van de klant.",
+      customerHasOpenReviews:
+        "Deze klant heeft sessies die op beoordeling wachten. Beoordeel die eerst voordat je pauzeert.",
+      customerSessionsLeft:
+        "Er zijn sessies voor deze klant verstuurd terwijl hij werd verwijderd. Probeer hem opnieuw te verwijderen.",
+      proofingPaused:
+        "Identiteitsverificatie is gepauzeerd voor deze organisatie.",
+      customerNoApiKey:
+        "Deze klant heeft nog geen API-sleutel. Een beheerder kan er een aanmaken op het tabblad API-sleutels van de klant.",
+      apiKeyNotFound: "Die API-sleutel bestaat niet meer.",
+      sessionNotFound: "Die sessie bestaat niet meer.",
+      notUnderReview:
+        "Deze sessie wacht niet meer op beoordeling: misschien heeft iemand haar al beoordeeld.",
+      referencePhotoRequired:
+        "Deze flow vergelijkt het gezicht met je eigen foto van de persoon, die alleen via de klant-API kan worden meegestuurd. Kies een andere flow.",
+      organizationNotFound: "Die organisatie bestaat niet.",
+      webhookNotFound:
+        "De webhook van deze klant bestaat niet meer: misschien heeft iemand hem verwijderd. Laad de pagina opnieuw.",
+      linkStarted: "Deze link is al ergens anders geopend. Ga daar verder.",
+      sessionOver: "Deze sessie is afgelopen. Start een nieuwe.",
+      deviceActive:
+        "De Idem-app heeft deze sessie nog open: ga daar verder, of sluit hem eerst.",
+      methodUnavailable:
+        "Deze omgeving kan geen sessies met de Yivi-app uitvoeren: de gezichtscontrole is niet ingesteld. Kies de Idem-app.",
+      hostedDisabled:
+        "De gehoste pagina van deze flow staat uit. Zet hem aan onder Gehoste pagina bij de flow, of verstuur het verzoek op een andere manier.",
+      diplomasNeedPage:
+        "Deze flow vraagt om diploma's, die worden geüpload op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
+      diplomasClosed:
+        "Diploma's kunnen alleen kort na een geslaagde identiteitscontrole worden toegevoegd.",
+      diplomasNotAsked: "Deze controle vraagt niet om diploma's.",
+      flowNoIdentity:
+        "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
+      dataFlowForMember:
+        "Een flow voor gegevensverzoeken is voor de mensen van een klant. Haal hem eerst uit de flows voor leden.",
+      exportUnavailable: "Deze gegevens kunnen niet meer worden gedownload.",
+      tooLarge: "Het bestand is te groot.",
+      generic: "Er ging iets mis. Probeer het opnieuw.",
+    },
+    diplomas: {
+      overview: {
+        label: "Diploma's",
+        detail:
+          "Na de identiteitscontrole: de diploma-uittreksels die je bij DUO downloadt, gecontroleerd op de handtekening van DUO en op je naam en geboortedatum",
+      },
+      identityDone: "Je identiteit is geverifieerd.",
+      heading: "Voeg nu je diploma toe",
+      intro:
+        "Upload het officiële uittreksel van je diploma van DUO. We controleren of DUO het heeft uitgegeven en of het op jouw naam staat.",
+      how: {
+        login: "Log in bij Mijn DUO met DigiD.",
+        openDuo: "Open Mijn DUO",
+        download:
+          "Download bij ‘Mijn diploma's’ het uittreksel van je diploma als pdf.",
+        upload:
+          "Upload die pdf hier, onveranderd. Een scan of foto van je diploma werkt niet.",
+      },
+      choose: "Pdf kiezen",
+      chooseAnother: "Nog een diploma toevoegen",
+      checking: "Bezig met controleren…",
+      closed: "De tijd om diploma's toe te voegen is voorbij.",
+      done: "Klaar",
+      needOne: "Voeg minstens één diploma toe om verder te gaan.",
+      level: "niveau {{level}}",
+      reasons: {
+        notADiploma:
+          "Dit is geen diploma-uittreksel van DUO. Download de originele pdf via Mijn DUO.",
+        signatureInvalid:
+          "De handtekening van DUO klopt niet: het bestand is gewijzigd of niet door DUO gemaakt. Download de originele pdf opnieuw.",
+        holderMismatch: "Dit diploma staat niet op jouw naam en geboortedatum.",
+        duplicate: "Dit diploma is al toegevoegd.",
+      },
+    },
+  },
+  customers: {
+    title: "Klanten",
+    subtitle:
+      "Organisaties waarvoor je mensen verifieert. Elk heeft eigen flows en sessies.",
+    add: "Klant toevoegen",
+    status: {
+      active: "Actief",
+      paused: "Gepauzeerd",
+      needsAttention: "Aandacht nodig",
+      setupNeeded: "Inrichting nodig",
+    },
+    list: {
+      search: "Klanten zoeken",
+      count_one: "{{count}} klant",
+      count_other: "{{count}} klanten",
+      name: "Klant",
+      flows: "Flows",
+      sessions: "Sessies 30d",
+      verified: "Geverifieerd",
+      status: "Status",
+      added: "Toegevoegd {{date}}",
+      empty: "Nog geen klanten.",
+      noMatch: "Geen klant komt overeen met je zoekopdracht.",
+      webhook: "Webhook",
+    },
+    new: {
+      title: "Nieuwe klant",
+      name: "Naam",
+      namePlaceholder: "Initech BV",
+      nameRequired: "Vul een naam in.",
+      create: "Klant toevoegen",
+      cancel: "Annuleren",
+    },
+    detail: {
+      since_one:
+        "{{id}} · klant sinds {{date}} · {{count}} sessie in de laatste 30 dagen",
+      since_other:
+        "{{id}} · klant sinds {{date}} · {{count}} sessies in de laatste 30 dagen",
+      notFound: "Deze klant bestaat niet.",
+      verify: "Een persoon verifiëren",
+      pause: "Verificatie pauzeren",
+      resume: "Verificatie hervatten",
+      pausedNotice:
+        "Verificatie is gepauzeerd voor deze klant: er kan geen nieuw verzoek worden verstuurd totdat een beheerder het hervat.",
+      noApiKeyNotice:
+        "Deze klant heeft nog geen API-sleutel: maak er een aan voordat je verzoeken verstuurt.",
+      noApiKeyNoticeMember:
+        "Deze klant heeft nog geen API-sleutel, dus er kan geen verzoek worden verstuurd. Vraag een beheerder er een aan te maken.",
+      createApiKey: "API-sleutel aanmaken",
+      pauseConfirm: {
+        title: "Verificatie pauzeren voor {{name}}?",
+        message:
+          "Er kan geen nieuw verzoek voor deze klant worden verstuurd totdat je het hervat. Verzoeken die al verstuurd zijn lopen gewoon af.",
+        confirm: "Verificatie pauzeren",
+      },
+    },
+    tabs: {
+      flows: "Flows",
+      sessions: "Sessies",
+      settings: "Instellingen",
+      branding: "Huisstijl",
+      apiKeys: "API-sleutels",
+      webhooks: "Webhooks",
+    },
+    flows: {
+      live: "Actief",
+      eidas: "eIDAS {{level}}",
+      intro:
+        "Een flow bepaalt welke gegevens worden gevraagd en het minimale betrouwbaarheidsniveau. Verzoeken voor deze klant kunnen de hier toegewezen flows gebruiken.",
+      sharedEditNote:
+        "Flows worden gedeeld: deze wijziging geldt voor elke klant en elk lid dat deze flow gebruikt.",
+      newFlowNote: "De nieuwe flow wordt meteen aan {{name}} toegewezen.",
+      newFlow: "Nieuwe flow",
+      assignExisting: "Bestaande flows toewijzen",
+      assignFailed:
+        "De flow is opgeslagen, maar niet aan deze klant toegewezen: {{reason}}",
+      noneAssignedAdmin:
+        "Er zijn nog geen flows aan deze klant toegewezen. Maak er een met Nieuwe flow, of wijs een bestaande flow van je organisatie toe.",
+      done: "Klaar",
+      noneAssigned: "Er zijn nog geen flows aan deze klant toegewezen.",
+      sessions_one: "{{count}} sessie in 30 dagen",
+      sessions_other: "{{count}} sessies in 30 dagen",
+      requestedData: "Gevraagde gegevens",
+      assuranceSteps: "Betrouwbaarheid · stappen",
+      noAssurance: "Geen minimumniveau",
+      noData: "Niets gevraagd",
+      edit: "Flow bewerken",
+      title: "Toegewezen flows",
+      hint: "Verzoeken voor deze klant kunnen de hier aangevinkte flows gebruiken, ook als leden ze niet mogen gebruiken; de standaardflow is voorgeselecteerd.",
+      empty: "Je organisatie heeft nog geen flows.",
+      default: "Standaard",
+      save: "Toegewezen flows opslaan",
+    },
+    send: {
+      title: "Een persoon verifiëren",
+      hint: "De persoon krijgt een mail met een QR-code en een link voor de vcmrtd-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek. Een account is niet nodig.",
+      hintOnScreen:
+        "De persoon is bij je. Een pagina laat zien wat er wordt verzameld, laat kiezen tussen de Yivi-app en de Idem-app en toont de QR-code. Er wordt niets gemaild.",
+      channel: "Hoe krijgt de persoon de QR-code?",
+      channels: {
+        email: {
+          title: "Per e-mail versturen",
+          hint: "Een mail met de QR-code en een link.",
+        },
+        onScreen: {
+          title: "Op dit scherm tonen",
+          hint: "Een pagina hier, voor iemand die bij je is.",
+        },
+        link: {
+          title: "Link kopiëren",
+          hint: "Een link naar de pagina van de klant, die je de persoon zelf stuurt. 72 uur geldig.",
+        },
+      },
+      emailOptional: "E-mailadres (optioneel)",
+      submitOnScreen: "Pagina openen",
+      submitLink: "Link maken",
+      hintLink:
+        "Je krijgt een link naar een pagina in de huisstijl van de klant. De persoon opent die op het eigen apparaat, leest wat er wordt verzameld, kiest de app en start daar; vanaf dan loopt de sessie. Er wordt niets gemaild.",
+      linkTitle: "Link gemaakt",
+      linkHint:
+        "Stuur deze link naar de persoon, bijvoorbeeld via chat. Hij kan één keer worden gestart, binnen 72 uur; de uitkomst verschijnt onder Sessies.",
+      linkDone: "Klaar",
+      email: "E-mailadres",
+      emailRequired: "Vul een geldig e-mailadres in.",
+      diplomasOnScreen:
+        "Deze flow vraagt om diploma's, die worden geüpload op de pagina waar de controle loopt, dus hij loopt op dit scherm of als link.",
+      name: "Naam (optioneel)",
+      nameHint:
+        "Laat leeg als je die niet weet: na verificatie staat de naam van het document hier 30 dagen.",
+      nameRequired: "Vul de naam in van de persoon bij deze geboortedatum.",
+      birthDate: "Geboortedatum (optioneel)",
+      birthDateHint:
+        "Met een geboortedatum kan alleen deze persoon slagen: de naam en geboortedatum op het document moeten kloppen, anders wordt de controle afgewezen.",
+      flow: "Flow",
+      submit: "Verzoek versturen",
+      cancel: "Annuleren",
+      noFlowsAdmin:
+        "Wijs eerst een flow aan deze klant toe, op het tabblad Flows.",
+      noFlowsMember:
+        "Een beheerder moet eerst een flow aan deze klant toewijzen voordat je een verzoek kunt versturen.",
+      referencePhotoFlows:
+        "Flows die het gezicht vergelijken met de eigen foto van de klant staan hier niet: het systeem van de klant verstuurt die via de API, met de foto.",
+    },
+    onScreen: {
+      title: "Een persoon verifiëren",
+      missingFlow:
+        "Deze flow is niet meer aan de klant toegewezen. Ga terug en kies een andere.",
+      steps: {
+        overview: "Wat er wordt verzameld",
+        method: "Kies een app",
+        session: "Scan de QR-code",
+        diplomas: "Diploma",
+      },
+      overview: {
+        heading: "{{name}} wil je identiteit verifiëren",
+        intro:
+          "Je bevestigt je identiteit met je paspoort of identiteitskaart. {{name}} ontvangt:",
+        noData: "Alleen de uitkomst: of je identiteit is geverifieerd.",
+        flow: "Flow",
+        assurance: "Betrouwbaarheidsniveau",
+        retention_one:
+          "Wat de verificatie verzamelt (je naam en de andere gegevens en foto's hierboven) wordt uiterlijk {{count}} dag na afloop verwijderd.",
+        retention_other:
+          "Wat de verificatie verzamelt (je naam en de andere gegevens en foto's hierboven) wordt uiterlijk {{count}} dagen na afloop verwijderd.",
+        support: "Vragen? {{contact}}",
+        privacy: "Privacyverklaring",
+        cancel: "Annuleren",
+        continue: "Verder",
+      },
+      attributeDetails: {
+        dg1: "Je naam, geboortedatum en nationaliteit, en het nummer en de vervaldatum van het document.",
+        dg11: "Je geboorteplaats en persoonsnummer (BSN), als je document die op de chip heeft staan.",
+        dg2: "Je pasfoto op de chip van het document.",
+        chip_checks: "Of de chip echt en onveranderd is.",
+        document_image:
+          "Foto's van de voor- en achterkant van je document (bij een paspoort alleen de fotopagina).",
+        selfie: "Een foto van je gezicht tijdens de controle.",
+        biometrics:
+          "Hoe goed je gezicht overeenkomt met de foto op het document.",
+      },
+      method: {
+        heading: "Hoe wil je je verifiëren?",
+        yivi: {
+          title: "Yivi-app",
+          detail:
+            "Deel het paspoort of de identiteitskaart die al in je Yivi-app staat en kijk daarna hier in de camera.",
+        },
+        idem: {
+          title: "Idem-app",
+          detail:
+            "Scan je paspoort of identiteitskaart met de Idem-app en houd het tegen je telefoon om de chip te lezen.",
+        },
+        back: "Terug",
+        continue: "QR-code tonen",
+      },
+      scan: {
+        yiviHeading: "Scan met de Yivi-app",
+        yiviHint:
+          "Open de Yivi-app en scan deze code, of tik op de knop als deze pagina op je telefoon staat.",
+        openYivi: "Openen in de Yivi-app",
+        idemHeading: "Scan met de Idem-app",
+        idemHint: "Open de Idem-app en scan deze code vanuit de app.",
+        openIdem: "Openen in de Idem-app",
+        starting: "De sessie wordt gestart…",
+        expiresIn: "Geldig voor {{time}}",
+        expired: "Deze code is verlopen.",
+        restart: "Opnieuw beginnen",
+        startedElsewhere:
+          "Deze controle is in een ander venster gestart: ga daar verder in de app.",
+        inProgress: "De sessie is geopend op de telefoon.",
+        newCode: "Nieuwe code tonen",
+        connectedHeading: "Verder in de Idem-app",
+        connectedHint:
+          "De sessie is geopend op de telefoon. Wordt de app gesloten, dan verschijnt hier een code om verder te gaan.",
+        awayHeading: "De Idem-app is gesloten",
+        awayHint:
+          "Scan deze code met de Idem-app om verder te gaan waar de sessie was, op dezelfde of een andere telefoon.",
+        newCodeLoading: "Nieuwe code ophalen…",
+        newCodeHint:
+          "App gesloten, code verlopen of een andere telefoon? Met een nieuwe code ga je verder waar de sessie was.",
+      },
+      yiviEnded: "De sessie in de Yivi-app is beëindigd: {{reason}}",
+      yiviCodes: {
+        photoMissing: "de gedeelde kaart heeft geen foto.",
+        referenceNoFace: "op de gedeelde foto is geen gezicht gevonden.",
+        documentNotAccepted: "deze flow accepteert het gedeelde document niet.",
+      },
+      face: {
+        heading: "Kijk in de camera",
+        hint: "Houd je gezicht in beeld. Het wordt vergeleken met de foto uit je Yivi-app. Een passend beeld wordt alleen bewaard als om je selfie is gevraagd.",
+        progress: "Match {{count}} van {{total}}",
+        noFace: "Geen gezicht gevonden. Kom dichter bij de camera.",
+        cameraError:
+          "De camera kon niet worden geopend. Geef deze pagina toegang en probeer het opnieuw.",
+        retry: "Opnieuw proberen",
+      },
+      outcome: {
+        approved: {
+          title: "Identiteit geverifieerd",
+          message: "De controle is afgerond.",
+        },
+        rejected: {
+          title: "Niet geverifieerd",
+          message: "De controle is niet gelukt.",
+        },
+        expired: {
+          title: "Sessie beëindigd",
+          message: "De controle is niet op tijd afgerond.",
+        },
+        review: {
+          title: "Wacht op beoordeling",
+          message:
+            "De controle is klaar en wordt handmatig beoordeeld voordat er een besluit is.",
+        },
+        cancelled: {
+          title: "Controle gestopt",
+          message:
+            "Er is geen identiteitscontrole gedaan en er is niets gedeeld.",
+        },
+        back: "Terug naar {{name}}",
+        again: "Opnieuw verifiëren",
+      },
+    },
+    sessions: {
+      review: {
+        title: "Beoordeling afronden",
+        hint: "De controles konden niet zelf beslissen. Jouw besluit rondt de sessie af en gaat naar de klant.",
+        reason: "Reden",
+        reasonPlaceholder: "Wat je hebt gecontroleerd, en waarom je zo besluit",
+        reasonRequired: "Geef een reden: die wordt bewaard in het auditlog.",
+        reasonTooLong: "Houd de reden op maximaal {{max}} tekens.",
+        approve: "Goedkeuren",
+        reject: "Afwijzen",
+      },
+      dataRequest: {
+        data_access: {
+          title: "Deze persoon vraagt welke gegevens er van hem of haar zijn",
+          hint: "De persoon heeft met deze sessie bewezen wie hij of zij is. Controleer de identiteit en keur de sessies goed die je deelt: de persoon kan die gegevens 7 dagen downloaden via de eigen link, en jij kunt ze hier downloaden om te versturen.",
+          approve_one: "Goedkeuren: {{count}} sessie delen",
+          approve_other: "Goedkeuren: {{count}} sessies delen",
+        },
+        data_erasure: {
+          title:
+            "Deze persoon vraagt om verwijdering van zijn of haar gegevens",
+          hint: "De persoon heeft met deze sessie bewezen wie hij of zij is. Controleer de identiteit en keur de sessies goed die je verwijdert: de persoonsgegevens worden direct gewist, de sessies blijven als registratie staan en de klant krijgt per sessie bericht.",
+          approve_one: "Goedkeuren: {{count}} sessie verwijderen",
+          approve_other: "Goedkeuren: {{count}} sessies verwijderen",
+          confirm: {
+            title_one: "{{count}} sessie wissen?",
+            title_other: "{{count}} sessies wissen?",
+            message:
+              "De persoonsgegevens in de aangevinkte sessies, en in dit verzoek, worden direct verwijderd en zijn niet te herstellen. De sessies blijven zonder die gegevens bewaard.",
+          },
+        },
+        reasonPlaceholder:
+          "Wat je hebt gecontroleerd, en waarom, bv. een wettelijke bewaarplicht",
+        noMatches:
+          "Er zijn geen andere sessies van deze persoon gevonden bij deze klant.",
+        matches_one: "{{count}} sessie van deze persoon gevonden",
+        matches_other: "{{count}} sessies van deze persoon gevonden",
+        emailMatches_one:
+          "{{count}} onafgeronde sessie met hetzelfde adres of dezelfde naam",
+        emailMatches_other:
+          "{{count}} onafgeronde sessies met hetzelfde adres of dezelfde naam",
+        emailMatchesHint:
+          "Deze zijn nooit afgerond, dus er is geen bewezen identiteit om te vergelijken: alleen het e-mailadres of de ingevulde naam komt overeen. Vink aan welke van deze persoon zijn.",
+        levels: {
+          strong: "Zelfde document",
+          probable: "Naam en geboortedatum",
+          email: "Zelfde e-mailadres",
+          name: "Zelfde naam",
+        },
+        untickHint:
+          "Sessies met hetzelfde document zijn aangevinkt; een sessie met alleen dezelfde naam en geboortedatum niet, dus vink die alleen aan als je zeker weet dat hij van deze persoon is. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
+        erased: "Verwijderd",
+        approved: "Goedgekeurd",
+        kept: "Bewaard",
+        download: "Gegevens downloaden",
+        downloadUntil: "Beschikbaar tot {{date}}",
+        downloadClosed: "De download was beschikbaar tot {{date}}.",
+      },
+      method: "Methode",
+      timeline: "Tijdlijn",
+      noEvents: "Nog niets vastgelegd.",
+      identity: {
+        audited:
+          "Het openen van een afgeronde sessie wordt vastgelegd in het auditlog.",
+        photo: "Documentfoto",
+        referencePhoto: "Foto van de klant",
+        noDocument: "Geen: het gezicht is vergeleken met de foto van de klant",
+        selfie: "Selfie",
+        documentImage: "Voorkant van het document",
+        documentImageBack: "Achterkant van het document",
+        none: "Geen identiteit: de controle is niet goedgekeurd.",
+        name: "Naam",
+        birthDate: "Geboortedatum",
+        nationality: "Nationaliteit",
+        document: "Document",
+        passiveAuth: "Echtheid chip",
+        faceMatch: "Gezichtsvergelijking",
+        liveness: "Echtheid persoon",
+        checks: {
+          valid: "Geldig",
+          invalid: "Ongeldig",
+          not_performed: "Niet uitgevoerd",
+          passed: "Geslaagd",
+          failed: "Mislukt",
+        },
+      },
+      filterLabel: "Sessies filteren",
+      filters: {
+        all: "Alle {{count}}",
+        review: "Te beoordelen {{count}}",
+        verified: "Geverifieerd {{count}}",
+        failed: "Mislukt {{count}}",
+        expired: "Verlopen {{count}}",
+      },
+      retention_one:
+        "Persoonsgegevens worden {{count}} dag na afloop van een sessie gewist. Het resultaat en het auditspoor blijven.",
+      retention_other:
+        "Persoonsgegevens worden {{count}} dagen na afloop van een sessie gewist. Het resultaat en het auditspoor blijven.",
+      retentionOwn_one:
+        "Je ziet de sessies die jij verstuurde. Persoonsgegevens worden {{count}} dag na afloop van een sessie gewist.",
+      retentionOwn_other:
+        "Je ziet de sessies die jij verstuurde. Persoonsgegevens worden {{count}} dagen na afloop van een sessie gewist.",
+      viaApiKey: "API-sleutel · {{name}}",
+      session: "Sessie",
+      result: "Resultaat",
+      started: "Gestart",
+      duration: "Duur",
+      details: "Details van sessie {{id}}",
+      fullId: "Sessie-id",
+      reason: "Reden",
+      completed: "Afgerond",
+      purgeAt: "Persoonsgegevens gewist op",
+      expectedSubject: "Verwachte persoon",
+      expectedSubjectValue:
+        "Naam en geboortedatum gecontroleerd tegen het document",
+      diplomas: {
+        title: "Diploma's",
+        none: "Geen diploma toegevoegd.",
+        tag_one: "{{count}} diploma",
+        tag_other: "{{count}} diploma's",
+        missing: "Geen diploma",
+        number: "DUO-nummer {{number}}",
+      },
+      purged: "Persoonsgegevens gewist",
+      purgedSubject: "Gewist",
+      failedBecause: "{{status}} · {{reason}}",
+    },
+    settings: {
+      sessionsTitle: "Sessies",
+      qrLifetime: "Geldigheid QR-code",
+      qrLifetimeHint:
+        "Daarna verloopt de sessie en is een nieuw verzoek nodig.",
+      minutes_one: "{{count}} min",
+      minutes_other: "{{count}} min",
+      retention: "Bewaartermijn",
+      retentionHint:
+        "De persoonsgegevens van een sessie (de naam en het e-mailadres waarheen hij is verstuurd, alles wat van het document en de chip is gelezen, de foto's en eventuele diploma's) worden zo lang na afloop gewist. Het resultaat en het auditspoor blijven.",
+      days_one: "{{count}} dag",
+      days_other: "{{count}} dagen",
+      nameTitle: "Naam",
+      nameHint: "Zichtbaar voor je leden en in het auditlog.",
+      redirectOriginsTitle: "Terugstuur-origins",
+      redirectOriginsHint:
+        "Eén per regel, zoals https://portal.example.com. Een gehoste pagina mag de persoon naar deze origins terugsturen en daarop worden ingesloten.",
+      save: "Opslaan",
+      removeTitle: "Klant verwijderen",
+      removeHint:
+        "Trekt de API-sleutels in, verwijdert de webhook en wist de sessies. Auditlog-regels blijven bewaard.",
+      remove: "Klant verwijderen",
+      removeConfirm: {
+        title: "{{name}} verwijderen?",
+        message:
+          "De API-sleutels werken niet meer, de webhook wordt verwijderd en elke sessie voor deze klant wordt gewist, met de adressen en namen van de personen. Het auditlog bewaart wat er gebeurde. Dit kan niet ongedaan worden gemaakt.",
+      },
+    },
+    webhookState: {
+      delivering: "Levert af",
+      deliveringCode: "Levert af · {{code}}",
+      failing: "Faalt · {{code}} sinds {{since}}",
+      failingNoAnswer: "Faalt · geen antwoord sinds {{since}}",
+      notConfigured: "Niet ingesteld",
+    },
+    secret: {
+      copy: "Kopiëren",
+      copied: "Gekopieerd",
+      done: "Ik heb het bewaard",
+    },
+    branding: {
+      title: "Huisstijl van de mail",
+      hint: "De verificatiemail die de personen van je klant krijgen, is ondertekend en opgemaakt als de klant.",
+      displayName: "Weergavenaam",
+      displayNameHint:
+        "Ondertekent de verificatiemail en het onderwerp. Leeg gebruikt de naam van de klant.",
+      logo: "Logo",
+      logoSet: "Huidig logo",
+      noLogo: "Geen logo: de weergavenaam staat er in plaats daarvan",
+      logoHint:
+        "PNG, JPEG, GIF of WebP, hooguit 512 KB. Mailprogramma's tonen geen SVG.",
+      upload: "Uploaden",
+      replace: "Vervangen",
+      removeLogo: "Verwijderen",
+      primaryColor: "Primaire kleur",
+      customColor: "Kies een kleur",
+      orgColor: "Standaard",
+      colorInvalid: "Vul een hexkleur in zoals #1F5B4A.",
+      primaryColorHint:
+        "Gebruikt voor de knop en het merkteken van de mail. De tekst erop wordt aangepast voor contrast.",
+      supportContact: "Supportcontact",
+      supportPlaceholder: "klantenservice@example.nl",
+      privacyUrl: "URL van de privacyverklaring",
+      privacyPlaceholder: "https://example.nl/privacy",
+      hidePoweredBy:
+        "Laat de regel “Mogelijk gemaakt door Yivi” weg op de gehoste pagina",
+      discard: "Verwerpen",
+      save: "Huisstijl opslaan",
+      preview: {
+        caption: "Live voorbeeld · verificatiemail",
+        heading: "{{name}} vraagt je je identiteit te verifiëren",
+        body: "{{name}} vraagt je je identiteit te verifiëren met je paspoort of identiteitskaart en je gezicht, in de vcmrtd-app op je telefoon.",
+        button: "Openen in de vcmrtd-app",
+        support: "Vragen over dit verzoek? Neem contact op met {{contact}}.",
+        privacy: "Hoe er met je gegevens wordt omgegaan: {{url}}",
+        footer: "Identiteitscontrole door Yivi",
+      },
+    },
+    apiKeys: {
+      intro:
+        "Je backend maakt met deze sleutels sessies aan en leest de uitkomst via de verificatie-API. Alleen actieve sleutels werken.",
+      create: "API-sleutel aanmaken",
+      name: "Naam",
+      namePlaceholder: "Productiebackend",
+      key: "Sleutel",
+      prefix: "{{prefix}}…",
+      created: "Aangemaakt",
+      lastUsed: "Laatst gebruikt",
+      neverUsed: "Nooit",
+      empty: "Nog geen API-sleutels.",
+      status: "Status",
+      active: "Actief",
+      revoked: "Ingetrokken",
+      revoke: "Intrekken",
+      revokeConfirm: {
+        title: "{{name}} intrekken?",
+        message:
+          "Alles wat deze sleutel gebruikt, werkt meteen niet meer. Dit kan niet ongedaan worden gemaakt.",
+      },
+      createdTitle: "Je nieuwe API-sleutel",
+      createdHint:
+        "Kopieer hem nu en bewaar hem veilig, bijvoorbeeld in de geheimenopslag van je backend: hij wordt niet opnieuw getoond. Alleen een hash ervan wordt bewaard.",
+    },
+    webhooks: {
+      endpoint: "Endpoint",
+      formHint:
+        "De wallet stuurt een ondertekend bericht naar deze URL als een sessie geverifieerd is, mislukt, verloopt of als de persoonsgegevens gewist zijn.",
+      url: "URL",
+      urlPlaceholder: "https://api.example.nl/hooks/yivi-proofing",
+      events: "Gebeurtenissen",
+      save: "Endpoint opslaan",
+      delivering: "Levert af",
+      failing: "Faalt",
+      secret: "Ondertekeningsgeheim",
+      retries: "Herhalingen",
+      retriesValue_one:
+        "Exponentieel uitstel, tot {{count}} poging binnen 24 uur",
+      retriesValue_other:
+        "Exponentieel uitstel, tot {{count}} pogingen binnen 24 uur",
+      queued_one: "{{count}} resultaat wacht op een nieuwe poging",
+      queued_other: "{{count}} resultaten wachten op een nieuwe poging",
+      test: "Testbericht sturen",
+      rotate: "Geheim vernieuwen",
+      edit: "Bewerken",
+      remove: "Verwijderen",
+      rotateConfirm: {
+        title: "Ondertekeningsgeheim vernieuwen?",
+        message:
+          "Berichten worden vanaf nu met het nieuwe geheim ondertekend, ook de berichten die op een nieuwe poging wachten. Stel je ontvanger in op het nieuwe geheim.",
+      },
+      removeConfirm: {
+        title: "Webhook-endpoint verwijderen?",
+        message:
+          "Er worden geen berichten meer naartoe gestuurd, en de berichten die op een nieuwe poging wachten vervallen.",
+      },
+      secretTitle: "Je ondertekeningsgeheim",
+      secretHint:
+        "Kopieer het nu en bewaar het bij je ontvanger: het wordt niet opnieuw getoond. Controleer er de Yivi-Signature-header mee.",
+      recent: "Recente afleveringen",
+      noEndpointTag: "Geen endpoint",
+      defaultBody:
+        "Er worden geen events verstuurd. Sessieresultaten staan op het tabblad Sessies, zijn op te vragen via de API en staan in de auditlog onder deze klant.",
+      defaultHint:
+        "Host je een eigen ontvanger? Voeg de URL toe en de wallet POST elk ondertekend event daarheen.",
+      useOwn: "Eigen endpoint gebruiken",
+      noDeliveries: "Nog geen berichten verstuurd.",
+      queuedTag: "In de wachtrij",
+      noAnswer: "Geen antwoord",
+      retrying_one: "poging {{count}} mislukt, opnieuw",
+      retrying_other: "{{count}} pogingen mislukt, opnieuw",
+      gaveUp: "opgegeven",
+    },
+  },
+  identityProofingFlows: {
+    title: "Verificatieflows",
+    subtitle:
+      "Bepaal de controles en gegevens van elke flow, bewaar de versies en kies welke flows leden mogen gebruiken.",
+    adminOnly:
+      "Alleen een beheerder van deze organisatie kan verificatieflows beheren.",
+    notCompletable: "Kan niet vanuit de wallet verstuurd worden",
+    referencePhoto: "Eigen foto, via API",
+    versionShort: "v{{version}}",
+    edit: "Bewerken",
+    selection: {
+      title: "Flows",
+      hint: "Leden versturen verzoeken met de flows die hier aangevinkt zijn; de standaardflow staat bij elk lid voorgeselecteerd. Een flow bewerken slaat een nieuwe versie op, die nieuwe verzoeken vanaf dan gebruiken.",
+      empty: "Nog geen flows. Maak er een aan met Nieuwe flow.",
+      default: "Standaard",
+      save: "Beschikbare flows opslaan",
+    },
+    hosted: {
+      title: "Gehoste pagina",
+      enabled:
+        "Klanten mogen links naar een gehoste pagina voor deze flow versturen",
+      locales: "Talen",
+      localesHint:
+        "Vink niets aan om alle talen aan te bieden. De pagina opent in de taal van de sessie, anders in de browsertaal van de persoon.",
+      completion: "Als de controle klaar is",
+      completions: {
+        redirect:
+          "Stuur de persoon naar de redirect-URL van de sessie, of toon een bedankpagina als die er niet is",
+        done: "Toon altijd de bedankpagina (sessies mogen geen redirect-URL hebben)",
+      },
+      save: "Gehoste pagina opslaan",
+      previewAs: "Voorbeeld als klant",
+      preview: "Voorbeeld van de gehoste pagina",
+      noCustomer:
+        "Voeg een klant toe om de pagina in diens huisstijl te bekijken.",
+    },
+    versions: {
+      title: "Versies",
+      hint: "Verzoeken die al verstuurd zijn houden de versie waarmee ze begonnen. Activeer een eerdere versie om terug te gaan.",
+      active: "Actief",
+      activate: "Activeren",
+    },
+    steps: {
+      document_capture: "Document scannen",
+      nfc_read: "Chip van het document lezen",
+      document_photo: "Document fotograferen",
+      face_verification: "Gezichtscontrole",
+      diploma_upload: "Diploma's uploaden (DUO)",
+    },
+    bsnPolicies: {
+      retrieve: "BSN vrijgeven",
+      mask: "Gemaskeerd vrijgeven",
+      omit: "Weglaten",
+    },
+    assuranceLevels: {
+      low: "Laag",
+      substantial: "Substantieel",
+    },
+    faceProviders: {
+      regula: "Regula",
+    },
+    checks: {
+      passiveAuth: "De gegevens op de chip zijn echt en ongewijzigd",
+      chipAuth: "De chip is geen kopie",
+      faceMatch: "Het gezicht komt overeen met de documentfoto",
+      liveness: "Een levend persoon, geen foto of video",
+    },
+    attributes: {
+      dg1: "Naam en documentgegevens",
+      dg11: "Geboorteplaats en persoonsnummer (BSN)",
+      dg2: "Pasfoto van de chip",
+      chip_checks: "Uitkomst chipcontroles",
+      document_image: "Foto's van het document",
+      selfie: "Selfie",
+      biometrics: "Scores gezichtscontrole",
+    },
+    attributeHints: {
+      dg1: "Naam, geboortedatum, nationaliteit, en het type, nummer en de vervaldatum van het document.",
+      dg11: "Alleen als het document ze op de chip heeft staan; veel documenten niet. Het BSN volgt het BSN-beleid hieronder.",
+      dg2: "De pasfoto van de houder op de chip, getoond naast de selfie.",
+      chip_checks: "Of de chip echt bleek en geen kopie.",
+      document_image:
+        "De voor- en achterkant van het document (bij een paspoort alleen de fotopagina), zoals gemaakt: het BSN daarop wordt nog niet vervaagd.",
+      selfie:
+        "De foto van het gezicht die tijdens de gezichtscontrole is gemaakt.",
+      biometrics:
+        "Hoe goed het gezicht overeenkwam met de documentfoto, en of het een levend persoon was.",
+    },
+    kinds: {
+      identity: {
+        title: "Identiteitscontrole",
+        hint: "De persoon bewijst wie hij of zij is; de klant krijgt de uitkomst.",
+      },
+      data_access: {
+        title: "Mijn gegevens inzien",
+        hint: "Iemand vraagt de klant welke gegevens er van hem of haar zijn. Na de identiteitscontrole gaat de sessie ter beoordeling, met de andere sessies van die persoon; goedkeuren laat de persoon die gegevens downloaden.",
+      },
+      data_erasure: {
+        title: "Mijn gegevens verwijderen",
+        hint: "Iemand vraagt de klant om zijn of haar gegevens te verwijderen. Na de identiteitscontrole gaat de sessie ter beoordeling, met de andere sessies van die persoon; goedkeuren verwijdert ze.",
+      },
+    },
+    new: {
+      kind: "Type",
+      title: "Nieuwe flow",
+      editTitle: "{{name}} bewerken",
+      hint: "Een flow bepaalt de stappen van een sessie, de resultaatgegevens die de verificatiedienst teruggeeft en de controles die de betrouwbaarheid bepalen.",
+      editHint:
+        "Opslaan maakt versie {{version}} en zet die meteen actief. Verzoeken die al verstuurd zijn houden de versie waarmee ze begonnen.",
+      name: "Naam",
+      namePlaceholder: "NL-paspoort + selfie",
+      create: "Flow aanmaken",
+      saveVersion: "Opslaan als versie {{version}}",
+      stepsTitle: "Stappen",
+      documentCaptureHint:
+        "De persoon fotografeert met de Idem-app de coderegels onderaan het paspoort of de ID-kaart; daarmee gaat de chip open. Altijd samen met het lezen van de chip.",
+      nfcReadHint:
+        "De persoon houdt het document tegen de telefoon en de Idem-app leest de chip. Altijd samen met het scannen van het document.",
+      documentPhotoHint:
+        "De persoon fotografeert in de Idem-app de voor- en achterkant van de ID-kaart of het rijbewijs, of de fotopagina van het paspoort.",
+      faceVerificationHint:
+        "De persoon maakt een selfie; die wordt gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
+      stepsOrder: "Wordt in deze volgorde verstuurd: {{steps}}",
+      diplomaUploadHint:
+        "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon uploadt de diploma-uittreksels die hij bij DUO downloadt, gecontroleerd op de handtekening van DUO en op naam en geboortedatum. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
+      faceLocationNative:
+        "De gezichtscontrole gebeurt in de app: de persoon heeft geen browserstap.",
+      faceProvider: "Aanbieder gezichtscontrole",
+      faceProviderHint:
+        "Regula doet de levendheidscontrole in de app en de wallet vergelijkt het gezicht met de chipfoto; in de Yivi-app vergelijkt Regula de camera met de foto uit het credential.",
+      faceWithoutChip:
+        "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met de eigen foto van de klant van deze persoon, die het systeem van de klant bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
+      dataTitle: "Gevraagde resultaatgegevens",
+      dataHint:
+        "Bepaalt welke resultaatgegevens de verificatiedienst teruggeeft. Alleen gegevens van een stap in deze flow kunnen worden gevraagd; zonder vinkje wordt alleen de uitkomst teruggegeven. De wallet bewaart zelf alleen de uitkomst en het betrouwbaarheidsniveau.",
+      checksTitle: "Vereiste controles",
+      checksHint:
+        "De controle van de chipgegevens is verplicht als de chip wordt gelezen, en de gezichtsvergelijking bij de gezichtscontrole, dus die staan vast aan; de kopiecontrole en de controle op een levend persoon blijven optioneel.",
+      faceMatchThreshold: "Drempel gezichtsvergelijking",
+      faceMatchThresholdHint:
+        "0–1, leeg is alleen geslaagd/gezakt. Alleen bij de gezichtscontrole.",
+      documentsTitle: "Geaccepteerde documenten",
+      documentTypes: "Geaccepteerde documenttypen",
+      documentTypesHint: "Gescheiden door komma's, leeg accepteert alles.",
+      issuingCountries: "Geaccepteerde landen van uitgifte",
+      issuingCountriesHint:
+        "ICAO-landcodes van drie letters zoals NLD of DEU, gescheiden door komma's; leeg accepteert alles. Een code die geen land heeft wordt geweigerd.",
+      policyTitle: "Betrouwbaarheid en privacy",
+      assuranceLevel: "Vereist betrouwbaarheidsniveau",
+      assuranceLevelHint:
+        "Met een vereist niveau wordt de sessie daaraan gehouden: een sessie die tekortschiet wordt afgewezen. Zonder vereist niveau meldt de sessie nog steeds welk niveau de controles haalden. Een gezichtsstap waarvan de levendheidscontrole of de gezichtsvergelijking mislukt, wijst de sessie hoe dan ook af. Een sessie kan een hoger niveau halen dan vereist. Alleen een gezicht dat Regula controleert kan Substantieel halen.",
+      assuranceLevelNeeds: {
+        low: "Laag vereist het lezen van de chip met geverifieerde chipgegevens. Zet die instellingen aan om de flow op te slaan.",
+        substantial:
+          "Substantieel vereist het lezen van de chip met geverifieerde chipgegevens en kopiecontrole, en een levend gezicht dat Regula met de chipfoto vergelijkt. Zet die instellingen aan om de flow op te slaan.",
+      },
+      none: "(geen)",
+      inherit: "(organisatie overnemen)",
+      yes: "Ja",
+      no: "Nee",
+      bsnPolicy: "BSN-beleid overschrijven",
+      retentionSeconds: "Bewaartermijn overschrijven (seconden)",
+      retentionSecondsHint:
+        "Ingevuld vervangt dit de bewaartermijn van de klant voor de sessies van deze flow; leeg of 0 houdt die van de klant aan.",
+      blurFace: "Gezicht vervagen overschrijven",
+      blurBsn: "BSN vervagen overschrijven",
+      errors: {
+        name: "Geef de flow een naam.",
+        steps: "Kies minstens één stap.",
+        assuranceLevel:
+          "Deze flow kan het vereiste niveau niet halen: zet aan wat het niveau vereist, of verlaag het.",
+        issuingCountries:
+          "Gebruik landcodes van drie letters zoals NLD, gescheiden door komma's.",
+        faceMatchThreshold: "Vul een getal van 0 tot 1 in.",
+        retentionSeconds: "Vul een heel aantal seconden in.",
+      },
+    },
+  },
+  proofLink: {
+    notFound: "Deze link bestaat niet, of is verwijderd.",
+    decline: "Weigeren",
+    redirecting: "Je wordt teruggestuurd…",
+    poweredBy: "Mogelijk gemaakt door Yivi",
+    dataRequest: {
+      data_access: {
+        intro:
+          "Je vraagt {{customer}} welke gegevens er van je zijn. Bevestig eerst wie je bent.",
+        inReview:
+          "Je verzoek is ter beoordeling naar {{customer}} gestuurd. Open deze link later opnieuw om de uitkomst te zien.",
+      },
+      data_erasure: {
+        intro:
+          "Je vraagt {{customer}} om je gegevens te verwijderen. Bevestig eerst wie je bent.",
+        inReview:
+          "Je verzoek is ter beoordeling naar {{customer}} gestuurd. Open deze link later opnieuw om de uitkomst te zien.",
+      },
+      erased: "Je gegevens zijn verwijderd.",
+      download: "Mijn gegevens downloaden",
+      downloadUntil: "Beschikbaar tot {{date}}.",
+      downloadExpired: "De download is niet meer beschikbaar.",
+    },
+  },
   vog: {
     title: "Dien je VOG in",
     subtitle:
@@ -598,6 +1553,27 @@ export const nl: Translation<typeof en> = {
     teamsSettingsSaved: "Microsoft Teams-instellingen opgeslagen",
     teamsTestSent: "Testnotificatie verstuurd",
     cscSettingsSaved: "Instellingen ondertekenprovider opgeslagen",
+    identityProofingFlowCreated: "Flow aangemaakt",
+    identityProofingFlowsSaved: "Beschikbare flows opgeslagen",
+    identityProofingFlowVersionSaved: "Versie {{version}} opgeslagen en actief",
+    identityProofingFlowVersionActivated: "Versie {{version}} is actief",
+    identityProofingMailNotSent:
+      "Verzoek aangemaakt, maar de mail kon niet verstuurd worden. Controleer de mailinstellingen van deze organisatie.",
+    identityProofingRequestSent: "Verzoek verstuurd",
+    identityProofingCustomerCreated: "Klant toegevoegd",
+    identityProofingCustomerRenamed: "Klant hernoemd",
+    identityProofingCustomerSettingsSaved: "Instellingen opgeslagen",
+    identityProofingCustomerPaused: "Verificatie gepauzeerd",
+    identityProofingCustomerResumed: "Verificatie hervat",
+    identityProofingCustomerRemoved: "Klant verwijderd",
+    identityProofingBrandingSaved: "Huisstijl opgeslagen",
+    identityProofingHostedSettingsSaved:
+      "Instellingen van de gehoste pagina opgeslagen",
+    identityProofingApiKeyRevoked: "API-sleutel ingetrokken",
+    identityProofingWebhookSaved: "Webhook opgeslagen",
+    identityProofingWebhookRemoved: "Webhook verwijderd",
+    identityProofingWebhookTestQueued: "Testbericht in de wachtrij",
+    identityProofingCustomerFlowsSaved: "Toegewezen flows opgeslagen",
     notificationSettingsSaved: "Notificatie-instellingen opgeslagen",
     provisioningSettingsSaved:
       "Instellingen voor directorysynchronisatie opgeslagen",
@@ -692,11 +1668,15 @@ export const nl: Translation<typeof en> = {
       "Elke uitgifte, vrijgave, ondertekening en configuratiewijziging wordt vastgelegd.",
     filter: "Filteren",
     export: "Exporteren",
-    adminOnly: "Alleen organisatiebeheerders kunnen het auditlogboek bekijken.",
+    detailHidden:
+      "Je ziet wijzigingen in de instellingen van de organisatie. Wie iets deed, wat er veranderde en alles over personen zien alleen beheerders.",
+    hiddenActor: "Verborgen",
     loadError: "Auditlogboek laden mislukt: {{message}}",
     loadMore: "Meer laden",
     empty: "Er is nog geen activiteit vastgelegd.",
     system: "Systeem",
+    apiKeyActor: "API-sleutel {{prefix}}…",
+    hostedLinkActor: "Persoon, via een gehoste link",
     columns: {
       when: "Wanneer",
       actor: "Actor",
@@ -705,6 +1685,13 @@ export const nl: Translation<typeof en> = {
       subject: "Onderwerp",
     },
     noSubject: "—",
+    fields: {
+      method: "Methode",
+      assuranceLevel: "Betrouwbaarheid",
+      eidasLevel: "eIDAS-niveau",
+      errorCode: "Reden",
+      ipsStatus: "Status bij verificatiedienst",
+    },
     targets: {
       organization: "Organisatie",
       member: "Lid",
@@ -980,7 +1967,6 @@ export const nl: Translation<typeof en> = {
       loadMore: "Meer laden",
     },
     active: "Actief lid",
-    verified: "Geverifieerd",
     identifiedOn: "Geïdentificeerd op",
     never: "Nooit",
     identityDueOn: "Heridentificeren vóór",
@@ -990,6 +1976,14 @@ export const nl: Translation<typeof en> = {
     requestIdentificationHint:
       "Vraagt dit lid om nu zijn identiteit opnieuw te bevestigen. Het lid krijgt een e-mail met een link.",
     identityRequested: "Identificatie aangevraagd",
+    proofing: {
+      flow: "Flow voor identiteitsverificatie",
+      send: "Identiteitsverificatie versturen",
+      hint: "Mailt dit lid een QR-code en een link voor de vcmrtd-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek.",
+      noFlows:
+        "Er is nog geen flow beschikbaar voor leden. Maak er een aan en vink die aan onder",
+      lastRequest: "Laatste verificatie:",
+    },
     vogValidUntil: "VOG geldig tot",
     vogNone: "Geen VOG bekend",
     requestVog: "VOG aanvragen",
