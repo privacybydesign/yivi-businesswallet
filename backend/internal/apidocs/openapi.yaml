@@ -1050,6 +1050,45 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/held/{id}/history:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Held credential id.
+    get:
+      tags: [attestation]
+      summary: Get a held credential's history
+      description: >-
+        Requires organisation membership. The audit events about the held credential,
+        oldest first: received, each status change its issuer's status list reported,
+        removal. As on the organisation audit log, a member who is not an administrator
+        gets each event with `detailHidden: true` and its actor, actor label and
+        metadata withheld.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/attestations/held/{id}:
     parameters:
       - name: slug
@@ -1075,6 +1114,44 @@ paths:
             application/json:
               schema:
                 description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/held/{id}/recheck:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Held attestation id.
+    post:
+      tags: [attestation]
+      summary: Re-check the status of a held credential
+      description: >-
+        Requires an administrator role in the organisation. Re-reads the issuer status
+        lists of the credentials the organisation holds (it also runs at startup and
+        every six hours) and audits each one that moved between valid and revoked.
+        Answers `changed`: whether this credential did.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

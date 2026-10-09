@@ -450,11 +450,45 @@ carries no validity columns: both facts live in the engine, so `Holder.Validitie
 reads them per credential-instance ref — the batch's `expires_at` (the `exp` claim) and
 the instance's `last_known_status` (the Token Status List bit, non-VALID/non-UNKNOWN =
 revoked, irmago's own policy). Nothing is fetched over the network on a list read, and
-"expiring soon" is a frontend window over the expiry, not an engine state. Open follow-up:
-irmago seeds the bit at receive and its `RevocationService.RefreshStatuses` sweep
-maintains it, but **we run no sweep yet** — so a credential revoked after it was received
-keeps reading as valid until one is scheduled (a periodic per-org refresh, like the
-provisioning scheduler).
+"expiring soon" is a frontend window over the expiry, not an engine state.
+
+**Status re-check.** `Engine.RefreshStatuses` runs irmago's
+`RevocationService.RefreshStatuses` with the same trust material a receive uses
+(`configuration` + `trustContext`, so a partner's status list verifies like its
+credential), writing `last_known_status` and `last_status_check_at` back. irmago checks
+one representative instance per batch, so `Validities` aggregates the status facts per
+batch (revoked if any copy is; last check is the latest).
+
+- Status lists are fetched through a `safehttp` client (`newStatusClient`): https only
+  (http only with `AllowInsecureHTTP`), no redirects, no private addresses.
+- It runs at boot and then every 6 hours for every org holding a credential
+  (`RecheckAllHeld`, `heldStatusRecheckEvery`), and on `POST /held/{id}/recheck`
+  (admin). That re-reads the whole org, since irmago refreshes per org, but answers
+  `changed` for that one credential only.
+- Each credential whose revoked state moved is audited
+  `attestation.held_status_changed` on the held target. `RecordHeldStatusChange`
+  locks the held row and skips a status already on record, so concurrent re-checks
+  audit a move once.
+- A re-check runs detached from the request's cancellation, bounded by
+  `heldRecheckTimeout`: irmago keeps a status flip it read, so a cut-off re-check
+  would leave the change unaudited. `Validities` also carries
+`issuedAt`, `format`, `hasStatusList` and `statusCheckedAt`, which the detail page's
+Checks card shows. The stub's refresh is a no-op.
+
+**History.** Accepting an offer now also audits `attestation.held_received` on the held
+target (sender, source, offer id), so `GET /held/{id}/history` (the audit trail for the
+target, oldest first) is the credential's history; the frontend adds the receipt for a
+row received before that event existed, and the last status check. Disclosures are not
+in it: presentations are audited on the transaction and deliberately never name the
+credential or claims (see §12), so "Disclosed to …" from the design is not shown.
+
+**Wallet view.** Status chips with counts, "Needs attention" rows (revoked, expired,
+expiring soon, worst first) with the reason, "Valid" cards; the detail page has a status
+banner (Re-check status), attributes, history, provenance, checks and a client-side
+"Export as JSON" of what the page shows (not the signed credential). Not built from the
+design: "Request a new credential" / "Request renewal" / "Contact issuer" (no renewal
+channel to an issuer yet) and the revocation reason and date (a status list carries a
+bit, not a reason).
 
 ### 6.6 `org_onboarding_attestations` — the onboarding auto-issue set
 
