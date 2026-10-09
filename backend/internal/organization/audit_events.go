@@ -38,7 +38,11 @@ func (h *Handler) auditEvents(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("listing audit events: %w", err)
 	}
-	addActorAvatarURIs(org.Slug, page.Events)
+	if SeesAuditDetail(r.Context()) {
+		addActorAvatarURIs(org.Slug, page.Events)
+	} else {
+		audit.HideDetail(page.Events)
+	}
 	respond.JSON(w, r, http.StatusOK, page)
 	return nil
 }

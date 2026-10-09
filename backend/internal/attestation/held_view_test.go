@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 )
 
@@ -20,7 +21,8 @@ import (
 
 // heldViewStore is an in-memory held index implementing the service's held seam.
 type heldViewStore struct {
-	rows []attestation.HeldAttestation
+	rows          []attestation.HeldAttestation
+	statusChanges []heldStatusChange
 }
 
 func (s *heldViewStore) ListHeld(_ context.Context, _ uuid.UUID) ([]attestation.HeldAttestation, error) {
@@ -40,10 +42,36 @@ func (s *heldViewStore) SoftDeleteHeld(_ context.Context, _, _ uuid.UUID) error 
 	return nil
 }
 
+func (s *heldViewStore) RecordHeldStatusChange(_ context.Context, _, id uuid.UUID, _ string, status attestation.HeldStatus) error {
+	s.statusChanges = append(s.statusChanges, heldStatusChange{id: id, revoked: status == attestation.HeldRevoked})
+	return nil
+}
+
+func (s *heldViewStore) HeldHistory(context.Context, uuid.UUID, uuid.UUID) ([]audit.Event, error) {
+	return []audit.Event{}, nil
+}
+
+func (s *heldViewStore) HolderOrgs(context.Context) ([]uuid.UUID, error) { return nil, nil }
+
+type heldStatusChange struct {
+	id      uuid.UUID
+	revoked bool
+}
+
 // heldViewHolder is a holder engine whose display and validity answers are fixtures.
 type heldViewHolder struct {
 	displays   map[string]eudiholder.HeldDisplay
 	validities map[string]eudiholder.HeldValidity
+	// refreshed is what a status refresh makes the validities read.
+	refreshed map[string]eudiholder.HeldValidity
+}
+
+func (h *heldViewHolder) RefreshStatuses(context.Context, uuid.UUID) (int, error) {
+	if h.refreshed == nil {
+		return 0, nil
+	}
+	h.validities = h.refreshed
+	return len(h.refreshed), nil
 }
 
 func (*heldViewHolder) Redeem(_ context.Context, _ uuid.UUID, _ string) (eudiholder.Redeemed, error) {
@@ -205,5 +233,39 @@ func TestHeldClaimsCarriesValidity(t *testing.T) {
 	// back to the issuer identifier the index row carries.
 	if view.IssuerName != row.Issuer {
 		t.Errorf("detail IssuerName = %q, want the issuer identifier %q", view.IssuerName, row.Issuer)
+	}
+}
+
+// A re-check audits exactly the credentials whose revoked state the issuer's
+// status list moved, in either direction; a re-confirmed one is not audited.
+func TestRecheckAuditsStatusChange(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	flipped := attestation.HeldAttestation{ID: uuid.New(), CredentialRef: "ref-flipped", VCT: "eaa.supplier"}
+	lifted := attestation.HeldAttestation{ID: uuid.New(), CredentialRef: "ref-lifted", VCT: "eaa.supplier"}
+	steady := attestation.HeldAttestation{ID: uuid.New(), CredentialRef: "ref-steady", VCT: "eaa.supplier"}
+	store := &heldViewStore{rows: []attestation.HeldAttestation{flipped, lifted, steady}}
+	holder := &heldViewHolder{
+		validities: map[string]eudiholder.HeldValidity{
+			"ref-flipped": {}, "ref-lifted": {Revoked: true}, "ref-steady": {},
+		},
+		refreshed: map[string]eudiholder.HeldValidity{
+			"ref-flipped": {Revoked: true}, "ref-lifted": {}, "ref-steady": {},
+		},
+	}
+	service := attestation.NewService(nil, nil, nil, nil, nil, store, nil, holder, "http://app.test")
+
+	changed, err := service.RecheckHeld(ctx, uuid.New())
+	if err != nil || changed != 2 {
+		t.Fatalf("RecheckHeld = %d, %v; want 2 changes", changed, err)
+	}
+	want := map[uuid.UUID]bool{flipped.ID: true, lifted.ID: false}
+	if len(store.statusChanges) != len(want) {
+		t.Fatalf("audited %v, want the flipped and the lifted credential", store.statusChanges)
+	}
+	for _, c := range store.statusChanges {
+		if revoked, ok := want[c.id]; !ok || revoked != c.revoked {
+			t.Errorf("audited %+v, want %v", c, want)
+		}
 	}
 }

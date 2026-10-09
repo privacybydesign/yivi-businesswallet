@@ -19,6 +19,8 @@ import {
   getCredentialOffers,
   getHeldAttestations,
   getHeldAttestationClaims,
+  getHeldAttestationHistory,
+  recheckHeldAttestations,
   getIssuedAttestation,
   getIssuedAttestations,
   getOnboardingAttestations,
@@ -51,6 +53,7 @@ import type {
   IssueResult,
   OnboardingAttestation,
 } from "./attestations";
+import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
 
 // The ledger reconciles status on read, so an offered attestation is re-fetched
@@ -117,20 +120,21 @@ export function credentialOffersQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "attestations", "offers"];
 }
 
+// One held credential's detail in every language it was read in: the prefix
+// of heldAttestationClaimsQueryKey.
+export function heldClaimsBaseQueryKey(
+  slug: string,
+  heldId: string,
+): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "held", heldId];
+}
+
 export function heldAttestationClaimsQueryKey(
   slug: string,
   heldId: string,
   lang: string,
 ): readonly string[] {
-  return [
-    "organizations",
-    "detail",
-    slug,
-    "attestations",
-    "held",
-    heldId,
-    lang,
-  ];
+  return [...heldClaimsBaseQueryKey(slug, heldId), lang];
 }
 
 // Public claim polling: re-fetches while the attestation is still offered so the
@@ -607,6 +611,46 @@ export function useDeclineCredentialOfferMutation(
       toast.success(t("toasts.credentialOfferDeclined"));
       void queryClient.invalidateQueries({
         queryKey: credentialOffersQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useHeldHistoryQuery(
+  slug: string,
+  heldId: string,
+): UseQueryResult<AuditEvent[], Error> {
+  return useQuery({
+    queryKey: [
+      "organizations",
+      "detail",
+      slug,
+      "attestations",
+      "held",
+      heldId,
+      "history",
+    ],
+    queryFn: ({ signal }) => getHeldAttestationHistory(slug, heldId, signal),
+    enabled: slug !== "" && heldId !== "",
+  });
+}
+
+// A re-check can move any credential's state, so the whole wallet is re-read.
+export function useRecheckHeldMutation(
+  slug: string,
+): UseMutationResult<number, Error, void> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: () => recheckHeldAttestations(slug),
+    onSuccess: (changed) => {
+      toast.success(
+        changed === 0
+          ? t("toasts.attestationHeldRecheckedSame")
+          : t("toasts.attestationHeldRechecked", { count: changed }),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: ["organizations", "detail", slug, "attestations", "held"],
       });
     },
   });

@@ -137,7 +137,7 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) error {
 }
 
 // serveLogo streams the org's stored logo bytes with a locked-down response
-// (see setLogoResponseHeaders).
+// (see SetLogoResponseHeaders).
 func (h *Handler) serveLogo(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	logo, err := h.store.GetLogo(r.Context(), org.ID)
@@ -148,7 +148,7 @@ func (h *Handler) serveLogo(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("getting theme logo: %w", err)
 	}
 
-	setLogoResponseHeaders(w.Header(), logo.ContentType)
+	SetLogoResponseHeaders(w.Header(), logo.ContentType)
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(logo.Bytes); err != nil {
 		// The status and headers are already committed, so an error here can only
@@ -158,11 +158,12 @@ func (h *Handler) serveLogo(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// setLogoResponseHeaders locks the logo response down. The logo is
+// SetLogoResponseHeaders locks a logo response down; every admin-uploaded logo
+// served same-origin (the org's, a proofing customer's) goes through it. The logo is
 // admin-uploaded content served same-origin, so nosniff keeps the declared type
 // authoritative and the sandbox + null-source CSP stop an uploaded SVG from
 // running script if the URL is opened directly.
-func setLogoResponseHeaders(h http.Header, contentType string) {
+func SetLogoResponseHeaders(h http.Header, contentType string) {
 	h.Set("Content-Type", contentType)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
@@ -195,18 +196,18 @@ func parseLogoUpdate(r *http.Request) (LogoUpdate, error) {
 	if len(data) > MaxLogoBytes {
 		return LogoUpdate{}, apiError(http.StatusRequestEntityTooLarge, "payload_too_large", "the logo is too large")
 	}
-	contentType, ok := detectLogoType(data)
+	contentType, ok := DetectLogoType(data)
 	if !ok {
 		return LogoUpdate{}, badRequest("invalid_input", "the logo must be a PNG, JPEG, GIF, WebP or SVG image")
 	}
 	return LogoUpdate{Replace: true, Logo: Logo{Bytes: data, ContentType: contentType}}, nil
 }
 
-// detectLogoType sniffs the actual bytes (not the client-declared type) and
+// DetectLogoType sniffs the actual bytes (not the client-declared type) and
 // returns the canonical MIME type for a supported image, or ok=false otherwise.
 // Raster formats are recognised by http.DetectContentType; SVG (XML, which the
 // sniffer reports as text) is matched separately.
-func detectLogoType(data []byte) (string, bool) {
+func DetectLogoType(data []byte) (string, bool) {
 	switch sniff := http.DetectContentType(data); {
 	case strings.HasPrefix(sniff, "image/png"):
 		return "image/png", true

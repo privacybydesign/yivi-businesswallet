@@ -3,6 +3,8 @@ package notifications
 import (
 	"context"
 
+	"github.com/google/uuid"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
@@ -49,7 +51,7 @@ func (r Recorder) Record(ctx context.Context, q database.Querier, action string,
 		TargetID:   target.ID,
 		Metadata:   metadata,
 	}
-	if actor, ok := audit.ActorFromContext(ctx); ok {
+	if actor, ok := audit.ActorFromContext(ctx); ok && actor.UserID != uuid.Nil {
 		userID := actor.UserID
 		e.ActorUserID = &userID
 	}

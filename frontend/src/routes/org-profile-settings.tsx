@@ -35,9 +35,9 @@ export function OrgProfileSettings({
   }
 
   return (
-    <Card className="max-w-2xl p-7">
+    <Card className="max-w-2xl p-5 sm:p-7">
       <h2 className="text-[16px] font-semibold">{t("settings.orgProfile")}</h2>
-      <div className="mt-4 grid grid-cols-[180px_1fr] items-center gap-x-5 gap-y-3.5">
+      <div className="mt-4 grid grid-cols-1 gap-x-5 gap-y-1.5 sm:grid-cols-[180px_1fr] sm:items-center sm:gap-y-3.5">
         <span className={EYEBROW}>{t("common.name")}</span>
         <input
           className={CONTROL}

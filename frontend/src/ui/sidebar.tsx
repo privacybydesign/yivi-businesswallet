@@ -1,4 +1,4 @@
-import { NavLink, useMatches } from "react-router";
+import { NavLink, useLocation, useMatches } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { IconName } from "./icon";
 import type { Me } from "../api/auth";
@@ -15,6 +15,9 @@ import * as React from "react";
 type NavLabelKey =
   | "nav.dashboard"
   | "nav.members"
+  | "nav.identityProofing"
+  | "nav.identityProofingOverview"
+  | "nav.customers"
   | "nav.qerds"
   | "nav.attestations"
   | "nav.postguard"
@@ -31,7 +34,11 @@ interface NavItem {
   labelKey: NavLabelKey;
   icon: IconName;
   end?: boolean;
+  // A section's pages, listed under it while one of them is open.
+  children?: NavChild[];
 }
+
+type NavChild = Omit<NavItem, "icon" | "children">;
 
 // Which optional items the org nav shows. signing gates "Sign documents" on the
 // org having a CSC signing provider configured (see the sidebar body); it is a
@@ -46,6 +53,20 @@ function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
   const items: NavItem[] = [
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
+  ];
+  // Identity proofing is the org's customers. A member is sent a proofing
+  // request from their detail page, not from here.
+  const proofing = `/${slug}/identity-proofing`;
+  items.push({
+    to: proofing,
+    labelKey: "nav.identityProofing",
+    icon: "scan_qrcode",
+    children: [
+      { to: proofing, labelKey: "nav.identityProofingOverview", end: true },
+      { to: `${proofing}/customers`, labelKey: "nav.customers" },
+    ],
+  });
+  items.push(
     { to: `/${slug}/qerds`, labelKey: "nav.qerds", icon: "email" },
     {
       to: `/${slug}/attestations`,
@@ -53,7 +74,7 @@ function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
       icon: "valid",
     },
     { to: `/${slug}/postguard`, labelKey: "nav.postguard", icon: "lock" },
-  ];
+  );
   if (visible.signing) {
     items.push({
       to: `/${slug}/signing`,
@@ -92,6 +113,11 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
 const NAV_ICON_SIZE = 16;
 const ORG_ADMIN_ROLE = "admin";
 
+// Whether pathname is the section at base or one of its pages.
+function isWithin(pathname: string, base: string): boolean {
+  return pathname === base || pathname.startsWith(`${base}/`);
+}
+
 interface SidebarProps {
   me: Me;
   onLogout: () => void;
@@ -121,6 +147,7 @@ export function Sidebar({
 }: SidebarProps): React.JSX.Element {
   const { t } = useTranslation();
   const matches = useMatches();
+  const { pathname } = useLocation();
 
   // The org slug (if any) is on a descendant route match, not on this layout.
   const activeSlug = matches.find(
@@ -174,30 +201,53 @@ export function Sidebar({
 
       <nav className="flex-1 overflow-y-auto px-2.5 py-1.5">
         {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              [
-                "relative flex h-8.5 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] transition-colors",
-                isActive
-                  ? "bg-sidebar-active text-sidebar-fg font-semibold"
-                  : "text-sidebar-fg-soft hover:bg-sidebar-active hover:text-sidebar-fg font-medium",
-              ].join(" ")
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <span className="bg-primary absolute left-0 h-4.5 w-0.75 rounded-r-[3px]" />
-                )}
-                <Icon name={item.icon} size={NAV_ICON_SIZE} />
-                {t(item.labelKey)}
-              </>
+          <React.Fragment key={item.to}>
+            <NavLink
+              to={item.to}
+              end={item.end}
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                [
+                  "relative flex h-8.5 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] transition-colors",
+                  isActive
+                    ? "bg-sidebar-active text-sidebar-fg font-semibold"
+                    : "text-sidebar-fg-soft hover:bg-sidebar-active hover:text-sidebar-fg font-medium",
+                ].join(" ")
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span className="bg-primary absolute left-0 h-4.5 w-0.75 rounded-r-[3px]" />
+                  )}
+                  <Icon name={item.icon} size={NAV_ICON_SIZE} />
+                  {t(item.labelKey)}
+                </>
+              )}
+            </NavLink>
+            {item.children && isWithin(pathname, item.to) && (
+              <div className="my-0.5 flex flex-col gap-0.5 pl-6.5">
+                {item.children.map((child) => (
+                  <NavLink
+                    key={child.to}
+                    to={child.to}
+                    end={child.end}
+                    onClick={onNavigate}
+                    className={({ isActive }) =>
+                      [
+                        "flex h-7.5 items-center rounded-md px-2.5 text-[13px] transition-colors",
+                        isActive
+                          ? "bg-sidebar-active text-sidebar-fg font-semibold"
+                          : "text-sidebar-fg-soft hover:bg-sidebar-active hover:text-sidebar-fg font-medium",
+                      ].join(" ")
+                    }
+                  >
+                    {t(child.labelKey)}
+                  </NavLink>
+                ))}
+              </div>
             )}
-          </NavLink>
+          </React.Fragment>
         ))}
       </nav>
 

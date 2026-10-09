@@ -117,7 +117,7 @@ func registeredRoutes(t *testing.T) map[string]bool {
 			}
 			pattern := strings.Trim(lit.Value, "`\"")
 			method, urlPath, ok := splitPattern(pattern)
-			if !ok || strings.HasPrefix(urlPath, "/api/") {
+			if !ok || strings.HasPrefix(urlPath, "/api/") || undocumented(path, urlPath) {
 				return true
 			}
 			routes[method+" /api/v1"+urlPath] = true
@@ -129,6 +129,35 @@ func registeredRoutes(t *testing.T) map[string]bool {
 		t.Fatalf("walk internal source: %v", err)
 	}
 	return routes
+}
+
+// undocumentedPrefixes are /api/v1 routes left out of the spec on purpose, by
+// the package directory that registers them: the Idem (vcmrtd) app's session
+// routes (proofingengine.Engine.Register). Only that app calls them;
+// integrators use the customer API, and the app's client
+// (ProofingSessionClient) is the contract. The spec must not document them.
+// Another package's route under the same prefix is held to the spec.
+var undocumentedPrefixes = map[string]string{"/app/": "proofingengine"}
+
+func undocumented(file, urlPath string) bool {
+	pkg, ok := undocumentedPrefixFor(urlPath)
+	return ok && filepath.Base(filepath.Dir(file)) == pkg
+}
+
+// underUndocumentedPrefix reports whether urlPath is under one of the
+// undocumented prefixes, which the spec keeps clear of.
+func underUndocumentedPrefix(urlPath string) bool {
+	_, ok := undocumentedPrefixFor(urlPath)
+	return ok
+}
+
+func undocumentedPrefixFor(urlPath string) (pkg string, ok bool) {
+	for prefix, pkg := range undocumentedPrefixes {
+		if strings.HasPrefix(urlPath, prefix) {
+			return pkg, true
+		}
+	}
+	return "", false
 }
 
 func documentedRoutes(t *testing.T) map[string]bool {
@@ -144,6 +173,9 @@ func documentedRoutes(t *testing.T) map[string]bool {
 	for urlPath, ops := range doc.Paths {
 		if !strings.HasPrefix(urlPath, "/api/v1/") {
 			continue
+		}
+		if underUndocumentedPrefix(strings.TrimPrefix(urlPath, "/api/v1")) {
+			t.Errorf("route %q is documented but is the Idem app's own (undocumentedPrefixes)", urlPath)
 		}
 		for method := range ops {
 			if methods[method] {

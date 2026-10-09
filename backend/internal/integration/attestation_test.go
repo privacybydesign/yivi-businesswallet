@@ -21,6 +21,16 @@ func (e *testEnv) postJSON(path string, body any) *http.Response {
 	return e.do(http.MethodPost, path, bytes.NewReader(raw))
 }
 
+// putJSON sends a JSON body with PUT and returns the response.
+func (e *testEnv) putJSON(path string, body any) *http.Response {
+	e.t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		e.t.Fatalf("marshal body: %v", err)
+	}
+	return e.do(http.MethodPut, path, bytes.NewReader(raw))
+}
+
 func decodeJSON[T any](t *testing.T, resp *http.Response) T {
 	t.Helper()
 	defer func() { _ = resp.Body.Close() }()

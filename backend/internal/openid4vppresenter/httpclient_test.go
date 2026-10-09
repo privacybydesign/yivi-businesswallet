@@ -3,11 +3,12 @@ package openid4vppresenter
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 )
 
 func TestPolicyCheckURL(t *testing.T) {
@@ -19,16 +20,16 @@ func TestPolicyCheckURL(t *testing.T) {
 		wantErr error
 	}{
 		{"https ok", strict, "https://verifier.example.com/r", nil},
-		{"http refused", strict, "http://verifier.example.com/r", errNotHTTPS},
+		{"http refused", strict, "http://verifier.example.com/r", safehttp.ErrNotHTTPS},
 		{"http allowed in dev", insecure, "http://localhost:8080/r", nil},
-		{"relative", strict, "/r", errNotAbsolute},
-		{"userinfo", strict, "https://user@verifier.example.com/r", errUserInfo},
-		{"other scheme", insecure, "ftp://verifier.example.com/r", errNotHTTPS},
-		{"javascript", insecure, "javascript:alert(1)", errNotAbsolute},
+		{"relative", strict, "/r", safehttp.ErrNotAbsolute},
+		{"userinfo", strict, "https://user@verifier.example.com/r", safehttp.ErrUserInfo},
+		{"other scheme", insecure, "ftp://verifier.example.com/r", safehttp.ErrNotHTTPS},
+		{"javascript", insecure, "javascript:alert(1)", safehttp.ErrNotAbsolute},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := tc.p.checkURL(tc.url)
+			_, err := tc.p.CheckURL(tc.url)
 			if tc.wantErr == nil && err != nil {
 				t.Fatalf("checkURL(%q) = %v, want nil", tc.url, err)
 			}
@@ -36,20 +37,6 @@ func TestPolicyCheckURL(t *testing.T) {
 				t.Fatalf("checkURL(%q) = %v, want %v", tc.url, err, tc.wantErr)
 			}
 		})
-	}
-}
-
-func TestIsPublic(t *testing.T) {
-	private := []string{"127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "fe80::1", "fc00::1"}
-	for _, ip := range private {
-		if isPublic(net.ParseIP(ip)) {
-			t.Errorf("%s classified public", ip)
-		}
-	}
-	for _, ip := range []string{"93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"} {
-		if !isPublic(net.ParseIP(ip)) {
-			t.Errorf("%s classified non-public", ip)
-		}
 	}
 }
 
@@ -63,7 +50,7 @@ func TestFetcherBlocksPrivateNetworkUnlessInsecure(t *testing.T) {
 	defer srv.Close()
 
 	strict := NewFetcher(Policy{})
-	if _, err := strict.Fetch(context.Background(), srv.URL); !errors.Is(err, ErrRequestURIUnreachable) || !strings.Contains(err.Error(), errPrivateNetwork.Error()) {
+	if _, err := strict.Fetch(context.Background(), srv.URL); !errors.Is(err, ErrRequestURIUnreachable) || !strings.Contains(err.Error(), safehttp.ErrPrivateNetwork.Error()) {
 		t.Fatalf("strict Fetch to loopback = %v, want private-network refusal", err)
 	}
 

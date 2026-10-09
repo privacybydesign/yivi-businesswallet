@@ -7,6 +7,7 @@ import {
 import { accessMessage } from "../lib/access-message";
 import {
   auditActionLabel,
+  auditActorLabel,
   auditSubject,
   auditTargetLabel,
   auditVisual,
@@ -27,7 +28,7 @@ export default function AuditLog(): React.JSX.Element {
 
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
-  const audit = useOrganizationAuditEventsQuery(slug, isAdmin);
+  const audit = useOrganizationAuditEventsQuery(slug, org.isSuccess);
   const events = audit.data?.pages.flatMap((page) => page.events) ?? [];
 
   const dateFormatter = React.useMemo(
@@ -68,17 +69,11 @@ export default function AuditLog(): React.JSX.Element {
         }
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {org.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
               {accessMessage(org.error, t)}
-            </p>
-          </Card>
-        ) : !org.isPending && !isAdmin ? (
-          <Card className="p-6">
-            <p className="text-ink-soft text-[14px]">
-              {t("auditLog.adminOnly")}
             </p>
           </Card>
         ) : audit.isError ? (
@@ -89,6 +84,11 @@ export default function AuditLog(): React.JSX.Element {
           </Card>
         ) : (
           <>
+            {org.isSuccess && !isAdmin && (
+              <p className="text-ink-soft mb-4 text-[13px]">
+                {t("auditLog.detailHidden")}
+              </p>
+            )}
             <Card className="overflow-hidden">
               <Table>
                 <Table.Head>
@@ -120,7 +120,7 @@ export default function AuditLog(): React.JSX.Element {
                   ) : (
                     events.map((event) => {
                       const visual = auditVisual(event.action);
-                      const subject = auditSubject(event, dateFormatter);
+                      const subject = auditSubject(event, dateFormatter, t);
                       return (
                         <Table.Row key={event.id}>
                           <Table.Cell>
@@ -146,9 +146,12 @@ export default function AuditLog(): React.JSX.Element {
                                 />
                               )}
                               <span className="text-ink truncate">
-                                {event.actor
-                                  ? fullName(event.actor)
-                                  : t("auditLog.system")}
+                                {event.detailHidden
+                                  ? t("auditLog.hiddenActor")
+                                  : event.actor
+                                    ? fullName(event.actor)
+                                    : (auditActorLabel(event.actorLabel, t) ??
+                                      t("auditLog.system"))}
                               </span>
                             </div>
                           </Table.Cell>

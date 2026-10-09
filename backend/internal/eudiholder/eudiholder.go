@@ -91,6 +91,13 @@ type Holder interface {
 	// yields an empty (non-nil) map.
 	Validities(ctx context.Context, orgID uuid.UUID) (map[string]HeldValidity, error)
 
+	// RefreshStatuses re-reads the Token Status List of every credential the
+	// organization holds that carries a status reference and stores what it
+	// observed, with the time of the check; Validities reads it back. It reports
+	// how many credentials changed status. An unreachable or unverifiable list is
+	// skipped, keeping the last known status.
+	RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, error)
+
 	// Present builds a vp_token satisfying dcqlQuery from orgID's held credentials,
 	// key-bound for audience (the verifier's client_id) and nonce. This is the
 	// "present" side of Art 5(1)(a), the seam the inbound OpenID4VP slice

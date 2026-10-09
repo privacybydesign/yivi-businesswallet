@@ -60,6 +60,8 @@ type issuanceService interface {
 	DeleteHeld(ctx context.Context, orgID, id uuid.UUID) error
 	ListHeld(ctx context.Context, orgID uuid.UUID, lang string) ([]HeldListView, error)
 	HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang string) (HeldClaimsView, error)
+	HeldHistory(ctx context.Context, orgID, id uuid.UUID) ([]audit.Event, error)
+	RecheckHeld(ctx context.Context, orgID uuid.UUID) (int, error)
 	ListOffers(ctx context.Context, orgID uuid.UUID) ([]CredentialOffer, error)
 	AcceptOffer(ctx context.Context, orgID, id uuid.UUID) (HeldAttestation, error)
 	DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error
@@ -171,7 +173,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// Held credentials (member read; admin delete). Art 5(1)(a) "store, select".
 	mux.Handle("GET /orgs/{slug}/attestations/held", member(respond.HandlerFunc(h.listHeld)))
 	mux.Handle("GET /orgs/{slug}/attestations/held/{id}/claims", member(respond.HandlerFunc(h.heldClaims)))
+	mux.Handle("GET /orgs/{slug}/attestations/held/{id}/history", member(respond.HandlerFunc(h.heldHistory)))
 	mux.Handle("DELETE /orgs/{slug}/attestations/held/{id}", admin(respond.HandlerFunc(h.deleteHeld)))
+	mux.Handle("POST /orgs/{slug}/attestations/held/recheck", admin(respond.HandlerFunc(h.recheckHeld)))
 
 	// Inbound credential offers awaiting a decision (member read; admin decides).
 	// Accepting is what puts the credential in the wallet — receiving the offer
@@ -244,6 +248,46 @@ func (h *Handler) heldClaims(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("reading held attestation claims: %w", err)
 	}
 	respond.JSON(w, r, http.StatusOK, view)
+	return nil
+}
+
+// heldHistory is a held credential's trail, oldest first: received and each
+// status change the issuer's list reported. A removed credential is not
+// found, so its removal is never in it; at most audit.MaxListLimit events.
+// Like the org audit log, only an admin sees who acted and what changed.
+func (h *Handler) heldHistory(w http.ResponseWriter, r *http.Request) error {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid held attestation id")
+	}
+	org := organization.OrgFromContext(r.Context())
+	events, err := h.service.HeldHistory(r.Context(), org.ID, id)
+	switch {
+	case errors.Is(err, ErrHeldNotFound):
+		return notFound("held_not_found", "held attestation not found")
+	case err != nil:
+		return fmt.Errorf("reading held attestation history: %w", err)
+	}
+	if !organization.SeesAuditDetail(r.Context()) {
+		audit.HideDetail(events)
+	}
+	respond.JSON(w, r, http.StatusOK, struct {
+		Events []audit.Event `json:"events"`
+	}{events})
+	return nil
+}
+
+// recheckHeld re-reads the issuer status list of every credential the org holds
+// now, instead of waiting for the scheduled sweep, and answers how many changed.
+func (h *Handler) recheckHeld(w http.ResponseWriter, r *http.Request) error {
+	org := organization.OrgFromContext(r.Context())
+	changed, err := h.service.RecheckHeld(r.Context(), org.ID)
+	if err != nil {
+		return fmt.Errorf("rechecking held attestations: %w", err)
+	}
+	respond.JSON(w, r, http.StatusOK, struct {
+		Changed int `json:"changed"`
+	}{changed})
 	return nil
 }
 

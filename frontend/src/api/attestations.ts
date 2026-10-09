@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { absoluteApiUrl, request } from "./http";
+import { auditEventSchema } from "./organization";
+import type { AuditEvent } from "./organization";
 
 // The value types an attribute may declare, mirroring the backend's
 // SupportedAttributeTypes allow-list. The schema editor offers these as a
@@ -305,6 +307,12 @@ export const heldAttestationSchema = z.object({
   logoUri: z.string().default(""),
   expiresAt: z.string().optional(),
   revoked: z.boolean().default(false),
+  // What the wallet knows of the credential's integrity: its iat and format,
+  // whether it carries a status list, and when that was last read.
+  issuedAt: z.string().optional(),
+  format: z.string().default(""),
+  hasStatusList: z.boolean().default(false),
+  statusCheckedAt: z.string().optional(),
 });
 
 export type HeldAttestation = z.infer<typeof heldAttestationSchema>;
@@ -361,6 +369,12 @@ export const heldAttestationClaimsSchema = z.object({
   receivedAt: z.string(),
   expiresAt: z.string().optional(),
   revoked: z.boolean().default(false),
+  // What the wallet knows of the credential's integrity: its iat and format,
+  // whether it carries a status list, and when that was last read.
+  issuedAt: z.string().optional(),
+  format: z.string().default(""),
+  hasStatusList: z.boolean().default(false),
+  statusCheckedAt: z.string().optional(),
   attributes: z.array(heldAttributeSchema),
 });
 
@@ -845,6 +859,34 @@ export function getAttestationClaim(
 ): Promise<AttestationClaim> {
   return request(`/api/v1/attestations/claim/${encodeURIComponent(token)}`, {
     schema: attestationClaimSchema,
+    signal,
+  });
+}
+
+// A held credential's trail, oldest first: received, status changes, removal.
+export function getHeldAttestationHistory(
+  slug: string,
+  heldId: string,
+  signal?: AbortSignal,
+): Promise<AuditEvent[]> {
+  return request(`${base(slug)}/held/${encodeURIComponent(heldId)}/history`, {
+    schema: z
+      .object({ events: z.array(auditEventSchema) })
+      .transform((page) => page.events),
+    signal,
+  });
+}
+
+// Re-reads the issuer status list of every credential the organization holds;
+// answers how many changed state.
+export function recheckHeldAttestations(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<number> {
+  return request(`${base(slug)}/held/recheck`, {
+    schema: z.object({ changed: z.number() }).transform((r) => r.changed),
+    method: "POST",
+    body: {},
     signal,
   });
 }

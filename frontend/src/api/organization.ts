@@ -800,6 +800,11 @@ export const auditEventSchema = z.object({
   targetId: z.string(),
   metadata: z.record(z.string(), z.unknown()),
   actor: auditActorSchema.nullable(),
+  // A non-user actor, e.g. `api_key:<prefix>` for a customer API key.
+  actorLabel: z.string().nullable().optional(),
+  // Set for an ordinary member: actor, actorLabel and metadata are withheld,
+  // so who acted and what changed is visible to admins only.
+  detailHidden: z.boolean().optional(),
 });
 
 export type AuditEvent = z.infer<typeof auditEventSchema>;

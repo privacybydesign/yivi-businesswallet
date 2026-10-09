@@ -53,6 +53,19 @@ func IsAdmin(ctx context.Context) bool {
 	return roleFromContext(ctx) == RoleAdmin
 }
 
+// SeesAuditDetail reports whether the caller reads audit events in full: an
+// admin whose mandate is not withdrawn, the same caller RequireOrgAdmin lets
+// through. Every other member reads them through audit.HideDetail.
+func SeesAuditDetail(ctx context.Context) bool {
+	return ActsAsAdmin(ctx)
+}
+
+// ActsAsAdmin reports whether the caller is an admin whose mandate is not
+// withdrawn: the caller RequireOrgAdmin lets through.
+func ActsAsAdmin(ctx context.Context) bool {
+	return IsAdmin(ctx) && !AuthorityFromContext(ctx).Withdrawn()
+}
+
 func contextWithAuthority(ctx context.Context, a Authority) context.Context {
 	return context.WithValue(ctx, authorityCtxKey{}, a)
 }
