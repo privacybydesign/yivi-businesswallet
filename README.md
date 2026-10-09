@@ -53,6 +53,42 @@ cp .env.example .env      # then edit POSTGRES_PASSWORD to a strong, unique valu
 The Vite dev server proxies health probes and `/api` to the backend container, so
 the frontend talks to the backend out of the box.
 
+### Upgrading the database from PostgreSQL 16 to 17
+
+The `db` service runs `postgres:17-alpine` on the `pgdata17` volume. The old
+PostgreSQL 16 data stays in the `pgdata` volume, which Compose no longer uses, so
+after the upgrade the stack starts with an empty database.
+
+If you don't need the old data (local dev), remove the old volume with
+`docker volume rm yivi-business-wallet_pgdata` and stop here.
+To keep the data, dump it from `pgdata` with a temporary 16 container and restore
+it into `pgdata17`. Run these from the repo root. Replace `postgres` /
+`yivi_business_wallet` if you set `POSTGRES_USER` / `POSTGRES_DB` in `.env`:
+
+```sh
+docker compose down
+
+# 1. Start PostgreSQL 16 on the old volume and dump the database
+docker run -d --name pg16-upgrade -v yivi-business-wallet_pgdata:/var/lib/postgresql postgres:16-alpine
+docker exec pg16-upgrade pg_isready -U postgres          # repeat until "accepting connections"
+docker exec pg16-upgrade pg_dump -U postgres -Fc -f /tmp/wallet.dump yivi_business_wallet
+docker cp pg16-upgrade:/tmp/wallet.dump ./wallet.dump
+docker rm -f pg16-upgrade
+
+# 2. Restore into a fresh PostgreSQL 17 volume
+docker volume rm yivi-business-wallet_pgdata17           # only if it already exists, e.g. from an earlier `npm run dev`
+docker compose up -d --wait db
+docker compose cp ./wallet.dump db:/tmp/wallet.dump
+docker compose exec db pg_restore -U postgres -d yivi_business_wallet --no-owner /tmp/wallet.dump
+
+# 3. Start the stack as usual
+npm run dev
+```
+
+Once you have checked the restored data, delete `wallet.dump` and the old volume
+(`docker volume rm yivi-business-wallet_pgdata`). The dump holds the full
+database, so don't commit it.
+
 ## Login (development)
 
 Authentication is an **OpenID4VP** disclosure verified by a hosted **EUDI verifier**.
