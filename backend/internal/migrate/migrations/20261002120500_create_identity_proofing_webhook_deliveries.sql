@@ -2,8 +2,10 @@
 -- identity_proofing_webhook_deliveries is the outbox: one row per session event
 -- of a customer, written in the same transaction as the change it reports, and
 -- sent by the delivery worker with exponential back-off until it succeeds or
--- runs out of attempts. payload holds no personal data: the session id,
--- outcome and assurance only.
+-- runs out of attempts. payload is the session id, outcome and assurance,
+-- and for session.diploma_added the extract added: personal data, dropped in
+-- the write that makes the delivery delivered or failed, or by a purge of its
+-- request while it is pending.
 CREATE TABLE identity_proofing_webhook_deliveries
 (
     id               UUID PRIMARY KEY     DEFAULT gen_random_uuid(),

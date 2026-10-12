@@ -72,7 +72,8 @@ CREATE TABLE identity_proofing_requests
     required_assurance_level       TEXT,
     diplomas                       TEXT        NOT NULL DEFAULT 'off' CHECK (diplomas IN ('off', 'required')),
     -- The flow's own retention at send, when it set one: the request's data
-    -- is kept that long, in place of its customer's data retention.
+    -- is kept that long, in place of its customer's data retention (or, for
+    -- a member's request, the wallet's default).
     retention_override_seconds     INTEGER CHECK (retention_override_seconds > 0),
 
     -- A hosted request is opened from a link: only the SHA-256 of its token is
@@ -117,10 +118,10 @@ CREATE TABLE identity_proofing_requests
     cancelled_at                   TIMESTAMPTZ,
     purged_at                      TIMESTAMPTZ,
     -- When the request is purged, so the hourly purge reads an index instead
-    -- of computing it per row. The store keeps it: every write to one of its
-    -- inputs sets it in the same transaction (proofing.refreshPurgeAt, which
-    -- holds the rule), and a customer's changed retention sets it again for
-    -- its requests.
+    -- of computing it per row: a customer's and a member's alike. The store
+    -- keeps it: every write to one of its inputs sets it in the same
+    -- transaction (proofing.refreshPurgeAt, which holds the rule), and a
+    -- customer's changed retention sets it again for its requests.
     purge_at                       TIMESTAMPTZ,
 
     -- The composite key lets the rows below prove their request is of the
