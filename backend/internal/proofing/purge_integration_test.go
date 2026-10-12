@@ -87,6 +87,68 @@ func TestPurgeDueFollowsRetention(t *testing.T) {
 	}
 }
 
+// A member's request without a flow retention is purged
+// proofedNameRetention after it settled, on the purge a customer's takes:
+// its diplomas and the audit fields naming its subject go with it.
+func TestPurgeDueTakesMemberRequests(t *testing.T) {
+	f := newPurgeFixture(t)
+	ctx := context.Background()
+	makeMember(t, f.pool, f.orgID, f.sam, "member")
+	member, err := f.requests.Member(ctx, f.orgID, f.sam)
+	if err != nil {
+		t.Fatalf("Member: %v", err)
+	}
+	in := newStoredRequest(f.orgID, f.sam, memberSubject(member))
+	in.Diplomas = DiplomasRequired
+	req := createStarted(t, f.requests, in, "s1")
+	if err := f.requests.RecordOutcome(ctx, req, "s1", StatusApproved, proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	req, err = f.requests.Get(ctx, f.orgID, req.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if req.PurgeAt == nil || req.CompletedAt == nil || !req.PurgeAt.Equal(req.CompletedAt.Add(proofedNameRetention)) {
+		t.Errorf("purge time = %v, want completed %v plus %v", req.PurgeAt, req.CompletedAt, proofedNameRetention)
+	}
+	extract := Diploma{
+		DocumentType: "Diploma", Qualification: "HBO Bachelor Verpleegkunde", Profiles: []string{},
+		Institution: "Hogeschool Utrecht", PlaceOfIssue: "Utrecht", DateAwarded: time.Date(2015, 7, 1, 0, 0, 0, 0, time.UTC),
+		DocumentNumber: "2896311",
+	}
+	if _, added, err := NewDiplomaStore(f.pool, audit.NewDBRecorder()).Add(ctx, req, extract); err != nil || !added {
+		t.Fatalf("Add diploma = %v, %v", added, err)
+	}
+	if due, err := f.requests.ListPurgeDue(ctx, 10); err != nil || len(due) != 0 {
+		t.Fatalf("purge due on settling = %d, %v; want none", len(due), err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests SET completed_at = now() - $2::interval
+		WHERE id = $1`, req.ID, (proofedNameRetention + time.Hour).String()); err != nil {
+		t.Fatalf("age the request: %v", err)
+	}
+	// A raw write: the store would set purge_at in the same transaction.
+	if err := refreshPurgeAt(ctx, f.pool, req.ID); err != nil {
+		t.Fatalf("refresh purge time: %v", err)
+	}
+	due, err := f.requests.ListPurgeDue(ctx, 10)
+	if err != nil || len(due) != 1 || due[0].ID != req.ID {
+		t.Fatalf("purge due past its retention = %+v, %v; want the member's request", due, err)
+	}
+	if err := f.requests.Purge(ctx, due[0]); err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	var diplomas, leaks int
+	if err := f.pool.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM identity_proofing_request_diplomas WHERE request_id = $1),
+			(SELECT count(*) FROM audit_events WHERE target_id = $1::text AND metadata::text ~ $2)`,
+		req.ID, `Verpleegkunde|2896311|`+member.Email).Scan(&diplomas, &leaks); err != nil {
+		t.Fatalf("read leftovers: %v", err)
+	}
+	if diplomas != 0 || leaks != 0 {
+		t.Errorf("after purge: %d diplomas, %d audit events naming the subject or diploma; want none", diplomas, leaks)
+	}
+}
+
 // The purge reads its due requests over an index, not a scan of every
 // unpurged row.
 func TestPurgeDueIsIndexed(t *testing.T) {

@@ -214,14 +214,14 @@ func orgTenant(orgID uuid.UUID) proofingprovider.Tenant {
 const retentionGrace = 24 * time.Hour
 
 // engineRetention is how long the engine keeps a session once it ended: the
-// flow's own override when it set one, else the customer's data retention,
-// plus grace; a member's request leaves it to the engine (the flow's
-// override, or its default).
+// flow's own override when it set one, else the customer's data retention, or
+// proofedNameRetention for a member's request, plus grace: the retention
+// setPurgeAt purges the request after.
 func engineRetention(customer *Customer, override time.Duration) time.Duration {
-	if customer == nil {
-		return 0
+	retention := proofedNameRetention
+	if customer != nil {
+		retention = customer.Settings.DataRetention()
 	}
-	retention := customer.Settings.DataRetention()
 	if override > 0 {
 		retention = override
 	}
@@ -1313,7 +1313,7 @@ func (s *Service) PurgeRequest(ctx context.Context, scope CustomerScope, id uuid
 // purgeBatch is how many overdue requests PurgeDue takes at a time.
 const purgeBatch = 100
 
-// PurgeDue purges every request past its customer's retention, for the
+// PurgeDue purges every request past its retention (setPurgeAt), for the
 // pruner. One that fails to purge is deferred (DeferPurge) and retried by a
 // later run. It first rejects the reviews left open in a paused org
 // (rejectPausedReviews), whose failure is reported once the purge ran.

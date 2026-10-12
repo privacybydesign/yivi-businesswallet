@@ -265,4 +265,7 @@ func TestHostedViewHidesDocNumber(t *testing.T) {
 	if strings.Contains(body, "documentNumber") || strings.Contains(body, documentNumber) {
 		t.Errorf("hosted view = %s, want no document number", body)
 	}
+	if got := w.Header().Get(headerCacheControl); got != cacheNoStore {
+		t.Errorf("Cache-Control = %q, want no-store", got)
+	}
 }

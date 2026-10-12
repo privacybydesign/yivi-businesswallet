@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"time"
 
@@ -17,10 +16,6 @@ const diplomaFormField = "file"
 // maxDiplomaUploadBytes bounds one upload request: every extract at its
 // largest, plus the multipart framing.
 const maxDiplomaUploadBytes = MaxDiplomasPerRequest*MaxDiplomaFileBytes + 1<<20
-
-// diplomaMultipartMemory is how much of an upload is held in memory before
-// the multipart reader spills to disk.
-const diplomaMultipartMemory = 8 << 20
 
 type flowDiplomasBody struct {
 	DiplomaMode DiplomaMode `json:"diplomaMode"`
@@ -121,48 +116,52 @@ func writeDiplomaVerdicts(w http.ResponseWriter, r *http.Request, verdicts []Dip
 }
 
 // readDiplomaFiles reads the extracts of a multipart upload, each at most
-// MaxDiplomaFileBytes.
+// MaxDiplomaFileBytes, part by part into memory: an upload never spills to a
+// temporary file, as ParseMultipartForm's would.
 func readDiplomaFiles(w http.ResponseWriter, r *http.Request) ([]DiplomaFile, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxDiplomaUploadBytes)
-	if err := r.ParseMultipartForm(diplomaMultipartMemory); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			return nil, &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "too_large", Message: "the upload is too large"}
+	reader, err := r.MultipartReader()
+	if err != nil {
+		return nil, diplomaReadError(err)
+	}
+	var files []DiplomaFile
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
 		}
-		return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "upload the extracts as multipart/form-data"}
-	}
-	headers := r.MultipartForm.File[diplomaFormField]
-	if len(headers) == 0 {
-		return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "no file uploaded"}
-	}
-	if len(headers) > MaxDiplomasPerRequest {
-		return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "too_many_files", Message: fmt.Sprintf("upload at most %d extracts", MaxDiplomasPerRequest)}
-	}
-	files := make([]DiplomaFile, 0, len(headers))
-	for _, header := range headers {
-		if header.Size > MaxDiplomaFileBytes {
+		if err != nil {
+			return nil, diplomaReadError(err)
+		}
+		if part.FormName() != diplomaFormField || part.FileName() == "" {
+			continue
+		}
+		if len(files) == MaxDiplomasPerRequest {
+			return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "too_many_files", Message: fmt.Sprintf("upload at most %d extracts", MaxDiplomasPerRequest)}
+		}
+		b, err := io.ReadAll(io.LimitReader(part, MaxDiplomaFileBytes+1))
+		if err != nil {
+			return nil, diplomaReadError(err)
+		}
+		if len(b) > MaxDiplomaFileBytes {
 			return nil, &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "too_large", Message: fmt.Sprintf("an extract is at most %d bytes", MaxDiplomaFileBytes)}
 		}
-		b, err := readPart(header)
-		if err != nil {
-			return nil, err
-		}
-		files = append(files, DiplomaFile{Name: header.Filename, Bytes: b})
+		files = append(files, DiplomaFile{Name: part.FileName(), Bytes: b})
+	}
+	if len(files) == 0 {
+		return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "no file uploaded"}
 	}
 	return files, nil
 }
 
-func readPart(header *multipart.FileHeader) ([]byte, error) {
-	f, err := header.Open()
-	if err != nil {
-		return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "unreadable file"}
+// diplomaReadError is the answer to an upload that does not read: too large
+// past maxDiplomaUploadBytes, else not well-formed multipart/form-data.
+func diplomaReadError(err error) error {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "too_large", Message: "the upload is too large"}
 	}
-	defer func() { _ = f.Close() }() // read-only; a close error loses nothing
-	b, err := io.ReadAll(io.LimitReader(f, MaxDiplomaFileBytes+1))
-	if err != nil || len(b) > MaxDiplomaFileBytes {
-		return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "unreadable file"}
-	}
-	return b, nil
+	return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "upload the extracts as multipart/form-data"}
 }
 
 // addDiplomas checks the extracts uploaded on a request's on-screen page.

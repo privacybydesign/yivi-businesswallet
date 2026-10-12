@@ -104,7 +104,8 @@ func (d Diploma) auditFields() map[string]any {
 }
 
 // webhookDiplomaKey is where a session.diploma_added delivery carries the
-// extract; Purge drops it from the request's deliveries.
+// extract; recordAttempt drops it once the delivery is final, and Purge from
+// the request's deliveries still pending.
 const webhookDiplomaKey = "diploma"
 
 // DiplomaFile is one uploaded file.

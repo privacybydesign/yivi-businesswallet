@@ -258,6 +258,8 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	}
 	out.Diplomas = newHostedDiplomas(diplomas[hosted.Request.ID])
 
+	// It lists the subject's diplomas: no browser keeps them past the purge.
+	w.Header().Set(headerCacheControl, cacheNoStore)
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }

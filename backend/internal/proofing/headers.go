@@ -11,4 +11,5 @@ const (
 	headerCSP                = "Content-Security-Policy"
 	headerIdempotentReplayed = "Idempotent-Replayed"
 	contentTypeJSON          = "application/json"
+	cacheNoStore             = "no-store"
 )

@@ -180,7 +180,7 @@ func writeDataExport(w http.ResponseWriter, r *http.Request, export DataExport, 
 		out.Sessions = append(out.Sessions, session)
 	}
 	w.Header().Set(headerContentDisposition, fmt.Sprintf("attachment; filename=%q", dataExportFilename))
-	w.Header().Set(headerCacheControl, "no-store")
+	w.Header().Set(headerCacheControl, cacheNoStore)
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }

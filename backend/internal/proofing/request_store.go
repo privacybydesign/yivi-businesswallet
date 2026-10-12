@@ -46,11 +46,11 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until,
 	r.retention_override_seconds, ` + purgeAtColumn
 
-// purgeAtColumn is when a customer's request is purged: purge_at, which every
-// write to its inputs stores (refreshPurgeAt), shown only once it settled.
-// NULL while it runs or awaits review, and for a member's. One whose session
-// never got attached (CreateRequest failed between the two writes) settles
-// when its link would have lapsed.
+// purgeAtColumn is when a request is purged: purge_at, which every write to
+// its inputs stores (refreshPurgeAt), shown only once it settled. NULL while
+// it runs or awaits review. One whose session never got attached
+// (CreateRequest failed between the two writes) settles when its link would
+// have lapsed.
 const purgeAtColumn = `CASE WHEN r.cancelled_at IS NULL AND r.ips_session_ended_at IS NULL
 		AND r.status IN ('pending', 'in_progress') AND COALESCE(r.ips_session_expires_at, r.link_expires_at) > now()
 		THEN NULL ELSE r.purge_at END`
@@ -60,17 +60,17 @@ const purgeAtColumn = `CASE WHEN r.cancelled_at IS NULL AND r.ips_session_ended_
 const dataRequestReviewDays = 30
 
 // setPurgeAt stores purge_at on the requests r its WHERE (appended, over $1)
-// selects; $2 is dataRequestReviewDays. It is the one rule for when a request
-// is purged, so ListPurgeDue reads an index instead of computing it for every
-// unpurged row:
+// selects; $2 is dataRequestReviewDays and $3 proofedNameRetention in seconds.
+// It is the one rule for when a request is purged, so ListPurgeDue reads an
+// index instead of computing it for every unpurged row:
 //   - its retention (its flow's override, else its customer's
-//     data_retention_days) after it settled: cancelled, its session ended,
-//     decided, or else its running session's or unstarted link's cap. A cap is
-//     stored before it passes; the purge asks purge_at <= now(), which holds
-//     only after the cap anyway, since a retention is never zero.
+//     data_retention_days, else for a member's proofedNameRetention) after it
+//     settled: cancelled, its session ended, decided, or else its running
+//     session's or unstarted link's cap. A cap is stored before it passes; the
+//     purge asks purge_at <= now(), which holds only after the cap anyway,
+//     since a retention is never zero.
 //   - a data request in review: dataRequestReviewDays after it went there.
-//   - NULL for a member's request without a flow retention, and while a review
-//     has no end.
+//   - NULL while a review has no end.
 //
 // The customer's retention is read in the statement: CustomerStore.SaveSettings
 // sets it again for that customer's requests (refreshCustomerPurgeAt).
@@ -81,7 +81,8 @@ const setPurgeAt = `UPDATE identity_proofing_requests r SET purge_at = LEAST(
 			CASE WHEN r.status = 'pending' AND r.ips_session_id IS NULL THEN r.link_expires_at END)
 			+ COALESCE(make_interval(secs => r.retention_override_seconds),
 				make_interval(days => (SELECT c.data_retention_days FROM identity_proofing_customers c
-					WHERE c.id = r.customer_id))),
+					WHERE c.id = r.customer_id)),
+				make_interval(secs => $3)),
 		CASE WHEN r.status = 'needs_review' AND r.flow_kind IN ('data_access', 'data_erasure')
 			THEN r.completed_at + make_interval(days => $2) END)
 	WHERE `
@@ -95,7 +96,7 @@ func refreshPurgeAt(ctx context.Context, q database.Querier, ids ...uuid.UUID) e
 	if len(ids) == 0 {
 		return nil
 	}
-	if _, err := q.Exec(ctx, setPurgeAt+`r.id = ANY($1)`, ids, dataRequestReviewDays); err != nil {
+	if _, err := q.Exec(ctx, setPurgeAt+`r.id = ANY($1)`, ids, dataRequestReviewDays, proofedNameRetention.Seconds()); err != nil {
 		return fmt.Errorf("proofing: set purge time requests %v: %w", ids, err)
 	}
 	return nil
@@ -116,8 +117,8 @@ func refreshCustomerPurgeAt(ctx context.Context, q database.Querier, orgID, id u
 		ORDER BY id FOR NO KEY UPDATE`, orgID, id); err != nil {
 		return fmt.Errorf("proofing: lock requests customer %s: %w", id, err)
 	}
-	if _, err := q.Exec(ctx, setPurgeAt+`r.organization_id = $3 AND r.customer_id = $1 AND r.purged_at IS NULL
-		AND r.retention_override_seconds IS NULL`, id, dataRequestReviewDays, orgID); err != nil {
+	if _, err := q.Exec(ctx, setPurgeAt+`r.organization_id = $4 AND r.customer_id = $1 AND r.purged_at IS NULL
+		AND r.retention_override_seconds IS NULL`, id, dataRequestReviewDays, proofedNameRetention.Seconds(), orgID); err != nil {
 		return fmt.Errorf("proofing: set purge time customer %s: %w", id, err)
 	}
 	return nil

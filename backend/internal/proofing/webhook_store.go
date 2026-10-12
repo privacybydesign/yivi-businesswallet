@@ -400,10 +400,11 @@ func (s *WebhookStore) nextDue(ctx context.Context) (time.Time, error) {
 }
 
 // recordAttempt stores one attempt's outcome: delivered on a 2xx, else another
-// attempt after the back-off, or failed once the attempts run out. Only while
-// d's lease holds: a worker whose lease lapsed (and whose delivery another
-// worker then claimed) records nothing, so its late outcome never overwrites
-// the newer one.
+// attempt after the back-off, or failed once the attempts run out. A delivered
+// or failed one is never sent again, so its diploma goes in the same write.
+// Only while d's lease holds: a worker whose lease lapsed (and whose delivery
+// another worker then claimed) records nothing, so its late outcome never
+// overwrites the newer one.
 func (s *WebhookStore) recordAttempt(ctx context.Context, d dueDelivery, statusCode *int, sendErr string) error {
 	attempts := d.Attempts + 1
 	// The database's clock sets the retry, as it decides what claimDue finds
@@ -424,9 +425,11 @@ func (s *WebhookStore) recordAttempt(ctx context.Context, d dueDelivery, statusC
 	tag, err := s.db.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries
 		SET status = $2, attempts = $3, next_attempt_at = now() + make_interval(secs => $4), last_attempt_at = now(),
 			last_status_code = $5, last_error = NULLIF($6, ''),
-			delivered_at = CASE WHEN $2 = $7 THEN now() END
+			delivered_at = CASE WHEN $2 = $7 THEN now() END,
+			payload = CASE WHEN $2 = $8 THEN payload ELSE payload - $11::text END
 		WHERE id = $1 AND status = $8 AND attempts = $9 AND next_attempt_at = $10`,
-		d.ID, status, attempts, delay.Seconds(), statusCode, sendErr, DeliveryDelivered, DeliveryPending, d.Attempts, d.LeasedUntil)
+		d.ID, status, attempts, delay.Seconds(), statusCode, sendErr, DeliveryDelivered, DeliveryPending, d.Attempts, d.LeasedUntil,
+		webhookDiplomaKey)
 	if err != nil {
 		return fmt.Errorf("proofing: record delivery %s: %w", d.ID, err)
 	}

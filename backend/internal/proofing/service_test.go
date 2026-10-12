@@ -1890,6 +1890,12 @@ func TestEngineRetentionPrefersFlow(t *testing.T) {
 	if got := engineRetention(&customer, 0); got != customer.Settings.DataRetention()+retentionGrace {
 		t.Errorf("no override = %v, want the customer's retention plus grace", got)
 	}
+	if got := engineRetention(nil, 0); got != proofedNameRetention+retentionGrace {
+		t.Errorf("a member's = %v, want proofedNameRetention plus grace", got)
+	}
+	if got := engineRetention(nil, week); got != week+retentionGrace {
+		t.Errorf("a member's with a week's override = %v, want a week plus grace", got)
+	}
 }
 
 func TestSubjectRetentionDays(t *testing.T) {

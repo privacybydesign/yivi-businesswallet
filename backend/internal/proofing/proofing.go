@@ -56,7 +56,8 @@ const maxListedRequests = 200
 
 // proofedNameRetention is how long the name read off a customer's subject's
 // document is kept before the pruner clears it: long enough for the member to
-// act on the outcome, not a record of the person.
+// act on the outcome, not a record of the person. A member's request is
+// purged after it too, unless its flow sets a retention.
 const proofedNameRetention = 30 * 24 * time.Hour
 
 // hoursPerDay converts a customer's data retention in days to a duration.
@@ -245,8 +246,8 @@ type Request struct {
 	// ProofedName is the name read off a customer's subject's approved document,
 	// until proofedNameRetention clears it; empty otherwise.
 	ProofedName string
-	// PurgeAt is when the pruner purges the request (Purge): its customer's
-	// retention after it settled; nil while it runs, and for a member's.
+	// PurgeAt is when the pruner purges the request (Purge): its retention
+	// after it settled (setPurgeAt); nil while it runs.
 	PurgeAt  *time.Time
 	FlowID   string
 	FlowName string
