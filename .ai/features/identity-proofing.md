@@ -938,8 +938,8 @@ holder's change of bank account).
   never matched against a supplied photo. Audited as `referencePhoto:
   true`, never the image.
 - **Held.** The engine's session keeps it sealed (`session.ReferencePhoto`)
-  and hands it to the app as `faceReference` for the face step
-  (`faceMatchReference`); `Session.ForStorage` drops it once the session is
+  and matches the face step against it at Regula (`faceMatchReference`),
+  never handing it to the app; `Session.ForStorage` drops it once the session is
   under review or over (the result's copy, below, is all that stays). A hosted request
   holds it sealed (`reference_photo_ciphertext`) only until its subject
   starts (`AttachSession`), cancels, lets the link lapse, or it is purged;
