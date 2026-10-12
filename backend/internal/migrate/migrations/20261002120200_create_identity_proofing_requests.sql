@@ -29,7 +29,7 @@ CREATE TABLE identity_proofing_requests
     -- Who asked: the member who sent it, or the customer key that created it
     -- (requested_by then stays NULL).
     requested_by                   UUID        REFERENCES users (id) ON DELETE SET NULL,
-    api_key_id                     UUID        REFERENCES identity_proofing_api_keys (id) ON DELETE SET NULL,
+    api_key_id                     UUID,
     customer_id                    UUID,
 
     -- The subject. subject_name and subject_email are the snapshot the request
@@ -128,6 +128,8 @@ CREATE TABLE identity_proofing_requests
     UNIQUE (organization_id, id),
     FOREIGN KEY (organization_id, customer_id)
         REFERENCES identity_proofing_customers (organization_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (organization_id, api_key_id)
+        REFERENCES identity_proofing_api_keys (organization_id, id) ON DELETE SET NULL (api_key_id),
     CONSTRAINT identity_proofing_requests_check
         CHECK ((ips_session_id IS NULL) = (ips_session_token_ciphertext IS NULL)),
     CONSTRAINT identity_proofing_requests_check1

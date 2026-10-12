@@ -36,7 +36,19 @@ func TestRequestChildrenStayInOrg(t *testing.T) {
 		return orgID, requestID
 	}
 	orgA, requestA := request("tenant-a")
-	_, requestB := request("tenant-b")
+	orgB, requestB := request("tenant-b")
+
+	apiKey := func(orgID string) (keyID string) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `WITH customer AS (
+				INSERT INTO identity_proofing_customers (organization_id, name) VALUES ($1, 'Customer') RETURNING id)
+			INSERT INTO identity_proofing_api_keys (organization_id, customer_id, name, prefix, secret_hash)
+			SELECT $1, id, 'Key', 'prefix', gen_random_uuid()::text::bytea FROM customer RETURNING id`, orgID).Scan(&keyID); err != nil {
+			t.Fatalf("insert api key: %v", err)
+		}
+		return keyID
+	}
+	keyA, keyB := apiKey(orgA), apiKey(orgB)
 
 	for name, insert := range map[string]string{
 		"match": `INSERT INTO identity_proofing_request_matches (organization_id, request_id, matched_request_id, level)
@@ -58,4 +70,28 @@ func TestRequestChildrenStayInOrg(t *testing.T) {
 		VALUES ($1, $2, $2, 'strong')`, orgA, requestA); err == nil {
 		t.Error("a request matched with itself was accepted")
 	}
+
+	t.Run("api key", func(t *testing.T) {
+		const setKey = `UPDATE identity_proofing_requests SET api_key_id = $2 WHERE id = $1`
+		_, err := pool.Exec(ctx, setKey, requestA, keyB)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != foreignKeyViolation {
+			t.Errorf("a request of org A naming org B's api key = %v, want a foreign key violation", err)
+		}
+
+		if _, err := pool.Exec(ctx, setKey, requestA, keyA); err != nil {
+			t.Fatalf("set org A's own api key: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM identity_proofing_api_keys WHERE id = $1`, keyA); err != nil {
+			t.Fatalf("delete api key: %v", err)
+		}
+		var keyID, orgID *string
+		if err := pool.QueryRow(ctx, `SELECT api_key_id::text, organization_id::text FROM identity_proofing_requests WHERE id = $1`,
+			requestA).Scan(&keyID, &orgID); err != nil {
+			t.Fatalf("read request: %v", err)
+		}
+		if keyID != nil || orgID == nil || *orgID != orgA {
+			t.Errorf("after its key is deleted the request has key %v, org %v; want no key, org %s", keyID, orgID, orgA)
+		}
+	})
 }
