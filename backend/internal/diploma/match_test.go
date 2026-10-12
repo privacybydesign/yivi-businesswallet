@@ -40,6 +40,16 @@ func TestMatchFullName(t *testing.T) {
 			want:      Result{DateOfBirthMatch: true, GivenNamesMatch: true, Reasons: []string{"surname differs"}},
 		},
 		{
+			name: "other prefix", printed: "Anna de Berg", dob: "1980-02-03",
+			disclosed: Person{GivenNames: "Anna", Prefix: "van der", Surname: "Berg", DateOfBirth: "1980-02-03"},
+			want:      Result{DateOfBirthMatch: true, GivenNamesMatch: true, Reasons: []string{"surname differs"}},
+		},
+		{
+			name: "part of a double surname", printed: "Anna Jansen-Smit", dob: "1980-02-03",
+			disclosed: Person{GivenNames: "Anna", Surname: "Smit", DateOfBirth: "1980-02-03"},
+			want:      Result{DateOfBirthMatch: true, GivenNamesMatch: true, Reasons: []string{"surname differs"}},
+		},
+		{
 			name: "other given name", printed: "Anna Maria van der Berg", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "Maria", Surname: "van der Berg", DateOfBirth: "1980-02-03"},
 			want:      Result{DateOfBirthMatch: true, SurnameMatch: true, Reasons: []string{"given names differ"}},

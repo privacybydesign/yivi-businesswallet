@@ -36,7 +36,7 @@ type Result struct {
 
 // MatchFullName compares a holder whose name is printed as a single line, the
 // way DUO prints it on a diploma extract ("Anna Maria van der Berg"), with the
-// disclosed person. The disclosed surname (with or without its prefix, in
+// disclosed person. The disclosed surname (with its prefix, if disclosed, in
 // either order) must be the tail of the printed name; what precedes it are the
 // given names, which givenNamesMatch compares. When the surname is not found
 // the first printed word is still compared with the first disclosed given name
@@ -45,10 +45,10 @@ func MatchFullName(fullName, dateOfBirth string, disclosed Person) Result {
 	result := Result{}
 	result.DateOfBirthMatch = compareDatesOfBirth(dateOfBirth, disclosed.DateOfBirth, &result.Reasons)
 
-	tokens := nameTokens(fullName)
+	tokens, wordStarts := printedTokens(fullName)
 	given := tokens
 	for _, surname := range surnameTails(disclosed) {
-		if len(surname) == 0 || len(surname) >= len(tokens) {
+		if len(surname) == 0 || len(surname) >= len(tokens) || !wordStarts[len(tokens)-len(surname)] {
 			continue
 		}
 		if equalTokens(tokens[len(tokens)-len(surname):], surname) {
@@ -71,6 +71,18 @@ func MatchFullName(fullName, dateOfBirth string, disclosed Person) Result {
 
 	result.Matched = result.DateOfBirthMatch && result.SurnameMatch && result.GivenNamesMatch
 	return result
+}
+
+// printedTokens splits a printed name into its words and marks the ones that
+// start a space-separated word, so a surname never begins inside "Jansen-Smit".
+func printedTokens(fullName string) ([]nameToken, map[int]bool) {
+	var tokens []nameToken
+	wordStarts := map[int]bool{}
+	for _, word := range strings.Fields(fullName) {
+		wordStarts[len(tokens)] = true
+		tokens = append(tokens, nameTokens(word)...)
+	}
+	return tokens, wordStarts
 }
 
 // compareDatesOfBirth parses both dates and reports whether they are equal,
@@ -131,18 +143,18 @@ func equalTokens(a, b []nameToken) bool {
 	return true
 }
 
-// surnameVariants returns the normalised surname with and without prefix, and
-// with the prefix trailing (as some MRZ transliterations do).
+// surnameVariants returns the normalised surname with its prefix leading and
+// trailing (as some MRZ transliterations do), or bare when none is disclosed.
 func surnameVariants(p Person) [][]nameToken {
 	surname := nameTokens(p.Surname)
 	prefix := nameTokens(p.Prefix)
-	variants := [][]nameToken{surname}
-	if len(prefix) > 0 {
-		variants = append(variants,
-			append(append([]nameToken{}, prefix...), surname...),
-			append(append([]nameToken{}, surname...), prefix...))
+	if len(prefix) == 0 {
+		return [][]nameToken{surname}
 	}
-	return variants
+	return [][]nameToken{
+		append(append([]nameToken{}, prefix...), surname...),
+		append(append([]nameToken{}, surname...), prefix...),
+	}
 }
 
 // givenNamesMatch reports whether two lists of given names are the same
