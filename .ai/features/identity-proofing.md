@@ -827,13 +827,48 @@ Everything this feature does not do yet, in one place.
   - Its disclosure (`proofingQuery`, `dcql.go`) asks no document type,
     issuing country or expiry, so a flow that restricts the type or country
     refuses every Yivi disclosure.
+- **Yivi route end to end.** It does not work end to end yet. Still to do:
+  - require the device token on the Yivi routes, as on the Idem ones;
+  - give a failed hosted Yivi session a restart (R26);
+  - make the face check after the disclosure optional per flow.
+- **Handover (R14, decided 2026-10-05).** A handover is minted from the screen
+  only; restricting who may mint one, or an in-app handover, is a later
+  feature. The hosted page does not follow the app (`waiting` / `connected` /
+  `away`) as the on-screen page does, so its session QR stays shown.
 - **Custom domains and white labelling** of the hosted page are not built:
   the page is on the wallet's own domain with the customer's branding (§4).
+  Planned: white labelling per org, then per customer, carried through to the
+  QR into the Idem app, usable only with that org's and customer's API key.
+- **Settings still open:**
+  - an unset BSN policy keeps the BSN (`retrieve`); `omit` as the default is
+    undecided;
+  - which fields a customer must send with a session, and what a mismatch
+    does, cannot be set per flow in the editor (§13 is per session);
+  - raising a customer's retention after a session moves the wallet's purge,
+    not the engine copy's, and the subject was told the old number;
+  - an identity session in `needs_review` has no purge time (moot until the
+    review trigger exists).
+- **Rate limits** are a fixed bucket per customer (`apiCallLimit`,
+  `APISessionLimit`, `hostedCallLimit`), per replica; an org has no total.
+  Planned: an org budget with customer limits inside it, `RateLimit-*`
+  headers, and API usage per org ranked by customer and key.
+- **App long-poll.** `GET /app/{token}/events` re-reads the session every
+  `SessionEventsPoll` while a client waits; a change notice would spare those
+  reads.
+- **Tests without a DOM:** `SecretReveal`'s `dismissible={false}` has no
+  render test.
+- **Planned features:** who sees what (member, admin, platform admin,
+  customer); audit log filter and export (the buttons exist); DigiD for the
+  address, compared with what the person gave (Idem route); residence permits
+  over NFC; anti-glare for document capture; `high` assurance, only with a
+  certified liveness vendor.
 - **Before launch:**
   - The DPA and the controller and processor chain with each customer.
   - The Regula licence for production.
   - Verifying the EU Trusted Lists' XAdES signatures: §12 trusts them on
     transport security alone (`diploma/eutl`).
+  - Confirming the Idem app only uses the step endpoints (the single-shot
+    `/result` is refused).
 
 ## 12. Diplomas (DUO extracts)
 
