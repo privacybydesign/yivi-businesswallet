@@ -154,31 +154,42 @@ paths:
       tags: [idem-app]
       summary: Claim a session slot with a claim or handover link
       description: >-
-        Moves the slot the grant is for to this device and returns its device token. Single use; a previous device is revoked.
+        Moves the slot the grant is for to this device and returns its device token. Single use; a previous device is revoked. Takes no body.
       security: []
+      parameters:
+        - $ref: '#/components/parameters/IdemAcceptLanguage'
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The slot is this device's; send `deviceToken` as X-Device-Token from now on.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                $ref: '#/components/schemas/IdemClaim'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: '`handover_invalid`: no grant matches the token.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdemAppError'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          description: '`handover_used`, `device_already_claimed` or `session_complete`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdemAppError'
+        '410':
+          description: '`handover_expired` or `session_expired`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdemAppError'
         '429':
-          description: Too many requests; see Retry-After.
+          $ref: '#/components/responses/IdemTooManyRequests'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
+      - $ref: '#/components/parameters/IdemSessionToken'
     get:
       tags: [idem-app]
       summary: Read the session as the app sees it
@@ -186,458 +197,433 @@ paths:
         What to collect, who asks and how long the session has. Opening it marks a created session opened.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
-          schema:
-            type: string
-          description: The device token the claim or handover returned.
+        - $ref: '#/components/parameters/IdemDeviceToken'
+        - $ref: '#/components/parameters/IdemAcceptLanguage'
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The session view.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/IdemAppSession'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/IdemSessionNotFound'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          $ref: '#/components/responses/IdemConflict'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/claim:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
+      - $ref: '#/components/parameters/IdemSessionToken'
     post:
       tags: [idem-app]
       summary: Claim with the session token (retired)
       description: >-
-        Always answers 410 claim_token_required: scan the claim or handover QR instead.
+        Always answers 410 `claim_token_required`: scan the claim or handover QR instead.
       security: []
       responses:
-        '2XX':
-          description: Successful response.
+        '410':
+          description: '`claim_token_required`.'
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '410':
-          description: Gone.
+                $ref: '#/components/schemas/IdemAppError'
   /api/v1/app/{token}/device/state:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
+      - $ref: '#/components/parameters/IdemSessionToken'
     post:
       tags: [idem-app]
       summary: Report the device state
       description: >-
-        Records whether the app is active or in the background, so the other device can offer a handover.
+        Records whether the app is active or in the background, so the other device can offer a handover. Back to `active` cancels a handover code left for this device's slot.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
-          schema:
-            type: string
-          description: The device token the claim or handover returned.
+        - $ref: '#/components/parameters/IdemDeviceToken'
+        - $ref: '#/components/parameters/IdemAcceptLanguage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdemDeviceStateRequest'
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The session view after the change.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/IdemAppSession'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/IdemBadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/IdemSessionNotFound'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          $ref: '#/components/responses/IdemConflict'
+        '410':
+          $ref: '#/components/responses/IdemSessionExpired'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/events:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
+      - $ref: '#/components/parameters/IdemSessionToken'
     get:
       tags: [idem-app]
       summary: Wait for a change to the session
       description: >-
-        Long-polls until the app view changes (status, steps, devices) or SessionEventsWait passes, then answers the view. `since` is the change key the client last saw. Capped per session and per server.
+        Long-polls until the app view changes (status, steps, resets, devices) or SessionEventsWait (25 s by default) passes, then answers the view. Capped per session and per server.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
+        - $ref: '#/components/parameters/IdemDeviceToken'
+        - $ref: '#/components/parameters/IdemAcceptLanguage'
+        - name: since
+          in: query
+          required: false
           schema:
             type: string
-          description: The device token the claim or handover returned.
+          description: The `changeKey` of the view the client last saw; answers at once when it differs.
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The session view, changed or after the wait.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/IdemAppSession'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/IdemSessionNotFound'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          $ref: '#/components/responses/IdemConflict'
         '429':
-          description: Too many requests; see Retry-After.
+          $ref: '#/components/responses/IdemTooManyRequests'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/handover:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
+      - $ref: '#/components/parameters/IdemSessionToken'
     post:
       tags: [idem-app]
       summary: Mint a handover link
       description: >-
-        Issues a short-lived, single-use grant for one of the session slots, replacing its pending one.
+        Issues a short-lived, single-use grant for one of the session slots, replacing its pending one. The body is optional; without it the grant is for the caller's own slot.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
-          schema:
-            type: string
-          description: The device token the claim or handover returned.
+        - $ref: '#/components/parameters/IdemDeviceToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdemHandoverRequest'
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The minted grant.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/IdemHandover'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/IdemBadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/IdemSessionNotFound'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          $ref: '#/components/responses/IdemConflict'
+        '410':
+          $ref: '#/components/responses/IdemSessionExpired'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/result:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
+      - $ref: '#/components/parameters/IdemSessionToken'
     post:
       tags: [idem-app]
       summary: Submit a whole result (retired)
       description: >-
-        Always answers 409 flow_steps_required: every session runs a flow, submitted step by step.
+        Always answers 409 `flow_steps_required` to an authorized device: every session runs a flow, submitted step by step.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
-          schema:
-            type: string
-          description: The device token the claim or handover returned.
+        - $ref: '#/components/parameters/IdemDeviceToken'
       responses:
-        '2XX':
-          description: Successful response.
+        '401':
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
+        '404':
+          $ref: '#/components/responses/IdemSessionNotFound'
+        '409':
+          description: '`flow_steps_required`, or `not_app_session` for a Yivi session.'
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+                $ref: '#/components/schemas/IdemAppError'
   /api/v1/app/{token}/steps/document_capture:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
+      - $ref: '#/components/parameters/IdemSessionToken'
     post:
       tags: [idem-app]
       summary: Submit the document_capture step
       description: >-
-        The MRZ reading and, for a chip read, its access data.
+        The MRZ reading and, for a flow with nfc_read, the chip access key, kept until the chip read lands. A later nfc_read supersedes the MRZ reading.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
-          schema:
-            type: string
-          description: The device token the claim or handover returned.
+        - $ref: '#/components/parameters/IdemDeviceToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdemDocumentCaptureRequest'
       responses:
-        '2XX':
-          description: Successful response.
-          content:
-            application/json:
-              schema:
-                description: Response payload; shape depends on the endpoint.
+        '200':
+          $ref: '#/components/responses/IdemStepRecorded'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/IdemBadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/IdemSessionNotFound'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          $ref: '#/components/responses/IdemConflict'
+        '410':
+          $ref: '#/components/responses/IdemSessionExpired'
         '422':
-          description: The document is not supported.
+          $ref: '#/components/responses/IdemDocumentUnsupported'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/steps/document_photo:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
+      - $ref: '#/components/parameters/IdemSessionToken'
     post:
       tags: [idem-app]
       summary: Submit the document_photo step
       description: >-
-        Photos of the document, with the located BSN region of a Dutch document.
+        Photos of the document's data page and optional back, with the located BSN region of a Dutch document.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
-          schema:
-            type: string
-          description: The device token the claim or handover returned.
+        - $ref: '#/components/parameters/IdemDeviceToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdemDocumentPhotoRequest'
       responses:
-        '2XX':
-          description: Successful response.
-          content:
-            application/json:
-              schema:
-                description: Response payload; shape depends on the endpoint.
+        '200':
+          $ref: '#/components/responses/IdemStepRecorded'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/IdemBadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/IdemSessionNotFound'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          $ref: '#/components/responses/IdemConflict'
+        '410':
+          $ref: '#/components/responses/IdemSessionExpired'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/steps/nfc:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
+      - $ref: '#/components/parameters/IdemSessionToken'
     post:
       tags: [idem-app]
       summary: Submit the nfc_read step
       description: >-
-        The raw chip data, which the server verifies itself (Passive and Active or Chip Authentication).
+        The raw chip data, which the server verifies itself (Passive and Active or Chip Authentication). The document is read from DG1/DG11 of the evidence, never from the app's own `document`. On a flow with document_capture it fulfils that step too.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
-          schema:
-            type: string
-          description: The device token the claim or handover returned.
+        - $ref: '#/components/parameters/IdemDeviceToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdemNFCRequest'
       responses:
-        '2XX':
-          description: Successful response.
-          content:
-            application/json:
-              schema:
-                description: Response payload; shape depends on the endpoint.
+        '200':
+          $ref: '#/components/responses/IdemStepRecorded'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/IdemBadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/IdemSessionNotFound'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          $ref: '#/components/responses/IdemConflict'
+        '410':
+          $ref: '#/components/responses/IdemSessionExpired'
         '422':
-          description: The document is not supported.
+          $ref: '#/components/responses/IdemDocumentUnsupported'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/steps/selfie:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
+      - $ref: '#/components/parameters/IdemSessionToken'
     post:
       tags: [idem-app]
       summary: Submit the face steps
       description: >-
-        The Regula liveness transaction of the live capture; the face is matched against the reference here.
+        The Regula liveness transaction of the live capture; one submission fulfils every face step of the flow, and the face is matched against the reference here. A failed attempt may be retried up to 3 times per session.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
-          schema:
-            type: string
-          description: The device token the claim or handover returned.
+        - $ref: '#/components/parameters/IdemDeviceToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdemSelfieRequest'
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The step is stored (or was already, `alreadyRecorded`), with the face verdict.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/IdemSelfieStepResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/IdemBadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/IdemSessionNotFound'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          description: >-
+            As the other step routes, or the reference photo for the face match has not landed yet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdemAppError'
+        '410':
+          $ref: '#/components/responses/IdemSessionExpired'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
         '503':
-          description: The face provider is unavailable.
+          description: '`FACE_PROVIDER_UNAVAILABLE`: Regula is unreachable or not configured.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdemAppError'
   /api/v1/app/{token}/steps/{step}/result:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
-      - name: step
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The flow step, e.g. selfie or nfc_read.
+      - $ref: '#/components/parameters/IdemSessionToken'
+      - $ref: '#/components/parameters/IdemStep'
     get:
       tags: [idem-app]
       summary: Read a step result
       description: >-
-        The recorded outcome of one step.
+        The recorded verdicts of one step, never its evidence, with the session's progress. Readable after the session finished.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
-          schema:
-            type: string
-          description: The device token the claim or handover returned.
+        - $ref: '#/components/parameters/IdemDeviceToken'
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The step's result.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/IdemStepResultResponse'
+        '400':
+          $ref: '#/components/responses/IdemBadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/IdemSessionNotFound'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          $ref: '#/components/responses/IdemConflict'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/steps/{step}/start:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
-      - name: step
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The flow step, e.g. selfie or nfc_read.
+      - $ref: '#/components/parameters/IdemSessionToken'
+      - $ref: '#/components/parameters/IdemStep'
     post:
       tags: [idem-app]
       summary: Start a step
       description: >-
-        Marks the step started, for its timing.
+        Marks the step started, for its timing and the audit log. Idempotent; takes no body.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
-          schema:
-            type: string
-          description: The device token the claim or handover returned.
+        - $ref: '#/components/parameters/IdemDeviceToken'
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The session's progress.
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/IdemStepResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/IdemBadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/IdemSessionNotFound'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          $ref: '#/components/responses/IdemConflict'
+        '410':
+          $ref: '#/components/responses/IdemSessionExpired'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/submit:
     parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The session token from the claim or handover link.
+      - $ref: '#/components/parameters/IdemSessionToken'
     post:
       tags: [idem-app]
       summary: Submit the session
       description: >-
-        Once every step has evidence the session gets its outcome; a repeat answers the current state.
+        Once every step has evidence the server decides the outcome; a repeat answers the current state with `alreadyRecorded`. Takes no body.
       security: []
       parameters:
-        - name: X-Device-Token
-          in: header
-          required: true
-          schema:
-            type: string
-          description: The device token the claim or handover returned.
+        - $ref: '#/components/parameters/IdemDeviceToken'
       responses:
-        '2XX':
-          description: Successful response.
+        '200':
+          description: The session's outcome (`status`, `errorCode`).
           content:
             application/json:
               schema:
-                description: Response payload; shape depends on the endpoint.
+                $ref: '#/components/schemas/IdemStepResponse'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/IdemSessionNotFound'
         '409':
-          description: The session cannot take this request now (finished, expired, a step already recorded, or a Yivi session).
+          description: >-
+            `steps_incomplete` (a step still lacks evidence, or the session was reset meanwhile), `not_app_session`, or the session has no flow.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdemAppError'
+        '410':
+          $ref: '#/components/responses/IdemSessionExpired'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
   /api/v1/attestations/claim/{token}:
     parameters:
       - name: token
@@ -6444,6 +6430,489 @@ components:
           type: string
           description: Stable machine-readable error code.
       required: [error, code]
+    IdemAppError:
+      type: object
+      description: An Idem app route's error body.
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+        code:
+          type: string
+          description: >-
+            Stable machine-readable code, where the route sets one: device_unauthorized, device_handed_over,
+            device_already_claimed, session_expired, session_complete, handover_invalid, handover_expired,
+            handover_used, claim_token_required, flow_steps_required, steps_incomplete, not_app_session,
+            document_unsupported, FACE_PROVIDER_UNAVAILABLE.
+      required: [error]
+    IdemFlowStep:
+      type: string
+      enum: [document_capture, nfc_read, document_photo, face_verification, selfie, liveness, face_match]
+    IdemSessionStatus:
+      type: string
+      enum: [created, opened, in_progress, needs_review, approved, rejected, expired, cancelled]
+    IdemLifecycle:
+      type: string
+      enum: [ACTIVE, COMPLETE, EXPIRED, CANCELLED]
+      description: COMPLETE means every step has a result and `status` holds the decided outcome.
+    IdemDeviceRole:
+      type: string
+      enum: [web, native]
+      description: The session slot; the Idem app is native, the browser web.
+    IdemDevice:
+      type: object
+      description: One slot's device, never its token.
+      properties:
+        claimed:
+          type: boolean
+        state:
+          type: string
+          enum: [active, inactive]
+        stale:
+          type: boolean
+          description: No request for DeviceStaleAfter, or its long-poll dropped; treat as inactive.
+        claimedAt:
+          type: string
+          format: date-time
+        lastActiveAt:
+          type: string
+          format: date-time
+      required: [claimed]
+    IdemCallerDevice:
+      allOf:
+        - $ref: '#/components/schemas/IdemDevice'
+        - type: object
+          properties:
+            authorized:
+              type: boolean
+            role:
+              $ref: '#/components/schemas/IdemDeviceRole'
+          required: [authorized]
+    IdemChipAccessKey:
+      type: object
+      description: The MRZ-derived key to open the document's chip.
+      properties:
+        documentType:
+          type: string
+          enum: [passport, identity_card, drivers_license]
+        documentNumber:
+          type: string
+        countryCode:
+          type: string
+        dateOfBirth:
+          type: string
+        dateOfExpiry:
+          type: string
+        version:
+          type: string
+        randomData:
+          type: string
+        configuration:
+          type: string
+      required: [documentType, documentNumber]
+    IdemStepResult:
+      type: object
+      description: A step's verdicts as the app sees them, never its evidence.
+      properties:
+        step:
+          type: string
+        completed:
+          type: boolean
+        completedAt:
+          type: string
+          format: date-time
+        summary:
+          type: object
+          additionalProperties: true
+          description: >-
+            document_capture: documentType, allChecksValid; face steps: livenessPassed and, after a match,
+            faceVerified.
+      required: [step, completed]
+    IdemAppSession:
+      type: object
+      description: The session as the app sees it; the org by display name only.
+      properties:
+        id:
+          type: string
+        method:
+          type: string
+          enum: [face, nfc_passport]
+        relyingParty:
+          type: string
+          description: The asking organisation's display name.
+        status:
+          $ref: '#/components/schemas/IdemSessionStatus'
+        language:
+          type: string
+          enum: [en, nl]
+        requestedAttributes:
+          type: array
+          items:
+            type: string
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdemFlowStep'
+        selfieLocation:
+          type: string
+          enum: [browser, native]
+        expiresAt:
+          type: string
+          format: date-time
+        aaChallenge:
+          type: string
+          description: The RND.IFD to send to the chip's INTERNAL AUTHENTICATE.
+        requiredChecks:
+          type: array
+          nullable: true
+          items:
+            type: string
+            enum: [mrz.parse, mrz.checkdigits, viz.ocr, viz.mrz.crossmatch, document.template, document.tamper,
+              document.screen_replay, nfc.passive_auth, nfc.chip_auth, face.match, face.liveness, chip.viz.crossmatch]
+        completedSteps:
+          type: array
+          items:
+            type: string
+        nativeHandoff:
+          type: object
+          description: Present while the Idem app still has work; the browser mints its QR with POST .../handover.
+          properties:
+            role:
+              $ref: '#/components/schemas/IdemDeviceRole'
+            claimed:
+              type: boolean
+          required: [role, claimed]
+        resetCount:
+          type: integer
+          description: Goes up with every reset; a client that sees it change starts over.
+        changeKey:
+          type: string
+          description: The `since` for GET .../events; opaque.
+        flowId:
+          type: string
+        flowVersion:
+          type: integer
+        currentStep:
+          type: string
+          description: The step to continue with, empty once complete; absent without a flow.
+        chipAccess:
+          $ref: '#/components/schemas/IdemChipAccessKey'
+        faceVerification:
+          type: object
+          description: Present when the app runs the face step as a Regula liveness session.
+          properties:
+            provider:
+              type: string
+              enum: [regula]
+            faceApiUrl:
+              type: string
+            tag:
+              type: string
+          required: [provider, faceApiUrl, tag]
+        faceProvider:
+          type: string
+          enum: [regula, engine]
+        stepResults:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/IdemStepResult'
+        lifecycle:
+          $ref: '#/components/schemas/IdemLifecycle'
+        readyToSubmit:
+          type: boolean
+          description: Every step has a result and the session waits for POST .../submit.
+        device:
+          $ref: '#/components/schemas/IdemCallerDevice'
+        devices:
+          type: object
+          description: Every slot's device, keyed web and native.
+          properties:
+            web:
+              $ref: '#/components/schemas/IdemDevice'
+            native:
+              $ref: '#/components/schemas/IdemDevice'
+          required: [web, native]
+      required: [id, method, relyingParty, status, selfieLocation, expiresAt, requiredChecks, resetCount, changeKey,
+        stepResults, lifecycle, device, devices]
+    IdemClaim:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Names the session in the app paths; it authorizes nothing.
+        deviceToken:
+          type: string
+          description: The X-Device-Token from now on.
+        role:
+          $ref: '#/components/schemas/IdemDeviceRole'
+        session:
+          $ref: '#/components/schemas/IdemAppSession'
+      required: [token, deviceToken, role, session]
+    IdemHandoverRequest:
+      type: object
+      properties:
+        role:
+          $ref: '#/components/schemas/IdemDeviceRole'
+      description: Role defaults to the caller's own slot.
+    IdemHandover:
+      type: object
+      properties:
+        handoverToken:
+          type: string
+        role:
+          $ref: '#/components/schemas/IdemDeviceRole'
+        expiresAt:
+          type: string
+          format: date-time
+          description: Never after the session itself expires.
+        qr:
+          type: string
+          description: What to render, the Idem app's deep link (vcmrtd://verify?handover=…&api=…).
+        url:
+          type: string
+        deepLink:
+          type: string
+        slotClaimed:
+          type: boolean
+          description: A device already holds the slot, so redeeming this moves the session.
+      required: [handoverToken, role, expiresAt, qr]
+    IdemDeviceStateRequest:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [active, inactive]
+      required: [state]
+    IdemDocument:
+      type: object
+      description: A document as the app read it.
+      properties:
+        type:
+          type: string
+          description: ICAO document code, e.g. P.
+        number:
+          type: string
+        issuingState:
+          type: string
+        nationality:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        displayName:
+          type: string
+        sex:
+          type: string
+        dateOfBirth:
+          type: string
+          description: YYYY-MM-DD.
+        dateOfExpiry:
+          type: string
+          description: YYYY-MM-DD.
+        personalNumber:
+          type: string
+        placeOfBirth:
+          type: string
+        validity:
+          type: object
+          properties:
+            documentNumberCheckDigitValid:
+              type: boolean
+            dateOfBirthCheckDigitValid:
+              type: boolean
+            dateOfExpiryCheckDigitValid:
+              type: boolean
+            compositeCheckDigitValid:
+              type: boolean
+            notExpired:
+              type: boolean
+    IdemDocumentCaptureRequest:
+      type: object
+      properties:
+        document:
+          allOf:
+            - $ref: '#/components/schemas/IdemDocument'
+          description: Required with at least `number`. A driving licence answers 422.
+        chipAccess:
+          $ref: '#/components/schemas/IdemChipAccessKey'
+      required: [document]
+    IdemImageRegion:
+      type: object
+      description: A box within the image, as fractions of its size; x+w and y+h at most 1.
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        w:
+          type: number
+        h:
+          type: number
+      required: [x, y, w, h]
+    IdemDocumentPhotoSide:
+      type: object
+      properties:
+        image:
+          type: string
+          description: Base64 image.
+        mimeType:
+          type: string
+          description: Defaults to image/jpeg.
+        bsnRegion:
+          $ref: '#/components/schemas/IdemImageRegion'
+      required: [image]
+    IdemDocumentPhotoRequest:
+      type: object
+      properties:
+        front:
+          $ref: '#/components/schemas/IdemDocumentPhotoSide'
+        back:
+          $ref: '#/components/schemas/IdemDocumentPhotoSide'
+      required: [front]
+    IdemPhoto:
+      type: object
+      properties:
+        imageBase64:
+          type: string
+        mimeType:
+          type: string
+          description: e.g. image/jpeg, image/jp2.
+    IdemMrtdEvidence:
+      type: object
+      description: The chip as read; Passive Authentication hashes these bytes.
+      properties:
+        efSod:
+          type: string
+          description: EF.SOD, hex.
+        dataGroups:
+          type: object
+          additionalProperties:
+            type: string
+          description: Raw data groups by name (DG1, DG2, …), hex.
+        documentType:
+          type: string
+          description: Picks the Passive Authentication path; empty is ICAO. A driving licence answers 422.
+        aaKeyDataGroup:
+          type: string
+          description: The data group with the Active Authentication key (DG15, or DG13 for a licence).
+        nonce:
+          type: string
+          description: The challenge sent to the chip; required with aaKeyDataGroup.
+        aaSignature:
+          type: string
+          description: The chip's signature over nonce; required with aaKeyDataGroup.
+      required: [efSod, dataGroups]
+    IdemNFCRequest:
+      type: object
+      properties:
+        photo:
+          allOf:
+            - $ref: '#/components/schemas/IdemPhoto'
+          description: >-
+            The chip's DG2 portrait, byte for byte; required when the flow matches the face against the chip
+            and no reference photo was sent with the session.
+        document:
+          allOf:
+            - $ref: '#/components/schemas/IdemDocument'
+          description: Accepted but ignored; the document is read from the evidence.
+        mrtdEvidence:
+          $ref: '#/components/schemas/IdemMrtdEvidence'
+        device:
+          type: object
+          properties:
+            appVersion:
+              type: string
+            devicePlatform:
+              type: string
+              description: e.g. android, ios.
+      required: [mrtdEvidence]
+    IdemSelfieRequest:
+      type: object
+      properties:
+        livenessTransactionId:
+          type: string
+          description: The Regula liveness transaction the app ran.
+      required: [livenessTransactionId]
+    IdemStepResponse:
+      type: object
+      description: Every step route's answer, and the submit's.
+      properties:
+        status:
+          $ref: '#/components/schemas/IdemSessionStatus'
+        completedSteps:
+          type: array
+          items:
+            type: string
+        currentStep:
+          type: string
+          description: What comes next, empty once complete; absent without a flow.
+        lifecycle:
+          $ref: '#/components/schemas/IdemLifecycle'
+        errorCode:
+          type: string
+          description: Why a decided session was rejected.
+        readyToSubmit:
+          type: boolean
+        alreadyRecorded:
+          type: boolean
+          description: The step (or the submit) was already recorded, so nothing was stored.
+      required: [status, completedSteps, lifecycle]
+    IdemSelfieStepResponse:
+      allOf:
+        - $ref: '#/components/schemas/IdemStepResponse'
+        - type: object
+          properties:
+            biometrics:
+              type: object
+              description: Absent when the step was already recorded.
+              properties:
+                faceMatchScore:
+                  type: number
+                faceVerified:
+                  type: boolean
+                livenessResult:
+                  type: string
+                  enum: [passed, failed]
+                livenessScore:
+                  type: number
+                engine:
+                  type: string
+                threshold:
+                  type: number
+    IdemStepResultResponse:
+      allOf:
+        - $ref: '#/components/schemas/IdemStepResult'
+        - $ref: '#/components/schemas/IdemStepResponse'
+  parameters:
+    IdemSessionToken:
+      name: token
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The session token from the claim response; it names the session and authorizes nothing.
+    IdemDeviceToken:
+      name: X-Device-Token
+      in: header
+      required: true
+      schema:
+        type: string
+      description: The device token the claim or handover returned.
+    IdemAcceptLanguage:
+      name: Accept-Language
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Picks the view's `language` when the session was sent without one.
+    IdemStep:
+      name: step
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/IdemFlowStep'
+      description: A step of the session's flow; any face step name maps to the flow's own.
   responses:
     BadRequest:
       description: The request was malformed or failed validation.
@@ -6469,5 +6938,72 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    IdemBadRequest:
+      description: The body, step or role is invalid (plain `error`, no code).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IdemAppError'
+    IdemDeviceUnauthorized:
+      description: '`device_unauthorized`: X-Device-Token is missing or holds no slot of this session.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IdemAppError'
+    IdemDeviceHandedOver:
+      description: '`device_handed_over`: the slot moved to another device.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IdemAppError'
+    IdemSessionNotFound:
+      description: No session has this token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IdemAppError'
+    IdemConflict:
+      description: >-
+        The session cannot take this request now: `session_complete`, `not_app_session` (a Yivi session), or
+        without a code (no flow, or a state change that lost a race).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IdemAppError'
+    IdemSessionExpired:
+      description: '`session_expired`.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IdemAppError'
+    IdemDocumentUnsupported:
+      description: '`document_unsupported`: EU driving licences are not supported yet.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IdemAppError'
+    IdemTooManyRequests:
+      description: Too many claims or waiting clients for this session; retry after Retry-After.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IdemAppError'
+    IdemInternalError:
+      description: A store or flow lookup failed; the detail is logged, not returned.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IdemAppError'
+    IdemStepRecorded:
+      description: The step is stored, or was already (`alreadyRecorded`, nothing stored).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IdemStepResponse'
 security:
   - cookieAuth: []
