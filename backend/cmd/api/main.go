@@ -871,19 +871,9 @@ func run() error {
 		return err
 	}
 	proofingWebhooks := proofing.NewWebhookStore(pool, recorder, proofingCipher)
-	proofingService := proofing.NewService(proofing.Stores{
-		Settings:     proofing.NewSettingsStore(pool, recorder),
-		Requests:     proofingRequests,
-		Customers:    proofing.NewCustomerStore(pool, recorder),
-		APIKeys:      proofing.NewAPIKeyStore(pool, recorder),
-		Webhooks:     proofingWebhooks,
-		Events:       audit.NewReader(pool),
-		Pauses:       proofing.NewPauseStore(pool, recorder),
-		FlowHosted:   proofing.NewFlowHostedStore(pool, recorder),
-		FlowDiplomas: proofing.NewFlowDiplomaStore(pool, recorder),
-		Diplomas:     proofing.NewDiplomaStore(pool, recorder),
-		DataRequests: proofing.NewDataRequestStore(pool, recorder, proofingCipher),
-	}, ips, verifier, emailService)
+	proofingService := proofing.NewService(
+		proofing.NewStores(pool, recorder, proofingCipher, proofingRequests, proofingWebhooks),
+		ips, verifier, emailService)
 	diplomaValidator, err := newDiplomaValidator(ctx, cfg)
 	if err != nil {
 		return err
