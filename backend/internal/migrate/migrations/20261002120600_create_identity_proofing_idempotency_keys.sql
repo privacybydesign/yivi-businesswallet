@@ -17,8 +17,8 @@ CREATE TABLE identity_proofing_idempotency_keys
     PRIMARY KEY (customer_id, key),
     FOREIGN KEY (organization_id, customer_id)
         REFERENCES identity_proofing_customers (organization_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (organization_id, request_id)
-        REFERENCES identity_proofing_requests (organization_id, id) ON DELETE CASCADE
+    FOREIGN KEY (organization_id, customer_id, request_id)
+        REFERENCES identity_proofing_requests (organization_id, customer_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX identity_proofing_idempotency_keys_created_idx

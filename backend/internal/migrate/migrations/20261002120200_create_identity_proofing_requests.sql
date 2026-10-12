@@ -123,14 +123,27 @@ CREATE TABLE identity_proofing_requests
     -- transaction (proofing.refreshPurgeAt, which holds the rule), and a
     -- customer's changed retention sets it again for its requests.
     purge_at                       TIMESTAMPTZ,
+    -- A request the purge fails to erase (the engine refuses, or its sealed
+    -- fields do not open) waits purge_retry_after before the purge takes it
+    -- again, longer after each of its purge_attempts, so it never holds up the
+    -- requests due after it.
+    purge_attempts                 INTEGER     NOT NULL DEFAULT 0,
+    purge_retry_after              TIMESTAMPTZ,
+    -- A keyed hash of the family name and date of birth a customer's settled
+    -- session proofed, set with its outcome: a data request reads from the
+    -- engine only the sessions that share its own.
+    identity_match_key             BYTEA,
 
-    -- The composite key lets the rows below prove their request is of the
-    -- same org.
+    -- The composite keys let the rows below prove their request is of the
+    -- same org, and of the same customer.
     UNIQUE (organization_id, id),
+    UNIQUE (organization_id, customer_id, id),
     FOREIGN KEY (organization_id, customer_id)
         REFERENCES identity_proofing_customers (organization_id, id) ON DELETE RESTRICT,
-    FOREIGN KEY (organization_id, api_key_id)
-        REFERENCES identity_proofing_api_keys (organization_id, id) ON DELETE SET NULL (api_key_id),
+    FOREIGN KEY (organization_id, customer_id, api_key_id)
+        REFERENCES identity_proofing_api_keys (organization_id, customer_id, id) ON DELETE SET NULL (api_key_id),
+    CONSTRAINT identity_proofing_requests_api_key_check
+        CHECK (api_key_id IS NULL OR customer_id IS NOT NULL),
     CONSTRAINT identity_proofing_requests_check
         CHECK ((ips_session_id IS NULL) = (ips_session_token_ciphertext IS NULL)),
     CONSTRAINT identity_proofing_requests_check1
@@ -174,6 +187,10 @@ CREATE INDEX identity_proofing_requests_open_link_idx
 -- first.
 CREATE INDEX identity_proofing_requests_purge_due_idx
     ON identity_proofing_requests (purge_at) WHERE purged_at IS NULL;
+-- A data request's candidates are its customer's sessions of the same person.
+CREATE INDEX identity_proofing_requests_identity_match_idx
+    ON identity_proofing_requests (organization_id, customer_id, identity_match_key)
+    WHERE identity_match_key IS NOT NULL;
 -- requested_by, subject_user_id and api_key_id are ON DELETE SET NULL, and the
 -- org-scoped indexes lead on organization_id: deleting a user or an API key
 -- would scan the whole requests table without these.

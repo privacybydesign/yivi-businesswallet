@@ -19,8 +19,8 @@ CREATE TABLE identity_proofing_api_keys
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_used_at    TIMESTAMPTZ,
     revoked_at      TIMESTAMPTZ,
-    -- The composite key lets a request prove its key is of the same org.
-    UNIQUE (organization_id, id),
+    -- The composite key lets a request prove its key is of the same customer.
+    UNIQUE (organization_id, customer_id, id),
     FOREIGN KEY (organization_id, customer_id)
         REFERENCES identity_proofing_customers (organization_id, id) ON DELETE CASCADE
 );

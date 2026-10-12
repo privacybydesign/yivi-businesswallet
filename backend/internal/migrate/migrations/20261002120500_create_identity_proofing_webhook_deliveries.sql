@@ -14,8 +14,8 @@ CREATE TABLE identity_proofing_webhook_deliveries
     event            TEXT        NOT NULL,
     request_id       UUID,
     payload          JSONB       NOT NULL,
-    -- The customer's endpoint it goes to; NULL for the wallet's own default.
-    endpoint_url     TEXT,
+    -- The customer's endpoint it goes to.
+    endpoint_url     TEXT        NOT NULL,
     status           TEXT        NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed')),
     attempts         INTEGER     NOT NULL DEFAULT 0,
     next_attempt_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -26,8 +26,8 @@ CREATE TABLE identity_proofing_webhook_deliveries
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     FOREIGN KEY (organization_id, customer_id)
         REFERENCES identity_proofing_customers (organization_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (organization_id, request_id)
-        REFERENCES identity_proofing_requests (organization_id, id) ON DELETE SET NULL (request_id)
+    FOREIGN KEY (organization_id, customer_id, request_id)
+        REFERENCES identity_proofing_requests (organization_id, customer_id, id) ON DELETE SET NULL (request_id)
 );
 
 CREATE INDEX identity_proofing_webhook_deliveries_due_idx
