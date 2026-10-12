@@ -64,14 +64,20 @@ func (s *Service) hostedRequest(ctx context.Context, token string) (Request, err
 
 // hostedLimitKey is whose rate limit a hosted link's calls count against:
 // its customer, or its org for a link sent to a member. ctx carries the
-// request it read, so the handler's own hostedRequest does not read it again.
+// request it read, so the handler's own hostedRequest does not read it again;
+// one ctx already carries for the link is used as is.
 func (s *Service) hostedLimitKey(ctx context.Context, token string) (context.Context, uuid.UUID, error) {
 	hash := sha256.Sum256([]byte(token))
-	req, err := s.requests.GetByLinkToken(ctx, hash[:])
-	if err != nil {
-		return ctx, uuid.UUID{}, err
+	var req Request
+	if read, ok := ctx.Value(linkReadKey{}).(*linkRead); ok && !read.used && bytes.Equal(read.hash, hash[:]) {
+		req = read.req
+	} else {
+		var err error
+		if req, err = s.requests.GetByLinkToken(ctx, hash[:]); err != nil {
+			return ctx, uuid.UUID{}, err
+		}
+		ctx = context.WithValue(ctx, linkReadKey{}, &linkRead{hash: hash[:], req: req})
 	}
-	ctx = context.WithValue(ctx, linkReadKey{}, &linkRead{hash: hash[:], req: req})
 	if req.CustomerID != nil {
 		return ctx, *req.CustomerID, nil
 	}

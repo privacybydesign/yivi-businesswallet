@@ -2,8 +2,11 @@ package proofing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 	"time"
@@ -24,6 +27,11 @@ type fakeDataRequests struct {
 	approved   []uuid.UUID
 	exportTill *time.Time
 	exported   int
+	// checks are the candidates read per data request; matchingBusy makes
+	// TryLockMatching find the lock held; saveErr fails SaveMatches.
+	checks       map[uuid.UUID]MatchLevel
+	matchingBusy bool
+	saveErr      error
 }
 
 func (f *fakeDataRequests) FlowKind(_ context.Context, _ uuid.UUID, flowID string) (FlowKind, error) {
@@ -50,7 +58,31 @@ func (f *fakeDataRequests) UnfinishedCandidates(context.Context, Request) ([]Req
 	return f.unfinished, nil
 }
 
+func (f *fakeDataRequests) TryLockMatching(context.Context, uuid.UUID) (func(), bool, error) {
+	if f.matchingBusy {
+		return nil, false, nil
+	}
+	return func() {}, true, nil
+}
+
+func (f *fakeDataRequests) MatchChecks(context.Context, Request) (map[uuid.UUID]MatchLevel, error) {
+	return maps.Clone(f.checks), nil
+}
+
+func (f *fakeDataRequests) RecordMatchCheck(_ context.Context, _ Request, candidateID uuid.UUID, level MatchLevel) error {
+	if f.checks == nil {
+		f.checks = map[uuid.UUID]MatchLevel{}
+	}
+	if _, ok := f.checks[candidateID]; !ok {
+		f.checks[candidateID] = level
+	}
+	return nil
+}
+
 func (f *fakeDataRequests) SaveMatches(_ context.Context, _ Request, matches []NewDataMatch) error {
+	if f.saveErr != nil {
+		return f.saveErr
+	}
 	f.saved = matches
 	f.matches = nil
 	for _, m := range matches {
@@ -448,13 +480,14 @@ func TestExportPersonalOnlyStrong(t *testing.T) {
 }
 
 // While one reconcile finds a data request's matches, another (a hosted
-// status poll meanwhile) does not read the candidates from the engine again.
+// status poll meanwhile, on any replica) does not read the candidates from the
+// engine again.
 func TestMatchingRunsOnce(t *testing.T) {
 	f, data := newDataFixture(FlowDataAccess)
 	data.candidates = []Request{heldSession("Anna Jansen")}
 	f.sendForCustomer(t, "anna@example.org", "")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
-	f.svc.matching.Store(f.requests.stored.ID, struct{}{})
+	data.matchingBusy = true
 
 	reads := f.ips.identityReads
 	if req := f.reconcile(t); req.Status == StatusNeedsReview {
@@ -464,8 +497,90 @@ func TestMatchingRunsOnce(t *testing.T) {
 		t.Errorf("read %d identities and saved %v; want neither", f.ips.identityReads-reads, data.saved)
 	}
 
-	f.svc.matching.Delete(f.requests.stored.ID)
+	data.matchingBusy = false
 	if req := f.reconcile(t); req.Status != StatusNeedsReview {
 		t.Errorf("status = %q once free; want needs_review", req.Status)
+	}
+}
+
+// A candidate is read from the engine once: a search that failed after it
+// (here saving the matches) reads only the requester again on its retry,
+// candidates without a kept proofed name included.
+func TestCandidateReadOnce(t *testing.T) {
+	f, data := newDataFixture(FlowDataAccess)
+	first, second := heldSession(""), heldSession("")
+	data.candidates = []Request{first, second}
+	f.sendForCustomer(t, "anna@example.org", "")
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
+	data.saveErr = errors.New("database down")
+
+	reads := f.ips.identityReads
+	if req := f.reconcile(t); req.Status == StatusNeedsReview {
+		t.Fatalf("status = %q after a failed search; want it retried", req.Status)
+	}
+	if got := f.ips.identityReads - reads; got != 3 {
+		t.Fatalf("first search read %d identities; want the requester and both candidates", got)
+	}
+
+	data.saveErr = nil
+	reads = f.ips.identityReads
+	if req := f.reconcile(t); req.Status != StatusNeedsReview {
+		t.Fatalf("status = %q on the retry; want needs_review", req.Status)
+	}
+	if got := f.ips.identityReads - reads; got != 1 {
+		t.Errorf("retry read %d identities; want only the requester's", got)
+	}
+	want := []NewDataMatch{{RequestID: first.ID, Level: MatchProbable}, {RequestID: second.ID, Level: MatchProbable}}
+	if !slices.Equal(data.saved, want) {
+		t.Errorf("matches = %+v; want %+v from the kept checks", data.saved, want)
+	}
+}
+
+// Bob proofs on the link a customer sent Alice, then asks for his own data:
+// his session matches strongly (it holds his identity), but it was never
+// shown to be Alice's, so the export carries his identity and not the name
+// and address the customer typed for Alice. A session approved for the one
+// person it was sent to does carry them. (The fake engine proofs everyone as
+// Anna Jansen: Bob, here.)
+func TestExportContactOnlyWhenAddressed(t *testing.T) {
+	f, data, alicesLink, addressed := inReview(t, FlowDataAccess)
+	ctx := context.Background()
+	alicesLink.SubjectName, alicesLink.SubjectEmail = "Alice de Boer", "alice@example.org"
+	addressed.SubjectName, addressed.SubjectEmail, addressed.ExpectsSubject = "Anna Jansen", "anna@example.org", true
+	data.matched = []Request{alicesLink, addressed}
+	data.matches = []DataMatch{{RequestID: alicesLink.ID, Level: MatchStrong}, {RequestID: addressed.ID, Level: MatchStrong}}
+	req, err := f.svc.DecideReview(ctx, testOrg.ID, f.requests.stored.ID, "reviewer@example.org",
+		ReviewInput{Approve: true, Reason: "ok"})
+	if err != nil {
+		t.Fatalf("DecideReview: %v", err)
+	}
+	yes := true
+	data.matches[0].Approved, data.matches[1].Approved = &yes, &yes
+	f.requests.stored.DataExportUntil = data.exportTill
+
+	export, err := f.svc.AdminDataExport(ctx, testOrg.ID, req.ID)
+	if err != nil {
+		t.Fatalf("AdminDataExport: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	if err := writeDataExport(rec, httptest.NewRequest(http.MethodGet, "/", nil), export, nil); err != nil {
+		t.Fatalf("writeDataExport: %v", err)
+	}
+	var out dataExportResponse
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode export: %v", err)
+	}
+	contacts := map[string]*dataExportContact{}
+	for _, s := range out.Sessions {
+		if s.Identity == nil {
+			t.Errorf("session %s: no identity; want the strong match's", s.SessionID)
+		}
+		contacts[s.SessionID] = s.Contact
+	}
+	if c := contacts[publicSessionID(alicesLink.ID)]; c != nil {
+		t.Errorf("Alice's link exported contact %+v; want none", c)
+	}
+	if c := contacts[publicSessionID(addressed.ID)]; c == nil || c.Email != "anna@example.org" {
+		t.Errorf("addressed session exported contact %+v; want anna@example.org", c)
 	}
 }

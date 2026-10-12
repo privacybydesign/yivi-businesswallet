@@ -8316,8 +8316,9 @@ paths:
         `data_access` session's data, for 7 days after the organisation's decision: each of
         your sessions of the person that the reviewer approved, each with its `match`. A
         `strong` match (proven with the person's own document) also carries what the check
-        read (`identity`, `evidence`), the contact you gave and its diplomas; any other match
-        may be someone else's session, so it carries its facts alone. Images are named in
+        read (`identity`, `evidence`) and its diplomas, and the contact you gave when that
+        session was approved for the one person you sent it to (`expectedSubject`); any other
+        match may be someone else's session, so it carries its facts alone. Images are named in
         `imagesHeld`, never included. Audited `identity_proofing.data_exported`.
       security:
         - customerApiKey: []

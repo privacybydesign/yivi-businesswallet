@@ -101,7 +101,9 @@ func TestPurgeDueIsIndexed(t *testing.T) {
 		t.Fatalf("disable seq scans: %v", err)
 	}
 	rows, err := conn.Query(ctx, `EXPLAIN SELECT r.id FROM identity_proofing_requests r
-		WHERE r.purged_at IS NULL AND r.purge_at <= now() ORDER BY r.purge_at LIMIT 10`)
+		WHERE r.purged_at IS NULL AND r.purge_at <= now()
+			AND (r.purge_retry_after IS NULL OR r.purge_retry_after <= now())
+		ORDER BY r.purge_at LIMIT 10`)
 	if err != nil {
 		t.Fatalf("explain: %v", err)
 	}
@@ -118,6 +120,76 @@ func TestPurgeDueIsIndexed(t *testing.T) {
 	}
 	if !strings.Contains(plan.String(), "identity_proofing_requests_purge_due_idx") {
 		t.Errorf("plan does not use the purge index:\n%s", plan.String())
+	}
+}
+
+// A request that fails to purge, or whose sealed fields do not open, is
+// deferred for longer after each failure, up to purgeRetryMax, and does not
+// hold up the requests due after it.
+func TestPurgeDueDefersFailures(t *testing.T) {
+	f := newPurgeFixture(t)
+	ctx := context.Background()
+	due := func(session string, overdue time.Duration) Request {
+		t.Helper()
+		req, err := f.requests.Create(ctx, newStoredRequest(f.orgID, f.sam, f.subject("", "a@example.org", "")))
+		if err != nil {
+			t.Fatalf("Create %s: %v", session, err)
+		}
+		if ok, err := f.requests.AttachSession(ctx, req, attachedSession(session)); err != nil || !ok {
+			t.Fatalf("AttachSession %s = %v, %v", session, ok, err)
+		}
+		if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests SET purge_at = now() - $2::interval
+			WHERE id = $1`, req.ID, overdue.String()); err != nil {
+			t.Fatalf("make %s due: %v", session, err)
+		}
+		return req
+	}
+	unreadable, failing, next := due("s1", 3*time.Hour), due("s2", 2*time.Hour), due("s3", time.Hour)
+	if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests SET ips_session_token_ciphertext = '\x00'
+		WHERE id = $1`, unreadable.ID); err != nil {
+		t.Fatalf("break the sealed token: %v", err)
+	}
+	retryIn := func(id uuid.UUID) (int, time.Duration) {
+		t.Helper()
+		var attempts int
+		var wait float64
+		if err := f.pool.QueryRow(ctx, `SELECT purge_attempts, EXTRACT(EPOCH FROM purge_retry_after - now())
+			FROM identity_proofing_requests WHERE id = $1`, id).Scan(&attempts, &wait); err != nil {
+			t.Fatalf("read the purge wait: %v", err)
+		}
+		return attempts, time.Duration(wait * float64(time.Second))
+	}
+
+	got, err := f.requests.ListPurgeDue(ctx, 1)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("first batch = %+v, %v; want the unreadable request left out", got, err)
+	}
+	if attempts, wait := retryIn(unreadable.ID); attempts != 1 || (wait-purgeRetryBase).Abs() > time.Minute {
+		t.Errorf("unreadable request: %d attempts, retry in %v; want 1, %v", attempts, wait, purgeRetryBase)
+	}
+	if got, err = f.requests.ListPurgeDue(ctx, 1); err != nil || len(got) != 1 || got[0].ID != failing.ID {
+		t.Fatalf("second batch = %+v, %v; want the failing request", got, err)
+	}
+	for range 2 {
+		if err := f.requests.DeferPurge(ctx, failing.ID); err != nil {
+			t.Fatalf("DeferPurge: %v", err)
+		}
+	}
+	if attempts, wait := retryIn(failing.ID); attempts != 2 || (wait-2*purgeRetryBase).Abs() > time.Minute {
+		t.Errorf("failing request: %d attempts, retry in %v; want 2, %v", attempts, wait, 2*purgeRetryBase)
+	}
+	if got, err = f.requests.ListPurgeDue(ctx, 1); err != nil || len(got) != 1 || got[0].ID != next.ID {
+		t.Fatalf("third batch = %+v, %v; want the request due after the deferred ones", got, err)
+	}
+
+	if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests SET purge_attempts = 1000 WHERE id = $1`, failing.ID); err != nil {
+		t.Fatalf("fail often: %v", err)
+	}
+	if err := f.requests.DeferPurge(ctx, failing.ID); err != nil {
+		t.Fatalf("DeferPurge after many failures: %v", err)
+	}
+	if _, wait := retryIn(failing.ID); (wait - purgeRetryMax).Abs() > time.Minute {
+		t.Errorf("retry after many failures in %v; want %v", wait, purgeRetryMax)
 	}
 }
 

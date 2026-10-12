@@ -94,13 +94,16 @@ func (s *DataRequestStore) SaveFlowKind(ctx context.Context, orgID uuid.UUID, fl
 // holds personal data and has an outcome: what a data request is matched
 // against. The person's earlier data requests are among them, since each
 // holds who asked (an erasure covers them too), but only once decided: one
-// still in review is the wallet's to decide, and is not purged under it.
+// still in review is the wallet's to decide, and is not purged under it. A
+// session rejected with errorIdentityMismatch is not: whoever proofed it is
+// known not to be the person it was sent to.
 func (s *DataRequestStore) Candidates(ctx context.Context, req Request) ([]Request, error) {
 	return s.scanRequests(ctx, `SELECT `+requestColumns+requestFrom+`
 		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.id <> $3
 			AND r.purged_at IS NULL AND r.ips_session_id IS NOT NULL
 			AND (r.status IN ('approved', 'rejected') OR (r.status = 'needs_review' AND r.flow_kind = $4))
-		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID, string(FlowIdentity))
+			AND r.error_code IS DISTINCT FROM $5
+		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID, string(FlowIdentity), errorIdentityMismatch)
 }
 
 // UnfinishedCandidates is every unfinished session of req's customer
@@ -112,6 +115,49 @@ func (s *DataRequestStore) UnfinishedCandidates(ctx context.Context, req Request
 		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.id <> $3
 			AND r.purged_at IS NULL AND r.status IN ('pending', 'in_progress', 'expired', 'cancelled')
 		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID)
+}
+
+// matchingLockKey namespaces TryLockMatching's advisory lock.
+const matchingLockKey = "identity_proofing_matching:"
+
+// TryLockMatching takes the lock on finding data request id's matches, across
+// replicas, until release is called; ok is false while another holds it.
+func (s *DataRequestStore) TryLockMatching(ctx context.Context, id uuid.UUID) (release func(), ok bool, err error) {
+	return advisoryLock(ctx, s.db, matchingLockKey, id, false)
+}
+
+// MatchChecks is what req found for each candidate whose identity it read
+// from the engine: the level it matched at, "" for none.
+func (s *DataRequestStore) MatchChecks(ctx context.Context, req Request) (map[uuid.UUID]MatchLevel, error) {
+	rows, err := s.db.Query(ctx, `SELECT candidate_request_id, COALESCE(level, '')
+		FROM identity_proofing_request_match_checks WHERE request_id = $1 AND organization_id = $2`,
+		req.ID, req.OrganizationID)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: match checks request %s: %w", req.ID, err)
+	}
+	out := map[uuid.UUID]MatchLevel{}
+	var id uuid.UUID
+	var level MatchLevel
+	if _, err := pgx.ForEachRow(rows, []any{&id, &level}, func() error {
+		out[id] = level
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("proofing: match checks request %s: %w", req.ID, err)
+	}
+	return out, nil
+}
+
+// RecordMatchCheck keeps what req found for one candidate ("" for no match),
+// so it is never read from the engine again.
+func (s *DataRequestStore) RecordMatchCheck(ctx context.Context, req Request, candidateID uuid.UUID, level MatchLevel) error {
+	if _, err := s.db.Exec(ctx, `INSERT INTO identity_proofing_request_match_checks
+			(organization_id, request_id, candidate_request_id, level)
+		VALUES ($1, $2, $3, NULLIF($4, ''))
+		ON CONFLICT (request_id, candidate_request_id) DO NOTHING`,
+		req.OrganizationID, req.ID, candidateID, string(level)); err != nil {
+		return fmt.Errorf("proofing: match check request %s candidate %s: %w", req.ID, candidateID, err)
+	}
+	return nil
 }
 
 // SaveMatches replaces req's matches.

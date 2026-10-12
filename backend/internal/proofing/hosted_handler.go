@@ -32,7 +32,8 @@ const frameNone = "frame-ancestors 'none'"
 
 // PageHeaders sets the hosted page's Content-Security-Policy: only its
 // customer's allowed origins may frame it. An unknown or throttled link, or a
-// failed read, may be framed by none.
+// failed read, may be framed by none; an unknown link counts against its
+// source's authFailureLimit, as limitHosted counts it.
 func (h *Handler) PageHeaders(r *http.Request, header http.Header) {
 	token, ok := strings.CutPrefix(r.URL.Path, hostedPagePrefix)
 	if !ok || token == "" || strings.Contains(token, "/") {
@@ -43,10 +44,12 @@ func (h *Handler) PageHeaders(r *http.Request, header http.Header) {
 
 func (h *Handler) framePolicy(r *http.Request, token string) string {
 	ctx, key, err := h.service.hostedLimitKey(r.Context(), token)
+	if errors.Is(err, ErrRequestNotFound) {
+		h.authFailures.Allow(requestSource(r))
+		return frameNone
+	}
 	if err != nil {
-		if !errors.Is(err, ErrRequestNotFound) {
-			slog.ErrorContext(r.Context(), "proofing: hosted page frame origins", slog.Any("error", err))
-		}
+		slog.ErrorContext(r.Context(), "proofing: hosted page frame origins", slog.Any("error", err))
 		return frameNone
 	}
 	r = r.WithContext(ctx)

@@ -189,11 +189,16 @@ var authFailureLimit = ratelimit.Limit{Burst: 60, Per: time.Minute}
 
 // failureLimited counts a failed key or link against its source.
 func (h *Handler) failureLimited(w http.ResponseWriter, r *http.Request) error {
+	return rateLimited(w, h.authFailures, requestSource(r))
+}
+
+// requestSource is the address a call came from: what authFailures keys on.
+func requestSource(r *http.Request) string {
 	source, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		source = r.RemoteAddr
+		return r.RemoteAddr
 	}
-	return rateLimited(w, h.authFailures, source)
+	return source
 }
 
 func (h *Handler) registerPublicAPI(mux *http.ServeMux) {

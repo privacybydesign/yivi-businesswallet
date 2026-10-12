@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -82,6 +81,7 @@ type requestStore interface {
 	RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode string) error
 	RecordHandover(ctx context.Context, req Request, expiresAt time.Time) error
 	ListPurgeDue(ctx context.Context, limit int) ([]Request, error)
+	DeferPurge(ctx context.Context, id uuid.UUID) error
 	ListUnpurgedForCustomer(ctx context.Context, orgID, customerID uuid.UUID) ([]Request, error)
 	ClearExpiredProofedNames(ctx context.Context) (int64, error)
 	ListOpenReviews(ctx context.Context, orgID uuid.UUID, customerID *uuid.UUID) ([]Request, error)
@@ -143,9 +143,6 @@ type Mailer interface {
 
 // Service orchestrates the engine, the settings, request and customer stores, and the mailer.
 type Service struct {
-	// matching holds the data requests whose matches a reconcile is finding.
-	matching sync.Map
-
 	settings  settingsStore
 	requests  requestStore
 	customers customerStore
@@ -933,14 +930,31 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 		// A proven person's data request goes to review with the customer's
 		// sessions of that person, found once.
 		if next == StatusApproved || next == StatusNeedsReview {
-			if req.Status != StatusNeedsReview {
-				// One reconcile matches at a time: the hosted page's status
-				// polls would otherwise each read every candidate from the
-				// engine while the first is still at it.
-				if _, busy := s.matching.LoadOrStore(req.ID, struct{}{}); busy {
+			if req.Status != StatusNeedsReview && s.dataRequests != nil {
+				// One reconcile matches at a time, across replicas: the hosted
+				// page's status polls would otherwise each search while the
+				// first is still at it.
+				release, ok, err := s.dataRequests.TryLockMatching(ctx, req.ID)
+				if err != nil {
+					slog.WarnContext(ctx, "identity proofing: lock data request matching failed",
+						slog.String("request_id", req.ID.String()), slog.Any("error", err))
+					return req, err
+				}
+				if !ok {
 					return req, nil
 				}
-				defer s.matching.Delete(req.ID)
+				defer release()
+				// Another reconcile may have finished between this one's read
+				// and the lock.
+				fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+				if err != nil {
+					slog.WarnContext(ctx, "identity proofing: read the data request to match failed",
+						slog.String("request_id", req.ID.String()), slog.Any("error", err))
+					return req, err
+				}
+				if fresh.Status != req.Status {
+					return fresh, nil
+				}
 				if err := s.findDataMatches(ctx, tenant, req); err != nil {
 					slog.WarnContext(ctx, "identity proofing: find data request matches failed",
 						slog.String("request_id", req.ID.String()), slog.Any("error", err))
@@ -1300,9 +1314,9 @@ func (s *Service) PurgeRequest(ctx context.Context, scope CustomerScope, id uuid
 const purgeBatch = 100
 
 // PurgeDue purges every request past its customer's retention, for the
-// pruner. One that the engine fails to erase is left for the next run. It
-// first rejects the reviews left open in a paused org (rejectPausedReviews),
-// whose failure is reported once the purge ran.
+// pruner. One that fails to purge is deferred (DeferPurge) and retried by a
+// later run. It first rejects the reviews left open in a paused org
+// (rejectPausedReviews), whose failure is reported once the purge ran.
 func (s *Service) PurgeDue(ctx context.Context) (int64, error) {
 	sweepErr := s.rejectPausedReviews(ctx)
 	purged, err := s.purgeDue(ctx)
@@ -1322,24 +1336,25 @@ func (s *Service) purgeDue(ctx context.Context) (int64, error) {
 		if err != nil {
 			return purged, err
 		}
-		failed := 0
 		for _, req := range due {
-			if err := s.lapseReview(ctx, req); err != nil {
-				failed++
+			err := s.lapseReview(ctx, req)
+			if err != nil {
 				slog.WarnContext(ctx, "identity proofing: lapse review failed",
 					slog.String("request_id", req.ID.String()), slog.Any("error", err))
-				continue
-			}
-			if err := s.purge(ctx, req); err != nil {
-				failed++
+			} else if err = s.purge(ctx, req); err != nil {
 				slog.WarnContext(ctx, "identity proofing: purge failed",
 					slog.String("request_id", req.ID.String()), slog.Any("error", err))
+			}
+			if err != nil {
+				// Deferred, it no longer holds up the requests due after it.
+				if err := s.requests.DeferPurge(ctx, req.ID); err != nil {
+					return purged, err
+				}
 				continue
 			}
 			purged++
 		}
-		// A full batch of failures would come back as is: wait for the next run.
-		if len(due) < purgeBatch || failed == len(due) {
+		if len(due) < purgeBatch {
 			return purged, nil
 		}
 	}

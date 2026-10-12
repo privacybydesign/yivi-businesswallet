@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/bits"
 	"time"
 
 	"github.com/google/uuid"
@@ -158,7 +159,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		}
 		name, err := s.cipher.Decrypt(nameCT)
 		if err != nil {
-			return Request{}, fmt.Errorf("proofing: decrypt proofed name request %s: %w", r.ID, err)
+			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt proofed name request %s: %w", r.ID, err)}
 		}
 		r.ProofedName = string(name)
 	}
@@ -168,7 +169,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		}
 		birthDate, err := s.cipher.Decrypt(birthDateCT)
 		if err != nil {
-			return Request{}, fmt.Errorf("proofing: decrypt expected birth date request %s: %w", r.ID, err)
+			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt expected birth date request %s: %w", r.ID, err)}
 		}
 		r.expectedBirthDate = string(birthDate)
 	}
@@ -178,7 +179,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		}
 		token, err := s.cipher.Decrypt(tokenCT)
 		if err != nil {
-			return Request{}, fmt.Errorf("proofing: decrypt session token request %s: %w", r.ID, err)
+			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt session token request %s: %w", r.ID, err)}
 		}
 		r.session = &ipsSession{ID: *sessionID, Token: string(token), EndedAt: sessionEndedAt}
 		if sessionExpiresAt != nil {
@@ -187,6 +188,16 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	}
 	return r, nil
 }
+
+// unreadableRequestError is a request row whose sealed fields do not open: a
+// failure of that row, not of the read it is in.
+type unreadableRequestError struct {
+	id  uuid.UUID
+	err error
+}
+
+func (e *unreadableRequestError) Error() string { return e.err.Error() }
+func (e *unreadableRequestError) Unwrap() error { return e.err }
 
 // NewStoredRequest is a request about to be stored. Its the engine session is already
 // created and is attached right after (AttachSession).
@@ -493,21 +504,39 @@ const reviewLockKey = "identity_proofing_review:"
 // decision's own writes on other connections never wait for. A second
 // decision waits, then finds the request decided.
 func (s *RequestStore) LockReview(ctx context.Context, id uuid.UUID) (func(), error) {
-	tx, err := s.db.Begin(ctx)
+	release, _, err := advisoryLock(ctx, s.db, reviewLockKey, id, true)
+	return release, err
+}
+
+// advisoryLock takes the transaction-scoped advisory lock named key and id,
+// across replicas, until release is called. With wait it waits for the
+// lock; without, a lock held elsewhere is reported as not taken (ok false,
+// nothing to release).
+func advisoryLock(ctx context.Context, db database.DB, key string, id uuid.UUID, wait bool) (release func(), ok bool, err error) {
+	tx, err := db.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("proofing: lock review request %s: %w", id, err)
+		return nil, false, fmt.Errorf("proofing: lock %s%s: %w", key, id, err)
 	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, reviewLockKey+id.String()); err != nil {
+	ok = true
+	if wait {
+		_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key+id.String())
+	} else {
+		err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))`, key+id.String()).Scan(&ok)
+	}
+	if err != nil || !ok {
 		if rbErr := tx.Rollback(ctx); rbErr != nil {
 			err = errors.Join(err, rbErr)
 		}
-		return nil, fmt.Errorf("proofing: lock review request %s: %w", id, err)
+		if err != nil {
+			return nil, false, fmt.Errorf("proofing: lock %s%s: %w", key, id, err)
+		}
+		return nil, false, nil
 	}
 	return func() {
 		if err := tx.Rollback(context.WithoutCancel(ctx)); err != nil {
-			slog.WarnContext(ctx, "identity proofing: release review lock", slog.String("request_id", id.String()), slog.Any("error", err))
+			slog.WarnContext(ctx, "identity proofing: release lock", slog.String("lock", key+id.String()), slog.Any("error", err))
 		}
-	}, nil
+	}, true, nil
 }
 
 // deviceEventActions are the audit actions of the engine's device events, by
@@ -935,6 +964,9 @@ func (s *RequestStore) Purge(ctx context.Context, req Request) error {
 		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_matches WHERE request_id = $1`, req.ID); err != nil {
 			return fmt.Errorf("proofing: purge matches request %s: %w", req.ID, err)
 		}
+		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_match_checks WHERE request_id = $1`, req.ID); err != nil {
+			return fmt.Errorf("proofing: purge match checks request %s: %w", req.ID, err)
+		}
 		if err := audit.StripFields(ctx, q, req.OrganizationID, audit.TargetIdentityProofingRequest,
 			req.ID.String(), audit.IdentityProofingPersonalKeys); err != nil {
 			return fmt.Errorf("proofing: purge audit subject request %s: %w", req.ID, err)
@@ -1092,27 +1124,70 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 	})
 }
 
-// ListPurgeDue returns up to limit requests past their purge time, the
-// longest overdue first. It reads the stored purge_at over its partial index
-// (unpurged rows only), so an hourly run touches only what is due;
-// refreshPurgeAt and refreshCustomerPurgeAt keep it.
+// ListPurgeDue returns up to limit requests past their purge time and any
+// DeferPurge wait, the longest overdue first. It reads the stored purge_at
+// over its partial index (unpurged rows only), so an hourly run touches only
+// what is due; refreshPurgeAt and refreshCustomerPurgeAt keep it. A row whose
+// sealed fields do not open is logged, deferred and left out.
 func (s *RequestStore) ListPurgeDue(ctx context.Context, limit int) ([]Request, error) {
 	rows, err := s.db.Query(ctx, `SELECT `+requestColumns+requestFrom+`
 		WHERE r.purged_at IS NULL AND r.purge_at <= now()
+			AND (r.purge_retry_after IS NULL OR r.purge_retry_after <= now())
 		ORDER BY r.purge_at LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list purge due: %w", err)
 	}
 	defer rows.Close()
 	var out []Request
+	var unreadable []*unreadableRequestError
 	for rows.Next() {
 		req, err := s.scanRequest(rows)
+		var bad *unreadableRequestError
+		if errors.As(err, &bad) {
+			unreadable = append(unreadable, bad)
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("proofing: scan purge due: %w", err)
 		}
 		out = append(out, req)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("proofing: list purge due: %w", err)
+	}
+	for _, bad := range unreadable {
+		slog.ErrorContext(ctx, "identity proofing: cannot open request to purge",
+			slog.String("request_id", bad.id.String()), slog.Any("error", bad.err))
+		if err := s.DeferPurge(ctx, bad.id); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+const (
+	// purgeRetryBase is how long a request whose purge failed waits before
+	// ListPurgeDue offers it again; the wait doubles with each further
+	// failure, up to purgeRetryMax.
+	purgeRetryBase = time.Hour
+	purgeRetryMax  = 24 * time.Hour
+)
+
+// purgeRetryDoublings is how often purgeRetryBase doubles before it passes
+// purgeRetryMax: the exponent stays bounded however often a purge fails.
+var purgeRetryDoublings = bits.Len64(uint64(purgeRetryMax / purgeRetryBase))
+
+// DeferPurge records a failed purge of request id: ListPurgeDue skips it for
+// purgeRetryBase, doubled for each earlier failure, at most purgeRetryMax.
+func (s *RequestStore) DeferPurge(ctx context.Context, id uuid.UUID) error {
+	if _, err := s.db.Exec(ctx, `UPDATE identity_proofing_requests
+		SET purge_attempts = purge_attempts + 1,
+			purge_retry_after = now() + make_interval(secs => LEAST($2 * power(2, LEAST(purge_attempts, $3)), $4))
+		WHERE id = $1 AND purged_at IS NULL`,
+		id, purgeRetryBase.Seconds(), purgeRetryDoublings, purgeRetryMax.Seconds()); err != nil {
+		return fmt.Errorf("proofing: defer purge request %s: %w", id, err)
+	}
+	return nil
 }
 
 // ClearExpiredProofedNames drops every proofed name past its

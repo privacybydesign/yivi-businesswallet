@@ -120,6 +120,9 @@ type dataRequestStore interface {
 	SaveFlowKind(ctx context.Context, orgID uuid.UUID, flowID string, kind FlowKind) (FlowKind, error)
 	Candidates(ctx context.Context, req Request) ([]Request, error)
 	UnfinishedCandidates(ctx context.Context, req Request) ([]Request, error)
+	TryLockMatching(ctx context.Context, id uuid.UUID) (release func(), ok bool, err error)
+	MatchChecks(ctx context.Context, req Request) (map[uuid.UUID]MatchLevel, error)
+	RecordMatchCheck(ctx context.Context, req Request, candidateID uuid.UUID, level MatchLevel) error
 	SaveMatches(ctx context.Context, req Request, matches []NewDataMatch) error
 	Matches(ctx context.Context, req Request) ([]DataMatch, error)
 	MatchedRequests(ctx context.Context, req Request) ([]Request, error)
@@ -216,7 +219,8 @@ func subjectIdentityOf(id proofingprovider.Identity) SubjectIdentity {
 // findDataMatches reads who a data request proofed and stores the customer's
 // sessions of that person, for the review. A session's kept proofed name
 // rules it out without reading the engine when the person's family name is
-// not in it. A proof without a name or date of birth matches nothing.
+// not in it, and a candidate read once is not read again (candidateMatch). A
+// proof without a name or date of birth matches nothing.
 func (s *Service) findDataMatches(ctx context.Context, tenant proofingprovider.Tenant, req Request) error {
 	if s.dataRequests == nil || req.session == nil {
 		return nil
@@ -232,18 +236,21 @@ func (s *Service) findDataMatches(ctx context.Context, tenant proofingprovider.T
 		if err != nil {
 			return err
 		}
+		checked, err := s.dataRequests.MatchChecks(ctx, req)
+		if err != nil {
+			return err
+		}
 		for _, c := range candidates {
 			if c.session == nil || (c.ProofedName != "" && !nameHolds(c.ProofedName, requester.FamilyName)) {
 				continue
 			}
-			held, err := s.ips.SessionIdentity(ctx, requestTenant(c), c.session.ID, c.session.Token)
-			if errors.Is(err, proofingprovider.ErrNotFound) {
-				continue
+			level, ok := checked[c.ID]
+			if !ok {
+				if level, err = s.candidateMatch(ctx, req, requester, c); err != nil {
+					return err
+				}
 			}
-			if err != nil {
-				return fmt.Errorf("proofing: data request %s match identity request %s: %w", req.ID, c.ID, err)
-			}
-			if level, ok := matchLevel(requester, held); ok {
+			if level != "" {
 				matches = append(matches, NewDataMatch{RequestID: c.ID, Level: level})
 			}
 		}
@@ -253,6 +260,25 @@ func (s *Service) findDataMatches(ctx context.Context, tenant proofingprovider.T
 		return err
 	}
 	return s.dataRequests.SaveMatches(ctx, req, append(matches, unfinished...))
+}
+
+// candidateMatch reads candidate c's identity from the engine and keeps how it
+// matches req's requester ("" for not at all, or no longer held), so a retried
+// search reads c no more.
+func (s *Service) candidateMatch(ctx context.Context, req Request, requester SubjectIdentity, c Request) (MatchLevel, error) {
+	var level MatchLevel
+	held, err := s.ips.SessionIdentity(ctx, requestTenant(c), c.session.ID, c.session.Token)
+	switch {
+	case errors.Is(err, proofingprovider.ErrNotFound):
+	case err != nil:
+		return "", fmt.Errorf("proofing: data request %s match identity request %s: %w", req.ID, c.ID, err)
+	default:
+		level, _ = matchLevel(requester, held)
+	}
+	if err := s.dataRequests.RecordMatchCheck(ctx, req, c.ID, level); err != nil {
+		return "", err
+	}
+	return level, nil
 }
 
 // unfinishedMatches are req's matches among the customer's unfinished
@@ -484,15 +510,25 @@ type DataExport struct {
 
 // DataExportSession is one session in a DataExport. Only a MatchStrong one,
 // proven with the requester's own document, carries personal data (Personal:
-// its contact, Identity and Diplomas): a probable, e-mail or name match the
-// reviewer ticked may still be another person's, so it exports its facts
-// alone.
+// Identity and Diplomas): a probable, e-mail or name match the reviewer
+// ticked may still be another person's, so it exports its facts alone.
 type DataExportSession struct {
 	Request  Request
 	Level    MatchLevel
 	Personal bool
-	Identity *proofingprovider.Identity
-	Diplomas []Diploma
+	// Addressed is a Personal session whose contact (the name and address the
+	// customer typed) is the requester's too: approved for the one person it
+	// was sent to (addressedTo).
+	Addressed bool
+	Identity  *proofingprovider.Identity
+	Diplomas  []Diploma
+}
+
+// addressedTo reports whether whoever proofed req is the person it was sent
+// to: approved on a request for one known person (ExpectsSubject). Any other
+// session proves who took it, not who it was addressed to.
+func addressedTo(req Request) bool {
+	return req.ExpectsSubject && req.Status == StatusApproved
 }
 
 // dataExport builds req's export while it is open, and never once req is
@@ -531,6 +567,7 @@ func (s *Service) dataExport(ctx context.Context, req Request) (DataExport, erro
 			continue
 		}
 		session := DataExportSession{Request: m, Level: levels[m.ID], Personal: levels[m.ID] == MatchStrong}
+		session.Addressed = session.Personal && addressedTo(m)
 		if session.Personal {
 			session.Diplomas = diplomas[m.ID]
 		}

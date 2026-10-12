@@ -108,11 +108,47 @@ func TestDataRequestStore(t *testing.T) {
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
 		t.Fatalf("RecordOutcome in review: %v", err)
 	}
+	// Nor against a session sent to one known person and proofed by someone
+	// else: it proves who that was, not whom it was sent to.
+	mismatch := newDataRequest(t, requests, orgID, sam, customer.ID, FlowIdentity, "s5")
+	if err := requests.RecordOutcome(ctx, mismatch, "s5", StatusRejected,
+		proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: errorIdentityMismatch}); err != nil {
+		t.Fatalf("RecordOutcome mismatch: %v", err)
+	}
 	erasure := newDataRequest(t, requests, orgID, sam, customer.ID, FlowDataErasure, "s4")
 	candidates, err = data.Candidates(ctx, erasure)
 	if err != nil || len(candidates) != 2 || candidates[0].ID != session.ID || candidates[1].ID != dr.ID {
 		t.Fatalf("erasure Candidates = %+v, %v; want the session and the decided access request", candidates, err)
 	}
+
+	// What a search found per candidate is kept, the first outcome only.
+	for _, c := range []struct {
+		id    uuid.UUID
+		level MatchLevel
+	}{{session.ID, MatchStrong}, {dr.ID, ""}, {session.ID, ""}} {
+		if err := data.RecordMatchCheck(ctx, erasure, c.id, c.level); err != nil {
+			t.Fatalf("RecordMatchCheck: %v", err)
+		}
+	}
+	checks, err := data.MatchChecks(ctx, erasure)
+	if err != nil || len(checks) != 2 || checks[session.ID] != MatchStrong || checks[dr.ID] != "" {
+		t.Errorf("MatchChecks = %v, %v; want the session strong, the access request no match", checks, err)
+	}
+
+	// One search at a time, whichever replica asks.
+	release, ok, err := data.TryLockMatching(ctx, erasure.ID)
+	if err != nil || !ok {
+		t.Fatalf("TryLockMatching = %v, %v; want the lock", ok, err)
+	}
+	if _, ok, err := data.TryLockMatching(ctx, erasure.ID); err != nil || ok {
+		t.Errorf("second TryLockMatching = %v, %v; want it held", ok, err)
+	}
+	release()
+	again, ok, err := data.TryLockMatching(ctx, erasure.ID)
+	if err != nil || !ok {
+		t.Fatalf("TryLockMatching after release = %v, %v; want the lock", ok, err)
+	}
+	again()
 }
 
 // newDataRequest creates a data request of kind for customerID with its

@@ -24,9 +24,9 @@ import (
 // Handler serves identity proofing: the org routes (any member reads the flows
 // made available to them and the org's customers, and sends requests; defining
 // flows, choosing which members may use, and managing customers and the flows
-// assigned to them is admin-only), the customer API, the hosted page and the
-// wallet's default webhook endpoint. The org is the proofing engine's tenant
-// under its own id; nothing is provisioned first.
+// assigned to them is admin-only), the customer API and the hosted page. The
+// org is the proofing engine's tenant under its own id; nothing is
+// provisioned first.
 type Handler struct {
 	service     *Service
 	requireUser func(http.Handler) http.Handler

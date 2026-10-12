@@ -42,7 +42,9 @@ func (f *fakeSettings) RecordFlowEvent(_ context.Context, _ uuid.UUID, action st
 type fakeRequests struct {
 	members  map[uuid.UUID]Member
 	linkHash []byte
-	reviews  []string
+	// linkLookups counts GetByLinkToken reads.
+	linkLookups int
+	reviews     []string
 	// stored is the last request created.
 	stored      *Request
 	resultReads int
@@ -66,6 +68,10 @@ type fakeRequests struct {
 	// session find the request moved on.
 	createErr    error
 	refuseAttach bool
+	// purgeDeferrals counts DeferPurge calls; purgeDeferred hides the
+	// request from ListPurgeDue until cleared.
+	purgeDeferrals int
+	purgeDeferred  bool
 }
 
 // actorLabel is the audit actor label ctx carries, "" for none.
@@ -125,6 +131,7 @@ func (f *fakeRequests) RecordReviewDecision(_ context.Context, _ Request, decide
 }
 
 func (f *fakeRequests) GetByLinkToken(_ context.Context, hash []byte) (Request, error) {
+	f.linkLookups++
 	if f.stored == nil || f.linkHash == nil || string(f.linkHash) != string(hash) {
 		return Request{}, ErrRequestNotFound
 	}
@@ -212,10 +219,16 @@ func (f *fakeRequests) ListUnpurgedForCustomer(_ context.Context, _, customerID 
 }
 
 func (f *fakeRequests) ListPurgeDue(context.Context, int) ([]Request, error) {
-	if f.stored == nil || f.stored.PurgedAt != nil || f.stored.PurgeAt == nil || f.stored.PurgeAt.After(time.Now()) {
+	if f.stored == nil || f.stored.PurgedAt != nil || f.stored.PurgeAt == nil || f.stored.PurgeAt.After(time.Now()) || f.purgeDeferred {
 		return nil, nil
 	}
 	return []Request{*f.stored}, nil
+}
+
+func (f *fakeRequests) DeferPurge(context.Context, uuid.UUID) error {
+	f.purgeDeferrals++
+	f.purgeDeferred = true
+	return nil
 }
 
 func (f *fakeRequests) Member(_ context.Context, _, userID uuid.UUID) (Member, error) {
@@ -1484,7 +1497,7 @@ func TestCancelAndPurgeRequest(t *testing.T) {
 }
 
 // A request past its retention is erased at IPS and here by the pruner; one
-// IPS fails to erase is kept for the next run.
+// IPS fails to erase is kept and deferred, not retried until its wait passed.
 func TestPurgeDue(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
@@ -1499,10 +1512,15 @@ func TestPurgeDue(t *testing.T) {
 	past := time.Now().Add(-time.Minute)
 	f.requests.stored.PurgeAt = &past
 	f.ips.deleteErr = errors.New("ips down")
-	if n, err := f.svc.PurgeDue(ctx); err != nil || n != 0 || f.requests.stored.PurgedAt != nil {
-		t.Fatalf("PurgeDue with IPS down = %d, %v; want it kept", n, err)
+	if n, err := f.svc.PurgeDue(ctx); err != nil || n != 0 || f.requests.stored.PurgedAt != nil || f.requests.purgeDeferrals != 1 {
+		t.Fatalf("PurgeDue with IPS down = %d, %v (%d deferrals); want it kept and deferred once", n, err, f.requests.purgeDeferrals)
 	}
 	f.ips.deleteErr = nil
+	deletes := f.ips.deletes
+	if n, err := f.svc.PurgeDue(ctx); err != nil || n != 0 || f.ips.deletes != deletes {
+		t.Fatalf("PurgeDue while deferred = %d, %v (%d deletes); want it left alone", n, err, f.ips.deletes-deletes)
+	}
+	f.requests.purgeDeferred = false
 	if n, err := f.svc.PurgeDue(ctx); err != nil || n != 1 || f.requests.stored.PurgedAt == nil {
 		t.Fatalf("PurgeDue = %d, %v; want the request purged", n, err)
 	}
