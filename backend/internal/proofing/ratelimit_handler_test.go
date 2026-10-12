@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/clientip"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
@@ -44,8 +45,8 @@ func TestUnknownCredentialsLimited(t *testing.T) {
 	}
 }
 
-// The failure limiter is keyed on the source, which behind the ingress is
-// shared by every caller: once it is spent by guesses, a valid hosted link,
+// The failure limiter is keyed on the source, which a NAT shares among its
+// callers: once it is spent by guesses, a valid hosted link,
 // its page's frame origins and a valid API key are still served; only
 // another guess is refused. The hosted page's guesses count against it too.
 func TestValidCredentialsPassSpentFailures(t *testing.T) {
@@ -101,6 +102,72 @@ func TestValidCredentialsPassSpentFailures(t *testing.T) {
 		t.Errorf("valid API key with the failures spent = %d, want 200", code)
 	}
 }
+
+// One source's hosted calls, a valid link's included, answer 429 once past
+// hostedSourceLimit, and its page may be framed by none; another source with
+// the same link is still served. The source is the client address the
+// trusted proxy reports, not the proxy.
+func TestHostedSourceLimited(t *testing.T) {
+	f := newFixture()
+	ctx := context.Background()
+	_, token := f.sendHosted(t)
+	if _, err := f.svc.SaveCustomerRedirectOrigins(ctx, testOrg.ID, initech.ID,
+		[]string{"https://portal.initech.example"}); err != nil {
+		t.Fatalf("SaveCustomerRedirectOrigins: %v", err)
+	}
+	pass := func(next http.Handler) http.Handler { return next }
+	h := NewHandler(f.svc, pass, pass)
+	mux := http.NewServeMux()
+	mux.Handle("GET /proof/{token}", respond.HandlerFunc(h.limitHosted(func(http.ResponseWriter, *http.Request) error { return nil })))
+	trusted, err := clientip.ParseTrusted([]string{ingressPeer})
+	if err != nil {
+		t.Fatalf("ParseTrusted: %v", err)
+	}
+	withClientIP := clientip.Middleware(clientip.NewResolver(trusted))
+	var captured *http.Request
+	capture := withClientIP(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { captured = r }))
+	from := func(client, path string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.RemoteAddr = ingressPeer + ":443"
+		r.Header.Set("X-Forwarded-For", "198.51.100.1, "+client)
+		capture.ServeHTTP(httptest.NewRecorder(), r)
+		return captured
+	}
+	serve := func(r *http.Request) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, r)
+		return rec
+	}
+	csp := func(r *http.Request) string {
+		header := http.Header{}
+		h.PageHeaders(r, header)
+		return header.Get(headerCSP)
+	}
+
+	const busy, other = "203.0.113.7", "203.0.113.8"
+	for i := range hostedSourceLimit.Burst {
+		if code := serve(from(busy, "/proof/"+token)).Code; code != http.StatusOK {
+			t.Fatalf("call %d within the limit = %d, want 200", i+1, code)
+		}
+	}
+	rec := serve(from(busy, "/proof/"+token))
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get(headerRetryAfter) == "" {
+		t.Errorf("valid link past the source's limit = %d (Retry-After %q), want 429 with Retry-After",
+			rec.Code, rec.Header().Get(headerRetryAfter))
+	}
+	if got := csp(from(busy, "/p/"+token)); got != frameNone {
+		t.Errorf("page past the source's limit: CSP = %q, want %q", got, frameNone)
+	}
+	if code := serve(from(other, "/proof/"+token)).Code; code != http.StatusOK {
+		t.Errorf("same link from another source = %d, want 200", code)
+	}
+	if got := csp(from(other, "/p/"+token)); got == frameNone {
+		t.Errorf("page from another source: CSP = %q, want its origins", got)
+	}
+}
+
+// ingressPeer is the trusted proxy the hosted source tests arrive through.
+const ingressPeer = "10.0.0.1"
 
 // A context that already carries a link's read is not read again for its
 // limit key, nor by the handler's own read after.

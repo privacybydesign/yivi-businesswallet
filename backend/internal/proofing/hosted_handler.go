@@ -24,6 +24,13 @@ import (
 // every 2 s.
 var hostedCallLimit = ratelimit.Limit{Burst: 3000, Per: time.Minute}
 
+// hostedSourceLimit holds the hosted page per client address, valid links
+// included, so one source cannot spend a customer's hostedCallLimit. One
+// person's page at its busiest sends some 210 calls a minute: a face frame
+// every 400 ms and the status and Yivi polls every 2 s. This leaves room for
+// a reload, a second tab and a few people behind one NAT.
+var hostedSourceLimit = ratelimit.Limit{Burst: 600, Per: time.Minute}
+
 // hostedPagePrefix is the SPA route of a hosted link's page, /p/:token.
 const hostedPagePrefix = "/p/"
 
@@ -31,9 +38,10 @@ const hostedPagePrefix = "/p/"
 const frameNone = "frame-ancestors 'none'"
 
 // PageHeaders sets the hosted page's Content-Security-Policy: only its
-// customer's allowed origins may frame it. An unknown or throttled link, or a
-// failed read, may be framed by none; an unknown link counts against its
-// source's authFailureLimit, as limitHosted counts it.
+// customer's allowed origins may frame it. An unknown or throttled link, a
+// throttled source, or a failed read, may be framed by none; the page counts
+// against its source's hostedSourceLimit, and an unknown link against its
+// authFailureLimit, as limitHosted counts them.
 func (h *Handler) PageHeaders(r *http.Request, header http.Header) {
 	token, ok := strings.CutPrefix(r.URL.Path, hostedPagePrefix)
 	if !ok || token == "" || strings.Contains(token, "/") {
@@ -43,6 +51,9 @@ func (h *Handler) PageHeaders(r *http.Request, header http.Header) {
 }
 
 func (h *Handler) framePolicy(r *http.Request, token string) string {
+	if ok, _ := h.hostedSources.Allow(requestSource(r)); !ok {
+		return frameNone
+	}
 	ctx, key, err := h.service.hostedLimitKey(r.Context(), token)
 	if errors.Is(err, ErrRequestNotFound) {
 		h.authFailures.Allow(requestSource(r))
@@ -83,10 +94,14 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("GET /proof/{token}/data-export", h.limitHosted(h.hostedDataExport))
 }
 
-// limitHosted counts a hosted call against its customer's hostedCallLimit,
-// and an unknown link against its source's authFailureLimit.
+// limitHosted counts a hosted call against its source's hostedSourceLimit
+// and its customer's hostedCallLimit, and an unknown link against its
+// source's authFailureLimit.
 func (h *Handler) limitHosted(next respond.HandlerFunc) respond.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) error {
+		if err := rateLimited(w, h.hostedSources, requestSource(r)); err != nil {
+			return err
+		}
 		ctx, key, err := h.service.hostedLimitKey(r.Context(), r.PathValue("token"))
 		if errors.Is(err, ErrRequestNotFound) {
 			if err := h.failureLimited(w, r); err != nil {

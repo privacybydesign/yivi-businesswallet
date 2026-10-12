@@ -39,6 +39,8 @@ type Handler struct {
 	// authFailures holds unknown API keys and hosted links per source
 	// (failureLimited).
 	authFailures *ratelimit.Limiter
+	// hostedSources holds the hosted page per source, valid links included.
+	hostedSources *ratelimit.Limiter
 	// memberFaceFrames holds the on-screen Yivi face check's frames per org:
 	// each one is a Regula call.
 	memberFaceFrames *ratelimit.Limiter
@@ -57,7 +59,7 @@ func NewHandler(service *Service, requireUser, authorize func(http.Handler) http
 		service: service, requireUser: requireUser, authorize: authorize,
 		apiCalls: ratelimit.New(apiCallLimit), apiSessions: ratelimit.New(APISessionLimit),
 		hostedCalls: ratelimit.New(hostedCallLimit), memberFaceFrames: ratelimit.New(memberFaceFrameLimit),
-		authFailures: newAuthFailures(),
+		authFailures: newAuthFailures(), hostedSources: ratelimit.New(hostedSourceLimit),
 	}
 }
 

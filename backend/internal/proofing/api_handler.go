@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"net"
 	"net/http"
 	"slices"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/clientip"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
@@ -192,13 +192,10 @@ func (h *Handler) failureLimited(w http.ResponseWriter, r *http.Request) error {
 	return rateLimited(w, h.authFailures, requestSource(r))
 }
 
-// requestSource is the address a call came from: what authFailures keys on.
+// requestSource is the client address a call came from: what authFailures
+// and hostedSources key on.
 func requestSource(r *http.Request) string {
-	source, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return source
+	return clientip.FromRequest(r)
 }
 
 func (h *Handler) registerPublicAPI(mux *http.ServeMux) {
