@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -186,8 +187,16 @@ func (s *TrustStore) load(ctx context.Context) (verify.TrustSource, string, erro
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: %w", ErrTrustUnavailable, err)
 	}
-	for territory, terr := range store.Errors {
-		slog.WarnContext(ctx, "diploma: EU trusted list not loaded", slog.String("territory", territory), slog.String("error", terr.Error()))
+	// eutl.Load succeeds once any territory loads; every one is needed here.
+	for _, territory := range trustTerritories {
+		if slices.Contains(store.Loaded, territory) {
+			continue
+		}
+		terr := store.Errors[territory]
+		if terr == nil {
+			terr = errors.New("not listed in the List of Trusted Lists")
+		}
+		return nil, "", fmt.Errorf("%w: trusted list %s: %w", ErrTrustUnavailable, territory, terr)
 	}
 	description := fmt.Sprintf("EU trusted lists (%d territories, %d services, fetched %s)",
 		len(store.Loaded), len(store.Services), store.FetchedAt.UTC().Format(time.RFC3339))

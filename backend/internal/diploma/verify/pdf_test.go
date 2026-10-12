@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -142,6 +144,8 @@ type ocspResponder struct {
 	// thisUpdate overrides the responses' this update (zero: a minute ago).
 	thisUpdate time.Time
 	nextUpdate time.Time
+	// delegate signs the responses in the issuer's place (nil: the issuer).
+	delegate *issuerOf
 }
 
 func (r *ocspResponder) add(cert, issuer *x509.Certificate, key *ecdsa.PrivateKey) {
@@ -166,7 +170,11 @@ func (r *ocspResponder) response(serial *big.Int) ([]byte, error) {
 	if r.revoked[serial.String()] {
 		tmpl.Status, tmpl.RevokedAt, tmpl.RevocationReason = ocsp.Revoked, time.Now().Add(-time.Hour), ocsp.KeyCompromise
 	}
-	return ocsp.CreateResponse(issuer.cert, issuer.cert, tmpl, issuer.key)
+	signer := issuer
+	if r.delegate != nil {
+		signer, tmpl.Certificate = *r.delegate, r.delegate.cert
+	}
+	return ocsp.CreateResponse(issuer.cert, signer.cert, tmpl, signer.key)
 }
 
 func (r *ocspResponder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -389,6 +397,92 @@ func TestPDFRevocation(t *testing.T) {
 			t.Errorf("an expired OCSP response passed: %+v", res.Checks)
 		}
 	})
+}
+
+// ocspSigner issues a certificate under the root that may sign OCSP
+// responses in its place, or, without ocspSigning, a sibling that may not.
+func ocspSigner(t *testing.T, p *pki, rootKey *ecdsa.PrivateKey, ocspSigning bool) *issuerOf {
+	t.Helper()
+	tmpl := &x509.Certificate{Subject: pkix.Name{CommonName: "test OCSP responder"}, KeyUsage: x509.KeyUsageDigitalSignature}
+	if ocspSigning {
+		tmpl.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageOCSPSigning}
+	}
+	cert, key := issue(t, tmpl, p.root, rootKey)
+	return &issuerOf{cert, key}
+}
+
+func TestPDFDelegatedOCSP(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		ocspSigning bool
+	}{
+		{"delegated responder", true},
+		{"sibling without OCSP signing", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newPKI(t, pkiOptions{})
+			p.responder.delegate = ocspSigner(t, p, p.responder.issuers[p.seal.SerialNumber.String()].key, tc.ocspSigning)
+
+			online := verifyPDF(t, signPDF(t, p, complete), Options{Issuer: &testIssuer, Trust: p.trust, OCSP: true})
+			good, err := p.responder.response(p.seal.SerialNumber)
+			if err != nil {
+				t.Fatal(err)
+			}
+			embedded := complete
+			embedded.embedded = [][]byte{good}
+			offline := verifyPDF(t, signPDF(t, p, embedded), Options{Issuer: &testIssuer, Trust: p.trust})
+
+			for path, res := range map[string]*Result{"online": online, "embedded": offline} {
+				if ok := checkOK(t, res, CheckRevocation); ok != tc.ocspSigning {
+					t.Errorf("%s: revocation check = %v, want %v: %+v", path, ok, tc.ocspSigning, res.Checks)
+				}
+			}
+		})
+	}
+}
+
+// A delegated responder must have been valid when it produced the response.
+func TestParseOCSPResponderValidity(t *testing.T) {
+	p := newPKI(t, pkiOptions{})
+	rootKey := p.responder.issuers[p.seal.SerialNumber.String()].key
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := ocsp.Response{Status: ocsp.Good, SerialNumber: p.seal.SerialNumber, ThisUpdate: time.Now().Add(-time.Minute)}
+
+	for i, tc := range []struct {
+		name                string
+		notBefore, notAfter time.Time
+		ok                  bool
+	}{
+		{"valid now", time.Now().Add(-time.Hour), time.Now().Add(time.Hour), true},
+		{"expired", time.Now().Add(-2 * time.Hour), time.Now().Add(-time.Hour), false},
+		{"not yet valid", time.Now().Add(time.Hour), time.Now().Add(2 * time.Hour), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			der, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+				SerialNumber: big.NewInt(int64(i + 1)), Subject: pkix.Name{CommonName: "test OCSP responder"},
+				NotBefore: tc.notBefore, NotAfter: tc.notAfter,
+				KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageOCSPSigning},
+			}, p.root, &key.PublicKey, rootKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			responder, err := x509.ParseCertificate(der)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tmpl.Certificate = responder
+			resp, err := ocsp.CreateResponse(p.root, responder, tmpl, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := parseOCSP(resp, p.seal, p.root); (err == nil) != tc.ok {
+				t.Errorf("parseOCSP = %v, want ok %v", err, tc.ok)
+			}
+		})
+	}
 }
 
 func TestPDFSignedAttributes(t *testing.T) {

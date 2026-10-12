@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/digitorus/pkcs7"
@@ -482,7 +483,7 @@ func embeddedRevocation(p7 *pkcs7.PKCS7) (revocationArchive, error) {
 // signing time.
 func (a revocationArchive) check(cert, issuer *x509.Certificate, signingTime time.Time) (string, error) {
 	for _, raw := range a.OCSP {
-		resp, err := ocsp.ParseResponseForCert(raw.FullBytes, cert, issuer)
+		resp, err := parseOCSP(raw.FullBytes, cert, issuer)
 		if err != nil {
 			continue
 		}
@@ -588,9 +589,32 @@ func fetchOCSP(ctx context.Context, hc *http.Client, cert, issuer *x509.Certific
 	if err != nil {
 		return nil, err
 	}
-	resp, err := ocsp.ParseResponseForCert(body, cert, issuer)
+	resp, err := parseOCSP(body, cert, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("ocsp: %w", err)
+	}
+	return resp, nil
+}
+
+// parseOCSP parses an OCSP response about cert and checks its signer: the
+// issuer itself, or a responder the issuer delegated OCSP signing to (RFC
+// 6960, 4.2.2.2). ocsp.ParseResponseForCert only checks that the issuer
+// signed the responder's certificate, not that it is a valid OCSP signer.
+func parseOCSP(der []byte, cert, issuer *x509.Certificate) (*ocsp.Response, error) {
+	resp, err := ocsp.ParseResponseForCert(der, cert, issuer)
+	if err != nil {
+		return nil, err
+	}
+	responder := resp.Certificate
+	if responder == nil || responder.Equal(issuer) {
+		return resp, nil
+	}
+	if !slices.Contains(responder.ExtKeyUsage, x509.ExtKeyUsageOCSPSigning) {
+		return nil, fmt.Errorf("responder %q is not authorised to sign OCSP responses", responder.Subject.CommonName)
+	}
+	if resp.ProducedAt.Before(responder.NotBefore) || resp.ProducedAt.After(responder.NotAfter) {
+		return nil, fmt.Errorf("responder %q was not valid when the response was produced at %s",
+			responder.Subject.CommonName, resp.ProducedAt.UTC().Format(time.RFC3339))
 	}
 	return resp, nil
 }

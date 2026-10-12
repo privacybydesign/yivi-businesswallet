@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,12 +20,14 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma/verify"
 )
 
-// listServer serves a List of Trusted Lists pointing at one NL list, or 503
-// while failing is set, and counts the LOTL downloads.
+// listServer serves a List of Trusted Lists pointing at an NL and an RO
+// list, or 503 while failing is set (for RO alone while roFailing is set), and
+// counts the LOTL downloads.
 type listServer struct {
 	*httptest.Server
-	failing atomic.Bool
-	hits    atomic.Int32
+	failing   atomic.Bool
+	roFailing atomic.Bool
+	hits      atomic.Int32
 }
 
 func newListServer(t *testing.T) *listServer {
@@ -43,6 +46,27 @@ func newListServer(t *testing.T) *listServer {
 	}
 
 	s := &listServer{}
+	pointer := func(territory string) string {
+		return `<OtherTSLPointer><TSLLocation>` + s.URL + `/` + strings.ToLower(territory) + `.xml</TSLLocation><AdditionalInformation>
+<OtherInformation><SchemeTerritory>` + territory + `</SchemeTerritory></OtherInformation><OtherInformation><MimeType>application/vnd.etsi.tsl+xml</MimeType></OtherInformation>
+</AdditionalInformation></OtherTSLPointer>`
+	}
+	list := func(territory string, failing *atomic.Bool) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			if failing.Load() {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = w.Write([]byte(`<TrustServiceStatusList xmlns="http://uri.etsi.org/02231/v2#"><SchemeInformation><SchemeTerritory>` + territory + `</SchemeTerritory></SchemeInformation>
+<TrustServiceProviderList><TrustServiceProvider><TSPInformation><TSPName><Name xml:lang="en">Test TSP</Name></TSPName></TSPInformation>
+<TSPServices><TSPService><ServiceInformation>
+<ServiceTypeIdentifier>http://uri.etsi.org/TrstSvc/Svctype/CA/QC</ServiceTypeIdentifier>
+<ServiceName><Name xml:lang="en">Test CA</Name></ServiceName>
+<ServiceDigitalIdentity><DigitalId><X509Certificate>` + base64.StdEncoding.EncodeToString(der) + `</X509Certificate></DigitalId></ServiceDigitalIdentity>
+<ServiceStatus>http://uri.etsi.org/TrstSvc/TrustedList/Svcstatus/granted</ServiceStatus>
+</ServiceInformation></TSPService></TSPServices></TrustServiceProvider></TrustServiceProviderList></TrustServiceStatusList>`))
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/lotl.xml", func(w http.ResponseWriter, _ *http.Request) {
 		s.hits.Add(1)
@@ -51,20 +75,10 @@ func newListServer(t *testing.T) *listServer {
 			return
 		}
 		_, _ = w.Write([]byte(`<TrustServiceStatusList xmlns="http://uri.etsi.org/02231/v2#"><SchemeInformation><SchemeTerritory>EU</SchemeTerritory>
-<PointersToOtherTSL><OtherTSLPointer><TSLLocation>` + s.URL + `/nl.xml</TSLLocation><AdditionalInformation>
-<OtherInformation><SchemeTerritory>NL</SchemeTerritory></OtherInformation><OtherInformation><MimeType>application/vnd.etsi.tsl+xml</MimeType></OtherInformation>
-</AdditionalInformation></OtherTSLPointer></PointersToOtherTSL></SchemeInformation></TrustServiceStatusList>`))
+<PointersToOtherTSL>` + pointer("NL") + pointer("RO") + `</PointersToOtherTSL></SchemeInformation></TrustServiceStatusList>`))
 	})
-	mux.HandleFunc("/nl.xml", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`<TrustServiceStatusList xmlns="http://uri.etsi.org/02231/v2#"><SchemeInformation><SchemeTerritory>NL</SchemeTerritory></SchemeInformation>
-<TrustServiceProviderList><TrustServiceProvider><TSPInformation><TSPName><Name xml:lang="en">Test TSP</Name></TSPName></TSPInformation>
-<TSPServices><TSPService><ServiceInformation>
-<ServiceTypeIdentifier>http://uri.etsi.org/TrstSvc/Svctype/CA/QC</ServiceTypeIdentifier>
-<ServiceName><Name xml:lang="en">Test CA</Name></ServiceName>
-<ServiceDigitalIdentity><DigitalId><X509Certificate>` + base64.StdEncoding.EncodeToString(der) + `</X509Certificate></DigitalId></ServiceDigitalIdentity>
-<ServiceStatus>http://uri.etsi.org/TrstSvc/TrustedList/Svcstatus/granted</ServiceStatus>
-</ServiceInformation></TSPService></TSPServices></TrustServiceProvider></TrustServiceProviderList></TrustServiceStatusList>`))
-	})
+	mux.HandleFunc("/nl.xml", list("NL", &s.failing))
+	mux.HandleFunc("/ro.xml", list("RO", &s.roFailing))
 	s.Server = httptest.NewTLSServer(mux)
 	t.Cleanup(s.Close)
 	return s
@@ -146,6 +160,42 @@ func TestTrustStoreReload(t *testing.T) {
 	store.reloads.Wait()
 	if got := store.Current(context.Background()); got == loaded {
 		t.Error("the retry after trustRetry did not load the lists anew")
+	}
+}
+
+// A load missing one of trustTerritories is a failure: the boot falls back to
+// the pinned roots, and a reload keeps the anchors already loaded.
+func TestTrustStorePartialLoad(t *testing.T) {
+	srv := newListServer(t)
+	srv.roFailing.Store(true)
+	clock := &fakeClock{now: time.Now()}
+
+	if _, err := trustStoreOn(t, srv, clock, false); !errors.Is(err, ErrTrustUnavailable) {
+		t.Errorf("boot without the RO list = %v, want ErrTrustUnavailable", err)
+	}
+	store, err := trustStoreOn(t, srv, clock, true)
+	if err != nil {
+		t.Fatalf("boot with the pinned fallback: %v", err)
+	}
+	if store.description != "pinned roots (EU trusted lists unavailable)" {
+		t.Errorf("description = %q, want the pinned fallback", store.description)
+	}
+
+	srv.roFailing.Store(false)
+	clock.now = clock.now.Add(trustRetry)
+	store.Current(context.Background())
+	store.reloads.Wait()
+	loaded := store.Current(context.Background())
+	if loaded == nil || store.loadedAt.IsZero() {
+		t.Fatal("the retry with every list available did not load them")
+	}
+
+	srv.roFailing.Store(true)
+	clock.now = clock.now.Add(trustRefresh)
+	store.Current(context.Background())
+	store.reloads.Wait()
+	if got := store.Current(context.Background()); got != loaded {
+		t.Error("a reload without the RO list replaced the loaded anchors")
 	}
 }
 
