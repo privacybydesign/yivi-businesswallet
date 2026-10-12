@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"strings"
 	"testing"
 )
@@ -369,22 +370,39 @@ func TestLoadDiplomaOCSPIsDefault(t *testing.T) {
 	}
 }
 
+// A stub outcome with the engine provider is a half-switched .env: refused,
+// not silently ignored.
+func TestLoadStubOutcomeNeedsStubProvider(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{
+		envIdentityProofingProvider:    ProviderEngine,
+		envIdentityProofingStubOutcome: "approved",
+		envDevMode:                     "true",
+	}); err == nil {
+		t.Errorf("%s with %s=%s loaded, want an error", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderEngine)
+	}
+}
+
 // A stub that passes a real check runs only on a local stack (DEV_MODE), and
 // DEV_MODE only with a localhost APP_BASE_URL.
 func TestLoadStubsNeedDevMode(t *testing.T) {
-	for key, value := range map[string]string{
-		envIdentityProofingProvider:    ProviderStub,
-		envIdentityProofingStubOutcome: "approved",
-		envDiplomaValidatorProvider:    ProviderStub,
+	for name, env := range map[string]map[string]string{
+		envIdentityProofingProvider: {envIdentityProofingProvider: ProviderStub},
+		envIdentityProofingStubOutcome: {
+			envIdentityProofingProvider:    ProviderStub,
+			envIdentityProofingStubOutcome: "approved",
+		},
+		envDiplomaValidatorProvider: {envDiplomaValidatorProvider: ProviderStub},
 	} {
-		t.Run(key+" without", func(t *testing.T) {
-			if _, err := loadWith(t, map[string]string{key: value}); err == nil {
-				t.Errorf("%s=%s without %s loaded, want an error", key, value, envDevMode)
+		t.Run(name+" without", func(t *testing.T) {
+			if _, err := loadWith(t, env); err == nil {
+				t.Errorf("%v without %s loaded, want an error", env, envDevMode)
 			}
 		})
-		t.Run(key+" with", func(t *testing.T) {
-			if _, err := loadWith(t, map[string]string{key: value, envDevMode: "true"}); err != nil {
-				t.Errorf("%s=%s with %s: %v", key, value, envDevMode, err)
+		t.Run(name+" with", func(t *testing.T) {
+			withDevMode := map[string]string{envDevMode: "true"}
+			maps.Copy(withDevMode, env)
+			if _, err := loadWith(t, withDevMode); err != nil {
+				t.Errorf("%v with %s: %v", env, envDevMode, err)
 			}
 		})
 	}

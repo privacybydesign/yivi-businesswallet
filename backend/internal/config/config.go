@@ -636,6 +636,9 @@ func Load() (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("config: %s must be approved, rejected or needs_review", envIdentityProofingStubOutcome)
 	}
+	if identityProofingStubOutcome != "" && identityProofingProvider != ProviderStub {
+		return Config{}, fmt.Errorf("config: %s needs %s=%q", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderStub)
+	}
 
 	attestationIssuer := envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
 	attestationIssuerURL := os.Getenv(envAttestationIssuerURL)
