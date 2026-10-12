@@ -41,16 +41,13 @@ const (
 	// extract parses in well under a second; past this the instance is killed,
 	// so a crafted PDF cannot hold one of the pool's few instances indefinitely.
 	pdfiumParseTimeout = 20 * time.Second
-	// pdfiumMaxParses is how many of the borrowed pool's instances diploma
-	// parses may hold at once: fewer than the pool has (vog's poolMaxTotal is
-	// 4), so a burst of diploma uploads cannot starve VOG uploads.
+	// pdfiumMaxParses is how many of the pool's instances diploma parses may
+	// hold at once.
 	pdfiumMaxParses = 2
 )
 
 // PDFiumParser parses diploma extracts with PDFium running in a WebAssembly
-// sandbox (pure Go, no cgo). It borrows a pool another parser owns (the VOG
-// parser's, vog.PDFiumParser.Pool): a pool is a full PDFium heap per
-// instance, so a process keeps one.
+// sandbox (pure Go, no cgo), on a pool its caller owns.
 type PDFiumParser struct {
 	pool pdfium.Pool
 	// parses holds a slot per parse in flight, at most pdfiumMaxParses.
@@ -80,8 +77,7 @@ func (p *PDFiumParser) Parse(ctx context.Context, pdf []byte) (*Document, error)
 
 // extract reads the pages on a pooled instance, killing the instance when the
 // parse outlives pdfiumParseTimeout or ctx. Kill interrupts the WebAssembly
-// call in flight only because the pool's runtime closes on context done
-// (vog.NewPDFiumParser).
+// call in flight only when the pool's runtime closes on context done.
 func (p *PDFiumParser) extract(ctx context.Context, pdf []byte) (*Pages, error) {
 	wait := time.NewTimer(pdfiumInstanceTimeout)
 	defer wait.Stop()
