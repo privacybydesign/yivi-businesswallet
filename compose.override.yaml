@@ -31,6 +31,9 @@ services:
       # dev accepts any extract, since nobody holds a DUO-signed one of a test
       # person. Set DIPLOMA_VALIDATOR_PROVIDER=duo in .env to check for real.
       DIPLOMA_VALIDATOR_PROVIDER: ${DIPLOMA_VALIDATOR_PROVIDER:-stub}
+      # The EU Trusted Lists cache, on the diploma-trust-cache volume so a
+      # restart does not fetch them again.
+      DIPLOMA_TRUST_CACHE_DIR: ${DIPLOMA_TRUST_CACHE_DIR:-/var/cache/diploma-trust}
       # Attestation issuer: stub by default. Set ATTESTATION_ISSUER=veramo (+ token)
       # in .env to issue against the hosted Veramo staging issuer.
       ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}
@@ -131,6 +134,7 @@ services:
       - ./backend:/app
       - backend-go-build:/root/.cache/go-build
       - backend-go-mod:/go/pkg/mod
+      - diploma-trust-cache:/var/cache/diploma-trust
 
   migrate:
     build:
@@ -632,4 +636,5 @@ networks:
 volumes:
   backend-go-build:
   backend-go-mod:
+  diploma-trust-cache:
   frontend-node-modules:

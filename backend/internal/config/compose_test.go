@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -186,8 +187,8 @@ func TestComposePassesEudiVerifierConfigToBackend(t *testing.T) {
 
 // TestComposePassesProofing holds the identity-proofing vars to
 // the passthrough rule: without them a value set in .env (the encryption key,
-// the phone-reachable URL, Regula, the stub outcome, the diploma validator)
-// never reaches the container.
+// the phone-reachable URL, Regula, the stub outcome, the diploma validator
+// and its trust cache) never reaches the container.
 func TestComposePassesProofing(t *testing.T) {
 	backendEnvironment := backendComposeEnvironment(t)
 
@@ -195,7 +196,7 @@ func TestComposePassesProofing(t *testing.T) {
 		envIdentityProofingProvider, envIdentityProofingEncryptionKey, envIdentityProofingPublicURL,
 		envIdentityProofingStubOutcome,
 		envRegulaFaceAPIURL, envRegulaFaceAPIPublicURL, envRegulaFaceMatchThreshold,
-		envDiplomaValidatorProvider, envDiplomaTrustSource, envDiplomaOCSP,
+		envDiplomaValidatorProvider, envDiplomaTrustSource, envDiplomaTrustCacheDir, envDiplomaOCSP,
 	} {
 		value, ok := backendEnvironment[key]
 		if !ok {
@@ -205,5 +206,49 @@ func TestComposePassesProofing(t *testing.T) {
 		if want := "${" + key + ":-}"; value != want {
 			t.Errorf("backend %s = %q, want %q", key, value, want)
 		}
+	}
+}
+
+// composeOverridePath is the dev stack's Compose override, from this package's
+// directory.
+const composeOverridePath = "../../../compose.override.yaml"
+
+// devDiplomaTrustCacheDir is where the dev stack keeps the diploma trust cache.
+const devDiplomaTrustCacheDir = "/var/cache/diploma-trust"
+
+// The dev stack keeps the diploma trust cache on a named volume, so a restart
+// reuses the EU Trusted Lists instead of fetching them again.
+func TestComposeOverrideKeepsDiplomaTrustCache(t *testing.T) {
+	raw, err := os.ReadFile(composeOverridePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", composeOverridePath, err)
+	}
+	var file struct {
+		Services map[string]struct {
+			Environment map[string]string `yaml:"environment"`
+			Volumes     []string          `yaml:"volumes"`
+		} `yaml:"services"`
+		Volumes map[string]any `yaml:"volumes"`
+	}
+	if err := yaml.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("parse %s: %v", composeOverridePath, err)
+	}
+	backend := file.Services["backend"]
+	if got, want := backend.Environment[envDiplomaTrustCacheDir], "${"+envDiplomaTrustCacheDir+":-"+devDiplomaTrustCacheDir+"}"; got != want {
+		t.Errorf("backend %s = %q, want %q", envDiplomaTrustCacheDir, got, want)
+	}
+	mounted := false
+	for _, v := range backend.Volumes {
+		name, dir, ok := strings.Cut(v, ":")
+		if !ok || dir != devDiplomaTrustCacheDir {
+			continue
+		}
+		if _, declared := file.Volumes[name]; !declared {
+			t.Errorf("backend mounts %q at %s, which is not a named volume", name, dir)
+		}
+		mounted = true
+	}
+	if !mounted {
+		t.Errorf("backend mounts no volume at %s; the trust cache is lost on every restart", devDiplomaTrustCacheDir)
 	}
 }

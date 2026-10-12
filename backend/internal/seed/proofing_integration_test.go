@@ -4,6 +4,7 @@ package seed
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -123,5 +124,33 @@ func TestEnsureProofingDemoIsIdempotent(t *testing.T) {
 		if err != nil || len(customers) != len(o.customers) {
 			t.Errorf("%s customers = %d, %v; want %d", o.slug, len(customers), err, len(o.customers))
 		}
+	}
+}
+
+// The staging proofing demo refuses a demo slug taken by an org it did not
+// create, and leaves that org untouched.
+func TestEnsureProofingDemoRefusesForeignOrg(t *testing.T) {
+	pool, dsn := testdb.Fresh(t)
+	ctx := context.Background()
+	var orgID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
+		VALUES ('a.s.r.', $1, '12345678', 'NL.KVK.12345678', 'asr@qerds.example') RETURNING id`, asrSlug).Scan(&orgID); err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	if err := EnsureProofingDemo(ctx, dsn, "qerds.localhost"); !errors.Is(err, ErrNotSeedOwned) {
+		t.Fatalf("EnsureProofingDemo = %v, want ErrNotSeedOwned", err)
+	}
+
+	var members, addresses int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM memberships WHERE organization_id = $1", orgID).Scan(&members); err != nil || members != 0 {
+		t.Errorf("foreign org members = %d, %v; want 0", members, err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM qerds_addresses WHERE organization_id = $1", orgID).Scan(&addresses); err != nil || addresses != 0 {
+		t.Errorf("foreign org QERDS addresses = %d, %v; want 0", addresses, err)
+	}
+	customers, err := proofing.NewCustomerStore(pool, audit.NopRecorder{}).List(ctx, orgID)
+	if err != nil || len(customers) != 0 {
+		t.Errorf("foreign org customers = %d, %v; want 0", len(customers), err)
 	}
 }

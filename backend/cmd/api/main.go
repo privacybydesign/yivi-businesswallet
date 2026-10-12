@@ -884,12 +884,21 @@ func run() error {
 		Diplomas:     proofing.NewDiplomaStore(pool, recorder),
 		DataRequests: proofing.NewDataRequestStore(pool, recorder, proofingCipher),
 	}, ips, verifier, emailService)
-	// A diploma extract is parsed on the VOG parser's PDFium pool.
 	diplomaValidator, err := newDiplomaValidator(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	diplomaChecker := diploma.NewChecker(diplomaValidator, diploma.NewPDFiumParser(vogParser.Pool()))
+	// A diploma extract is parsed on its own PDFium pool, apart from VOG's.
+	diplomaPool, err := newDiplomaPDFiumPool()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := diplomaPool.Close(); err != nil {
+			slog.Error("close diploma pdfium pool", slog.String("error", err.Error()))
+		}
+	}()
+	diplomaChecker := diploma.NewChecker(diplomaValidator, diploma.NewPDFiumParser(diplomaPool))
 	if err := diplomaChecker.Ping(ctx); err != nil {
 		return fmt.Errorf("diploma validator ping: %w", err)
 	}

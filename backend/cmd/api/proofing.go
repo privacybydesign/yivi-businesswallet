@@ -6,6 +6,9 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/klippa-app/go-pdfium"
+	"github.com/klippa-app/go-pdfium/webassembly"
+	"github.com/tetratelabs/wazero"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 )
@@ -33,3 +36,27 @@ func (n orgNames) DisplayName(ctx context.Context, tenantID string) (string, err
 type noRoutes struct{}
 
 func (noRoutes) Register(*http.ServeMux) {}
+
+// The diploma parser's own PDFium pool, apart from the VOG parser's, so a
+// burst of crafted diploma uploads cannot starve VOG uploads.
+const (
+	diplomaPDFiumMinIdle  = 1
+	diplomaPDFiumMaxIdle  = 2
+	diplomaPDFiumMaxTotal = 2
+)
+
+// newDiplomaPDFiumPool builds the diploma parser's PDFium WebAssembly pool.
+// Its runtime closes on context done, so the parser's Kill interrupts a parse
+// in flight.
+func newDiplomaPDFiumPool() (pdfium.Pool, error) {
+	pool, err := webassembly.Init(webassembly.Config{
+		MinIdle:       diplomaPDFiumMinIdle,
+		MaxIdle:       diplomaPDFiumMaxIdle,
+		MaxTotal:      diplomaPDFiumMaxTotal,
+		RuntimeConfig: wazero.NewRuntimeConfig().WithCloseOnContextDone(true),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("diploma: initialise pdfium: %w", err)
+	}
+	return pool, nil
+}

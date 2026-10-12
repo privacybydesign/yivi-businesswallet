@@ -2,6 +2,7 @@ package seed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -250,6 +251,9 @@ func EnsureProofingDemo(ctx context.Context, dsn, addressDomain string) error {
 		if !slices.ContainsFunc(demoProofingOrgs, func(p demoProofingOrg) bool { return p.slug == o.slug }) {
 			continue
 		}
+		if err := requireSeedOwned(ctx, orgs, o); err != nil {
+			return err
+		}
 		org, err := ensureOrg(ctx, pool, o, addressDomain)
 		if err != nil {
 			return err
@@ -270,6 +274,26 @@ func EnsureProofingDemo(ctx context.Context, dsn, addressDomain string) error {
 		return err
 	}
 	slog.Info("ensured identity proofing demo", slog.Int("orgs", len(orgsBySlug)))
+	return nil
+}
+
+// ErrNotSeedOwned is returned when a demo org's slug belongs to an org the
+// seed did not create: the demo must never adopt a real tenant.
+var ErrNotSeedOwned = errors.New("seed: slug taken by an organisation the seed did not create")
+
+// requireSeedOwned refuses o when an org with its slug exists that does not
+// carry o's placeholder KVK number and EUID, the seed's mark on its orgs.
+func requireSeedOwned(ctx context.Context, orgs *organization.Store, o demoOrganization) error {
+	existing, err := orgs.GetBySlug(ctx, o.slug)
+	if errors.Is(err, organization.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("seed: look up org %q: %w", o.slug, err)
+	}
+	if existing.KVKNumber != o.kvkNumber || existing.EUID != o.euid {
+		return fmt.Errorf("%w: %q", ErrNotSeedOwned, o.slug)
+	}
 	return nil
 }
 

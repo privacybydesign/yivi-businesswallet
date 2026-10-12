@@ -122,6 +122,8 @@ services:
       # the source of the trusted signing roots; empty keeps the config defaults.
       DIPLOMA_VALIDATOR_PROVIDER: ${DIPLOMA_VALIDATOR_PROVIDER:-}
       DIPLOMA_TRUST_SOURCE: ${DIPLOMA_TRUST_SOURCE:-}
+      # Where the EU Trusted Lists are cached between restarts; empty keeps none.
+      DIPLOMA_TRUST_CACHE_DIR: ${DIPLOMA_TRUST_CACHE_DIR:-}
       # "false" stops the online revocation check of DUO's signing chain; on by default.
       DIPLOMA_OCSP: ${DIPLOMA_OCSP:-}
     depends_on:
