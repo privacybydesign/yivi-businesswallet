@@ -362,6 +362,72 @@ func TestReviewAndCancel(t *testing.T) {
 	}
 }
 
+// A session that ends without an outcome keeps none of its evidence, however
+// it ends (cancelled, or expired on a read), and still answers its status.
+func TestUnfinishedSessionsDropEvidence(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	f, err := h.engine.CreateFlow(ctx, h.tenant, chipFlow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withEvidence := func(t *testing.T, expiresAt time.Time) pp.Session {
+		t.Helper()
+		sess, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{FlowID: f.ID})
+		if err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		if _, err := h.sessions.Update(h.tenant.ID, sess.ID, func(s *session.Session) error {
+			now := time.Now().UTC()
+			for _, to := range []session.Status{session.StatusOpened, session.StatusInProgress} {
+				if err := s.SetStatus(to, now); err != nil {
+					return err
+				}
+			}
+			s.Steps = session.StepEvidence{
+				Document: &session.DocumentStepEvidence{
+					Parsed:     session.ParsedMRZ{IssuingState: "NLD", Surname: "Jansen"},
+					ChipAccess: &session.ChipAccessKey{DocumentNumber: "X1234567"},
+				},
+				NFC:           &session.NFCStepEvidence{Raw: map[string]any{"photo": "cGhvdG8="}},
+				Selfie:        &session.SelfieStepEvidence{Image: "c2VsZmll"},
+				DocumentPhoto: &session.DocumentPhotoStepEvidence{Front: session.DocumentPhotoSide{Image: "ZG9j"}},
+			}
+			s.Yivi = &session.YiviState{Reference: "cmVm", LastFrame: "ZnJhbWU="}
+			s.ExpiresAt = expiresAt
+			return nil
+		}); err != nil {
+			t.Fatalf("add evidence: %v", err)
+		}
+		return sess
+	}
+	check := func(t *testing.T, sess pp.Session, want pp.Status) {
+		t.Helper()
+		stored, err := h.sessions.Get(h.tenant.ID, sess.ID)
+		if err != nil {
+			t.Fatalf("read session: %v", err)
+		}
+		if stored.Status != session.Status(want) || stored.Steps.Document != nil || stored.Steps.NFC != nil ||
+			stored.Steps.Selfie != nil || stored.Steps.DocumentPhoto != nil || stored.Yivi != nil {
+			t.Errorf("stored %s session = %+v, Yivi %v; want no evidence", stored.Status, stored.Steps, stored.Yivi != nil)
+		}
+		if res, err := h.engine.SessionStatus(ctx, h.tenant, sess.ID, sess.Token); err != nil || res.Status != want {
+			t.Errorf("status = %+v, %v; want %s", res, err, want)
+		}
+		if id, err := h.engine.SessionIdentity(ctx, h.tenant, sess.ID, sess.Token); err != nil || id.Status != want || id.Evidence != nil {
+			t.Errorf("identity = %+v, %v; want %s without evidence", id, err, want)
+		}
+	}
+
+	cancelled := withEvidence(t, time.Now().Add(time.Hour))
+	if err := h.engine.CancelSession(ctx, h.tenant, cancelled.ID, cancelled.Token); err != nil {
+		t.Fatalf("CancelSession: %v", err)
+	}
+	check(t, cancelled, pp.StatusCancelled)
+
+	check(t, withEvidence(t, time.Now().Add(-time.Second)), pp.StatusExpired)
+}
+
 func TestYiviNeedsRegula(t *testing.T) {
 	h := newHarness(t)
 	if _, err := h.engine.CreateSession(context.Background(), h.tenant, pp.SessionInput{Method: pp.MethodYivi}); !errors.Is(err, pp.ErrMethodUnavailable) {
@@ -472,9 +538,9 @@ func TestReferencePhotoFaceCheck(t *testing.T) {
 		t.Fatalf("claim = %d %v", code, claim)
 	}
 	view := claim["session"].(map[string]any)
-	ref, _ := view["faceReference"].(map[string]any)
-	if view["currentStep"] != "face_verification" || ref["imageBase64"] != photo.Base64 || ref["mimeType"] != photo.MimeType {
-		t.Errorf("app view = step %v, faceReference %v; want the face step against the org's photo", view["currentStep"], ref)
+	// The match is Regula's, server side: the app never gets the org's photo.
+	if _, sent := view["faceReference"]; view["currentStep"] != "face_verification" || sent {
+		t.Errorf("app view = step %v, faceReference sent %v; want the face step without the org's photo", view["currentStep"], sent)
 	}
 
 	if err := h.engine.CancelSession(ctx, h.tenant, sess.ID, sess.Token); err != nil {

@@ -63,10 +63,6 @@ type appSessionView struct {
 	// ChipAccess is the MRZ-derived chip access key, present only while the chip
 	// read is the current step (chipAccessFor).
 	ChipAccess *session.ChipAccessKey `json:"chipAccess,omitempty"`
-	// FaceReference is the photo the face step is matched against (the chip
-	// portrait, or the customer's photo on a flow without nfc_read), present while
-	// the face step is current and runs in the Idem app.
-	FaceReference *photoInfo `json:"faceReference,omitempty"`
 	// FaceVerification tells the Idem app to run the face step as a Regula
 	// liveness session, when the flow uses Regula and it is configured.
 	FaceVerification *faceVerificationInfo `json:"faceVerification,omitempty"`
@@ -198,12 +194,6 @@ func (s *Server) buildAppSessionView(r *http.Request, sess session.Session, role
 		faceVerification = &faceVerificationInfo{Provider: faceProviderRegula, FaceAPIURL: s.cfg.RegulaFaceAPIPublicURL, Tag: regulaTag(sess)}
 		s.queueRegulaSweep(r.Context(), sess)
 	}
-	var faceReference *photoInfo
-	if current != nil && isFaceStep(flow.Step(*current)) && selfieLocation == flow.LocationNative {
-		if image, mime, ok := s.faceMatchReference(sess); ok {
-			faceReference = &photoInfo{ImageBase64: image, MimeType: mime}
-		}
-	}
 	device := callerDeviceView{Authorized: role != "", Role: role}
 	if role != "" {
 		device.deviceView = s.toDeviceView(sess.Access.Slot(role))
@@ -216,7 +206,7 @@ func (s *Server) buildAppSessionView(r *http.Request, sess session.Session, role
 		CompletedSteps: sess.CompletedSteps(), NativeHandoff: nativeHandoff,
 		ResetCount: sess.ResetCount, ChangeKey: s.appSessionChangeKey(sess, time.Now()),
 		FlowID: sess.Flow, FlowVersion: sess.FlowVersion,
-		CurrentStep: current, ChipAccess: chipAccess, FaceReference: faceReference, FaceVerification: faceVerification, FaceProvider: faceProvider,
+		CurrentStep: current, ChipAccess: chipAccess, FaceVerification: faceVerification, FaceProvider: faceProvider,
 		StepResults: stepResults(sess, resolvedFlow), Lifecycle: sessionLifecycle(sess), ReadyToSubmit: readyToSubmit(sess, resolvedFlow), Device: device,
 		Devices: map[string]deviceView{
 			string(session.DeviceRoleWeb):    s.toDeviceView(sess.Access.Web),

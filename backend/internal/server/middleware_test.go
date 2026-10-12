@@ -234,9 +234,9 @@ func TestRecoverer_ReturnsInternalServerError(t *testing.T) {
 	}
 }
 
-// A bearer token in the path never reaches the request log; ids and route
-// words do.
-func TestLoggedPathRedactsTokens(t *testing.T) {
+// A path no route matched loses its token-shaped segments; ids and route
+// words stay.
+func TestRedactTokenShapes(t *testing.T) {
 	cases := map[string]string{
 		"/api/v1/app/Zq3xY9vK2mN8pL4rT6wB1cD5/steps/nfc":                 "/api/v1/app/{token}/steps/nfc",
 		"/api/v1/proof/0123456789abcdef0123456789abcdef":                 "/api/v1/proof/{token}",
@@ -246,8 +246,40 @@ func TestLoggedPathRedactsTokens(t *testing.T) {
 		"/livez": "/livez",
 	}
 	for in, want := range cases {
-		if got := loggedPath(in); got != want {
-			t.Errorf("loggedPath(%q) = %q, want %q", in, got, want)
+		if got := redactTokenShapes(in); got != want {
+			t.Errorf("redactTokenShapes(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A matched route's token wildcards are redacted whatever the token looks
+// like (here: no digit, which the shape fallback would miss); its other
+// wildcards are logged.
+func TestLoggedPathRedactsRouteTokens(t *testing.T) {
+	var buf bytes.Buffer
+	defer installTestLogger(&buf)()
+
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	v1 := http.NewServeMux()
+	v1.Handle("GET /app/{token}", ok)
+	v1.Handle("POST /app/handover/{handoverToken}/claim", ok)
+	v1.Handle("GET /orgs/{slug}/members/{userId}", ok)
+	handler := defaultMiddleware()(http.StripPrefix(apiV1Prefix, recordRoute(v1)))
+
+	const token = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ" // 43 base64url chars, no digit
+	cases := map[string]string{
+		"GET /api/v1/app/" + token:                      "/api/v1/app/{token}",
+		"POST /api/v1/app/handover/" + token + "/claim": "/api/v1/app/handover/{token}/claim",
+		"GET /api/v1/orgs/acme/members/" + token:        "/api/v1/orgs/acme/members/" + token,
+		"GET /api/v1/unrouted/Zq3xY9vK2mN8pL4rT6wB1cD5": "/api/v1/unrouted/{token}",
+	}
+	for req, want := range cases {
+		buf.Reset()
+		method, path, _ := strings.Cut(req, " ")
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(method, path, nil))
+		records := parseLogs(t, &buf)
+		if len(records) != 1 || records[0][attrPath] != want {
+			t.Errorf("%s logged %v, want path %q", req, records, want)
 		}
 	}
 }

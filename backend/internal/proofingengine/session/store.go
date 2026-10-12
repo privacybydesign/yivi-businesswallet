@@ -253,7 +253,7 @@ func (s *PostgresStore) Update(tenantID, id string, fn func(*Session) error) (Se
 			if err := sess.SetStatus(StatusExpired, now); err != nil {
 				return err
 			}
-			expiredNow, expired = true, sess
+			expiredNow, expired = true, sess.ForStorage()
 		}
 		updated = sess
 		if fnErr = fn(&updated); fnErr != nil {
@@ -264,6 +264,8 @@ func (s *PostgresStore) Update(tenantID, id string, fn func(*Session) error) (Se
 			updated = expired
 		}
 		updated.UpdatedAt = now
+		// Callers see what is stored, not evidence a terminal session dropped.
+		updated = updated.ForStorage()
 		sealed, err := s.seal(updated)
 		if err != nil {
 			return err

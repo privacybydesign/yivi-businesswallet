@@ -146,10 +146,12 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 	}
 
 	if attrRequested(sess, attrDocumentImage) {
-		if img := releasedDocumentImage(sess, req.DocumentImage, redaction); img != nil {
+		docRedaction := redaction
+		docRedaction.BlurBSN = coversDocumentBSN(redaction, bsnPolicy, resultIssuingState(sess, req))
+		if img := releasedDocumentImage(sess, req.DocumentImage, docRedaction); img != nil {
 			result["documentImage"] = img
 		}
-		if img := releasedDocumentImage(sess, req.DocumentImageBack, redaction); img != nil {
+		if img := releasedDocumentImage(sess, req.DocumentImageBack, docRedaction); img != nil {
 			result["documentImageBack"] = img
 		}
 	}

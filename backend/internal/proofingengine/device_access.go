@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
@@ -159,11 +160,46 @@ func actorDetails(sess session.Session, role session.DeviceRole) map[string]any 
 // audits the refusal: which route, why, and as which device.
 func (s *Server) denyApp(w http.ResponseWriter, r *http.Request, sess session.Session, caller appCaller, err error) {
 	if code := accessErrorCode(err); code != "" {
-		details := actorDetails(sess, caller.role)
-		details[detailReason], details[detailRoute] = code, r.Pattern
-		s.auditProofing(sess, eventAccessDenied, details)
+		s.auditDenial(r, sess, caller, code)
 	}
 	writeAccessError(w, r, err)
+}
+
+// auditDenial audits a refused app request, once per session, device and
+// reason: an app retrying a refused call adds no further audit rows.
+func (s *Server) auditDenial(r *http.Request, sess session.Session, caller appCaller, code string) {
+	details := actorDetails(sess, caller.role)
+	deviceID, _ := details[detailDeviceID].(string)
+	if !s.denials.first(sess.ID + "\x00" + string(caller.role) + "\x00" + deviceID + "\x00" + code) {
+		return
+	}
+	details[detailReason], details[detailRoute] = code, r.Pattern
+	s.auditProofing(sess, eventAccessDenied, details)
+}
+
+// maxDenialKeys bounds the denials remembered; past it they are forgotten
+// at once, so at worst a denial is audited again.
+const maxDenialKeys = 4096
+
+// denialSet is the app denials audited so far, in this process. The zero
+// value is ready to use.
+type denialSet struct {
+	mu   sync.Mutex
+	seen map[string]struct{}
+}
+
+// first reports whether key is new, and remembers it.
+func (d *denialSet) first(key string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d.seen[key]; ok {
+		return false
+	}
+	if d.seen == nil || len(d.seen) >= maxDenialKeys {
+		d.seen = map[string]struct{}{}
+	}
+	d.seen[key] = struct{}{}
+	return true
 }
 
 var (

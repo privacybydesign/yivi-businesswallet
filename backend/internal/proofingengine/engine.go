@@ -202,6 +202,7 @@ type Server struct {
 
 	claimLimit *ratelimit.Limiter
 	waiters    eventWaiters
+	denials    denialSet
 
 	// changed queues the sessions to tell notify about; pending holds the
 	// ones queued, so a burst of events for one session is one notice.

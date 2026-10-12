@@ -16,7 +16,11 @@ import (
 // portrait, so redacting earlier would match against a blurred image. The raw
 // DG1 is dropped too; Passive Authentication already ran on it.
 func redactStepsForStorage(sess *session.Session, bsnPolicy privacy.BSNPolicy, redaction privacy.RedactionPolicy) {
-	if redaction.BlurBSN {
+	var storedState string
+	if sess.Steps.Document != nil {
+		storedState = sess.Steps.Document.Parsed.IssuingState
+	}
+	if coversDocumentBSN(redaction, bsnPolicy, storedState) {
 		redactStoredDocumentPhoto(sess)
 	}
 	if redaction.BlurFace && sess.Steps.Selfie != nil && sess.Steps.Selfie.Image != "" {
@@ -93,6 +97,29 @@ func dropDataGroups(ev *mrtdEvidenceRequest, names ...string) bool {
 		}
 	}
 	return dropped
+}
+
+// coversDocumentBSN reports whether a document photo's printed BSN is
+// covered: under BlurBSN, and under a mask or omit BSN policy unless the
+// document is known not to be Dutch.
+func coversDocumentBSN(redaction privacy.RedactionPolicy, bsnPolicy privacy.BSNPolicy, issuingState string) bool {
+	if redaction.BlurBSN {
+		return true
+	}
+	p := bsnPolicy.Effective()
+	return (p == privacy.BSNPolicyMask || p == privacy.BSNPolicyOmit) && (issuingState == "" || issuingState == dutchIssuingState)
+}
+
+// resultIssuingState is the issuing state of the document a result is built
+// from: the submitted one, else the captured one.
+func resultIssuingState(sess session.Session, req appResultRequest) string {
+	if req.Document != nil && req.Document.IssuingState != "" {
+		return req.Document.IssuingState
+	}
+	if sess.Steps.Document != nil {
+		return sess.Steps.Document.Parsed.IssuingState
+	}
+	return ""
 }
 
 func dutchDocument(sess session.Session, req submitNFCStepRequest) bool {

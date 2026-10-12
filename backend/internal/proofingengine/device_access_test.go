@@ -33,3 +33,21 @@ func TestWriteAccessError(t *testing.T) {
 		}
 	}
 }
+
+// A refused app request is audited once per session, device and reason: an
+// app retrying the same refused call adds no rows, another reason or device
+// does.
+func TestAccessDeniedAuditedOnce(t *testing.T) {
+	trail := &fakeDeviceTrail{}
+	s := &Server{cfg: Config{DeviceTrail: trail}}
+	sess := session.Session{ID: "ps_1", TenantID: "org"}
+	r := httptest.NewRequest(http.MethodGet, "/app/tok", nil)
+	for range 3 {
+		s.denyApp(httptest.NewRecorder(), r, sess, appCaller{}, session.ErrDeviceUnauthorized)
+	}
+	s.denyApp(httptest.NewRecorder(), r, sess, appCaller{}, errSessionExpired)
+	s.denyApp(httptest.NewRecorder(), r, session.Session{ID: "ps_2", TenantID: "org"}, appCaller{}, session.ErrDeviceUnauthorized)
+	if len(trail.events) != 3 {
+		t.Fatalf("recorded %d denials, want one per session and reason: %+v", len(trail.events), trail.events)
+	}
+}

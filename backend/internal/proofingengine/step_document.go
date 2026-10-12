@@ -82,7 +82,7 @@ type documentPhotoSideRequest struct {
 
 // handleSubmitDocumentPhotoStep stores the document's front and optional back,
 // released as documentImage and documentImageBack with the BSN covered under a
-// BlurBSN policy, in the result and in storage.
+// BlurBSN, mask or omit policy, in the result and in storage.
 func (s *Server) handleSubmitDocumentPhotoStep(w http.ResponseWriter, r *http.Request) {
 	sess, resolvedFlow, caller, ok := s.stepSession(w, r, flow.StepDocumentPhoto)
 	if !ok {

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -36,10 +37,10 @@ type ShouldLog func(status int, duration time.Duration) bool
 
 func AlwaysLog(_ int, _ time.Duration) bool { return true }
 
-// tokenSegment is a path segment that is a bearer token: a session's, a
-// hosted link's, an invitation's. It is long, random and so has a digit, which
-// a route's own words ("request-identification") do not; a UUID (an id, not a
-// credential) is left alone.
+// tokenSegment is a path segment shaped like a bearer token: long, random
+// and so with a digit, which a route's own words ("request-identification")
+// do not have; a UUID (an id, not a credential) is left alone. Only a path no
+// route matched is redacted by shape (redactTokenShapes).
 var (
 	tokenSegment = regexp.MustCompile(`^[A-Za-z0-9_-]{20,}$`)
 	digit        = regexp.MustCompile(`[0-9]`)
@@ -48,9 +49,88 @@ var (
 // redactedSegment stands in for a token in a logged path.
 const redactedSegment = "{token}"
 
-// loggedPath is path with its token segments replaced: a path token is the
-// credential of a session or link, and the request log outlives it.
-func loggedPath(path string) string {
+// routedKey is the context key of the request's *routedRequest.
+type routedKey struct{}
+
+// routedRequest is the request the API mux routed (prefix stripped): the mux
+// sets its Pattern in place, so the loggers read the matched route from it.
+type routedRequest struct{ r *http.Request }
+
+// trackRoute gives the request a routedRequest for recordRoute to fill.
+func trackRoute(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), routedKey{}, &routedRequest{})))
+	})
+}
+
+// recordRoute wraps the mux whose route patterns name the path's tokens.
+func recordRoute(mux http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if rr, ok := r.Context().Value(routedKey{}).(*routedRequest); ok {
+			rr.r = r
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// loggedPath is r's path with its token segments replaced: a path token is the
+// credential of a session or link, and the request log outlives it. The
+// matched route says which segments are tokens; a path no route matched is
+// redacted by shape.
+func loggedPath(r *http.Request) string {
+	if rr, ok := r.Context().Value(routedKey{}).(*routedRequest); ok && rr.r != nil && rr.r.Pattern != "" {
+		if prefix, ok := strings.CutSuffix(r.URL.Path, rr.r.URL.Path); ok {
+			return prefix + redactByPattern(rr.r.URL.Path, rr.r.Pattern)
+		}
+	}
+	return redactTokenShapes(r.URL.Path)
+}
+
+// redactByPattern replaces the segments of path that pattern's token
+// wildcards matched.
+func redactByPattern(path, pattern string) string {
+	slash := strings.Index(pattern, "/")
+	if slash < 0 {
+		return redactTokenShapes(path)
+	}
+	segments := strings.Split(path, "/")
+	for i, seg := range strings.Split(pattern[slash:], "/") {
+		name, rest, ok := wildcard(seg)
+		if !ok || !tokenWildcard(name) || i >= len(segments) {
+			continue
+		}
+		end := i + 1
+		if rest {
+			end = len(segments)
+		}
+		for j := i; j < end; j++ {
+			segments[j] = redactedSegment
+		}
+	}
+	return strings.Join(segments, "/")
+}
+
+// wildcard parses a pattern segment "{name}" or "{name...}".
+func wildcard(seg string) (name string, rest, ok bool) {
+	inner, ok := strings.CutPrefix(seg, "{")
+	if !ok {
+		return "", false, false
+	}
+	if inner, ok = strings.CutSuffix(inner, "}"); !ok {
+		return "", false, false
+	}
+	name, rest = strings.CutSuffix(inner, "...")
+	return name, rest, true
+}
+
+// tokenWildcard reports whether a route wildcard names a token: {token}, or
+// one ending in Token ({handoverToken}).
+func tokenWildcard(name string) bool {
+	return name == "token" || strings.HasSuffix(name, "Token")
+}
+
+// redactTokenShapes replaces the segments of path shaped like a token.
+func redactTokenShapes(path string) string {
 	segments := strings.Split(path, "/")
 	for i, seg := range segments {
 		if tokenSegment.MatchString(seg) && digit.MatchString(seg) && !canonicalUUID(seg) {
@@ -107,7 +187,7 @@ func recoverer(next http.Handler) http.Handler {
 					slog.Any(attrPanic, v),
 					slog.String(attrStack, stack),
 					slog.String(attrMethod, r.Method),
-					slog.String(attrPath, loggedPath(r.URL.Path)),
+					slog.String(attrPath, loggedPath(r)),
 				)
 				respond.Error(w, r, http.StatusInternalServerError, "internal_error", "internal server error")
 			}
@@ -136,7 +216,7 @@ func requestLogger(shouldLog ShouldLog) func(http.Handler) http.Handler {
 			if shouldLog(rec.status, duration) {
 				slog.InfoContext(r.Context(), "request",
 					slog.String(attrMethod, r.Method),
-					slog.String(attrPath, loggedPath(r.URL.Path)),
+					slog.String(attrPath, loggedPath(r)),
 					slog.Int(attrStatus, rec.status),
 					slog.Float64(attrDurationMS, float64(duration.Microseconds())/1000.0),
 				)
@@ -189,6 +269,7 @@ func chain(mws ...func(http.Handler) http.Handler) func(http.Handler) http.Handl
 func defaultMiddleware() func(http.Handler) http.Handler {
 	return chain(
 		requestID,
+		trackRoute,
 		recoverer,
 		requestLogger(AlwaysLog),
 	)

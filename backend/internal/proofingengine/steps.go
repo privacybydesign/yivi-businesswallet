@@ -279,9 +279,7 @@ func (s *Server) handleStartStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sessionOpenForDevices(sess); err != nil {
-		details := actorDetails(sess, caller.role)
-		details[detailReason], details[detailRoute] = accessErrorCode(err), r.Pattern
-		s.auditProofing(sess, eventAccessDenied, details)
+		s.auditDenial(r, sess, caller, accessErrorCode(err))
 		writeStepRejected(w, sess)
 		return
 	}

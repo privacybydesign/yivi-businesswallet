@@ -410,11 +410,8 @@ type resultView struct {
 	ErrorCode   string     `json:"errorCode"`
 	CompletedAt *time.Time `json:"completedAt"`
 	Result      *struct {
-		Assurance *struct {
-			Level      string `json:"level"`
-			EIDASLevel string `json:"eidasLevel"`
-		} `json:"assurance"`
-		Document *struct {
+		Assurance *assuranceView `json:"assurance"`
+		Document  *struct {
 			Type         string `json:"type"`
 			IssuingState string `json:"issuingState"`
 			Nationality  string `json:"nationality"`
@@ -452,6 +449,44 @@ type resultView struct {
 	Devices []struct {
 		Role string `json:"role"`
 	} `json:"devices"`
+	// chipRead is whether the session read the document's chip, whether or not
+	// its result releases chip_checks.
+	chipRead bool
+}
+
+// assuranceView is the part of a result's assurance the wallet reads.
+type assuranceView struct {
+	Level      string `json:"level"`
+	EIDASLevel string `json:"eidasLevel"`
+	Categories []struct {
+		Check flow.Check `json:"check"`
+		State checkState `json:"state"`
+	} `json:"categories"`
+}
+
+// check is the outcome the assurance scored for c, as a pp.Check* value.
+func (a *assuranceView) check(c flow.Check) string {
+	if a == nil {
+		return pp.CheckNotPerformed
+	}
+	for _, cat := range a.Categories {
+		if cat.Check != c {
+			continue
+		}
+		switch cat.State {
+		case checkStatePass:
+			return pp.CheckValid
+		case checkStateFail, checkStateError:
+			return pp.CheckInvalid
+		case checkStateNotApplicable, checkStateNotRun:
+		}
+	}
+	return pp.CheckNotPerformed
+}
+
+// chipRead reports whether sess's evidence came off the document's chip.
+func chipRead(sess session.Session) bool {
+	return sess.Steps.NFC != nil || (sess.Steps.Document != nil && sess.Steps.Document.Source == session.DocumentSourceChip)
 }
 
 func (s *Server) readResult(t pp.Tenant, id, token string) (resultView, error) {
@@ -464,6 +499,7 @@ func (s *Server) readResult(t pp.Tenant, id, token string) (resultView, error) {
 		ID: sess.ID, Status: sess.Status, ErrorCode: sess.ErrorCode,
 		Result: sess.Result, CompletedAt: sess.CompletedAt, Devices: deviceParticipation(sess.Access),
 	}, &out)
+	out.chipRead = chipRead(sess)
 	return out, err
 }
 
@@ -519,7 +555,7 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	if res.FaceReference == faceReferenceRelyingParty {
 		ev.Type = pp.EvidenceReferencePhoto
 	}
-	if ev.Type == pp.EvidenceEMRTD && res.ChipChecks == nil {
+	if ev.Type == pp.EvidenceEMRTD && !v.chipRead {
 		ev.Type = pp.EvidenceDocumentPhoto
 	}
 	if doc := res.Document; doc != nil {
@@ -534,6 +570,10 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 		if a := chip.Active; a != nil && a.Attempted != nil && *a.Attempted {
 			ev.ActiveAuth = checkOf(a.Passed)
 		}
+	} else if ev.Type == pp.EvidenceEMRTD {
+		// chip_checks not released: the assurance still scored them.
+		ev.PassiveAuth = res.Assurance.check(flow.CheckNFCPassiveAuth)
+		ev.ActiveAuth = res.Assurance.check(flow.CheckNFCChipAuth)
 	}
 	if b := res.Biometrics; b != nil {
 		ev.FaceMatch, ev.Liveness = b.FaceMatchScore, b.LivenessResult
