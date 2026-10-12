@@ -1139,10 +1139,10 @@ paths:
       tags: [attestation]
       summary: Re-check the status of a held credential
       description: >-
-        Requires an administrator role in the organisation. Re-reads the issuer status
-        lists of the credentials the organisation holds (it also runs at startup and
-        every six hours) and audits each one that moved between valid and revoked.
-        Answers `changed`: whether this credential did.
+        Requires an administrator role in the organisation. Re-reads this credential's
+        issuer status list (every held credential's is also re-read at startup and
+        every six hours) and audits each credential whose status differs from its last
+        audited one. Answers `changed`: whether this credential did.
       responses:
         '2XX':
           description: Successful response.

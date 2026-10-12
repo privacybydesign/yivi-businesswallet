@@ -318,6 +318,25 @@ func TestValiditiesLiftedSuspension(t *testing.T) {
 	}
 }
 
+// TestRefreshStatusOneCredential pins that a single credential's refresh
+// resolves its batch and changes nothing without a status list, and that an
+// unknown ref is a no-op rather than an error.
+func TestRefreshStatusOneCredential(t *testing.T) {
+	eng, _ := newTestEngine(t)
+	ctx := context.Background()
+	org := uuid.New()
+
+	ref, err := eng.Store(ctx, org, sampleCredential("nl.kvk.registration", "hash-refresh"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	for _, r := range []string{ref, uuid.NewString(), "demo-kvk-registration"} {
+		if changed, err := eng.RefreshStatus(ctx, org, r); err != nil || changed != 0 {
+			t.Errorf("RefreshStatus(%q) = %d, %v; want 0, nil", r, changed, err)
+		}
+	}
+}
+
 // cloneInstance copies a credential instance under a new id in the same batch,
 // standing in for a batch issued with more than one instance.
 func cloneInstance(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID, ref string) string {

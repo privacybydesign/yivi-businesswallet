@@ -877,8 +877,8 @@ export function getHeldAttestationHistory(
   });
 }
 
-// Re-reads the issuer status lists of the organization's credentials; answers
-// whether this one changed state.
+// Re-reads this credential's issuer status list; answers whether it changed
+// state.
 export function recheckHeldAttestation(
   slug: string,
   heldId: string,

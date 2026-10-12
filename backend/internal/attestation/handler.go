@@ -277,9 +277,8 @@ func (h *Handler) heldHistory(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// recheckHeld re-reads the issuer status lists of the org's credentials now,
-// instead of waiting for the scheduled sweep, and answers whether the one
-// credential asked about changed state.
+// recheckHeld re-reads the credential's issuer status list now, instead of
+// waiting for the scheduled sweep, and answers whether it changed state.
 func (h *Handler) recheckHeld(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {

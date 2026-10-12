@@ -98,6 +98,10 @@ type Holder interface {
 	// skipped, keeping the last known status.
 	RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, error)
 
+	// RefreshStatus is RefreshStatuses for the one credential ref names (the
+	// credential-instance id Validities keys on); an unknown ref is a no-op.
+	RefreshStatus(ctx context.Context, orgID uuid.UUID, ref string) (int, error)
+
 	// Present builds a vp_token satisfying dcqlQuery from orgID's held credentials,
 	// key-bound for audience (the verifier's client_id) and nonce. This is the
 	// "present" side of Art 5(1)(a), the seam the inbound OpenID4VP slice

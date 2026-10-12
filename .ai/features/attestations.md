@@ -463,17 +463,22 @@ batch (revoked if any copy is; last check is the latest).
   (http only with `AllowInsecureHTTP`), no redirects, no private addresses.
 - It runs at boot and then every 6 hours for every org holding a credential
   (`RecheckAllHeld`, `heldStatusRecheckEvery`), and on `POST /held/{id}/recheck`
-  (admin). That re-reads the whole org, since irmago refreshes per org, but answers
-  `changed` for that one credential only.
-- Each credential whose revoked state moved is audited
-  `attestation.held_status_changed` on the held target. `RecordHeldStatusChange`
-  locks the held row and skips a status already on record, so concurrent re-checks
-  audit a move once.
-- A re-check runs detached from the request's cancellation, bounded by
-  `heldRecheckTimeout`: irmago keeps a status flip it read, so a cut-off re-check
-  would leave the change unaudited. `Validities` also carries
-`issuedAt`, `format`, `hasStatusList` and `statusCheckedAt`, which the detail page's
-Checks card shows. The stub's refresh is a no-op.
+  (admin). That one re-reads only that credential's list (`Engine.RefreshStatus`
+  hands irmago a `batchStatusStore` narrowed to its batch) and answers `changed`
+  for it.
+- After every refresh, also a failed or timed-out one, each held credential with a
+  status list whose current status differs from its last audited one is audited
+  `attestation.held_status_changed` on the held target (`auditHeldStatuses`).
+  `RecordHeldStatusChange` locks the held row and skips a status already on record,
+  so concurrent re-checks audit a move once. One credential's error does not stop
+  the rest.
+- A re-check runs detached from the request's cancellation and actor (the issuer
+  moved the status, not the admin), bounded by `heldRecheckTimeout`, with its own
+  `heldAuditTimeout` for the audit: irmago commits each status it reads as it goes,
+  so the audit reconciles against that state rather than a before/after diff.
+- `Validities` also carries `issuedAt`, `format`, `hasStatusList` and
+  `statusCheckedAt`, which the detail page's Checks card shows. The stub's refresh
+  is a no-op.
 
 **History.** Accepting an offer now also audits `attestation.held_received` on the held
 target (sender, source, offer id), so `GET /held/{id}/history` (the audit trail for the

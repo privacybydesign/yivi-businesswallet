@@ -91,6 +91,7 @@ type holderEngine interface {
 	Displays(ctx context.Context, orgID uuid.UUID, lang string) (map[string]eudiholder.HeldDisplay, error)
 	Validities(ctx context.Context, orgID uuid.UUID) (map[string]eudiholder.HeldValidity, error)
 	RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, error)
+	RefreshStatus(ctx context.Context, orgID uuid.UUID, ref string) (int, error)
 }
 
 // emailNotifier delivers a person-facing "your credential is ready" e-mail.
@@ -679,69 +680,88 @@ func (s *Service) HeldHistory(ctx context.Context, orgID, id uuid.UUID) ([]audit
 // that started it: see recheckHeld.
 const heldRecheckTimeout = 2 * time.Minute
 
+// heldAuditTimeout bounds auditing what a re-check left behind, given its own
+// budget so a re-check that ran out of time is still audited.
+const heldAuditTimeout = 30 * time.Second
+
 // RecheckHeld re-reads the issuer status list of every credential the
 // organization holds and audits each one whose state moved between valid and
 // revoked. It reports how many changed.
 func (s *Service) RecheckHeld(ctx context.Context, orgID uuid.UUID) (int, error) {
-	changed, err := s.recheckHeld(ctx, orgID)
+	changed, err := s.recheckHeld(ctx, orgID, func(ctx context.Context) error {
+		_, err := s.holder.RefreshStatuses(ctx, orgID)
+		return err
+	})
 	return len(changed), err
 }
 
-// RecheckHeldOne re-checks the organization's credentials for one of them, the
-// re-check a credential's own page asks for, and reports whether that one
-// changed state. The issuer status lists are re-read for the whole org, since
-// the holder refreshes them per org; every change is audited.
+// RecheckHeldOne re-reads the issuer status list of one held credential, the
+// re-check a credential's own page asks for, and reports whether it changed
+// state.
 func (s *Service) RecheckHeldOne(ctx context.Context, orgID, id uuid.UUID) (bool, error) {
-	if _, err := s.held.GetHeld(ctx, orgID, id); err != nil {
-		return false, err
-	}
-	changed, err := s.recheckHeld(ctx, orgID)
+	held, err := s.held.GetHeld(ctx, orgID, id)
 	if err != nil {
 		return false, err
 	}
+	changed, err := s.recheckHeld(ctx, orgID, func(ctx context.Context) error {
+		_, err := s.holder.RefreshStatus(ctx, orgID, held.CredentialRef)
+		return err
+	})
 	_, ok := changed[id]
-	return ok, nil
+	return ok, err
 }
 
-// recheckHeld is RecheckHeld returning the ids of the credentials that
-// changed. It runs detached from ctx's cancellation: the holder keeps a status
-// flip it has read, so a re-check cut off between that and the audit (a
-// closed tab, a shutdown) would leave the change unaudited for good.
-func (s *Service) recheckHeld(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]struct{}, error) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), heldRecheckTimeout)
-	defer cancel()
+// recheckHeld runs refresh and then audits every held credential whose status
+// differs from its last audited one, returning the ids it audited. It runs
+// detached from ctx's cancellation and actor: the holder keeps each status it
+// reads as it goes, so a re-check cut off (a closed tab, a timeout) must still
+// audit what was kept, and the issuer, not the caller, moved the status.
+func (s *Service) recheckHeld(ctx context.Context, orgID uuid.UUID, refresh func(context.Context) error) (map[uuid.UUID]struct{}, error) {
+	ctx = audit.WithoutActor(context.WithoutCancel(ctx))
 
-	before, err := s.holder.Validities(ctx, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("attestation: validities before recheck org %s: %w", orgID, err)
+	refreshCtx, cancel := context.WithTimeout(ctx, heldRecheckTimeout)
+	refreshErr := refresh(refreshCtx)
+	cancel()
+	if refreshErr != nil {
+		refreshErr = fmt.Errorf("attestation: recheck org %s: %w", orgID, refreshErr)
 	}
-	if _, err := s.holder.RefreshStatuses(ctx, orgID); err != nil {
-		return nil, fmt.Errorf("attestation: recheck org %s: %w", orgID, err)
-	}
-	after, err := s.holder.Validities(ctx, orgID)
+
+	auditCtx, cancel := context.WithTimeout(ctx, heldAuditTimeout)
+	defer cancel()
+	changed, err := s.auditHeldStatuses(auditCtx, orgID)
+	return changed, errors.Join(refreshErr, err)
+}
+
+// auditHeldStatuses records each held credential with a status list whose
+// status in the holder differs from its last audited one. A credential that
+// fails is skipped, not the ones after it.
+func (s *Service) auditHeldStatuses(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]struct{}, error) {
+	changed := map[uuid.UUID]struct{}{}
+	validities, err := s.holder.Validities(ctx, orgID)
 	if err != nil {
-		return nil, fmt.Errorf("attestation: validities after recheck org %s: %w", orgID, err)
+		return changed, fmt.Errorf("attestation: validities org %s: %w", orgID, err)
 	}
 	held, err := s.held.ListHeld(ctx, orgID)
 	if err != nil {
-		return nil, err
+		return changed, err
 	}
 
-	changed := map[uuid.UUID]struct{}{}
+	var errs []error
 	for _, h := range held {
-		was, now := before[h.CredentialRef], after[h.CredentialRef]
-		if was.Revoked == now.Revoked {
+		v := validities[h.CredentialRef]
+		if !v.HasStatusList {
 			continue
 		}
-		recorded, err := s.held.RecordHeldStatusChange(ctx, orgID, h.ID, h.VCT, heldStatusOf(now.Revoked))
+		recorded, err := s.held.RecordHeldStatusChange(ctx, orgID, h.ID, h.VCT, heldStatusOf(v.Revoked))
 		if err != nil {
-			return changed, err
+			errs = append(errs, err)
+			continue
 		}
 		if recorded {
 			changed[h.ID] = struct{}{}
 		}
 	}
-	return changed, nil
+	return changed, errors.Join(errs...)
 }
 
 // RecheckAllHeld re-checks every holder organization's credentials, for the

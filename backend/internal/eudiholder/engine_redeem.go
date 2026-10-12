@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -21,6 +22,7 @@ import (
 	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
 	"github.com/privacybydesign/irmago/eudi/storage/db"
 	"github.com/privacybydesign/irmago/eudi/storage/db/models"
+	"gorm.io/datatypes"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 )
@@ -212,6 +214,35 @@ func (e *Engine) RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, err
 	if err != nil {
 		return 0, err
 	}
+	return e.refreshStatuses(ctx, orgID, st, db.NewCredentialStore(st.Db()))
+}
+
+// RefreshStatus is RefreshStatuses for the one credential ref names: only its
+// batch's status list is fetched. An unknown ref refreshes nothing.
+func (e *Engine) RefreshStatus(ctx context.Context, orgID uuid.UUID, ref string) (int, error) {
+	id, err := uuid.Parse(ref)
+	if err != nil {
+		return 0, nil
+	}
+	st, err := e.engineFor(ctx, orgID)
+	if err != nil {
+		return 0, err
+	}
+	var batchIDs []datatypes.UUID
+	if err := st.Db().WithContext(ctx).
+		Model(&models.IssuedCredentialInstance{}).
+		Where("id = ?", id).
+		Pluck("credential_batch_id", &batchIDs).Error; err != nil {
+		return 0, fmt.Errorf("eudiholder: batch of credential %s org %s: %w", ref, orgID, err)
+	}
+	if len(batchIDs) == 0 {
+		return 0, nil
+	}
+	return e.refreshStatuses(ctx, orgID, st, batchStatusStore{CredentialStore: db.NewCredentialStore(st.Db()), batchID: batchIDs[0]})
+}
+
+// refreshStatuses runs irmago's status sweep over the credentials store lists.
+func (e *Engine) refreshStatuses(ctx context.Context, orgID uuid.UUID, st irmastorage.Storage, store db.CredentialStore) (int, error) {
 	conf, err := e.configuration(st, orgID)
 	if err != nil {
 		return 0, err
@@ -220,12 +251,27 @@ func (e *Engine) RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, err
 	if err != nil {
 		return 0, err
 	}
-	revocation := services.NewRevocationService(e.newStatusChecker(x509Context, st), db.NewCredentialStore(st.Db()))
+	revocation := services.NewRevocationService(e.newStatusChecker(x509Context, st), store)
 	changed, err := revocation.RefreshStatuses(ctx)
 	if err != nil {
 		return changed, fmt.Errorf("eudiholder: refresh statuses org %s: %w", orgID, err)
 	}
 	return changed, nil
+}
+
+// batchStatusStore narrows the instances irmago's status sweep visits to one
+// batch, the sweep's only read of what to check.
+type batchStatusStore struct {
+	db.CredentialStore
+	batchID datatypes.UUID
+}
+
+func (s batchStatusStore) ListInstancesWithStatusReference() ([]db.CredentialStatusInstance, error) {
+	all, err := s.CredentialStore.ListInstancesWithStatusReference()
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(all, func(inst db.CredentialStatusInstance) bool { return inst.BatchID != s.batchID }), nil
 }
 
 // trustContext builds the X.509 trust material received credentials are verified
