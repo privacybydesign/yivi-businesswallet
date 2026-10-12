@@ -52,8 +52,7 @@ func NewPDFiumParser() (*PDFiumParser, error) {
 		MinIdle:  poolMinIdle,
 		MaxIdle:  poolMaxIdle,
 		MaxTotal: poolMaxTotal,
-		// Lets an instance's Kill interrupt the WebAssembly call in flight, which
-		// the diploma parser relies on to bound a parse of an untrusted PDF.
+		// Lets an instance's Kill interrupt the WebAssembly call in flight.
 		RuntimeConfig: wazero.NewRuntimeConfig().WithCloseOnContextDone(true),
 	})
 	if err != nil {
@@ -379,11 +378,4 @@ func ParseDutchDate(s string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid day in %q", s)
 	}
 	return t, nil
-}
-
-// Pool is the PDFium pool the parser owns, for another PDF parser in the
-// process to borrow (diploma.NewPDFiumParser): each instance is a full PDFium
-// heap, so a process keeps one pool. Close still closes it.
-func (p *PDFiumParser) Pool() pdfium.Pool {
-	return p.pool
 }
