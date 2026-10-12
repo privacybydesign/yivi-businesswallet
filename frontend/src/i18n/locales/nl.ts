@@ -908,7 +908,7 @@ export const nl: Translation<typeof en> = {
       dataRequest: {
         data_access: {
           title: "Deze persoon vraagt welke gegevens er van hem of haar zijn",
-          hint: "De persoon heeft met deze sessie bewezen wie hij of zij is. Controleer de identiteit en keur de sessies goed die je deelt: de persoon kan die gegevens 7 dagen downloaden via de eigen link, en jij kunt ze hier downloaden om te versturen.",
+          hint: "De persoon heeft met deze sessie bewezen wie hij of zij is. Controleer de identiteit en keur de sessies goed die je deelt: de persoon kan die gegevens 24 uur downloaden via de eigen link, en jij kunt ze hier downloaden om te versturen.",
           approve_one: "Goedkeuren: {{count}} sessie delen",
           approve_other: "Goedkeuren: {{count}} sessies delen",
         },

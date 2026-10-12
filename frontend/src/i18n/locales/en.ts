@@ -888,7 +888,7 @@ export const en = {
       dataRequest: {
         data_access: {
           title: "This person asks what data is held about them",
-          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to share: they can download that data from their link for 7 days, and you can download it here to send it.",
+          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to share: they can download that data from their link for 24 hours, and you can download it here to send it.",
           approve_one: "Approve: share {{count}} session",
           approve_other: "Approve: share {{count}} sessions",
         },
