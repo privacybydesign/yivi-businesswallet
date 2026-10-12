@@ -263,7 +263,7 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 		retention = in.Retention
 	}
 	if in.TTL > 0 {
-		ttl = min(max(in.TTL, s.cfg.SessionMinTTL), s.cfg.SessionMaxTTL)
+		ttl = max(in.TTL, s.cfg.SessionMinTTL)
 	}
 	if s.cfg.SessionMaxLifetime > 0 {
 		ttl = min(ttl, s.cfg.SessionMaxLifetime)

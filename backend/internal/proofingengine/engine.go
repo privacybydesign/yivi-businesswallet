@@ -35,7 +35,6 @@ type Config struct {
 
 	SessionCreateTTL time.Duration
 	SessionMinTTL    time.Duration
-	SessionMaxTTL    time.Duration
 	SessionOpenTTL   time.Duration
 	// SessionMaxLifetime caps ExpiresAt at CreatedAt plus this, whatever
 	// the requested TTL or an opening extends it to.
@@ -151,7 +150,6 @@ func DefaultConfig() Config {
 		MaxBodyBytes:             12 << 20,
 		SessionCreateTTL:         10 * time.Minute,
 		SessionMinTTL:            time.Minute,
-		SessionMaxTTL:            60 * time.Minute,
 		SessionOpenTTL:           10 * time.Minute,
 		SessionMaxLifetime:       15 * time.Minute,
 		HandoverTokenTTL:         2 * time.Minute,

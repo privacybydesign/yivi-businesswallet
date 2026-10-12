@@ -133,10 +133,6 @@ type Session struct {
 	// relay window gmrtd's activeauth.VerifyEvidence warns about.
 	AAChallenge string `json:"aaChallenge,omitempty"`
 
-	// ResetCount is how many times the session was reset to opened (POST
-	// .../reset). The app view carries it, and the Idem app watches it.
-	ResetCount int `json:"resetCount,omitempty"`
-
 	// Yivi is a Yivi-method session's face check while it runs: the
 	// reference photo of the disclosure and the frames scored so far. It is
 	// cleared when the session settles, so no biometric outlives it.
@@ -158,6 +154,9 @@ type Session struct {
 	// Steps is the evidence collected per step, so a reload or a handover resumes
 	// where the subject left off. A nil field is a step not submitted yet.
 	Steps StepEvidence `json:"steps,omitempty"`
+	// FaceAttempts is how many face step attempts were reserved, each before
+	// the face provider was called.
+	FaceAttempts int `json:"faceAttempts,omitempty"`
 }
 
 // ForStorage is sess as it is persisted: a session whose face step can no

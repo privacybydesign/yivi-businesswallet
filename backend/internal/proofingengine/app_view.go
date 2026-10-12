@@ -47,9 +47,6 @@ type appSessionView struct {
 	// step when it runs native. The browser mints the app's QR itself (POST
 	// .../handover {role: "native"}).
 	NativeHandoff *nativeHandoffInfo `json:"nativeHandoff,omitempty"`
-	// ResetCount goes up with every reset (POST .../reset): a client that sees it
-	// change drops what it collected and starts over.
-	ResetCount int `json:"resetCount"`
 	// ChangeKey is the ?since= for GET .../events; clients echo it back, so its
 	// format may change.
 	ChangeKey string `json:"changeKey"`
@@ -204,8 +201,8 @@ func (s *Server) buildAppSessionView(r *http.Request, sess session.Session, role
 		SelfieLocation: selfieLocation,
 		AAChallenge:    sess.AAChallenge, RequiredChecks: assuranceChecksFor(resolvedFlow),
 		CompletedSteps: sess.CompletedSteps(), NativeHandoff: nativeHandoff,
-		ResetCount: sess.ResetCount, ChangeKey: s.appSessionChangeKey(sess, time.Now()),
-		FlowID: sess.Flow, FlowVersion: sess.FlowVersion,
+		ChangeKey: s.appSessionChangeKey(sess, time.Now()),
+		FlowID:    sess.Flow, FlowVersion: sess.FlowVersion,
 		CurrentStep: current, ChipAccess: chipAccess, FaceVerification: faceVerification, FaceProvider: faceProvider,
 		StepResults: stepResults(sess, resolvedFlow), Lifecycle: sessionLifecycle(sess), ReadyToSubmit: readyToSubmit(sess, resolvedFlow), Device: device,
 		Devices: map[string]deviceView{
@@ -297,8 +294,7 @@ func (e *eventWaiters) release(sessionID string) {
 }
 
 // appSessionChangeKey is what handleAppSessionEvents waits on: status,
-// completed steps, resets (a reset from opened changes nothing else), and
-// the device slots, so a handover or an inactive device wakes every client.
+// completed steps, and the device slots, so a handover or an inactive device wakes every client.
 func (s *Server) appSessionChangeKey(sess session.Session, now time.Time) string {
 	states := ""
 	for _, d := range []*session.DeviceAccess{sess.Access.Web, sess.Access.Native} {
@@ -310,7 +306,7 @@ func (s *Server) appSessionChangeKey(sess session.Session, now time.Time) string
 		}
 		states += ","
 	}
-	return string(sess.Status) + "|" + strings.Join(sess.CompletedSteps(), ",") + "|" + strconv.Itoa(sess.ResetCount) +
+	return string(sess.Status) + "|" + strings.Join(sess.CompletedSteps(), ",") +
 		"|" + strconv.Itoa(sess.Access.Generation) + "|" + states
 }
 

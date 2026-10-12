@@ -53,26 +53,39 @@ func (s *Server) stepSession(w http.ResponseWriter, r *http.Request, step flow.S
 	return sess, resolvedFlow, caller, true
 }
 
-// errStepAlreadyRecorded: a step's evidence is never replaced, save a failed
-// face step's (faceStepRetryable).
-var errStepAlreadyRecorded = errors.New("step already recorded")
+var (
+	// errStepAlreadyRecorded: a step's evidence is never replaced, save a
+	// failed face step's (faceStepRetryable).
+	errStepAlreadyRecorded = errors.New("step already recorded")
+	// errFaceAttemptsSpent: every face attempt is reserved, and none left
+	// evidence to stand.
+	errFaceAttemptsSpent = errors.New("face step attempts spent")
+)
 
 // maxFaceStepAttempts bounds how often one session's face step is submitted.
 // How often the subject may retry a failed liveness or match is the app's
 // call; this is only the engine's safety bound on the Regula transactions a
-// session runs. Past it the last failed evidence stands and the submit
-// decides on it.
+// session runs. An attempt is reserved before Regula is called
+// (reserveFaceAttempt) and spent whatever the call's outcome. Past it the
+// last failed evidence stands and the submit decides on it.
 const maxFaceStepAttempts = 3
 
-// faceStepRetryable reports whether ev, recorded face evidence, may be
+// faceStepRetryable reports whether sess's recorded face evidence may be
 // replaced by a new attempt: it failed liveness or did not match, and the
-// session has attempts left.
-func faceStepRetryable(ev *session.SelfieStepEvidence) bool {
+// attempt may run (reserved: it already holds a reservation).
+func faceStepRetryable(sess session.Session, reserved bool) bool {
+	ev := sess.Steps.Selfie
 	if ev == nil {
 		return false
 	}
 	failed := !ev.LivenessPassed || (ev.FaceVerified != nil && !*ev.FaceVerified)
-	return failed && faceStepAttempts(ev) < maxFaceStepAttempts
+	return failed && (reserved || faceAttemptsReserved(sess) < maxFaceStepAttempts)
+}
+
+// faceAttemptsReserved is how many face attempts sess reserved; evidence
+// stored before attempts were reserved counts its own.
+func faceAttemptsReserved(sess session.Session) int {
+	return max(sess.FaceAttempts, faceStepAttempts(sess.Steps.Selfie))
 }
 
 // faceStepAttempts is how many times ev's face step was submitted; 0 without
@@ -89,6 +102,12 @@ func faceStepAttempts(ev *session.SelfieStepEvidence) int {
 // (or failed face evidence it may replace). The check inside the write's
 // Update is the one that counts.
 func stepWriteCheck(sess session.Session, caller appCaller, step flow.Step) error {
+	return stepWriteCheckAs(sess, caller, step, false)
+}
+
+// stepWriteCheckAs is stepWriteCheck; reserved says the request holds a face
+// attempt already, so the bound on them does not stop its result.
+func stepWriteCheckAs(sess session.Session, caller appCaller, step flow.Step, reserved bool) error {
 	if caller.role != "" || sess.Access.Bound() {
 		if err := sess.Access.AuthorizeAs(caller.deviceToken, caller.role); err != nil {
 			return err
@@ -100,18 +119,29 @@ func stepWriteCheck(sess session.Session, caller appCaller, step flow.Step) erro
 	case session.StatusCancelled:
 		return errSessionComplete
 	}
-	if step != "" && stepHasEvidence(sess, step) && (!isFaceStep(step) || !faceStepRetryable(sess.Steps.Selfie)) {
+	if step != "" && stepHasEvidence(sess, step) && (!isFaceStep(step) || !faceStepRetryable(sess, reserved)) {
 		return errStepAlreadyRecorded
 	}
-	return sessionOpenForDevices(sess)
+	if err := sessionOpenForDevices(sess); err != nil {
+		return err
+	}
+	if isFaceStep(step) && !reserved && faceAttemptsReserved(sess) >= maxFaceStepAttempts {
+		return errFaceAttemptsSpent
+	}
+	return nil
 }
 
 // writeStep stores one step's evidence once stepWriteCheck passes inside the
 // Update, so a request that was overtaken (handed over, expired, recorded
 // meanwhile) cannot write.
 func (s *Server) writeStep(sess session.Session, caller appCaller, step flow.Step, apply func(*session.Session, time.Time)) (session.Session, error) {
+	return s.writeStepAs(sess, caller, step, false, apply)
+}
+
+// writeStepAs is writeStep; reserved is stepWriteCheckAs's.
+func (s *Server) writeStepAs(sess session.Session, caller appCaller, step flow.Step, reserved bool, apply func(*session.Session, time.Time)) (session.Session, error) {
 	return s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
-		if err := stepWriteCheck(*sess, caller, step); err != nil {
+		if err := stepWriteCheckAs(*sess, caller, step, reserved); err != nil {
 			return err
 		}
 		now := time.Now().UTC()

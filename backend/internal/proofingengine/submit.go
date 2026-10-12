@@ -118,16 +118,14 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 	achieved := computeEIDASAssuranceLevel(fd, req, verifiedChecks, faceMatchSourceOf(sess))
 	finalStatus, finalErrorCode, reason := sessionOutcome(fd, sess, req, verifiedChecks, achieved, s.cfg.Now())
 
-	snapshotResets, snapshotFaceAttempts := sess.ResetCount, faceStepAttempts(sess.Steps.Selfie)
+	snapshotFaceAttempts := faceStepAttempts(sess.Steps.Selfie)
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if err := checkAppWrite(sess, caller); err != nil {
 			return err
 		}
-		// The result was built from the snapshot above: a reset in between means it is
-		// not this session's evidence any more, even if new evidence completed the
-		// steps again; nor is it once a face retry replaced the face evidence.
-		if sess.ResetCount != snapshotResets || faceStepAttempts(sess.Steps.Selfie) != snapshotFaceAttempts ||
-			!requiredStepsComplete(*sess, fd) {
+		// The result was built from the snapshot above: it is not this session's
+		// evidence any more once a face retry replaced the face evidence.
+		if faceStepAttempts(sess.Steps.Selfie) != snapshotFaceAttempts || !requiredStepsComplete(*sess, fd) {
 			return errStepsIncomplete
 		}
 		now := time.Now().UTC()

@@ -51,6 +51,7 @@ const (
 	errCodeFlowStepsRequired  = "flow_steps_required"
 	errCodeStepsIncomplete    = "steps_incomplete"
 	errCodeNotAppSession      = "not_app_session"
+	errCodeFaceAttemptsSpent  = "face_attempts_spent"
 )
 
 // The rest of the device trail: every grant, state change, connection drop
@@ -110,6 +111,8 @@ func writeAccessError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, errNothingToMark), errors.Is(err, errStepAlreadyStarted):
 		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, errFaceAttemptsSpent):
+		writeErrorCode(w, http.StatusConflict, errCodeFaceAttemptsSpent, err.Error())
 	case errors.Is(err, session.ErrNotFound):
 		writeError(w, http.StatusNotFound, "session not found")
 	default:

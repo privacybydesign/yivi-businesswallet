@@ -66,16 +66,21 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 		ref = &faceReference{ImageBase64: refImage, MimeType: refMime}
 	}
 
+	stage := faceStepName(resolvedFlow)
+	attempt, err := s.reserveFaceAttempt(sess, caller, flow.Step(stage))
+	if err != nil {
+		s.writeStepError(w, r, sess, resolvedFlow, caller, flow.Step(stage), err)
+		return
+	}
 	out, err := verifier.Verify(r.Context(), sess, ref, live)
 	if err != nil {
 		writeFaceVerifyError(w, r, provider, err)
 		return
 	}
 
-	// Liveness and the match take seconds; writeStep checks again that nothing
-	// overtook this request.
-	stage := faceStepName(resolvedFlow)
-	updated, err := s.writeStep(sess, caller, flow.Step(stage), func(sess *session.Session, now time.Time) {
+	// Liveness and the match take seconds; writeStepAs checks again that
+	// nothing overtook this request.
+	updated, err := s.writeStepAs(sess, caller, flow.Step(stage), true, func(sess *session.Session, now time.Time) {
 		// A retry replaces a failed attempt (faceStepRetryable): the step
 		// started with the first.
 		var started *session.StepTiming
@@ -85,7 +90,7 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 		ev := &session.SelfieStepEvidence{
 			LivenessPassed: out.LivenessPassed, LivenessScore: out.LivenessScore,
 			FaceMatchScore: out.MatchScore, FaceVerified: out.Matched,
-			Attempts: faceStepAttempts(sess.Steps.Selfie) + 1,
+			Attempts: attempt,
 			Timing:   stepTiming(started, now),
 		}
 		// Regula holds the capture itself and it is deleted with the
@@ -110,6 +115,21 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 		Engine: selfieEngine(updated.Steps.Selfie), Threshold: out.Threshold,
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// reserveFaceAttempt spends one of sess's face attempts before the provider is
+// called, inside the Update, so concurrent submissions never run more than
+// maxFaceStepAttempts. attempt is its number.
+func (s *Server) reserveFaceAttempt(sess session.Session, caller appCaller, step flow.Step) (attempt int, err error) {
+	_, err = s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
+		if err := stepWriteCheck(*sess, caller, step); err != nil {
+			return err
+		}
+		attempt = faceAttemptsReserved(*sess) + 1
+		sess.FaceAttempts = attempt
+		return nil
+	})
+	return attempt, err
 }
 
 // writeFaceVerifyError maps a faceVerifier error to its HTTP response.

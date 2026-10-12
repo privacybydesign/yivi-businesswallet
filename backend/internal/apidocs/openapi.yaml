@@ -510,7 +510,8 @@ paths:
           $ref: '#/components/responses/IdemSessionNotFound'
         '409':
           description: >-
-            As the other step routes, or the reference photo for the face match has not landed yet.
+            As the other step routes, or the reference photo for the face match has not landed yet, or
+            `face_attempts_spent`: every attempt is taken and none left evidence to stand.
           content:
             application/json:
               schema:
@@ -6443,7 +6444,7 @@ components:
             Stable machine-readable code, where the route sets one: device_unauthorized, device_handed_over,
             device_already_claimed, session_expired, session_complete, handover_invalid, handover_expired,
             handover_used, claim_token_required, flow_steps_required, steps_incomplete, not_app_session,
-            document_unsupported, FACE_PROVIDER_UNAVAILABLE.
+            document_unsupported, face_attempts_spent, FACE_PROVIDER_UNAVAILABLE.
       required: [error]
     IdemFlowStep:
       type: string
@@ -6582,9 +6583,6 @@ components:
             claimed:
               type: boolean
           required: [role, claimed]
-        resetCount:
-          type: integer
-          description: Goes up with every reset; a client that sees it change starts over.
         changeKey:
           type: string
           description: The `since` for GET .../events; opaque.
@@ -6632,7 +6630,7 @@ components:
             native:
               $ref: '#/components/schemas/IdemDevice'
           required: [web, native]
-      required: [id, method, relyingParty, status, selfieLocation, expiresAt, requiredChecks, resetCount, changeKey,
+      required: [id, method, relyingParty, status, selfieLocation, expiresAt, requiredChecks, changeKey,
         stepResults, lifecycle, device, devices]
     IdemClaim:
       type: object
