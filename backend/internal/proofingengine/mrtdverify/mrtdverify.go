@@ -263,7 +263,7 @@ func dataGroupNumber(dgName string) (int, error) {
 	return num, nil
 }
 
-// The embedded ICAO masterlist (cms.DefaultMasterList) is parsed once: it is
+// The CSCAs gmrtd embeds (cms.DefaultMasterList) are parsed once: they are
 // the same anchor for every request.
 var (
 	passportCertPoolOnce sync.Once
@@ -271,8 +271,9 @@ var (
 	passportCertPoolErr  error
 )
 
-// PassportCertPool returns the embedded ICAO CSCA masterlist gmrtd bundles,
-// used as the trust anchor for passport/ID-card Passive Authentication.
+// PassportCertPool returns gmrtd's embedded German and Dutch CSCA master lists
+// plus Indonesia's 2010-series CSCAs, used as the trust anchor for
+// passport/ID-card Passive Authentication. Only a gmrtd bump refreshes them.
 func PassportCertPool() (cms.CertPool, error) {
 	passportCertPoolOnce.Do(func() {
 		passportCertPool, passportCertPoolErr = cms.DefaultMasterList()
@@ -281,8 +282,8 @@ func PassportCertPool() (cms.CertPool, error) {
 }
 
 // CertPoolFor is the Passive Authentication anchor for the key data group:
-// DG13 (EU driving licences) gets DrivingLicenceCertPool, anything else the
-// passport and ID-card masterlist.
+// DG13 (EU driving licences) gets DrivingLicenceCertPool, anything else
+// PassportCertPool.
 func CertPoolFor(aaKeyDataGroup string) (cms.CertPool, error) {
 	if aaKeyDataGroup == "DG13" {
 		return DrivingLicenceCertPool()

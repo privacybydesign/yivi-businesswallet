@@ -23,8 +23,9 @@ const MaxJPEG2000Pixels = 4_000_000
 const maxJPEG2000Components = 4
 
 // MaxImagePixels bounds any other image's raster, checked on its header
-// before the full decode.
-const MaxImagePixels = 40_000_000
+// before the full decode. The largest is the app's document photo, scaled to
+// 1600 px on its long edge (2.56 MP at most); selfies and portraits are smaller.
+const MaxImagePixels = 4_000_000
 
 // maxConcurrentDecodes is how many images are worked on at once in the
 // process: each holds a full raster (and its copies) from decode through
