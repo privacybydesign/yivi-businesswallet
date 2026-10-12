@@ -223,7 +223,7 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 		return Sent{}, ErrFlowNotCompletable
 	}
 	if method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
-		return Sent{}, fmt.Errorf("%w: this flow's face provider only runs in the Idem app", ErrInvalidInput)
+		return Sent{}, fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
 	}
 	// The reference photo was held for this start; a flow that needs one
 	// it lacks (the flow changed since the send) cannot run.

@@ -852,7 +852,6 @@ export const nl: Translation<typeof en> = {
       presentationRequestSent: "Gegevens bij een organisatie opgevraagd",
       presentationResponseReceived: "Antwoord op een gegevensverzoek ontvangen",
       presentationRequestFailed: "Gegevensverzoek mislukt",
-      identityProofingProvisioned: "Identiteitsverificatie ingericht",
       identityProofingFlowCreated: "Identiteitsverificatieflow aangemaakt",
       identityProofingFlowsConfigured:
         "Voor leden beschikbare identiteitsverificatieflows gewijzigd",

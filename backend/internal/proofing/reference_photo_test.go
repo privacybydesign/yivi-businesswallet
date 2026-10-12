@@ -29,6 +29,12 @@ func (f fixture) withFaceOnlyFlow() Customer {
 	return c
 }
 
+// withRequiredLevel is f requiring the eIDAS level.
+func withRequiredLevel(f proofingprovider.Flow, level string) proofingprovider.Flow {
+	f.RequiredAssuranceLevel = level
+	return f
+}
+
 func (f fixture) sendWithPhoto(flowID, photo string, channel Channel) (Sent, error) {
 	return f.svc.CreateRequest(context.Background(), testOrg, Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)},
 		NewRequest{CustomerID: &initech.ID, SubjectEmail: "dibran@example.org", FlowID: flowID, ReferencePhoto: photo, Channel: channel})
@@ -41,10 +47,13 @@ func TestNeedsReferencePhoto(t *testing.T) {
 		completes  bool
 		yiviOffers bool
 	}{
-		"face only":      {faceOnlyFlow, true, true, false},
-		"chip and face":  {appFlow, false, true, true},
-		"chip only":      {chipFlow, false, true, true},
-		"browser selfie": {browserFlow, false, false, true},
+		"face only":            {faceOnlyFlow, true, true, false},
+		"chip and face":        {appFlow, false, true, true},
+		"chip only":            {chipFlow, false, true, true},
+		"browser selfie":       {browserFlow, false, false, true},
+		"requires low":         {withRequiredLevel(appFlow, eidasLow), false, true, true},
+		"requires substantial": {withRequiredLevel(appFlow, eidasSubstantial), false, true, false},
+		"requires high":        {withRequiredLevel(appFlow, eidasHigh), false, true, false},
 	} {
 		if got := flowNeedsReferencePhoto(tc.flow); got != tc.needs {
 			t.Errorf("%s: flowNeedsReferencePhoto = %v, want %v", name, got, tc.needs)

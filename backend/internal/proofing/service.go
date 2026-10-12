@@ -485,7 +485,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 		return Sent{}, err
 	}
 	if in.Method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
-		return Sent{}, fmt.Errorf("%w: this flow's face provider only runs in the Idem app", ErrInvalidInput)
+		return Sent{}, fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
 	}
 	if subject.BirthDate != "" && !readsIdentity(flow) {
 		return Sent{}, fmt.Errorf("%w: this flow does not read the name and date of birth, so it cannot check for one person", ErrInvalidInput)
@@ -966,6 +966,11 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	}
 	if next == req.Status {
 		return req, nil
+	}
+	if err := s.recordIdentityKey(ctx, tenant, req, sess, next, res); err != nil {
+		slog.WarnContext(ctx, "identity proofing: record the identity match key failed",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
+		return req, err
 	}
 	// The name read off the document is kept only for a customer's subject the
 	// sender may know only by address, and only once the document is approved

@@ -834,7 +834,6 @@ export const en = {
       presentationResponseReceived:
         "Received an answer to a credential request",
       presentationRequestFailed: "Credential request failed",
-      identityProofingProvisioned: "Set up identity proofing",
       identityProofingFlowCreated: "Created identity proofing flow",
       identityProofingFlowsConfigured:
         "Changed the identity proofing flows available to members",

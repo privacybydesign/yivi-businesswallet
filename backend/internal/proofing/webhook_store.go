@@ -246,7 +246,7 @@ func (s *WebhookStore) SendTest(ctx context.Context, orgID, customerID uuid.UUID
 
 // Deliveries returns a customer's most recent deliveries, newest first.
 func (s *WebhookStore) Deliveries(ctx context.Context, orgID, customerID uuid.UUID) ([]Delivery, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, event, request_id, COALESCE(endpoint_url, ''), status, attempts, last_status_code,
+	rows, err := s.db.Query(ctx, `SELECT id, event, request_id, endpoint_url, status, attempts, last_status_code,
 			COALESCE(last_error, ''), last_attempt_at, delivered_at, created_at
 		FROM identity_proofing_webhook_deliveries
 		WHERE organization_id = $1 AND customer_id = $2

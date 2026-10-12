@@ -92,7 +92,6 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "presentation.request_sent": { icon: "email", tone: "blue" },
   "presentation.response_received": { icon: "valid", tone: "green" },
   "presentation.request_failed": { icon: "warning", tone: "red" },
-  "identity_proofing.provisioned": { icon: "settings", tone: "blue" },
   "identity_proofing.flow_created": { icon: "add", tone: "green" },
   "identity_proofing.flows_configured": { icon: "settings", tone: "blue" },
   "identity_proofing.flow_version_created": { icon: "edit", tone: "blue" },
@@ -367,8 +366,6 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.presentationResponseReceived");
     case "presentation.request_failed":
       return t("auditLog.actions.presentationRequestFailed");
-    case "identity_proofing.provisioned":
-      return t("auditLog.actions.identityProofingProvisioned");
     case "identity_proofing.flow_created":
       return t("auditLog.actions.identityProofingFlowCreated");
     case "identity_proofing.flows_configured":

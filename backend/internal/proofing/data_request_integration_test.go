@@ -62,8 +62,25 @@ func TestDataRequestStore(t *testing.T) {
 		t.Fatalf("Get data request = %q, %v; want data_access", dr.FlowKind, err)
 	}
 
-	// Only the customer's identity sessions with personal data are candidates.
-	candidates, err := data.Candidates(ctx, dr)
+	// Only the customer's identity sessions with personal data and the
+	// requester's identity match key are candidates: case, accents and the
+	// date's notation aside.
+	anna := SubjectIdentity{GivenName: "Anna", FamilyName: "Jansen", BirthDate: "1990-04-12"}
+	if err := data.RecordIdentityKey(ctx, session, SubjectIdentity{FamilyName: "JANSÉN", BirthDate: "12-04-1990"}); err != nil {
+		t.Fatalf("RecordIdentityKey session: %v", err)
+	}
+	other := newDataRequest(t, requests, orgID, sam, customer.ID, FlowIdentity, "s6")
+	if err := requests.RecordOutcome(ctx, other, "s6", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Pietersen"}); err != nil {
+		t.Fatalf("RecordOutcome other: %v", err)
+	}
+	if err := data.RecordIdentityKey(ctx, other, SubjectIdentity{FamilyName: "Pietersen", BirthDate: anna.BirthDate}); err != nil {
+		t.Fatalf("RecordIdentityKey other: %v", err)
+	}
+	if candidates, err := data.Candidates(ctx, dr, SubjectIdentity{FamilyName: "Jansen"}); err != nil || len(candidates) != 0 {
+		t.Fatalf("Candidates without a birth date = %+v, %v; want none", candidates, err)
+	}
+	candidates, err := data.Candidates(ctx, dr, anna)
 	if err != nil || len(candidates) != 1 || candidates[0].ID != session.ID || candidates[0].ProofedName != "Anna Jansen" {
 		t.Fatalf("Candidates = %+v, %v; want the earlier session with its name", candidates, err)
 	}
@@ -103,10 +120,16 @@ func TestDataRequestStore(t *testing.T) {
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
 		t.Fatalf("RecordOutcome data request: %v", err)
 	}
+	if err := data.RecordIdentityKey(ctx, dr, anna); err != nil {
+		t.Fatalf("RecordIdentityKey data request: %v", err)
+	}
 	inReview := newDataRequest(t, requests, orgID, sam, customer.ID, FlowDataAccess, "s3")
 	if err := requests.RecordOutcome(ctx, inReview, "s3", StatusNeedsReview,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
 		t.Fatalf("RecordOutcome in review: %v", err)
+	}
+	if err := data.RecordIdentityKey(ctx, inReview, anna); err != nil {
+		t.Fatalf("RecordIdentityKey in review: %v", err)
 	}
 	// Nor against a session sent to one known person and proofed by someone
 	// else: it proves who that was, not whom it was sent to.
@@ -115,10 +138,26 @@ func TestDataRequestStore(t *testing.T) {
 		proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: errorIdentityMismatch}); err != nil {
 		t.Fatalf("RecordOutcome mismatch: %v", err)
 	}
+	if err := data.RecordIdentityKey(ctx, mismatch, anna); err != nil {
+		t.Fatalf("RecordIdentityKey mismatch: %v", err)
+	}
 	erasure := newDataRequest(t, requests, orgID, sam, customer.ID, FlowDataErasure, "s4")
-	candidates, err = data.Candidates(ctx, erasure)
+	candidates, err = data.Candidates(ctx, erasure, anna)
 	if err != nil || len(candidates) != 2 || candidates[0].ID != session.ID || candidates[1].ID != dr.ID {
 		t.Fatalf("erasure Candidates = %+v, %v; want the session and the decided access request", candidates, err)
+	}
+
+	// A purge drops the key with the rest of the personal data.
+	if other, err = requests.Get(ctx, orgID, other.ID); err != nil {
+		t.Fatalf("Get other: %v", err)
+	}
+	if err := requests.Purge(ctx, other); err != nil {
+		t.Fatalf("Purge other: %v", err)
+	}
+	var keyed bool
+	if err := pool.QueryRow(ctx, `SELECT identity_match_key IS NOT NULL FROM identity_proofing_requests WHERE id = $1`,
+		other.ID).Scan(&keyed); err != nil || keyed {
+		t.Errorf("identity match key after the purge = %v, %v; want none", keyed, err)
 	}
 
 	// What a search found per candidate is kept, the first outcome only.

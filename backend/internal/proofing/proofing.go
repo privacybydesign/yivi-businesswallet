@@ -582,11 +582,13 @@ const (
 var faceProviders = []string{faceProviderRegula}
 
 // yiviAppAvailable reports whether flow f can run in the Yivi app: unless it
-// photographs the document, which only the Idem app does, or matches the face
+// photographs the document, which only the Idem app does, matches the face
 // against a customer's reference photo (the Yivi app matches against its
-// credential's photo).
+// credential's photo), or requires a level above what a Yivi session reaches
+// (yiviEIDASLevel), which enforceAssurance would only reject at the end.
 func yiviAppAvailable(f proofingprovider.Flow) bool {
-	return !slices.Contains(f.Steps, stepDocumentPhoto) && !flowNeedsReferencePhoto(f)
+	return !slices.Contains(f.Steps, stepDocumentPhoto) && !flowNeedsReferencePhoto(f) &&
+		meetsAssurance(yiviEIDASLevel, f.RequiredAssuranceLevel)
 }
 
 // Public API rate limits, per customer and per API replica: apiCallLimit for

@@ -11422,9 +11422,9 @@ components:
             format: uuid
           description: >-
             Only on a data request: the matched sessions an approval takes (absent takes only
-            the `strong` ones, proven with the same document; a `probable` or `email` match is
-            taken only when listed). An erasure purges them; an access request opens their data
-            for download.
+            the `strong` ones, proven with the same document; a `probable`, `email` or `name`
+            match is taken only when listed). An erasure purges them and takes `strong` matches
+            only: listing another is a 400. An access request opens their data for download.
       required: [decision, reason]
     ProofingClaimLink:
       type: object
@@ -11969,6 +11969,10 @@ components:
                     type: string
                 yiviAvailable:
                   type: boolean
+                  description: >-
+                    Whether the Yivi app can run the flow: not when it photographs the document,
+                    matches the face against a reference photo, or requires more than `low`, the
+                    level a Yivi session reaches.
                 diplomaMode:
                   type: string
                   enum: ['off', required]

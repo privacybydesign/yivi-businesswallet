@@ -943,7 +943,7 @@ func (s *RequestStore) Purge(ctx context.Context, req Request) error {
 			SET purged_at = now(), subject_name = '', subject_email = '',
 				proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL, expected_birth_date_ciphertext = NULL,
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL, data_export_until = NULL,
-				redirect_url = NULL, yivi_transaction_id = NULL,
+				redirect_url = NULL, yivi_transaction_id = NULL, identity_match_key = NULL,
 				ips_session_ended_at = COALESCE(ips_session_ended_at, now()), updated_at = now()
 			WHERE id = $1 AND purged_at IS NULL AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID)
 		if err != nil {

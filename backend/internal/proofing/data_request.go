@@ -118,7 +118,8 @@ type dataRequestStore interface {
 	FlowKind(ctx context.Context, orgID uuid.UUID, flowID string) (FlowKind, error)
 	AllFlowKinds(ctx context.Context, orgID uuid.UUID) (map[string]FlowKind, error)
 	SaveFlowKind(ctx context.Context, orgID uuid.UUID, flowID string, kind FlowKind) (FlowKind, error)
-	Candidates(ctx context.Context, req Request) ([]Request, error)
+	Candidates(ctx context.Context, req Request, requester SubjectIdentity) ([]Request, error)
+	RecordIdentityKey(ctx context.Context, req Request, id SubjectIdentity) error
 	UnfinishedCandidates(ctx context.Context, req Request) ([]Request, error)
 	TryLockMatching(ctx context.Context, id uuid.UUID) (release func(), ok bool, err error)
 	MatchChecks(ctx context.Context, req Request) (map[uuid.UUID]MatchLevel, error)
@@ -217,10 +218,10 @@ func subjectIdentityOf(id proofingprovider.Identity) SubjectIdentity {
 }
 
 // findDataMatches reads who a data request proofed and stores the customer's
-// sessions of that person, for the review. A session's kept proofed name
-// rules it out without reading the engine when the person's family name is
-// not in it, and a candidate read once is not read again (candidateMatch). A
-// proof without a name or date of birth matches nothing.
+// sessions of that person, for the review. Only the sessions with the
+// person's family name and date of birth are read from the engine
+// (Candidates), and a candidate read once is not read again (candidateMatch).
+// A proof without a name or date of birth matches nothing.
 func (s *Service) findDataMatches(ctx context.Context, tenant proofingprovider.Tenant, req Request) error {
 	if s.dataRequests == nil || req.session == nil {
 		return nil
@@ -230,9 +231,12 @@ func (s *Service) findDataMatches(ctx context.Context, tenant proofingprovider.T
 		return fmt.Errorf("proofing: data request %s identity: %w", req.ID, err)
 	}
 	requester := subjectIdentityOf(proof)
+	if err := s.dataRequests.RecordIdentityKey(ctx, req, requester); err != nil {
+		return err
+	}
 	matches := []NewDataMatch{}
 	if requester.FamilyName != "" && requester.BirthDate != "" {
-		candidates, err := s.dataRequests.Candidates(ctx, req)
+		candidates, err := s.dataRequests.Candidates(ctx, req, requester)
 		if err != nil {
 			return err
 		}
@@ -241,7 +245,7 @@ func (s *Service) findDataMatches(ctx context.Context, tenant proofingprovider.T
 			return err
 		}
 		for _, c := range candidates {
-			if c.session == nil || (c.ProofedName != "" && !nameHolds(c.ProofedName, requester.FamilyName)) {
+			if c.session == nil {
 				continue
 			}
 			level, ok := checked[c.ID]
@@ -281,6 +285,30 @@ func (s *Service) candidateMatch(ctx context.Context, req Request, requester Sub
 	return level, nil
 }
 
+// recordIdentityKey keeps the identity match key of who a customer's session
+// proofed once it is decided or goes to review, so a later data request reads
+// only that person's sessions from the engine. A session already in review
+// has its key, a proven data request's is kept by its search
+// (findDataMatches), and one rejected as someone other than the person it was
+// sent to is never a candidate.
+func (s *Service) recordIdentityKey(ctx context.Context, tenant proofingprovider.Tenant, req Request, sess *ipsSession,
+	next Status, res proofingprovider.Result,
+) error {
+	if s.dataRequests == nil || req.CustomerID == nil || req.Status == StatusNeedsReview ||
+		res.ErrorCode == errorIdentityMismatch || (next != StatusApproved && next != StatusRejected && next != StatusNeedsReview) ||
+		(req.FlowKind.dataRequest() && next != StatusRejected) {
+		return nil
+	}
+	held, err := s.ips.SessionIdentity(ctx, tenant, sess.ID, sess.Token)
+	switch {
+	case errors.Is(err, proofingprovider.ErrNotFound):
+		return nil
+	case err != nil:
+		return fmt.Errorf("proofing: identity match key request %s: %w", req.ID, err)
+	}
+	return s.dataRequests.RecordIdentityKey(ctx, req, subjectIdentityOf(held))
+}
+
 // unfinishedMatches are req's matches among the customer's unfinished
 // sessions, apart from those already matched on identity: MatchEmail when sent
 // to the address req was sent to, case aside, else MatchName when its typed
@@ -304,18 +332,6 @@ func (s *Service) unfinishedMatches(ctx context.Context, req Request, requester 
 		}
 	}
 	return out, nil
-}
-
-// nameHolds reports whether every word of familyName is in name, compared as
-// diploma.Normalize does (case, accents and punctuation aside).
-func nameHolds(name, familyName string) bool {
-	words := strings.Fields(diploma.Normalize(name))
-	for _, w := range strings.Fields(diploma.Normalize(familyName)) {
-		if !slices.Contains(words, w) {
-			return false
-		}
-	}
-	return true
 }
 
 // matchLevel compares the identity a session holds with the requester's: the
@@ -367,8 +383,8 @@ func (s *Service) DataMatches(ctx context.Context, orgID, id uuid.UUID) (Request
 
 // decideDataRequest is DecideReview for a data request, which the wallet
 // holds in review itself (the engine approved the person). Approving takes the
-// approved matches (every one when approved is nil): an erasure purges each of
-// those sessions, then the request's own personal data (it held who asked
+// approved matches (approvedMatches): an erasure purges each of those
+// sessions, then the request's own personal data (it held who asked
 // only for the review); an access request opens their data for
 // DataExportWindow. Rejecting records ErrorReviewRejected unless the reviewer
 // named a code. A session the engine itself holds in review is decided there
@@ -382,7 +398,7 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 
 	approved := []uuid.UUID{}
 	if in.Approve {
-		if approved, err = approvedMatches(matches, in.RequestIDs); err != nil {
+		if approved, err = approvedMatches(matches, in.RequestIDs, req.FlowKind); err != nil {
 			return Request{}, err
 		}
 	}
@@ -455,11 +471,14 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 // approvedMatches checks a reviewer's approved sessions against the matches;
 // nil approves only the MatchStrong ones, proven with the same document: a
 // MatchProbable, MatchEmail or MatchName one is taken only by a reviewer's own
-// tick.
-func approvedMatches(matches []DataMatch, approved []uuid.UUID) ([]uuid.UUID, error) {
+// tick, and never for an erasure: nothing tells it from another person's
+// session, and an erasure cannot be undone.
+func approvedMatches(matches []DataMatch, approved []uuid.UUID, kind FlowKind) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0, len(matches))
+	levels := make(map[uuid.UUID]MatchLevel, len(matches))
 	for _, m := range matches {
 		ids = append(ids, m.RequestID)
+		levels[m.RequestID] = m.Level
 	}
 	if approved == nil {
 		strong := []uuid.UUID{}
@@ -474,6 +493,10 @@ func approvedMatches(matches []DataMatch, approved []uuid.UUID) ([]uuid.UUID, er
 	for _, id := range approved {
 		if !slices.Contains(ids, id) {
 			return nil, fmt.Errorf("%w: session %s is not one of this request's matches", ErrInvalidInput, id)
+		}
+		if kind == FlowDataErasure && levels[id] != MatchStrong {
+			return nil, fmt.Errorf("%w: session %s is not proven with the requester's document and cannot be erased",
+				ErrInvalidInput, id)
 		}
 		if !slices.Contains(out, id) {
 			out = append(out, id)

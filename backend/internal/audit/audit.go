@@ -167,7 +167,6 @@ const (
 	PresentationRequestFailed    = "presentation.request_failed"
 
 	// identity proofing service
-	IdentityProofingProvisioned     = "identity_proofing.provisioned"
 	IdentityProofingFlowCreated     = "identity_proofing.flow_created"
 	IdentityProofingFlowsConfigured = "identity_proofing.flows_configured"
 

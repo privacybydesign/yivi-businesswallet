@@ -157,9 +157,9 @@ func sessionEventData(req Request, status Status) map[string]any {
 }
 
 // enqueueWebhook writes a delivery of event in the caller's transaction, so it
-// is sent exactly when the change it reports commits: to the customer's own
-// endpoint if it has one subscribed to the event, else to the wallet's default
-// endpoint (endpoint_url NULL). A member's request (no customer) sends nothing.
+// is sent exactly when the change it reports commits, to the customer's
+// endpoint when it is subscribed to the event. A member's request (no
+// customer) sends nothing.
 func enqueueWebhook(ctx context.Context, q database.Querier, orgID uuid.UUID, customerID *uuid.UUID,
 	event string, requestID *uuid.UUID, data map[string]any,
 ) error {
