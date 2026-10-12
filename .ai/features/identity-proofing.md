@@ -784,6 +784,12 @@ Everything this feature does not do yet, in one place.
   the app (`selfieLocation: native`) can be sent; the wallet forces `native` and
   refuses others (`flow_not_completable`). No face engine of its own: a flow's
   face step and the Yivi method need Regula.
+- **Deep link.** A tapped vcmrtd deep link is not confirmed to open the app
+  (on either platform; a fix there is the vcmrtd app's):
+  - It is the mail's button and "Open in the Idem app" on the on-screen and
+    hosted pages.
+  - Scanning the QR from inside the app works, so each page shows the QR and
+    says to scan it from inside the app.
 - **Reconciling reads `SessionStatus`**, which carries no personal data; the full
   result is read only for an approved customer subject, whose name is kept.
 - **EU driving licences** are refused, 422 `document_unsupported`
