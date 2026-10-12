@@ -33,7 +33,6 @@ const (
 )
 
 // The orgs that run identity proofing for their own customers (proofing.go).
-// use cases examples
 const (
 	radboudSlug = "radboud-universiteit"
 	asrSlug     = "asr"
@@ -274,12 +273,6 @@ func expandTeams(groups []sdvbTeamGroup, extras []string) []string {
 	return append(names, extras...)
 }
 
-// communityOrganizations are the dev-demo associations. Hervormde Gemeente
-// Barneveld is one church split into four wijkgemeenten (district congregations,
-// hervormdbarneveld.nl/wijkgemeenten), each covering its own neighbourhoods and
-// run by its own kerkenraad; the wijkgemeente is the unit a member belongs to, so
-// each is a department. SDV Barneveld is the local football club with every youth
-// and senior team as a department (see sdvbTeamGroups).
 // proofingOrganizations run identity proofing for their own customers
 // (demoProofingOrgs); Radboud Universiteit, the fourth, is a demo company.
 // Their names say "(Demo)": they are real organisations' names, used only to
@@ -293,6 +286,12 @@ var proofingOrganizations = []demoOrganization{
 	{name: "CM.com (Demo)", slug: cmSlug, kvkNumber: "90000130", euid: "NL.KVK.90000130", addressLocal: "cm"},
 }
 
+// communityOrganizations are the dev-demo associations. Hervormde Gemeente
+// Barneveld is one church split into four wijkgemeenten (district congregations,
+// hervormdbarneveld.nl/wijkgemeenten), each covering its own neighbourhoods and
+// run by its own kerkenraad; the wijkgemeente is the unit a member belongs to, so
+// each is a department. SDV Barneveld is the local football club with every youth
+// and senior team as a department (see sdvbTeamGroups).
 var communityOrganizations = []communityOrganization{
 	{
 		org: demoOrganization{

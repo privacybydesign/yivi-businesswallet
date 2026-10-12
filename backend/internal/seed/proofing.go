@@ -309,13 +309,10 @@ func (c demoProofingCustomer) flowNames() []string {
 // ensureProofingFlows creates each of want that orgID lacks, with its kind and
 // diploma setting, and returns every one's id by name.
 func ensureProofingFlows(ctx context.Context, pool *pgxpool.Pool, recorder audit.Recorder, orgID uuid.UUID, want []demoProofingFlow) (map[string]string, error) {
-	flows := flow.NewPostgresStore(pool)
-	existing, err := flows.List(ctx, orgID.String())
+	existing, err := flow.NewPostgresStore(pool).List(ctx, orgID.String())
 	if err != nil {
 		return nil, fmt.Errorf("seed: list flows: %w", err)
 	}
-	kinds := proofing.NewDataRequestStore(pool, recorder, nil)
-	diplomas := proofing.NewFlowDiplomaStore(pool, recorder)
 	ids := map[string]string{}
 	for _, f := range want {
 		i := slices.IndexFunc(existing, func(e flow.FlowDefinition) bool { return e.Name == f.def.Name })
@@ -323,23 +320,42 @@ func ensureProofingFlows(ctx context.Context, pool *pgxpool.Pool, recorder audit
 			ids[f.def.Name] = existing[i].ID
 			continue
 		}
-		def := f.def
-		def.TenantID = orgID.String()
-		saved, err := flows.Save(ctx, def)
+		id, err := createProofingFlow(ctx, pool, recorder, orgID, f)
 		if err != nil {
-			return nil, fmt.Errorf("seed: flow %s: %w", f.def.Name, err)
+			return nil, err
 		}
-		ids[f.def.Name] = saved.ID
-		if f.kind != "" {
-			if _, err := kinds.SaveFlowKind(ctx, orgID, saved.ID, f.kind); err != nil {
-				return nil, fmt.Errorf("seed: flow %s kind: %w", f.def.Name, err)
-			}
-		}
-		if f.diplomas != "" {
-			if _, err := diplomas.Save(ctx, orgID, saved.ID, f.diplomas); err != nil {
-				return nil, fmt.Errorf("seed: flow %s diplomas: %w", f.def.Name, err)
-			}
-		}
+		ids[f.def.Name] = id
 	}
 	return ids, nil
+}
+
+// createProofingFlow saves f for orgID with its kind and diploma setting in
+// one transaction, so a re-run never finds the flow without them.
+func createProofingFlow(ctx context.Context, pool *pgxpool.Pool, recorder audit.Recorder, orgID uuid.UUID, f demoProofingFlow) (string, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("seed: flow %s: %w", f.def.Name, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	def := f.def
+	def.TenantID = orgID.String()
+	saved, err := flow.NewPostgresStore(tx).Save(ctx, def)
+	if err != nil {
+		return "", fmt.Errorf("seed: flow %s: %w", f.def.Name, err)
+	}
+	if f.kind != "" {
+		if _, err := proofing.NewDataRequestStore(tx, recorder, nil).SaveFlowKind(ctx, orgID, saved.ID, f.kind); err != nil {
+			return "", fmt.Errorf("seed: flow %s kind: %w", f.def.Name, err)
+		}
+	}
+	if f.diplomas != "" {
+		if _, err := proofing.NewFlowDiplomaStore(tx, recorder).Save(ctx, orgID, saved.ID, f.diplomas); err != nil {
+			return "", fmt.Errorf("seed: flow %s diplomas: %w", f.def.Name, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("seed: flow %s: %w", f.def.Name, err)
+	}
+	return saved.ID, nil
 }
