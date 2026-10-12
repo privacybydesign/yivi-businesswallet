@@ -3,6 +3,7 @@
 package proofing
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -308,5 +309,30 @@ func TestDataRequestReviewLapses(t *testing.T) {
 	}
 	if got, err := requests.Get(ctx, orgID, erasure.ID); err != nil || got.Status != StatusRejected || got.ErrorCode != errorReviewLapsed {
 		t.Errorf("after the lapse = %q %q, %v; want rejected %s", got.Status, got.ErrorCode, err, errorReviewLapsed)
+	}
+}
+
+// The identity match key is one person's at one customer: the same name and
+// date of birth at another customer hashes apart, and a missing date to none.
+func TestIdentityMatchKey(t *testing.T) {
+	data := NewDataRequestStore(nil, nil, newTestCipher(t))
+	anna := SubjectIdentity{FamilyName: "Jansen", BirthDate: "1990-04-12"}
+	customerA, customerB := uuid.New(), uuid.New()
+	key := func(customerID uuid.UUID, id SubjectIdentity) []byte {
+		t.Helper()
+		k, err := data.identityMatchKey(Request{CustomerID: &customerID}, id)
+		if err != nil {
+			t.Fatalf("identityMatchKey: %v", err)
+		}
+		return k
+	}
+	if a, again := key(customerA, anna), key(customerA, SubjectIdentity{FamilyName: " jansen ", BirthDate: "12-04-1990"}); !bytes.Equal(a, again) {
+		t.Error("the same person at one customer hashed apart")
+	}
+	if bytes.Equal(key(customerA, anna), key(customerB, anna)) {
+		t.Error("the same person at two customers hashed alike")
+	}
+	if k := key(customerA, SubjectIdentity{FamilyName: "Jansen"}); k != nil {
+		t.Errorf("a key without a birth date = %x; want none", k)
 	}
 }

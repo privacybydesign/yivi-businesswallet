@@ -104,7 +104,7 @@ func (s *DataRequestStore) SaveFlowKind(ctx context.Context, orgID uuid.UUID, fl
 // match key is the requester's are candidates: another family name or date of
 // birth is never read from the engine.
 func (s *DataRequestStore) Candidates(ctx context.Context, req Request, requester SubjectIdentity) ([]Request, error) {
-	key, err := s.identityMatchKey(requester)
+	key, err := s.identityMatchKey(req, requester)
 	if err != nil || key == nil {
 		return []Request{}, err
 	}
@@ -160,14 +160,15 @@ func (s *DataRequestStore) MatchChecks(ctx context.Context, req Request) (map[uu
 // identityKeyPurpose names the secret identity match keys are hashed with.
 const identityKeyPurpose = "identity_proofing_identity_match_key"
 
-// identityMatchKey is the keyed hash of a family name, compared as
-// diploma.Normalize does, and a date of birth: equal for the same person's
-// sessions without either being stored. nil when either is missing or
+// identityMatchKey is the keyed hash of req's customer, a family name,
+// compared as diploma.Normalize does, and a date of birth: equal for the same
+// person's sessions at one customer, without the name or date being stored,
+// and never equal across customers. nil when the name or date is missing or
 // unreadable.
-func (s *DataRequestStore) identityMatchKey(id SubjectIdentity) ([]byte, error) {
+func (s *DataRequestStore) identityMatchKey(req Request, id SubjectIdentity) ([]byte, error) {
 	family := strings.Join(strings.Fields(diploma.Normalize(id.FamilyName)), " ")
 	birthDate, err := diploma.ParseDate(id.BirthDate)
-	if family == "" || err != nil {
+	if req.CustomerID == nil || family == "" || err != nil {
 		return nil, nil
 	}
 	if s.requests.cipher == nil {
@@ -178,14 +179,14 @@ func (s *DataRequestStore) identityMatchKey(id SubjectIdentity) ([]byte, error) 
 		return nil, fmt.Errorf("proofing: identity match key: %w", err)
 	}
 	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(family + "\x00" + birthDate.Format(time.DateOnly)))
+	mac.Write([]byte(req.CustomerID.String() + "\x00" + family + "\x00" + birthDate.Format(time.DateOnly)))
 	return mac.Sum(nil), nil
 }
 
 // RecordIdentityKey keeps the identity match key of who req's session
 // proofed; nothing when the session read no name or date of birth.
 func (s *DataRequestStore) RecordIdentityKey(ctx context.Context, req Request, id SubjectIdentity) error {
-	key, err := s.identityMatchKey(id)
+	key, err := s.identityMatchKey(req, id)
 	if err != nil || key == nil {
 		return err
 	}
