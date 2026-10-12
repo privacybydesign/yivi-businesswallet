@@ -943,6 +943,10 @@ export const nl: Translation<typeof en> = {
           email: "Zelfde e-mailadres",
           name: "Zelfde naam",
         },
+        erasureUntickHint:
+          "Alleen sessies met hetzelfde document kunnen worden verwijderd: een sessie met alleen dezelfde naam en geboortedatum kan van iemand anders zijn, en verwijderen is niet terug te draaien. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
+        erasureEmailMatchesHint:
+          "Deze zijn nooit afgerond, dus er is geen bewezen identiteit om te vergelijken en ze kunnen hier niet worden verwijderd: hun gegevens worden verwijderd zodra de bewaartermijn van de klant verloopt.",
         untickHint:
           "Sessies met hetzelfde document zijn aangevinkt; een sessie met alleen dezelfde naam en geboortedatum niet, dus vink die alleen aan als je zeker weet dat hij van deze persoon is. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
         erased: "Verwijderd",

@@ -15,6 +15,7 @@ import {
   verifyStages,
   progressPollContinues,
   reviewSubmitStep,
+  matchTickable,
   assignedFlows,
   attributeAvailable,
   draftFromFlow,
@@ -190,6 +191,18 @@ describe("yiviAppAvailable", () => {
     expect(yiviAppAvailable({ steps: ["nfc_read", "document_photo"] })).toBe(
       false,
     );
+  });
+
+  it("leaves a flow requiring more than low to the Idem app", () => {
+    const face = ["document_capture", "nfc_read", "face_verification"];
+    expect(
+      yiviAppAvailable({ steps: face, requiredAssuranceLevel: "low" }),
+    ).toBe(true);
+    for (const level of ["substantial", "high"]) {
+      expect(
+        yiviAppAvailable({ steps: face, requiredAssuranceLevel: level }),
+      ).toBe(false);
+    }
   });
 });
 
@@ -950,6 +963,14 @@ describe("diploma step", () => {
 });
 
 describe("data request review", () => {
+  it("ticks only a same-document match for an erasure", () => {
+    expect(matchTickable("data_erasure", "strong")).toBe(true);
+    for (const level of ["probable", "email", "name"]) {
+      expect(matchTickable("data_erasure", level)).toBe(false);
+      expect(matchTickable("data_access", level)).toBe(true);
+    }
+  });
+
   it("confirms an erasure before approving it", () => {
     expect(
       reviewSubmitStep({

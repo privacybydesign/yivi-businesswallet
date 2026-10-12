@@ -922,6 +922,10 @@ export const en = {
           email: "Same e-mail address",
           name: "Same name",
         },
+        erasureUntickHint:
+          "Only sessions proven with the same document can be erased: one that only shares the name and date of birth may be another person's, and an erasure cannot be undone. Untick what must be kept, for example under a legal retention duty.",
+        erasureEmailMatchesHint:
+          "These never finished, so there is no proven identity to compare and they cannot be erased here: their data is deleted when the customer's retention lapses.",
         untickHint:
           "Sessions proven with the same document are ticked; one that only shares the name and date of birth is not, so tick it only when you are sure it is this person's. Untick what must be kept, for example under a legal retention duty.",
         erased: "Erased",

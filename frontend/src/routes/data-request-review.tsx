@@ -13,6 +13,7 @@ import type {
 import { useWhenFormatter } from "../lib/format-when";
 import {
   assuranceLevelLabel,
+  matchTickable,
   proofingErrorMessage,
   proofingStatusLabel,
   REVIEW_REASON_MAX_CHARS,
@@ -172,7 +173,15 @@ function Review({
           onClose={() => setConfirmingErasure(false)}
         />
       )}
-      <MatchList matches={matches} selection={{ ticked, onToggle: toggle }} />
+      <MatchList
+        matches={matches}
+        selection={{
+          ticked,
+          onToggle: toggle,
+          tickable: (m) => matchTickable(kind, m.level),
+          erasure: kind === "data_erasure",
+        }}
+      />
       <label
         htmlFor={fieldId}
         className="text-ink-soft text-[12px] font-semibold"
@@ -232,6 +241,8 @@ function Review({
 interface MatchSelection {
   ticked: string[];
   onToggle: (requestId: string) => void;
+  tickable: (match: ProofingDataMatch) => boolean;
+  erasure: boolean;
 }
 
 // MatchList lists the matched sessions: those found on the person's identity,
@@ -268,7 +279,11 @@ function MatchList({
           <MatchRows matches={identified} selection={selection} />
           {selection && (
             <p className={HINT}>
-              {t("customers.sessions.dataRequest.untickHint")}
+              {t(
+                selection.erasure
+                  ? "customers.sessions.dataRequest.erasureUntickHint"
+                  : "customers.sessions.dataRequest.untickHint",
+              )}
             </p>
           )}
         </>
@@ -283,7 +298,11 @@ function MatchList({
           <MatchRows matches={typed} selection={selection} />
           {selection && (
             <p className={HINT}>
-              {t("customers.sessions.dataRequest.emailMatchesHint")}
+              {t(
+                selection.erasure
+                  ? "customers.sessions.dataRequest.erasureEmailMatchesHint"
+                  : "customers.sessions.dataRequest.emailMatchesHint",
+              )}
             </p>
           )}
         </>
@@ -320,6 +339,7 @@ function MatchRows({
                 type="checkbox"
                 className="mt-1 h-4 w-4"
                 checked={selection.ticked.includes(m.requestId)}
+                disabled={!selection.tickable(m)}
                 onChange={() => selection.onToggle(m.requestId)}
               />
             )}

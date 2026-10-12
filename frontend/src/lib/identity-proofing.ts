@@ -157,20 +157,32 @@ const FACE_STEPS = ["face_verification", "selfie", "liveness", "face_match"];
 // (proofing.selfieLocationBrowser).
 const SELFIE_LOCATION_BROWSER = "browser";
 
+// The eIDAS level a Yivi session reaches (proofing.yiviEIDASLevel).
+const YIVI_EIDAS_LEVEL = "low";
+
 // Whether the Yivi app can run a flow (proofing.yiviAppAvailable): unless it
-// photographs the document, which only the Idem app does, or matches the face
+// photographs the document, which only the Idem app does, matches the face
 // against a customer's reference photo (proofing.NeedsReferencePhoto: a face
 // step without the chip read, outside the browser), where the Yivi app
-// matches against its credential's photo instead.
+// matches against its credential's photo instead, or requires a level above
+// what a Yivi session reaches.
 export function yiviAppAvailable(flow: {
   steps: readonly string[];
   selfieLocation?: string | undefined;
+  requiredAssuranceLevel?: string | undefined;
 }): boolean {
   const needsReferencePhoto =
     flow.steps.some((step) => FACE_STEPS.includes(step)) &&
     !flow.steps.includes(STEP_NFC_READ) &&
     flow.selfieLocation !== SELFIE_LOCATION_BROWSER;
-  return !flow.steps.includes(STEP_DOCUMENT_PHOTO) && !needsReferencePhoto;
+  const levelMet =
+    !flow.requiredAssuranceLevel ||
+    flow.requiredAssuranceLevel === YIVI_EIDAS_LEVEL;
+  return (
+    !flow.steps.includes(STEP_DOCUMENT_PHOTO) &&
+    !needsReferencePhoto &&
+    levelMet
+  );
 }
 
 // "" inherits the tenant's policy at the proofing service.
@@ -543,6 +555,14 @@ export function reviewSubmitStep({
   return decision === "approve" && kind === "data_erasure" && !confirming
     ? "confirm"
     : "decide";
+}
+
+// Whether a reviewer may tick a match of level for a data request of kind: an
+// erasure takes only a session proven with the requester's own document
+// (proofing.approvedMatches), since any other may be another person's and an
+// erasure cannot be undone.
+export function matchTickable(kind: FlowKind, level: string): boolean {
+  return kind !== "data_erasure" || level === "strong";
 }
 
 // The backend's own message for an error whose text is meant for the reader:
