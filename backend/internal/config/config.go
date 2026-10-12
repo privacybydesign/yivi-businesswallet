@@ -2,10 +2,13 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/clientip"
 )
 
 const (
@@ -157,6 +160,10 @@ const (
 	// STATIC_DIR points at the built frontend; when set the API also serves it as
 	// an SPA on "/". Unset in dev (Vite serves the frontend).
 	envStaticDir = "STATIC_DIR"
+
+	// envTrustedProxies lists the reverse proxies (CIDRs or addresses) whose
+	// X-Forwarded-For is believed; empty trusts none.
+	envTrustedProxies = "TRUSTED_PROXIES"
 
 	defaultAppBaseURL = "http://localhost:5173"
 	defaultMailLocale = "en"
@@ -412,6 +419,11 @@ type Config struct {
 	// static serving (dev serves the frontend via Vite).
 	StaticDir string
 
+	// TrustedProxies are the reverse proxies whose X-Forwarded-For names the
+	// client address that per-source rate limits key on. Empty trusts none:
+	// every request's source is its connection's peer.
+	TrustedProxies []netip.Prefix
+
 	PostGuardSidecarURL    string
 	PostGuardSharedSecret  string
 	PostGuardEncryptionKey string
@@ -557,6 +569,11 @@ func Load() (Config, error) {
 		}
 	}
 
+	trustedProxies, err := clientip.ParseTrusted(parseList(os.Getenv(envTrustedProxies)))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: %s: %w", envTrustedProxies, err)
+	}
+
 	return Config{
 		DatabaseDSN: dsn,
 		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
@@ -636,6 +653,7 @@ func Load() (Config, error) {
 		SigningRedirectURI:         signingRedirectURI,
 		MailDefaultLocale:          envOrDefault(envMailDefaultLocale, defaultMailLocale),
 		StaticDir:                  os.Getenv(envStaticDir),
+		TrustedProxies:             trustedProxies,
 
 		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
 		PostGuardSharedSecret:  os.Getenv(envPostGuardSharedSecret),

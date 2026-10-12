@@ -168,3 +168,18 @@ func TestComposePassesEudiVerifierConfigToBackend(t *testing.T) {
 		}
 	}
 }
+
+// TRUSTED_PROXIES is hosted-deploy config like APP_BASE_URL: without the
+// passthrough a value set in .env never reaches the container, and every
+// caller behind the proxy shares one per-source rate limit.
+func TestComposePassesTrustedProxiesToBackend(t *testing.T) {
+	backendEnvironment := backendComposeEnvironment(t)
+
+	value, ok := backendEnvironment[envTrustedProxies]
+	if !ok {
+		t.Fatalf("backend service does not pass %s through; setting it in .env would do nothing", envTrustedProxies)
+	}
+	if want := "${" + envTrustedProxies + ":-}"; value != want {
+		t.Errorf("backend %s = %q, want %q", envTrustedProxies, value, want)
+	}
+}

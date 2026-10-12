@@ -19,6 +19,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/clientip"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/config"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/csc"
@@ -794,6 +795,9 @@ func run() error {
 		cscHandler,
 		signingHandler,
 	)
+	// Outermost, so every route and the SPA's page headers see the client
+	// address the trusted proxies report.
+	handler = clientip.Middleware(clientip.NewResolver(cfg.TrustedProxies))(handler)
 
 	httpServer := &http.Server{
 		Addr:              serverAddr,

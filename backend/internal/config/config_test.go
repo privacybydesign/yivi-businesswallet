@@ -309,3 +309,33 @@ func TestLoadRejectsHalfConfiguredRequesterCA(t *testing.T) {
 		})
 	}
 }
+
+// TRUSTED_PROXIES takes CIDRs and single addresses; empty trusts none, and a
+// value that is neither stops the boot instead of trusting nothing silently.
+func TestLoadTrustedProxies(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("unset TrustedProxies = %v, want none", cfg.TrustedProxies)
+	}
+
+	cfg, err = loadWith(t, map[string]string{envTrustedProxies: "10.0.0.0/8, 192.168.1.7 ,fd00::/8"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := []string{"10.0.0.0/8", "192.168.1.7/32", "fd00::/8"}
+	if len(cfg.TrustedProxies) != len(want) {
+		t.Fatalf("TrustedProxies = %v, want %v", cfg.TrustedProxies, want)
+	}
+	for i, p := range cfg.TrustedProxies {
+		if p.String() != want[i] {
+			t.Errorf("TrustedProxies[%d] = %s, want %s", i, p, want[i])
+		}
+	}
+
+	if _, err := loadWith(t, map[string]string{envTrustedProxies: "10.0.0.0/8,ingress-nginx"}); err == nil {
+		t.Error("TRUSTED_PROXIES with a name loaded, want an error")
+	}
+}

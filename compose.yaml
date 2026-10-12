@@ -71,6 +71,9 @@ services:
       # Public base URL of the frontend, used to build claim links in outbound
       # e-mail / QERDS credential-offer messages.
       APP_BASE_URL: ${APP_BASE_URL:-}
+      # Reverse proxies (CIDRs or addresses) whose X-Forwarded-For names the
+      # client that per-source rate limits key on; empty trusts none.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       # Encrypts per-org SMTP passwords at rest (hex 32 bytes). Optional: without
       # it, orgs can only configure passwordless (e.g. relay) SMTP.
       EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY:-}
