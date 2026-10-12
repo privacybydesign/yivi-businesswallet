@@ -64,15 +64,18 @@ func apply(imageBase64, mimeType string, r Rect, redact func(*image.RGBA, image.
 	if err != nil {
 		return "", "", fmt.Errorf("redact: decode base64 image: %w", err)
 	}
-	img, format, err := images.Decode(raw)
+	var out, outMime string
+	err = images.Decode(raw, func(img image.Image, format string) error {
+		rgba := toRGBA(img)
+		redact(rgba, rectToBounds(r, rgba.Bounds().Dx(), rgba.Bounds().Dy()))
+		var err error
+		out, outMime, err = encode(rgba, format)
+		return err
+	})
 	if err != nil {
 		return "", "", fmt.Errorf("redact: %w", err)
 	}
-
-	rgba := toRGBA(img)
-	redact(rgba, rectToBounds(r, rgba.Bounds().Dx(), rgba.Bounds().Dy()))
-
-	return encode(rgba, format)
+	return out, outMime, nil
 }
 
 // toRGBA copies img into a freshly allocated *image.RGBA, so pixelate can
@@ -173,7 +176,7 @@ func encode(rgba *image.RGBA, format string) (string, string, error) {
 		err = png.Encode(&buf, rgba)
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("redact: encode redacted image: %w", err)
+		return "", "", fmt.Errorf("encode redacted image: %w", err)
 	}
 	return base64.StdEncoding.EncodeToString(buf.Bytes()), mimeType, nil
 }

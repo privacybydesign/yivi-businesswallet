@@ -26,9 +26,10 @@ const maxJPEG2000Components = 4
 // before the full decode.
 const MaxImagePixels = 40_000_000
 
-// maxConcurrentDecodes is how many images decode at once in the process: each
-// decode holds a full raster, so a burst of uploads queues instead of
-// allocating them all at the same time.
+// maxConcurrentDecodes is how many images are worked on at once in the
+// process: each holds a full raster (and its copies) from decode through
+// encode, so a burst of uploads queues instead of allocating them all at the
+// same time.
 const maxConcurrentDecodes = 4
 
 // The names go-jpeg2000 registers its formats under with the image package.
@@ -45,34 +46,35 @@ var ErrTooLarge = errors.New("images: image too large to decode")
 
 // Decode decodes an untrusted image after checking its header: at most
 // MaxImagePixels (MaxJPEG2000Pixels and maxJPEG2000Components for a
-// JPEG2000), and at most maxConcurrentDecodes at once. It returns the image
-// and its format name, as image.Decode does. Every decode of an uploaded
-// image goes through it.
-func Decode(raw []byte) (image.Image, string, error) {
+// JPEG2000). It hands the image and its format name, as image.Decode returns
+// them, to use, and returns use's error. At most maxConcurrentDecodes decodes
+// and their use run at once, so whatever use derives from the raster is
+// bounded with it. Every decode of an uploaded image goes through it.
+func Decode(raw []byte, use func(img image.Image, format string) error) error {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {
-		return nil, "", fmt.Errorf("images: unsupported or corrupt image: %w", err)
+		return fmt.Errorf("images: unsupported or corrupt image: %w", err)
 	}
 	limit := int64(MaxImagePixels)
 	if format == jp2Format || format == j2kFormat {
 		limit = MaxJPEG2000Pixels
 		m, err := jpeg2000.DecodeMetadata(bytes.NewReader(raw))
 		if err != nil {
-			return nil, "", fmt.Errorf("images: read JPEG2000 header: %w", err)
+			return fmt.Errorf("images: read JPEG2000 header: %w", err)
 		}
 		if m.NumComponents <= 0 || m.NumComponents > maxJPEG2000Components {
-			return nil, "", fmt.Errorf("%w: JPEG2000 with %d components", ErrTooLarge, m.NumComponents)
+			return fmt.Errorf("%w: JPEG2000 with %d components", ErrTooLarge, m.NumComponents)
 		}
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > limit {
-		return nil, "", fmt.Errorf("%w: %dx%d is over %d pixels", ErrTooLarge, cfg.Width, cfg.Height, limit)
+		return fmt.Errorf("%w: %dx%d is over %d pixels", ErrTooLarge, cfg.Width, cfg.Height, limit)
 	}
 
 	decodeSlots <- struct{}{}
 	defer func() { <-decodeSlots }()
 	img, format, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
-		return nil, "", fmt.Errorf("images: decode %s: %w", format, err)
+		return fmt.Errorf("images: decode %s: %w", format, err)
 	}
-	return img, format, nil
+	return use(img, format)
 }

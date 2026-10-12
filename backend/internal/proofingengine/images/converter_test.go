@@ -87,6 +87,15 @@ func TestDisplayablePNGBadBase64(t *testing.T) {
 	}
 }
 
+// unused is a Decode use that fails the test when it runs.
+func unused(t *testing.T) func(image.Image, string) error {
+	t.Helper()
+	return func(image.Image, string) error {
+		t.Error("use ran for an image Decode refused")
+		return nil
+	}
+}
+
 // A JPEG2000 whose header claims more than MaxJPEG2000Pixels is refused
 // before its raster is decoded, and passed through unconverted.
 func TestDecodeRefusesHuge(t *testing.T) {
@@ -94,7 +103,7 @@ func TestDecodeRefusesHuge(t *testing.T) {
 	if err := jpeg2000.Encode(&buf, image.NewGray(image.Rect(0, 0, 2001, 2000)), nil); err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	if _, _, err := Decode(buf.Bytes()); !errors.Is(err, ErrTooLarge) {
+	if err := Decode(buf.Bytes(), unused(t)); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("Decode(a %d-byte JPEG2000 of 2001x2000) = %v, want ErrTooLarge", buf.Len(), err)
 	}
 	in := base64.StdEncoding.EncodeToString(buf.Bytes())
@@ -138,7 +147,33 @@ func TestDecodeRefusesManyComponents(t *testing.T) {
 	if err := jpeg2000.Encode(&buf, image.NewGray(image.Rect(0, 0, 16, 16)), opts); err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	if _, _, err := Decode(withComponents(t, buf.Bytes(), manyComponents)); !errors.Is(err, ErrTooLarge) {
+	if err := Decode(withComponents(t, buf.Bytes(), manyComponents), unused(t)); !errors.Is(err, ErrTooLarge) {
 		t.Errorf("Decode(%d components) = %v, want ErrTooLarge", manyComponents, err)
+	}
+}
+
+// Decode holds its slot until use returns, so what use derives from the
+// raster (a copy, an encode) counts against maxConcurrentDecodes too.
+func TestDecodeHoldsSlotThroughUse(t *testing.T) {
+	raw, err := base64.StdEncoding.DecodeString(jp2SamplePhotoBase64(t))
+	if err != nil {
+		t.Fatalf("decode base64: %v", err)
+	}
+	errUse := errors.New("use failed")
+	for name, result := range map[string]error{"success": nil, "failure": errUse} {
+		t.Run(name, func(t *testing.T) {
+			err := Decode(raw, func(image.Image, string) error {
+				if held := len(decodeSlots); held != 1 {
+					t.Errorf("slots held during use = %d, want 1", held)
+				}
+				return result
+			})
+			if !errors.Is(err, result) {
+				t.Errorf("Decode = %v, want %v", err, result)
+			}
+			if held := len(decodeSlots); held != 0 {
+				t.Errorf("slots held after Decode = %d, want 0", held)
+			}
+		})
 	}
 }

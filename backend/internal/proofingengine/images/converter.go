@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"image"
 	"image/png"
 	"log/slog"
 
@@ -38,16 +39,19 @@ func ToDisplayablePNG(imageBase64, mimeType string) (string, string, error) {
 		return imageBase64, mimeType, nil
 	}
 
-	img, _, err := Decode(raw)
+	var converted bytes.Buffer
+	var encodeErr error
+	err = Decode(raw, func(img image.Image, _ string) error {
+		encodeErr = png.Encode(&converted, img)
+		return encodeErr
+	})
+	if encodeErr != nil {
+		return "", "", fmt.Errorf("encode photo as PNG: %w", encodeErr)
+	}
 	if err != nil {
 		slog.Warn("images: JPEG2000 photo not converted for display; returning original bytes", slog.Any("error", err))
 		return imageBase64, mimeType, nil
 	}
 
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return "", "", fmt.Errorf("encode photo as PNG: %w", err)
-	}
-
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), "image/png", nil
+	return base64.StdEncoding.EncodeToString(converted.Bytes()), "image/png", nil
 }
