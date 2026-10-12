@@ -18,8 +18,7 @@ import i18n from "../i18n";
 import { errorCode } from "../lib/api-error";
 import { useWhenFormatter } from "../lib/format-when";
 import {
-  completedMessage,
-  completionRedirect,
+  hostedHandBack,
   hostedLanguage,
   hostedTheme,
   postCompletion,
@@ -137,25 +136,24 @@ function HostedFlow({
   const settle = useCallback(
     (status: string) => {
       setSettledStatus(status);
-      // A data request in review is not answered yet: the page says so
-      // (DataRequestOutcome) instead of handing the person back as if it was.
-      if (handedBack.current || (dataRequest && status === "needs_review")) {
+      const handBack = hostedHandBack({
+        sessionId: page.sessionId,
+        status,
+        handedBack: handedBack.current,
+        dataRequest,
+        framed: window.parent !== window,
+        redirectUrl: page.redirectUrl,
+      });
+      if (!handBack) {
         return;
       }
       handedBack.current = true;
-      const message = completedMessage(page.sessionId, status);
-      if (window.parent !== window) {
-        postCompletion(window.parent, page.embedOrigins, message);
+      if (handBack.post) {
+        postCompletion(window.parent, page.embedOrigins, handBack.message);
       }
-      // A data request's answer (a download, an erasure notice) shows here, so
-      // its page never redirects away.
-      const to =
-        page.redirectUrl && !dataRequest
-          ? completionRedirect(page.redirectUrl, message)
-          : undefined;
-      if (to) {
+      if (handBack.redirectTo) {
         setRedirecting(true);
-        window.location.assign(to);
+        window.location.assign(handBack.redirectTo);
       }
     },
     [page.sessionId, page.embedOrigins, page.redirectUrl, dataRequest],

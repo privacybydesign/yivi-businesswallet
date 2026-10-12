@@ -615,6 +615,33 @@ export function verifyStages({
   ];
 }
 
+// What a verify page's running session shows: the diploma step once an
+// approved session asks for extracts and the subject is not done adding them,
+// else the outcome once settled, the expiry once an unstarted session's link
+// ran out, or the session itself.
+export type SessionView = "diplomas" | "outcome" | "expired" | "running";
+
+export function sessionView({
+  status,
+  diplomaMode,
+  diplomasUntil,
+  diplomasDone,
+  secondsLeft,
+}: {
+  status: string;
+  diplomaMode: DiplomaMode;
+  diplomasUntil: string | undefined;
+  diplomasDone: boolean;
+  secondsLeft: number;
+}): SessionView {
+  if (!isProofingLive(status)) {
+    return diplomaMode !== "off" && diplomasUntil !== undefined && !diplomasDone
+      ? "diplomas"
+      : "outcome";
+  }
+  return secondsLeft === 0 && status === "pending" ? "expired" : "running";
+}
+
 // Whether a request on flow can be mailed (proofing.ErrDiplomasNeedPage): a
 // flow that asks for diplomas has them uploaded on the page that runs the
 // session. No flow picked yet is mailable.

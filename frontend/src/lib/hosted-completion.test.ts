@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   completedMessage,
   completionRedirect,
+  hostedHandBack,
   hostedLanguage,
   hostedTheme,
   originLines,
@@ -53,6 +54,74 @@ describe("completionRedirect", () => {
   it("refuses what is not an http(s) URL", () => {
     expect(completionRedirect("javascript:alert(1)", done)).toBeUndefined();
     expect(completionRedirect("/relative", done)).toBeUndefined();
+  });
+});
+
+describe("hostedHandBack", () => {
+  const settled = {
+    sessionId: "ps_abc",
+    status: "approved",
+    handedBack: false,
+    dataRequest: false,
+    framed: false,
+    redirectUrl: undefined,
+  };
+  const redirectUrl = "https://portal.example/done";
+
+  it("hands back once", () => {
+    expect(hostedHandBack(settled)).toEqual({
+      message: completedMessage("ps_abc", "approved"),
+      post: false,
+      redirectTo: undefined,
+    });
+    expect(hostedHandBack({ ...settled, handedBack: true })).toBeUndefined();
+  });
+
+  it("posts the outcome only when framed", () => {
+    expect(hostedHandBack({ ...settled, framed: true })?.post).toBe(true);
+  });
+
+  it("redirects with the outcome when the session has a redirect", () => {
+    expect(hostedHandBack({ ...settled, redirectUrl })?.redirectTo).toBe(
+      "https://portal.example/done?session=ps_abc&status=approved",
+    );
+  });
+
+  it("posts and redirects when framed with a redirect", () => {
+    const handBack = hostedHandBack({ ...settled, framed: true, redirectUrl });
+    expect(handBack?.post).toBe(true);
+    expect(handBack?.redirectTo).toBeDefined();
+  });
+
+  it("stays on the page for an unusable redirect", () => {
+    expect(
+      hostedHandBack({ ...settled, redirectUrl: "javascript:alert(1)" })
+        ?.redirectTo,
+    ).toBeUndefined();
+  });
+
+  it("skips a data request in review, which is not answered yet", () => {
+    expect(
+      hostedHandBack({
+        ...settled,
+        status: "needs_review",
+        dataRequest: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      hostedHandBack({ ...settled, status: "needs_review" })?.message.status,
+    ).toBe("needs_review");
+  });
+
+  it("hands a settled data request back without redirecting away", () => {
+    const handBack = hostedHandBack({
+      ...settled,
+      dataRequest: true,
+      framed: true,
+      redirectUrl,
+    });
+    expect(handBack?.post).toBe(true);
+    expect(handBack?.redirectTo).toBeUndefined();
   });
 });
 

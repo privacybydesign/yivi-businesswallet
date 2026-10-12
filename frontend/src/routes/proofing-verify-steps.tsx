@@ -28,11 +28,11 @@ import {
   diplomaRejectionReason,
   diplomaStepDone,
   formatDuration,
-  isProofingLive,
   isRequestedAttribute,
   proofingErrorMessage,
   proofingRejectionReason,
   secondsUntil,
+  sessionView,
 } from "../lib/identity-proofing";
 import type { RequestedAttribute } from "../lib/identity-proofing";
 import { useDateFormatter } from "../lib/format-when";
@@ -318,22 +318,25 @@ export function Session({
   const { t } = useTranslation();
   const progress = useProofingProgressQuery(target);
   const current = progress.data ?? initial;
-  const settled = !isProofingLive(current.status);
   const [diplomasDone, setDiplomasDone] = useState(false);
-  const askDiplomas =
-    settled &&
-    diplomaMode !== "off" &&
-    current.diplomasUntil !== undefined &&
-    !diplomasDone;
+  const secondsLeft = useSecondsLeft(current.linkExpiresAt);
+  const view = sessionView({
+    status: current.status,
+    diplomaMode,
+    diplomasUntil: current.diplomasUntil,
+    diplomasDone,
+    secondsLeft,
+  });
+  const askDiplomas = view === "diplomas";
+  const showsOutcome = view === "outcome";
   useEffect(() => {
-    if (settled && !askDiplomas) {
+    if (showsOutcome) {
       onSettled?.(current.status);
     }
-  }, [settled, askDiplomas, current.status, onSettled]);
+  }, [showsOutcome, current.status, onSettled]);
   useEffect(() => {
     onDiplomaStep?.(askDiplomas);
   }, [askDiplomas, onDiplomaStep]);
-  const secondsLeft = useSecondsLeft(current.linkExpiresAt);
   const [link, setLink] = useState(deepLink);
   const fresh = useNewClaimLinkMutation(target);
   const newCode = (
@@ -372,10 +375,10 @@ export function Session({
       />
     );
   }
-  if (settled) {
+  if (showsOutcome) {
     return <SessionOutcome progress={current} actions={outcomeActions} />;
   }
-  if (secondsLeft === 0 && current.status === "pending") {
+  if (view === "expired") {
     return <Expired onRestart={onRestart} />;
   }
 

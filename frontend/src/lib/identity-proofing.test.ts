@@ -11,6 +11,7 @@ import {
   OUTCOME_ONLY,
   readsIdentity,
   sendableByMail,
+  sessionView,
   verifyStages,
   progressPollContinues,
   reviewSubmitStep,
@@ -806,6 +807,82 @@ describe("diploma modes mirror backend/internal/proofing", () => {
     for (const mode of DIPLOMA_MODES) {
       expect(backend).toContain(mode);
     }
+  });
+});
+
+describe("sessionView", () => {
+  const until = "2026-10-12T12:00:00Z";
+  const running = {
+    status: "pending",
+    diplomaMode: "off" as const,
+    diplomasUntil: undefined,
+    diplomasDone: false,
+    secondsLeft: 60,
+  };
+
+  it("runs the session while it is live and its link lasts", () => {
+    expect(sessionView(running)).toBe("running");
+    expect(sessionView({ ...running, status: "in_progress" })).toBe("running");
+  });
+
+  it("expires an unstarted session once its link ran out", () => {
+    expect(sessionView({ ...running, secondsLeft: 0 })).toBe("expired");
+  });
+
+  it("keeps a started session running after its link ran out", () => {
+    expect(
+      sessionView({ ...running, status: "in_progress", secondsLeft: 0 }),
+    ).toBe("running");
+  });
+
+  it("shows the outcome once settled", () => {
+    for (const status of ["approved", "rejected", "needs_review", "expired"]) {
+      expect(sessionView({ ...running, status, secondsLeft: 0 })).toBe(
+        "outcome",
+      );
+    }
+  });
+
+  it("asks for diplomas after a settled session that has the step", () => {
+    expect(
+      sessionView({
+        ...running,
+        status: "approved",
+        diplomaMode: "required",
+        diplomasUntil: until,
+      }),
+    ).toBe("diplomas");
+  });
+
+  it("shows the outcome once the diplomas are done", () => {
+    expect(
+      sessionView({
+        ...running,
+        status: "approved",
+        diplomaMode: "required",
+        diplomasUntil: until,
+        diplomasDone: true,
+      }),
+    ).toBe("outcome");
+  });
+
+  it("skips the diploma step without a deadline or on a flow without it", () => {
+    expect(
+      sessionView({ ...running, status: "rejected", diplomaMode: "required" }),
+    ).toBe("outcome");
+    expect(
+      sessionView({ ...running, status: "approved", diplomasUntil: until }),
+    ).toBe("outcome");
+  });
+
+  it("does not ask for diplomas while the session is live", () => {
+    expect(
+      sessionView({
+        ...running,
+        diplomaMode: "required",
+        diplomasUntil: until,
+      }),
+    ).toBe("running");
   });
 });
 

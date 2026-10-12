@@ -70,6 +70,46 @@ export function completionRedirect(
   return url.toString();
 }
 
+// How a settled hosted page hands its subject back: the message, whether it is
+// posted to the embedding page, and where the page redirects, if anywhere.
+export interface HostedHandBack {
+  message: HostedCompletedMessage;
+  post: boolean;
+  redirectTo: string | undefined;
+}
+
+// The hand-back for a settled status, or undefined when there is none: the
+// page hands back once, and a data request in review is not answered yet. A
+// data request's answer shows on the page, so it never redirects away.
+export function hostedHandBack({
+  sessionId,
+  status,
+  handedBack,
+  dataRequest,
+  framed,
+  redirectUrl,
+}: {
+  sessionId: string;
+  status: string;
+  handedBack: boolean;
+  dataRequest: boolean;
+  framed: boolean;
+  redirectUrl: string | undefined;
+}): HostedHandBack | undefined {
+  if (handedBack || (dataRequest && status === "needs_review")) {
+    return undefined;
+  }
+  const message = completedMessage(sessionId, status);
+  return {
+    message,
+    post: framed,
+    redirectTo:
+      redirectUrl && !dataRequest
+        ? completionRedirect(redirectUrl, message)
+        : undefined,
+  };
+}
+
 // What a page posts to: its parent window when it is framed.
 export interface MessageTarget {
   postMessage(message: unknown, targetOrigin: string): void;
