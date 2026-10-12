@@ -111,6 +111,7 @@ const ON_SCREEN_POLL_INTERVAL_MS = 2_000;
 // secret) is dropped from the cache as soon as nothing shows it, instead of
 // lingering there for the default five minutes.
 const SECRET_MUTATION_GC_TIME_MS = 0;
+const IDENTITY_RESULT_GC_TIME_MS = 0;
 
 export function proofingQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "identity-proofing"];
@@ -822,7 +823,7 @@ export function useProofingRequestResultQuery(
     queryFn: ({ signal }) => getProofingRequestResult(slug, requestId, signal),
     enabled: enabled && slug !== "" && requestId !== "",
     staleTime: Infinity,
-    gcTime: 0,
+    gcTime: IDENTITY_RESULT_GC_TIME_MS,
   });
   const readAt = query.dataUpdatedAt;
   useEffect(() => {
