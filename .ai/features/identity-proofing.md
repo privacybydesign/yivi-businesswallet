@@ -107,6 +107,11 @@ the app calls them), and the deep link's `api=` is
     how often is the app's call; the engine bounds it at 3 attempts a session
     (`maxFaceStepAttempts`), after which the last failed evidence stands and
     the submit decides on it. Each attempt's transaction is released as usual.
+    - Each submit reserves its attempt under the session lock before Regula
+      is called (`reserveFaceAttempt`), and spends it whatever the outcome, so
+      concurrent submits never exceed the bound.
+    - With every attempt reserved and none leaving evidence, a submit is 409
+      `face_attempts_spent`.
   - A Yivi-method session sends at most twice `BoundLoginMaxAttempts` frames
     to Regula, faceless ones included (`boundLoginFrameBudget`); spending it
     rejects the session `FACE_NO_MATCH`.
@@ -116,8 +121,8 @@ the app calls them), and the deep link's `api=` is
   - The member route `yivi/face` counts each frame against its org's
     `memberFaceFrameLimit` (1500 a minute); past it 429 `rate_limited`.
 - **Images.** Every uploaded image is decoded through `images.Decode`: its
-  header is checked first (40 megapixels, `images.MaxImagePixels`; a JPEG2000
-  4 megapixels and at most 4 colour components), and at most 4 decode at once
+  header is checked first (4 megapixels, `images.MaxImagePixels`, above the
+  app's largest image, a 1600 px document photo; a JPEG2000 4 megapixels and at most 4 colour components), and at most 4 decode at once
   in the process. A JPEG2000 chip portrait is converted to PNG in pure Go
   (go-jpeg2000) for display; redaction decodes through the same helper.
 - **Regula clean-up.** Every Regula tag the app is handed is queued for
@@ -276,7 +281,8 @@ the app calls them), and the deep link's `api=` is
   The subject picks the Yivi app or the Idem app on the verify page
   (`yiviAppAvailable`, the same name in the backend and the frontend), unless the flow
   photographs the document or matches against a reference photo, which only
-  the Idem app does. A face step without `nfc_read` needs a
+  the Idem app does, or requires more than low, the level a Yivi session
+  reaches (`yiviEIDASLevel`; it would only end `ASSURANCE_NOT_MET`). A face step without `nfc_read` needs a
   per-session reference photo (§14): such a flow is not `completable` for
   members, but a customer may be assigned it and send it through its API. A flow with
   `document_photo` (front and back, or a passport's photo page) runs in the
@@ -810,7 +816,24 @@ Everything this feature does not do yet, in one place.
   combined with the expected-subject match, which needs the document data.
 - **Data requests (§15):** no matching across customers or orgs (each customer
   is the controller of its own sessions); no mail to the person when decided;
-  no data requests on members' own proofing requests.
+  no data requests on members' own proofing requests. An erasure cannot take a
+  `probable`, `email` or `name` match: those wait for the customer's retention.
+- **Chip Authentication** over DG14 is not run: `nfc.chip_auth` is checked
+  through Active Authentication only (`chip_verify.go`), so a chip with
+  Chip Authentication and no AA key is not proven genuine against cloning.
+- **Yivi app:**
+  - It reaches low only, so it is offered on no flow requiring substantial;
+    a Yivi path to substantial is planned.
+  - Its disclosure (`proofingQuery`, `dcql.go`) asks no document type,
+    issuing country or expiry, so a flow that restricts the type or country
+    refuses every Yivi disclosure.
+- **Custom domains and white labelling** of the hosted page are not built:
+  the page is on the wallet's own domain with the customer's branding (§4).
+- **Before launch:**
+  - The DPA and the controller and processor chain with each customer.
+  - The Regula licence for production.
+  - Verifying the EU Trusted Lists' XAdES signatures: §12 trusts them on
+    transport security alone (`diploma/eutl`).
 
 ## 12. Diplomas (DUO extracts)
 
@@ -976,8 +999,8 @@ editor's Type, and the hosted page.
 - **Matches.** `findDataMatches` reads the person's identity and every
   `Candidates` session of the **same customer** (not purged, settled; the
   person's earlier data requests too once decided, as each holds who asked, so
-  an erasure clears them; one still in review never), skipping one whose kept
-  proofed name lacks the family name. A match needs the same full name word for
+  an erasure clears them; one still in review never) with the person's
+  identity match key. A match needs the same full name word for
   word (`diploma.SameName`) and birth date: `strong` when document type,
   issuing state and expiry also agree (the same document; the document number
   is never read), `probable` otherwise. The customer's unfinished sessions
@@ -987,16 +1010,28 @@ editor's Type, and the hosted page.
   - `name`: otherwise, the typed name is the person's full name word for word
     (`diploma.SameName`).
   Stored in `identity_proofing_request_matches`, whose composite foreign keys
-  keep both requests in the matching request's org. One reconcile at a time
-  finds a request's matches (a hosted status poll meanwhile waits). No HMAC or other deterministic
-  identifier: it would link a person's sessions for anyone reading the
-  database.
+  keep both requests with the matching request's customer. One reconcile at a
+  time finds a request's matches (a hosted status poll meanwhile waits), and
+  what it read per candidate is kept (`identity_proofing_request_match_checks`)
+  so a retry reads none again.
+- **Identity match key.** `identity_match_key` is an HMAC of the customer, the
+  normalised family name and the date of birth, under a secret derived from
+  the encryption key. It is set when a customer's session is decided or goes
+  to review (`recordIdentityKey`; a data request's by its own search) and
+  cleared by the purge.
+  - `Candidates` selects on it, so only sessions with the person's family
+    name and date of birth are read from the engine.
+  - It links one person's sessions at one customer for a database reader,
+    who can already link them by the plaintext `subject_email`; it never
+    links across customers.
 - **Review.** The session's panel shows the person's identity and proof (name,
   date of birth, document, chip, face match, liveness, eIDAS level; the
   result read allows a data request in review, `heldToVerdict`) and the
   matches. Only `strong` matches start ticked; `probable`, `email` and `name` ones are
   taken only when ticked, and the API's approve without `requestIds` takes the
-  `strong` ones alone. `DecideReview` → `decideDataRequest` (decided in the
+  `strong` ones alone. An erasure takes `strong` matches only (the others
+  cannot be ticked; listing one is 400): nothing tells them from another
+  person's session, and an erasure cannot be undone. `DecideReview` → `decideDataRequest` (decided in the
   engine too if it holds a review there). Approving an erasure asks to confirm
   the number of sessions, then purges each approved match through
   `Service.purge` (row stays, personal data goes, `session.purged` per
