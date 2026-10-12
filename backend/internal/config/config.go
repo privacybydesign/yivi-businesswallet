@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -422,7 +421,7 @@ type Config struct {
 	// TrustedProxies are the reverse proxies whose X-Forwarded-For names the
 	// client address that per-source rate limits key on. Empty trusts none:
 	// every request's source is its connection's peer.
-	TrustedProxies []netip.Prefix
+	TrustedProxies clientip.Trusted
 
 	PostGuardSidecarURL    string
 	PostGuardSharedSecret  string

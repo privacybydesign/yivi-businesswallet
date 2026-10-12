@@ -152,6 +152,21 @@ func TestComposePassesSigningRedirectURIToBackend(t *testing.T) {
 	}
 }
 
+// TRUSTED_PROXIES is hosted-deploy config like APP_BASE_URL: without the
+// passthrough a value set in .env never reaches the container, and every
+// caller behind the proxy shares one per-source rate limit.
+func TestComposePassesTrustedProxiesToBackend(t *testing.T) {
+	backendEnvironment := backendComposeEnvironment(t)
+
+	value, ok := backendEnvironment[envTrustedProxies]
+	if !ok {
+		t.Fatalf("backend service does not pass %s through; setting it in .env would do nothing", envTrustedProxies)
+	}
+	if want := "${" + envTrustedProxies + ":-}"; value != want {
+		t.Errorf("backend %s = %q, want %q", envTrustedProxies, value, want)
+	}
+}
+
 // Same passthrough rule: a certificate set in .env that never reaches the
 // container fails the boot probe while looking configured.
 func TestComposePassesEudiVerifierConfigToBackend(t *testing.T) {
@@ -166,20 +181,5 @@ func TestComposePassesEudiVerifierConfigToBackend(t *testing.T) {
 		if want := "${" + key + ":-}"; value != want {
 			t.Errorf("backend %s = %q, want %q", key, value, want)
 		}
-	}
-}
-
-// TRUSTED_PROXIES is hosted-deploy config like APP_BASE_URL: without the
-// passthrough a value set in .env never reaches the container, and every
-// caller behind the proxy shares one per-source rate limit.
-func TestComposePassesTrustedProxiesToBackend(t *testing.T) {
-	backendEnvironment := backendComposeEnvironment(t)
-
-	value, ok := backendEnvironment[envTrustedProxies]
-	if !ok {
-		t.Fatalf("backend service does not pass %s through; setting it in .env would do nothing", envTrustedProxies)
-	}
-	if want := "${" + envTrustedProxies + ":-}"; value != want {
-		t.Errorf("backend %s = %q, want %q", envTrustedProxies, value, want)
 	}
 }

@@ -295,21 +295,6 @@ func TestLoadOrgRequestDefaults(t *testing.T) {
 	}
 }
 
-// A CA certificate without its key (or the reverse) is a half-done setup, not
-// a request for the ephemeral CA.
-func TestLoadRejectsHalfConfiguredRequesterCA(t *testing.T) {
-	for name, env := range map[string]map[string]string{
-		"cert only": {envOpenID4VPRequesterCACert: "cert"},
-		"key only":  {envOpenID4VPRequesterCAKey: "key"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, err := loadWith(t, env); err == nil {
-				t.Errorf("Load(%v) succeeded, want an error", env)
-			}
-		})
-	}
-}
-
 // TRUSTED_PROXIES takes CIDRs and single addresses; empty trusts none, and a
 // value that is neither stops the boot instead of trusting nothing silently.
 func TestLoadTrustedProxies(t *testing.T) {
@@ -337,5 +322,20 @@ func TestLoadTrustedProxies(t *testing.T) {
 
 	if _, err := loadWith(t, map[string]string{envTrustedProxies: "10.0.0.0/8,ingress-nginx"}); err == nil {
 		t.Error("TRUSTED_PROXIES with a name loaded, want an error")
+	}
+}
+
+// A CA certificate without its key (or the reverse) is a half-done setup, not
+// a request for the ephemeral CA.
+func TestLoadRejectsHalfConfiguredRequesterCA(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"cert only": {envOpenID4VPRequesterCACert: "cert"},
+		"key only":  {envOpenID4VPRequesterCAKey: "key"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := loadWith(t, env); err == nil {
+				t.Errorf("Load(%v) succeeded, want an error", env)
+			}
+		})
 	}
 }

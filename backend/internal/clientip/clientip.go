@@ -16,6 +16,9 @@ import (
 // the request from to.
 const headerForwardedFor = "X-Forwarded-For"
 
+// Trusted is the parsed list of trusted proxies.
+type Trusted = []netip.Prefix
+
 // Resolver finds a request's client address. Its zero value trusts no proxy:
 // every request resolves to its connection's peer.
 type Resolver struct {
