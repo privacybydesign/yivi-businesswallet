@@ -960,6 +960,7 @@ function FaceCheck({
   }, [ready, decided, frameError, verdict, frameTick, mutateAsync, t]);
 
   const total = verdict?.stableFrames ?? stableFrames;
+  const noFace = verdict !== undefined && !verdict.faceDetected;
   return (
     <>
       <h2 className="text-ink text-[18px] font-bold">
@@ -985,26 +986,26 @@ function FaceCheck({
           className="rounded-yivi border-line-strong bg-surface-3 aspect-[4/3] w-full max-w-sm -scale-x-100 border object-cover"
         />
       )}
-      {frameError !== undefined ? (
+      {frameError !== undefined && (
         <Failed
           message={frameError}
           actionLabel={t("customers.onScreen.face.retry")}
           onRestart={() => setFrameError(undefined)}
         />
-      ) : verdict && !verdict.faceDetected ? (
-        <p className="text-warning-fg text-[13px]">
-          {t("customers.onScreen.face.noFace")}
-        </p>
-      ) : (
-        total !== undefined && (
-          <p className="text-ink-soft text-[13px]">
-            {t("customers.onScreen.face.progress", {
-              count: verdict?.consecutive ?? 0,
-              total,
-            })}
-          </p>
-        )
       )}
+      <p
+        role="status"
+        className={`text-[13px] ${noFace ? "text-warning-fg" : "text-ink-soft"}`}
+      >
+        {frameError === undefined &&
+          (noFace
+            ? t("customers.onScreen.face.noFace")
+            : total !== undefined &&
+              t("customers.onScreen.face.progress", {
+                count: verdict?.consecutive ?? 0,
+                total,
+              }))}
+      </p>
     </>
   );
 }
