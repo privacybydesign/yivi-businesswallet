@@ -306,17 +306,21 @@ function StatusBanner({
     <div
       className={`flex flex-wrap items-center gap-4 rounded-lg border px-5 py-4 ${look.box}`}
     >
-      <span aria-hidden="true" className={look.iconClass}>
-        <Icon name={look.icon} size={BANNER_ICON_SIZE} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-ink text-[15px] font-bold">{title}</div>
-        <p className="text-ink-soft mt-0.5 max-w-3xl text-[13px]">{body}</p>
-        {recheck.isError && (
-          <p className="text-error mt-1 text-[12.5px]">
-            {t("attestations.loadError", { message: recheck.error.message })}
-          </p>
-        )}
+      {/* Icon and text wrap as one, wide enough that on a phone the button
+          moves below them instead of squeezing the text. */}
+      <div className="flex min-w-0 grow basis-64 items-center gap-4">
+        <span aria-hidden="true" className={look.iconClass}>
+          <Icon name={look.icon} size={BANNER_ICON_SIZE} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-ink text-[15px] font-bold">{title}</div>
+          <p className="text-ink-soft mt-0.5 max-w-3xl text-[13px]">{body}</p>
+          {recheck.isError && (
+            <p className="text-error mt-1 text-[12.5px]">
+              {t("attestations.loadError", { message: recheck.error.message })}
+            </p>
+          )}
+        </div>
       </div>
       {isAdmin && credential.hasStatusList && (
         <Button
@@ -471,9 +475,14 @@ function HistoryCard({
               <li
                 // The trail is positional; two entries can share a time.
                 key={`${entry.at}-${index}`}
-                className="grid grid-cols-[150px_16px_1fr] items-start gap-3 px-5 py-3.5"
+                // On a phone the time sits above the entry, so the entry
+                // keeps the width.
+                className="grid grid-cols-[16px_1fr] items-start gap-x-3 gap-y-1 px-5 py-3.5 sm:grid-cols-[150px_16px_1fr]"
               >
-                <time dateTime={entry.at} className="text-muted text-[12.5px]">
+                <time
+                  dateTime={entry.at}
+                  className="text-muted col-span-2 text-[12.5px] sm:col-span-1"
+                >
                   {formatWhen(entry.at)}
                 </time>
                 <span
