@@ -41,6 +41,11 @@ const (
 	// engineMaxOpenConns bounds each per-org engine's pool so many orgs don't
 	// exhaust Postgres connections (the per-org-engine isolation trade-off).
 	engineMaxOpenConns = 4
+	// engineConnMaxIdleTime closes a per-org engine's idle connections. Engines
+	// stay cached for the life of the process, and the held status sweep opens
+	// one for every holder org, so without it each would keep its idle
+	// connections open until shutdown.
+	engineConnMaxIdleTime = time.Minute
 	// fsKeyLabel domain-separates the per-org filesystem key derivation.
 	fsKeyLabel = "ybw-eudiholder-fs-key-v1:"
 	// emptyJSONPayload is the not-null default for a credential with no processed
@@ -700,6 +705,7 @@ func (e *Engine) open(ctx context.Context, schema string, key [32]byte) (irmasto
 	}
 	if sqlDB, err := st.Db().DB(); err == nil {
 		sqlDB.SetMaxOpenConns(engineMaxOpenConns)
+		sqlDB.SetConnMaxIdleTime(engineConnMaxIdleTime)
 	}
 	return st, nil
 }
