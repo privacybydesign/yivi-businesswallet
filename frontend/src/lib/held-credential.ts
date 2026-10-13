@@ -258,7 +258,7 @@ export function heldDaysToExpiry(
 // One line of a held credential's history.
 export interface HeldHistoryEntry {
   at: string;
-  kind: "received" | "statusChanged" | "statusChecked" | "removed" | "other";
+  kind: "received" | "statusChanged" | "statusChecked" | "other";
   action: string;
   actor?: string;
   sender?: string;
@@ -321,13 +321,6 @@ export function heldHistory(
           revoked: event.detailHidden
             ? undefined
             : afterField(event, "revoked") === true,
-        };
-      case "attestation.held_deleted":
-        return {
-          at: event.occurredAt,
-          kind: "removed",
-          action: event.action,
-          actor,
         };
       default:
         return {

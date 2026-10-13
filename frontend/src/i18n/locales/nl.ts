@@ -2284,12 +2284,14 @@ export const nl: Translation<typeof en> = {
       line: {
         revoked: "ingetrokken door de uitgever",
         expired: "verlopen {{date}}",
+        expiring_zero: "verloopt vandaag",
         expiring_one: "verloopt over {{count}} dag",
         expiring_other: "verloopt over {{count}} dagen",
       },
       reason: {
         revoked: "Op de statuslijst van de uitgever",
         revokedChecked: "Ingetrokken gezien {{date}}",
+        expired_zero: "Vandaag verlopen",
         expired_one: "{{count}} dag geleden verlopen",
         expired_other: "{{count}} dagen geleden verlopen",
         expiring: "Vernieuwen voor {{date}}",
@@ -2298,7 +2300,7 @@ export const nl: Translation<typeof en> = {
         revoked: "Ingetrokken door de uitgever",
         revokedChecked: "Ingetrokken door de uitgever, gezien {{date}}",
         revokedBody:
-          "De uitgever heeft deze credential op zijn statuslijst gezet. Hij kan niet meer worden getoond: elke verificateur die de statuslijst controleert, weigert hem. Verwijderen uit de wallet maakt de intrekking niet ongedaan.",
+          "De uitgever heeft deze credential op zijn statuslijst gezet. Hij kan niet meer worden getoond: elke verificateur die de statuslijst controleert, weigert hem.",
         expired: "Verlopen op {{date}}",
         expiredBody:
           "De attributen hieronder zijn nog leesbaar, maar verificateurs weigeren hem totdat je een nieuwe van de uitgever ontvangt.",
@@ -2327,7 +2329,6 @@ export const nl: Translation<typeof en> = {
         checkedValid: "niet ingetrokken",
         statusChanged: "Status gewijzigd",
         detailHidden: "details alleen zichtbaar voor beheerders",
-        removed: "Verwijderd",
       },
       checks: {
         signature: "Handtekening geldig",

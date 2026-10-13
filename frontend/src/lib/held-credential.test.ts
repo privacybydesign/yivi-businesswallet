@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import i18next from "i18next";
 import type { HeldAttestation } from "../api/attestations";
 import { HELD_SOURCES } from "../api/attestations";
 import { en } from "../i18n/locales/en";
@@ -347,6 +348,26 @@ describe("the wallet's status chips", () => {
       -34,
     );
     expect(heldDaysToExpiry(held(), NOW)).toBeNull();
+  });
+
+  // heldDaysToExpiry reads 0 on the last day before expiry and on the first day
+  // after it, which the rows word as "today" rather than "in 0 days".
+  it("words zero days as today", async () => {
+    const i18n = i18next.createInstance();
+    await i18n.init({ lng: "en", resources: { en: { translation: en } } });
+    const ahead = heldDaysToExpiry(held({ expiresAt: daysFromNow(0.2) }), NOW);
+    const past = heldDaysToExpiry(held({ expiresAt: daysFromNow(-0.2) }), NOW);
+    expect(
+      i18n.t("attestations.held.line.expiring", { count: ahead ?? 0 }),
+    ).toBe("expires today");
+    expect(
+      i18n.t("attestations.held.reason.expired", {
+        count: Math.abs(past ?? 0),
+      }),
+    ).toBe("Expired today");
+    expect(i18n.t("attestations.held.line.expiring", { count: 1 })).toBe(
+      "expires in 1 day",
+    );
   });
 });
 

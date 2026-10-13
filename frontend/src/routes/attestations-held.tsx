@@ -555,11 +555,6 @@ function historyText(
           ? t("attestations.held.history.checkedRevoked")
           : t("attestations.held.history.checkedValid"),
       };
-    case "removed":
-      return {
-        title: t("attestations.held.history.removed"),
-        detail: entry.actor ?? "",
-      };
     default:
       return { title: entry.action, detail: entry.actor ?? "" };
   }
