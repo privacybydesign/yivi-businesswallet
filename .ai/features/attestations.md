@@ -460,7 +460,12 @@ one representative instance per batch, so `Validities` aggregates the status fac
 batch (revoked if any copy is; last check is the latest).
 
 - Status lists are fetched through a `safehttp` client (`newStatusClient`): https only
-  (http only with `AllowInsecureHTTP`), no redirects, no private addresses.
+  (http only with `AllowInsecureHTTP`), no redirects, no private addresses. Receiving
+  a credential uses the same client, and irmago's status check at receipt is
+  fail-closed: a credential whose status list is on plain http, behind a redirect or
+  on a private address is refused when it arrives.
+- Each per-org engine closes idle connections after `engineConnMaxIdleTime`: the
+  sweep opens an engine for every holder org, and engines stay cached.
 - It runs at boot and then every 6 hours for every org holding a credential
   (`RecheckAllHeld`, `heldStatusRecheckEvery`), and on `POST /held/{id}/recheck`
   (admin). That one re-reads only that credential's list (`Engine.RefreshStatus`
