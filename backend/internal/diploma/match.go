@@ -37,8 +37,9 @@ type Result struct {
 // MatchFullName compares a holder whose name is printed as a single line, the
 // way DUO prints it on a diploma extract ("Anna Maria van der Berg"), with the
 // disclosed person. The disclosed surname (with its prefix, if disclosed, in
-// either order) must be the tail of the printed name; what precedes it are the
-// given names, which givenNamesMatch compares. When the surname is not found
+// either order) must be the tail of the printed name, not preceded by a surname
+// prefix the disclosed name lacks; what precedes it are the given names, which
+// givenNamesMatch compares. When the surname is not found
 // the first printed word is still compared with the first disclosed given name
 // so the reasons stay informative.
 func MatchFullName(fullName, dateOfBirth string, disclosed Person) Result {
@@ -46,14 +47,16 @@ func MatchFullName(fullName, dateOfBirth string, disclosed Person) Result {
 	result.DateOfBirthMatch = compareDatesOfBirth(dateOfBirth, disclosed.DateOfBirth, &result.Reasons)
 
 	tokens, wordStarts := printedTokens(fullName)
+	disclosedGiven := nameTokens(disclosed.GivenNames)
 	given := tokens
 	for _, surname := range surnameTails(disclosed) {
 		if len(surname) == 0 || len(surname) >= len(tokens) || !wordStarts[len(tokens)-len(surname)] {
 			continue
 		}
-		if equalTokens(tokens[len(tokens)-len(surname):], surname) {
+		rest := tokens[:len(tokens)-len(surname)]
+		if equalTokens(tokens[len(tokens)-len(surname):], surname) && !endsInSurnamePrefix(rest, disclosedGiven) {
 			result.SurnameMatch = true
-			given = tokens[:len(tokens)-len(surname)]
+			given = rest
 			break
 		}
 	}
@@ -64,7 +67,7 @@ func MatchFullName(fullName, dateOfBirth string, disclosed Person) Result {
 		}
 	}
 
-	result.GivenNamesMatch = givenNamesMatch(given, nameTokens(disclosed.GivenNames))
+	result.GivenNamesMatch = givenNamesMatch(given, disclosedGiven)
 	if !result.GivenNamesMatch {
 		result.Reasons = append(result.Reasons, "given names differ")
 	}
@@ -83,6 +86,30 @@ func printedTokens(fullName string) ([]nameToken, map[int]bool) {
 		tokens = append(tokens, nameTokens(word)...)
 	}
 	return tokens, wordStarts
+}
+
+// endsInSurnamePrefix reports whether the printed words before a surname end
+// in surname prefix words past the disclosed given names: printed "Anna van der
+// Berg" is not the "Berg" of someone disclosed without a prefix, whose "Anna"
+// would otherwise match "Anna van der" as given names.
+func endsInSurnamePrefix(printedGiven, disclosedGiven []nameToken) bool {
+	end := len(printedGiven)
+	for end > len(disclosedGiven) && surnamePrefixWords[printedGiven[end-1].plain] {
+		end--
+	}
+	return end < len(printedGiven)
+}
+
+// surnamePrefixWords are the words of common surname prefixes (tussenvoegsels),
+// Dutch and foreign, as nameToken.plain spells them ("'t" is T). A prefix
+// missing here only leaves its name matched as loosely as before.
+var surnamePrefixWords = map[string]bool{
+	"VAN": true, "DE": true, "DER": true, "DEN": true, "HET": true, "T": true,
+	"TE": true, "TEN": true, "TER": true, "IN": true, "OP": true, "AAN": true,
+	"BIJ": true, "UIT": true, "VOOR": true, "ONDER": true, "OVER": true,
+	"LA": true, "LE": true, "DU": true, "DES": true, "DA": true, "DI": true,
+	"DEL": true, "DOS": true, "DAS": true, "VON": true, "VOM": true, "ZU": true,
+	"ZUM": true, "ZUR": true, "S": true, "D": true, "L": true,
 }
 
 // compareDatesOfBirth parses both dates and reports whether they are equal,
