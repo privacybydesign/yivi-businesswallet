@@ -2293,6 +2293,7 @@ export const en = {
       confirmDelete: "Remove credential “{{name}}”?",
       viewDetail: "View {{name}} details",
       search: "Search by name, type or issuer…",
+      reset: "Reset",
       fields: {
         validUntil: "Valid until",
         issuer: "Issued by",
@@ -2312,6 +2313,8 @@ export const en = {
       filters: {
         all: "All",
         status: "Status",
+        source: "Received via",
+        allSources: "All sources",
       },
       sources: {
         qerds: "QERDS",

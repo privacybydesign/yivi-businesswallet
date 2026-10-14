@@ -495,13 +495,14 @@ included (`hideHeldHistoryDetail`). Disclosures are not in it: presentations are
 audited on the transaction and deliberately never name the credential or claims (see
 §12), so "Disclosed to …" from the design is not shown.
 
-**Wallet view.** Status chips with counts, "Needs attention" rows (revoked, expired,
-expiring soon, worst first) with the reason, "Valid" cards; the detail page has a status
-banner (Re-check status), attributes, history, provenance, checks and a client-side
-"Export as JSON" of what the page shows (not the signed credential). Not built from the
-design: "Request a new credential" / "Request renewal" / "Contact issuer" (no renewal
-channel to an issuer yet) and the revocation reason and date (a status list carries a
-bit, not a reason).
+**Wallet view.** Status chips with counts and the "Received via" source filter,
+"Needs attention" rows (revoked, expired, expiring soon, worst first) with the reason,
+"Valid" cards; an admin removes a credential from its row or card, or from its page. The
+detail page has a status banner (Re-check status), attributes, history, provenance,
+checks and a client-side "Export as JSON" of what the page shows (not the signed
+credential). Not built from the design: "Request a new credential" / "Request renewal" /
+"Contact issuer" (no renewal channel to an issuer yet) and the revocation reason and date
+(a status list carries a bit, not a reason).
 
 ### 6.6 `org_onboarding_attestations` — the onboarding auto-issue set
 

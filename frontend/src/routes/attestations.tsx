@@ -9,6 +9,7 @@ import type {
   HeldAttestation,
   IssuedAttestation,
 } from "../api/attestations";
+import { HELD_SOURCES } from "../api/attestations";
 import {
   useAcceptCredentialOfferMutation,
   useAttestationKeysQuery,
@@ -19,6 +20,7 @@ import {
   useDeclineCredentialOfferMutation,
   useDeleteAttestationSchemaMutation,
   useDeleteAttestationTemplateMutation,
+  useDeleteHeldAttestationMutation,
   useHeldAttestationsQuery,
   useIssuedAttestationsQuery,
   useRevokeIssuedAttestationMutation,
@@ -27,9 +29,14 @@ import { useOrganizationQuery } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { credentialDisplayName } from "../lib/credential-display";
 import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
-import type { HeldStatus, HeldStatusFilter } from "../lib/held-credential";
+import type {
+  HeldSourceFilter,
+  HeldStatus,
+  HeldStatusFilter,
+} from "../lib/held-credential";
 import {
   HELD_CHIP_FILTERS,
+  HELD_SOURCE_FILTERS,
   HELD_STATUS_FILTERS,
   HELD_STATUS_TONES,
   heldDaysToExpiry,
@@ -234,6 +241,7 @@ export default function Attestations(): React.JSX.Element {
                   rows={held.data ?? []}
                   pending={held.isPending}
                   error={held.error}
+                  isAdmin={isAdmin}
                   formatWhen={formatWhen}
                 />
               </>
@@ -554,6 +562,10 @@ function IssuedTab({
   );
 }
 
+// Toolbar control: the source filter dropdown shares the app's form-control styling.
+const FILTER_SELECT_CLASS =
+  "rounded-yivi border-line-strong bg-surface text-ink h-9 border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
+
 // The credential offers waiting on the organization. An offer that arrived over
 // QERDS is not in the wallet yet — accepting is what redeems it, declining leaves
 // it unredeemed for good. Renders nothing when there is nothing to decide, so the
@@ -687,30 +699,42 @@ function readHeldStatusFilter(params: URLSearchParams): HeldStatusFilter {
   return raw && HELD_STATUS_FILTERS.includes(raw) ? raw : "";
 }
 
+function readHeldSourceFilter(params: URLSearchParams): HeldSourceFilter {
+  const raw = params.get("source") as HeldSourceFilter | null;
+  return raw && HELD_SOURCE_FILTERS.includes(raw) ? raw : "";
+}
+
 // The credentials the organization holds, split into what needs attention
 // (revoked, expired or expiring soon: rows that say why) and what is valid
-// (cards). A credential opens its detail page, where it is also removed. The
-// search term and the status chip live in the URL alongside ?tab=held so the
-// view survives a refresh and can be shared.
+// (cards). A credential opens its detail page; an admin can also remove it from
+// here. The search term, the status chip and the source filter live in the URL
+// alongside ?tab=held so the view survives a refresh and can be shared.
 function HeldTab({
   slug,
   rows,
   pending,
   error,
+  isAdmin,
   formatWhen,
 }: {
   slug: string;
   rows: HeldAttestation[];
   pending: boolean;
   error: Error | null;
+  isAdmin: boolean;
   formatWhen: (iso: string) => string;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const formatDate = useDateFormatter();
+  const remove = useDeleteHeldAttestationMutation(slug);
+  const [pendingDelete, setPendingDelete] = useState<HeldAttestation | null>(
+    null,
+  );
 
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q")?.trim() ?? "";
   const status = readHeldStatusFilter(searchParams);
+  const source = readHeldSourceFilter(searchParams);
 
   const [searchInput, setSearchInput] = useState(
     () => searchParams.get("q") ?? "",
@@ -735,11 +759,20 @@ function HeldTab({
     );
   }, [debouncedSearch, query, setSearchParams]);
 
-  const setStatus = (value: string): void => {
+  const setFilter = (key: "status" | "source", value: string): void => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (value) next.set("status", value);
-      else next.delete("status");
+      if (value) next.set(key, value);
+      else next.delete(key);
+      return next;
+    });
+  };
+
+  const resetView = (): void => {
+    setSearchInput("");
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      for (const key of ["q", "status", "source"]) next.delete(key);
       return next;
     });
   };
@@ -772,8 +805,9 @@ function HeldTab({
   // with the section the same credential was sorted into.
   const now = new Date();
   const counts = heldStatusCounts(rows, now);
-  const sections = heldSections(rows, { query, status }, now);
+  const sections = heldSections(rows, { query, status, source }, now);
   const shown = sections.attention.length + sections.valid.length;
+  const filtered = query !== "" || status !== "" || source !== "";
 
   return (
     <div className="flex flex-col gap-6">
@@ -799,7 +833,7 @@ function HeldTab({
                 key={key || "all"}
                 type="button"
                 aria-pressed={active}
-                onClick={() => setStatus(key)}
+                onClick={() => setFilter("status", key)}
                 className={[
                   "h-8 rounded-full border px-3 text-[12.5px] font-semibold transition-colors",
                   active
@@ -818,6 +852,24 @@ function HeldTab({
             );
           })}
         </div>
+        <select
+          className={FILTER_SELECT_CLASS}
+          value={source}
+          aria-label={t("attestations.held.filters.source")}
+          onChange={(event) => setFilter("source", event.target.value)}
+        >
+          <option value="">{t("attestations.held.filters.allSources")}</option>
+          {HELD_SOURCES.map((value) => (
+            <option key={value} value={value}>
+              {heldSourceLabel(value, t)}
+            </option>
+          ))}
+        </select>
+        {filtered && (
+          <Button variant="ghost" size="sm" onClick={resetView}>
+            {t("attestations.held.reset")}
+          </Button>
+        )}
         <span className="text-muted ml-auto text-[12.5px]">
           {t("attestations.held.shown", { shown, count: rows.length })}
         </span>
@@ -848,7 +900,9 @@ function HeldTab({
                       credential={credential}
                       status={rowStatus}
                       now={now}
+                      isAdmin={isAdmin}
                       formatDate={formatDate}
+                      onDelete={() => setPendingDelete(credential)}
                     />
                   ),
                 )}
@@ -866,14 +920,34 @@ function HeldTab({
                     key={credential.id}
                     slug={slug}
                     credential={credential}
+                    isAdmin={isAdmin}
                     formatWhen={formatWhen}
                     formatDate={formatDate}
+                    onDelete={() => setPendingDelete(credential)}
                   />
                 ))}
               </div>
             </HeldSection>
           )}
         </>
+      )}
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title={t("attestations.held.delete")}
+          message={t("attestations.held.confirmDelete", {
+            name:
+              pendingDelete.displayName ||
+              credentialDisplayName(pendingDelete.vct),
+          })}
+          confirmLabel={t("attestations.held.delete")}
+          busy={remove.isPending}
+          onConfirm={() => {
+            remove.mutate({ heldId: pendingDelete.id });
+            setPendingDelete(null);
+          }}
+          onClose={() => setPendingDelete(null)}
+        />
       )}
     </div>
   );
@@ -932,19 +1006,25 @@ const ATTENTION_ICON_SIZE = 18;
 const OPEN_ICON_SIZE = 22;
 
 // A credential that needs attention, as a row that says why: revoked by its
-// issuer, expired so many days ago, or to be renewed before a date.
+// issuer, expired so many days ago, or to be renewed before a date. The whole
+// row is the link to its detail page (an overlay stretched over it), so an
+// admin's Remove sits above that overlay to stay clickable in its own right.
 function AttentionRow({
   slug,
   credential,
   status,
   now,
+  isAdmin,
   formatDate,
+  onDelete,
 }: {
   slug: string;
   credential: HeldAttestation;
   status: Exclude<HeldStatus, "valid">;
   now: Date;
+  isAdmin: boolean;
   formatDate: (iso: string) => string;
+  onDelete: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const name = credential.displayName || credentialDisplayName(credential.vct);
@@ -969,11 +1049,14 @@ function AttentionRow({
         : t("attestations.held.reason.expiring", { date: expiry });
 
   return (
-    <Link
-      to={`/${slug}/attestations/held/${credential.id}`}
-      aria-label={t("attestations.held.viewDetail", { name })}
-      className={`focus-visible:ring-ink/10 grid grid-cols-[4px_1fr] overflow-hidden rounded-lg border transition-shadow outline-none hover:shadow-md focus-visible:ring-3 ${look.row}`}
+    <div
+      className={`focus-within:ring-ink/10 relative grid grid-cols-[4px_minmax(0,1fr)] overflow-hidden rounded-lg border transition-shadow focus-within:ring-3 hover:shadow-md ${look.row}`}
     >
+      <Link
+        to={`/${slug}/attestations/held/${credential.id}`}
+        aria-label={t("attestations.held.viewDetail", { name })}
+        className="absolute inset-0 outline-none"
+      />
       <span aria-hidden="true" className={look.stripe} />
       <div className="flex items-center gap-4 px-5 py-4">
         <span
@@ -989,35 +1072,50 @@ function AttentionRow({
               {heldStatusLabel(status, t)}
             </Tag>
           </div>
-          <div className="text-muted mt-0.5 truncate text-[12.5px]">
+          <div className="text-muted mt-0.5 text-[12.5px] sm:truncate">
             {credential.issuerName || credential.issuer} · {statusLine}
           </div>
         </div>
         <span className="text-muted hidden max-w-60 text-right text-[12.5px] sm:block">
           {reason}
         </span>
-        <span aria-hidden="true" className="text-muted">
+        {isAdmin && (
+          <Button
+            variant="dangerGhost"
+            size="sm"
+            className="relative z-10 shrink-0"
+            onClick={onDelete}
+          >
+            {t("attestations.held.delete")}
+          </Button>
+        )}
+        <span aria-hidden="true" className="text-muted shrink-0">
           <Icon name="chevron_right" size={OPEN_ICON_SIZE} />
         </span>
       </div>
-    </Link>
+    </div>
   );
 }
 
 const VALID_ICON_SIZE = 18;
 
 // A valid credential as a card: what it is, from whom, until when, and how it
-// arrived. The whole card opens its detail page.
+// arrived. Like AttentionRow, the whole card opens its detail page through an
+// overlay, and an admin's Remove sits above it.
 function ValidCard({
   slug,
   credential,
+  isAdmin,
   formatWhen,
   formatDate,
+  onDelete,
 }: {
   slug: string;
   credential: HeldAttestation;
+  isAdmin: boolean;
   formatWhen: (iso: string) => string;
   formatDate: (iso: string) => string;
+  onDelete: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const name = credential.displayName || credentialDisplayName(credential.vct);
@@ -1025,11 +1123,12 @@ function ValidCard({
     heldExpiryAt(credential) === null ? undefined : credential.expiresAt;
 
   return (
-    <Link
-      to={`/${slug}/attestations/held/${credential.id}`}
-      aria-label={t("attestations.held.viewDetail", { name })}
-      className="rounded-yivi border-line bg-surface shadow-card hover:border-line-strong focus-visible:ring-ink/10 flex flex-col gap-3.5 border p-[18px] transition-shadow outline-none hover:shadow-md focus-visible:ring-3"
-    >
+    <div className="rounded-yivi border-line bg-surface shadow-card hover:border-line-strong focus-within:ring-ink/10 relative flex flex-col gap-3.5 border p-[18px] transition-shadow focus-within:ring-3 hover:shadow-md">
+      <Link
+        to={`/${slug}/attestations/held/${credential.id}`}
+        aria-label={t("attestations.held.viewDetail", { name })}
+        className="rounded-yivi absolute inset-0 outline-none"
+      />
       <div className="flex items-start gap-3">
         {credential.logoUri ? (
           <img
@@ -1075,7 +1174,19 @@ function ValidCard({
           <Tag>{heldSourceLabel(credential.source, t)}</Tag>
         </dd>
       </dl>
-    </Link>
+      {isAdmin && (
+        <div className="mt-auto flex justify-end">
+          <Button
+            variant="dangerGhost"
+            size="sm"
+            className="relative z-10"
+            onClick={onDelete}
+          >
+            {t("attestations.held.delete")}
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 

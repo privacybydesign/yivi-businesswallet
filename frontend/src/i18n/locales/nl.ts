@@ -2348,6 +2348,7 @@ export const nl: Translation<typeof en> = {
       confirmDelete: "Credential “{{name}}” verwijderen?",
       viewDetail: "Details van {{name}} bekijken",
       search: "Zoek op naam, type of uitgever…",
+      reset: "Herstellen",
       fields: {
         validUntil: "Geldig tot",
         issuer: "Uitgegeven door",
@@ -2367,6 +2368,8 @@ export const nl: Translation<typeof en> = {
       filters: {
         all: "Alle",
         status: "Status",
+        source: "Ontvangen via",
+        allSources: "Alle bronnen",
       },
       sources: {
         qerds: "QERDS",
