@@ -441,7 +441,9 @@ post-review outcome stay the system's.
   `DELETE /proofing/sessions/{id}` erases it in the engine and clears its personal data
   (subject name and address, proofed name, the subject in its audit events;
   `purged_at`, audited `session_purged`, webhook `session.purged`); the row
-  stays readable with `purgedAt` and its outcome.
+  stays readable with `purgedAt` and its outcome. A CHECK
+  (`identity_proofing_requests_purged_check`) refuses any write that puts
+  personal data back on a purged row.
   `GET /proofing/sessions/{id}/result` (scope `results:read`) reads a settled
   session's identity and evidence from the engine on each call (`SessionIdentity`
   decodes only name, birth date, nationality, the checks and the `photo` and
