@@ -230,6 +230,11 @@ const (
 	IdentityProofingFlowDiplomasConfigured = "identity_proofing.flow_diplomas_configured"
 	IdentityProofingDiplomaAdded           = "identity_proofing.diploma_added"
 	IdentityProofingDiplomaRejected        = "identity_proofing.diploma_rejected"
+
+	// whether a flow asks for the subject's postal address, and the address a
+	// subject entered (never its content)
+	IdentityProofingFlowAddressConfigured = "identity_proofing.flow_address_configured"
+	IdentityProofingAddressAdded          = "identity_proofing.address_added"
 )
 
 const (

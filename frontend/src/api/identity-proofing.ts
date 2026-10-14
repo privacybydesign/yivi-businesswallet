@@ -30,6 +30,25 @@ export const DIPLOMA_MODES = ["off", "required"] as const;
 // than silently skipping a step the backend enforces.
 const diplomaModeSchema = z.enum(DIPLOMA_MODES).catch("required");
 
+// Whether a flow has the address step: once their identity is approved, its
+// subject enters their postal address. It is what they declare, not read off
+// a document.
+export const ADDRESS_MODES = ["off", "required"] as const;
+// An unknown mode reads as required, as diplomaModeSchema.
+const addressModeSchema = z.enum(ADDRESS_MODES).catch("required");
+export type AddressMode = z.infer<typeof addressModeSchema>;
+
+// The postal address a subject entered.
+const proofingAddressSchema = z.object({
+  street: z.string(),
+  houseNumber: z.string(),
+  postalCode: z.string(),
+  city: z.string(),
+  country: z.string(),
+});
+
+export type ProofingAddress = z.infer<typeof proofingAddressSchema>;
+
 // What a flow's sessions are for: an identity check, or a customer's subject
 // asking for the data held of them ("see my data") or for its erasure
 // ("delete my data"). A data request goes to review once the person is
@@ -113,6 +132,8 @@ const proofingFlowSchema = z.object({
   // list carries it.
   diplomaMode: diplomaModeSchema.optional(),
   // Absent on a single version, as diplomaMode.
+  addressMode: addressModeSchema.optional(),
+  // Absent on a single version, as diplomaMode.
   kind: flowKindSchema.optional(),
 });
 
@@ -150,6 +171,12 @@ const proofingRequestSchema = z.object({
   diplomaMode: diplomaModeSchema,
   diplomas: z.array(proofingDiplomaSchema),
   diplomasUntil: z.string().optional(),
+  // Whether the session asks for the postal address, the one entered, and
+  // until when the subject can enter it (absent until approved, and once
+  // entered).
+  addressMode: addressModeSchema,
+  address: proofingAddressSchema.optional(),
+  addressUntil: z.string().optional(),
   // A request for one known person: only subjectName, born on the date it
   // was sent with, is approved (IDENTITY_MISMATCH otherwise).
   expectedSubject: z.boolean(),
@@ -576,6 +603,24 @@ export function saveProofingFlowDiplomas(
     body: { diplomaMode },
     signal,
   }).then((r) => r.diplomaMode);
+}
+
+const proofingFlowAddressSchema = z.object({
+  addressMode: addressModeSchema,
+});
+
+export function saveProofingFlowAddress(
+  slug: string,
+  flowId: string,
+  addressMode: AddressMode,
+  signal?: AbortSignal,
+): Promise<AddressMode> {
+  return request(`${flowBase(slug, flowId)}/address`, {
+    schema: proofingFlowAddressSchema,
+    method: "PUT",
+    body: { addressMode },
+    signal,
+  }).then((r) => r.addressMode);
 }
 
 const proofingFlowKindSchema = z.object({ kind: flowKindSchema });
@@ -1097,6 +1142,9 @@ export interface ProofingProgress {
   // sessions an approved erasure kept.
   dataExportUntil?: string;
   dataMatchesKept?: number;
+  // Until when the subject can enter their address, once approved and while
+  // they have not.
+  addressUntil?: string;
 }
 
 export function startProofingYivi(
@@ -1210,6 +1258,10 @@ const hostedProgressSchema = z.object({
   started: z.boolean(),
   // Until when the subject can add a diploma extract; absent while they cannot.
   diplomasUntil: z.string().optional(),
+  // Until when the subject can enter their address; absent while they cannot,
+  // and once they did (addressGiven).
+  addressUntil: z.string().optional(),
+  addressGiven: z.boolean(),
   // Until when an approved "see my data" request's data downloads.
   dataExportUntil: z.string().optional(),
   // How many sessions an approved erasure kept, not deleted.
@@ -1258,6 +1310,7 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     requestedAttributes: z.array(z.string()),
     yiviAvailable: z.boolean(),
     diplomaMode: diplomaModeSchema,
+    addressMode: addressModeSchema,
     kind: flowKindSchema,
     // The most days the session's data is kept, as the page tells the subject.
     retentionDays: z.number(),
@@ -1353,6 +1406,21 @@ export function uploadProofingDiplomas(
     method: "POST",
     body: form,
     timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,
+    signal,
+  });
+}
+
+// Keeps the postal address entered on a verify page, after an approved
+// identity; the backend answers 204.
+export async function submitProofingAddress(
+  target: VerifyTarget,
+  address: ProofingAddress,
+  signal?: AbortSignal,
+): Promise<void> {
+  await request(`${verifyPath(target)}/address`, {
+    schema: z.unknown(),
+    method: "POST",
+    body: address,
     signal,
   });
 }

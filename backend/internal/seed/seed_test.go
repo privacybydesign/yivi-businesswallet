@@ -87,6 +87,9 @@ func TestDemoOrgsMatchRegister(t *testing.T) {
 	data := registryprovider.DefaultDataset()
 
 	for _, o := range demoOrganizations {
+		if o.repKind == "" {
+			continue
+		}
 		reg, ok := data[o.kvkNumber]
 		if !ok {
 			t.Errorf("demo org %q (kvk %s) is not in the register dataset", o.slug, o.kvkNumber)

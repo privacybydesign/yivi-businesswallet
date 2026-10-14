@@ -311,7 +311,10 @@ function FlowSummary({ flow }: { flow: ProofingFlow }): React.JSX.Element {
   const steps = flow.steps.map((step) =>
     isProofingStep(step) ? t(`identityProofingFlows.steps.${step}`) : step,
   );
-  // The wallet's own step, after the app's: uploaded in the browser.
+  // The wallet's own steps, after the app's: given in the browser.
+  if (flow.addressMode === "required") {
+    steps.push(t("identityProofingFlows.steps.address"));
+  }
   if (flow.diplomaMode === "required") {
     steps.push(t("identityProofingFlows.steps.diploma_upload"));
   }

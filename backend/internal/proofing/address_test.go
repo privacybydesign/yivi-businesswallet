@@ -1,0 +1,117 @@
+package proofing
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type fakeFlowAddresses struct{ modes map[string]AddressMode }
+
+func (f *fakeFlowAddresses) Get(_ context.Context, _ uuid.UUID, flowID string) (AddressMode, error) {
+	if mode, ok := f.modes[flowID]; ok {
+		return mode, nil
+	}
+	return AddressOff, nil
+}
+
+func (f *fakeFlowAddresses) All(context.Context, uuid.UUID) (map[string]AddressMode, error) {
+	return f.modes, nil
+}
+
+func (f *fakeFlowAddresses) Save(_ context.Context, _ uuid.UUID, flowID string, mode AddressMode) (AddressMode, error) {
+	f.modes[flowID] = mode
+	return mode, nil
+}
+
+var testAddress = Address{Street: "Kerkstraat", HouseNumber: "12a", PostalCode: "6511 AB", City: "Nijmegen", Country: "Nederland"}
+
+// newAddressFixture is a provisioned fixture whose appFlow asks for the
+// address as mode says.
+func newAddressFixture(mode AddressMode) fixture {
+	f := newFixture()
+	f.svc.flowAddressSettings = &fakeFlowAddresses{modes: map[string]AddressMode{appFlow.ID: mode}}
+	return f
+}
+
+// sendApprovedAddress sends appFlow on screen and has IPS approve it
+// completedAgo ago.
+func sendApprovedAddress(t *testing.T, f fixture, completedAgo time.Duration) Request {
+	t.Helper()
+	if _, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
+		NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID, Channel: ChannelOnScreen}); err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	completed := time.Now().Add(-completedAgo)
+	f.requests.stored.Status, f.requests.stored.CompletedAt = StatusApproved, &completed
+	return *f.requests.stored
+}
+
+func TestAddressFlowIsNotMailed(t *testing.T) {
+	f := newAddressFixture(AddressRequired)
+	_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
+		NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID})
+	if !errors.Is(err, ErrAddressNeedsPage) {
+		t.Fatalf("CreateRequest by mail = %v, want ErrAddressNeedsPage", err)
+	}
+	if len(f.ips.sessions) != 0 {
+		t.Errorf("sessions created = %d, want none", len(f.ips.sessions))
+	}
+}
+
+func TestAddressModeKeptOnRequest(t *testing.T) {
+	f := newAddressFixture(AddressRequired)
+	sendApprovedAddress(t, f, 0)
+	if got := f.requests.created[0].Address; got != AddressRequired {
+		t.Errorf("stored address mode = %q, want required", got)
+	}
+}
+
+func TestAddAddressTrimsAndKeeps(t *testing.T) {
+	f := newAddressFixture(AddressRequired)
+	req := sendApprovedAddress(t, f, time.Minute)
+	in := testAddress
+	in.Street = "  Kerkstraat "
+	got, err := f.svc.AddAddress(context.Background(), testOrg.ID, req.ID, nil, in)
+	if err != nil {
+		t.Fatalf("AddAddress: %v", err)
+	}
+	if *got.SubjectAddress != testAddress || *f.requests.stored.SubjectAddress != testAddress {
+		t.Errorf("address = %+v, stored %+v; want %+v", *got.SubjectAddress, *f.requests.stored.SubjectAddress, testAddress)
+	}
+}
+
+func TestAddAddressRefused(t *testing.T) {
+	cases := []struct {
+		name         string
+		mode         AddressMode
+		status       Status
+		completedAgo time.Duration
+		given        bool
+		address      Address
+		want         error
+	}{
+		{"flow asks none", AddressOff, StatusApproved, 0, false, testAddress, ErrAddressNotAsked},
+		{"identity rejected", AddressRequired, StatusRejected, 0, false, testAddress, ErrAddressClosed},
+		{"window passed", AddressRequired, StatusApproved, AddressWindow + time.Minute, false, testAddress, ErrAddressClosed},
+		{"entered already", AddressRequired, StatusApproved, 0, true, testAddress, ErrAddressClosed},
+		{"city missing", AddressRequired, StatusApproved, 0, false, Address{Street: "Kerkstraat", HouseNumber: "1", PostalCode: "1234 AB", Country: "NL"}, ErrInvalidInput},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newAddressFixture(tc.mode)
+			sendApprovedAddress(t, f, tc.completedAgo)
+			f.requests.stored.Status = tc.status
+			if tc.given {
+				given := testAddress
+				f.requests.stored.SubjectAddress = &given
+			}
+			if _, err := f.svc.AddAddress(context.Background(), testOrg.ID, f.requests.stored.ID, nil, tc.address); !errors.Is(err, tc.want) {
+				t.Errorf("AddAddress = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}

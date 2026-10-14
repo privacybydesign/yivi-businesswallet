@@ -102,14 +102,16 @@ type dataExportSessionResponse struct {
 	PurgeAt  *time.Time `json:"purgeAt,omitempty"`
 	PurgedAt *time.Time `json:"purgedAt,omitempty"`
 	// Match is how the session was matched to the requester. Only a strong
-	// match carries Identity and Diplomas: another may be someone else's
-	// session.
+	// match carries Identity, Diplomas and Address: another may be someone
+	// else's session.
 	Match MatchLevel `json:"match"`
 	// Contact is the name and address the customer gave for the person, only
 	// when the session was approved for that person (DataExportSession.Addressed).
 	Contact  *dataExportContact  `json:"contact,omitempty"`
 	Identity *dataExportIdentity `json:"identity,omitempty"`
 	Diplomas []diplomaResponse   `json:"diplomas"`
+	// Address is the postal address the person entered.
+	Address *Address `json:"address,omitempty"`
 }
 
 type dataExportContact struct {
@@ -170,6 +172,9 @@ func writeDataExport(w http.ResponseWriter, r *http.Request, export DataExport, 
 			Method: string(req.Method), AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel,
 			CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt, PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt,
 			Diplomas: newDiplomaResponses(s.Diplomas), Match: s.Level,
+		}
+		if s.Personal {
+			session.Address = req.SubjectAddress
 		}
 		if s.Addressed {
 			session.Contact = &dataExportContact{Name: req.SubjectName, Email: req.SubjectEmail}

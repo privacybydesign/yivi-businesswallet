@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import { ApiError } from "../api/http";
 import { isDataRequest } from "../api/identity-proofing";
 import type {
+  AddressMode,
   DiplomaMode,
   FlowKind,
   ProofingChannel,
@@ -680,45 +681,67 @@ export function dataRequestRefusal(
 }
 
 // The stages a verify page's stepper shows: what is collected, the app (when
-// the subject has a choice), its session, and the diploma upload (when the
-// flow has that step).
-export type VerifyStage = "overview" | "method" | "session" | "diplomas";
+// the subject has a choice), its session, then the address and the diploma
+// upload (when the flow has those steps).
+export type VerifyStage =
+  | "overview"
+  | "method"
+  | "session"
+  | "address"
+  | "diplomas";
 
 export function verifyStages({
   appChoice,
+  address = false,
   diplomas,
 }: {
   appChoice: boolean;
+  address?: boolean;
   diplomas: boolean;
 }): VerifyStage[] {
   return [
     "overview",
     ...(appChoice ? (["method"] as const) : []),
     "session",
+    ...(address ? (["address"] as const) : []),
     ...(diplomas ? (["diplomas"] as const) : []),
   ];
 }
 
-// What a verify page's running session shows: the diploma step once an
-// approved session asks for extracts and the subject is not done adding them,
-// else the outcome once settled, the expiry once an unstarted session's link
-// ran out, or the session itself.
-export type SessionView = "diplomas" | "outcome" | "expired" | "running";
+// What a verify page's running session shows: once an approved session asks
+// for them, the address step and then the diploma step until the subject is
+// done with each, else the outcome once settled, the expiry once an unstarted
+// session's link ran out, or the session itself.
+export type SessionView =
+  | "address"
+  | "diplomas"
+  | "outcome"
+  | "expired"
+  | "running";
 
 export function sessionView({
   status,
+  addressMode,
+  addressUntil,
+  addressDone,
   diplomaMode,
   diplomasUntil,
   diplomasDone,
   secondsLeft,
 }: {
   status: string;
+  addressMode: AddressMode;
+  addressUntil: string | undefined;
+  addressDone: boolean;
   diplomaMode: DiplomaMode;
   diplomasUntil: string | undefined;
   diplomasDone: boolean;
   secondsLeft: number;
 }): SessionView {
   if (!isProofingLive(status)) {
+    if (addressMode !== "off" && addressUntil !== undefined && !addressDone) {
+      return "address";
+    }
     return diplomaMode !== "off" && diplomasUntil !== undefined && !diplomasDone
       ? "diplomas"
       : "outcome";
@@ -726,13 +749,16 @@ export function sessionView({
   return secondsLeft === 0 && status === "pending" ? "expired" : "running";
 }
 
-// Whether a request on flow can be mailed (proofing.ErrDiplomasNeedPage): a
-// flow that asks for diplomas has them uploaded on the page that runs the
-// session. No flow picked yet is mailable.
+// Whether a request on flow can be mailed (proofing.ErrDiplomasNeedPage,
+// ErrAddressNeedsPage): a flow that asks for diplomas or the address has them
+// given on the page that runs the session. No flow picked yet is mailable.
 export function sendableByMail(
-  flow: { diplomaMode?: DiplomaMode } | undefined,
+  flow: { diplomaMode?: DiplomaMode; addressMode?: AddressMode } | undefined,
 ): boolean {
-  return (flow?.diplomaMode ?? "off") === "off";
+  return (
+    (flow?.diplomaMode ?? "off") === "off" &&
+    (flow?.addressMode ?? "off") === "off"
+  );
 }
 
 // The document data a flow releases: the holder's name and date of birth.
@@ -838,6 +864,12 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.diplomasClosed");
     case "diplomas_not_asked":
       return t("identityProofing.errors.diplomasNotAsked");
+    case "address_needs_page":
+      return t("identityProofing.errors.addressNeedsPage");
+    case "address_closed":
+      return t("identityProofing.errors.addressClosed");
+    case "address_not_asked":
+      return t("identityProofing.errors.addressNotAsked");
     case "flow_no_identity":
       return t("identityProofing.errors.flowNoIdentity");
     case "data_flow_for_member":
@@ -1231,14 +1263,15 @@ export function sessionEventDetail(
 }
 
 // What the send form does with its fields: the flow it sends (a pick no longer
-// sendable falls back to the default), how (a flow that asks for diplomas
-// cannot be mailed, so it runs on screen), whether it checks for one person (a
+// sendable falls back to the default), how (a flow that asks for diplomas or
+// the address cannot be mailed, so it runs on screen), whether it checks for one person (a
 // flow reading name and date of birth, given a date of birth), and which
 // fields still block it.
 export function sendFormDecision<
   F extends {
     id: string;
     diplomaMode?: DiplomaMode;
+    addressMode?: AddressMode;
     requestedAttributes?: string[];
   },
 >(input: {

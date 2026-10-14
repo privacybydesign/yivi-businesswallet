@@ -11,8 +11,11 @@ import {
   useStartProofingYiviMutation,
   useSubmitFaceFrameMutation,
   useUploadDiplomasMutation,
+  useSubmitAddressMutation,
 } from "../api/identity-proofing.queries";
 import type {
+  AddressMode,
+  ProofingAddress,
   DiplomaMode,
   DiplomaVerdict,
   ProofingCustomer,
@@ -39,13 +42,14 @@ import {
 import type { RequestedAttribute } from "../lib/identity-proofing";
 import { useDateFormatter } from "../lib/format-when";
 import { yiviUniversalLink } from "../lib/yivi-universal-link";
-import { Button, DataDisclosure, Icon, Outcome } from "../ui";
+import { Button, DataDisclosure, Icon, Input, Outcome } from "../ui";
 import type { DataDisclosureItem, IconName } from "../ui";
 
 // The steps a customer's subject goes through to be verified, shared by the
 // on-screen page a member shows (customer-verify) and the hosted page a link
 // opens (proof): what is collected, the app to use, then that app's session.
 
+const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[13px]";
 const ERROR = "text-error text-[12.5px]";
 const CAPTION =
@@ -71,6 +75,8 @@ export interface VerifyFlowInfo {
   requiredAssuranceLevel?: string;
   // Whether the subject is asked for their DUO diploma extracts afterwards.
   diplomaMode?: DiplomaMode;
+  // Whether the subject is asked for their postal address afterwards.
+  addressMode?: AddressMode;
   // The most days the session's data is kept, as the server works it out:
   // the flow's retention when it sets one, else the customer's.
   retentionDays: number;
@@ -119,6 +125,13 @@ export function Overview({
       label: t(`identityProofingFlows.attributes.${value}`),
       detail: t(`customers.onScreen.attributeDetails.${value}`),
     }));
+  if (flow.addressMode !== undefined && flow.addressMode !== "off") {
+    items.push({
+      icon: "personal",
+      label: t("identityProofing.address.overview.label"),
+      detail: t("identityProofing.address.overview.detail"),
+    });
+  }
   if (flow.diplomaMode !== undefined && flow.diplomaMode !== "off") {
     items.push({
       icon: "flag",
@@ -331,6 +344,8 @@ export function Session({
   diplomas = [],
   onDiplomaStep,
   dataRequest = false,
+  addressMode = "off",
+  onAddressStep,
 }: {
   target: VerifyTarget;
   initial: ProofingProgress;
@@ -352,19 +367,28 @@ export function Session({
   // A data request: a refusal reads as the request refused, not the person
   // unverified.
   dataRequest?: boolean;
+  // Whether an approved session goes on to the address step, before the
+  // diploma step; onAddressStep is told whether it shows.
+  addressMode?: AddressMode;
+  onAddressStep?: (active: boolean) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const progress = useProofingProgressQuery(target);
   const current = progress.data ?? initial;
+  const [addressDone, setAddressDone] = useState(false);
   const [diplomasDone, setDiplomasDone] = useState(false);
   const secondsLeft = useSecondsLeft(current.linkExpiresAt);
   const view = sessionView({
     status: current.status,
+    addressMode,
+    addressUntil: current.addressUntil,
+    addressDone,
     diplomaMode,
     diplomasUntil: current.diplomasUntil,
     diplomasDone,
     secondsLeft,
   });
+  const askAddress = view === "address";
   const askDiplomas = view === "diplomas";
   const showsOutcome = view === "outcome";
   useEffect(() => {
@@ -372,6 +396,9 @@ export function Session({
       onSettled?.(current);
     }
   }, [showsOutcome, current, onSettled]);
+  useEffect(() => {
+    onAddressStep?.(askAddress);
+  }, [askAddress, onAddressStep]);
   useEffect(() => {
     onDiplomaStep?.(askDiplomas);
   }, [askDiplomas, onDiplomaStep]);
@@ -403,6 +430,15 @@ export function Session({
     </div>
   );
 
+  if (askAddress && current.addressUntil !== undefined) {
+    return (
+      <AddressStep
+        target={target}
+        until={current.addressUntil}
+        onDone={() => setAddressDone(true)}
+      />
+    );
+  }
   if (askDiplomas && current.diplomasUntil !== undefined) {
     return (
       <DiplomaStep
@@ -673,6 +709,127 @@ function DiplomaStep({
         </p>
       )}
     </div>
+  );
+}
+
+const ADDRESS_FIELDS = [
+  "street",
+  "houseNumber",
+  "postalCode",
+  "city",
+  "country",
+] as const satisfies readonly (keyof ProofingAddress)[];
+
+const ADDRESS_AUTOCOMPLETE: Record<keyof ProofingAddress, string> = {
+  street: "address-line1",
+  houseNumber: "address-line2",
+  postalCode: "postal-code",
+  city: "address-level2",
+  country: "country-name",
+};
+
+const EMPTY_ADDRESS: ProofingAddress = {
+  street: "",
+  houseNumber: "",
+  postalCode: "",
+  city: "",
+  country: "",
+};
+
+// After an approved identity: the subject enters their postal address. It is
+// what they declare, kept beside the proven identity. The step ends once it
+// is kept, or the time to enter it is up.
+function AddressStep({
+  target,
+  until,
+  onDone,
+}: {
+  target: VerifyTarget;
+  until: string;
+  onDone: () => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const submit = useSubmitAddressMutation(target);
+  const [address, setAddress] = useState<ProofingAddress>(EMPTY_ADDRESS);
+  const [touched, setTouched] = useState(false);
+  const secondsLeft = useSecondsLeft(until);
+  const open = secondsLeft > 0;
+  const missing = ADDRESS_FIELDS.filter((f) => address[f].trim() === "");
+
+  function save(event: React.FormEvent): void {
+    event.preventDefault();
+    setTouched(true);
+    if (missing.length > 0) return;
+    submit.mutate(address, { onSuccess: onDone });
+  }
+
+  return (
+    <form className="flex w-full flex-col gap-5" onSubmit={save} noValidate>
+      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
+        <Icon name="valid" className="text-success shrink-0" />
+        {t("identityProofing.address.identityDone")}
+      </p>
+
+      <div className="flex flex-col gap-1">
+        <h2 className="text-ink text-[18px] font-bold">
+          {t("identityProofing.address.heading")}
+        </h2>
+        <p className={HINT}>{t("identityProofing.address.intro")}</p>
+      </div>
+
+      {open ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[2fr_1fr]">
+          {ADDRESS_FIELDS.map((field) => {
+            const invalid = touched && missing.includes(field);
+            return (
+              <div
+                key={field}
+                className={`flex flex-col gap-1 ${field === "country" ? "sm:col-span-2" : ""}`}
+              >
+                <label htmlFor={`proofing-address-${field}`} className={LABEL}>
+                  {t(`identityProofing.address.fields.${field}`)}
+                </label>
+                <Input
+                  id={`proofing-address-${field}`}
+                  autoComplete={ADDRESS_AUTOCOMPLETE[field]}
+                  value={address[field]}
+                  aria-invalid={invalid}
+                  onChange={(event) =>
+                    setAddress((current) => ({
+                      ...current,
+                      [field]: event.target.value,
+                    }))
+                  }
+                />
+                {invalid && (
+                  <p className={ERROR}>
+                    {t("identityProofing.address.required")}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className={HINT}>{t("identityProofing.address.closed")}</p>
+      )}
+      {submit.isError && (
+        <p className={ERROR}>{proofingErrorMessage(submit.error, t)}</p>
+      )}
+
+      <div className="border-line flex items-center justify-between gap-3 border-t pt-4">
+        {open ? <Countdown seconds={secondsLeft} /> : <span />}
+        {open ? (
+          <Button type="submit" icon="arrow_front" loading={submit.isPending}>
+            {t("identityProofing.address.save")}
+          </Button>
+        ) : (
+          <Button variant="secondary" icon="arrow_front" onClick={onDone}>
+            {t("identityProofing.address.continue")}
+          </Button>
+        )}
+      </div>
+    </form>
   );
 }
 

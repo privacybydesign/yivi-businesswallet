@@ -465,6 +465,9 @@ type apiResultResponse struct {
 	// Diplomas are the DUO diploma extracts the subject added, each checked
 	// against DUO's signature and the proofed identity.
 	Diplomas []diplomaResponse `json:"diplomas"`
+	// Address is the postal address the subject entered after their identity
+	// was approved; as they declared it, not read off a document.
+	Address *Address `json:"address,omitempty"`
 }
 
 type apiIdentity struct {
@@ -572,7 +575,7 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 	out := apiResultResponse{
 		ID: publicSessionID(req.ID), Status: req.EffectiveStatus(now), Method: string(identity.Method),
 		AssuranceLevel: identity.AssuranceLevel, EIDASLevel: identity.EIDASLevel, ErrorCode: identity.ErrorCode,
-		Evidence: []apiEvidenceEntry{}, Diplomas: []diplomaResponse{},
+		Evidence: []apiEvidenceEntry{}, Diplomas: []diplomaResponse{}, Address: req.SubjectAddress,
 	}
 	if identity.Status == proofingprovider.StatusApproved {
 		out.VerifiedAt = identity.CompletedAt

@@ -60,7 +60,8 @@ pause) + `customer-flows-tab.tsx` (assignment, send) + `customer-sessions-tab.ts
 `routes/flow-hosted-settings.tsx` (per-flow hosted settings), `diploma*.go` +
 `internal/diploma` + `routes/flow-editor.tsx` (the flow's diploma
 step) + `routes/proofing-verify-steps.tsx` (the upload) (DUO diplomas, §12),
-`matchSubject` in `service.go` (one known person, §13).
+`matchSubject` in `service.go` (one known person, §13), `address*.go` +
+`routes/proofing-verify-steps.tsx` (`AddressStep`) (the postal address, §16).
 **Depends on:** the Regula Face API (`REGULA_FACE_API_URL`) for every face
 check, and the Idem app's `/api/v1/app/{token}/...` contract
 (`vcmrtd/idem/lib/services/proofing_session_client.dart`).
@@ -1287,7 +1288,7 @@ editor's Type, and the hosted page.
   then: it is kept no longer than a decided one.
 - **Export.** An approved access request's data: per approved session the
   outcome and its `match`. Only a `strong` match also carries identity and
-  evidence, and diplomas: a ticked `probable`, `email` or `name` match may be
+  evidence, the address, and diplomas: a ticked `probable`, `email` or `name` match may be
   someone else's session. The contact the customer gave (the name and address
   it typed) goes out only for a strong match that was also approved for the
   one person it was sent to (`DataExportSession.Addressed`). Images are named in
@@ -1296,3 +1297,36 @@ editor's Type, and the hosted page.
   progress; 24 h), for the admin (`…/requests/{id}/data-export`) and for the
   customer (`GET /proofing/sessions/{id}/data-export`). Audited
   `identity_proofing.data_exported`.
+
+## 16. Postal address
+
+For onboarding that needs where the person lives. Wallet-side only, like the
+diplomas (§12): the engine knows nothing of it. The address is what the subject
+declares, never read off a document or checked.
+
+- **Per flow** (`identity_proofing_flow_settings.address`, `FlowAddressStore`,
+  `PUT .../flows/{id}/address`, admin): `off` (the default) or `required`,
+  audited `flow_address_configured`.
+  - The flow editor shows it as "Enter the address", before the diploma step;
+    saved after the flow and before the diplomas' follow-up save.
+  - The flow list carries it as `addressMode`; a single version's answer omits
+    it. A data request flow asks for none.
+  - A request snapshots it at send (`identity_proofing_requests.address`).
+- **A page, never a mail.** Like the diplomas: refused on the mail channel and
+  as a bare deep link (`address_needs_page`, 422); `sendableByMail` checks both.
+- **Entry** (`POST .../requests/{id}/address`, `POST /proof/{token}/address`,
+  JSON, 204):
+  - Once, on an approved request, within `AddressWindow` (1 h) of the approval
+    (`addressUntil` in the request and the hosted progress, gone once entered;
+    the hosted progress says `addressGiven`, never the address).
+  - Street, house number, postal code, city and country, each required, trimmed,
+    at most 200 characters.
+  - The page shows it after the approval and before the diplomas; it hands back
+    (`onSettled`) once the address is kept or the window closed.
+- **Kept** sealed in `address_ciphertext` (the proofing cipher), decrypted on
+  every request read. Audited `address_added` without the address; the webhook
+  `session.address_added` carries it.
+  - Shown in the request responses, the customer API's `result`, a data
+    access export (strong match only), and the Sessions tab.
+  - `Purge` clears it and strips `address` from the request's webhook
+    deliveries.

@@ -5,7 +5,6 @@ package seed
 import (
 	"context"
 	"errors"
-	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -165,7 +164,7 @@ func TestEnsureProofingDemoRenamesItsOwnOrg(t *testing.T) {
 		t.Fatalf("EnsureProofingDemo: %v", err)
 	}
 	want := ""
-	for _, o := range slices.Concat(demoOrganizations, proofingOrganizations) {
+	for _, o := range demoOrganizations {
 		if o.slug == radboudSlug {
 			want = o.name
 		}

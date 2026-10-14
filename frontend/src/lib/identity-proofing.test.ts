@@ -937,6 +937,9 @@ describe("sessionView", () => {
   const until = "2026-10-12T12:00:00Z";
   const running = {
     status: "pending",
+    addressMode: "off" as const,
+    addressUntil: undefined,
+    addressDone: false,
     diplomaMode: "off" as const,
     diplomasUntil: undefined,
     diplomasDone: false,
@@ -1006,6 +1009,38 @@ describe("sessionView", () => {
         diplomasUntil: until,
       }),
     ).toBe("running");
+  });
+
+  it("asks for the address before the diplomas", () => {
+    const settled = {
+      ...running,
+      status: "approved",
+      addressMode: "required" as const,
+      addressUntil: until,
+      diplomaMode: "required" as const,
+      diplomasUntil: until,
+    };
+    expect(sessionView(settled)).toBe("address");
+    expect(sessionView({ ...settled, addressDone: true })).toBe("diplomas");
+    expect(
+      sessionView({ ...settled, addressUntil: undefined, diplomasDone: true }),
+    ).toBe("outcome");
+  });
+});
+
+describe("address step", () => {
+  it("adds the address stage after the session, before the diplomas", () => {
+    expect(
+      verifyStages({ appChoice: false, address: true, diplomas: true }),
+    ).toEqual(["overview", "session", "address", "diplomas"]);
+  });
+
+  it("mails only a flow that asks for no address", () => {
+    expect(sendableByMail({ addressMode: "off" })).toBe(true);
+    expect(sendableByMail({ addressMode: "required" })).toBe(false);
+    expect(
+      sendableByMail({ addressMode: "required", diplomaMode: "off" }),
+    ).toBe(false);
   });
 });
 

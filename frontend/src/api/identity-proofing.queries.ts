@@ -43,6 +43,7 @@ import {
   getProofingFlowHosted,
   saveProofingFlowHosted,
   saveProofingFlowDiplomas,
+  saveProofingFlowAddress,
   getProofingPause,
   listProofingPauses,
   setPlatformProofingPause,
@@ -53,6 +54,7 @@ import {
   startProofingYivi,
   submitProofingFaceFrame,
   uploadProofingDiplomas,
+  submitProofingAddress,
 } from "./identity-proofing";
 import type {
   ProofingCustomer,
@@ -87,6 +89,8 @@ import type {
   ProofingFlowHosted,
   DiplomaMode,
   DiplomaVerdict,
+  AddressMode,
+  ProofingAddress,
   FlowKind,
   ProofingDataMatch,
 } from "./identity-proofing";
@@ -264,6 +268,23 @@ export function useSaveFlowDiplomasMutation(
   return useMutation({
     mutationFn: ({ flowId, mode }) =>
       saveProofingFlowDiplomas(slug, flowId, mode),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => invalidateFlow(queryClient, slug),
+  });
+}
+
+// The flow lists carry each flow's address mode, so they are refetched.
+export function useSaveFlowAddressMutation(
+  slug: string,
+): UseMutationResult<
+  AddressMode,
+  Error,
+  { flowId: string; mode: AddressMode }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ flowId, mode }) =>
+      saveProofingFlowAddress(slug, flowId, mode),
     meta: { suppressErrorToast: true },
     onSuccess: () => invalidateFlow(queryClient, slug),
   });
@@ -992,6 +1013,20 @@ export function useUploadDiplomasMutation(
   return useMutation({
     mutationFn: (files) => uploadProofingDiplomas(target, files),
     meta: { suppressErrorToast: true },
+  });
+}
+
+// Keeps the postal address entered on a verify page; the page's progress is
+// refetched, so the step closes.
+export function useSubmitAddressMutation(
+  target: VerifyTarget,
+): UseMutationResult<void, Error, ProofingAddress> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (address) => submitProofingAddress(target, address),
+    meta: { suppressErrorToast: true },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: verifyQueryKey(target) }),
   });
 }
 

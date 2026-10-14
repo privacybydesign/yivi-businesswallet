@@ -5068,6 +5068,7 @@ paths:
                       allowed: true
                       default: true
                       diplomaMode: "off"
+                      addressMode: "off"
                       needsReferencePhoto: false
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -5460,6 +5461,7 @@ paths:
                       completedAt: "2026-10-02T09:34:12Z"
                       purgeAt: "2026-11-01T09:34:12Z"
                       diplomaMode: "off"
+                      addressMode: "off"
                       diplomas: []
                       expectedSubject: false
         '400':
@@ -5499,8 +5501,8 @@ paths:
         `yivi/start`. A Yivi request needs Regula on the deployment (else 409
         `method_unavailable`), and a flow that takes no document photos and is not matched
         against a reference photo (else 400
-        `invalid_input`). A flow that asks for diplomas cannot be e-mailed (422
-        `diplomas_need_page`), and a customer flow matched against a reference photo cannot be
+        `invalid_input`). A flow that asks for diplomas or the address cannot be e-mailed (422
+        `diplomas_need_page`, `address_needs_page`), and a customer flow matched against a reference photo cannot be
         sent from here, which takes no photo (422 `reference_photo_required`). A customer's
         request with `birthDate` (a past date, YYYY-MM-DD, with `name`) is for that one person:
         an approval of anyone else is recorded as `rejected` with `errorCode`
@@ -5565,6 +5567,7 @@ paths:
                     linkExpiresAt: "2026-10-02T09:40:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
                     diplomaMode: "off"
+                    addressMode: "off"
                     diplomas: []
                     expectedSubject: false
                     mailSent: true
@@ -5585,6 +5588,7 @@ paths:
                     linkExpiresAt: "2026-10-02T09:40:00Z"
                     createdAt: "2026-10-02T09:30:00Z"
                     diplomaMode: "off"
+                    addressMode: "off"
                     diplomas: []
                     expectedSubject: false
                     mailSent: false
@@ -5609,7 +5613,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: The person is not a member (`member_not_found`), or the flow does not exist, cannot be completed in the app, is not available to members or assigned to the customer, asks for diplomas on an e-mailed request (`diplomas_need_page`), or needs a reference photo (`reference_photo_required`).
+          description: The person is not a member (`member_not_found`), or the flow does not exist, cannot be completed in the app, is not available to members or assigned to the customer, asks for diplomas or the address on an e-mailed request (`diplomas_need_page`, `address_needs_page`), or needs a reference photo (`reference_photo_required`).
           content:
             application/json:
               schema:
@@ -5665,6 +5669,7 @@ paths:
                     completedAt: "2026-10-02T09:34:12Z"
                     purgeAt: "2026-11-01T09:34:12Z"
                     diplomaMode: "off"
+                    addressMode: "off"
                     diplomas: []
                     expectedSubject: false
         '400':
@@ -6071,6 +6076,94 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/address:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id.
+    get:
+      tags: [identity-proofing]
+      summary: Read whether a flow asks for the postal address
+      description: >-
+        Requires an administrator role in the organisation. `{addressMode}`: `off` or
+        `required` (the flow has the address step). With `required`, once the identity is
+        approved the subject enters their postal address on the page that ran the session. It
+        is what they declare, not read off a document. A flow never set reads `off`.
+      responses:
+        '200':
+          description: The flow's address mode.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowAddress'
+              examples:
+                off:
+                  summary: No address
+                  value:
+                    addressMode: "off"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '422':
+          description: The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [identity-proofing]
+      summary: Set whether a flow asks for the postal address
+      description: >-
+        Requires an administrator role in the organisation. Body `{addressMode}`. Sessions
+        already sent keep the mode they were sent with. A flow that asks for the address cannot
+        be mailed or sent as a bare deep link (422 `address_needs_page`): show it on screen or
+        create it `hosted`. Audited `identity_proofing.flow_address_configured` with before and
+        after. A mode other than `off` or `required` is 400 `invalid_input`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowAddress'
+            examples:
+              required:
+                summary: Ask for the address
+                value:
+                  addressMode: required
+      responses:
+        '200':
+          description: The saved mode.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowAddress'
+              examples:
+                required:
+                  summary: Address asked
+                  value:
+                    addressMode: required
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '422':
+          description: The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/diplomas:
     parameters:
       - name: slug
@@ -6379,6 +6472,62 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The request is not under review (`not_under_review`), decided already or its session ended.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/address:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the customer API and webhooks show.
+    post:
+      tags: [identity-proofing]
+      summary: Enter the postal address on an on-screen request
+      description: >-
+        Requires organisation membership (an admin, or the member who sent it). Once, within an
+        hour of an approved identity on a request that asks for the address. Every field is
+        required, at most 200 characters, trimmed; a missing one is 400 `invalid_input`. The
+        address is kept sealed and shown with the request; audited
+        `identity_proofing.address_added` without the address (webhook
+        `session.address_added`, which carries it).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingAddress'
+            examples:
+              address:
+                summary: An address
+                value:
+                  street: Kerkstraat
+                  houseNumber: 12a
+                  postalCode: 6511 AB
+                  city: Nijmegen
+                  country: Nederland
+      responses:
+        '204':
+          description: The address is kept.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request asks for no address (`address_not_asked`), it holds one already or the window is closed (`address_closed`), or the request was cancelled or erased (`session_over`).
           content:
             application/json:
               schema:
@@ -7297,7 +7446,7 @@ paths:
                       state: delivering
                       lastStatusCode: 200
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
                     maxAttempts: 8
                 none:
                   summary: No endpoint
@@ -7307,7 +7456,7 @@ paths:
                     health:
                       state: not_configured
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
                     maxAttempts: 8
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -7366,7 +7515,7 @@ paths:
                       state: delivering
                       lastStatusCode: 200
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
                     maxAttempts: 8
                     secret: whsec_4tY8mK2qN6vB1xC9zR3wP7sL5dF0gH8jA2eU6iO4x9Qa
         '400':
@@ -7624,6 +7773,7 @@ paths:
                     status: pending
                     linkExpiresAt: "2026-10-05T09:30:00Z"
                     started: false
+                    addressGiven: false
                     sessionId: ps_b7k2mq4xz6rt3vnw5hc2jd7fae
                     redirectUrl: https://portal.acme.example/reset/return
                     embedOrigins: [https://portal.acme.example]
@@ -7647,6 +7797,7 @@ paths:
                       requestedAttributes: [dg1, dg2, selfie]
                       yiviAvailable: true
                       diplomaMode: "off"
+                      addressMode: "off"
                       retentionDays: 31
                     diplomas: []
         '403':
@@ -7690,6 +7841,7 @@ paths:
                     method: idem_app
                     linkExpiresAt: "2026-10-02T09:40:00Z"
                     started: true
+                    addressGiven: false
                 approved:
                   summary: Approved
                   value:
@@ -7697,6 +7849,7 @@ paths:
                     method: idem_app
                     linkExpiresAt: "2026-10-02T09:40:00Z"
                     started: true
+                    addressGiven: false
                     completedAt: "2026-10-02T09:34:12Z"
         '403':
           $ref: '#/components/responses/ProofingForbidden'
@@ -7746,6 +7899,7 @@ paths:
                     method: idem_app
                     linkExpiresAt: "2026-10-02T09:40:00Z"
                     started: true
+                    addressGiven: false
                     deepLink: vcmrtd://verify?handover=hv_3m8x2kq7&api=https%3A%2F%2Fwallet.example.nl
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -7796,6 +7950,7 @@ paths:
                     status: cancelled
                     linkExpiresAt: "2026-10-05T09:30:00Z"
                     started: false
+                    addressGiven: false
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '404':
@@ -8060,6 +8215,44 @@ paths:
                 $ref: '#/components/schemas/Error'
         '429':
           $ref: '#/components/responses/HostedTooManyRequests'
+  /api/v1/proof/{token}/address:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    post:
+      tags: [identity-proofing]
+      summary: Enter the postal address on a hosted link
+      security: []
+      description: >-
+        As the org route of the same name, for a hosted link, by its subject. The page reads
+        `addressGiven` back, never the address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingAddress'
+      responses:
+        '204':
+          description: The address is kept.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/HostedTooManyRequests'
+        '409':
+          description: The session asks for no address (`address_not_asked`), it holds one already or the window is closed (`address_closed`), or the link was cancelled or erased (`session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/proof/{token}/diplomas:
     parameters:
       - name: token
@@ -8350,8 +8543,8 @@ paths:
           description: >-
             The flow does not exist (`flow_not_found`), cannot be finished
             (`flow_not_completable`), is not assigned to the customer (`flow_not_assigned`), needs a
-            `referencePhoto` (`reference_photo_required`), or asks for diplomas and so needs
-            `hosted: true` (`diplomas_need_page`); or the `Idempotency-Key` was used with
+            `referencePhoto` (`reference_photo_required`), or asks for diplomas or the address and
+            so needs `hosted: true` (`diplomas_need_page`, `address_needs_page`); or the `Idempotency-Key` was used with
             another body (`idempotency_key_reused`).
           content:
             application/json:
@@ -8880,6 +9073,7 @@ paths:
                       assigned: true
                       default: true
                       diplomaMode: "off"
+                      addressMode: "off"
                       needsReferencePhoto: false
                       retentionDays: 31
         '400':
@@ -10879,6 +11073,8 @@ components:
           description: The DUO diploma extracts the person added, each checked against DUO's signature and the proofed identity.
           items:
             $ref: '#/components/schemas/ProofingDiploma'
+        address:
+          $ref: '#/components/schemas/ProofingAddress'
       required: [id, status, evidence, diplomas]
     ProofingApiMethodStart:
       type: object
@@ -10929,7 +11125,7 @@ components:
           description: The delivery's id; the same on every retry.
         type:
           type: string
-          enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, test]
+          enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, test]
         createdAt:
           type: string
           format: date-time
@@ -10959,6 +11155,8 @@ components:
             expectedSubject:
               type: boolean
               description: Only present, as true, on a session created for one person.
+            address:
+              $ref: '#/components/schemas/ProofingAddress'
             diploma:
               type: object
               description: Only on `session.diploma_added`.
@@ -11191,6 +11389,9 @@ components:
             diplomaMode:
               type: string
               enum: ['off', required]
+            addressMode:
+              type: string
+              enum: ['off', required]
             needsReferencePhoto:
               type: boolean
               description: The face is matched against a reference photo; only a customer's API can send such a flow.
@@ -11231,6 +11432,9 @@ components:
             diplomaMode:
               type: string
               enum: ['off', required]
+            addressMode:
+              type: string
+              enum: ['off', required]
             needsReferencePhoto:
               type: boolean
             kind:
@@ -11243,7 +11447,7 @@ components:
                 retention when it sets one, else the customer's `dataRetentionDays`, plus the day
                 the proofing engine keeps its copy longer, rounded up to whole days. What the
                 on-screen page tells the subject.
-          required: [id, version, active, createdAt, completable, assigned, default, diplomaMode, needsReferencePhoto, retentionDays]
+          required: [id, version, active, createdAt, completable, assigned, default, diplomaMode, addressMode, needsReferencePhoto, retentionDays]
     ProofingCustomerFlowList:
       type: array
       items:
@@ -11420,7 +11624,37 @@ components:
                 type: array
                 items:
                   $ref: '#/components/schemas/ProofingDiploma'
+              address:
+                $ref: '#/components/schemas/ProofingAddress'
       required: [sessionId, exportedAt, sessions]
+    ProofingFlowAddress:
+      type: object
+      additionalProperties: false
+      properties:
+        addressMode:
+          type: string
+          enum: ['off', required]
+      required: [addressMode]
+    ProofingAddress:
+      type: object
+      description: The postal address a subject entered, as they declared it; not read off a document.
+      properties:
+        street:
+          type: string
+          maxLength: 200
+        houseNumber:
+          type: string
+          maxLength: 200
+        postalCode:
+          type: string
+          maxLength: 200
+        city:
+          type: string
+          maxLength: 200
+        country:
+          type: string
+          maxLength: 200
+      required: [street, houseNumber, postalCode, city, country]
     ProofingFlowDiplomas:
       type: object
       additionalProperties: false
@@ -11505,6 +11739,15 @@ components:
           type: string
           format: date-time
           description: When the person can last add a diploma extract; absent until the identity is approved.
+        addressMode:
+          type: string
+          enum: ['off', required]
+        address:
+          $ref: '#/components/schemas/ProofingAddress'
+        addressUntil:
+          type: string
+          format: date-time
+          description: When the person can last enter their address; absent until the identity is approved, and once they did.
         expectedSubject:
           type: boolean
         flowKind:
@@ -11515,7 +11758,7 @@ components:
           type: string
           format: date-time
           description: Until when an approved `data_access` session's data downloads.
-      required: [id, requestedByName, subjectName, subjectEmail, flowId, flowName, status, linkExpiresAt, createdAt, diplomaMode, diplomas, expectedSubject]
+      required: [id, requestedByName, subjectName, subjectEmail, flowId, flowName, status, linkExpiresAt, createdAt, diplomaMode, diplomas, addressMode, expectedSubject]
     ProofingRequestList:
       type: array
       items:
@@ -12090,7 +12333,7 @@ components:
           minItems: 1
           items:
             type: string
-            enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added]
+            enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
       required: [url, events]
     ProofingWebhookDeliveryList:
       type: array
@@ -12150,6 +12393,13 @@ components:
         diplomasUntil:
           type: string
           format: date-time
+        addressUntil:
+          type: string
+          format: date-time
+          description: When the subject can last enter their address; absent while they cannot, and once they did.
+        addressGiven:
+          type: boolean
+          description: The subject entered their address.
         dataExportUntil:
           type: string
           format: date-time
@@ -12157,7 +12407,7 @@ components:
         dataMatchesKept:
           type: integer
           description: On an approved erasure, how many of the person's matched sessions were kept, not deleted.
-      required: [status, linkExpiresAt, started]
+      required: [status, linkExpiresAt, started, addressGiven]
     ProofingHostedView:
       allOf:
         - $ref: '#/components/schemas/ProofingHostedProgress'
@@ -12210,6 +12460,9 @@ components:
                 diplomaMode:
                   type: string
                   enum: ['off', required]
+                addressMode:
+                  type: string
+                  enum: ['off', required]
                 kind:
                   type: string
                   enum: [identity, data_access, data_erasure]
@@ -12219,7 +12472,7 @@ components:
                     The most days the session's data is kept: the flow's retention when it set
                     one, else the customer's `dataRetentionDays`, plus the day the proofing engine
                     keeps its copy longer, rounded up to whole days. What the page tells the subject.
-              required: [name, requestedAttributes, yiviAvailable, diplomaMode, retentionDays]
+              required: [name, requestedAttributes, yiviAvailable, diplomaMode, addressMode, retentionDays]
             diplomas:
               type: array
               description: The extracts the subject added, as the page lists them.
