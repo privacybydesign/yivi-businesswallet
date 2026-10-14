@@ -215,17 +215,44 @@ the app calls them), and the deep link's `api=` is
   - **Whose identity:** the engine reads the document (name, number, dates,
     nationality, DG11's full name, BSN and place of birth) off the chip
     evidence itself, `documentFromEvidence` in `proofingengine/chipdocument.go`:
-    a passport's or ID card's DG1 MRZ and DG11 through gmrtd. The `document`
-    the app posts on `/steps/nfc` is ignored: nothing binds it to the chip, so
-    a modified app could pair a genuine chip with another person's name. A DG1
-    that does not parse is a 400. A driving licence never gets this far: see
-    §11.
+    a passport's or ID card's DG1 MRZ and DG11 through gmrtd, a driving
+    licence's ISO/IEC 18013-2 DG1. The `document` the app posts on
+    `/steps/nfc` is ignored: nothing binds it to the chip, so a modified app
+    could pair a genuine chip with another person's name. A DG1 that does not
+    parse is a 400.
+  - **Driving licences: Dutch only.** The document type is `drivers_license`
+    (`document.type`, `chipAccess.documentType`, `acceptedDocumentTypes`); the
+    chip evidence says `eu_driving_licence`, which `flow.Validate` refuses in
+    `acceptedDocumentTypes`, since no document carries it.
+    - Trust anchor: the RDW's `CSCA NL eDL` roots, generations 01–03, never
+      in this repo; as go-passport-issuer does it, ops mounts them and the
+      backend reads them at startup.
+      - `IDENTITY_PROOFING_EDL_CSCA_PATHS`: comma-separated files, PEM or
+        DER, into `mrtdverify.LoadCertPool`. Unset trusts no
+        licence (`CSCATrustChainValid` false, so `DOC_TAMPERED`).
+      - Source: `yivi-businesswallet-ops` `certificates/edl/gen{1,2,3}.cer`
+        (copied from go-passport-issuer-ops), a ConfigMap mounted at
+        `/certificates/edl`; ops builds the env var from the files, so a new
+        generation is one more file.
+      - Local: `compose.override.yaml` mounts a sibling ops checkout
+        (`EDL_CSCA_DIR` to override) at the same `/certificates/edl`.
+    - Passive Authentication: `mrtdverify.VerifyPassiveDrivingLicence`, as
+      go-passport-issuer's `PassiveAuthenticationEDL`: DG1 required, and a DG13
+      the EF.SOD lists but was not sent is `DOC_TAMPERED`.
+    - Active Authentication: DG13 holds the key (method
+      `active_authentication`); `resolveAAKeyDataGroup` defaults to it when sent.
+    - Portrait: DG6, so `photoFromChip` and the face match use it.
+    - Another state's licence is a 422 `document_unsupported`
+      (`drivingLicenceSupported`): at `document_capture` by its issuing state or
+      chip access country, at `nfc_read` by the chip's own DG1. Without its
+      CSCA a genuine one could only end `DOC_TAMPERED`.
   - **Assurance level**: none, low or substantial; high is not offered (no
     certified anti-spoofing). `flow.LevelRequirements` (mirrored in the
     editor's `LEVEL_REQUIREMENTS`) says what each needs:
     - low: the chip read, `nfc.passive_auth` verified.
     - substantial: low plus `nfc.chip_auth`, `face.match` and `face.liveness`,
-      the face matched by Regula against the chip's DG2.
+      the face matched by Regula against the chip's portrait (DG2, a
+      licence's DG6).
   - **The level is a minimum, nothing more.** Picking one turns no step, check
     or provider on. A flow whose settings cannot reach it is not saved
     (`reachesAssuranceLevel` in the editor, `flow.Validate` in the engine).
@@ -256,8 +283,8 @@ the app calls them), and the deep link's `api=` is
         response too: a recorded chip read replayed without the chip;
       - without `nfc.chip_auth` the app runs no AA, so a missing response
         only keeps the session from substantial;
-      - leaving out a DG15 the EF.SOD lists is `DOC_TAMPERED`
-        (`DocumentComplete`, passports and ID cards).
+      - leaving out a DG15 (a licence's DG13) the EF.SOD lists is
+        `DOC_TAMPERED` (`DocumentComplete`).
     - **Face step:**
       - `FACE_NO_MATCH` gates at any level;
       - `LIVENESS_FAILED` gates only when the flow requires a level or lists
@@ -798,11 +825,8 @@ Everything this feature does not do yet, in one place.
     says to scan it from inside the app.
 - **Reconciling reads `SessionStatus`**, which carries no personal data; the full
   result is read only for an approved customer subject, whose name is kept.
-- **EU driving licences** are refused, 422 `document_unsupported`
-  (`flow.DrivingLicence`): at `document_capture` (`drivers_license`), and at
-  `nfc_read` (`eu_driving_licence`), before the chip is verified; a flow may not
-  accept one either. There is no CSCA source for them yet, so a genuine licence
-  would end `DOC_TAMPERED`. The licence parsing stays for when one exists.
+- **Only Dutch driving licences** (§ Whose identity): no other state's
+  licence CSCAs are embedded, and there is no EU licence masterlist to load.
 - **Hosted page:** no full-theme endpoint; no automated accessibility test
   (axe, WCAG 2.2 AA), which needs a rendered DOM the frontend tests do not have.
 - **Manual review:** when an identity session goes to review is a product

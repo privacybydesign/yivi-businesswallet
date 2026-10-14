@@ -296,7 +296,8 @@ type FlowDefinition struct {
 	// session.
 	FaceProvider FaceProvider `json:"FaceProvider"`
 	// AcceptedDocumentTypes are the document codes accepted ("P", ...); empty
-	// accepts any. Validate refuses a driving licence (DrivingLicence).
+	// accepts any. A driving licence is DocumentTypeDrivingLicence; Validate
+	// refuses DocumentTypeEUDrivingLicence, which no document has.
 	AcceptedDocumentTypes []string `json:"AcceptedDocumentTypes"`
 	// AcceptedIssuingCountries are the 3-letter ICAO issuing states accepted
 	// (ValidIssuingCountry); empty accepts any.
@@ -398,8 +399,7 @@ const MaxRetentionOverrideDays = 365
 
 // DocumentTypeDrivingLicence is an EU driving licence's document type, which
 // has no MRZ document code; the app reports it at document_capture. The
-// engine refuses a licence at document_capture and nfc_read until it has a
-// CSCA source for licences, so a flow may not accept one either.
+// engine verifies Dutch licences only (mrtdverify.DrivingLicenceIssuingState).
 const DocumentTypeDrivingLicence = "drivers_license"
 
 // DocumentTypeEUDrivingLicence is the other spelling of an EU driving
@@ -479,8 +479,8 @@ func validate(fd FlowDefinition) error {
 	if err := noDuplicateStrings("accepted document type", fd.AcceptedDocumentTypes); err != nil {
 		return err
 	}
-	if i := slices.IndexFunc(fd.AcceptedDocumentTypes, DrivingLicence); i >= 0 {
-		return fmt.Errorf("flow: accepted document type %q is not supported yet: the engine refuses an EU driving licence, having no CSCA source to verify its chip", fd.AcceptedDocumentTypes[i])
+	if slices.Contains(fd.AcceptedDocumentTypes, DocumentTypeEUDrivingLicence) {
+		return fmt.Errorf("flow: accepted document type %q is the chip evidence's type, never a document's: accept %q for a driving licence", DocumentTypeEUDrivingLicence, DocumentTypeDrivingLicence)
 	}
 	for _, c := range fd.AcceptedIssuingCountries {
 		if !ValidIssuingCountry(c) {

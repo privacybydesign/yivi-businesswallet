@@ -8,7 +8,8 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 )
 
-// Only a photo inside DG2 counts as the chip's.
+// Only a photo inside the portrait data group counts as the chip's: DG2, or
+// a driving licence's DG6.
 func TestPhotoFromChip(t *testing.T) {
 	portrait := []byte("portrait-jpeg-bytes")
 	dg2 := hex.EncodeToString(append(append([]byte{0x75, 0x82, 0x01, 0x00}, portrait...), 0x00))
@@ -26,6 +27,8 @@ func TestPhotoFromChip(t *testing.T) {
 		{"not base64", photoInfo{ImageBase64: "%%%"}, ev, false},
 		{"no DG2", photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(portrait)}, &mrtdEvidenceRequest{DataGroups: map[string]string{}}, false},
 		{"DG2 not hex", photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(portrait)}, &mrtdEvidenceRequest{DataGroups: map[string]string{dataGroupPortrait: "zz"}}, false},
+		{"a licence's DG6", photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(portrait)}, &mrtdEvidenceRequest{DocumentType: documentTypeEUDrivingLicence, DataGroups: map[string]string{dataGroupDLPortrait: dg2}}, true},
+		{"a licence's DG2", photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(portrait)}, &mrtdEvidenceRequest{DocumentType: documentTypeEUDrivingLicence, DataGroups: map[string]string{dataGroupPortrait: dg2}}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -33,6 +36,47 @@ func TestPhotoFromChip(t *testing.T) {
 				t.Errorf("photoFromChip = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// Only a Dutch driving licence is verified; any other document passes, and so
+// does a licence whose state is not known yet.
+func TestDrivingLicenceSupported(t *testing.T) {
+	cases := []struct {
+		documentType, issuingState string
+		want                       bool
+	}{
+		{"drivers_license", "NLD", true},
+		{"eu_driving_licence", "NLD", true},
+		{"drivers_license", "", true},
+		{"drivers_license", "DEU", false},
+		{"eu_driving_licence", "BEL", false},
+		{"P", "DEU", true},
+	}
+	for _, c := range cases {
+		if got := drivingLicenceSupported(c.documentType, c.issuingState); got != c.want {
+			t.Errorf("drivingLicenceSupported(%q, %q) = %v, want %v", c.documentType, c.issuingState, got, c.want)
+		}
+	}
+}
+
+// Without a named key group, the document's own Active Authentication key is
+// used when it was sent: DG15, or a licence's DG13.
+func TestResolveAAKeyDataGroup(t *testing.T) {
+	cases := []struct {
+		name string
+		ev   mrtdEvidenceRequest
+		want string
+	}{
+		{"passport DG15", mrtdEvidenceRequest{DataGroups: map[string]string{"DG15": "6f00"}}, "DG15"},
+		{"licence DG13", mrtdEvidenceRequest{DocumentType: documentTypeEUDrivingLicence, DataGroups: map[string]string{"DG13": "6f00"}}, "DG13"},
+		{"licence without DG13", mrtdEvidenceRequest{DocumentType: documentTypeEUDrivingLicence, DataGroups: map[string]string{"DG15": "6f00"}}, ""},
+		{"explicit", mrtdEvidenceRequest{AAKeyDataGroup: "DG13", DataGroups: map[string]string{}}, "DG13"},
+	}
+	for _, c := range cases {
+		if got := resolveAAKeyDataGroup(&c.ev); got != c.want {
+			t.Errorf("%s: resolveAAKeyDataGroup = %q, want %q", c.name, got, c.want)
+		}
 	}
 }
 

@@ -114,8 +114,8 @@ func TestFailedLivenessRetries(t *testing.T) {
 }
 
 // The chip read is refused where the flow has none and without the photo a
-// face match needs; an EU driving licence is refused at both document steps
-// (422 document_unsupported) while a passport goes through.
+// face match needs; a non-Dutch driving licence is refused at document_capture
+// (422 document_unsupported) while a Dutch one and a passport go through.
 func TestNFCStepRefusals(t *testing.T) {
 	h := newHarness(t, func(c *proofingengine.Config) { c.Regula = fakeRegula{similarity: 0.9} })
 	ctx := context.Background()
@@ -179,9 +179,20 @@ func TestNFCStepRefusals(t *testing.T) {
 	unsupported("document_capture with a licence document", code, step)
 	licence := map[string]any{"documentType": "eu_driving_licence", "efSod": evidence["efSod"], "dataGroups": evidence["dataGroups"]}
 	code, step = h.do(t, http.MethodPost, "/app/"+token+"/steps/nfc", device, map[string]any{"mrtdEvidence": licence})
-	unsupported("nfc with licence evidence", code, step)
+	if msg, _ := step["error"].(string); code != http.StatusBadRequest || !strings.Contains(msg, "no driving licence personal data") {
+		t.Errorf("nfc with a passport's chip as a licence = %d %v, want 400 no driving licence personal data", code, step)
+	}
 	capture(token, device, "passport")
 	if code, step = h.do(t, http.MethodPost, "/app/"+token+"/steps/nfc", device, map[string]any{"mrtdEvidence": evidence}); code != http.StatusOK {
 		t.Errorf("nfc with a passport's chip = %d %v, want 200", code, step)
+	}
+
+	token, device = start(chipFlow, pp.SessionInput{})
+	code, step = h.do(t, http.MethodPost, "/app/"+token+"/steps/document_capture", device, map[string]any{
+		"document":   map[string]any{"type": "drivers_license", "number": "5012345678", "issuingState": "NLD"},
+		"chipAccess": map[string]any{"documentType": "drivers_license", "documentNumber": "5012345678", "countryCode": "NLD", "version": "1", "randomData": "ABCDEFGHIJK", "configuration": "1"},
+	})
+	if code != http.StatusOK {
+		t.Errorf("document_capture with a Dutch licence = %d %v, want 200", code, step)
 	}
 }

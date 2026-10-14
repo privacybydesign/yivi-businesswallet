@@ -196,6 +196,7 @@ func TestComposePassesProofing(t *testing.T) {
 		envIdentityProofingProvider, envIdentityProofingEncryptionKey, envIdentityProofingPublicURL,
 		envIdentityProofingStubOutcome,
 		envRegulaFaceAPIURL, envRegulaFaceAPIPublicURL, envRegulaFaceMatchThreshold,
+		envIdentityProofingEDLCSCAPaths,
 		envDiplomaValidatorProvider, envDiplomaTrustSource, envDiplomaTrustCacheDir, envDiplomaOCSP,
 	} {
 		value, ok := backendEnvironment[key]

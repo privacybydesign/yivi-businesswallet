@@ -86,6 +86,8 @@ const (
 	dataGroupPersonalDetails = "DG11"
 	// dataGroupAAKey is a passport's or ID card's Active Authentication key.
 	dataGroupAAKey = "DG15"
+	// dataGroupDLAAKey is an EU driving licence's Active Authentication key.
+	dataGroupDLAAKey = "DG13"
 )
 
 func dropDataGroups(ev *mrtdEvidenceRequest, names ...string) bool {

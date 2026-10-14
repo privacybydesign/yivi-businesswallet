@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gmrtd/gmrtd/cms"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/i18n"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
@@ -77,6 +79,10 @@ type Config struct {
 	// RegulaFaceMatchThreshold the similarity a match must reach.
 	RegulaFaceAPIPublicURL   string
 	RegulaFaceMatchThreshold float64
+
+	// DrivingLicenceCertPool anchors a driving licence's Passive Authentication
+	// (mrtdverify.LoadCertPool); nil trusts no licence.
+	DrivingLicenceCertPool cms.CertPool
 
 	// BoundLoginTTL is a Yivi-method session's default lifetime;
 	// BoundLoginStableFrames the consecutive matching frames that approve
@@ -217,6 +223,9 @@ type Engine = Server
 func New(cfg Config, sessions session.Interface, flows flow.Store, tenants TenantLookup, notify Notifier) *Server {
 	if cfg.RegulaFaceMatchThreshold <= 0 {
 		cfg.RegulaFaceMatchThreshold = regula.DefaultMatchThreshold
+	}
+	if cfg.DrivingLicenceCertPool == nil {
+		cfg.DrivingLicenceCertPool = &cms.GenericCertPool{}
 	}
 	if cfg.BoundLoginStableFrames <= 0 {
 		cfg.BoundLoginStableFrames = 1

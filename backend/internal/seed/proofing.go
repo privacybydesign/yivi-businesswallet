@@ -74,8 +74,8 @@ const (
 )
 
 // chipAndFace is an eIDAS substantial flow: the document's chip read in the
-// Idem app (passport or identity card; the engine refuses an EU driving
-// licence for now) and a live face matched against its portrait by Regula.
+// Idem app (passport, identity card or Dutch driving licence) and a live face
+// matched against its portrait by Regula.
 func chipAndFace(name string, basis privacy.LegalBasis, purpose string) flow.FlowDefinition {
 	return flow.FlowDefinition{
 		Name: name, Steps: chipAndFaceSteps, SelfieLocation: flow.LocationNative,

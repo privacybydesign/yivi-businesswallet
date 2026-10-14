@@ -1293,7 +1293,7 @@ export const nl: Translation<typeof en> = {
       saveVersion: "Opslaan als versie {{version}}",
       stepsTitle: "Stappen",
       documentCaptureHint:
-        "De persoon fotografeert met de Idem-app de coderegels onderaan het paspoort of de ID-kaart; daarmee gaat de chip open. Altijd samen met het lezen van de chip.",
+        "De persoon fotografeert met de Idem-app de coderegels op het paspoort, de ID-kaart of het Nederlandse rijbewijs; daarmee gaat de chip open. Altijd samen met het lezen van de chip.",
       nfcReadHint:
         "De persoon houdt het document tegen de telefoon en de Idem-app leest de chip. Altijd samen met het scannen van het document.",
       documentPhotoHint:
@@ -1321,7 +1321,8 @@ export const nl: Translation<typeof en> = {
         "0–1, leeg is alleen geslaagd/gezakt. Alleen bij de gezichtscontrole.",
       documentsTitle: "Geaccepteerde documenten",
       documentTypes: "Geaccepteerde documenttypen",
-      documentTypesHint: "Gescheiden door komma's, leeg accepteert alles.",
+      documentTypesHint:
+        "Gescheiden door komma's: P (paspoort), I (ID-kaart), drivers_license (Nederlands rijbewijs). Leeg accepteert alles.",
       issuingCountries: "Geaccepteerde landen van uitgifte",
       issuingCountriesHint:
         "ICAO-landcodes van drie letters zoals NLD of DEU, gescheiden door komma's; leeg accepteert alles. Een code die geen land heeft wordt geweigerd.",

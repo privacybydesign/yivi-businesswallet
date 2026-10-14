@@ -202,14 +202,16 @@ func TestValidateEmptyDocTypeEntry(t *testing.T) {
 	wantRefused(t, fd, "accepted document type entries must not be empty")
 }
 
-// The engine refuses every EU driving licence, so a flow accepting one could
-// only fail.
-func TestValidateRefusesLicence(t *testing.T) {
-	for _, licence := range []string{DocumentTypeDrivingLicence, DocumentTypeEUDrivingLicence} {
-		fd := validFlow()
-		fd.AcceptedDocumentTypes = []string{"P", licence}
-		wantRefused(t, fd, "is not supported yet")
+// A flow accepts a driving licence by its document type; the chip evidence's
+// type is no document's, so accepting it could only fail.
+func TestValidateLicence(t *testing.T) {
+	fd := validFlow()
+	fd.AcceptedDocumentTypes = []string{"P", DocumentTypeDrivingLicence}
+	if err := Validate(fd); err != nil {
+		t.Errorf("Validate(accepts %s) = %v", DocumentTypeDrivingLicence, err)
 	}
+	fd.AcceptedDocumentTypes = []string{"P", DocumentTypeEUDrivingLicence}
+	wantRefused(t, fd, "never a document's")
 }
 
 func TestValidateDuplicateCountry(t *testing.T) {

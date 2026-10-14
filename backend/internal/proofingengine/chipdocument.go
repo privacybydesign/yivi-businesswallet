@@ -17,8 +17,8 @@ import (
 
 // documentTypeDriversLicense is documentInfo.Type for an EU driving licence,
 // which has no MRZ document code; the app reports the same value, and so does
-// a chip access key (validChipAccessDocumentType). The steps refuse a licence
-// for now (flow.DrivingLicence).
+// a chip access key (validChipAccessDocumentType). Only a Dutch one is
+// verified (drivingLicenceSupported).
 const documentTypeDriversLicense = flow.DocumentTypeDrivingLicence
 
 // The ISO/IEC 18013-2 tags of an EU driving licence's DG1: the data group,
