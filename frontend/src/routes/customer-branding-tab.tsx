@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useSaveBrandingMutation } from "../api/identity-proofing.queries";
-import type { ProofingCustomer } from "../api/identity-proofing";
+import {
+  CUSTOMER_THEME_COLOR_FIELDS,
+  type CustomerThemeColorField,
+  type ProofingCustomer,
+} from "../api/identity-proofing";
+import { COLOR_FIELD_DEFAULTS, FONT_OPTIONS } from "../lib/theme";
 import {
   isHexColor,
   proofingErrorMessage,
@@ -11,12 +16,13 @@ import {
 import { absoluteApiUrl } from "../api/http";
 import { Button, Card, Icon, Input } from "../ui";
 import { InitialMark } from "./proofing-customer-ui";
+import { ColorField as ThemeColorField } from "./theme-settings";
 
 const LABEL = "text-ink text-[13px] font-semibold";
 const HINT = "text-muted text-[12px]";
 const ERROR = "text-error text-[12.5px]";
 const CAPTION =
-  "text-muted font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase";
+  "text-muted font-label text-[10.5px] font-medium tracking-[0.08em] uppercase";
 // A few starting points; any #rrggbb works.
 const PRESET_COLORS = ["#1F5B4A", "#26307A", "#8B2332", "#1A1A1A"] as const;
 // Shown when the customer has no colour: the Yivi default the mail falls back to.
@@ -24,10 +30,25 @@ const FALLBACK_PREVIEW_COLOR = "#1A1A1A";
 const LOGO_ACCEPT = "image/png,image/jpeg,image/gif,image/webp";
 const PREVIEW_QR_ICON = 40;
 const PREVIEW_MARK = "h-6 w-6 rounded text-[11px]";
+const SELECT =
+  "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full max-w-[220px] border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
+// Each further colour's label, the org theme settings' own.
+const THEME_COLOR_LABELS = {
+  textColor: "themeSettings.textColor",
+  surfaceColor: "themeSettings.surfaceColor",
+  borderColor: "themeSettings.borderColor",
+  linkColor: "themeSettings.linkColor",
+  successColor: "themeSettings.successColor",
+  warningColor: "themeSettings.warningColor",
+  errorColor: "themeSettings.errorColor",
+  topbarColor: "themeSettings.topbarColor",
+} as const satisfies Record<CustomerThemeColorField, string>;
 
-interface Draft {
+interface Draft extends Record<CustomerThemeColorField, string> {
   displayName: string;
   primaryColor: string;
+  secondaryColor: string;
+  fontFamily: string;
   supportContact: string;
   privacyUrl: string;
   hidePoweredBy: boolean;
@@ -40,6 +61,16 @@ function draftFrom(customer: ProofingCustomer): Draft {
   return {
     displayName: b.displayName,
     primaryColor: b.primaryColor,
+    secondaryColor: b.secondaryColor,
+    textColor: b.textColor,
+    surfaceColor: b.surfaceColor,
+    borderColor: b.borderColor,
+    linkColor: b.linkColor,
+    successColor: b.successColor,
+    warningColor: b.warningColor,
+    errorColor: b.errorColor,
+    topbarColor: b.topbarColor,
+    fontFamily: b.fontFamily,
     supportContact: b.supportContact,
     privacyUrl: b.privacyUrl,
     hidePoweredBy: b.hidePoweredBy,
@@ -80,11 +111,19 @@ export function BrandingTab({
     draft.removeLogo ||
     draft.displayName !== saved.displayName ||
     draft.primaryColor !== saved.primaryColor ||
+    draft.secondaryColor !== saved.secondaryColor ||
+    CUSTOMER_THEME_COLOR_FIELDS.some(
+      (field) => draft[field] !== saved[field],
+    ) ||
+    draft.fontFamily !== saved.fontFamily ||
     draft.supportContact !== saved.supportContact ||
     draft.privacyUrl !== saved.privacyUrl ||
     draft.hidePoweredBy !== saved.hidePoweredBy;
-  const colorInvalid =
-    draft.primaryColor !== "" && !isHexColor(draft.primaryColor);
+  const colorInvalid = [
+    draft.primaryColor,
+    draft.secondaryColor,
+    ...CUSTOMER_THEME_COLOR_FIELDS.map((field) => draft[field]),
+  ].some((color) => !isHexOrEmpty(color));
   const logoUri =
     logoPreview ??
     (draft.removeLogo || !customer.branding.logoUri
@@ -102,6 +141,16 @@ export function BrandingTab({
       {
         displayName: draft.displayName,
         primaryColor: draft.primaryColor,
+        secondaryColor: draft.secondaryColor,
+        textColor: draft.textColor,
+        surfaceColor: draft.surfaceColor,
+        borderColor: draft.borderColor,
+        linkColor: draft.linkColor,
+        successColor: draft.successColor,
+        warningColor: draft.warningColor,
+        errorColor: draft.errorColor,
+        topbarColor: draft.topbarColor,
+        fontFamily: draft.fontFamily,
         supportContact: draft.supportContact,
         privacyUrl: draft.privacyUrl,
         hidePoweredBy: draft.hidePoweredBy,
@@ -204,64 +253,58 @@ export function BrandingTab({
               </div>
             </div>
 
+            <ColorField
+              id="branding-primary-color"
+              label={t("customers.branding.primaryColor")}
+              hint={t("customers.branding.primaryColorHint")}
+              value={draft.primaryColor}
+              onChange={(value) => set("primaryColor", value)}
+            />
+
+            <ColorField
+              id="branding-secondary-color"
+              label={t("customers.branding.secondaryColor")}
+              hint={t("customers.branding.secondaryColorHint")}
+              value={draft.secondaryColor}
+              onChange={(value) => set("secondaryColor", value)}
+            />
+
             <div className="flex flex-col gap-1.5">
-              <span id="branding-color-label" className={LABEL}>
-                {t("customers.branding.primaryColor")}
+              <span className={LABEL}>
+                {t("customers.branding.themeTitle")}
               </span>
-              <div
-                role="group"
-                aria-labelledby="branding-color-label"
-                className="flex flex-wrap items-center gap-2"
-              >
-                {PRESET_COLORS.map((color) => {
-                  const active =
-                    draft.primaryColor.toLowerCase() === color.toLowerCase();
-                  return (
-                    <button
-                      key={color}
-                      type="button"
-                      aria-pressed={active}
-                      aria-label={color}
-                      onClick={() => set("primaryColor", color)}
-                      className={[
-                        "h-9 w-9 rounded-md transition-shadow",
-                        active
-                          ? "ring-ink ring-offset-surface ring-2 ring-offset-2"
-                          : "",
-                      ].join(" ")}
-                      style={{ backgroundColor: color }}
-                    />
-                  );
-                })}
-                <input
-                  type="color"
-                  aria-label={t("customers.branding.customColor")}
-                  value={
-                    isHexColor(draft.primaryColor)
-                      ? draft.primaryColor
-                      : FALLBACK_PREVIEW_COLOR
-                  }
-                  onChange={(e) => set("primaryColor", e.target.value)}
-                  className="border-line-strong h-9 w-9 cursor-pointer rounded-md border bg-transparent"
-                />
-                <div className="ml-2 w-32">
-                  <Input
-                    value={draft.primaryColor}
-                    placeholder={t("customers.branding.orgColor")}
-                    aria-label={t("customers.branding.primaryColor")}
-                    aria-invalid={colorInvalid}
-                    className="font-mono text-[12.5px]"
-                    onChange={(e) => set("primaryColor", e.target.value.trim())}
+              <p className={HINT}>{t("customers.branding.themeHint")}</p>
+              <div className="mt-2 grid grid-cols-[180px_1fr] items-center gap-x-5 gap-y-3.5">
+                {CUSTOMER_THEME_COLOR_FIELDS.map((field) => (
+                  <ThemeColorField
+                    key={field}
+                    label={t(THEME_COLOR_LABELS[field])}
+                    value={draft[field]}
+                    fallback={COLOR_FIELD_DEFAULTS[field]}
+                    onChange={(value) => set(field, value)}
+                    onClear={() => set(field, "")}
+                    clearLabel={t("themeSettings.reset")}
                   />
-                </div>
+                ))}
+                <span className={CAPTION}>{t("themeSettings.font")}</span>
+                <select
+                  className={SELECT}
+                  value={draft.fontFamily}
+                  onChange={(e) => set("fontFamily", e.target.value)}
+                  aria-label={t("themeSettings.font")}
+                  style={{ fontFamily: draft.fontFamily || undefined }}
+                >
+                  {FONT_OPTIONS.map((option) => (
+                    <option
+                      key={option.name}
+                      value={option.value}
+                      style={{ fontFamily: option.value || undefined }}
+                    >
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
               </div>
-              {colorInvalid ? (
-                <p className={ERROR}>{t("customers.branding.colorInvalid")}</p>
-              ) : (
-                <p className={HINT}>
-                  {t("customers.branding.primaryColorHint")}
-                </p>
-              )}
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -328,6 +371,83 @@ export function BrandingTab({
         supportContact={draft.supportContact.trim()}
         privacyUrl={draft.privacyUrl.trim()}
       />
+    </div>
+  );
+}
+
+function isHexOrEmpty(value: string): boolean {
+  return value === "" || isHexColor(value);
+}
+
+// One of the branding's colours: a few presets, a picker and the hex itself;
+// empty falls back to the organisation's.
+function ColorField({
+  id,
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (value: string) => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const invalid = !isHexOrEmpty(value);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span id={`${id}-label`} className={LABEL}>
+        {label}
+      </span>
+      <div
+        role="group"
+        aria-labelledby={`${id}-label`}
+        className="flex flex-wrap items-center gap-2"
+      >
+        {PRESET_COLORS.map((color) => {
+          const active = value.toLowerCase() === color.toLowerCase();
+          return (
+            <button
+              key={color}
+              type="button"
+              aria-pressed={active}
+              aria-label={color}
+              onClick={() => onChange(color)}
+              className={[
+                "h-9 w-9 rounded-md transition-shadow",
+                active
+                  ? "ring-ink ring-offset-surface ring-2 ring-offset-2"
+                  : "",
+              ].join(" ")}
+              style={{ backgroundColor: color }}
+            />
+          );
+        })}
+        <input
+          type="color"
+          aria-label={t("customers.branding.customColor")}
+          value={isHexColor(value) ? value : FALLBACK_PREVIEW_COLOR}
+          onChange={(e) => onChange(e.target.value)}
+          className="border-line-strong h-9 w-9 cursor-pointer rounded-md border bg-transparent"
+        />
+        <div className="ml-2 w-32">
+          <Input
+            value={value}
+            placeholder={t("customers.branding.orgColor")}
+            aria-label={label}
+            aria-invalid={invalid}
+            className="font-mono text-[12.5px]"
+            onChange={(e) => onChange(e.target.value.trim())}
+          />
+        </div>
+      </div>
+      {invalid ? (
+        <p className={ERROR}>{t("customers.branding.colorInvalid")}</p>
+      ) : (
+        <p className={HINT}>{hint}</p>
+      )}
     </div>
   );
 }

@@ -26,7 +26,7 @@ import { SecretReveal, WebhookStateText } from "./proofing-customer-ui";
 const ERROR = "text-error text-[12.5px]";
 const HINT = "text-muted text-[12px]";
 const CAPTION =
-  "text-muted font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase";
+  "text-muted font-label text-[10.5px] font-medium tracking-[0.08em] uppercase";
 // The masked middle of a secret whose last four characters are shown.
 const SECRET_MASK = "••••••••••••••••";
 

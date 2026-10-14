@@ -74,10 +74,23 @@ var DataRetentionDayOptions = []int{7, 30, 90, 180, 365}
 // CustomerBranding is how the proofing mail to a customer's subjects looks:
 // DisplayName signs it ("" is the customer's name), PrimaryColor colours it
 // ("" is the org's), and SupportContact and PrivacyURL are added to it ("" leaves
-// each out). HasLogo reports a stored logo, read with CustomerStore.Logo.
+// each out). SecondaryColor is the Idem app's second colour ("" is the org's
+// accent colour). HasLogo reports a stored logo, read with CustomerStore.Logo.
+// The other colours and FontFamily are the rest of its white-label, the same as
+// the org theme's ("" keeps the design's own); TopbarColor is the app's header.
 type CustomerBranding struct {
 	DisplayName    string
 	PrimaryColor   string
+	SecondaryColor string
+	TextColor      string
+	SurfaceColor   string
+	BorderColor    string
+	LinkColor      string
+	SuccessColor   string
+	WarningColor   string
+	ErrorColor     string
+	TopbarColor    string
+	FontFamily     string
 	SupportContact string
 	PrivacyURL     string
 	HasLogo        bool
@@ -100,7 +113,10 @@ type LogoChange struct {
 
 func (b CustomerBranding) auditFields() map[string]any {
 	return map[string]any{
-		"displayName": b.DisplayName, "primaryColor": b.PrimaryColor,
+		"displayName": b.DisplayName, "primaryColor": b.PrimaryColor, "secondaryColor": b.SecondaryColor,
+		"textColor": b.TextColor, "surfaceColor": b.SurfaceColor, "borderColor": b.BorderColor,
+		"linkColor": b.LinkColor, "successColor": b.SuccessColor, "warningColor": b.WarningColor,
+		"errorColor": b.ErrorColor, "topbarColor": b.TopbarColor, "fontFamily": b.FontFamily,
 		"supportContact": b.SupportContact, "privacyUrl": b.PrivacyURL, "hasLogo": b.HasLogo,
 		"hidePoweredBy": b.HidePoweredBy,
 	}

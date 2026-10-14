@@ -634,6 +634,21 @@ func (s *RequestStore) Get(ctx context.Context, orgID, id uuid.UUID) (Request, e
 	return req, nil
 }
 
+// CustomerOf returns the customer the org's request was sent for (nil for a
+// member's), or ErrRequestNotFound.
+func (s *RequestStore) CustomerOf(ctx context.Context, orgID, id uuid.UUID) (*uuid.UUID, error) {
+	var customerID *uuid.UUID
+	err := s.db.QueryRow(ctx, `SELECT customer_id FROM identity_proofing_requests
+		WHERE id = $1 AND organization_id = $2`, id, orgID).Scan(&customerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrRequestNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("proofing: customer of request %s: %w", id, err)
+	}
+	return customerID, nil
+}
+
 // GetForCustomer returns one of the requests scope reaches, or
 // ErrRequestNotFound.
 func (s *RequestStore) GetForCustomer(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {

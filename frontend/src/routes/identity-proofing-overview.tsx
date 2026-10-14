@@ -203,7 +203,7 @@ function StatCell({
 }): React.JSX.Element {
   return (
     <div className="px-5 py-4">
-      <div className="text-muted font-mono text-[11px] font-medium tracking-[0.08em] uppercase">
+      <div className="text-muted font-label text-[11px] font-medium tracking-[0.08em] uppercase">
         {label}
       </div>
       <div className="font-display text-ink mt-1.5 text-[26px] font-bold tracking-[-0.01em]">

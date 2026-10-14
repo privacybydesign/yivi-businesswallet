@@ -10,6 +10,7 @@ import { router } from "./router";
 import { setUnauthorizedHandler } from "./api/http";
 import { meQueryKey } from "./api/auth.queries";
 import { toast } from "./lib/toast";
+import { watchSystemColorScheme } from "./lib/color-scheme";
 import { Toaster } from "./ui";
 import i18n from "./i18n";
 import "./index.css";
@@ -44,6 +45,8 @@ const queryClient = new QueryClient({
 setUnauthorizedHandler(() => {
   queryClient.setQueryData(meQueryKey, null);
 });
+
+watchSystemColorScheme();
 
 const root = document.getElementById("root");
 

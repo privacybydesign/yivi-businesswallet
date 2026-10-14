@@ -19,6 +19,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
@@ -1772,11 +1773,25 @@ func (s *Service) RemoveCustomer(ctx context.Context, orgID, id uuid.UUID) error
 	return err
 }
 
-// SaveCustomerBranding replaces a customer's branding. The colour is a
+// SaveCustomerBranding replaces a customer's branding. The colours are
 // #rrggbb hex, the privacy statement an https URL; empty fields fall back.
 func (s *Service) SaveCustomerBranding(ctx context.Context, orgID, id uuid.UUID, b CustomerBranding, logo LogoChange) (Customer, error) {
 	b.DisplayName = strings.TrimSpace(b.DisplayName)
 	b.PrimaryColor = strings.TrimSpace(b.PrimaryColor)
+	b.SecondaryColor = strings.TrimSpace(b.SecondaryColor)
+	b.FontFamily = strings.TrimSpace(b.FontFamily)
+	for name, color := range map[string]*string{
+		"text": &b.TextColor, "surface": &b.SurfaceColor, "border": &b.BorderColor, "link": &b.LinkColor,
+		"success": &b.SuccessColor, "warning": &b.WarningColor, "error": &b.ErrorColor, "top bar": &b.TopbarColor,
+	} {
+		*color = strings.TrimSpace(*color)
+		if *color != "" && !hexColor.MatchString(*color) {
+			return Customer{}, fmt.Errorf("%w: the %s colour must be a hex colour like #1f5b4a", ErrInvalidInput, name)
+		}
+	}
+	if b.FontFamily != "" && !themesettings.ValidFontFamily(b.FontFamily) {
+		return Customer{}, fmt.Errorf("%w: the font must be a comma-separated font-family list", ErrInvalidInput)
+	}
 	b.SupportContact = strings.TrimSpace(b.SupportContact)
 	b.PrivacyURL = strings.TrimSpace(b.PrivacyURL)
 	switch {
@@ -1784,6 +1799,8 @@ func (s *Service) SaveCustomerBranding(ctx context.Context, orgID, id uuid.UUID,
 		return Customer{}, fmt.Errorf("%w: the display name is too long", ErrInvalidInput)
 	case b.PrimaryColor != "" && !hexColor.MatchString(b.PrimaryColor):
 		return Customer{}, fmt.Errorf("%w: the primary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
+	case b.SecondaryColor != "" && !hexColor.MatchString(b.SecondaryColor):
+		return Customer{}, fmt.Errorf("%w: the secondary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
 	case len(b.SupportContact) > maxSupportContactLen:
 		return Customer{}, fmt.Errorf("%w: the support contact is too long", ErrInvalidInput)
 	case len(b.PrivacyURL) > maxWebhookURLLength:

@@ -1265,6 +1265,9 @@ func TestSaveBrandingValidates(t *testing.T) {
 	f := newFixture()
 	for name, b := range map[string]CustomerBranding{
 		"colour":       {PrimaryColor: "green"},
+		"text colour":  {TextColor: "#12345"},
+		"top bar":      {TopbarColor: "red"},
+		"font":         {FontFamily: "Arial; color: red"},
 		"http privacy": {PrivacyURL: "http://initech.example/privacy"},
 		"relative":     {PrivacyURL: "/privacy"},
 	} {

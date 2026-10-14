@@ -49,10 +49,17 @@ type Handler struct {
 	idempotency *IdempotencyStore
 	// platformAdmins may pause any org's proofing.
 	platformAdmins auth.PlatformAdmins
+	// appBranding dresses the hosted page as the Idem app dresses the
+	// session; nil leaves the page the customer's own colour only.
+	appBranding *AppBrandingResolver
 }
 
 // SetIdempotencyStore turns on Idempotency-Key handling for the customer API.
 func (h *Handler) SetIdempotencyStore(s *IdempotencyStore) { h.idempotency = s }
+
+// SetAppBranding gives the hosted page the branding the Idem app shows its
+// session in: the org's theme with the customer's overrides on top.
+func (h *Handler) SetAppBranding(r *AppBrandingResolver) { h.appBranding = r }
 
 func NewHandler(service *Service, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{

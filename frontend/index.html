@@ -13,38 +13,65 @@
       // Apply the active org's cached theme before first paint, so a full reload
       // never flashes the default palette before React swaps the tenant branding
       // in. The org slug is the first path segment; the cache is written by
-      // cacheOrgTheme (src/lib/theme.ts) as { inline, css } — keep this reader in
-      // step with it. `inline` holds the mode-safe brand fills (set on the
-      // documentElement); `css` is the mode-aware block (surface/text/border/
+      // cacheOrgTheme (src/lib/theme.ts) as { inline, css, whiteLabel } — keep this reader in
+      // step with it. `inline` holds the brand fills (set on the
+      // documentElement); `css` is the derived block (surface/text/border/
       // link/status) whose `:root:root` selector wins over Vite's CSS by
-      // specificity, so injecting it here has no source-order race. Any failure
-      // is swallowed: the runtime apply then themes the app a moment later, so
-      // this is only an optimisation.
+      // specificity, so injecting it here has no source-order race;
+      // `whiteLabel` marks the white-label design. Any failure is swallowed: the runtime apply then
+      // themes the app a moment later, so this is only an optimisation. The
+      // colour scheme is always set, also on pages without an org.
       (function () {
+        var whiteLabel = false;
         try {
           var slug = location.pathname.split("/")[1];
-          if (!slug) return;
-          var raw = localStorage.getItem("ybw.theme." + slug);
-          if (!raw) return;
-          var payload = JSON.parse(raw);
-          var inline = (payload && payload.inline) || {};
-          var style = document.documentElement.style;
-          for (var name in inline) {
-            if (Object.prototype.hasOwnProperty.call(inline, name)) {
-              style.setProperty(name, inline[name]);
+          var raw = slug && localStorage.getItem("ybw.theme." + slug);
+          if (raw) {
+            var payload = JSON.parse(raw);
+            var inline = (payload && payload.inline) || {};
+            var style = document.documentElement.style;
+            for (var name in inline) {
+              if (Object.prototype.hasOwnProperty.call(inline, name)) {
+                style.setProperty(name, inline[name]);
+              }
             }
-          }
-          if (payload && payload.css) {
-            var el =
-              document.getElementById("ybw-org-theme") ||
-              document.createElement("style");
-            el.id = "ybw-org-theme";
-            el.textContent = payload.css;
-            if (!el.isConnected) document.head.appendChild(el);
+            if (payload && payload.css) {
+              var el =
+                document.getElementById("ybw-org-theme") ||
+                document.createElement("style");
+              el.id = "ybw-org-theme";
+              el.textContent = payload.css;
+              if (!el.isConnected) document.head.appendChild(el);
+            }
+            if (payload && payload.whiteLabel) {
+              whiteLabel = true;
+              document.documentElement.setAttribute(
+                "data-design",
+                "white-label",
+              );
+            }
           }
         } catch (e) {
           /* no-op: fall back to the runtime apply */
         }
+        // Light or dark, resolved as resolveColorScheme (src/lib/color-scheme.ts)
+        // does: always light in the white-label design, else the switch's
+        // stored choice, else the OS.
+        var preference = "system";
+        try {
+          preference = localStorage.getItem("bw.colorScheme") || "system";
+        } catch (e) {
+          /* no-op: Auto */
+        }
+        var dark =
+          !whiteLabel &&
+          (preference === "dark" ||
+            (preference !== "light" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches));
+        document.documentElement.setAttribute(
+          "data-color-scheme",
+          dark ? "dark" : "light",
+        );
       })();
     </script>
   </head>

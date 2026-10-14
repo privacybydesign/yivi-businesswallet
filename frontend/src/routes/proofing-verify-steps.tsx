@@ -47,7 +47,7 @@ import type { DataDisclosureItem, IconName } from "../ui";
 const HINT = "text-ink-soft text-[13px]";
 const ERROR = "text-error text-[12.5px]";
 const CAPTION =
-  "text-muted font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase";
+  "text-muted font-label text-[10.5px] font-medium tracking-[0.08em] uppercase";
 const LINK_BUTTON =
   "rounded-yivi font-display bg-primary text-primary-fg hover:bg-primary-hover inline-flex h-11 items-center justify-center px-[18px] text-[15px] font-semibold";
 
@@ -250,7 +250,7 @@ export function MethodChoice({
                 onChange={() => onChange(option.value)}
                 className="mt-1"
               />
-              <span className="bg-surface-3 text-ink rounded-yivi-sm flex h-9 w-9 shrink-0 items-center justify-center">
+              <span className="bg-tile text-tile-fg rounded-yivi-sm flex h-9 w-9 shrink-0 items-center justify-center">
                 <Icon name={METHOD_ICONS[option.value]} />
               </span>
               <span className="flex flex-col gap-0.5">
@@ -495,7 +495,7 @@ function DiplomaStep({
       <ol className="flex flex-col gap-2.5">
         {(["login", "download", "upload"] as const).map((step, i) => (
           <li key={step} className="flex items-start gap-3 text-[13.5px]">
-            <span className="bg-surface-3 text-ink flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold">
+            <span className="bg-tile text-tile-fg flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold">
               {i + 1}
             </span>
             <span className="text-ink pt-0.5">
@@ -701,7 +701,7 @@ function IdemOnScreen({
   if (state === "connected") {
     return (
       <div className="flex flex-col items-center gap-2 text-center">
-        <span className="bg-surface-3 text-ink rounded-yivi flex h-12 w-12 items-center justify-center">
+        <span className="bg-tile text-tile-fg rounded-yivi flex h-12 w-12 items-center justify-center">
           <Icon name="phone" size={24} />
         </span>
         <h2 className="text-ink text-[18px] font-bold">

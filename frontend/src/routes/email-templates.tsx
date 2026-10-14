@@ -40,7 +40,7 @@ import {
 import { Button, Card, ConfirmDialog, Input, Table, Tag } from "../ui";
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 const CONTROL =
   "rounded-yivi border-line-strong bg-surface text-ink w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
 const CONFLICT_STATUS = 409;

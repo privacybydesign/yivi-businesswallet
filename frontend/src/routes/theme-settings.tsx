@@ -10,13 +10,14 @@ import {
   AA_CONTRAST,
   COLOR_FIELD_DEFAULTS,
   DEFAULT_PRIMARY,
+  FONT_OPTIONS,
   primaryContrastFloor,
   readableForeground,
 } from "../lib/theme";
 import { Button, Card } from "../ui";
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 const GROUP_LABEL =
   "text-ink col-span-2 mt-2 text-[12px] font-semibold first:mt-0";
 const CONTROL =
@@ -71,27 +72,6 @@ const COLOR_GROUPS = [
   fields: ReadonlyArray<{ field: ThemeColorField; labelKey: string }>;
 }>;
 
-// Curated body-font options. Values are full font-family stacks; each is either
-// a bundled font (Open Sans, Alexandria) shipped with its open licence, or a
-// system/web-safe stack rendered from the client's own fonts — so nothing is
-// distributed by us and there is no commercial-licence exposure. The default
-// (Open Sans) stores "" so an unset theme keeps the app default. Names are
-// proper nouns and stay untranslated.
-const FONT_OPTIONS = [
-  { name: "Open Sans", value: "" },
-  { name: "Alexandria", value: '"Alexandria", system-ui, sans-serif' },
-  {
-    name: "System UI",
-    value: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-  },
-  { name: "Helvetica / Arial", value: '"Helvetica Neue", Arial, sans-serif' },
-  { name: "Georgia", value: 'Georgia, "Times New Roman", serif' },
-  {
-    name: "Monospace",
-    value: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-  },
-] as const;
-
 const ALL_COLOR_FIELDS = COLOR_GROUPS.flatMap((g) =>
   g.fields.map((f) => f.field),
 );
@@ -139,7 +119,10 @@ export function ThemeSettingsPanel({
   );
 }
 
-function ColorField({
+// One theme colour: a picker, its hex and a reset; empty shows `fallback`.
+// Laid out as two cells of a label/control grid. The customer branding tab
+// uses it too.
+export function ColorField({
   label,
   value,
   fallback,
@@ -383,7 +366,7 @@ function ThemeForm({
         <span className={EYEBROW}>{t("themeSettings.preview")}</span>
         <div className="mt-2.5 flex items-center gap-3">
           <span
-            className="rounded-yivi font-display inline-flex h-9 items-center px-3.5 text-[13.5px] font-semibold"
+            className="rounded-button font-button inline-flex h-9 items-center px-3.5 text-[13.5px] font-(--yb-button-weight)"
             style={{
               backgroundColor: previewPrimary,
               color: readableForeground(previewPrimary),
