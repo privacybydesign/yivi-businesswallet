@@ -139,11 +139,12 @@ func Decode(raw []byte, use func(img image.Image, format string) error) error {
 	var mu sync.Mutex
 	abandoned := false
 	done := make(chan decoded, 1)
+	decode := decodeImage
 	go func() {
 		var out decoded
 		out.err = guard(func() error {
 			var err error
-			out.img, out.format, err = decodeImage(bytes.NewReader(raw))
+			out.img, out.format, err = decode(bytes.NewReader(raw))
 			return err
 		})
 		mu.Lock()

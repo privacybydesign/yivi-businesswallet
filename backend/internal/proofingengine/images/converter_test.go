@@ -201,11 +201,18 @@ func samplePhoto(t *testing.T) []byte {
 	return raw
 }
 
+// slotsDeadline bounds how long waitForSlots polls: generous, since CI runs
+// these under the race detector on shared machines.
+const slotsDeadline = 10 * time.Second
+
+// errReleased is what the stand-in decoders return once let go.
+var errReleased = errors.New("stand-in decoder released")
+
 // waitForSlots polls until held slots are taken: a given-up decode frees its
 // slot from its own goroutine.
 func waitForSlots(t *testing.T, held int) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(slotsDeadline)
 	for len(decodeSlots) != held {
 		if time.Now().After(deadline) {
 			t.Fatalf("slots held = %d, want %d", len(decodeSlots), held)
@@ -218,9 +225,9 @@ func waitForSlots(t *testing.T, held int) {
 // until it ends, so hung decodes never exceed maxConcurrentDecodes.
 func TestDecodeGivesUpOnAHang(t *testing.T) {
 	release := make(chan struct{})
-	withDecoder(t, func(r io.Reader) (image.Image, string, error) {
+	withDecoder(t, func(io.Reader) (image.Image, string, error) {
 		<-release
-		return image.Decode(r)
+		return nil, "", errReleased
 	})
 	if err := Decode(samplePhoto(t), unused(t)); !errors.Is(err, ErrDecodeTimeout) {
 		t.Fatalf("Decode = %v, want ErrDecodeTimeout", err)
