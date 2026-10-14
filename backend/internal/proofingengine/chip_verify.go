@@ -37,25 +37,27 @@ type mrtdEvidenceRequest struct {
 // card, verified with mrtdverify.VerifyPassiveICAO, which also checks the
 // signer's country against DG1's and narrows the trust pool to it.
 const (
-	// documentTypeEUDrivingLicence runs the generic mrtdverify.VerifyPassive:
-	// licences use DG1/DG6/DG13 encodings the typed parsers cannot read, so there
-	// is no country cross-check.
+	// documentTypeEUDrivingLicence runs mrtdverify.VerifyPassiveDrivingLicence
+	// against the Dutch licence CSCAs: licences use DG1/DG6/DG13 encodings the
+	// typed parsers cannot read. Only a Dutch licence gets this far
+	// (drivingLicenceSupported), so the pool is the country cross-check.
 	documentTypeEUDrivingLicence = flow.DocumentTypeEUDrivingLicence
 )
 
-// resolveAAKeyDataGroup defaults ev.AAKeyDataGroup to DG15 when the client sent
-// a DG15 but named no key group, as vcmrtd does; without it a genuine Active
-// Authentication would never be verified. An explicit value wins. Driving
-// licences (DG13) get no default.
+// resolveAAKeyDataGroup defaults ev.AAKeyDataGroup to the document's Active
+// Authentication key (DG15, a licence's DG13) when the client sent it but
+// named no key group, as vcmrtd does when it ran no AA; without it a missing
+// response would go unnoticed. An explicit value wins.
 func resolveAAKeyDataGroup(ev *mrtdEvidenceRequest) string {
 	if ev.AAKeyDataGroup != "" {
 		return ev.AAKeyDataGroup
 	}
+	key := dataGroupAAKey
 	if ev.DocumentType == documentTypeEUDrivingLicence {
-		return ""
+		key = dataGroupDLAAKey
 	}
-	if _, ok := ev.DataGroups[dataGroupAAKey]; ok {
-		return dataGroupAAKey
+	if _, ok := ev.DataGroups[key]; ok {
+		return key
 	}
 	return ""
 }
@@ -77,8 +79,8 @@ type passiveAuthInfo struct {
 	InvalidDataGroups    []string `json:"invalidDataGroups,omitempty"` // e.g. ["DG2"] when a hash mismatched
 	CSCATrustChainValid  *bool    `json:"cscaTrustChainValid,omitempty"`
 	IssuingCSCA          string   `json:"issuingCsca,omitempty"`
-	// DocumentComplete is false when EF.SOD lists a DG14 or DG15 that was not sent;
-	// always true for a driving licence.
+	// DocumentComplete is false when EF.SOD lists a DG14 or DG15 (a licence's
+	// DG13) that was not sent.
 	DocumentComplete  *bool  `json:"documentComplete,omitempty"`
 	DocumentVerifyErr string `json:"documentVerifyErr,omitempty"`
 }
@@ -96,20 +98,19 @@ type activeAuthInfo struct {
 // Authentication counts only with the session's own challenge
 // (expectedAAChallenge), against relay and replay. An error is malformed
 // evidence (a bad request); a check that ran and failed is in the result.
-func verifyMrtdEvidence(ev *mrtdEvidenceRequest, expectedAAChallenge string) (*chipChecksInfo, error) {
+func (s *Server) verifyMrtdEvidence(ev *mrtdEvidenceRequest, expectedAAChallenge string) (*chipChecksInfo, error) {
 	if ev == nil {
 		return nil, nil
 	}
 
 	aaKeyDataGroup := resolveAAKeyDataGroup(ev)
-	pool, err := mrtdverify.CertPoolFor(aaKeyDataGroup)
-	if err != nil {
-		return nil, fmt.Errorf("loading CSCA trust anchor: %w", err)
-	}
-
-	verifyPassive := mrtdverify.VerifyPassiveICAO
-	if ev.DocumentType == documentTypeEUDrivingLicence {
-		verifyPassive = mrtdverify.VerifyPassive
+	pool, verifyPassive := s.cfg.DrivingLicenceCertPool, mrtdverify.VerifyPassiveDrivingLicence
+	if ev.DocumentType != documentTypeEUDrivingLicence {
+		var err error
+		if pool, err = mrtdverify.PassportCertPool(); err != nil {
+			return nil, fmt.Errorf("loading CSCA trust anchor: %w", err)
+		}
+		verifyPassive = mrtdverify.VerifyPassiveICAO
 	}
 	passive, err := verifyPassive(ev.EFSOD, ev.DataGroups, pool)
 	if err != nil {
@@ -146,8 +147,10 @@ func verifyMrtdEvidence(ev *mrtdEvidenceRequest, expectedAAChallenge string) (*c
 			// about the chip being here now (a replay or relay), however valid.
 			active.Passed = false
 		}
+		// A passport's DG15 and a licence's DG13 both hold an Active
+		// Authentication key.
 		method := "chip_authentication"
-		if aaKeyDataGroup == dataGroupAAKey {
+		if aaKeyDataGroup == dataGroupAAKey || aaKeyDataGroup == dataGroupDLAAKey {
 			method = "active_authentication"
 		}
 		checks.ActiveAuthentication = &activeAuthInfo{
@@ -195,8 +198,9 @@ const (
 // When fd asks for nfc.chip_auth and the chip carries an AA key, a response
 // that is missing counts as cloned too: the app runs AA whenever the check is
 // listed, so leaving it out is what a recorded read replayed without the chip
-// looks like. A chip whose EF.SOD lists DG15 cannot dodge this by leaving
-// DG15 out: Passive Authentication's completeness check marks that tampered.
+// looks like. A chip whose EF.SOD lists DG15 (a licence's DG13) cannot dodge
+// this by leaving it out: Passive Authentication's completeness check marks
+// that tampered.
 func authenticityFailure(fd *flow.FlowDefinition, checks *chipChecksInfo) (failed bool, errorCode string) {
 	if checks == nil {
 		return false, ""

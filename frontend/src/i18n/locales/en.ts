@@ -1319,7 +1319,7 @@ export const en = {
       saveVersion: "Save as version {{version}}",
       stepsTitle: "Flow steps",
       documentCaptureHint:
-        "The person photographs the code lines at the bottom of their passport or ID card with the Idem app, which unlocks the chip. Always together with reading the chip.",
+        "The person photographs the code lines on their passport, ID card or Dutch driving licence with the Idem app, which unlocks the chip. Always together with reading the chip.",
       nfcReadHint:
         "The person holds the document against their phone and the Idem app reads its chip. Always together with the document scan.",
       documentPhotoHint:
@@ -1349,7 +1349,8 @@ export const en = {
         "0–1, blank is pass/fail only. Only applies with the face check.",
       documentsTitle: "Accepted documents",
       documentTypes: "Accepted document types",
-      documentTypesHint: "Comma-separated, blank accepts any.",
+      documentTypesHint:
+        "Comma-separated: P (passport), I (ID card), drivers_license (Dutch driving licence). Blank accepts any.",
       issuingCountries: "Accepted issuing countries",
       issuingCountriesHint:
         "3-letter ICAO country codes such as NLD or DEU, comma-separated; blank accepts any. A code no country has is refused.",

@@ -11099,9 +11099,10 @@ components:
           items:
             type: string
           description: >-
-            Document codes accepted (the MRZ document code, such as `P`); empty accepts any.
-            An EU driving licence, `drivers_license` or `eu_driving_licence`, is refused (422 `rejected_by_provider`):
-            the engine has no CSCA source to verify a licence's chip, so it refuses every one.
+            Document codes accepted (the MRZ document code, such as `P`, or `drivers_license` for a Dutch
+            driving licence); empty accepts any. `eu_driving_licence`, the chip evidence's type, is refused
+            (422 `rejected_by_provider`). Only Dutch driving licences are verified: the engine holds the RDW's
+            licence CSCAs and no other state's.
         acceptedIssuingCountries:
           type: array
           items:

@@ -43,6 +43,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine"
 	proofingflow "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/mrtdverify"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regulasweep"
 	proofingsession "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
@@ -209,6 +210,11 @@ func newProofingProvider(ctx context.Context, cfg config.Config, pool *pgxpool.P
 		if cfg.RegulaFaceMatchThreshold > 0 {
 			engineCfg.RegulaFaceMatchThreshold = cfg.RegulaFaceMatchThreshold
 		}
+		drivingLicenceCertPool, err := mrtdverify.LoadCertPool(cfg.IdentityProofingEDLCSCAPaths)
+		if err != nil {
+			return nil, nil, fmt.Errorf("loading driving licence CSCAs: %w", err)
+		}
+		engineCfg.DrivingLicenceCertPool = drivingLicenceCertPool
 		// Without a cipher the session store refuses every session
 		// (proofingprovider.ErrNoEncryptionKey); flows still work.
 		sessions := proofingsession.NewPostgresStore(pool, cipher)

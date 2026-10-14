@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/mrtdverify"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 )
 
@@ -39,7 +40,8 @@ func (s *Server) handleSubmitDocumentStep(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "chipAccess.documentType must be passport, identity_card or drivers_license")
 		return
 	}
-	if flow.DrivingLicence(req.Document.Type) || (req.ChipAccess != nil && flow.DrivingLicence(req.ChipAccess.DocumentType)) {
+	if !drivingLicenceSupported(req.Document.Type, req.Document.IssuingState) ||
+		(req.ChipAccess != nil && !drivingLicenceSupported(req.ChipAccess.DocumentType, req.ChipAccess.CountryCode)) {
 		writeDocumentUnsupported(w)
 		return
 	}
@@ -145,15 +147,22 @@ func validImageRegion(r imageRegion) bool {
 	return r.X >= 0 && r.Y >= 0 && r.W > 0 && r.H > 0 && r.X+r.W <= 1 && r.Y+r.H <= 1
 }
 
-// errCodeDocumentUnsupported refuses an EU driving licence at
-// document_capture and nfc_read: there is no CSCA source for licences
-// (mrtdverify.DrivingLicenceCertPool is empty), so a genuine one could only
-// end DOC_TAMPERED.
+// errCodeDocumentUnsupported refuses a non-Dutch EU driving licence at
+// document_capture and nfc_read: Config.DrivingLicenceCertPool holds only
+// the Dutch licence CSCAs, so a genuine one could only end DOC_TAMPERED.
 const errCodeDocumentUnsupported = "document_unsupported"
 
 func writeDocumentUnsupported(w http.ResponseWriter) {
 	writeErrorCode(w, http.StatusUnprocessableEntity, errCodeDocumentUnsupported,
-		"EU driving licences are not supported yet: scan a passport or identity card")
+		"only Dutch driving licences are supported: scan a passport, identity card or Dutch driving licence")
+}
+
+// drivingLicenceSupported is false for a driving licence from a state other
+// than mrtdverify.DrivingLicenceIssuingState; any other document passes. An
+// issuing state not yet known passes too: the chip's own DG1 decides at
+// nfc_read.
+func drivingLicenceSupported(documentType, issuingState string) bool {
+	return !flow.DrivingLicence(documentType) || issuingState == "" || issuingState == mrtdverify.DrivingLicenceIssuingState
 }
 
 // The document types a chip access key may name.

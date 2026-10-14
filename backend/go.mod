@@ -337,4 +337,4 @@ tool (
 
 // gmrtd's maintained fork, as go-passport-issuer uses: the chip verification
 // in internal/proofingengine/mrtdverify.
-replace github.com/gmrtd/gmrtd => github.com/privacybydesign/gmrtd v1.0.1
+replace github.com/gmrtd/gmrtd => github.com/privacybydesign/gmrtd v1.2.0
