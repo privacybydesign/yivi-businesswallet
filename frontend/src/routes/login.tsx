@@ -176,7 +176,7 @@ export default function Login(): React.JSX.Element {
         </section>
 
         <div className="order-1 flex justify-center lg:order-2 lg:justify-end">
-          <Card className="w-full max-w-md p-8">
+          <Card className="w-full max-w-md p-6 sm:p-8">
             <div className="flex justify-center">
               <Logo />
             </div>

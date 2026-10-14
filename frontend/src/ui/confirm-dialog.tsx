@@ -15,6 +15,9 @@ interface ConfirmDialogProps {
   onClose: () => void;
   // Disables the confirm button while the action is in flight.
   busy?: boolean;
+  // Why the action failed (translated by the caller); the dialog stays open so
+  // the user sees it and can retry.
+  error?: string;
 }
 
 // ConfirmDialog is the in-app replacement for window.confirm: an accessible,
@@ -28,6 +31,7 @@ export function ConfirmDialog({
   onConfirm,
   onClose,
   busy = false,
+  error,
 }: ConfirmDialogProps): React.JSX.Element {
   const { t } = useTranslation();
   return (
@@ -52,6 +56,11 @@ export function ConfirmDialog({
       }
     >
       <p className="text-ink-soft text-sm">{message}</p>
+      {error !== undefined && (
+        <p role="alert" className="text-error mt-2 text-[12.5px]">
+          {error}
+        </p>
+      )}
     </Modal>
   );
 }

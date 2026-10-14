@@ -25,6 +25,8 @@ func run() error {
 		"provision the anchor organisations — Yivi (with its team as admins + attestation catalogue) and the KVK register (authentic source); no demo members or activity, safe for staging/production")
 	partnersOnly := flag.Bool("partners", false,
 		"provision the staging pilot partner organisations (Anoigo, Gemeente Nijmegen, Ver.iD, PinkRoccade, Stichting Nuts, Secumail) with their teams as admins — Gemeente Nijmegen also gets its APV standplaatsvergunning attestation catalogue; no other demo data, idempotent — staging only, not for production")
+	proofingDemo := flag.Bool("proofing-demo", false,
+		"provision the identity proofing demo orgs (Radboud, a.s.r., Unibet, CM) with their flows and customers, and the Yivi team as their admins; idempotent; staging only, not for production")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -36,10 +38,10 @@ func run() error {
 
 	ctx := context.Background()
 
-	// Both partial seeds create no demo data, so they can be combined and are
-	// safe to run on every deploy. Only when neither flag is set does the full
-	// dev demo seed run.
-	if *adminsOnly || *orgOnly || *partnersOnly {
+	// The partial seeds are idempotent, so they can be combined and are safe to
+	// run on every deploy. Only when no flag is set does the full dev demo seed
+	// run.
+	if *adminsOnly || *orgOnly || *partnersOnly || *proofingDemo {
 		if *adminsOnly {
 			slog.Info("provisioning platform-admin accounts", slog.Int("count", len(cfg.PlatformAdminEmails)))
 			if err := seed.EnsurePlatformAdmins(ctx, cfg.DatabaseDSN, cfg.PlatformAdminEmails); err != nil {
@@ -66,6 +68,13 @@ func run() error {
 				return err
 			}
 			slog.Info("partner organisation provisioning complete")
+		}
+		if *proofingDemo {
+			slog.Info("provisioning identity proofing demo")
+			if err := seed.EnsureProofingDemo(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
+				return err
+			}
+			slog.Info("identity proofing demo provisioning complete")
 		}
 		return nil
 	}

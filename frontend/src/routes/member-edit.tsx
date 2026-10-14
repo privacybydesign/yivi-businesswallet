@@ -110,7 +110,7 @@ function EditForm({
         }
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <Card className="max-w-lg p-6">
           <form
             id={FORM_ID}
@@ -225,7 +225,7 @@ export default function MemberEdit(): React.JSX.Element {
   const shell = (body: React.ReactNode): React.JSX.Element => (
     <>
       <TopBar title={t("memberEdit.title")} />
-      <div className="p-8">{body}</div>
+      <div className="p-4 sm:p-8">{body}</div>
     </>
   );
   const message = (text: string, isError = false): React.JSX.Element => (

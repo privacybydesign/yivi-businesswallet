@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"strings"
 	"testing"
 )
@@ -295,6 +296,36 @@ func TestLoadOrgRequestDefaults(t *testing.T) {
 	}
 }
 
+// TRUSTED_PROXIES takes CIDRs and single addresses; empty trusts none, and a
+// value that is neither stops the boot instead of trusting nothing silently.
+func TestLoadTrustedProxies(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("unset TrustedProxies = %v, want none", cfg.TrustedProxies)
+	}
+
+	cfg, err = loadWith(t, map[string]string{envTrustedProxies: "10.0.0.0/8, 192.168.1.7 ,fd00::/8"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := []string{"10.0.0.0/8", "192.168.1.7/32", "fd00::/8"}
+	if len(cfg.TrustedProxies) != len(want) {
+		t.Fatalf("TrustedProxies = %v, want %v", cfg.TrustedProxies, want)
+	}
+	for i, p := range cfg.TrustedProxies {
+		if p.String() != want[i] {
+			t.Errorf("TrustedProxies[%d] = %s, want %s", i, p, want[i])
+		}
+	}
+
+	if _, err := loadWith(t, map[string]string{envTrustedProxies: "10.0.0.0/8,ingress-nginx"}); err == nil {
+		t.Error("TRUSTED_PROXIES with a name loaded, want an error")
+	}
+}
+
 // A CA certificate without its key (or the reverse) is a half-done setup, not
 // a request for the ephemeral CA.
 func TestLoadRejectsHalfConfiguredRequesterCA(t *testing.T) {
@@ -305,6 +336,86 @@ func TestLoadRejectsHalfConfiguredRequesterCA(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := loadWith(t, env); err == nil {
 				t.Errorf("Load(%v) succeeded, want an error", env)
+			}
+		})
+	}
+}
+
+// The real DUO signature check is the default, as in go-diploma-issuer: a
+// deployment that forgets the setting never accepts any PDF as a diploma.
+func TestLoadDiplomaDefaultsToDUO(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DiplomaValidatorProvider != ProviderDUO {
+		t.Errorf("diploma validator = %q, want %q", cfg.DiplomaValidatorProvider, ProviderDUO)
+	}
+	stub, err := loadWith(t, map[string]string{envDiplomaValidatorProvider: ProviderStub, envDevMode: "true"})
+	if err != nil || stub.DiplomaValidatorProvider != ProviderStub {
+		t.Errorf("explicit stub = %q, %v; want %q", stub.DiplomaValidatorProvider, err, ProviderStub)
+	}
+}
+
+// The online revocation check is on unless switched off: off, only the
+// revocation information embedded in an extract counts.
+func TestLoadDiplomaOCSPIsDefault(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil || !cfg.DiplomaOCSP {
+		t.Errorf("default DiplomaOCSP = %v, %v; want on", cfg.DiplomaOCSP, err)
+	}
+	cfg, err = loadWith(t, map[string]string{envDiplomaOCSP: "false"})
+	if err != nil || cfg.DiplomaOCSP {
+		t.Errorf("DIPLOMA_OCSP=false: DiplomaOCSP = %v, %v; want off", cfg.DiplomaOCSP, err)
+	}
+}
+
+// A stub outcome with the engine provider is a half-switched .env: refused,
+// not silently ignored.
+func TestLoadStubOutcomeNeedsStubProvider(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{
+		envIdentityProofingProvider:    ProviderEngine,
+		envIdentityProofingStubOutcome: "approved",
+		envDevMode:                     "true",
+	}); err == nil {
+		t.Errorf("%s with %s=%s loaded, want an error", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderEngine)
+	}
+}
+
+// A stub that passes a real check runs only on a local stack (DEV_MODE), and
+// DEV_MODE only with a localhost APP_BASE_URL.
+func TestLoadStubsNeedDevMode(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		envIdentityProofingProvider: {envIdentityProofingProvider: ProviderStub},
+		envIdentityProofingStubOutcome: {
+			envIdentityProofingProvider:    ProviderStub,
+			envIdentityProofingStubOutcome: "approved",
+		},
+		envDiplomaValidatorProvider: {envDiplomaValidatorProvider: ProviderStub},
+	} {
+		t.Run(name+" without", func(t *testing.T) {
+			if _, err := loadWith(t, env); err == nil {
+				t.Errorf("%v without %s loaded, want an error", env, envDevMode)
+			}
+		})
+		t.Run(name+" with", func(t *testing.T) {
+			withDevMode := map[string]string{envDevMode: "true"}
+			maps.Copy(withDevMode, env)
+			if _, err := loadWith(t, withDevMode); err != nil {
+				t.Errorf("%v with %s: %v", env, envDevMode, err)
+			}
+		})
+	}
+	for base, ok := range map[string]bool{
+		"http://localhost:5173":                    true,
+		"http://127.0.0.1:8080":                    true,
+		"https://business-wallet.staging.yivi.app": false,
+		"http://192.168.1.20:5173":                 false,
+	} {
+		t.Run(base, func(t *testing.T) {
+			_, err := loadWith(t, map[string]string{envDevMode: "true", envAppBaseURL: base})
+			if (err == nil) != ok {
+				t.Errorf("DEV_MODE with APP_BASE_URL %s: %v, want ok %v", base, err, ok)
 			}
 		})
 	}

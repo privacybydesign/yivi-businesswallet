@@ -195,7 +195,7 @@ export default function Signing(): React.JSX.Element {
       <div
         role="tablist"
         aria-label={t("signing.title")}
-        className="border-line bg-surface flex gap-1 border-b px-8"
+        className="border-line bg-surface flex gap-1 overflow-x-auto border-b px-4 sm:px-8"
         onKeyDown={(e) => {
           if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
           e.preventDefault();
@@ -219,7 +219,7 @@ export default function Signing(): React.JSX.Element {
               tabIndex={active ? 0 : -1}
               onClick={() => setTab(tab.key)}
               className={[
-                "h-11 border-b-2 px-3.5 text-[13.5px] transition-colors",
+                "h-11 shrink-0 border-b-2 px-3.5 text-[13.5px] whitespace-nowrap transition-colors",
                 active
                   ? "border-primary text-ink font-semibold"
                   : "text-ink-soft hover:text-ink border-transparent font-medium",
@@ -235,7 +235,7 @@ export default function Signing(): React.JSX.Element {
         id="signing-tabpanel"
         role="tabpanel"
         aria-labelledby={`signing-tab-${activeTab}`}
-        className="p-8"
+        className="p-4 sm:p-8"
       >
         {activeTab === "history" ? (
           <SigningHistoryPanel slug={slug} enabled={isAdmin} />

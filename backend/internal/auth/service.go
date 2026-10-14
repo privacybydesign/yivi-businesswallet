@@ -90,7 +90,12 @@ type Service struct {
 	users         *user.Store
 	sessions      *session.Store
 	invites       invitationLookup
+	// bootstrap, on a DEV_MODE stack, makes the first unknown login its admin.
+	bootstrap *DevBootstrap
 }
+
+// SetDevBootstrap turns on DEV_MODE's first-login admin.
+func (s *Service) SetDevBootstrap(b *DevBootstrap) { s.bootstrap = b }
 
 func NewService(
 	verifier verifier,
@@ -221,10 +226,10 @@ func (s *Service) Authenticate(ctx context.Context, id string) (user.User, strin
 	}
 
 	u, err := s.users.FindByEmail(ctx, email)
+	if errors.Is(err, user.ErrNotFound) {
+		u, err = s.unknownUser(ctx, email)
+	}
 	if err != nil {
-		if errors.Is(err, user.ErrNotFound) {
-			return user.User{}, "", s.invitedOrNotFound(ctx, email)
-		}
 		return user.User{}, "", err
 	}
 
@@ -257,6 +262,24 @@ func (s *Service) result(ctx context.Context, id string) (openid4vpverifier.Pres
 		return openid4vpverifier.Presentation{}, err
 	}
 	return res, nil
+}
+
+// unknownUser answers a login by an address the wallet has no user for: its
+// invitations, else on a DEV_MODE stack the bootstrap admin while unclaimed,
+// else errUserNotInvited.
+func (s *Service) unknownUser(ctx context.Context, email user.Email) (user.User, error) {
+	err := s.invitedOrNotFound(ctx, email)
+	if !errors.Is(err, errUserNotInvited) || s.bootstrap == nil {
+		return user.User{}, err
+	}
+	u, claimed, cerr := s.bootstrap.claim(ctx, email)
+	if cerr != nil {
+		return user.User{}, cerr
+	}
+	if !claimed {
+		return user.User{}, err
+	}
+	return u, nil
 }
 
 func (s *Service) invitedOrNotFound(ctx context.Context, email user.Email) error {

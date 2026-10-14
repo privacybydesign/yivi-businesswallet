@@ -93,6 +93,7 @@ type inviter interface {
 
 type auditReader interface {
 	ListForOrganization(ctx context.Context, orgID uuid.UUID, after *audit.Cursor, limit int) (audit.Page, error)
+	ListMemberVisible(ctx context.Context, orgID uuid.UUID, after *audit.Cursor, limit int) (audit.Page, error)
 	ListForMember(ctx context.Context, orgID, userID uuid.UUID, after *audit.Cursor, limit int) (audit.Page, error)
 }
 
@@ -235,7 +236,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/mandates", orgScoped(RequireMandateAuthority(respond.HandlerFunc(h.grantMandate))))
 	mux.Handle("POST /orgs/{slug}/mandates/{id}/revoke", orgScoped(RequireMandateAuthority(respond.HandlerFunc(h.revokeMandate))))
 
-	mux.Handle("GET /orgs/{slug}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.auditEvents))))
+	// Any member reads the org's configuration events; only an admin sees the
+	// rest, and who acted, on whom and what changed.
+	mux.Handle("GET /orgs/{slug}/audit-events", orgScoped(respond.HandlerFunc(h.auditEvents)))
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {

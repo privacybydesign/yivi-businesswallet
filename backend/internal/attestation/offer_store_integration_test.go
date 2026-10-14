@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 )
 
 // inboundMessage inserts a received QERDS message for the org, returning its id —
@@ -132,6 +133,11 @@ func TestAcceptOfferRecordsHeldAndClosesTheOffer(t *testing.T) {
 	}
 	if held.SourceMessageID == nil || *held.SourceMessageID != messageID {
 		t.Errorf("held row lost the QERDS evidence link: %v", held.SourceMessageID)
+	}
+	// The held credential's own trail starts with its receipt.
+	history, err := e.store.HeldHistory(ctx, e.orgID, held.ID)
+	if err != nil || len(history) != 1 || history[0].Action != audit.AttestationHeldReceived {
+		t.Errorf("held history = %+v, %v; want the received event", history, err)
 	}
 
 	pending, err := e.store.ListPendingOffers(ctx, e.orgID)

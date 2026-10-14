@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/privacybydesign/irmago/eudi"
@@ -25,6 +26,8 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 )
 
 const (
@@ -76,6 +79,9 @@ type Engine struct {
 	// httpClient is the client the holder uses to reach the issuer's token and
 	// credential endpoints.
 	httpClient *http.Client
+	// statusClient fetches Token Status Lists: their URIs come from the
+	// credentials, so it is held to redeem's safehttp policy.
+	statusClient *http.Client
 	// sessionCounter yields a unique session id per redemption.
 	sessionCounter atomic.Uint64
 	// wsca, when set, backs holder binding keys with the wallet-provider WSCA/HSM
@@ -118,13 +124,14 @@ func NewEngine(dsn, storageDir string, masterKey [32]byte, redeem RedeemConfig) 
 		eudi.Logger = logrus.New()
 	}
 	return &Engine{
-		dsn:        dsn,
-		storageDir: storageDir,
-		masterKey:  masterKey,
-		engines:    make(map[uuid.UUID]irmastorage.Storage),
-		opening:    make(map[uuid.UUID]*sync.Mutex),
-		redeem:     redeem,
-		httpClient: &http.Client{},
+		dsn:          dsn,
+		storageDir:   storageDir,
+		masterKey:    masterKey,
+		engines:      make(map[uuid.UUID]irmastorage.Storage),
+		opening:      make(map[uuid.UUID]*sync.Mutex),
+		redeem:       redeem,
+		httpClient:   &http.Client{},
+		statusClient: newStatusClient(safehttp.Policy{AllowInsecureHTTP: redeem.AllowInsecureHTTP}),
 	}
 }
 
@@ -300,29 +307,81 @@ func (e *Engine) Validities(ctx context.Context, orgID uuid.UUID) (map[string]He
 	if err != nil {
 		return nil, err
 	}
-	// One row per credential instance: its own id (the ref) and status bit, plus its
-	// batch's expiry — expiry is a property of the batch, revocation of the instance.
+	// One row per credential instance: its own id (the ref), its batch, its status
+	// reference and bit, plus its batch's claims. A status refresh writes back only
+	// one representative instance per batch (irmago's RevocationService), so the
+	// status facts are aggregated per batch below: a batch is revoked together.
+	// irmago picks that representative from an unordered query, so a later sweep
+	// may write a different instance than the one an earlier sweep marked
+	// suspended; the most recently checked instance is therefore the batch's
+	// status, and an OR over every instance only applies while none was checked.
 	var rows []struct {
-		ID              datatypes.UUID
-		ExpiresAt       datatypes.NullTime
-		LastKnownStatus uint8
+		ID                datatypes.UUID
+		CredentialBatchID datatypes.UUID
+		ExpiresAt         datatypes.NullTime
+		IssuedAt          datatypes.NullTime
+		Format            string
+		HasStatusList     bool
+		LastKnownStatus   uint8
+		LastStatusCheckAt *time.Time
 	}
 	if err := eng.Db().WithContext(ctx).
 		Model(&models.IssuedCredentialInstance{}).
 		Select(`issued_credential_instances.id,
+			issued_credential_instances.credential_batch_id,
 			credential_batches.expires_at,
-			issued_credential_instances.last_known_status`).
+			credential_batches.issued_at,
+			credential_batches.format,
+			issued_credential_instances.status_list_uri IS NOT NULL AS has_status_list,
+			issued_credential_instances.last_known_status,
+			issued_credential_instances.last_status_check_at`).
 		Joins(`JOIN credential_batches
 			ON credential_batches.id = issued_credential_instances.credential_batch_id`).
 		Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("eudiholder: validities org %s: %w", orgID, err)
 	}
+	type batchStatus struct {
+		revoked, hasStatusList bool
+		// uncheckedRevoked is the OR over instances never checked, the fallback
+		// while no sweep has written any instance of the batch.
+		uncheckedRevoked bool
+		checkedAt        *time.Time
+	}
+	batches := map[datatypes.UUID]batchStatus{}
+	for _, row := range rows {
+		b := batches[row.CredentialBatchID]
+		b.hasStatusList = b.hasStatusList || row.HasStatusList
+		rowRevoked := statusRevoked(row.LastKnownStatus)
+		switch {
+		case row.LastStatusCheckAt == nil:
+			b.uncheckedRevoked = b.uncheckedRevoked || rowRevoked
+		case b.checkedAt == nil || row.LastStatusCheckAt.After(*b.checkedAt):
+			b.checkedAt = row.LastStatusCheckAt
+			b.revoked = rowRevoked
+		case row.LastStatusCheckAt.Equal(*b.checkedAt):
+			b.revoked = b.revoked || rowRevoked
+		}
+		batches[row.CredentialBatchID] = b
+	}
+	for id, b := range batches {
+		if b.checkedAt == nil {
+			b.revoked = b.uncheckedRevoked
+			batches[id] = b
+		}
+	}
 	validities := make(map[string]HeldValidity, len(rows))
 	for _, row := range rows {
-		validity := HeldValidity{Revoked: statusRevoked(row.LastKnownStatus)}
+		b := batches[row.CredentialBatchID]
+		validity := HeldValidity{
+			Format: row.Format, Revoked: b.revoked, HasStatusList: b.hasStatusList, StatusCheckedAt: b.checkedAt,
+		}
 		if row.ExpiresAt.Valid {
 			expiresAt := row.ExpiresAt.V
 			validity.ExpiresAt = &expiresAt
+		}
+		if row.IssuedAt.Valid {
+			issuedAt := row.IssuedAt.V
+			validity.IssuedAt = &issuedAt
 		}
 		validities[row.ID.String()] = validity
 	}

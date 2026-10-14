@@ -31,23 +31,36 @@ function Breadcrumb({ items }: { items: BreadcrumbItem[] }): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <nav aria-label={t("nav.breadcrumb")}>
-      <ol className="flex items-center gap-1.5 text-[12px]">
+      <ol className="flex min-w-0 items-center gap-1.5 text-[12px]">
         {items.map((item, index) => {
           const isLast = index === items.length - 1;
+          // Phones keep only the parent and the current page; the rest of the
+          // trail would wrap every crumb onto several lines.
+          const phoneHidden = index < items.length - 2;
           return (
-            <li key={item.label} className="flex items-center gap-1.5">
+            // Keyed by position: two crumbs can share a label (a record's
+            // crumb falls back to its list's name while it loads), and a
+            // duplicate key leaves a stale item behind when the label changes.
+            <li
+              key={index}
+              className={[
+                "min-w-0 items-center gap-1.5 whitespace-nowrap",
+                phoneHidden ? "hidden sm:flex" : "flex",
+              ].join(" ")}
+            >
               {item.to && !isLast ? (
                 <Link
                   to={item.to}
-                  className="text-muted hover:text-ink transition-colors"
+                  className="text-muted hover:text-ink truncate transition-colors"
                 >
                   {item.label}
                 </Link>
               ) : (
                 <span
-                  className={
-                    isLast ? "text-ink-soft font-medium" : "text-muted"
-                  }
+                  className={[
+                    "truncate",
+                    isLast ? "text-ink-soft font-medium" : "text-muted",
+                  ].join(" ")}
                   aria-current={isLast ? "page" : undefined}
                 >
                   {item.label}
@@ -57,7 +70,7 @@ function Breadcrumb({ items }: { items: BreadcrumbItem[] }): React.JSX.Element {
                 <Icon
                   name="chevron_right"
                   size={SEPARATOR_SIZE}
-                  className="text-muted"
+                  className="text-muted shrink-0"
                 />
               )}
             </li>
