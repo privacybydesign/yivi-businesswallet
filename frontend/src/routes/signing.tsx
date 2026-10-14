@@ -1360,7 +1360,7 @@ function NewRequestTab({
               <div className="w-full shrink-0 lg:w-[360px]">
                 <Card className="overflow-hidden p-0">
                   <div className="border-line border-b px-4 py-3.5">
-                    <div className="text-muted font-mono text-[11px] tracking-wide uppercase">
+                    <div className="text-muted font-label text-[11px] tracking-wide uppercase">
                       {t("signing.summaryTitle")}
                     </div>
                     <div className="mt-2 flex items-center gap-2.5">

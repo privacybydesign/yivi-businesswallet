@@ -226,9 +226,9 @@
       "blocks": [
         { "type": "logo" },
         { "type": "heading", "text": "{{orgName}} asks you to verify your identity" },
-        { "type": "paragraph", "text": "{{requesterName}} asked you to verify your identity with your passport or identity card and your face, in the vcmrtd app on your phone." },
-        { "type": "qr", "label": "Scan with the vcmrtd app", "url": "{{proofingUrl}}" },
-        { "type": "button", "label": "Open in the vcmrtd app", "url": "{{proofingUrl}}" },
+        { "type": "paragraph", "text": "{{requesterName}} asked you to verify your identity with your passport or identity card and your face, in the Idem app on your phone." },
+        { "type": "qr", "label": "Scan with the Idem app", "url": "{{proofingUrl}}" },
+        { "type": "button", "label": "Open in the Idem app", "url": "{{proofingUrl}}" },
         { "type": "paragraph", "text": "Reading this on your phone? Tap the button. The QR code and the button start the same session, which is valid for {{validMinutes}} minutes from when this e-mail was sent. After that, ask {{orgName}} for a new one." },
         { "type": "paragraph", "text": "Questions about this request? Contact {{supportContact}}." },
         { "type": "paragraph", "text": "How your data is handled: {{privacyUrl}}" },

@@ -761,7 +761,7 @@ function SessionTimeline({
     <section aria-labelledby={`timeline-${request.id}`}>
       <h3
         id={`timeline-${request.id}`}
-        className="text-muted mb-3 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase"
+        className="text-muted font-label mb-3 text-[10.5px] font-medium tracking-[0.08em] uppercase"
       >
         {t("customers.sessions.timeline")}
       </h3>

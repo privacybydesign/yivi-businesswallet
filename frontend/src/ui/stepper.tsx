@@ -64,7 +64,7 @@ export function Stepper({ steps, current }: StepperProps): React.JSX.Element {
               className={[
                 "mt-2 px-1 text-center text-[12px] leading-tight",
                 active
-                  ? "text-ink font-semibold"
+                  ? "font-semibold text-(--yb-step-label)"
                   : done
                     ? "text-ink"
                     : "text-muted",

@@ -166,14 +166,39 @@ describe("originLines", () => {
 
 describe("hostedTheme", () => {
   it("brands the page in the customer's colour only", () => {
-    const theme = hostedTheme("#0a7c59");
-    expect(theme?.primaryColor).toBe("#0a7c59");
-    expect(theme?.accentColor).toBe("");
+    const theme = hostedTheme(undefined, "#0a7c59");
+    expect(theme.primaryColor).toBe("#0a7c59");
+    expect(theme.accentColor).toBe("");
   });
 
-  it("keeps the default look without a valid colour", () => {
-    expect(hostedTheme("")).toBeNull();
-    expect(hostedTheme("red")).toBeNull();
-    expect(hostedTheme("#0a7c5")).toBeNull();
+  it("keeps the white-label design's colour without a valid one", () => {
+    for (const invalid of ["", "red", "#0a7c5"]) {
+      const theme = hostedTheme(undefined, invalid);
+      expect(theme.configured).toBe(true);
+      expect(theme.primaryColor).toBe("");
+    }
+  });
+
+  it("takes the session's theme, header and accent included", () => {
+    const theme = hostedTheme(
+      {
+        primaryColor: "#036bd2",
+        secondaryColor: "#5412c7",
+        textColor: "#101e1e",
+        surfaceColor: "#fbfbfc",
+        borderColor: "#eaebee",
+        linkColor: "#036bd2",
+        successColor: "#2a9066",
+        warningColor: "",
+        errorColor: "",
+        headerColor: "#101e1e",
+        fontFamily: "",
+      },
+      "",
+    );
+    expect(theme.primaryColor).toBe("#036bd2");
+    expect(theme.accentColor).toBe("#5412c7");
+    expect(theme.topbarColor).toBe("#101e1e");
+    expect(theme.surfaceColor).toBe("#fbfbfc");
   });
 });

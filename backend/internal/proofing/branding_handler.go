@@ -28,6 +28,16 @@ const (
 type brandingResponse struct {
 	DisplayName    string `json:"displayName"`
 	PrimaryColor   string `json:"primaryColor"`
+	SecondaryColor string `json:"secondaryColor"`
+	TextColor      string `json:"textColor"`
+	SurfaceColor   string `json:"surfaceColor"`
+	BorderColor    string `json:"borderColor"`
+	LinkColor      string `json:"linkColor"`
+	SuccessColor   string `json:"successColor"`
+	WarningColor   string `json:"warningColor"`
+	ErrorColor     string `json:"errorColor"`
+	TopbarColor    string `json:"topbarColor"`
+	FontFamily     string `json:"fontFamily"`
 	SupportContact string `json:"supportContact"`
 	PrivacyURL     string `json:"privacyUrl"`
 	LogoURI        string `json:"logoUri"`
@@ -38,6 +48,10 @@ type brandingResponse struct {
 func newBrandingResponse(slug string, c Customer) brandingResponse {
 	b := brandingResponse{
 		DisplayName: c.Branding.DisplayName, PrimaryColor: c.Branding.PrimaryColor,
+		SecondaryColor: c.Branding.SecondaryColor, TextColor: c.Branding.TextColor,
+		SurfaceColor: c.Branding.SurfaceColor, BorderColor: c.Branding.BorderColor, LinkColor: c.Branding.LinkColor,
+		SuccessColor: c.Branding.SuccessColor, WarningColor: c.Branding.WarningColor, ErrorColor: c.Branding.ErrorColor,
+		TopbarColor: c.Branding.TopbarColor, FontFamily: c.Branding.FontFamily,
 		SupportContact: c.Branding.SupportContact, PrivacyURL: c.Branding.PrivacyURL,
 		HidePoweredBy: c.Branding.HidePoweredBy,
 	}
@@ -70,6 +84,16 @@ func (h *Handler) saveBranding(w http.ResponseWriter, r *http.Request) error {
 	c, err := h.service.SaveCustomerBranding(r.Context(), orgFromRequest(r).ID, id, CustomerBranding{
 		DisplayName:    r.FormValue("displayName"),
 		PrimaryColor:   r.FormValue("primaryColor"),
+		SecondaryColor: r.FormValue("secondaryColor"),
+		TextColor:      r.FormValue("textColor"),
+		SurfaceColor:   r.FormValue("surfaceColor"),
+		BorderColor:    r.FormValue("borderColor"),
+		LinkColor:      r.FormValue("linkColor"),
+		SuccessColor:   r.FormValue("successColor"),
+		WarningColor:   r.FormValue("warningColor"),
+		ErrorColor:     r.FormValue("errorColor"),
+		TopbarColor:    r.FormValue("topbarColor"),
+		FontFamily:     r.FormValue("fontFamily"),
 		SupportContact: r.FormValue("supportContact"),
 		PrivacyURL:     r.FormValue("privacyUrl"),
 		HidePoweredBy:  r.FormValue("hidePoweredBy") == "true",

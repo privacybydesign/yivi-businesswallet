@@ -17,7 +17,7 @@ import (
 // like the app.
 //
 // Only the LIGHT half of that derivation is mirrored. The app ships a
-// `prefers-color-scheme: dark` block; mail cannot (see shell.go), so the mail
+// dark-mode block; mail cannot (see shell.go), so the mail
 // palette is one light-mode palette chosen to stay readable when a client
 // force-inverts it. Every colour is nudged toward black rather than white for the
 // same reason: a darker foreground survives inversion better than a lighter one.

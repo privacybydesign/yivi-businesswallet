@@ -20,6 +20,9 @@ type appSessionView struct {
 	ID           string         `json:"id"`
 	Method       session.Method `json:"method"`
 	RelyingParty string         `json:"relyingParty"`
+	// Branding is the look of the org or customer that requested the session;
+	// absent, the app keeps its own.
+	Branding *Branding `json:"branding,omitempty"`
 	// Status lets the browser tell a finished session from a running one.
 	Status session.Status `json:"status"`
 	// Language is "en" or "nl": the session's language when shipped, else the
@@ -199,7 +202,8 @@ func (s *Server) buildAppSessionView(r *http.Request, sess session.Session, role
 		device.deviceView = s.toDeviceView(sess.Access.Slot(role))
 	}
 	return appSessionView{
-		ID: sess.ID, Method: sess.Method, RelyingParty: s.tenantDisplayName(r.Context(), sess.TenantID), Status: sess.Status, Language: requestLanguage(r, sess.Language),
+		ID: sess.ID, Method: sess.Method, RelyingParty: s.tenantDisplayName(r.Context(), sess.TenantID),
+		Branding: s.sessionBranding(r.Context(), sess.TenantID, sess.ClientReference), Status: sess.Status, Language: requestLanguage(r, sess.Language),
 		RequestedAttributes: sess.RequestedAttributes, Steps: steps, ExpiresAt: sess.ExpiresAt,
 		SelfieLocation: selfieLocation,
 		AAChallenge:    sess.AAChallenge, RequiredChecks: assuranceChecksFor(resolvedFlow),

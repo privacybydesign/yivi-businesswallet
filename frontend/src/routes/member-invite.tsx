@@ -44,7 +44,7 @@ const CONFLICT_STATUS = 409;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 const FIELD_LABEL = "text-ink-soft text-[12px] font-semibold";
 const SUBHEAD = "text-ink text-[12px] font-semibold";
 const CONTROL =

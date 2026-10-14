@@ -130,12 +130,13 @@ function HostedFlow({
     );
   }, [page.language, page.locales]);
 
-  // The customer's colour for as long as the page shows.
+  // The session's look for as long as the page shows.
   const { primaryColor } = customer.branding;
+  const { theme } = page;
   useEffect(() => {
-    applyOrgTheme(hostedTheme(primaryColor));
+    applyOrgTheme(hostedTheme(theme, primaryColor));
     return clearOrgTheme;
-  }, [primaryColor]);
+  }, [theme, primaryColor]);
 
   // Handed back once, however often the outcome is rendered.
   const handedBack = useRef(false);
@@ -184,104 +185,111 @@ function HostedFlow({
     ? hostedErrorMessage(start.error, t)
     : undefined;
   return (
-    <Card className="flex flex-col gap-6 p-6">
-      <div className="flex items-center gap-3">
+    <Card className="flex flex-col overflow-hidden">
+      {/* The theme's header colour, as the top of the Idem app's screens. */}
+      <div className="bg-topbar text-topbar-fg border-topbar-line flex items-center gap-3 border-b px-6 py-5">
         <CustomerMark customer={customer} size="lg" />
-        <span className="text-ink text-[16px] font-bold">{customer.name}</span>
+        <span className="font-display text-[16px] font-bold">
+          {customer.name}
+        </span>
       </div>
-      {dataRequest && (
-        <p className="text-ink text-[13.5px]">
-          {t(`proofLink.dataRequest.${flow.kind as DataKind}.intro`, {
-            customer: customer.name,
-          })}
-        </p>
-      )}
-      <Stepper
-        steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
-        current={stages.indexOf(inDiplomas ? "diplomas" : step)}
-      />
-      <StepRegion step={inDiplomas ? "diplomas" : step}>
-        {step === "overview" && (
-          <Overview
-            customer={customer}
-            flow={flow}
-            onContinue={choice ? () => setStep("method") : begin}
-            starting={start.isPending}
-            error={actionError}
-            cancel={
-              <Button
-                variant="secondary"
-                disabled={start.isPending}
-                onClick={() => setConfirmDecline(true)}
-              >
-                {t("proofLink.decline")}
-              </Button>
-            }
-          />
-        )}
-        {confirmDecline && (
-          <ConfirmDialog
-            title={t("proofLink.declineConfirm.title")}
-            message={t("proofLink.declineConfirm.message", {
+      <div className="flex flex-col gap-6 p-6">
+        {dataRequest && (
+          <p className="text-ink text-[13.5px]">
+            {t(`proofLink.dataRequest.${flow.kind as DataKind}.intro`, {
               customer: customer.name,
             })}
-            confirmLabel={t("proofLink.declineConfirm.confirm")}
-            busy={decline.isPending}
-            error={
-              decline.isError ? hostedErrorMessage(decline.error, t) : undefined
-            }
-            onClose={() => {
-              setConfirmDecline(false);
-              decline.reset();
-            }}
-            onConfirm={() =>
-              decline.mutate(undefined, {
-                onSuccess: () => {
-                  setConfirmDecline(false);
-                  setStep("session");
-                },
-              })
-            }
-          />
+          </p>
         )}
-        {step === "method" && (
-          <MethodChoice
-            method={method}
-            onChange={setMethod}
-            onBack={() => setStep("overview")}
-            onContinue={begin}
-            starting={start.isPending}
-            error={actionError}
-          />
-        )}
-        {step === "session" && (
-          <Session
-            target={{ kind: "hosted", token }}
-            initial={started ?? page}
-            deepLink={started?.deepLink}
-            method={method}
-            diplomaMode={flow.diplomaMode}
-            diplomas={page.diplomas}
-            onDiplomaStep={setInDiplomas}
-            onSettled={settle}
-            dataRequest={dataRequest}
-            outcomeActions={
-              redirecting ? (
-                <p role="status" className={HINT}>
-                  {t("proofLink.redirecting")}
-                </p>
-              ) : dataRequest ? (
-                <DataRequestOutcome
-                  token={token}
-                  customer={customer.name}
-                  kind={flow.kind as DataKind}
-                  progress={settled ?? page}
-                />
-              ) : undefined
-            }
-          />
-        )}
-      </StepRegion>
+        <Stepper
+          steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
+          current={stages.indexOf(inDiplomas ? "diplomas" : step)}
+        />
+        <StepRegion step={inDiplomas ? "diplomas" : step}>
+          {step === "overview" && (
+            <Overview
+              customer={customer}
+              flow={flow}
+              onContinue={choice ? () => setStep("method") : begin}
+              starting={start.isPending}
+              error={actionError}
+              cancel={
+                <Button
+                  variant="secondary"
+                  disabled={start.isPending}
+                  onClick={() => setConfirmDecline(true)}
+                >
+                  {t("proofLink.decline")}
+                </Button>
+              }
+            />
+          )}
+          {confirmDecline && (
+            <ConfirmDialog
+              title={t("proofLink.declineConfirm.title")}
+              message={t("proofLink.declineConfirm.message", {
+                customer: customer.name,
+              })}
+              confirmLabel={t("proofLink.declineConfirm.confirm")}
+              busy={decline.isPending}
+              error={
+                decline.isError
+                  ? hostedErrorMessage(decline.error, t)
+                  : undefined
+              }
+              onClose={() => {
+                setConfirmDecline(false);
+                decline.reset();
+              }}
+              onConfirm={() =>
+                decline.mutate(undefined, {
+                  onSuccess: () => {
+                    setConfirmDecline(false);
+                    setStep("session");
+                  },
+                })
+              }
+            />
+          )}
+          {step === "method" && (
+            <MethodChoice
+              method={method}
+              onChange={setMethod}
+              onBack={() => setStep("overview")}
+              onContinue={begin}
+              starting={start.isPending}
+              error={actionError}
+            />
+          )}
+          {step === "session" && (
+            <Session
+              target={{ kind: "hosted", token }}
+              initial={started ?? page}
+              deepLink={started?.deepLink}
+              method={method}
+              diplomaMode={flow.diplomaMode}
+              diplomas={page.diplomas}
+              onDiplomaStep={setInDiplomas}
+              onSettled={settle}
+              dataRequest={dataRequest}
+              outcomeActions={
+                redirecting ? (
+                  <p role="status" className={HINT}>
+                    {t("proofLink.redirecting")}
+                  </p>
+                ) : dataRequest ? (
+                  <DataRequestOutcome
+                    token={token}
+                    customer={customer.name}
+                    kind={flow.kind as DataKind}
+                    progress={settled ?? page}
+                  />
+                ) : undefined
+              }
+            />
+          )}
+        </StepRegion>
+      </div>
     </Card>
   );
 }

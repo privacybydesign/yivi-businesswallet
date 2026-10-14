@@ -9,6 +9,12 @@ export const en = {
     department: "Department",
     edit: "Edit",
     jobTitle: "Job title",
+    colorScheme: "Appearance",
+    colorSchemeName: {
+      system: "Auto",
+      light: "Light",
+      dark: "Dark",
+    },
     language: "Language",
     languageName: {
       en: "English",
@@ -717,7 +723,7 @@ export const en = {
     },
     send: {
       title: "Verify a person",
-      hint: "The person gets a mail with a QR code and a link for the vcmrtd app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request. They need no account.",
+      hint: "The person gets a mail with a QR code and a link for the Idem app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request. They need no account.",
       hintOnScreen:
         "The person is with you. A page shows them what is collected, lets them choose the Yivi app or the Idem app, and shows its QR code. Nothing is mailed.",
       channel: "How does the person get the QR code?",
@@ -1083,8 +1089,8 @@ export const en = {
       done: "I have stored it",
     },
     branding: {
-      title: "Mail branding",
-      hint: "The proofing mail your customer's subjects receive is signed with and styled as the customer.",
+      title: "Branding",
+      hint: "The customer's own look for its mail, its hosted page and the Idem app. With a colour or font set here, its flows use this look instead of the organisation's; with only a logo, they use the organisation's look with this logo.",
       displayName: "Display name",
       displayNameHint:
         "Signs the proofing mail and its subject line. Empty uses the customer's name.",
@@ -1102,6 +1108,12 @@ export const en = {
       colorInvalid: "Enter a hex colour like #1F5B4A.",
       primaryColorHint:
         "Used for the mail's button and header mark. The text on it is adjusted for contrast.",
+      secondaryColor: "Secondary colour",
+      secondaryColorHint:
+        "Used for step labels and badges in the Idem app and on the hosted page.",
+      themeTitle: "House style",
+      themeHint:
+        "The rest of the customer's look in the Idem app and on its hosted page: the same options as the organisation's theme. Empty keeps the default design.",
       supportContact: "Support contact",
       supportPlaceholder: "klantenservice@example.nl",
       privacyUrl: "Privacy statement URL",
@@ -1112,8 +1124,8 @@ export const en = {
       preview: {
         caption: "Live preview · proofing mail",
         heading: "{{name}} asks you to verify your identity",
-        body: "{{name}} asked you to verify your identity with your passport or identity card and your face, in the vcmrtd app on your phone.",
-        button: "Open in the vcmrtd app",
+        body: "{{name}} asked you to verify your identity with your passport or identity card and your face, in the Idem app on your phone.",
+        button: "Open in the Idem app",
         support: "Questions about this request? Contact {{contact}}.",
         privacy: "How your data is handled: {{url}}",
         footer: "Identity check by Yivi",
@@ -2023,7 +2035,7 @@ export const en = {
     proofing: {
       flow: "Identity proofing flow",
       send: "Send identity proofing",
-      hint: "Mails this member a QR code and a link for the vcmrtd app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request.",
+      hint: "Mails this member a QR code and a link for the Idem app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request.",
       noFlows:
         "No flow is available to members yet. Create one and tick it under",
       lastRequest: "Last proofing:",

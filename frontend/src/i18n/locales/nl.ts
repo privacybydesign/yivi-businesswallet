@@ -20,6 +20,12 @@ export const nl: Translation<typeof en> = {
     department: "Afdeling",
     edit: "Bewerken",
     jobTitle: "Functie",
+    colorScheme: "Weergave",
+    colorSchemeName: {
+      system: "Auto",
+      light: "Licht",
+      dark: "Donker",
+    },
     language: "Taal",
     languageName: {
       en: "English",
@@ -734,7 +740,7 @@ export const nl: Translation<typeof en> = {
     },
     send: {
       title: "Een persoon verifiëren",
-      hint: "De persoon krijgt een mail met een QR-code en een link voor de vcmrtd-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek. Een account is niet nodig.",
+      hint: "De persoon krijgt een mail met een QR-code en een link voor de Idem-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek. Een account is niet nodig.",
       hintOnScreen:
         "De persoon is bij je. Een pagina laat zien wat er wordt verzameld, laat kiezen tussen de Yivi-app en de Idem-app en toont de QR-code. Er wordt niets gemaild.",
       channel: "Hoe krijgt de persoon de QR-code?",
@@ -1106,8 +1112,8 @@ export const nl: Translation<typeof en> = {
       done: "Ik heb het bewaard",
     },
     branding: {
-      title: "Huisstijl van de mail",
-      hint: "De verificatiemail die de personen van je klant krijgen, is ondertekend en opgemaakt als de klant.",
+      title: "Huisstijl",
+      hint: "De eigen huisstijl van de klant voor de mail, de gehoste pagina en de Idem-app. Met een kleur of lettertype hier gebruiken de flows van de klant deze huisstijl in plaats van die van de organisatie; met alleen een logo gebruiken ze de huisstijl van de organisatie met dit logo.",
       displayName: "Weergavenaam",
       displayNameHint:
         "Ondertekent de verificatiemail en het onderwerp. Leeg gebruikt de naam van de klant.",
@@ -1125,6 +1131,12 @@ export const nl: Translation<typeof en> = {
       colorInvalid: "Vul een hexkleur in zoals #1F5B4A.",
       primaryColorHint:
         "Gebruikt voor de knop en het merkteken van de mail. De tekst erop wordt aangepast voor contrast.",
+      secondaryColor: "Secundaire kleur",
+      secondaryColorHint:
+        "Gebruikt voor staplabels en badges in de Idem-app en op de gehoste pagina.",
+      themeTitle: "Huisstijl",
+      themeHint:
+        "De rest van de uitstraling van de klant in de Idem-app en op de gehoste pagina: dezelfde opties als het thema van de organisatie. Leeg houdt het standaardontwerp.",
       supportContact: "Supportcontact",
       supportPlaceholder: "klantenservice@example.nl",
       privacyUrl: "URL van de privacyverklaring",
@@ -1136,8 +1148,8 @@ export const nl: Translation<typeof en> = {
       preview: {
         caption: "Live voorbeeld · verificatiemail",
         heading: "{{name}} vraagt je je identiteit te verifiëren",
-        body: "{{name}} vraagt je je identiteit te verifiëren met je paspoort of identiteitskaart en je gezicht, in de vcmrtd-app op je telefoon.",
-        button: "Openen in de vcmrtd-app",
+        body: "{{name}} vraagt je je identiteit te verifiëren met je paspoort of identiteitskaart en je gezicht, in de Idem-app op je telefoon.",
+        button: "Openen in de Idem-app",
         support: "Vragen over dit verzoek? Neem contact op met {{contact}}.",
         privacy: "Hoe er met je gegevens wordt omgegaan: {{url}}",
         footer: "Identiteitscontrole door Yivi",
@@ -2065,7 +2077,7 @@ export const nl: Translation<typeof en> = {
     proofing: {
       flow: "Flow voor identiteitsverificatie",
       send: "Identiteitsverificatie versturen",
-      hint: "Mailt dit lid een QR-code en een link voor de vcmrtd-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek.",
+      hint: "Mailt dit lid een QR-code en een link voor de Idem-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek.",
       noFlows:
         "Er is nog geen flow beschikbaar voor leden. Maak er een aan en vink die aan onder",
       lastRequest: "Laatste verificatie:",
