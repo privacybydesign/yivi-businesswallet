@@ -129,10 +129,17 @@ the app calls them), and the deep link's `api=` is
   `ErrDecodeTimeout` (it keeps its slot until it ends), and a decoder panic is
   `ErrDecoderPanic`. A JPEG2000 chip portrait is converted to PNG in pure Go
   (go-jpeg2000, the only pure-Go decoder; OpenJPEG would mean C in-process)
-  for display. The BSN region is covered through the same helper. A covered
-  face (`redact.Image`) is a flat grey PNG of the photo's size, made from the
-  header alone: a mosaic or blur can still be matched against candidate
-  photos.
+  for display. The BSN region is covered through the same helper.
+- **Face photos are not kept by default.** The document portrait (DG2, or a
+  disclosed credential's), the selfie and the customer's reference photo
+  leave the result and the stored evidence once the face match is done
+  (`redactStepsForStorage`, `buildResult`); the match's verdicts stay. A flow
+  sets `KeepFacePhotos` for a customer that must keep them, for its
+  retention. Covering a face instead was dropped: a mosaic or blur can still
+  be matched against candidate photos, and a flat cover holds nothing. The
+  wallet shows kept photos blurred until a member clicks to reveal one.
+  Masking only the printed portrait on a document photo (as the KopieID app
+  does) is not built: it needs the portrait's position.
 - **Regula clean-up.** Every Regula tag the app is handed is queued for
   deletion (`identity_proofing_regula_sweeps`): 15 minutes after the session's
   expiry while it runs, moved forward to 15 minutes after its end once it ends,
@@ -279,11 +286,11 @@ the app calls them), and the deep link's `api=` is
     becomes `rejected` with `ASSURANCE_NOT_MET`. This catches Yivi-method
     sessions, which the engine approves without comparing; one it reports no
     level for counts as low (`yiviEIDASLevel`).
-  - Overrides: BSN policy, cover face and blur BSN (default/true/false), and
-    retention in seconds, which replaces the customer's retention for the
+  - Overrides: BSN policy, keep face photos and blur BSN (default/true/false),
+    and retention in seconds, which replaces the customer's retention for the
     flow's sessions. An unset BSN policy is `omit` (`privacy.DefaultBSNPolicy`):
     an organisation may process a BSN only where a law allows it, so keeping
-    one is the flow's choice. Unset cover face and blur BSN are off.
+    one is the flow's choice. Unset keep face photos and blur BSN are off.
   - Legal basis, purpose and assurance tiers are not in the editor: they are
     carried over unchanged when a version is saved.
   Face capture is forced to `native` (§11). The face provider is always

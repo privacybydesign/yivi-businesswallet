@@ -962,6 +962,9 @@ export const nl: Translation<typeof en> = {
       identity: {
         audited:
           "Het openen van een afgeronde sessie wordt vastgelegd in het auditlog.",
+        reveal: "Tonen",
+        revealPhoto: "{{name}} tonen",
+        conceal: "Verbergen",
         photo: "Documentfoto",
         referencePhoto: "Foto van de klant",
         noDocument: "Geen: het gezicht is vergeleken met de foto van de klant",
@@ -1342,7 +1345,9 @@ export const nl: Translation<typeof en> = {
       retentionSeconds: "Bewaartermijn overschrijven (seconden)",
       retentionSecondsHint:
         "Ingevuld vervangt dit de bewaartermijn van de klant voor de sessies van deze flow; leeg of 0 houdt die van de klant aan.",
-      blurFace: "Gezicht afdekken overschrijven",
+      keepFacePhotos: "Gezichtsfoto's bewaren overschrijven",
+      keepFacePhotosHint:
+        "Uit: het portret, de selfie en de foto van de klant verdwijnen zodra de gezichtsvergelijking klaar is; de uitkomst blijft. Zet dit alleen aan voor een klant die ze moet bewaren.",
       blurBsn: "BSN vervagen overschrijven",
       errors: {
         name: "Geef de flow een naam.",

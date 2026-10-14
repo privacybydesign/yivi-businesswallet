@@ -169,7 +169,11 @@ func TestIdemAppFlow(t *testing.T) {
 		c.Now = func() time.Time { return time.Date(2021, time.June, 1, 0, 0, 0, 0, time.UTC) }
 	})
 	ctx := context.Background()
-	f, err := h.engine.CreateFlow(ctx, h.tenant, chipFlow)
+	// This flow keeps its face photos, so the chip portrait comes back below.
+	keepFacePhotos := true
+	kept := chipFlow
+	kept.KeepFacePhotos = &keepFacePhotos
+	f, err := h.engine.CreateFlow(ctx, h.tenant, kept)
 	if err != nil {
 		t.Fatalf("CreateFlow: %v", err)
 	}

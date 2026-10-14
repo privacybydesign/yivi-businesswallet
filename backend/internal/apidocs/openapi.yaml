@@ -4958,7 +4958,7 @@ paths:
         `steps`, and optionally `faceProvider` (`regula`, the default for a flow with a face
         step and the only provider; anything else is refused),
         `requestedAttributes`, `acceptedDocumentTypes`, `acceptedIssuingCountries`,
-        `requiredChecks`, `checkThresholds`, `requiredAssuranceLevel`, `bsnPolicy`, `blurFace`,
+        `requiredChecks`, `checkThresholds`, `requiredAssuranceLevel`, `bsnPolicy`, `keepFacePhotos`,
         `blurBsn`, `retentionOverrideSeconds`, `assuranceTiers`, `legalBasis` and
         `processingPurpose`. Face capture is always set to the app (`selfieLocation` is
         overwritten). An empty `name` or `steps`, or an unknown `faceProvider`, is 400
@@ -10966,9 +10966,13 @@ components:
           type: string
           enum: [retrieve, mask, omit]
           description: Absent is omit, the BSN dropped before storage.
-        blurFace:
+        keepFacePhotos:
           type: boolean
-          description: Cover the portrait and the selfie in a flat grey. Absent is false.
+          description: >-
+            Keep the face photos (the document portrait, the selfie and the customer's
+            reference photo) in the result and the stored evidence, for a customer that must
+            keep them. Absent is false: they are dropped once the face match is done, and its
+            verdicts stay.
         blurBsn:
           type: boolean
           description: Cover the BSN region of a document photo. Absent is false.

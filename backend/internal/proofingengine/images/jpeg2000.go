@@ -72,10 +72,10 @@ var (
 	ErrDecoderPanic = errors.New("images: decoder failed on the image")
 )
 
-// Config reads an untrusted image's header and refuses one over Decode's
+// checkHeader reads an untrusted image's header and refuses one over Decode's
 // limits: at most MaxImagePixels (MaxJPEG2000Pixels and
 // maxJPEG2000Components for a JPEG2000). It never decodes the raster.
-func Config(raw []byte) (image.Config, string, error) {
+func checkHeader(raw []byte) (image.Config, string, error) {
 	var cfg image.Config
 	var format string
 	err := guard(func() error {
@@ -110,7 +110,7 @@ type decoded struct {
 	err    error
 }
 
-// Decode decodes an untrusted image after checking its header (Config). It
+// Decode decodes an untrusted image after checking its header (checkHeader). It
 // hands the image and its format name, as image.Decode returns them, to use,
 // and returns use's error. At most maxConcurrentDecodes decodes and their use
 // run at once, so whatever use derives from the raster is bounded with it.
@@ -120,7 +120,7 @@ type decoded struct {
 // longer than decodeWait is ErrBusy, a decode running longer than
 // decodeTimeout is ErrDecodeTimeout, and a decoder panic is ErrDecoderPanic.
 func Decode(raw []byte, use func(img image.Image, format string) error) error {
-	if _, _, err := Config(raw); err != nil {
+	if _, _, err := checkHeader(raw); err != nil {
 		return err
 	}
 	wait := time.NewTimer(decodeWait)

@@ -44,8 +44,10 @@ type FlowSpec struct {
 	RequiredAssuranceLevel   string             `json:"requiredAssuranceLevel,omitempty"`
 	// BSNPolicy is retrieve, mask or omit; empty is omit.
 	BSNPolicy string `json:"bsnPolicy,omitempty"`
-	// BlurFace and BlurBSN cover the face and the BSN region; nil is off.
-	BlurFace                 *bool           `json:"blurFace,omitempty"`
+	// KeepFacePhotos keeps the face photos (portrait, selfie, the customer's
+	// photo) in the result and the evidence; nil is off, so none are kept.
+	// BlurBSN covers the BSN region of a document photo; nil is off.
+	KeepFacePhotos           *bool           `json:"keepFacePhotos,omitempty"`
 	BlurBSN                  *bool           `json:"blurBsn,omitempty"`
 	RetentionOverrideSeconds int             `json:"retentionOverrideSeconds,omitempty"`
 	AssuranceTiers           []AssuranceTier `json:"assuranceTiers,omitempty"`

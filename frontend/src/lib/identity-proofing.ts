@@ -207,7 +207,7 @@ export interface ProofingFlowDraft {
   acceptedIssuingCountries: string;
   assuranceLevel: Inherit<AssuranceLevel>;
   bsnPolicy: Inherit<(typeof BSN_POLICIES)[number]>;
-  blurFace: Tristate;
+  keepFacePhotos: Tristate;
   blurBsn: Tristate;
   // Whole seconds as typed; "" or 0 is no override.
   retentionSeconds: string;
@@ -305,7 +305,7 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     acceptedIssuingCountries: "",
     assuranceLevel: "",
     bsnPolicy: "",
-    blurFace: "",
+    keepFacePhotos: "",
     blurBsn: "",
     retentionSeconds: "",
     carried: {},
@@ -347,7 +347,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     acceptedIssuingCountries: (flow.acceptedIssuingCountries ?? []).join(", "),
     assuranceLevel: oneOf(ASSURANCE_LEVELS, flow.requiredAssuranceLevel),
     bsnPolicy: oneOf(BSN_POLICIES, flow.bsnPolicy),
-    blurFace: tristate(flow.blurFace),
+    keepFacePhotos: tristate(flow.keepFacePhotos),
     blurBsn: tristate(flow.blurBsn),
     retentionSeconds: flow.retentionOverrideSeconds
       ? String(flow.retentionOverrideSeconds)
@@ -464,8 +464,8 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
   if (draft.bsnPolicy !== "") {
     spec.bsnPolicy = draft.bsnPolicy;
   }
-  if (draft.blurFace !== "") {
-    spec.blurFace = draft.blurFace === "true";
+  if (draft.keepFacePhotos !== "") {
+    spec.keepFacePhotos = draft.keepFacePhotos === "true";
   }
   if (draft.blurBsn !== "") {
     spec.blurBsn = draft.blurBsn === "true";

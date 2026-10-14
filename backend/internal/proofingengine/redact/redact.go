@@ -1,11 +1,10 @@
-// Package redact covers parts of evidence images under the redaction policy,
-// before a result or stored evidence is written, so a kept image is redacted
-// from the moment it is stored.
+// Package redact covers the printed BSN in a document photo under the
+// redaction policy, before a result or stored evidence is written, so a kept
+// image is redacted from the moment it is stored.
 //
-// Both are covered solid, never pixelated or blurred. A face (Image) in a
-// mosaic or blur can still be matched against candidate photos by a
-// recognition model, and nine digits in a known font (Region, the BSN) can be
-// read back by rendering candidates through the same grid.
+// The region is filled solid, never pixelated or blurred: nine digits in a
+// known font can be read back from a mosaic by rendering candidates through
+// the same grid.
 package redact
 
 import (
@@ -31,47 +30,11 @@ type Rect struct {
 // redactionColor covers a Region.
 var redactionColor = color.RGBA{A: 0xff}
 
-// faceColor covers a face: a neutral grey, so the evidence reads as a photo
-// withheld rather than a broken image.
-var faceColor = color.RGBA{R: 0x9e, G: 0x9e, B: 0x9e, A: 0xff}
-
 // MIME types the redacted images are encoded as.
 const (
 	mimePNG  = "image/png"
 	mimeJPEG = "image/jpeg"
 )
-
-// Image replaces a whole image, a portrait or selfie (the face crop itself),
-// with a PNG of the same size in faceColor. Only the header is read, for the
-// size: the image is never decoded.
-func Image(imageBase64, mimeType string) (string, string, error) {
-	if imageBase64 == "" {
-		return imageBase64, mimeType, nil
-	}
-	raw, err := base64.StdEncoding.DecodeString(imageBase64)
-	if err != nil {
-		return "", "", fmt.Errorf("redact: decode base64 image: %w", err)
-	}
-	cfg, _, err := images.Config(raw)
-	if err != nil {
-		return "", "", fmt.Errorf("redact: %w", err)
-	}
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, flat{bounds: image.Rect(0, 0, cfg.Width, cfg.Height), color: faceColor}); err != nil {
-		return "", "", fmt.Errorf("redact: encode covered image: %w", err)
-	}
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), mimePNG, nil
-}
-
-// flat is an image of one colour, encoded without allocating a raster.
-type flat struct {
-	bounds image.Rectangle
-	color  color.RGBA
-}
-
-func (f flat) ColorModel() color.Model { return color.RGBAModel }
-func (f flat) Bounds() image.Rectangle { return f.bounds }
-func (f flat) At(int, int) color.Color { return f.color }
 
 // Region fills r within the image with a solid block and leaves the rest, as
 // for the printed BSN of a document photo.

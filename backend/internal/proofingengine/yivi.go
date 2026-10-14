@@ -449,7 +449,7 @@ func boundLoginAssurance() assuranceInfo {
 }
 
 // buildBoundLoginResult is the released result, gated by requestedAttributes,
-// its faces blurred under the flow's redaction policy.
+// with the faces only when the flow keeps them.
 func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviState, redaction privacy.RedactionPolicy) (map[string]any, error) {
 	var info disclosureInfo
 	if err := json.Unmarshal(st.Disclosure, &info); err != nil {
@@ -463,21 +463,13 @@ func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviSta
 	}
 	result["disclosure"] = info
 	result["assurance"] = boundLoginAssurance()
-	if st.KeepPhoto && attrRequested(sess, attrDG2, attrFaceImage) {
-		if photo, ok := releasedFace(photoInfo{ImageBase64: st.Reference, MimeType: st.ReferenceMime}, redaction); ok {
-			result["photo"] = photo
-		} else {
-			slog.Warn("identity proofing: could not blur the photo; leaving it out", slog.String("session_id", sess.ID))
-		}
+	// The face photos only when the flow keeps them, as in buildResult.
+	if st.KeepPhoto && redaction.KeepFacePhotos && attrRequested(sess, attrDG2, attrFaceImage) {
+		result["photo"] = &photoInfo{ImageBase64: st.Reference, MimeType: st.ReferenceMime}
 	}
-	if st.LastFrame != "" && attrRequested(sess, attrSelfie) {
+	if st.LastFrame != "" && redaction.KeepFacePhotos && attrRequested(sess, attrSelfie) {
 		if raw, mime, err := decodeImageBase64(st.LastFrame, defaultImageMime); err == nil {
-			selfie := photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
-			if released, ok := releasedFace(selfie, redaction); ok {
-				result["selfie"] = released
-			} else {
-				slog.Warn("identity proofing: could not blur the selfie; leaving it out", slog.String("session_id", sess.ID))
-			}
+			result["selfie"] = &photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
 		}
 	}
 	if attrRequested(sess, attrBiometrics) {
@@ -489,19 +481,6 @@ func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviSta
 		}
 	}
 	return result, nil
-}
-
-// releasedFace is face as released under redaction: blurred when the policy
-// asks it, ok false when it could not be, and the face is then left out.
-func releasedFace(face photoInfo, redaction privacy.RedactionPolicy) (*photoInfo, bool) {
-	if !redaction.BlurFace {
-		return &face, true
-	}
-	blurred, mime, ok := blurFace(face.ImageBase64, face.MimeType)
-	if !ok {
-		return nil, false
-	}
-	return &photoInfo{ImageBase64: blurred, MimeType: mime}, true
 }
 
 // boundLoginOutcomeDetails is the terminal event's face-check details.

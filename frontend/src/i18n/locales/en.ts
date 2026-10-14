@@ -940,6 +940,9 @@ export const en = {
       noEvents: "Nothing recorded yet.",
       identity: {
         audited: "Opening a settled session is recorded in the audit log.",
+        reveal: "Show",
+        revealPhoto: "Show {{name}}",
+        conceal: "Hide",
         photo: "Document photo",
         referencePhoto: "Customer's photo",
         noDocument: "None: the face was matched against the customer's photo",
@@ -1315,7 +1318,9 @@ export const en = {
       retentionSeconds: "Retention override (seconds)",
       retentionSecondsHint:
         "Set, it replaces the customer's retention for this flow's sessions; blank or 0 keeps the customer's.",
-      blurFace: "Cover face override",
+      keepFacePhotos: "Keep face photos override",
+      keepFacePhotosHint:
+        "Off: the portrait, selfie and customer's photo are dropped once the face match is done; its verdicts stay. Turn it on only for a customer that must keep them.",
       blurBsn: "Blur BSN override",
       errors: {
         name: "Give the flow a name.",

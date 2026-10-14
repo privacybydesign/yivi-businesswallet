@@ -500,10 +500,11 @@ export function FlowEditor({
             />
           </Field>
           <TristateField
-            id="proofing-flow-blur-face"
-            label={t("identityProofingFlows.new.blurFace")}
-            value={draft.blurFace}
-            onChange={(blurFace) => update({ blurFace })}
+            id="proofing-flow-keep-face-photos"
+            label={t("identityProofingFlows.new.keepFacePhotos")}
+            hint={t("identityProofingFlows.new.keepFacePhotosHint")}
+            value={draft.keepFacePhotos}
+            onChange={(keepFacePhotos) => update({ keepFacePhotos })}
           />
           <TristateField
             id="proofing-flow-blur-bsn"
@@ -568,17 +569,19 @@ function Field({
 function TristateField({
   id,
   label,
+  hint,
   value,
   onChange,
 }: {
   id: string;
   label: string;
+  hint?: string;
   value: Tristate;
   onChange: (value: Tristate) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   return (
-    <Field id={id} label={label}>
+    <Field id={id} label={label} hint={hint}>
       <select
         id={id}
         className={SELECT_CLASS}

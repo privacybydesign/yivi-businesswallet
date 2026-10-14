@@ -120,7 +120,7 @@ describe("flowSpecFromDraft", () => {
         acceptedIssuingCountries: "nld, bel",
         assuranceLevel: "substantial",
         bsnPolicy: "mask",
-        blurFace: "false",
+        keepFacePhotos: "false",
         retentionSeconds: "3600",
       }),
     );
@@ -129,7 +129,7 @@ describe("flowSpecFromDraft", () => {
       acceptedIssuingCountries: ["NLD", "BEL"],
       requiredAssuranceLevel: "substantial",
       bsnPolicy: "mask",
-      blurFace: false,
+      keepFacePhotos: false,
       retentionOverrideSeconds: 3600,
     });
     expect(spec.blurBsn).toBeUndefined();
@@ -240,7 +240,7 @@ describe("draftFromFlow", () => {
       checkThresholds: { "face.match": 0.7 },
       requiredAssuranceLevel: "substantial",
       bsnPolicy: "omit",
-      blurFace: true,
+      keepFacePhotos: true,
       retentionOverrideSeconds: 86_400,
       assuranceTiers: [{ level: "low", minPercent: 0 }],
       legalBasis: "consent",
@@ -260,7 +260,7 @@ describe("draftFromFlow", () => {
       faceMatchThreshold: "0.7",
       assuranceLevel: "substantial",
       bsnPolicy: "omit",
-      blurFace: "true",
+      keepFacePhotos: "true",
       blurBsn: "",
       retentionSeconds: "86400",
     });

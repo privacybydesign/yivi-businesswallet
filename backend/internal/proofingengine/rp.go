@@ -37,7 +37,7 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		SelfieLocation: flow.StepLocation(in.SelfieLocation), FaceProvider: flow.FaceProvider(in.FaceProvider),
 		AcceptedDocumentTypes: in.AcceptedDocumentTypes, AcceptedIssuingCountries: in.AcceptedIssuingCountries,
 		RequiredAssuranceLevel: flow.AssuranceLevel(in.RequiredAssuranceLevel),
-		BSNPolicy:              privacyBSN(in.BSNPolicy), BlurFace: in.BlurFace, BlurBSN: in.BlurBSN,
+		BSNPolicy:              privacyBSN(in.BSNPolicy), KeepFacePhotos: in.KeepFacePhotos, BlurBSN: in.BlurBSN,
 		RetentionOverride: time.Duration(in.RetentionOverrideSeconds) * time.Second,
 		LegalBasis:        privacyBasis(in.LegalBasis), ProcessingPurpose: in.ProcessingPurpose,
 	}
@@ -71,7 +71,7 @@ func toFlow(fd flow.FlowDefinition) pp.Flow {
 		SelfieLocation: string(fd.EffectiveSelfieLocation()), FaceProvider: string(fd.FaceProvider),
 		AcceptedDocumentTypes: fd.AcceptedDocumentTypes, AcceptedIssuingCountries: fd.AcceptedIssuingCountries,
 		RequiredAssuranceLevel: string(fd.RequiredAssuranceLevel), BSNPolicy: string(fd.BSNPolicy),
-		BlurFace: fd.BlurFace, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
+		KeepFacePhotos: fd.KeepFacePhotos, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
 		LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
 	}
 	for _, st := range fd.Steps {

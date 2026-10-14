@@ -92,7 +92,7 @@ const proofingFlowSchema = z.object({
   checkThresholds: z.record(z.string(), z.number()).optional(),
   requiredAssuranceLevel: z.string().optional(),
   bsnPolicy: z.string().optional(),
-  blurFace: z.boolean().optional(),
+  keepFacePhotos: z.boolean().optional(),
   blurBsn: z.boolean().optional(),
   retentionOverrideSeconds: z.number().optional(),
   assuranceTiers: z.array(assuranceTierSchema).optional(),
@@ -189,7 +189,7 @@ export interface ProofingFlowSpec {
   checkThresholds?: Record<string, number>;
   requiredAssuranceLevel?: string;
   bsnPolicy?: string;
-  blurFace?: boolean;
+  keepFacePhotos?: boolean;
   blurBsn?: boolean;
   retentionOverrideSeconds?: number;
   assuranceTiers?: ProofingAssuranceTier[];
