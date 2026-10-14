@@ -533,12 +533,6 @@ function historyText(
       };
     }
     case "statusChanged":
-      if (entry.revoked === undefined) {
-        return {
-          title: t("attestations.held.history.statusChanged"),
-          detail: t("attestations.held.history.detailHidden"),
-        };
-      }
       return entry.revoked
         ? {
             title: t("attestations.held.history.revoked"),

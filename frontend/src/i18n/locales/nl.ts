@@ -2327,8 +2327,6 @@ export const nl: Translation<typeof en> = {
         checked: "Statuslijst gecontroleerd",
         checkedRevoked: "ingetrokken",
         checkedValid: "niet ingetrokken",
-        statusChanged: "Status gewijzigd",
-        detailHidden: "details alleen zichtbaar voor beheerders",
       },
       checks: {
         signature: "Handtekening geldig",

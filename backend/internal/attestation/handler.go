@@ -254,7 +254,8 @@ func (h *Handler) heldClaims(w http.ResponseWriter, r *http.Request) error {
 // heldHistory is a held credential's trail, oldest first: received and each
 // status change the issuer's list reported. A removed credential is not
 // found, so its removal is never in it; at most audit.MaxListLimit events.
-// Like the org audit log, only an admin sees who acted and what changed.
+// Like the org audit log, only an admin sees who acted and what changed, but a
+// member sees a status change whole (see hideHeldHistoryDetail).
 func (h *Handler) heldHistory(w http.ResponseWriter, r *http.Request) error {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
@@ -269,12 +270,24 @@ func (h *Handler) heldHistory(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("reading held attestation history: %w", err)
 	}
 	if !organization.ActsAsAdmin(r.Context()) {
-		audit.HideDetail(events)
+		hideHeldHistoryDetail(events)
 	}
 	respond.JSON(w, r, http.StatusOK, struct {
 		Events []audit.Event `json:"events"`
 	}{events})
 	return nil
+}
+
+// hideHeldHistoryDetail is the org audit log's member view of a held
+// credential's trail, except that a status change stays whole: the issuer
+// moved it (it is recorded without an actor), so it names no colleague, and
+// which way it moved is what the credential's status already shows a member.
+func hideHeldHistoryDetail(events []audit.Event) {
+	for i := range events {
+		if events[i].Action != audit.AttestationHeldStatusChanged {
+			audit.HideDetail(events[i : i+1])
+		}
+	}
 }
 
 // recheckHeld re-reads the credential's issuer status list now, instead of

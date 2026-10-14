@@ -317,10 +317,7 @@ export function heldHistory(
           at: event.occurredAt,
           kind: "statusChanged",
           action: event.action,
-          // Which way it moved is metadata, withheld from an ordinary member.
-          revoked: event.detailHidden
-            ? undefined
-            : afterField(event, "revoked") === true,
+          revoked: afterField(event, "revoked") === true,
         };
       default:
         return {

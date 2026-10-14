@@ -488,9 +488,12 @@ batch (revoked if any copy is; last check is the latest).
 **History.** Accepting an offer now also audits `attestation.held_received` on the held
 target (sender, source, offer id), so `GET /held/{id}/history` (the audit trail for the
 target, oldest first) is the credential's history; the frontend adds the receipt for a
-row received before that event existed, and the last status check. Disclosures are not
-in it: presentations are audited on the transaction and deliberately never name the
-credential or claims (see §12), so "Disclosed to …" from the design is not shown.
+row received before that event existed, and the last status check. A member who is not
+an admin reads it as the audit log shows it (who acted and what changed withheld), except
+a status change: the issuer made it, so it names no one, and it comes whole, direction
+included (`hideHeldHistoryDetail`). Disclosures are not in it: presentations are
+audited on the transaction and deliberately never name the credential or claims (see
+§12), so "Disclosed to …" from the design is not shown.
 
 **Wallet view.** Status chips with counts, "Needs attention" rows (revoked, expired,
 expiring soon, worst first) with the reason, "Valid" cards; the detail page has a status

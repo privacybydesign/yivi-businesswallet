@@ -2272,8 +2272,6 @@ export const en = {
         checked: "Status list checked",
         checkedRevoked: "revoked",
         checkedValid: "not revoked",
-        statusChanged: "Status changed",
-        detailHidden: "details visible to admins only",
       },
       checks: {
         signature: "Signature valid",
