@@ -182,13 +182,34 @@ func (e *Engine) newStatusChecker(x509Context eudijwt.X509VerificationContext, s
 	}, db.NewStatusListCacheStore(st.Db()))
 }
 
+// maxStatusListRedirects bounds the redirects one status list fetch follows:
+// the Token Status List spec has a client follow them (§8.2) but guard against
+// loops (§11.4).
+const maxStatusListRedirects = 3
+
+var errStatusListRedirects = errors.New("eudiholder: status list: too many redirects")
+
 // newStatusClient is a safehttp client that also enforces policy's scheme
-// rule on every request: a status list URI is issuer-supplied, so it must not
-// reach a private address, follow a redirect or, outside dev, use plain http.
+// rule on every request: a status list URI is issuer-supplied, so no request,
+// the first or a redirect's, may reach a private address or, outside dev, use
+// plain http. Unlike safehttp's default it follows redirects, since an issuer
+// that moves its lists can only redirect: the URI is signed into every
+// credential it issued. Each hop passes policyTransport and the dialer's
+// address check like the first, and the list it ends at is verified the same.
 func newStatusClient(policy safehttp.Policy) *http.Client {
 	client := safehttp.NewClient(policy)
 	client.Transport = policyTransport{policy: policy, next: client.Transport}
+	client.CheckRedirect = followStatusRedirect
 	return client
+}
+
+// followStatusRedirect is the status client's CheckRedirect: via holds the
+// requests already made, so its length is the redirect about to be followed.
+func followStatusRedirect(_ *http.Request, via []*http.Request) error {
+	if len(via) > maxStatusListRedirects {
+		return errStatusListRedirects
+	}
+	return nil
 }
 
 // policyTransport refuses a request whose URL policy rejects before it is sent.
