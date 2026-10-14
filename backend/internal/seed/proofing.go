@@ -247,7 +247,7 @@ func EnsureProofingDemo(ctx context.Context, dsn, addressDomain string) error {
 	users := user.NewStore(pool)
 	orgs := organization.NewStore(pool, audit.NewDBRecorder())
 	orgsBySlug := map[string]organization.Organization{}
-	for _, o := range slices.Concat(demoOrganizations, proofingOrganizations) {
+	for _, o := range demoOrganizations {
 		if !slices.ContainsFunc(demoProofingOrgs, func(p demoProofingOrg) bool { return p.slug == o.slug }) {
 			continue
 		}

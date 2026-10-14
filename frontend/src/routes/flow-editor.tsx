@@ -5,10 +5,12 @@ import {
   useCreateProofingFlowMutation,
   useEditProofingFlowMutation,
   useSaveFlowDiplomasMutation,
+  useSaveFlowAddressMutation,
   useSaveFlowKindMutation,
 } from "../api/identity-proofing.queries";
 import { FLOW_KINDS, isDataRequest } from "../api/identity-proofing";
 import type {
+  AddressMode,
   DiplomaMode,
   FlowKind,
   ProofingFlow,
@@ -63,7 +65,7 @@ export function FlowEditor({
   const { t } = useTranslation();
   const editing = mode.kind === "edit" ? mode.flow : null;
   // The flow this editor already saved, with the spec it was saved with. When
-  // a follow-up save (diplomas, kind) fails, a retry must not save the flow
+  // a follow-up save (diplomas, address, kind) fails, a retry must not save the flow
   // again: a create would make a second flow, an edit another version.
   const [saved, setSaved] = useState<{
     flow: ProofingFlow;
@@ -79,6 +81,9 @@ export function FlowEditor({
   const saveDiplomas = useSaveFlowDiplomasMutation(slug);
   const savedDiplomas: DiplomaMode = editing?.diplomaMode ?? "off";
   const [diplomaMode, setDiplomaMode] = useState<DiplomaMode>(savedDiplomas);
+  const saveAddress = useSaveFlowAddressMutation(slug);
+  const savedAddress: AddressMode = editing?.addressMode ?? "off";
+  const [addressMode, setAddressMode] = useState<AddressMode>(savedAddress);
   const saveKind = useSaveFlowKindMutation(slug);
   const savedKind: FlowKind = editing?.kind ?? "identity";
   const [flowKind, setFlowKind] = useState<FlowKind>(savedKind);
@@ -126,15 +131,26 @@ export function FlowEditor({
           { onSuccess: finish },
         );
       };
-      // A data request asks for no diplomas.
+      // A data request asks for no address and no diplomas.
+      const address = isDataRequest(flowKind) ? "off" : addressMode;
+      const addressThenKind = (): void => {
+        if (address === savedAddress) {
+          kindThenFinish();
+          return;
+        }
+        saveAddress.mutate(
+          { flowId: flow.id, mode: address },
+          { onSuccess: kindThenFinish },
+        );
+      };
       const diplomas = isDataRequest(flowKind) ? "off" : diplomaMode;
       if (diplomas === savedDiplomas) {
-        kindThenFinish();
+        addressThenKind();
         return;
       }
       saveDiplomas.mutate(
         { flowId: flow.id, mode: diplomas },
-        { onSuccess: kindThenFinish },
+        { onSuccess: addressThenKind },
       );
     };
     if (saved !== null && saved.spec === specKey) {
@@ -244,6 +260,14 @@ export function FlowEditor({
             onChange={(checked) => update({ faceVerification: checked })}
           />
           <Checkbox
+            id="proofing-flow-step-address"
+            checked={addressMode !== "off" && !isDataRequest(flowKind)}
+            disabled={isDataRequest(flowKind)}
+            label={t("identityProofingFlows.steps.address")}
+            hint={t("identityProofingFlows.new.addressHint")}
+            onChange={(checked) => setAddressMode(checked ? "required" : "off")}
+          />
+          <Checkbox
             id="proofing-flow-step-diplomas"
             checked={diplomaMode !== "off" && !isDataRequest(flowKind)}
             disabled={isDataRequest(flowKind)}
@@ -251,6 +275,11 @@ export function FlowEditor({
             hint={t("identityProofingFlows.new.diplomaUploadHint")}
             onChange={(checked) => setDiplomaMode(checked ? "required" : "off")}
           />
+          {saveAddress.isError && (
+            <p className={ERROR}>
+              {proofingErrorMessage(saveAddress.error, t)}
+            </p>
+          )}
           {saveDiplomas.isError && (
             <p className={ERROR}>
               {proofingErrorMessage(saveDiplomas.error, t)}
@@ -263,6 +292,9 @@ export function FlowEditor({
                     ...steps
                       .filter(isProofingStep)
                       .map((step) => t(`identityProofingFlows.steps.${step}`)),
+                    ...(addressMode === "off"
+                      ? []
+                      : [t("identityProofingFlows.steps.address")]),
                     ...(diplomaMode === "off"
                       ? []
                       : [t("identityProofingFlows.steps.diploma_upload")]),

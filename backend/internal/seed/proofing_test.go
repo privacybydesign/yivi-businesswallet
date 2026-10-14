@@ -56,7 +56,7 @@ func TestDemoCustomersSayDemo(t *testing.T) {
 
 // Every demo proofing org is a seeded org.
 func TestDemoProofingOrgsAreSeeded(t *testing.T) {
-	seeded := slices.Concat(demoOrganizations, proofingOrganizations)
+	seeded := demoOrganizations
 	for _, o := range demoProofingOrgs {
 		if !slices.ContainsFunc(seeded, func(d demoOrganization) bool { return d.slug == o.slug }) {
 			t.Errorf("proofing org %q is not a seeded org", o.slug)
@@ -68,7 +68,7 @@ func TestDemoProofingOrgsAreSeeded(t *testing.T) {
 // and a duplicate makes the seed's ensureOrg fail.
 func TestDemoOrgKVKNumbersUnique(t *testing.T) {
 	seen := map[string]string{}
-	all := slices.Concat(demoOrganizations, proofingOrganizations)
+	all := demoOrganizations
 	for _, c := range communityOrganizations {
 		all = append(all, c.org)
 	}

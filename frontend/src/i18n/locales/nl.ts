@@ -588,6 +588,11 @@ export const nl: Translation<typeof en> = {
       diplomasClosed:
         "Diploma's kunnen alleen kort na een geslaagde identiteitscontrole worden toegevoegd.",
       diplomasNotAsked: "Deze controle vraagt niet om diploma's.",
+      addressNeedsPage:
+        "Deze flow vraagt om het adres, dat wordt ingevuld op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
+      addressClosed:
+        "Het adres kan maar één keer worden ingevuld, kort na een geslaagde identiteitscontrole.",
+      addressNotAsked: "Deze controle vraagt niet om een adres.",
       flowNoIdentity:
         "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
       dataFlowForMember:
@@ -595,6 +600,27 @@ export const nl: Translation<typeof en> = {
       exportUnavailable: "Deze gegevens kunnen niet meer worden gedownload.",
       tooLarge: "Het bestand is te groot.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
+    },
+    address: {
+      overview: {
+        label: "Adres",
+        detail: "Na de identiteitscontrole: het postadres dat je invult",
+      },
+      identityDone: "Je identiteit is geverifieerd.",
+      heading: "Vul nu je adres in",
+      intro:
+        "Vul het adres in waar je woont. Het wordt bij je geverifieerde identiteit bewaard, zoals je het invult.",
+      fields: {
+        street: "Straat",
+        houseNumber: "Huisnummer",
+        postalCode: "Postcode",
+        city: "Plaats",
+        country: "Land",
+      },
+      required: "Vul dit in.",
+      save: "Adres opslaan",
+      closed: "De tijd om je adres in te vullen is voorbij.",
+      continue: "Verder",
     },
     diplomas: {
       overview: {
@@ -756,7 +782,7 @@ export const nl: Translation<typeof en> = {
       email: "E-mailadres",
       emailRequired: "Vul een geldig e-mailadres in.",
       diplomasOnScreen:
-        "Deze flow vraagt om diploma's, die worden geüpload op de pagina waar de controle loopt, dus hij loopt op dit scherm of als link.",
+        "Deze flow vraagt om een adres of diploma's, die worden opgegeven op de pagina waar de controle loopt, dus hij loopt op dit scherm of als link.",
       name: "Naam (optioneel)",
       nameHint:
         "Laat leeg als je die niet weet: na verificatie staat de naam van het document hier 30 dagen.",
@@ -782,6 +808,7 @@ export const nl: Translation<typeof en> = {
         overview: "Wat er wordt verzameld",
         method: "Kies een app",
         session: "Scan de QR-code",
+        address: "Adres",
         diplomas: "Diploma",
       },
       overview: {
@@ -1013,6 +1040,13 @@ export const nl: Translation<typeof en> = {
       expectedSubject: "Verwachte persoon",
       expectedSubjectValue:
         "Naam en geboortedatum gecontroleerd tegen het document",
+      address: {
+        title: "Adres",
+        none: "Geen adres ingevuld.",
+        missing: "Geen adres",
+        declared:
+          "Zoals de persoon het invulde; niet gecontroleerd tegen een document.",
+      },
       diplomas: {
         title: "Diploma's",
         none: "Geen diploma toegevoegd.",
@@ -1225,6 +1259,7 @@ export const nl: Translation<typeof en> = {
       nfc_read: "Chip van het document lezen",
       document_photo: "Document fotograferen",
       face_verification: "Gezichtscontrole",
+      address: "Adres invullen",
       diploma_upload: "Diploma's uploaden (DUO)",
     },
     bsnPolicies: {
@@ -1301,6 +1336,8 @@ export const nl: Translation<typeof en> = {
       faceVerificationHint:
         "De persoon maakt een selfie; die wordt gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
       stepsOrder: "Wordt in deze volgorde verstuurd: {{steps}}",
+      addressHint:
+        "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in, bewaard zoals hij het opgeeft en niet gecontroleerd tegen een document. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
       diplomaUploadHint:
         "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon uploadt de diploma-uittreksels die hij bij DUO downloadt, gecontroleerd op de handtekening van DUO en op naam en geboortedatum. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
       faceLocationNative:
@@ -1903,6 +1940,9 @@ export const nl: Translation<typeof en> = {
         "Gewijzigd of een flow om diploma's vraagt",
       identityProofingDiplomaAdded: "Diploma toegevoegd",
       identityProofingDiplomaRejected: "Diploma geweigerd",
+      identityProofingFlowAddressConfigured:
+        "Gewijzigd of een flow om het adres vraagt",
+      identityProofingAddressAdded: "Adres ingevuld",
       identityProofingResumed: "Identiteitsverificatie hervat",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",

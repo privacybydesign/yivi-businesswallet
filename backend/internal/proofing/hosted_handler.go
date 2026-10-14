@@ -91,6 +91,7 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("GET /proof/{token}/yivi/disclosure", h.limitHosted(h.hostedYiviDisclosure))
 	mux.Handle("POST /proof/{token}/yivi/face", h.limitHosted(h.hostedFaceFrame))
 	mux.Handle("POST /proof/{token}/diplomas", h.limitHosted(h.hostedAddDiplomas))
+	mux.Handle("POST /proof/{token}/address", h.limitHosted(h.hostedAddAddress))
 	mux.Handle("GET /proof/{token}/data-export", h.limitHosted(h.hostedDataExport))
 }
 
@@ -128,6 +129,10 @@ type hostedProgressResponse struct {
 	// DiplomasUntil is when the subject can last add a diploma extract;
 	// absent while they cannot.
 	DiplomasUntil *time.Time `json:"diplomasUntil,omitempty"`
+	// AddressUntil is when the subject can last enter their address; absent
+	// while they cannot, and once they did (AddressGiven).
+	AddressUntil *time.Time `json:"addressUntil,omitempty"`
+	AddressGiven bool       `json:"addressGiven"`
 	// DataExportUntil is until when an approved "see my data" request's data
 	// downloads (GET /proof/{token}/data-export); absent otherwise.
 	DataExportUntil *time.Time `json:"dataExportUntil,omitempty"`
@@ -142,6 +147,7 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 		Status: req.EffectiveStatus(now), ErrorCode: req.ErrorCode, Method: string(req.Method),
 		LinkExpiresAt: expires, Started: req.session != nil, CompletedAt: req.CompletedAt,
 		DiplomasUntil: diplomasUntil(req), DataExportUntil: openExport(req, now),
+		AddressUntil: addressUntil(req), AddressGiven: req.SubjectAddress != nil,
 	}
 }
 
@@ -183,6 +189,8 @@ type hostedViewResponse struct {
 		YiviAvailable          bool     `json:"yiviAvailable"`
 		// DiplomaMode is whether the session asks for DUO diploma extracts.
 		DiplomaMode DiplomaMode `json:"diplomaMode"`
+		// AddressMode is whether the session asks for the postal address.
+		AddressMode AddressMode `json:"addressMode"`
 		// Kind is what the session is for: an identity check, or the person
 		// asking for their data or its erasure.
 		Kind FlowKind `json:"kind"`
@@ -249,6 +257,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	}
 	out.Flow.YiviAvailable = yiviAppAvailable(f)
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
+	out.Flow.AddressMode = addressModeOf(hosted.Request)
 	out.Flow.Kind = hosted.Request.FlowKind
 	out.Flow.RetentionDays = subjectRetentionDays(c, hosted.Request.RetentionOverride)
 

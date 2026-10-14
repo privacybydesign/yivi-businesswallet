@@ -97,8 +97,10 @@ function HostedFlow({
   const choice = flow.yiviAvailable;
   const stages = verifyStages({
     appChoice: choice,
+    address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
   });
+  const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
   // A link started before (another tab, a reload) goes straight to its session.
   const [step, setStep] = useState<Step>(
@@ -188,7 +190,9 @@ function HostedFlow({
       )}
       <Stepper
         steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
-        current={stages.indexOf(inDiplomas ? "diplomas" : step)}
+        current={stages.indexOf(
+          inAddress ? "address" : inDiplomas ? "diplomas" : step,
+        )}
       />
       {step === "overview" && (
         <Overview
@@ -232,6 +236,8 @@ function HostedFlow({
           diplomaMode={flow.diplomaMode}
           diplomas={page.diplomas}
           onDiplomaStep={setInDiplomas}
+          addressMode={flow.addressMode}
+          onAddressStep={setInAddress}
           onSettled={settle}
           outcomeActions={
             redirecting ? (

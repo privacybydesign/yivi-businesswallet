@@ -281,6 +281,13 @@ type Request struct {
 	// Diplomas is whether the request asks for DUO diploma extracts once the
 	// identity is approved: its flow's DiplomaMode when it was sent.
 	Diplomas DiplomaMode
+	// Address is whether the request asks for the subject's postal address
+	// once the identity is approved: its flow's AddressMode when it was sent.
+	// SubjectAddress is the address they entered, decrypted, at
+	// AddressAddedAt; nil before, and once the request is purged.
+	Address        AddressMode
+	SubjectAddress *Address
+	AddressAddedAt *time.Time
 	// ExpectsSubject is a request for one known person: only an identity that
 	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
 	ExpectsSubject bool
@@ -396,6 +403,8 @@ type OrgFlow struct {
 	Default bool
 	// Diplomas is whether the flow asks for DUO diploma extracts.
 	Diplomas DiplomaMode
+	// Address is whether the flow asks for the subject's postal address.
+	Address AddressMode
 	// Kind is what the flow's sessions are for.
 	Kind FlowKind
 }
@@ -553,6 +562,7 @@ type CustomerFlow struct {
 	Assigned bool
 	Default  bool
 	Diplomas DiplomaMode
+	Address  AddressMode
 	Kind     FlowKind
 	// RetentionDays is what a subject on this flow for the customer is told
 	// about keeping their data: subjectRetentionDays.

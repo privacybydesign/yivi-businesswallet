@@ -571,6 +571,11 @@ export const en = {
       diplomasClosed:
         "Diplomas can only be added for a while after the identity check succeeded.",
       diplomasNotAsked: "This check does not ask for diplomas.",
+      addressNeedsPage:
+        "This flow asks for the address, which is entered on the page that runs the check. Show it on this screen or send a hosted link.",
+      addressClosed:
+        "The address can only be entered once, for a while after the identity check succeeded.",
+      addressNotAsked: "This check does not ask for an address.",
       flowNoIdentity:
         "A data request flow must read the name and date of birth: the person's sessions are found by them.",
       dataFlowForMember:
@@ -578,6 +583,27 @@ export const en = {
       exportUnavailable: "This data can no longer be downloaded.",
       tooLarge: "The file is too large.",
       generic: "Something went wrong. Please try again.",
+    },
+    address: {
+      overview: {
+        label: "Address",
+        detail: "After the identity check: the postal address you enter",
+      },
+      identityDone: "Your identity is verified.",
+      heading: "Now enter your address",
+      intro:
+        "Enter the address where you live. It is kept with your verified identity, as you enter it.",
+      fields: {
+        street: "Street",
+        houseNumber: "House number",
+        postalCode: "Postal code",
+        city: "City",
+        country: "Country",
+      },
+      required: "Fill this in.",
+      save: "Save address",
+      closed: "The time to enter your address is up.",
+      continue: "Continue",
     },
     diplomas: {
       overview: {
@@ -739,7 +765,7 @@ export const en = {
       email: "E-mail address",
       emailRequired: "Enter a valid e-mail address.",
       diplomasOnScreen:
-        "This flow asks for diplomas, which are uploaded on the page that runs the check, so it runs on this screen or as a link.",
+        "This flow asks for an address or diplomas, which are given on the page that runs the check, so it runs on this screen or as a link.",
       name: "Name (optional)",
       nameHint:
         "Leave it empty if you do not know it: once verified, the name on their document is shown here for 30 days.",
@@ -764,6 +790,7 @@ export const en = {
         overview: "What is collected",
         method: "Choose an app",
         session: "Scan the QR code",
+        address: "Address",
         diplomas: "Diploma",
       },
       overview: {
@@ -991,6 +1018,12 @@ export const en = {
       expectedSubject: "Expected person",
       expectedSubjectValue:
         "Name and date of birth checked against the document",
+      address: {
+        title: "Address",
+        none: "No address entered.",
+        missing: "No address",
+        declared: "As the person entered it; not checked against a document.",
+      },
       diplomas: {
         title: "Diplomas",
         none: "No diploma added.",
@@ -1199,6 +1232,7 @@ export const en = {
       nfc_read: "Read the document's chip",
       document_photo: "Photograph the document",
       face_verification: "Face check",
+      address: "Enter the address",
       diploma_upload: "Upload diplomas (DUO)",
     },
     bsnPolicies: {
@@ -1274,6 +1308,8 @@ export const en = {
       faceVerificationHint:
         "The person takes a selfie, which is checked to be a live person and compared with the photo on the chip.",
       stepsOrder: "Will be sent in this order: {{steps}}",
+      addressHint:
+        "After the identity check, in the browser rather than the Idem app: the person enters their postal address, kept as they declare it and not checked against a document. Such a flow is shown on screen or sent as a hosted link, never mailed.",
       diplomaUploadHint:
         "After the identity check, in the browser rather than the Idem app: the person uploads the diploma extracts they download from DUO, checked against DUO's signature and their name and date of birth. Such a flow is shown on screen or sent as a hosted link, never mailed.",
       faceLocationNative:
@@ -1863,6 +1899,9 @@ export const en = {
         "Changed whether a flow asks for diplomas",
       identityProofingDiplomaAdded: "Added a diploma",
       identityProofingDiplomaRejected: "Refused a diploma",
+      identityProofingFlowAddressConfigured:
+        "Changed whether a flow asks for the address",
+      identityProofingAddressAdded: "Entered an address",
       identityProofingResumed: "Resumed identity proofing",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",

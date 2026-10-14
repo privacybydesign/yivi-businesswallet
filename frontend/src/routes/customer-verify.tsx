@@ -125,8 +125,10 @@ function VerifyFlow({
   const choice = yiviAppAvailable(flow);
   const stages = verifyStages({
     appChoice: choice,
+    address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
   });
+  const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
   const [sent, setSent] = useState<ProofingSent>();
   const create = useCreateRequestMutation(slug);
@@ -166,7 +168,9 @@ function VerifyFlow({
       </div>
       <Stepper
         steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
-        current={stages.indexOf(inDiplomas ? "diplomas" : step)}
+        current={stages.indexOf(
+          inAddress ? "address" : inDiplomas ? "diplomas" : step,
+        )}
       />
       {step === "overview" && (
         <Overview
@@ -210,6 +214,8 @@ function VerifyFlow({
           diplomaMode={sent.diplomaMode}
           diplomas={sent.diplomas}
           onDiplomaStep={setInDiplomas}
+          addressMode={sent.addressMode}
+          onAddressStep={setInAddress}
           onRestart={restart}
           outcomeActions={
             <div className="flex flex-wrap justify-center gap-2">
