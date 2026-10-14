@@ -61,7 +61,8 @@ func TestAAChallengeMatches(t *testing.T) {
 	}
 }
 
-// Mask and omit drop a Dutch document's raw DG11, and nothing else.
+// Mask and omit, and so an empty policy, drop a Dutch document's raw DG11,
+// and nothing else.
 func TestRedactBSNFromEvidence(t *testing.T) {
 	const dg11 = "6b0a5f1001"
 	cases := []struct {
@@ -74,7 +75,7 @@ func TestRedactBSNFromEvidence(t *testing.T) {
 		{"omit drops DG11", &documentInfo{IssuingState: dutchIssuingState}, privacy.BSNPolicyOmit, false},
 		{"omit drops DG11 without a parsed BSN", &documentInfo{IssuingState: dutchIssuingState, PersonalNumber: ""}, privacy.BSNPolicyOmit, false},
 		{"retrieve keeps DG11", &documentInfo{IssuingState: dutchIssuingState}, privacy.BSNPolicyRetrieve, true},
-		{"an empty policy keeps DG11", &documentInfo{IssuingState: dutchIssuingState}, "", true},
+		{"an empty policy drops DG11", &documentInfo{IssuingState: dutchIssuingState}, "", false},
 		{"another country keeps DG11", &documentInfo{IssuingState: "D"}, privacy.BSNPolicyOmit, true},
 		{"no document keeps DG11", nil, privacy.BSNPolicyOmit, true},
 	}

@@ -10965,13 +10965,13 @@ components:
         bsnPolicy:
           type: string
           enum: [retrieve, mask, omit]
-          description: Absent inherits the organisation's.
+          description: Absent is omit, the BSN dropped before storage.
         blurFace:
           type: boolean
-          description: Absent inherits the organisation's redaction policy.
+          description: Cover the portrait and the selfie in a flat grey. Absent is false.
         blurBsn:
           type: boolean
-          description: Absent inherits the organisation's redaction policy.
+          description: Cover the BSN region of a document photo. Absent is false.
         retentionOverrideSeconds:
           type: integer
           minimum: 1

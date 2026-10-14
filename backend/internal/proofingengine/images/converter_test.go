@@ -7,8 +7,10 @@ import (
 	"errors"
 	"image"
 	"image/png"
+	"io"
 	"os"
 	"testing"
+	"time"
 
 	jpeg2000 "github.com/mrjoshuak/go-jpeg2000"
 )
@@ -176,4 +178,85 @@ func TestDecodeHoldsSlotThroughUse(t *testing.T) {
 			}
 		})
 	}
+}
+
+// shortLimit stands in for decodeWait and decodeTimeout, so a test of them
+// runs in milliseconds.
+const shortLimit = 50 * time.Millisecond
+
+// withDecoder swaps the decoder and both limits for one test.
+func withDecoder(t *testing.T, decode func(io.Reader) (image.Image, string, error)) {
+	t.Helper()
+	oldDecode, oldWait, oldTimeout := decodeImage, decodeWait, decodeTimeout
+	decodeImage, decodeWait, decodeTimeout = decode, shortLimit, shortLimit
+	t.Cleanup(func() { decodeImage, decodeWait, decodeTimeout = oldDecode, oldWait, oldTimeout })
+}
+
+func samplePhoto(t *testing.T) []byte {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString(jp2SamplePhotoBase64(t))
+	if err != nil {
+		t.Fatalf("decode base64: %v", err)
+	}
+	return raw
+}
+
+// waitForSlots polls until held slots are taken: a given-up decode frees its
+// slot from its own goroutine.
+func waitForSlots(t *testing.T, held int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for len(decodeSlots) != held {
+		if time.Now().After(deadline) {
+			t.Fatalf("slots held = %d, want %d", len(decodeSlots), held)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// A decode that hangs costs the request decodeTimeout, and keeps its slot
+// until it ends, so hung decodes never exceed maxConcurrentDecodes.
+func TestDecodeGivesUpOnAHang(t *testing.T) {
+	release := make(chan struct{})
+	withDecoder(t, func(r io.Reader) (image.Image, string, error) {
+		<-release
+		return image.Decode(r)
+	})
+	if err := Decode(samplePhoto(t), unused(t)); !errors.Is(err, ErrDecodeTimeout) {
+		t.Fatalf("Decode = %v, want ErrDecodeTimeout", err)
+	}
+	if held := len(decodeSlots); held != 1 {
+		t.Errorf("slots held while the decode hangs = %d, want 1", held)
+	}
+	close(release)
+	waitForSlots(t, 0)
+}
+
+// With every slot taken for decodeWait, a decode fails fast instead of
+// queueing forever.
+func TestDecodeBusyWhenEverySlotIsTaken(t *testing.T) {
+	withDecoder(t, image.Decode)
+	for range maxConcurrentDecodes {
+		decodeSlots <- struct{}{}
+	}
+	t.Cleanup(func() {
+		for range maxConcurrentDecodes {
+			<-decodeSlots
+		}
+	})
+	if err := Decode(samplePhoto(t), unused(t)); !errors.Is(err, ErrBusy) {
+		t.Errorf("Decode = %v, want ErrBusy", err)
+	}
+}
+
+// A decoder that panics on an image fails that image and frees its slot:
+// the decode runs on a goroutine nothing else would recover.
+func TestDecodeRecoversADecoderPanic(t *testing.T) {
+	withDecoder(t, func(io.Reader) (image.Image, string, error) {
+		panic("index out of range")
+	})
+	if err := Decode(samplePhoto(t), unused(t)); !errors.Is(err, ErrDecoderPanic) {
+		t.Errorf("Decode = %v, want ErrDecoderPanic", err)
+	}
+	waitForSlots(t, 0)
 }

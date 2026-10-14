@@ -1308,14 +1308,14 @@ export const en = {
           "Substantial needs the chip read with its data and copy check verified, and a live face matched by Regula against the chip photo. Turn those settings on to save the flow.",
       },
       none: "(none)",
-      inherit: "(inherit organization)",
+      defaultOption: "(default: {{option}})",
       yes: "Yes",
       no: "No",
       bsnPolicy: "BSN policy override",
       retentionSeconds: "Retention override (seconds)",
       retentionSecondsHint:
         "Set, it replaces the customer's retention for this flow's sessions; blank or 0 keeps the customer's.",
-      blurFace: "Blur face override",
+      blurFace: "Cover face override",
       blurBsn: "Blur BSN override",
       errors: {
         name: "Give the flow a name.",

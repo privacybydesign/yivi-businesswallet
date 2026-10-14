@@ -1335,14 +1335,14 @@ export const nl: Translation<typeof en> = {
           "Substantieel vereist het lezen van de chip met geverifieerde chipgegevens en kopiecontrole, en een levend gezicht dat Regula met de chipfoto vergelijkt. Zet die instellingen aan om de flow op te slaan.",
       },
       none: "(geen)",
-      inherit: "(organisatie overnemen)",
+      defaultOption: "(standaard: {{option}})",
       yes: "Ja",
       no: "Nee",
       bsnPolicy: "BSN-beleid overschrijven",
       retentionSeconds: "Bewaartermijn overschrijven (seconden)",
       retentionSecondsHint:
         "Ingevuld vervangt dit de bewaartermijn van de klant voor de sessies van deze flow; leeg of 0 houdt die van de klant aan.",
-      blurFace: "Gezicht vervagen overschrijven",
+      blurFace: "Gezicht afdekken overschrijven",
       blurBsn: "BSN vervagen overschrijven",
       errors: {
         name: "Geef de flow een naam.",

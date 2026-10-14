@@ -185,7 +185,8 @@ export function yiviAppAvailable(flow: {
   );
 }
 
-// "" inherits the tenant's policy at the proofing service.
+// "" is the proofing service's default: omit for the BSN policy, off for the
+// covers.
 export type Inherit<T extends string> = "" | T;
 export type Tristate = "" | "true" | "false";
 

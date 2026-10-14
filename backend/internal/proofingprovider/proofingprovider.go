@@ -42,9 +42,9 @@ type FlowSpec struct {
 	RequiredChecks           []string           `json:"requiredChecks,omitempty"`
 	CheckThresholds          map[string]float64 `json:"checkThresholds,omitempty"`
 	RequiredAssuranceLevel   string             `json:"requiredAssuranceLevel,omitempty"`
-	// BSNPolicy is retrieve, mask or omit; empty inherits the tenant's.
+	// BSNPolicy is retrieve, mask or omit; empty is omit.
 	BSNPolicy string `json:"bsnPolicy,omitempty"`
-	// BlurFace and BlurBSN are nil to inherit the tenant's redaction policy.
+	// BlurFace and BlurBSN cover the face and the BSN region; nil is off.
 	BlurFace                 *bool           `json:"blurFace,omitempty"`
 	BlurBSN                  *bool           `json:"blurBsn,omitempty"`
 	RetentionOverrideSeconds int             `json:"retentionOverrideSeconds,omitempty"`

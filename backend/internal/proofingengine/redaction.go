@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/redact"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
@@ -186,19 +185,15 @@ func coverBSN(imageBase64, mimeType string, region *imageRegion) (string, string
 	return redact.Region(imageBase64, mimeType, redact.Rect{X: region.X, Y: region.Y, W: region.W, H: region.H})
 }
 
-// blurFace pixelates a face under a BlurFace policy, including a chip's
-// JPEG2000 portrait. ok is false when it could not, and the caller then drops
-// the image.
+// blurFace covers a face under a BlurFace policy (redact.Image), a chip's
+// JPEG2000 portrait included, without decoding it. ok is false when it could
+// not, and the caller then drops the image.
 func blurFace(imageBase64, mimeType string) (string, string, bool) {
 	raw, mime, err := decodeImageBase64(imageBase64, mimeType)
 	if err != nil {
 		return "", "", false
 	}
-	plain := base64.StdEncoding.EncodeToString(raw)
-	if converted, convertedMime, err := images.ToDisplayablePNG(plain, mime); err == nil {
-		plain, mime = converted, convertedMime
-	}
-	blurred, blurredMime, err := redact.Image(plain, mime)
+	blurred, blurredMime, err := redact.Image(base64.StdEncoding.EncodeToString(raw), mime)
 	if err != nil {
 		return "", "", false
 	}

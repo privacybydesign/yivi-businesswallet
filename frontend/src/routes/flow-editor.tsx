@@ -470,7 +470,11 @@ export function FlowEditor({
                 })
               }
             >
-              <option value="">{t("identityProofingFlows.new.inherit")}</option>
+              <option value="">
+                {t("identityProofingFlows.new.defaultOption", {
+                  option: t("identityProofingFlows.bsnPolicies.omit"),
+                })}
+              </option>
               {BSN_POLICIES.map((policy) => (
                 <option key={policy} value={policy}>
                   {t(`identityProofingFlows.bsnPolicies.${policy}`)}
@@ -581,7 +585,11 @@ function TristateField({
         value={value}
         onChange={(event) => onChange(event.target.value as Tristate)}
       >
-        <option value="">{t("identityProofingFlows.new.inherit")}</option>
+        <option value="">
+          {t("identityProofingFlows.new.defaultOption", {
+            option: t("identityProofingFlows.new.no"),
+          })}
+        </option>
         <option value="true">{t("identityProofingFlows.new.yes")}</option>
         <option value="false">{t("identityProofingFlows.new.no")}</option>
       </select>

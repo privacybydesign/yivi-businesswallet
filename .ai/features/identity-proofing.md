@@ -122,9 +122,17 @@ the app calls them), and the deep link's `api=` is
     `memberFaceFrameLimit` (1500 a minute); past it 429 `rate_limited`.
 - **Images.** Every uploaded image is decoded through `images.Decode`: its
   header is checked first (4 megapixels, `images.MaxImagePixels`, above the
-  app's largest image, a 1600 px document photo; a JPEG2000 4 megapixels and at most 4 colour components), and at most 4 decode at once
-  in the process. A JPEG2000 chip portrait is converted to PNG in pure Go
-  (go-jpeg2000) for display; redaction decodes through the same helper.
+  app's largest image, a 1600 px document photo; a JPEG2000 1 megapixel, as a
+  chip portrait is well under it and JPEG2000 decodes slowly, and at most 4
+  colour components), and at most 4 decode at once in the process. A slot
+  waited for over 10 s is `ErrBusy`, a decode running over 10 s is
+  `ErrDecodeTimeout` (it keeps its slot until it ends), and a decoder panic is
+  `ErrDecoderPanic`. A JPEG2000 chip portrait is converted to PNG in pure Go
+  (go-jpeg2000, the only pure-Go decoder; OpenJPEG would mean C in-process)
+  for display. The BSN region is covered through the same helper. A covered
+  face (`redact.Image`) is a flat grey PNG of the photo's size, made from the
+  header alone: a mosaic or blur can still be matched against candidate
+  photos.
 - **Regula clean-up.** Every Regula tag the app is handed is queued for
   deletion (`identity_proofing_regula_sweeps`): 15 minutes after the session's
   expiry while it runs, moved forward to 15 minutes after its end once it ends,
@@ -271,9 +279,11 @@ the app calls them), and the deep link's `api=` is
     becomes `rejected` with `ASSURANCE_NOT_MET`. This catches Yivi-method
     sessions, which the engine approves without comparing; one it reports no
     level for counts as low (`yiviEIDASLevel`).
-  - Overrides: BSN policy, blur face and blur BSN (inherit/true/false), and
+  - Overrides: BSN policy, cover face and blur BSN (default/true/false), and
     retention in seconds, which replaces the customer's retention for the
-    flow's sessions.
+    flow's sessions. An unset BSN policy is `omit` (`privacy.DefaultBSNPolicy`):
+    an organisation may process a BSN only where a law allows it, so keeping
+    one is the flow's choice. Unset cover face and blur BSN are off.
   - Legal basis, purpose and assurance tiers are not in the editor: they are
     carried over unchanged when a version is saved.
   Face capture is forced to `native` (§11). The face provider is always
@@ -842,8 +852,6 @@ Everything this feature does not do yet, in one place.
   Planned: white labelling per org, then per customer, carried through to the
   QR into the Idem app, usable only with that org's and customer's API key.
 - **Settings still open:**
-  - an unset BSN policy keeps the BSN (`retrieve`); `omit` as the default is
-    undecided;
   - which fields a customer must send with a session, and what a mismatch
     does, cannot be set per flow in the editor (§13 is per session);
   - raising a customer's retention after a session moves the wallet's purge,

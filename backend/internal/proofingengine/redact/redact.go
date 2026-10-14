@@ -2,10 +2,10 @@
 // before a result or stored evidence is written, so a kept image is redacted
 // from the moment it is stored.
 //
-// A face (Image) is pixelated into flat blocks, which keeps it from being
-// recognised. A region (Region, the BSN) is filled solid: nine digits in a known
-// font can be read back from a mosaic by rendering candidates through the same
-// grid.
+// Both are covered solid, never pixelated or blurred. A face (Image) in a
+// mosaic or blur can still be matched against candidate photos by a
+// recognition model, and nine digits in a known font (Region, the BSN) can be
+// read back by rendering candidates through the same grid.
 package redact
 
 import (
@@ -28,24 +28,50 @@ type Rect struct {
 	X, Y, W, H float64
 }
 
-var wholeImage = Rect{X: 0, Y: 0, W: 1, H: 1}
-
-// pixelateDivisions sets how coarse the redaction grid is: each block is
-// roughly 1/pixelateDivisions of the redacted region's smaller dimension,
-// with a floor (minBlockSize) so a small region (e.g. a tight BSN bounding
-// box) still gets meaningfully coarsened rather than a near-identity blur.
-const (
-	pixelateDivisions = 10
-	minBlockSize      = 8
-)
-
 // redactionColor covers a Region.
 var redactionColor = color.RGBA{A: 0xff}
 
-// Image pixelates a whole image: a portrait or selfie is the face crop itself.
+// faceColor covers a face: a neutral grey, so the evidence reads as a photo
+// withheld rather than a broken image.
+var faceColor = color.RGBA{R: 0x9e, G: 0x9e, B: 0x9e, A: 0xff}
+
+// MIME types the redacted images are encoded as.
+const (
+	mimePNG  = "image/png"
+	mimeJPEG = "image/jpeg"
+)
+
+// Image replaces a whole image, a portrait or selfie (the face crop itself),
+// with a PNG of the same size in faceColor. Only the header is read, for the
+// size: the image is never decoded.
 func Image(imageBase64, mimeType string) (string, string, error) {
-	return apply(imageBase64, mimeType, wholeImage, pixelate)
+	if imageBase64 == "" {
+		return imageBase64, mimeType, nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(imageBase64)
+	if err != nil {
+		return "", "", fmt.Errorf("redact: decode base64 image: %w", err)
+	}
+	cfg, _, err := images.Config(raw)
+	if err != nil {
+		return "", "", fmt.Errorf("redact: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, flat{bounds: image.Rect(0, 0, cfg.Width, cfg.Height), color: faceColor}); err != nil {
+		return "", "", fmt.Errorf("redact: encode covered image: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), mimePNG, nil
 }
+
+// flat is an image of one colour, encoded without allocating a raster.
+type flat struct {
+	bounds image.Rectangle
+	color  color.RGBA
+}
+
+func (f flat) ColorModel() color.Model { return color.RGBAModel }
+func (f flat) Bounds() image.Rectangle { return f.bounds }
+func (f flat) At(int, int) color.Color { return f.color }
 
 // Region fills r within the image with a solid block and leaves the rest, as
 // for the printed BSN of a document photo.
@@ -78,7 +104,7 @@ func apply(imageBase64, mimeType string, r Rect, redact func(*image.RGBA, image.
 	return out, outMime, nil
 }
 
-// toRGBA copies img into a freshly allocated *image.RGBA, so pixelate can
+// toRGBA copies img into a freshly allocated *image.RGBA, so a redaction can
 // mutate it in place regardless of img's original concrete type.
 func toRGBA(img image.Image) *image.RGBA {
 	if rgba, ok := img.(*image.RGBA); ok {
@@ -122,39 +148,6 @@ func rectToBounds(r Rect, w, h int) image.Rectangle {
 	return image.Rect(x0, y0, x1, y1)
 }
 
-// pixelate block-averages bounds within img, in place.
-func pixelate(img *image.RGBA, bounds image.Rectangle) {
-	dx, dy := bounds.Dx(), bounds.Dy()
-	blockSize := max(min(dx, dy)/pixelateDivisions, minBlockSize)
-
-	for by := bounds.Min.Y; by < bounds.Max.Y; by += blockSize {
-		blockMaxY := min(by+blockSize, bounds.Max.Y)
-		for bx := bounds.Min.X; bx < bounds.Max.X; bx += blockSize {
-			blockMaxX := min(bx+blockSize, bounds.Max.X)
-			avg := averageColor(img, bx, by, blockMaxX, blockMaxY)
-			fill(img, bx, by, blockMaxX, blockMaxY, avg)
-		}
-	}
-}
-
-func averageColor(img *image.RGBA, x0, y0, x1, y1 int) color.RGBA {
-	var rSum, gSum, bSum, aSum, n uint64
-	for y := y0; y < y1; y++ {
-		for x := x0; x < x1; x++ {
-			c := img.RGBAAt(x, y)
-			rSum += uint64(c.R)
-			gSum += uint64(c.G)
-			bSum += uint64(c.B)
-			aSum += uint64(c.A)
-			n++
-		}
-	}
-	if n == 0 {
-		return color.RGBA{}
-	}
-	return color.RGBA{R: uint8(rSum / n), G: uint8(gSum / n), B: uint8(bSum / n), A: uint8(aSum / n)}
-}
-
 func fill(img *image.RGBA, x0, y0, x1, y1 int, c color.RGBA) {
 	for y := y0; y < y1; y++ {
 		for x := x0; x < x1; x++ {
@@ -167,10 +160,10 @@ func fill(img *image.RGBA, x0, y0, x1, y1 int, c color.RGBA) {
 // no lossy encoder for the others). It returns base64 and the mime type.
 func encode(rgba *image.RGBA, format string) (string, string, error) {
 	var buf bytes.Buffer
-	mimeType := "image/png"
+	mimeType := mimePNG
 	var err error
 	if strings.EqualFold(format, "jpeg") {
-		mimeType = "image/jpeg"
+		mimeType = mimeJPEG
 		err = jpeg.Encode(&buf, rgba, &jpeg.Options{Quality: 90})
 	} else {
 		err = png.Encode(&buf, rgba)

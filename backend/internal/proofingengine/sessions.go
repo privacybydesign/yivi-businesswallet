@@ -78,9 +78,9 @@ func stepAuditDetails(sess session.Session, fd *flow.FlowDefinition, stage, step
 }
 
 // effectivePrivacyPolicy is the flow's BSN and redaction policy, else the
-// default (BSN kept, nothing blurred).
+// default (BSN left out, nothing covered).
 func effectivePrivacyPolicy(resolvedFlow *flow.FlowDefinition) (privacy.BSNPolicy, privacy.RedactionPolicy) {
-	bsnPolicy, redaction := privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{}
+	bsnPolicy, redaction := privacy.DefaultBSNPolicy, privacy.RedactionPolicy{}
 	if resolvedFlow != nil {
 		if resolvedFlow.BSNPolicy != "" {
 			bsnPolicy = resolvedFlow.BSNPolicy
