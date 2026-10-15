@@ -157,6 +157,16 @@ type Session struct {
 	// FaceAttempts is how many face step attempts were reserved, each before
 	// the face provider was called.
 	FaceAttempts int `json:"faceAttempts,omitempty"`
+	// Review is the manual review that decided the session, when one did.
+	Review *ReviewDecision `json:"review,omitempty"`
+}
+
+// ReviewDecision is a manual review's record: who decided, why and when, as
+// the relying party gave them.
+type ReviewDecision struct {
+	Reviewer  string    `json:"reviewer"`
+	Reason    string    `json:"reason"`
+	DecidedAt time.Time `json:"decidedAt"`
 }
 
 // ForStorage is sess as it is persisted: a session whose face step can no

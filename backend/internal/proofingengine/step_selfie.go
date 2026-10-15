@@ -2,6 +2,7 @@ package proofingengine
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"slices"
 	"time"
@@ -74,6 +75,9 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 	}
 	out, err := verifier.Verify(r.Context(), sess, ref, live)
 	if err != nil {
+		if refundsFaceAttempt(err) {
+			s.refundFaceAttempt(sess, attempt)
+		}
 		writeFaceVerifyError(w, r, provider, err)
 		return
 	}
@@ -130,6 +134,32 @@ func (s *Server) reserveFaceAttempt(sess session.Session, caller appCaller, step
 		return nil
 	})
 	return attempt, err
+}
+
+// refundsFaceAttempt is whether a face check that failed with err gives its
+// attempt back. Regula failing, or no call made at all (a capture of the
+// wrong kind, a reference that does not decode), is not the subject's
+// attempt, and three of those would otherwise strand the session. A
+// transaction Regula does not know, or one that is another session's, is the
+// client's doing and stays spent, so made-up ids cannot run up Face API calls.
+func refundsFaceAttempt(err error) bool {
+	return !errors.Is(err, errUnknownTransaction) && !errors.Is(err, errForeignTransaction)
+}
+
+// refundFaceAttempt gives back attempt, reserved for a face check that failed
+// through no fault of the subject's: only while it is still the latest
+// reservation and no evidence was written for it. A failed refund is logged;
+// the request is answered with the check's error either way.
+func (s *Server) refundFaceAttempt(sess session.Session, attempt int) {
+	_, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
+		if sess.FaceAttempts == attempt && faceStepAttempts(sess.Steps.Selfie) < attempt {
+			sess.FaceAttempts = attempt - 1
+		}
+		return nil
+	})
+	if err != nil {
+		slog.Warn("identity proofing: refund a face attempt", slog.String("session_id", sess.ID), slog.Any("error", err))
+	}
 }
 
 // writeFaceVerifyError maps a faceVerifier error to its HTTP response.

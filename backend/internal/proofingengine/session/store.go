@@ -29,6 +29,9 @@ var errMisplaced = errors.New("session: sealed data belongs to another row")
 type Interface interface {
 	Create(sess Session) (Session, error)
 	Get(tenantID, id string) (Session, error)
+	// ChangedAt is when the session was last written, read without unsealing
+	// it: what a poll compares before paying for a Get.
+	ChangedAt(tenantID, id string) (time.Time, error)
 	Authenticate(token string) (Session, error)
 	AuthenticateSession(tenantID, id, token string) (Session, error)
 	FindByHandover(tokenHash string) (Session, error)
@@ -177,6 +180,21 @@ func (s *PostgresStore) get(query string, args ...any) (Session, error) {
 
 func (s *PostgresStore) Get(tenantID, id string) (Session, error) {
 	return s.get(`id = $1 AND organization_id::text = $2`, id, tenantID)
+}
+
+func (s *PostgresStore) ChangedAt(tenantID, id string) (time.Time, error) {
+	c, cancel := ctx()
+	defer cancel()
+	var at time.Time
+	err := s.db.QueryRow(c, `SELECT updated_at FROM identity_proofing_sessions
+		WHERE id = $1 AND organization_id::text = $2`, id, tenantID).Scan(&at)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, ErrNotFound
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("session: read changed at: %w", err)
+	}
+	return at, nil
 }
 
 // Authenticate resolves the app-facing session token.

@@ -248,12 +248,12 @@ func TestSessionOutcome(t *testing.T) {
 		{"AA not listed, not performed", chipAndFaceFlow("", flow.CheckNFCPassiveAuth, flow.CheckFaceMatch, flow.CheckFaceLiveness), faceDone, liveRegulaMatch(), chipAANotPerformed(), flow.AssuranceLevelLow, session.StatusApproved, ""},
 		// AA is configured, but a chip without it still passes low.
 		{"required low, chip without AA", substantialFlow(flow.AssuranceLevelLow), faceDone, liveRegulaMatch(), chipWithoutAA(), flow.AssuranceLevelLow, session.StatusApproved, ""},
-		// A failed liveness gates only with a required level or face.liveness
-		// listed. Otherwise the match decides, and Regula matched nothing.
-		{"liveness failed, not gating", chipAndFaceFlow("", flow.CheckNFCPassiveAuth, flow.CheckFaceMatch), faceDone, notLiveRegula(), verifiedChip(), flow.AssuranceLevelLow, session.StatusRejected, errCodeFaceNoMatch},
+		// A failed liveness rejects whatever the flow lists or requires, a
+		// capture-only flow included: it has no match to fail on instead.
+		{"liveness failed, not listed", chipAndFaceFlow("", flow.CheckNFCPassiveAuth, flow.CheckFaceMatch), faceDone, notLiveRegula(), verifiedChip(), flow.AssuranceLevelLow, session.StatusRejected, errCodeLivenessFailed},
 		{"liveness failed, listed", chipAndFaceFlow("", flow.CheckNFCPassiveAuth, flow.CheckFaceMatch, flow.CheckFaceLiveness), faceDone, notLiveRegula(), verifiedChip(), flow.AssuranceLevelLow, session.StatusRejected, errCodeLivenessFailed},
 		{"liveness failed, required low", chipAndFaceFlow(flow.AssuranceLevelLow, flow.CheckNFCPassiveAuth, flow.CheckFaceMatch), faceDone, notLiveRegula(), verifiedChip(), flow.AssuranceLevelLow, session.StatusRejected, errCodeLivenessFailed},
-		{"liveness failed, capture only", selfieOnlyFlow(), faceDone, notLiveRegula(), verifiedChip(), flow.AssuranceLevelLow, session.StatusApproved, ""},
+		{"liveness failed, capture only", selfieOnlyFlow(), faceDone, notLiveRegula(), verifiedChip(), flow.AssuranceLevelLow, session.StatusRejected, errCodeLivenessFailed},
 		{"face did not match", substantialFlow(""), faceDone, noMatch, verifiedChip(), flow.AssuranceLevelLow, session.StatusRejected, errCodeFaceNoMatch},
 		{"tampered chip", chipFlow(""), session.Session{}, appResultRequest{}, tampered, flow.AssuranceLevelLow, session.StatusRejected, "DOC_TAMPERED"},
 	} {

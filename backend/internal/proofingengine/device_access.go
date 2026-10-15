@@ -113,6 +113,8 @@ func writeAccessError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, errFaceAttemptsSpent):
 		writeErrorCode(w, http.StatusConflict, errCodeFaceAttemptsSpent, err.Error())
+	case errors.Is(err, errDeviceActive):
+		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, session.ErrNotFound):
 		writeError(w, http.StatusNotFound, "session not found")
 	default:
@@ -415,6 +417,11 @@ func (s *Server) handleMintHandover(w http.ResponseWriter, r *http.Request) {
 		writeAccessError(w, r, session.ErrDeviceUnauthorized)
 		return
 	}
+	if ok, retry := s.handoverLimit.Allow(sess.ID); !ok {
+		w.Header().Set(headerRetryAfter, strconv.Itoa(int(math.Ceil(retry.Seconds()))))
+		writeError(w, http.StatusTooManyRequests, "too many handover codes for this session, try again later")
+		return
+	}
 	var req mintHandoverRequest
 	if r.ContentLength != 0 && !s.decode(w, r, &req) {
 		return
@@ -427,6 +434,15 @@ func (s *Server) handleMintHandover(w http.ResponseWriter, r *http.Request) {
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if err := checkAppWrite(sess, caller); err != nil {
 			return err
+		}
+		// A device hands its own slot over at will; the other slot only while
+		// that is free or its device is away, as SessionHandover holds the
+		// relying party to. Otherwise one device could push out the other
+		// mid-step, and void the QR it is about to scan.
+		if role != caller.role {
+			if d := sess.Access.Slot(role); d != nil && !s.deviceAway(d, time.Now()) {
+				return errDeviceActive
+			}
 		}
 		var err error
 		token, err = sess.Access.MintHandover(role, s.grantExpiry(*sess, s.cfg.HandoverTokenTTL))

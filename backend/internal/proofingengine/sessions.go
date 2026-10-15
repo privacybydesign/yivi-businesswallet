@@ -132,18 +132,15 @@ func hasFaceStep(fd *flow.FlowDefinition) bool {
 }
 
 // faceStepFailure reports a face step that did not verify the person:
-//   - in a step that compares faces, no passing match, at any level;
-//   - a capture that was not live, only when fd requires a level or lists
-//     face.liveness. Otherwise the match alone decides.
-//
-// Regula matches only a live capture, so a failed liveness leaves no match at
-// all: a face step that compares faces still fails, with FACE_NO_MATCH.
+//   - a capture that was not live, whatever fd lists: Regula, the only face
+//     provider, runs liveness on every capture, and a flow without a face
+//     match (liveness or a selfie alone) has nothing else to fail on;
+//   - in a step that compares faces, no passing match, at any level.
 func faceStepFailure(fd *flow.FlowDefinition, req appResultRequest, checks *chipChecksInfo) (failed bool, errorCode string) {
 	if fd == nil || !hasFaceStep(fd) {
 		return false, ""
 	}
-	livenessGates := fd.RequiredAssuranceLevel != "" || flowListsCheck(fd, flow.CheckFaceLiveness)
-	if livenessGates && checkOutcome(fd, flow.CheckFaceLiveness, req, checks) == checkStateFail {
+	if checkOutcome(fd, flow.CheckFaceLiveness, req, checks) == checkStateFail {
 		return true, errCodeLivenessFailed
 	}
 	if flowNeedsFaceMatch(fd) && checkOutcome(fd, flow.CheckFaceMatch, req, checks) != checkStatePass {

@@ -59,6 +59,9 @@ type Config struct {
 	// retried, or abuse of a leaked link). Per session rather than per client
 	// IP: behind the wallet's reverse proxy every phone has the proxy's address.
 	ClaimLimit ratelimit.Limit
+	// HandoverLimit bounds the grants one session's devices mint: each is
+	// audited in the org's log, so an unbounded loop would flood it.
+	HandoverLimit ratelimit.Limit
 
 	// PublicBaseURL is the origin the Idem app reaches /api/v1/app at: the
 	// api= of every vcmrtd deep link.
@@ -160,6 +163,7 @@ func DefaultConfig() Config {
 		SessionEventsPoll:        500 * time.Millisecond,
 		SessionRetention:         defaultSessionRetention,
 		ClaimLimit:               ratelimit.Limit{Burst: 20, Per: time.Minute},
+		HandoverLimit:            ratelimit.Limit{Burst: 20, Per: time.Minute},
 		RegulaFaceMatchThreshold: regula.DefaultMatchThreshold,
 		BoundLoginTTL:            5 * time.Minute,
 		BoundLoginStableFrames:   3,
@@ -198,9 +202,10 @@ type Server struct {
 	tenants  TenantLookup
 	notify   Notifier
 
-	claimLimit *ratelimit.Limiter
-	waiters    eventWaiters
-	denials    denialSet
+	claimLimit    *ratelimit.Limiter
+	handoverLimit *ratelimit.Limiter
+	waiters       eventWaiters
+	denials       denialSet
 
 	// changed queues the sessions to tell notify about; pending holds the
 	// ones queued, so a burst of events for one session is one notice.
@@ -232,10 +237,10 @@ func New(cfg Config, sessions session.Interface, flows flow.Store, tenants Tenan
 	}
 	s := &Server{
 		cfg: cfg, sessions: sessions, flows: flows, tenants: tenants, notify: notify,
-		claimLimit: ratelimit.New(cfg.ClaimLimit),
-		changed:    make(chan string, notifyQueue),
-		pending:    map[string]bool{},
-		waiters:    eventWaiters{bySession: map[string]int{}},
+		claimLimit: ratelimit.New(cfg.ClaimLimit), handoverLimit: ratelimit.New(cfg.HandoverLimit),
+		changed: make(chan string, notifyQueue),
+		pending: map[string]bool{},
+		waiters: eventWaiters{bySession: map[string]int{}},
 	}
 	// A session expiring is noticed lazily, by whichever read finds its
 	// deadline passed; this is how that reaches the wallet.

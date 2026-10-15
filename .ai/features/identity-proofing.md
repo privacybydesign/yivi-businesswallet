@@ -31,7 +31,10 @@ link and QR; the transaction id stays in `yivi_transaction_id`), polls
 face reference (`SubmitReference`), then runs the face check from the browser
 camera (`yivi/face`): each frame is a Regula image match against that photo
 (`MatchImages`), so the Yivi method needs Regula (`ErrMethodUnavailable`
-otherwise). A subject
+otherwise). A frame matches at the deployment's threshold or the flow's
+`face.match`, whichever is higher (`boundLoginThreshold`), and the session is
+eIDAS low with no tier (`boundLoginAssurance`): one check out of one is not a
+score. A subject
 who cancels in the app is not reported: the verifier only knows pending or done,
 so the page waits out the countdown. Both count down to the
 session's expiry and poll `GET requests/{id}` for the outcome. Nothing is
@@ -82,10 +85,16 @@ the app calls them), and the deep link's `api=` is
   through the wallet, never the app: its token opens no `/app` route (409
   `not_app_session`). The `/events` long polls are capped at 4 per session and
   512 per process (`maxEventWaitersPerSession`, `maxEventWaiters`; past it 429).
+  A waiting poll reads the row's write time each tick (`Store.ChangedAt`) and
+  unseals the session only when that moved or the deadline passed.
   The request log writes a token path segment as `{token}` (`loggedPath` in
   `internal/server`), for these routes and every other token link.
 - **A session needs a flow of its org** (`CreateSession`): none, or one the
   engine does not hold, is refused, since such a session could never finish.
+  A method other than the Idem or the Yivi app is 400. The Yivi method is
+  refused (400) on a flow it cannot serve: one requiring more than low,
+  matching a reference photo, or photographing the document, whatever the
+  caller offers.
 
 - **Storage.** Flow versions in `identity_proofing_flow_versions` (definition as
   JSON, one active version per flow); sessions in `identity_proofing_sessions`,
@@ -108,8 +117,10 @@ the app calls them), and the deep link's `api=` is
     (`maxFaceStepAttempts`), after which the last failed evidence stands and
     the submit decides on it. Each attempt's transaction is released as usual.
     - Each submit reserves its attempt under the session lock before Regula
-      is called (`reserveFaceAttempt`), and spends it whatever the outcome, so
-      concurrent submits never exceed the bound.
+      is called (`reserveFaceAttempt`), so concurrent submits never exceed the
+      bound. An attempt that left no evidence because Regula or the engine
+      failed is given back (`refundFaceAttempt`); one naming a transaction
+      Regula does not know, or another session's, stays spent.
     - With every attempt reserved and none leaving evidence, a submit is 409
       `face_attempts_spent`.
   - A Yivi-method session sends at most twice `BoundLoginMaxAttempts` frames
@@ -275,17 +286,18 @@ the app calls them), and the deep link's `api=` is
         (`DocumentComplete`, passports and ID cards).
     - **Face step:**
       - `FACE_NO_MATCH` gates at any level;
-      - `LIVENESS_FAILED` gates only when the flow requires a level or lists
-        `face.liveness`; otherwise the match alone decides;
+      - `LIVENESS_FAILED` gates at any level: the app runs Regula liveness
+        always, whether or not the flow lists `face.liveness`;
       - a face that failed liveness never counts as matched, whatever its
         score, and never reaches substantial.
     - `CHIP_AUTH_MISSING` appears only on sessions decided under an earlier
       rule.
   - **The wallet re-checks the level** against the one the request stored at
     send (`required_assurance_level`, `enforceAssurance`): an approval below it
-    becomes `rejected` with `ASSURANCE_NOT_MET`. This catches Yivi-method
-    sessions, which the engine approves without comparing; one it reports no
-    level for counts as low (`yiviEIDASLevel`).
+    becomes `rejected` with `ASSURANCE_NOT_MET`. A Yivi-method session is
+    approved by the engine without comparing (create already refused it on
+    a flow above low); one reported with no level counts as low
+    (`yiviEIDASLevel`).
   - Overrides: BSN policy, keep face photos and blur BSN (default/true/false),
     and retention in seconds, which replaces the customer's retention for the
     flow's sessions. An unset BSN policy is `omit` (`privacy.DefaultBSNPolicy`):
@@ -455,7 +467,8 @@ post-review outcome stay the system's.
   mail for a customer's subject names the customer as requester, never the key.
   `POST /proofing/sessions/{id}/cancel` ends a `pending`/`in_progress` session in
   the engine too (`cancelled_at`; status reads `cancelled`; audited `session_cancelled`).
-  `DELETE /proofing/sessions/{id}` erases it in the engine and clears its personal data
+  `DELETE /proofing/sessions/{id}` erases it in the engine (a session already
+  gone is fine; one there under another token is an error, never erased) and clears its personal data
   (subject name and address, proofed name, the subject in its audit events;
   `purged_at`, audited `session_purged`, webhook `session.purged`); the row
   stays readable with `purgedAt` and its outcome. A CHECK
@@ -587,6 +600,11 @@ member, or `hosted_link`) and sends `session.handover`; a fresh claim is not. An
 app still active is 409 `device_active`. A Yivi request has none
 (`wrong_method`).
 
+The app's own `POST /app/{token}/handover` mints at most 20 a minute per
+session (`HandoverLimit`; past it 429), as each one is audited. A device
+mints for its own slot at will, but for the other slot only while that slot
+is free or its device is away (409 `device_active` otherwise), as above.
+
 The on-screen page follows the phone by itself: `GET …/requests/{id}/app` reads
 the engine's status live (`devices[].current`/`away`) as `waiting`, `connected` or
 `away`, polled every 2 s. It shows the claim QR while `waiting` (renewed once
@@ -713,7 +731,8 @@ end it, §3). The reviewer sees the person's identity and check results (an
 audited result read). An admin decides it on the customer's Sessions tab (filter
 "Needs review", also counted on the overview): approve or reject (optionally
 with an error code), with a required reason. `POST .../requests/{id}/review` calls the engine's
-`DecideReview` (the admin's e-mail as `reviewer`), audits
+`DecideReview` (the admin's e-mail as `reviewer`; the engine keeps who
+decided, why and when with the session, `session.ReviewDecision`), audits
 `identity_proofing.review_decided` with the admin as actor, then reconciles:
 the outcome lands like any other, so an approval still has to meet the flow's
 assurance level and the customer's webhook is sent. A request no longer under
@@ -1006,7 +1025,11 @@ holder's change of bank account).
   levels need the chip; the engine scores it as `matchedRelyingPartyPhoto`).
   The send form leaves it out.
 - **Send.** Only the customer API: `referencePhoto`, standard base64,
-  sniffed as PNG/JPEG/WebP, at most `maxReferencePhotoBytes` (512 KiB;
+  sniffed as PNG/JPEG/WebP and decoded when the engine session is made
+  (`checkReferencePhoto`; one that does not decode is 400, not a failed
+  face step later): at send, or for a hosted request at its subject's start,
+  since the wallet does not decode images itself; at most
+  `maxReferencePhotoBytes` (512 KiB;
   the create body is capped at 1 MiB, an idempotent one past that is 413
   `body_too_large`). Required on such a flow (422
   `reference_photo_required`), refused on any other (400), so a chip flow is

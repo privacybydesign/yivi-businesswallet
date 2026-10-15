@@ -8223,11 +8223,10 @@ paths:
         document is another person's), `ASSURANCE_NOT_MET` (the checks fell short of the
         flow's required level) and `REVIEW_LAPSED` (a data request nobody reviewed within 30
         days) and `ORG_PAUSED` (a review left open when the organisation paused proofing). The
-        session itself is rejected, on any flow, for a face that did not match (`FACE_NO_MATCH`),
-        `DOC_EXPIRED`, `DOC_TAMPERED`, and for an achieved eIDAS level below the flow's
-        (`ASSURANCE_NOT_MET`). A failed liveness (`LIVENESS_FAILED`) rejects it when the flow
-        requires a level or lists `face.liveness`; otherwise the match alone decides, and a
-        face that failed liveness never counts as matched. `CHIP_CLONE_DETECTED` is an Active
+        session itself is rejected, on any flow, for a face that did not match (`FACE_NO_MATCH`)
+        or failed liveness (`LIVENESS_FAILED`), `DOC_EXPIRED`, `DOC_TAMPERED`, and for an
+        achieved eIDAS level below the flow's (`ASSURANCE_NOT_MET`); a face that failed liveness
+        never counts as matched. `CHIP_CLONE_DETECTED` is an Active
         Authentication that failed, or, on a flow listing `nfc.chip_auth`, a chip with an AA key
         whose response is missing (a recorded chip read replayed). `CHIP_AUTH_MISSING` appears
         only on sessions decided under an earlier rule.
@@ -10519,7 +10518,9 @@ components:
           description: >-
             Your own photo of the person's face, standard base64 of a PNG, JPEG or WebP of
             at most 512 KiB. Required on a flow with `needsReferencePhoto`, refused on any
-            other. Deleted once the face check can no longer run.
+            other. One that does not decode is refused (400) when its session is made: here,
+            or for a hosted request when its subject starts. Deleted once the face check can
+            no longer run.
         flowId:
           type: string
           description: One of the customer's flows; absent runs its default flow.

@@ -2,6 +2,7 @@ package proofingengine
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -134,8 +135,10 @@ func (s *Server) handleAppSession(w http.ResponseWriter, r *http.Request) {
 			opened, err = s.openLocked(sess, time.Now().UTC())
 			return err
 		})
+		// openLocked cannot fail on a created session, so an error is the
+		// store's: never its text to the device.
 		if err != nil {
-			writeError(w, http.StatusConflict, err.Error())
+			writeSessionReadError(w, r, "open session", err)
 			return
 		}
 		sess = updated
@@ -232,6 +235,16 @@ func (s *Server) handleAppSessionEvents(w http.ResponseWriter, r *http.Request) 
 	ticker := time.NewTicker(s.cfg.SessionEventsPoll)
 	defer ticker.Stop()
 
+	// Unsealing a session decrypts everything it collected, images included,
+	// so a tick reads only when the row was last written, and unseals it only
+	// when that moved or its deadline passed (the read expires it). The
+	// change key's time-dependent part (a device going stale) is recomputed
+	// from the copy in hand every tick.
+	changedAt, err := s.sessions.ChangedAt(sess.TenantID, sess.ID)
+	if err != nil {
+		writeSessionReadError(w, r, "read session change", err)
+		return
+	}
 	for s.appSessionChangeKey(sess, time.Now()) == baseline {
 		select {
 		case <-ctx.Done():
@@ -245,21 +258,39 @@ func (s *Server) handleAppSessionEvents(w http.ResponseWriter, r *http.Request) 
 			s.handleAppSession(w, r)
 			return
 		case <-ticker.C:
-			updated, err := s.sessions.Get(sess.TenantID, sess.ID)
+			at, err := s.sessions.ChangedAt(sess.TenantID, sess.ID)
 			if err != nil {
-				writeError(w, http.StatusNotFound, "session not found")
+				writeSessionReadError(w, r, "read session change", err)
 				return
 			}
-			sess = updated
+			if at.Equal(changedAt) && !sess.IsExpired(time.Now()) {
+				continue
+			}
+			updated, err := s.sessions.Get(sess.TenantID, sess.ID)
+			if err != nil {
+				writeSessionReadError(w, r, "read session", err)
+				return
+			}
+			sess, changedAt = updated, at
 		}
 	}
 	s.handleAppSession(w, r)
 }
 
-// Bounds on the /events long polls: each waiter re-reads (and unseals) its
-// session every SessionEventsPoll, so they are capped per session (a web and a
-// native device, with room for a reconnect overlapping its old poll) and in
-// the process.
+// writeSessionReadError answers a failed session read: a session that is gone
+// is 404, and anything else is the store's, logged and never shown.
+func writeSessionReadError(w http.ResponseWriter, r *http.Request, what string, err error) {
+	if errors.Is(err, session.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	writeInternalError(w, r, what, err)
+}
+
+// Bounds on the /events long polls: each waiter reads its session's write time
+// every SessionEventsPoll (and unseals it when that moved), so they are capped
+// per session (a web and a native device, with room for a reconnect
+// overlapping its old poll) and in the process.
 const (
 	maxEventWaitersPerSession = 4
 	maxEventWaiters           = 512

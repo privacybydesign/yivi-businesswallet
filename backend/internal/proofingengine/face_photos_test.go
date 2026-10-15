@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 )
 
@@ -67,12 +68,12 @@ func TestBoundLoginResultReleasesFacesOnlyWhenKept(t *testing.T) {
 		KeepPhoto: true, LastFrame: face.ImageBase64,
 	}
 	s := &Server{}
-	byDefault, err := s.buildBoundLoginResult(session.Session{}, st, privacy.RedactionPolicy{})
+	byDefault, err := s.buildBoundLoginResult(session.Session{}, st, privacy.RedactionPolicy{}, regula.DefaultMatchThreshold)
 	if err != nil {
 		t.Fatal(err)
 	}
 	checkFaces(t, byDefault, []string{"photo", "selfie"}, false)
-	kept, err := s.buildBoundLoginResult(session.Session{}, st, keepFaces)
+	kept, err := s.buildBoundLoginResult(session.Session{}, st, keepFaces, regula.DefaultMatchThreshold)
 	if err != nil {
 		t.Fatal(err)
 	}
