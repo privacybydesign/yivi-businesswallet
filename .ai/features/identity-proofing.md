@@ -24,7 +24,7 @@ The send form can instead **show the session on this screen**
 the flow collects, lets the subject pick the Yivi app or the Idem app, and only
 then creates the request (so the session's minutes start there). Idem shows the
 vcmrtd QR and link; Yivi starts an **OpenID4VP** disclosure of the passport or
-ID card with its photo at the wallet's own EUDI verifier (`yivi/start`:
+ID card with its photo at the hosted EUDI verifier, `EUDI_VERIFIER_URL` (`yivi/start`:
 `ScopeProofing`, the `openid4vp://` request shown as an `open.yivi.app` universal
 link and QR; the transaction id stays in `yivi_transaction_id`), polls
 `yivi/disclosure`, which on DONE hands the photo and claims to the engine as the
@@ -77,8 +77,8 @@ keys, webhooks, the audit log and the admin pages are the wallet's.
 session, status/result/identity, review, handover, cancel, delete) with a
 `proofingprovider.Tenant{ID: org id}`; nothing goes over HTTP. The Idem app
 talks to the routes `Engine.Register` mounts under `/api/v1/app/...` (claim,
-view, events, steps, submit; documented under the `idem-app` tag, though only
-the app calls them), and the deep link's `api=` is
+view, events, steps, submit, device state, and minting and claiming a handover;
+documented under the `idem-app` tag, though only the app calls them), and the deep link's `api=` is
 `IDENTITY_PROOFING_PUBLIC_URL` (default `APP_BASE_URL`).
 
 - **Who reaches the app routes.** A Yivi-method session (bound login) runs
@@ -156,10 +156,12 @@ the app calls them), and the deep link's `api=` is
   expiry while it runs, moved forward to 15 minutes after its end once it ends,
   whatever the outcome (`Queue.Settle`). An erased session (`DeleteSession`)
   is due at once. `Engine.SweepRegula` deletes them.
-- **Retention.** A finished session is deleted 90 days after it ended, unless
-  it carries its own retention: a customer's session carries its flow's
-  retention override when set, else the customer's data retention, plus a day
-  (`engineRetention`), so `PurgeDue` erases it first. `PurgeDue`,
+- **Retention.** Every session the wallet creates carries its own retention,
+  the one the wallet purges the request after, plus a day (`engineRetention`),
+  so `PurgeDue` erases it first: its flow's retention override when set, else
+  the customer's data retention, else for a member's request
+  `proofedNameRetention` (30 days). The engine's own default, 90 days after a
+  session ended, applies only to a session created without one. `PurgeDue`,
   `Engine.Purge` (removal in batches of 100, each with its own timeout) and
   `Engine.SweepRegula` run at start and then every `SESSION_PRUNE_INTERVAL`
   (`startPruner`): a replica restarted more often than the interval would
@@ -264,8 +266,10 @@ the app calls them), and the deep link's `api=` is
     - only Regula lifts a face past low;
     - a check that did not apply or run (no AA key, AA not attempted, no
       liveness result) has not verified: low at most.
-  - **`requiredChecks` decide no outcome.** They are what the steps perform
-    and the score counts. The Idem app follows them, never its own settings:
+  - **`requiredChecks` are what the steps perform** and the score counts. They
+    change one outcome: with `nfc.chip_auth` listed, a chip with an AA key that
+    sends no AA response is a clone (below). The Idem app follows them, never
+    its own settings:
     Active Authentication only when `nfc.chip_auth` is listed; Regula liveness
     always; the face engine the flow names.
   - **What rejects a session** (`sessionOutcome` in `submit.go`), first match
@@ -326,8 +330,8 @@ the app calls them), and the deep link's `api=` is
 - **Admin allow-list.** `identity_proofing_flow_settings.member_allowed` marks the
   flows an admin made available to members, and `member_default` exactly one
   default (partial unique index). That table is the wallet's one row per org and
-  flow id, shared with the hosted and diploma settings below; saving one of the
-  three leaves the others alone, and no row reads as every default.
+  flow id, shared with the hosted, diploma and kind settings below; saving one
+  of the four leaves the others alone, and no row reads as every default.
   `PUT /flow-selection` replaces it whole, audited `identity_proofing.flows_configured`
   with before/after. A new flow starts unselected. A request is refused
   (`flow_not_allowed`) on any flow outside the list, for admins too. An id the
@@ -362,7 +366,7 @@ token in the `vcmrtd://verify?handover=…&api=…` deep link, is single use and
 claimable for `ClaimTokenTTL` (10 minutes, never past the session's own
 expiry), so the mailed QR works for the whole session.
 
-**Send.** `CreateRequest` creates the engine session (`ttlSeconds` = the
+**Send.** `CreateRequest` creates the engine session (`SessionInput.TTL` = the
 customer's `session_ttl_seconds`, else `proofing.SessionTTL` (600); client
 reference = the request id), stores the request
 with `link_expires_at` = the session's expiry, attaches the session
@@ -463,8 +467,9 @@ once when shutdown starts (`Engine.StopWaiting`, registered with
 `shutdownTimeout`. A configured Regula is pinged at boot, and a failed ping
 fails the boot.
 
-**Method and timeline.** `proofingprovider` derives the app a subject used
-from the session's status, reading only each device's `role` and whether a
+**Method and timeline.** The engine derives the app a subject used
+(`methodOf` in `SessionStatus`; `proofingprovider` names the methods) from the
+session's status, reading only each device's `role` and whether a
 Yivi `disclosure` exists: `yivi_app` (a Yivi disclosure), `idem_app` (the
 native device; vcmrtd is the Idem app), `browser` (the web device alone), or
 none while no device claimed the session. It is stored on the request
@@ -485,8 +490,8 @@ post-review outcome stay the system's.
 
 - **API keys** (`identity_proofing_api_keys`): `yp_live_` + 32 random bytes,
   stored as SHA-256 only, shown once; `prefix` tells keys apart. Revoke is
-  permanent; removing the customer removes them. Audited `api_key_created` /
-  `api_key_revoked` (with its scopes) on the customer. There are no test keys
+  permanent; removing the customer removes them. Audited `api_key_created`
+  (with its scopes) and `api_key_revoked` on the customer. There are no test keys
   (§5). A customer takes no request, from the dashboard or otherwise, until it
   holds an unrevoked key (409 `customer_no_api_key`; `hasApiKey` on the
   customer, "Setup needed" in the UI).
@@ -507,18 +512,23 @@ post-review outcome stay the system's.
   personal data back on a purged row.
   `GET /proofing/sessions/{id}/result` (scope `results:read`) reads a settled
   session's identity and evidence from the engine on each call (`SessionIdentity`
-  decodes only name, birth date, nationality, the checks and the `photo` and
-  `selfie` images; never the document number), audited `result_read`; 404 once
-  erased. The customer API never returns an image.
+  decodes the name, birth date, nationality, document type, issuing state and
+  expiry, the checks, and the images: `photo`, `selfie`, `referencePhoto`,
+  `documentImage` and `documentImageBack`; never the document number),
+  audited `result_read`; 404 once erased. The customer API never returns an image.
   An org admin reads the same shape in the wallet at
   `GET /orgs/{slug}/identity-proofing/requests/{id}/result`
   (`AdminRequestResult`, sharing `requestResult`), audited `result_read` with the
   admin as actor; a member's request is 404. For an approval this response adds
-  `photo` (the document's portrait, DG2 or the disclosed credential's) and
-  `selfie`, `{mimeType, data}`, only PNG/JPEG/WebP (anything else, like an
-  unconverted JPEG2000, is dropped). The customer's Sessions tab reads it when
+  every image the engine still holds, `{mimeType, data}`, only PNG/JPEG/WebP
+  (anything else, like an unconverted JPEG2000, is dropped): `photo` (the
+  document's portrait, DG2 or the disclosed credential's), `selfie`,
+  `referencePhoto` (the customer's own photo of the person, §14), and
+  `documentImage` / `documentImageBack` (the document's front and back). A flow
+  that does not keep face photos has dropped the face images after the match.
+  The customer's Sessions tab reads it when
   an admin opens an approved, rejected or in-review row and folds
-  it into the row's detail list with the two photos: one audited read per open
+  it into the row's detail list with those photos: one audited read per open
   (`staleTime: Infinity`), and the timeline then shows it.
   Keys carry `scopes` (`sessions:write`, `sessions:read`, `results:read`,
   `flows:read`); every key gets all four, and only a signed-in org admin
@@ -676,8 +686,8 @@ the API is:
 
 - The link is looked up once per call (the limiter hands the request it read
   to the handler). A live link's call counts against its customer's
-  `hostedCallLimit` across all its links (a member's link counts against its
-  org); a link no longer live (`Request.linkLive`: not waiting to start, its
+  `hostedCallLimit` across all its links (every link belongs to a customer:
+  `normalizeRequest` refuses one without); a link no longer live (`Request.linkLive`: not waiting to start, its
   session not running or in review, no diploma or export window open) counts
   against its own `staleLinkLimit` (60 a minute), so an old link polled hard
   leaves the customer's live pages alone. Every call also counts against its
@@ -810,38 +820,48 @@ wallet's `error…` constants both ways; name a new code as a constant there). E
 outcome is its own action, `identity_proofing.approved` / `.rejected` /
 `.needs_review`, so a rejection never reads as a success. Every request event
 names its subject
-(`subjectName` when sent with one, `subjectEmail`). Never the other document fields, BSN or images: the wallet reads only the
-status, error code, completion time, assurance and the document's name
-(`displayName`, else `firstName lastName`).
+(`subjectName` when sent with one, `subjectEmail`). Never the other document fields, BSN or images.
+
+What the wallet reads from the engine is not what it keeps. Reconciling reads
+`SessionStatus`, which carries no personal data. It reads the identity
+(`SessionIdentity`) to compare an expected subject (§13) and for a decided or
+in-review customer session's match key (`recordIdentityKey`: an HMAC of the
+family name and birth date, §15), the full result (`SessionResult`) for the
+name it keeps (below), and the identity with its images on each result read
+(§4). Of those reads it keeps only the sealed name and that HMAC.
 
 The name is the one exception, and only for a **customer's subject** once the
-session is **approved** (the sender may know only an address): it is sealed
+session is **approved**, or for a data request once its person is proven and
+it goes to review (the sender may know only an address): it is sealed
 under `IDENTITY_PROOFING_ENCRYPTION_KEY` in `proofed_name_ciphertext`, shown as
-`proofedName`, never audited. A member's request, or a rejected or
-`needs_review` one, keeps no name.
+`proofedName`, never audited. A member's request, a rejected one, or an
+identity check in review keeps no name.
 
 Under a flow's BlurBSN policy a document photo is released and stored only
 with the BSN region the app located filled solid; a photo that came without
 one is withheld from the result and dropped from storage (`coverBSN`), since
 the server never guesses where the BSN is.
 
-A customer's session is purged by the `identity_proofing_purge` pruner
+A session is purged by the `identity_proofing_purge` pruner
 (`Service.PurgeDue`) its flow's retention override (kept on the request,
 `retention_override_seconds`) or, without one, its customer's
-`data_retention_days` (§4) after it ends
-(completed, cancelled, expired; not while it awaits review): as `DELETE`
+`data_retention_days` (§4), or for a member's request `proofedNameRetention`
+(30 days), after it ends (completed, cancelled, expired, or gone to review: an
+undecided identity review is kept no longer than a decided one; a data request
+in review lapses after `dataRequestReviewDays` instead): as `DELETE`
 above, erased in the engine, then its personal data cleared here (the subject's
 name and address, the proofed name, the redirect URL and Yivi transaction, its
 diplomas and stored idempotent answers, a data request's own matches), the
 reviewer's reason in its audit events included. The expected birth date
 (§13) goes as soon as the session ends, is cancelled or its link lapses. The
-dashboard shows the time as `purgeAt`. A member's request is not purged.
+dashboard shows the time as `purgeAt`.
 - **`purge_at` is stored** (a column of `identity_proofing_requests`), so the hourly
   `ListPurgeDue` reads a partial index (`purged_at IS NULL`) instead of
   computing the time for every unpurged row.
   - The store computes it, not a trigger: `setPurgeAt` in
     `request_store.go` is the one rule (retention after settling, a data
-    request's review lapse after `dataRequestReviewDays`, NULL for a member's).
+    request's review lapse after `dataRequestReviewDays`, an approved erasure
+    when it was decided).
   - Every write to one of its inputs calls `refreshPurgeAt` on the same
     transaction, after the write:
 
@@ -899,8 +919,6 @@ Everything this feature does not do yet, in one place.
     hosted pages.
   - Scanning the QR from inside the app works, so each page shows the QR and
     says to scan it from inside the app.
-- **Reconciling reads `SessionStatus`**, which carries no personal data; the full
-  result is read only for an approved customer subject, whose name is kept.
 - **EU driving licences** are refused, 422 `document_unsupported`
   (`flow.DrivingLicence`): at `document_capture` (`drivers_license`), and at
   `nfc_read` (`eu_driving_licence`), before the chip is verified; a flow may not
@@ -935,8 +953,10 @@ Everything this feature does not do yet, in one place.
   - give a failed hosted Yivi session a restart (R26);
   - make the face check after the disclosure optional per flow.
 - **Handover (R14, decided 2026-10-05).** A handover is minted from the screen
-  only; restricting who may mint one, or an in-app handover, is a later
-  feature. The hosted page does not follow the app (`waiting` / `connected` /
+  (`SessionHandover`, once the device holding the slot is inactive or stale) or
+  by that device itself (`POST /api/v1/app/{token}/handover`); redeeming one
+  moves the slot and revokes the old device. Restricting who may mint one is a
+  later feature. The hosted page does not follow the app (`waiting` / `connected` /
   `away`) as the on-screen page does, so its session QR stays shown.
 - **Custom domains and white labelling** of the hosted page are not built:
   the page is on the wallet's own domain with the customer's branding (§4).
@@ -946,9 +966,7 @@ Everything this feature does not do yet, in one place.
   - which fields a customer must send with a session, and what a mismatch
     does, cannot be set per flow in the editor (§13 is per session);
   - raising a customer's retention after a session moves the wallet's purge,
-    not the engine copy's, and the subject was told the old number;
-  - an identity session in `needs_review` has no purge time (moot until the
-    review trigger exists).
+    not the engine copy's, and the subject was told the old number.
 - **Rate limits** are a fixed bucket per customer (`apiCallLimit`,
   `APISessionLimit`, `hostedCallLimit`), per replica; an org has no total.
   Planned: an org budget with customer limits inside it, `RateLimit-*`
@@ -1012,9 +1030,8 @@ only: the engine knows nothing of it.
   bytes: it must cover the whole file, carry a qualified timestamp (the
   timestamp's own signer must be trusted) and chain on the EU Trusted Lists to
   DUO's qualified e-seal. An unsigned file is `not_a_diploma`, and only a file
-  that passed reaches PDFium (the VOG parser's pool, `vog.PDFiumParser.Pool`;
-  at most 2 diploma parses hold an instance at once, so VOG keeps the rest),
-  which is killed past 20 s. The printed holder (one line, `MatchFullName`)
+  that passed reaches PDFium, on its own pool apart from VOG's
+  (`newDiplomaPDFiumPool` in `cmd/api`, at most 2 instances), killed past 20 s. The printed holder (one line, `MatchFullName`)
   and birth date must match the identity the engine approved, read with
   `SessionIdentity` at upload (the chip's DG11 name when it has one, as the MRZ
   cuts a long name off); each name word matches plain or ICAO 9303
@@ -1218,9 +1235,11 @@ editor's Type, and the hosted page.
   review counts its retention from going to review, and lapses the same way
   then: it is kept no longer than a decided one.
 - **Export.** An approved access request's data: per approved session the
-  outcome and its `match`. Only a `strong` match also carries the contact the
-  customer gave, identity and evidence, and diplomas: a ticked `probable`,
-  `email` or `name` match may be someone else's session. Images are named in
+  outcome and its `match`. Only a `strong` match also carries identity and
+  evidence, and diplomas: a ticked `probable`, `email` or `name` match may be
+  someone else's session. The contact the customer gave (the name and address
+  it typed) goes out only for a strong match that was also approved for the
+  one person it was sent to (`DataExportSession.Addressed`). Images are named in
   `imagesHeld`, never included. For the person on their
   hosted link (`GET /proof/{token}/data-export`, `dataExportUntil` in the
   progress; 24 h), for the admin (`…/requests/{id}/data-export`) and for the

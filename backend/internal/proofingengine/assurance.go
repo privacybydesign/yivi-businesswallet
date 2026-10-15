@@ -41,7 +41,9 @@ var defaultAssuranceChecks = []flow.Check{
 
 // assuranceChecksFor is the checks fd's steps are configured to perform: what
 // the app is asked to run (appSessionView.RequiredChecks) and what the score
-// counts. It decides no outcome and no eIDAS level.
+// counts. It decides no eIDAS level. The one outcome it changes: with
+// nfc.chip_auth listed, a missing Active Authentication response is a clone
+// (authenticityFailure).
 func assuranceChecksFor(fd *flow.FlowDefinition) []flow.Check {
 	wanted := defaultAssuranceChecks
 	if fd != nil && len(fd.RequiredChecks) > 0 {
