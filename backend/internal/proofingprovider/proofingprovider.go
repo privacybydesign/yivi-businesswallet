@@ -148,6 +148,10 @@ type Result struct {
 	Name string
 	// App is where the Idem app's phone is; SessionStatus only.
 	App App
+	// ExpiresAt is when the session lapses as the engine holds it now:
+	// opening a session moves it later than the expiry it was created with.
+	// SessionStatus only; zero when the provider does not say.
+	ExpiresAt time.Time
 }
 
 // App is where an Idem session's phone is: none scanned yet, holding the
@@ -165,10 +169,15 @@ const (
 // the document number, personal number or place of birth.
 type Identity struct {
 	Result
-	GivenName   string
-	FamilyName  string
-	BirthDate   string
-	Nationality string
+	// GivenName and FamilyName are the MRZ's: a long name is cut off there.
+	GivenName  string
+	FamilyName string
+	// FullGivenName and FullFamilyName are the chip's DG11 name, never cut
+	// off; empty when the chip has no DG11.
+	FullGivenName  string
+	FullFamilyName string
+	BirthDate      string
+	Nationality    string
 	// Evidence is what the identity rests on; nil while there is no result.
 	Evidence *Evidence
 	// Photo is the document's portrait (the chip's DG2, or the disclosed

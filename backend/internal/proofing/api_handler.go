@@ -145,10 +145,6 @@ func (h *Handler) requireAPIKey(scope string, next respond.HandlerFunc) http.Han
 			return err
 		}
 
-		if err := h.service.checkActive(r.Context(), caller.Org.ID); err != nil {
-			return mapError(err)
-		}
-
 		if !slices.Contains(caller.Scopes, scope) {
 			return &respond.APIError{Status: http.StatusForbidden, Code: "insufficient_scope", Message: "this API key lacks the " + scope + " scope"}
 		}
@@ -192,10 +188,10 @@ func (h *Handler) failureLimited(w http.ResponseWriter, r *http.Request) error {
 	return rateLimited(w, h.authFailures, requestSource(r))
 }
 
-// requestSource is the client address a call came from: what authFailures
-// and hostedSources key on.
+// requestSource is the source a call came from, its client address or that
+// address's IPv6 /64: what authFailures and hostedSources key on.
 func requestSource(r *http.Request) string {
-	return clientip.FromRequest(r)
+	return clientip.SourceKey(r)
 }
 
 func (h *Handler) registerPublicAPI(mux *http.ServeMux) {

@@ -118,6 +118,55 @@ func (c Customer) SignedAs() string {
 type CustomerSettings struct {
 	SessionTTL        time.Duration
 	DataRetentionDays int
+	ErasureHandling   ErasureHandling
+}
+
+// ErasureHandling is how a customer's "delete my data" requests are decided
+// once their person is proven. A match proven to be the person's is a sure
+// one (MatchStrong, MatchProbable: read off a verified chip); one found only
+// by its e-mail address or typed name (MatchEmail, MatchName) is not.
+type ErasureHandling string
+
+const (
+	// ErasureReview leaves each request to a reviewer, the sure matches ticked.
+	ErasureReview ErasureHandling = "review"
+	// ErasureAutomatic erases the sure matches at once. A request without
+	// unsure ones is then decided; one with them waits for a reviewer, who
+	// decides only those.
+	ErasureAutomatic ErasureHandling = "automatic"
+	// ErasureKeep refuses every request (ErrorLegalRetention): the customer is
+	// bound by law to keep the data.
+	ErasureKeep ErasureHandling = "keep"
+)
+
+func (h ErasureHandling) valid() bool {
+	return h == ErasureReview || h == ErasureAutomatic || h == ErasureKeep
+}
+
+// CustomerSettingsChange changes some of a customer's settings: a nil field
+// keeps what is set.
+type CustomerSettingsChange struct {
+	SessionTTL        *time.Duration
+	DataRetentionDays *int
+	ErasureHandling   *ErasureHandling
+}
+
+func (c CustomerSettingsChange) empty() bool {
+	return c.SessionTTL == nil && c.DataRetentionDays == nil && c.ErasureHandling == nil
+}
+
+// apply is settings with c's changes.
+func (c CustomerSettingsChange) apply(settings CustomerSettings) CustomerSettings {
+	if c.SessionTTL != nil {
+		settings.SessionTTL = *c.SessionTTL
+	}
+	if c.DataRetentionDays != nil {
+		settings.DataRetentionDays = *c.DataRetentionDays
+	}
+	if c.ErasureHandling != nil {
+		settings.ErasureHandling = *c.ErasureHandling
+	}
+	return settings
 }
 
 // DataRetention is DataRetentionDays as a duration.
@@ -129,6 +178,7 @@ func (c CustomerSettings) auditFields() map[string]any {
 	return map[string]any{
 		"sessionTtlSeconds": int(c.SessionTTL.Seconds()),
 		"dataRetentionDays": c.DataRetentionDays,
+		"erasureHandling":   string(c.ErasureHandling),
 	}
 }
 
@@ -223,6 +273,9 @@ type Request struct {
 	// DataExportUntil is until when an approved FlowDataAccess request's data
 	// can be downloaded; nil otherwise.
 	DataExportUntil *time.Time
+	// DataMatchesKept is how many of an approved erasure's matched sessions
+	// were kept, not erased; nil for any other request.
+	DataMatchesKept *int
 	// CancelledAt is when the customer cancelled it; PurgedAt when its data was
 	// erased in the engine and here (the row stays for the audit trail).
 	CancelledAt     *time.Time
@@ -342,6 +395,22 @@ func (r Request) SessionExpiresAt(now time.Time) *time.Time {
 	}
 	at := sess.ExpiresAt
 	return &at
+}
+
+// linkLive reports whether a hosted link still has its subject at work:
+// waiting to start, its session running or in review, or a diploma or data
+// export window open. A link past all of that only shows its outcome.
+func (r Request) linkLive(now time.Time) bool {
+	if r.PurgedAt != nil || r.CancelledAt != nil {
+		return false
+	}
+	if r.awaitingStart(now) || r.liveSession(now) != nil || r.EffectiveStatus(now) == StatusNeedsReview {
+		return true
+	}
+	if until := diplomasUntil(r); until != nil && now.Before(*until) {
+		return true
+	}
+	return r.DataExportUntil != nil && now.Before(*r.DataExportUntil)
 }
 
 // awaitingStart reports a hosted request its subject has not started yet,

@@ -78,11 +78,21 @@ const (
 	// ErrorReviewRejected is the error code a rejected review records when
 	// the reviewer names none, as the engine does.
 	ErrorReviewRejected = "MANUAL_REVIEW_REJECTED"
+	// ErrorLegalRetention is the error code of an erasure refused because its
+	// customer is bound by law to keep the data (ErasureKeep).
+	ErrorLegalRetention = "LEGAL_RETENTION"
+	// automaticReviewer is who decided a data request its customer's
+	// ErasureHandling decided without a reviewer.
+	automaticReviewer = "automatic"
+	// The reasons an automatic decision records, as a reviewer's would.
+	erasedAutomaticallyReason = "Erased automatically: every session found was proven to be this person's."
+	keptByLawReason           = "Kept automatically: the customer is bound by law to keep this data."
 )
 
 var (
-	// ErrFlowNoIdentity is a data request flow that does not read the name and
-	// date of birth the person's sessions are found by.
+	// ErrFlowNoIdentity is a flow that does not read the name and date of birth
+	// where they are needed: a data request finds the person's sessions by
+	// them, and a required diploma's holder is matched against them.
 	ErrFlowNoIdentity = errors.New("proofing: the flow does not read the name and date of birth")
 	// ErrDataFlowForMember is a data request flow offered to, or sent to, a
 	// member: only a customer's subjects ask for their data.
@@ -127,7 +137,7 @@ type dataRequestStore interface {
 	SaveMatches(ctx context.Context, req Request, matches []NewDataMatch) error
 	Matches(ctx context.Context, req Request) ([]DataMatch, error)
 	MatchedRequests(ctx context.Context, req Request) ([]Request, error)
-	RecordDecision(ctx context.Context, req Request, approved []uuid.UUID, exportUntil *time.Time) error
+	RecordDecision(ctx context.Context, req Request, approved []uuid.UUID, exportUntil *time.Time, kept *int) error
 	RecordExported(ctx context.Context, req Request, sessions int) error
 }
 
@@ -429,6 +439,11 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 		until := s.now().Add(DataExportWindow)
 		exportUntil = &until
 	}
+	var kept *int
+	if in.Approve && req.FlowKind == FlowDataErasure {
+		n := keptMatches(matches, approved)
+		kept = &n
+	}
 
 	decided, code := StatusApproved, ""
 	if !in.Approve {
@@ -438,7 +453,7 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 		}
 	}
 
-	if err := s.dataRequests.RecordDecision(ctx, req, approved, exportUntil); err != nil {
+	if err := s.dataRequests.RecordDecision(ctx, req, approved, exportUntil, kept); err != nil {
 		return Request{}, err
 	}
 
@@ -468,41 +483,117 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 	return out, nil
 }
 
-// approvedMatches checks a reviewer's approved sessions against the matches;
-// nil approves only the MatchStrong ones, proven with the same document: a
-// MatchProbable, MatchEmail or MatchName one is taken only by a reviewer's own
-// tick, and never for an erasure: nothing tells it from another person's
-// session, and an erasure cannot be undone.
+// handleErasure decides a proven "delete my data" request as its customer's
+// ErasureHandling says, once it has reached review: ErasureKeep refuses it with
+// ErrorLegalRetention; ErasureAutomatic erases its sure matches at once and
+// decides it when no unsure one is left, or leaves those to a reviewer;
+// ErasureReview leaves all of it to a reviewer. It holds the review lock, as a
+// reviewer's decision does, so the two never decide at once. A request that
+// fails here waits in review: a reviewer decides it as any other.
+func (s *Service) handleErasure(ctx context.Context, req Request) (Request, error) {
+	if req.FlowKind != FlowDataErasure || req.CustomerID == nil || s.dataRequests == nil {
+		return req, nil
+	}
+	customer, err := s.customers.Get(ctx, req.OrganizationID, *req.CustomerID)
+	if err != nil {
+		return req, err
+	}
+	handling := customer.Settings.ErasureHandling
+	if handling != ErasureAutomatic && handling != ErasureKeep {
+		return req, nil
+	}
+	release, err := s.requests.LockReview(ctx, req.ID)
+	if err != nil {
+		return req, err
+	}
+	defer release()
+	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	if err != nil {
+		return req, err
+	}
+	if fresh.Status != StatusNeedsReview || fresh.session == nil || fresh.session.EndedAt != nil || fresh.PurgedAt != nil {
+		return fresh, nil
+	}
+	if handling == ErasureKeep {
+		return s.decideDataRequest(ctx, fresh, automaticReviewer,
+			ReviewInput{ErrorCode: ErrorLegalRetention, Reason: keptByLawReason})
+	}
+	matches, err := s.dataRequests.Matches(ctx, fresh)
+	if err != nil {
+		return fresh, err
+	}
+	sure, unsure := []uuid.UUID{}, false
+	for _, m := range matches {
+		switch {
+		case sureMatch(m.Level):
+			sure = append(sure, m.RequestID)
+		case m.PurgedAt == nil:
+			unsure = true
+		}
+	}
+	if !unsure {
+		return s.decideDataRequest(ctx, fresh, automaticReviewer,
+			ReviewInput{Approve: true, RequestIDs: sure, Reason: erasedAutomaticallyReason})
+	}
+	// The sure ones are the person's and go now; the rest wait for a reviewer.
+	if err := s.purgeMatches(ctx, fresh, sure); err != nil {
+		return fresh, err
+	}
+	return s.requests.Get(ctx, fresh.OrganizationID, fresh.ID)
+}
+
+// approvedMatches checks a reviewer's approved sessions against the matches.
+// nil approves the ones taken without a tick: for an erasure the sure ones
+// (sureMatch: read off a verified chip as the requester), for "see my data"
+// the ones proven with the same document. Any other match is taken only by a
+// reviewer's own tick. A match an automatic erasure purged already is
+// approved whatever the list says: it is erased.
 func approvedMatches(matches []DataMatch, approved []uuid.UUID, kind FlowKind) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, 0, len(matches))
-	levels := make(map[uuid.UUID]MatchLevel, len(matches))
 	for _, m := range matches {
 		ids = append(ids, m.RequestID)
-		levels[m.RequestID] = m.Level
-	}
-	if approved == nil {
-		strong := []uuid.UUID{}
-		for _, m := range matches {
-			if m.Level == MatchStrong {
-				strong = append(strong, m.RequestID)
-			}
-		}
-		return strong, nil
 	}
 	out := []uuid.UUID{}
+	if approved == nil {
+		for _, m := range matches {
+			if m.Level == MatchStrong || (kind == FlowDataErasure && sureMatch(m.Level)) {
+				out = append(out, m.RequestID)
+			}
+		}
+	}
 	for _, id := range approved {
 		if !slices.Contains(ids, id) {
 			return nil, fmt.Errorf("%w: session %s is not one of this request's matches", ErrInvalidInput, id)
-		}
-		if kind == FlowDataErasure && levels[id] != MatchStrong {
-			return nil, fmt.Errorf("%w: session %s is not proven with the requester's document and cannot be erased",
-				ErrInvalidInput, id)
 		}
 		if !slices.Contains(out, id) {
 			out = append(out, id)
 		}
 	}
+	if kind == FlowDataErasure {
+		for _, m := range matches {
+			if m.PurgedAt != nil && !slices.Contains(out, m.RequestID) {
+				out = append(out, m.RequestID)
+			}
+		}
+	}
 	return out, nil
+}
+
+// sureMatch reports a match level that is the requester's for certain: the
+// same name and date of birth read off a verified chip, on the same document
+// or another. An e-mail address or a typed name is not.
+func sureMatch(level MatchLevel) bool { return level == MatchStrong || level == MatchProbable }
+
+// keptMatches counts the matches an erasure approving approved leaves: not
+// approved, and not purged already.
+func keptMatches(matches []DataMatch, approved []uuid.UUID) int {
+	kept := 0
+	for _, m := range matches {
+		if m.PurgedAt == nil && !slices.Contains(approved, m.RequestID) {
+			kept++
+		}
+	}
+	return kept
 }
 
 // purgeMatches purges each approved match not purged already; a purge that

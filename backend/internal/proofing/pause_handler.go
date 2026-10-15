@@ -14,19 +14,8 @@ import (
 // SetPlatformAdmins names who may pause any org's proofing; none when unset.
 func (h *Handler) SetPlatformAdmins(admins auth.PlatformAdmins) { h.platformAdmins = admins }
 
-// active refuses an org route while the org's proofing is paused.
-func (h *Handler) active(next http.Handler) http.Handler {
-	return respond.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
-		if err := h.service.checkActive(r.Context(), orgFromRequest(r).ID); err != nil {
-			return mapError(err)
-		}
-		next.ServeHTTP(w, r)
-		return nil
-	})
-}
-
-// registerPause mounts the pause routes, which stay reachable while paused:
-// the org's own switch, and the platform admin's over every org.
+// registerPause mounts the pause routes: the org's own switch, and the
+// platform admin's over every org.
 func (h *Handler) registerPause(mux *http.ServeMux) {
 	member := func(next http.Handler) http.Handler { return h.requireUser(h.authorize(next)) }
 	admin := func(next http.Handler) http.Handler {

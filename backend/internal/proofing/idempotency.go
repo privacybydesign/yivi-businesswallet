@@ -189,7 +189,7 @@ func (h *Handler) idempotent(next respond.HandlerFunc) respond.HandlerFunc {
 		case errors.Is(err, errIdempotencyInFlight):
 			return &respond.APIError{Status: http.StatusConflict, Code: "idempotency_in_flight", Message: "a request with this Idempotency-Key is still running or its outcome is unknown; look the session up or use a new key"}
 		case err != nil:
-			return err
+			return mapError(err)
 		case replay != nil:
 			w.Header().Set(headerContentType, contentTypeJSON)
 			w.Header().Set(headerIdempotentReplayed, "true")
@@ -202,7 +202,8 @@ func (h *Handler) idempotent(next respond.HandlerFunc) respond.HandlerFunc {
 		defer func() {
 			if p := recover(); p != nil {
 				if err := h.idempotency.abandon(context.WithoutCancel(r.Context()), customerID, key); err != nil {
-					slog.ErrorContext(r.Context(), "release idempotency key after a panic", "customer_id", customerID, "error", err)
+					slog.ErrorContext(r.Context(), "release idempotency key after a panic",
+						slog.String("customer_id", customerID.String()), slog.Any("error", err))
 				}
 				panic(p)
 			}
@@ -210,8 +211,11 @@ func (h *Handler) idempotent(next respond.HandlerFunc) respond.HandlerFunc {
 		rec := &answerRecorder{header: w.Header(), status: http.StatusOK}
 		if err := next(rec, r); err != nil {
 			// A context of its own: the key must be released even if the call was cancelled.
+			// The caller still gets the call's own answer, so a key left in
+			// flight is logged here: the answer would hide it.
 			if abandonErr := h.idempotency.abandon(context.WithoutCancel(r.Context()), customerID, key); abandonErr != nil {
-				return errors.Join(err, abandonErr)
+				slog.ErrorContext(r.Context(), "release idempotency key after a failed call",
+					slog.String("customer_id", customerID.String()), slog.Any("error", abandonErr))
 			}
 			return err
 		}
@@ -219,7 +223,8 @@ func (h *Handler) idempotent(next respond.HandlerFunc) respond.HandlerFunc {
 		// in flight rather than freeing it, and the caller still gets its answer.
 		if err := h.idempotency.finish(context.WithoutCancel(r.Context()), customerID, key,
 			storedAnswer{Status: rec.status, Body: rec.body.Bytes()}); err != nil {
-			slog.ErrorContext(r.Context(), "store idempotent answer", "customer_id", customerID, "error", err)
+			slog.ErrorContext(r.Context(), "store idempotent answer",
+				slog.String("customer_id", customerID.String()), slog.Any("error", err))
 		}
 		w.WriteHeader(rec.status)
 		_, err = w.Write(rec.body.Bytes())

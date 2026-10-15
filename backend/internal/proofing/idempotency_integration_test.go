@@ -157,7 +157,7 @@ func TestPurgeDropsIdempotent(t *testing.T) {
 	f.call(t, store, "purged", answerWith(reqs[0].ID, &runs))
 	f.call(t, store, "kept", answerWith(reqs[1].ID, &runs))
 
-	if err := requests.Purge(ctx, reqs[0]); err != nil {
+	if err := requests.Purge(ctx, reqs[0], nil); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
 	var keys []string

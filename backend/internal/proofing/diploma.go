@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
 // DiplomaMode is whether a flow has the diploma step: once their identity is
@@ -348,7 +350,9 @@ func (s *Service) FlowDiplomas(ctx context.Context, org Org, flowID string) (Dip
 }
 
 // SaveFlowDiplomas sets one of the org's flows' DiplomaMode. Requests already
-// sent keep the mode they were sent with.
+// sent keep the mode they were sent with. Requiring diplomas needs a flow that
+// reads the name and date of birth: each extract's holder is matched against
+// them, so without them no extract could ever be taken.
 func (s *Service) SaveFlowDiplomas(ctx context.Context, org Org, flowID string, mode DiplomaMode) (DiplomaMode, error) {
 	if s.flowDiplomaSettings == nil {
 		return "", errors.New("proofing: no diploma settings store configured")
@@ -356,8 +360,16 @@ func (s *Service) SaveFlowDiplomas(ctx context.Context, org Org, flowID string, 
 	if !mode.valid() {
 		return "", fmt.Errorf("%w: diplomas is off or required", ErrInvalidInput)
 	}
-	if err := s.orgHasFlow(ctx, org, flowID); err != nil {
-		return "", err
+	flows, err := s.ips.ListFlows(ctx, orgTenant(org.ID))
+	if err != nil {
+		return "", fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
+	}
+	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
+	if i < 0 {
+		return "", ErrFlowNotFound
+	}
+	if mode.asked() && !readsIdentity(flows[i]) {
+		return "", ErrFlowNoIdentity
 	}
 	return s.flowDiplomaSettings.Save(ctx, org.ID, flowID, mode)
 }
@@ -382,14 +394,25 @@ func (s *Service) AddDiplomas(ctx context.Context, orgID, id uuid.UUID, requeste
 
 // HostedAddDiplomas is AddDiplomas for a hosted request, by its subject.
 // HostedDiplomasOpen reports whether a hosted link takes extracts now, the
-// same checks HostedAddDiplomas makes: what the upload route asks before it
-// reads a body of up to maxDiplomaUploadBytes from an anonymous caller.
-func (s *Service) HostedDiplomasOpen(ctx context.Context, token string) error {
+// same checks HostedAddDiplomas makes, and how many more it takes: what the
+// upload route asks before it reads a body from an anonymous caller.
+func (s *Service) HostedDiplomasOpen(ctx context.Context, token string) (int, error) {
 	req, err := s.hostedRequest(ctx, token)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return s.diplomasOpen(req)
+	if err := s.diplomasOpen(req); err != nil {
+		return 0, err
+	}
+	held, err := s.diplomas.List(ctx, []uuid.UUID{req.ID})
+	if err != nil {
+		return 0, err
+	}
+	slots := MaxDiplomasPerRequest - len(held[req.ID])
+	if slots <= 0 {
+		return 0, fmt.Errorf("%w: a session holds at most %d extracts", ErrInvalidInput, MaxDiplomasPerRequest)
+	}
+	return slots, nil
 }
 
 func (s *Service) HostedAddDiplomas(ctx context.Context, token string, files []DiplomaFile) ([]DiplomaVerdict, error) {
@@ -443,7 +466,11 @@ func (s *Service) addDiplomas(ctx context.Context, req Request, files []DiplomaF
 	if err != nil {
 		return nil, fmt.Errorf("proofing: identity for diplomas request %s: %w", req.ID, err)
 	}
+	// The chip's DG11 name when it has one: the MRZ's cuts a long name off.
 	holder := diploma.Person{GivenNames: identity.GivenName, Surname: identity.FamilyName, DateOfBirth: identity.BirthDate}
+	if identity.FullFamilyName != "" {
+		holder.GivenNames, holder.Surname = identity.FullGivenName, identity.FullFamilyName
+	}
 
 	verdicts := make([]DiplomaVerdict, 0, len(files))
 	for _, f := range files {

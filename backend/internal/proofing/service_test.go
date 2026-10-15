@@ -145,6 +145,13 @@ func (f *fakeRequests) List(context.Context, uuid.UUID, RequestFilter) ([]Reques
 	return []Request{*f.stored}, nil
 }
 
+func (f *fakeRequests) ExtendSession(_ context.Context, _ Request, _ string, expiresAt time.Time) error {
+	if f.stored.session != nil && expiresAt.After(f.stored.session.ExpiresAt) {
+		f.stored.session.ExpiresAt = expiresAt
+	}
+	return nil
+}
+
 func (f *fakeRequests) MarkStarted(ctx context.Context, _ Request, _ string, method proofingprovider.Method) error {
 	f.actors = append(f.actors, actorLabel(ctx))
 	f.methods = append(f.methods, method)
@@ -165,9 +172,14 @@ func (f *fakeRequests) EndSession(context.Context, Request, string, proofingprov
 	return nil
 }
 
-func (f *fakeRequests) Cancel(context.Context, Request) (bool, error) {
+func (f *fakeRequests) Cancel(ctx context.Context, _ Request, endSession func(context.Context) error) (bool, error) {
 	if f.stored.CancelledAt != nil {
 		return false, nil
+	}
+	if endSession != nil {
+		if err := endSession(ctx); err != nil {
+			return false, err
+		}
 	}
 	now := time.Now()
 	f.stored.CancelledAt = &now
@@ -190,7 +202,12 @@ func (f *fakeRequests) RecordResultRead(context.Context, Request) error {
 	return nil
 }
 
-func (f *fakeRequests) Purge(context.Context, Request) error {
+func (f *fakeRequests) Purge(ctx context.Context, _ Request, endSession func(context.Context) error) error {
+	if endSession != nil {
+		if err := endSession(ctx); err != nil {
+			return err
+		}
+	}
 	now := time.Now()
 	f.stored.PurgedAt, f.stored.ProofedName = &now, ""
 	f.stored.SubjectName, f.stored.SubjectEmail = "", ""
@@ -382,9 +399,9 @@ func (f *fakeCustomers) SetStatus(ctx context.Context, orgID, id uuid.UUID, stat
 	return c, nil
 }
 
-func (f *fakeCustomers) SaveSettings(_ context.Context, _, id uuid.UUID, settings CustomerSettings) (Customer, error) {
+func (f *fakeCustomers) SaveSettings(_ context.Context, _, id uuid.UUID, change CustomerSettingsChange) (Customer, error) {
 	c := f.byID[id]
-	c.Settings = settings
+	c.Settings = change.apply(c.Settings)
 	f.byID[id] = c
 	return c, nil
 }
@@ -438,6 +455,9 @@ func (f *fakeCustomers) Logo(_ context.Context, _, id uuid.UUID) (CustomerLogo, 
 }
 
 type fakeIPS struct {
+	// identity is who SessionIdentity reads off the document; Anna Jansen,
+	// born testBirthDate, when unset.
+	identity    proofingprovider.Identity
 	flows       []proofingprovider.Flow
 	flowLists   int
 	decisions   []proofingprovider.ReviewDecision
@@ -474,9 +494,12 @@ type fakeIPS struct {
 func (f *fakeIPS) SessionIdentity(_ context.Context, _ proofingprovider.Tenant, _, _ string) (proofingprovider.Identity, error) {
 	f.resultReads++
 	f.identityReads++
-	return proofingprovider.Identity{
-		Result: f.result, GivenName: "Anna", FamilyName: "Jansen", BirthDate: testBirthDate,
-	}, cmp.Or(f.identityErr, f.resultErr)
+	id := proofingprovider.Identity{GivenName: "Anna", FamilyName: "Jansen", BirthDate: testBirthDate}
+	if f.identity.FamilyName != "" {
+		id = f.identity
+	}
+	id.Result = f.result
+	return id, cmp.Or(f.identityErr, f.resultErr)
 }
 
 func (f *fakeIPS) CancelSession(context.Context, proofingprovider.Tenant, string, string) error {
@@ -1210,7 +1233,7 @@ func TestCustomerRequestLifetime(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
 	short := CustomerSettings{SessionTTL: 2 * time.Minute, DataRetentionDays: 7}
-	if _, err := f.svc.SaveCustomerSettings(ctx, testOrg.ID, initech.ID, short); err != nil {
+	if _, err := f.svc.SaveCustomerSettings(ctx, testOrg.ID, initech.ID, settingsChange(short)); err != nil {
 		t.Fatalf("SaveCustomerSettings: %v", err)
 	}
 	f.sendForCustomer(t, "anna@example.org", "")
@@ -1228,8 +1251,9 @@ func TestSaveSettingsOwnOptionsOnly(t *testing.T) {
 		{SessionTTL: 3 * time.Minute, DataRetentionDays: 30},
 		{SessionTTL: SessionTTL, DataRetentionDays: 366},
 		{SessionTTL: SessionTTL, DataRetentionDays: 60},
+		{SessionTTL: SessionTTL, DataRetentionDays: 30, ErasureHandling: "sometimes"},
 	} {
-		if _, err := f.svc.SaveCustomerSettings(context.Background(), testOrg.ID, initech.ID, settings); !errors.Is(err, ErrInvalidInput) {
+		if _, err := f.svc.SaveCustomerSettings(context.Background(), testOrg.ID, initech.ID, settingsChange(settings)); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("SaveCustomerSettings(%+v) = %v, want ErrInvalidInput", settings, err)
 		}
 	}

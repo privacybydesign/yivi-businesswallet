@@ -6,8 +6,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -48,25 +50,28 @@ type Hosted struct {
 	Settings FlowHosted
 }
 
-// hostedRequest is the request behind a hosted link; ErrProofingPaused while
-// its org's proofing is paused.
+// hostedRequest is the request behind a hosted link. A paused org's links
+// still read, settle and decline: only starting one is refused (startHosted).
 func (s *Service) hostedRequest(ctx context.Context, token string) (Request, error) {
 	hash := sha256.Sum256([]byte(token))
-	req, err := s.linkRequest(ctx, hash[:])
-	if err != nil {
-		return Request{}, err
-	}
-	if err := s.checkActive(ctx, req.OrganizationID); err != nil {
-		return Request{}, err
-	}
-	return req, nil
+	return s.linkRequest(ctx, hash[:])
 }
 
-// hostedLimitKey is whose rate limit a hosted link's calls count against:
-// its customer, or its org for a link sent to a member. ctx carries the
-// request it read, so the handler's own hostedRequest does not read it again;
-// one ctx already carries for the link is used as is.
-func (s *Service) hostedLimitKey(ctx context.Context, token string) (context.Context, uuid.UUID, error) {
+// hostedBudget is the bucket a hosted call counts against: its customer's
+// (its org's, for a link sent to a member) while the link is live, the
+// link's own once it is not.
+type hostedBudget struct {
+	key  string
+	live bool
+}
+
+// hostedLimitKey is the budget a hosted link's calls count against. Only a
+// live link (Request.linkLive) spends its customer's: anyone who was ever
+// sent a link keeps it, and a stale one polled from a few addresses would
+// otherwise take the budget of every page the customer has open. ctx carries
+// the request it read, so the handler's own hostedRequest does not read it
+// again; one ctx already carries for the link is used as is.
+func (s *Service) hostedLimitKey(ctx context.Context, token string) (context.Context, hostedBudget, error) {
 	hash := sha256.Sum256([]byte(token))
 	var req Request
 	if read, ok := ctx.Value(linkReadKey{}).(*linkRead); ok && !read.used && bytes.Equal(read.hash, hash[:]) {
@@ -74,14 +79,17 @@ func (s *Service) hostedLimitKey(ctx context.Context, token string) (context.Con
 	} else {
 		var err error
 		if req, err = s.requests.GetByLinkToken(ctx, hash[:]); err != nil {
-			return ctx, uuid.UUID{}, err
+			return ctx, hostedBudget{}, err
 		}
 		ctx = context.WithValue(ctx, linkReadKey{}, &linkRead{hash: hash[:], req: req})
 	}
-	if req.CustomerID != nil {
-		return ctx, *req.CustomerID, nil
+	if !req.linkLive(s.now()) {
+		return ctx, hostedBudget{key: hex.EncodeToString(hash[:])}, nil
 	}
-	return ctx, req.OrganizationID, nil
+	if req.CustomerID != nil {
+		return ctx, hostedBudget{key: req.CustomerID.String(), live: true}, nil
+	}
+	return ctx, hostedBudget{key: req.OrganizationID.String(), live: true}, nil
 }
 
 type linkReadKey struct{}
@@ -195,9 +203,15 @@ func (s *Service) StartHeadless(ctx context.Context, scope CustomerScope, id uui
 	return out, nil
 }
 
+// startHosted creates a hosted request's engine session for method, unless
+// the org's proofing is paused: a pause lets running sessions settle, and
+// starts none.
 func (s *Service) startHosted(ctx context.Context, req Request, method proofingprovider.Method) (Sent, error) {
 	if req.CancelledAt != nil || req.PurgedAt != nil {
 		return Sent{}, ErrSessionOver
+	}
+	if err := s.checkActive(ctx, req.OrganizationID); err != nil {
+		return Sent{}, err
 	}
 	if !req.awaitingStart(s.now()) {
 		if req.session != nil {
@@ -368,7 +382,7 @@ func (s *Service) DeclineHosted(ctx context.Context, token string) (Request, err
 		}
 		return Request{}, ErrSessionOver
 	}
-	cancelled, err := s.requests.Cancel(audit.ContextWithActor(ctx, hostedSubjectActor), req)
+	cancelled, err := s.requests.Cancel(audit.ContextWithActor(ctx, hostedSubjectActor), req, nil)
 	if errors.Is(err, errCancelSessionMoved) {
 		return Request{}, ErrLinkStarted
 	}
@@ -388,9 +402,16 @@ const (
 	maxRedirectLength  = 2048
 )
 
+// The longest DNS name, and the longest label in one (RFC 1035 §2.3.4).
+const (
+	maxHostLength  = 253
+	maxLabelLength = 63
+)
+
 // loopbackHosts may use plain http in a redirect origin, for a customer
-// developing against its own machine.
-var loopbackHosts = []string{"localhost", "127.0.0.1", "[::1]"}
+// developing against its own machine. They are hostnames as url.URL.Hostname
+// gives them: an IPv6 address without its brackets.
+var loopbackHosts = []string{"localhost", "127.0.0.1", "::1"}
 
 // parseRedirectOrigin reads raw as an origin: https (or http on a loopback
 // host), a host, an optional port, and nothing else. It returns the origin
@@ -400,6 +421,9 @@ func parseRedirectOrigin(raw string) (string, error) {
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return "", fmt.Errorf("%w: %q is not an origin (scheme://host[:port])", ErrInvalidInput, raw)
 	}
+	if !validHost(u.Hostname()) {
+		return "", fmt.Errorf("%w: %q is not an origin (scheme://host[:port])", ErrInvalidInput, raw)
+	}
 	origin := strings.ToLower(u.Scheme + "://" + u.Host)
 	if u.Scheme != "https" && (u.Scheme != "http" || !slices.Contains(loopbackHosts, strings.ToLower(u.Hostname()))) {
 		return "", fmt.Errorf("%w: %q must use https", ErrInvalidInput, raw)
@@ -407,24 +431,59 @@ func parseRedirectOrigin(raw string) (string, error) {
 	return origin, nil
 }
 
+// validHost reports whether host, a URL's hostname, is an IP address or a DNS
+// name: dot-separated labels of letters, digits and inner hyphens. Anything
+// else, a * wildcard, a quote or a ;, would mean something else in the
+// frame-ancestors list the origin is written into. An internationalised name
+// is entered in its xn-- form, as a browser serialises the origin.
+func validHost(host string) bool {
+	if _, err := netip.ParseAddr(host); err == nil {
+		return true
+	}
+	if host == "" || len(host) > maxHostLength {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > maxLabelLength || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // SaveCustomerRedirectOrigins replaces the origins a customer's hosted pages
 // may redirect to and be embedded on: each an origin, kept once, in the order
 // given.
 func (s *Service) SaveCustomerRedirectOrigins(ctx context.Context, orgID, id uuid.UUID, origins []string) (Customer, error) {
+	out, err := redirectOrigins(origins)
+	if err != nil {
+		return Customer{}, err
+	}
+	return s.customers.SaveRedirectOrigins(ctx, orgID, id, out)
+}
+
+// redirectOrigins reads origins as redirect origins (parseRedirectOrigin),
+// each once, at most maxRedirectOrigins.
+func redirectOrigins(origins []string) ([]string, error) {
 	if len(origins) > maxRedirectOrigins {
-		return Customer{}, fmt.Errorf("%w: at most %d redirect origins", ErrInvalidInput, maxRedirectOrigins)
+		return nil, fmt.Errorf("%w: at most %d redirect origins", ErrInvalidInput, maxRedirectOrigins)
 	}
 	out := make([]string, 0, len(origins))
 	for _, raw := range origins {
 		origin, err := parseRedirectOrigin(raw)
 		if err != nil {
-			return Customer{}, err
+			return nil, err
 		}
 		if !slices.Contains(out, origin) {
 			out = append(out, origin)
 		}
 	}
-	return s.customers.SaveRedirectOrigins(ctx, orgID, id, out)
+	return out, nil
 }
 
 // checkRedirect accepts a hosted request's redirect: an absolute URL on one of

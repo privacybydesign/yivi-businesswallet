@@ -270,12 +270,14 @@ func (s *WebhookStore) Deliveries(ctx context.Context, orgID, customerID uuid.UU
 // answering, keyed by customer; a customer without an endpoint is absent.
 func (s *WebhookStore) Health(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]WebhookHealth, error) {
 	// The last attempt decides the state. The failing streak runs back from it
-	// to the first attempt after the last success.
+	// to the first attempt after the last success: a delivery still failing
+	// counts from its first attempt (first_attempt_at; last_attempt_at moves
+	// with every retry), or from the last success when it began before it.
 	rows, err := s.db.Query(ctx, `SELECT w.customer_id, last.status, last.last_status_code,
-			(SELECT min(d.last_attempt_at) FROM identity_proofing_webhook_deliveries d
-			 WHERE d.customer_id = w.customer_id AND d.status <> $2 AND d.last_attempt_at IS NOT NULL
-				AND d.last_attempt_at > COALESCE((SELECT max(ok.delivered_at) FROM identity_proofing_webhook_deliveries ok
-					WHERE ok.customer_id = w.customer_id AND ok.status = $2), '-infinity')),
+			(SELECT min(GREATEST(d.first_attempt_at, ok.at)) FROM identity_proofing_webhook_deliveries d,
+				LATERAL (SELECT COALESCE(max(o.delivered_at), '-infinity') AS at FROM identity_proofing_webhook_deliveries o
+					WHERE o.customer_id = w.customer_id AND o.status = $2) ok
+			 WHERE d.customer_id = w.customer_id AND d.status <> $2 AND d.last_attempt_at > ok.at),
 			(SELECT count(*) FROM identity_proofing_webhook_deliveries d
 			 WHERE d.customer_id = w.customer_id AND d.status = $3 AND d.attempts > 0)
 		FROM identity_proofing_webhooks w
@@ -313,19 +315,31 @@ func (s *WebhookStore) Health(ctx context.Context, orgID uuid.UUID) (map[uuid.UU
 
 // claimDue leases up to limit due deliveries, across every org, and returns
 // them with their endpoint's URL and secrets. The lease keeps another worker
-// from sending the same delivery while this one does.
-func (s *WebhookStore) claimDue(ctx context.Context, limit int) ([]dueDelivery, error) {
+// from sending the same delivery while this one does. It takes at most
+// perEndpoint of one endpoint's, its oldest: an endpoint that never answers
+// would otherwise fill every batch with its backlog, and the next batch waits
+// for the last, so no other org's delivery would go out until it drained. A
+// delivery whose secret does not open counts as a failed attempt, so it runs
+// out of attempts like any other instead of coming back forever.
+func (s *WebhookStore) claimDue(ctx context.Context, limit, perEndpoint int) ([]dueDelivery, error) {
 	if s.cipher == nil {
 		return nil, ErrNoEncryptionKey
 	}
 
 	// A delivery whose endpoint is gone is never claimed; Remove drops it.
-	rows, err := s.db.Query(ctx, `WITH due AS (
+	// The ranking counts rows another worker holds too, so across replicas
+	// an endpoint still has at most perEndpoint in flight.
+	rows, err := s.db.Query(ctx, `WITH ranked AS (
+			SELECT d.id, row_number() OVER (PARTITION BY d.customer_id ORDER BY d.next_attempt_at) AS n
+			FROM identity_proofing_webhook_deliveries d
+			WHERE d.status = $1 AND d.next_attempt_at <= now()
+		), due AS (
 			SELECT d.id, w.url, w.secret_ciphertext,
 				CASE WHEN w.previous_secret_until > now() THEN w.previous_secret_ciphertext END AS previous_ciphertext
 			FROM identity_proofing_webhook_deliveries d
 			JOIN identity_proofing_webhooks w ON w.customer_id = d.customer_id
 			WHERE d.status = $1 AND d.next_attempt_at <= now()
+				AND d.id IN (SELECT id FROM ranked WHERE n <= $4)
 			ORDER BY d.next_attempt_at LIMIT $2 FOR UPDATE OF d SKIP LOCKED
 		)
 		UPDATE identity_proofing_webhook_deliveries d
@@ -334,13 +348,13 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit int) ([]dueDelivery, 
 		WHERE d.id = due.id
 		RETURNING d.id, d.event, d.payload, d.attempts, d.created_at, d.next_attempt_at, due.url,
 			due.secret_ciphertext, due.previous_ciphertext`,
-		DeliveryPending, limit, deliveryLease.Seconds())
+		DeliveryPending, limit, deliveryLease.Seconds(), perEndpoint)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: claim deliveries: %w", err)
 	}
 
 	defer rows.Close()
-	var out []dueDelivery
+	var out, sealedShut []dueDelivery
 	for rows.Next() {
 		var d dueDelivery
 		var sealed, previous []byte
@@ -350,21 +364,30 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit int) ([]dueDelivery, 
 		}
 		secrets, err := s.openSecrets(sealed, previous)
 		if err != nil {
-			// Skip only this one; its lease lapses and it is retried, e.g. after a key fix.
 			slog.ErrorContext(ctx, "identity proofing: cannot open webhook secret",
 				slog.String("delivery_id", d.ID.String()), slog.Any("error", err))
+			sealedShut = append(sealedShut, d)
 			continue
 		}
 		d.Secrets = secrets
 		out = append(out, d)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("proofing: claim deliveries: %w", err)
 	}
+	rows.Close()
 
+	for _, d := range sealedShut {
+		if err := s.recordAttempt(ctx, d, nil, errSecretSealed.Error()); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
+
+// errSecretSealed is the failed attempt recorded for a delivery whose
+// endpoint secret does not open, e.g. after the encryption key changed.
+var errSecretSealed = errors.New("the endpoint's signing secret could not be decrypted")
 
 // openSecrets unseals an endpoint's current secret and, when set, the
 // previous one still in its overlap.
@@ -424,6 +447,7 @@ func (s *WebhookStore) recordAttempt(ctx context.Context, d dueDelivery, statusC
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries
 		SET status = $2, attempts = $3, next_attempt_at = now() + make_interval(secs => $4), last_attempt_at = now(),
+			first_attempt_at = COALESCE(first_attempt_at, now()),
 			last_status_code = $5, last_error = NULLIF($6, ''),
 			delivered_at = CASE WHEN $2 = $7 THEN now() END,
 			payload = CASE WHEN $2 = $8 THEN payload ELSE payload - $11::text END

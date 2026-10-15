@@ -13,7 +13,7 @@ import type {
 import { useWhenFormatter } from "../lib/format-when";
 import {
   assuranceLevelLabel,
-  matchTickable,
+  matchTickedByDefault,
   proofingErrorMessage,
   proofingStatusLabel,
   REVIEW_REASON_MAX_CHARS,
@@ -108,11 +108,17 @@ function Review({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const decide = useDecideReviewMutation(slug, request.id);
-  // A match proven with the same document starts ticked; the reviewer
-  // unticks what must be kept. A match on name and date of birth alone, or on
-  // the e-mail address, starts unticked: only the reviewer's tick takes it.
+  // The matches taken without a tick start ticked (matchTickedByDefault); the
+  // reviewer unticks what must be kept and ticks any other of the person's. One
+  // an automatic erasure deleted already stays ticked: it is gone.
   const [ticked, setTicked] = useState<string[]>(() =>
-    matches.filter((m) => m.level === "strong").map((m) => m.requestId),
+    matches
+      .filter(
+        (m) =>
+          m.purgedAt !== undefined ||
+          matchTickedByDefault(request.flowKind, m.level),
+      )
+      .map((m) => m.requestId),
   );
   const [reason, setReason] = useState("");
   const [touched, setTouched] = useState(false);
@@ -178,7 +184,7 @@ function Review({
         selection={{
           ticked,
           onToggle: toggle,
-          tickable: (m) => matchTickable(kind, m.level),
+          tickable: (m) => m.purgedAt === undefined,
           erasure: kind === "data_erasure",
         }}
       />

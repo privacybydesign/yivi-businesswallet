@@ -558,12 +558,15 @@ export function reviewSubmitStep({
     : "decide";
 }
 
-// Whether a reviewer may tick a match of level for a data request of kind: an
-// erasure takes only a session proven with the requester's own document
-// (proofing.approvedMatches), since any other may be another person's and an
-// erasure cannot be undone.
-export function matchTickable(kind: FlowKind, level: string): boolean {
-  return kind !== "data_erasure" || level === "strong";
+// Whether a match of level starts ticked on a data request of kind, as
+// proofing.approvedMatches takes it without a tick: for an erasure, a session
+// whose name and date of birth were read off a verified chip (the same
+// document or another); for "see my data", only one proven with the same
+// document. The reviewer ticks any other that is the person's.
+export function matchTickedByDefault(kind: FlowKind, level: string): boolean {
+  return (
+    level === "strong" || (kind === "data_erasure" && level === "probable")
+  );
 }
 
 // The backend's own message for an error whose text is meant for the reader:
@@ -609,6 +612,8 @@ export function proofingRejectionReason(code: string, t: TFunction): string {
       return t("identityProofing.rejectionReasons.identityMismatch");
     case "REVIEW_LAPSED":
       return t("identityProofing.rejectionReasons.reviewLapsed");
+    case "LEGAL_RETENTION":
+      return t("identityProofing.rejectionReasons.legalRetention");
     case "ORG_PAUSED":
       return t("identityProofing.rejectionReasons.orgPaused");
     default:

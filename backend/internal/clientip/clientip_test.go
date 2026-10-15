@@ -164,3 +164,19 @@ func TestMiddlewareAndFromRequest(t *testing.T) {
 		t.Errorf("without Middleware: FromRequest = %q, want the peer", got)
 	}
 }
+
+// An IPv6 caller is one source across its /64: otherwise each address it
+// holds would get a limit of its own.
+func TestSourceKey(t *testing.T) {
+	for _, tc := range []struct{ remoteAddr, want string }{
+		{"203.0.113.7:4567", "203.0.113.7"},
+		{"[2001:db8:1:2:aaaa::1]:4567", "2001:db8:1:2::/64"},
+		{"[2001:db8:1:2:bbbb::9]:4567", "2001:db8:1:2::/64"},
+		{"[::ffff:203.0.113.7]:4567", "203.0.113.7"},
+		{"not-an-address", "not-an-address"},
+	} {
+		if got := SourceKey(request(tc.remoteAddr)); got != tc.want {
+			t.Errorf("SourceKey(%s) = %q, want %q", tc.remoteAddr, got, tc.want)
+		}
+	}
+}

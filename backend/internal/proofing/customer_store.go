@@ -29,7 +29,7 @@ func NewCustomerStore(db database.DB, recorder audit.Recorder) *CustomerStore {
 	return &CustomerStore{db: db, audit: recorder}
 }
 
-const customerColumns = `id, organization_id, name, paused_at, session_ttl_seconds, data_retention_days,
+const customerColumns = `id, organization_id, name, paused_at, session_ttl_seconds, data_retention_days, erasure_handling,
 	COALESCE(display_name, ''), COALESCE(primary_color, ''), COALESCE(support_contact, ''), COALESCE(privacy_url, ''),
 	logo_bytes IS NOT NULL, hide_powered_by, created_at, updated_at, allowed_redirect_origins,
 	EXISTS (SELECT 1 FROM identity_proofing_api_keys k WHERE k.customer_id = identity_proofing_customers.id
@@ -130,7 +130,7 @@ func scanCustomer(row pgx.CollectableRow) (Customer, error) {
 	var c Customer
 	var ttlSeconds int
 	b := &c.Branding
-	err := row.Scan(&c.ID, &c.OrganizationID, &c.Name, &c.PausedAt, &ttlSeconds, &c.Settings.DataRetentionDays,
+	err := row.Scan(&c.ID, &c.OrganizationID, &c.Name, &c.PausedAt, &ttlSeconds, &c.Settings.DataRetentionDays, &c.Settings.ErasureHandling,
 		&b.DisplayName, &b.PrimaryColor, &b.SupportContact, &b.PrivacyURL, &b.HasLogo, &b.HidePoweredBy, &c.CreatedAt, &c.UpdatedAt, &c.RedirectOrigins, &c.HasAPIKey)
 	c.Settings.SessionTTL = time.Duration(ttlSeconds) * time.Second
 	return c, err
@@ -232,10 +232,10 @@ func (s *CustomerStore) SetStatus(ctx context.Context, orgID, id uuid.UUID, stat
 	return s.Get(ctx, orgID, id)
 }
 
-// SaveSettings replaces a customer's session settings and audits
-// identity_proofing.customer_updated with before and after. Saving the settings
-// it already has changes and audits nothing.
-func (s *CustomerStore) SaveSettings(ctx context.Context, orgID, id uuid.UUID, settings CustomerSettings) (Customer, error) {
+// SaveSettings applies change to a customer's settings and audits
+// identity_proofing.customer_updated with before and after. A change to what
+// is already set changes and audits nothing.
+func (s *CustomerStore) SaveSettings(ctx context.Context, orgID, id uuid.UUID, change CustomerSettingsChange) (Customer, error) {
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		// A request created meanwhile waits on this lock (customerLockCreate),
 		// so it reads the new retention for its purge time. Not FOR UPDATE: a
@@ -248,13 +248,15 @@ func (s *CustomerStore) SaveSettings(ctx context.Context, orgID, id uuid.UUID, s
 		if err != nil {
 			return err
 		}
+		// Applied under the lock, so two changes at once each keep the other's.
+		settings := change.apply(before.Settings)
 		if before.Settings == settings {
 			return nil
 		}
 		if _, err := q.Exec(ctx, `UPDATE identity_proofing_customers
-			SET session_ttl_seconds = $3, data_retention_days = $4, updated_at = now()
+			SET session_ttl_seconds = $3, data_retention_days = $4, erasure_handling = $5, updated_at = now()
 			WHERE organization_id = $1 AND id = $2`,
-			orgID, id, int(settings.SessionTTL.Seconds()), settings.DataRetentionDays); err != nil {
+			orgID, id, int(settings.SessionTTL.Seconds()), settings.DataRetentionDays, string(settings.ErasureHandling)); err != nil {
 			return fmt.Errorf("proofing: save customer settings %s: %w", id, err)
 		}
 		if before.Settings.DataRetentionDays != settings.DataRetentionDays {
@@ -314,7 +316,10 @@ func (s *CustomerStore) SaveBranding(ctx context.Context, orgID, id uuid.UUID, b
 		if logo.Replace {
 			after.HasLogo = len(logo.Logo.Bytes) > 0
 		}
-		if after == before.Branding {
+		// A new logo over an old one leaves HasLogo as it was, so it changes
+		// the branding even when nothing else does.
+		newLogo := logo.Replace && len(logo.Logo.Bytes) > 0
+		if after == before.Branding && !newLogo {
 			return nil
 		}
 		if _, err := q.Exec(ctx, `UPDATE identity_proofing_customers SET
@@ -328,9 +333,13 @@ func (s *CustomerStore) SaveBranding(ctx context.Context, orgID, id uuid.UUID, b
 			logo.Replace, nilIfEmpty(logo.Logo.Bytes), logo.Logo.ContentType, b.HidePoweredBy); err != nil {
 			return fmt.Errorf("proofing: save customer branding %s: %w", id, err)
 		}
+		changed := after.auditFields()
+		if newLogo && before.Branding.HasLogo {
+			changed["logoReplaced"] = true
+		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingCustomerUpdated,
 			audit.Target{Type: audit.TargetIdentityProofingCustomer, ID: id.String(), OrgID: &orgID},
-			audit.Updated(before.Branding.auditFields(), after.auditFields()))
+			audit.Updated(before.Branding.auditFields(), changed))
 	})
 	if err != nil {
 		return Customer{}, err

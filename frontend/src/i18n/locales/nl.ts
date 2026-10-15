@@ -538,6 +538,7 @@ export const nl: Translation<typeof en> = {
       docExpired: "document verlopen",
       assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",
       reviewLapsed: "niet binnen 30 dagen beoordeeld",
+      legalRetention: "de klant moet deze gegevens volgens de wet bewaren",
       orgPaused:
         "identiteitsverificatie werd gepauzeerd terwijl de sessie op beoordeling wachtte; probeer het later opnieuw",
       identityMismatch:
@@ -944,9 +945,9 @@ export const nl: Translation<typeof en> = {
           name: "Zelfde naam",
         },
         erasureUntickHint:
-          "Alleen sessies met hetzelfde document kunnen worden verwijderd: een sessie met alleen dezelfde naam en geboortedatum kan van iemand anders zijn, en verwijderen is niet terug te draaien. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
+          "Sessies waarvan de naam en geboortedatum van een geverifieerde chip zijn gelezen, staan aangevinkt, met hetzelfde of een ander document: die zijn van deze persoon. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
         erasureEmailMatchesHint:
-          "Deze zijn nooit afgerond, dus er is geen bewezen identiteit om te vergelijken en ze kunnen hier niet worden verwijderd: hun gegevens worden verwijderd zodra de bewaartermijn van de klant verloopt.",
+          "Deze zijn nooit afgerond, dus er is geen bewezen identiteit om te vergelijken: alleen het e-mailadres of de ingevulde naam komt overeen. Vink aan welke van deze persoon zijn om ze ook te verwijderen; de rest wordt verwijderd zodra de bewaartermijn van de klant verloopt.",
         untickHint:
           "Sessies met hetzelfde document zijn aangevinkt; een sessie met alleen dezelfde naam en geboortedatum niet, dus vink die alleen aan als je zeker weet dat hij van deze persoon is. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
         erased: "Verwijderd",
@@ -1040,6 +1041,21 @@ export const nl: Translation<typeof en> = {
         "De persoonsgegevens van een sessie (de naam en het e-mailadres waarheen hij is verstuurd, alles wat van het document en de chip is gelezen, de foto's en eventuele diploma's) worden zo lang na afloop gewist. Het resultaat en het auditspoor blijven.",
       days_one: "{{count}} dag",
       days_other: "{{count}} dagen",
+      erasure: "Verwijderverzoeken",
+      erasureHint:
+        "Hoe een verzoek om iemands gegevens te verwijderen wordt beslist zodra diens identiteit is bewezen.",
+      erasureOptions: {
+        review: "Beoordelaar beslist",
+        automatic: "Automatisch",
+        keep: "Bewaren: wettelijke plicht",
+      },
+      erasureOptionHints: {
+        review:
+          "Een beoordelaar beslist over elk verzoek. Sessies die bewezen van deze persoon zijn, staan aangevinkt; sessies die alleen op e-mailadres of naam zijn gevonden, vinkt de beoordelaar zelf aan.",
+        automatic:
+          "Sessies die bewezen van deze persoon zijn, worden meteen verwijderd. Alleen sessies die op e-mailadres of naam zijn gevonden, gaan naar een beoordelaar.",
+        keep: "Elk verzoek wordt geweigerd en de gegevens blijven bewaard, omdat deze klant ze volgens de wet moet bewaren. De persoon krijgt te zien waarom.",
+      },
       nameTitle: "Naam",
       nameHint: "Zichtbaar voor je leden en in het auditlog.",
       redirectOriginsTitle: "Terugstuur-origins",
@@ -1380,6 +1396,12 @@ export const nl: Translation<typeof en> = {
           "Je verzoek is ter beoordeling naar {{customer}} gestuurd. Open deze link later opnieuw om de uitkomst te zien.",
       },
       erased: "Je gegevens zijn verwijderd.",
+      erasedPartly_one:
+        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerder verzoek konden we niet met zekerheid aan jou koppelen; dat is bewaard en wordt verwijderd zodra de bewaartermijn van {{customer}} verloopt.",
+      erasedPartly_other:
+        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerdere verzoeken konden we niet met zekerheid aan jou koppelen; die zijn bewaard en worden verwijderd zodra de bewaartermijn van {{customer}} verloopt.",
+      keptByLaw:
+        "{{customer}} moet je gegevens volgens de wet bewaren, daarom zijn ze niet verwijderd.",
       download: "Mijn gegevens downloaden",
       downloadUntil: "Beschikbaar tot {{date}}.",
       downloadExpired: "De download is niet meer beschikbaar.",

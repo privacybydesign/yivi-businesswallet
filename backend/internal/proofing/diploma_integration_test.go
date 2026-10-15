@@ -97,7 +97,7 @@ func TestDiplomaExtractsUntilPurge(t *testing.T) {
 		t.Errorf("deliveries = %+v, %v; want one session.diploma_added", deliveries, err)
 	}
 
-	if err := requests.Purge(ctx, req); err != nil {
+	if err := requests.Purge(ctx, req, nil); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
 	if held, err := diplomas.List(ctx, []uuid.UUID{req.ID}); err != nil || len(held[req.ID]) != 0 {

@@ -204,6 +204,11 @@ type documentInfo struct {
 	Nationality  string `json:"nationality,omitempty"`
 	FirstName    string `json:"firstName,omitempty"`
 	LastName     string `json:"lastName,omitempty"`
+	// FullFirstName and FullLastName are DG11's name, when the chip has one:
+	// UTF-8, and never cut off, where the MRZ's fixed-width field truncates a
+	// long name (30 characters on an ID card).
+	FullFirstName string `json:"fullFirstName,omitempty"`
+	FullLastName  string `json:"fullLastName,omitempty"`
 	// DisplayName prefers DG11's UTF-8 name over the transliterated MRZ name, as
 	// vcmrtd does.
 	DisplayName string `json:"displayName,omitempty"`

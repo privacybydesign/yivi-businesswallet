@@ -105,7 +105,7 @@ tags:
       ### Outcomes
 
       `status` ends as `approved`, `rejected` (`errorCode` says why; the wallet itself
-      sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET` and `REVIEW_LAPSED`; the session
+      sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET`, `REVIEW_LAPSED` and `LEGAL_RETENTION`; the session
       itself is rejected for `FACE_NO_MATCH`, `LIVENESS_FAILED`, `DOC_EXPIRED`,
       `DOC_TAMPERED` and `ASSURANCE_NOT_MET`), `needs_review` (an admin decides), `expired` or
       `cancelled`.
@@ -149,10 +149,11 @@ paths:
       tags: [identity-proofing]
       summary: Pause or resume an org's identity proofing (platform admin)
       description: >-
-        Requires the platform administrator role. Body `{paused}`. While paused, the org's
-        identity-proofing routes, its customers' API keys and its hosted links answer 403
-        `proofing_paused`; sessions already running still settle and their webhooks still go
-        out. Pausing first rejects every session of the org waiting for review, `errorCode`
+        Requires the platform administrator role. Body `{paused}`. While paused, nothing new
+        starts: sending a request, creating a session through the customer API and starting a
+        hosted link answer 403 `proofing_paused`. Every other route stays open, so an admin can
+        still revoke a key, remove a webhook or erase data, and sessions already running still
+        settle and their webhooks still go out. Pausing first rejects every session of the org waiting for review, `errorCode`
         `ORG_PAUSED` with a reason saying so: nothing can be decided while it is paused. A
         review that cannot be rejected refuses the pause (500); a session that reaches review
         while paused is rejected the same way as it arrives. The org's admin cannot lift a platform pause. Audited `identity_proofing.paused` or
@@ -6045,7 +6046,7 @@ paths:
       tags: [identity-proofing]
       summary: Read whether the org's identity proofing is paused
       description: >-
-        Any member; reachable while paused, unlike the other identity-proofing routes. `paused` is whether identity proofing is stopped for the org; `platformPausedAt` and `orgPausedAt` say who paused it.
+        Any member. `paused` is whether identity proofing is stopped for the org; `platformPausedAt` and `orgPausedAt` say who paused it.
       responses:
         '200':
           description: Whether proofing is paused.
@@ -6074,7 +6075,9 @@ paths:
       summary: Switch the org's identity proofing off or on
       description: >-
         Requires an administrator role in the organisation. Body `{paused}`: the org's own
-        switch, beside a platform admin's pause, which it cannot lift. Pausing first rejects
+        switch, beside a platform admin's pause, which it cannot lift. While paused, nothing new
+        starts (403 `proofing_paused` on sending, creating a session and starting a hosted
+        link); every other route stays open. Pausing first rejects
         every session waiting for review with `errorCode` `ORG_PAUSED`; one that cannot be
         rejected refuses the pause (500), and a session that reaches review while paused is
         rejected the same way as it arrives. Audited
@@ -6450,9 +6453,11 @@ paths:
         Requires an administrator role in the organisation. What a data request's review shows
         beside the person's identity (`GET .../result`): its `flowKind` and the customer's
         sessions whose proofed identity is the person's (`strong` on the same document,
-        `probable` on name and date of birth alone), and its unfinished sessions (pending,
-        in progress, expired or cancelled) to the same e-mail address (`email`), listed apart
-        and never approved unless chosen. Empty for any other request.
+        `probable` on the same name and date of birth off another document's chip), and its
+        unfinished sessions (pending, in progress, expired or cancelled) to the same e-mail
+        address (`email`) or with the same typed name (`name`), listed apart and never approved
+        unless chosen. A session an automatic erasure deleted already carries `purgedAt`.
+        Empty for any other request.
       responses:
         '200':
           description: The matches.
@@ -6649,6 +6654,7 @@ paths:
                       status: active
                       sessionTtlSeconds: 600
                       dataRetentionDays: 30
+                      erasureHandling: review
                       webhook:
                         state: delivering
                         lastStatusCode: 200
@@ -6702,6 +6708,7 @@ paths:
                     status: active
                     sessionTtlSeconds: 600
                     dataRetentionDays: 30
+                    erasureHandling: review
                     webhook:
                       state: not_configured
                       pendingRetries: 0
@@ -6766,6 +6773,7 @@ paths:
                     status: active
                     sessionTtlSeconds: 600
                     dataRetentionDays: 30
+                    erasureHandling: review
                     webhook:
                       state: delivering
                       lastStatusCode: 200
@@ -6791,17 +6799,23 @@ paths:
           $ref: '#/components/responses/NotFound'
     patch:
       tags: [identity-proofing]
-      summary: Rename, pause or resume a customer
+      summary: Rename, pause or resume a customer, or change its settings
       description: >-
         Requires an administrator role in the organisation. `name`, as on create, and/or
         `paused`: while a customer is paused (`status` `paused`), no request can be sent for it;
         requests already sent run out as usual. A customer with a session waiting for review
         cannot be paused until it is decided (409 `customer_has_open_reviews`). An absent field is left as it is; a body with
-        none is 400 `invalid_body`. `sessionTtlSeconds` (120, 300 or 600) is how long each of
+        none is 400 `invalid_body`. Every field is checked before any is saved, so a refused
+        update changes nothing. `sessionTtlSeconds` (120, 300 or 600) is how long each of
         the customer's sessions runs; `dataRetentionDays` (7, 30, 90, 180 or 365; default 30)
-        how long an approved subject's name is kept. `allowedRedirectOrigins` replaces the
-        origins (`https://host[:port]`, or `http` on a loopback host; at most 10) a hosted page
-        may send its subject back to and be embedded on.
+        how long an approved subject's name is kept. `erasureHandling` is how its "delete my
+        data" requests are decided once the person is proven: `review` (default) by a
+        reviewer; `automatic` erases the sessions proven to be the person's at once and leaves
+        a reviewer only those found by e-mail address or name; `keep` refuses each one with
+        `LEGAL_RETENTION`, for a customer bound by law to keep the data.
+        `allowedRedirectOrigins` replaces the origins (`https://host[:port]`, or `http` on a
+        loopback host; the host a DNS name or an IP address; at most 10) a hosted page may
+        send its subject back to and be embedded on.
       requestBody:
         required: true
         content:
@@ -6814,10 +6828,11 @@ paths:
                 value:
                   paused: true
               settings:
-                summary: Shorter sessions, longer retention, a return origin
+                summary: Shorter sessions, longer retention, automatic erasure, a return origin
                 value:
                   sessionTtlSeconds: 300
                   dataRetentionDays: 90
+                  erasureHandling: automatic
                   allowedRedirectOrigins: [https://portal.acme.example]
       responses:
         '200':
@@ -7314,7 +7329,8 @@ paths:
       description: >-
         Requires an administrator role in the organisation. Queues a `test` event for the
         endpoint, whatever it subscribed to; it is sent within seconds. A customer without an
-        endpoint is 404 `webhook_not_found`.
+        endpoint is 404 `webhook_not_found`. At most 10 a minute per customer (429
+        `rate_limited`).
       responses:
         '204':
           description: Queued.
@@ -7326,6 +7342,8 @@ paths:
           $ref: '#/components/responses/ProofingForbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many test events for this customer (`rate_limited`); `Retry-After` says when to try again.
   /api/v1/orgs/{slug}/customers/{customerID}/webhook/deliveries:
     parameters:
       - name: slug
@@ -7485,6 +7503,7 @@ paths:
                         logoUri: /api/v1/proof/BwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSY/logo?v=1759397400
                         hidePoweredBy: false
                       dataRetentionDays: 30
+                      erasureHandling: review
                     flow:
                       name: Onboarding
                       requiredAssuranceLevel: substantial
@@ -8035,7 +8054,7 @@ paths:
       summary: Create a proofing session (public API)
       description: >-
         Send an `Idempotency-Key` header to make a retry safe: the same key and body
-        within 24 hours get the first answer again (`Idempotent-Replayed: true`), the
+        within 24 hours (until the next hourly prune after) get the first answer again (`Idempotent-Replayed: true`), the
         key with another body is 422 `idempotency_key_reused`, and while the first call
         still runs 409 `idempotency_in_flight`. A call whose outcome is unknown (the
         server lost it mid-call) keeps answering 409 until the key expires after 24
@@ -8221,8 +8240,10 @@ paths:
         it. `expectedSubject: true` is a session created for one person (`name` with
         `birthDate`). Rejection codes the wallet itself sets: `IDENTITY_MISMATCH` (the
         document is another person's), `ASSURANCE_NOT_MET` (the checks fell short of the
-        flow's required level) and `REVIEW_LAPSED` (a data request nobody reviewed within 30
-        days) and `ORG_PAUSED` (a review left open when the organisation paused proofing). The
+        flow's required level), `REVIEW_LAPSED` (a review nobody decided in time: a data request
+        in 30 days, an identity check within the data retention), `LEGAL_RETENTION` (an
+        erasure refused because the customer is bound by law to keep the data) and
+        `ORG_PAUSED` (a review left open when the organisation paused proofing). The
         session itself is rejected, on any flow, for a face that did not match (`FACE_NO_MATCH`)
         or failed liveness (`LIVENESS_FAILED`), `DOC_EXPIRED`, `DOC_TAMPERED`, and for an
         achieved eIDAS level below the flow's (`ASSURANCE_NOT_MET`); a face that failed liveness
@@ -10584,8 +10605,9 @@ components:
           description: >-
             Why a session was rejected. The wallet itself sets `IDENTITY_MISMATCH` (the
             document is not the expected person's), `ASSURANCE_NOT_MET` (the checks fell
-            short of the flow's level) and `REVIEW_LAPSED` (a data request nobody reviewed
-            within 30 days); others come from the session itself
+            short of the flow's level), `REVIEW_LAPSED` (a review nobody decided in time) and
+            `LEGAL_RETENTION` (an erasure the customer must refuse by law); others come from
+            the session itself
             (`FACE_NO_MATCH`, `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
             `CHIP_CLONE_DETECTED`, `ASSURANCE_NOT_MET`, …).
         expiresAt:
@@ -11432,10 +11454,11 @@ components:
             type: string
             format: uuid
           description: >-
-            Only on a data request: the matched sessions an approval takes (absent takes only
-            the `strong` ones, proven with the same document; a `probable`, `email` or `name`
-            match is taken only when listed). An erasure purges them and takes `strong` matches
-            only: listing another is a 400. An access request opens their data for download.
+            Only on a data request: the matched sessions an approval takes. Absent takes, for an
+            erasure, the `strong` and `probable` ones (the same name and date of birth off a
+            verified chip) and, for an access request, the `strong` ones; any other is taken
+            only when listed. An erasure purges them, and one an automatic erasure purged
+            already counts as taken. An access request opens their data for download.
       required: [decision, reason]
     ProofingClaimLink:
       type: object
@@ -11712,6 +11735,10 @@ components:
           type: integer
         dataRetentionDays:
           type: integer
+        erasureHandling:
+          type: string
+          enum: [review, automatic, keep]
+          description: How the customer's "delete my data" requests are decided once the person is proven.
         webhook:
           $ref: '#/components/schemas/ProofingWebhookHealth'
         branding:
@@ -11729,7 +11756,7 @@ components:
         updatedAt:
           type: string
           format: date-time
-      required: [id, name, flowIds, status, sessionTtlSeconds, dataRetentionDays, webhook, branding, allowedRedirectOrigins, hasApiKey, createdAt, updatedAt]
+      required: [id, name, flowIds, status, sessionTtlSeconds, dataRetentionDays, erasureHandling, webhook, branding, allowedRedirectOrigins, hasApiKey, createdAt, updatedAt]
     ProofingCustomerList:
       type: array
       items:
@@ -11757,6 +11784,9 @@ components:
         dataRetentionDays:
           type: integer
           enum: [7, 30, 90, 180, 365]
+        erasureHandling:
+          type: string
+          enum: [review, automatic, keep]
         allowedRedirectOrigins:
           type: array
           maxItems: 10
@@ -11934,6 +11964,9 @@ components:
           type: string
           format: date-time
           description: Until when an approved "see my data" session's data downloads through the link (`GET /api/v1/proof/{token}/data-export`), 24 hours from the approval.
+        dataMatchesKept:
+          type: integer
+          description: On an approved erasure, how many of the person's matched sessions were kept, not deleted.
       required: [status, linkExpiresAt, started]
     ProofingHostedView:
       allOf:
@@ -12552,8 +12585,9 @@ components:
     TooManyRequests:
       description: >-
         The customer spent its public API budget (code `rate_limited`): 120 calls a
-        minute, and of those 10 session creations. `Retry-After` says in how many
-        seconds to try again.
+        minute, and of those 10 session creations. A client address presenting unknown or
+        revoked keys gets this too past 60 a minute, instead of 401 (an IPv6 address counts
+        with its /64). `Retry-After` says in how many seconds to try again.
       headers:
         Retry-After:
           description: Seconds until the next call is allowed.
@@ -12565,9 +12599,11 @@ components:
             $ref: '#/components/schemas/Error'
     HostedTooManyRequests:
       description: >-
-        The link spent its budget (code `rate_limited`, "too many requests for this
-        link"): 300 calls a minute per hosted link. `Retry-After` says in how many
-        seconds to try again.
+        A hosted link's budget is spent (code `rate_limited`): 600 calls a minute per client
+        address (an IPv6 address counts with its /64), 3000 a minute across all of a
+        customer's links still in use, and 60 a minute for a link that is not (its session
+        over and nothing left to download or upload). `Retry-After` says in how many seconds
+        to try again.
       headers:
         Retry-After:
           description: Seconds until the next call is allowed.

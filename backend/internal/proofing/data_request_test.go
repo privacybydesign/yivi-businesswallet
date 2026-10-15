@@ -26,6 +26,7 @@ type fakeDataRequests struct {
 	saved      []NewDataMatch
 	approved   []uuid.UUID
 	exportTill *time.Time
+	kept       *int
 	exported   int
 	// checks are the candidates read per data request; matchingBusy makes
 	// TryLockMatching find the lock held; saveErr fails SaveMatches.
@@ -108,8 +109,8 @@ func (f *fakeDataRequests) MatchedRequests(context.Context, Request) ([]Request,
 	return f.matched, nil
 }
 
-func (f *fakeDataRequests) RecordDecision(_ context.Context, _ Request, approved []uuid.UUID, exportUntil *time.Time) error {
-	f.approved, f.exportTill = approved, exportUntil
+func (f *fakeDataRequests) RecordDecision(_ context.Context, _ Request, approved []uuid.UUID, exportUntil *time.Time, kept *int) error {
+	f.approved, f.exportTill, f.kept = approved, exportUntil, kept
 	return nil
 }
 
@@ -309,18 +310,22 @@ func inReview(t *testing.T, kind FlowKind) (fixture, *fakeDataRequests, Request,
 	return f, data, first, second
 }
 
-// A probable match is never erased: the reviewer cannot tell it from another
-// person's session with the same name and date of birth.
-func TestDataErasureRefusesProbable(t *testing.T) {
+// A probable match is erased like a strong one: the same name and date of
+// birth were read off a verified chip, only from another document.
+func TestDataErasureTakesProbable(t *testing.T) {
 	f, data, first, second := inReview(t, FlowDataErasure)
 	deletes := f.ips.deletes
-	_, err := f.svc.DecideReview(context.Background(), testOrg.ID, f.requests.stored.ID, "reviewer@example.org",
-		ReviewInput{Approve: true, Reason: "looks like her", RequestIDs: []uuid.UUID{first.ID, second.ID}})
-	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("DecideReview with a probable match = %v; want ErrInvalidInput", err)
+	req, err := f.svc.DecideReview(context.Background(), testOrg.ID, f.requests.stored.ID, "reviewer@example.org",
+		ReviewInput{Approve: true, Reason: "her ID card and her passport", RequestIDs: []uuid.UUID{first.ID, second.ID}})
+	if err != nil {
+		t.Fatalf("DecideReview: %v", err)
 	}
-	if f.ips.deletes != deletes || data.approved != nil {
-		t.Errorf("erased %d sessions, recorded %v; want nothing decided", f.ips.deletes-deletes, data.approved)
+	if req.Status != StatusApproved || len(data.approved) != 2 || data.kept == nil || *data.kept != 0 {
+		t.Errorf("decision: %q, approved %v, kept %v; want both erased, none kept", req.Status, data.approved, data.kept)
+	}
+	// Both matches and the request itself.
+	if got := f.ips.deletes - deletes; got != 3 {
+		t.Errorf("sessions erased = %d; want 3", got)
 	}
 }
 
@@ -335,6 +340,9 @@ func TestDataErasurePurgesApproved(t *testing.T) {
 	if req.Status != StatusApproved || !slices.Equal(data.approved, []uuid.UUID{first.ID}) || data.exportTill != nil {
 		t.Errorf("decision: %q, approved %v, export %v; want approved, the first match, no export", req.Status, data.approved, data.exportTill)
 	}
+	if data.kept == nil || *data.kept != 1 {
+		t.Errorf("kept = %v; want the unticked match", data.kept)
+	}
 	// The approved session and the request itself are erased; the other match stays.
 	if got := f.ips.deletes - deletes; got != 2 {
 		t.Errorf("sessions erased = %d; want 2", got)
@@ -345,26 +353,91 @@ func TestDataErasurePurgesApproved(t *testing.T) {
 	}
 }
 
-// Approving without choosing takes only the matches proven with the same
-// document: a probable or e-mail one needs the reviewer's own tick, and an
-// erasure takes none.
-func TestApprovedTakesStrongOnly(t *testing.T) {
+// Approving without choosing takes the sure matches for an erasure (the same
+// name and date of birth off a verified chip) and only those proven with the
+// same document for "see my data". Anything else needs the reviewer's tick,
+// which an erasure takes too. A match an automatic erasure purged is approved
+// whatever was ticked.
+func TestApprovedTakesSureMatches(t *testing.T) {
 	strong, probable, email := uuid.New(), uuid.New(), uuid.New()
 	matches := []DataMatch{{RequestID: strong, Level: MatchStrong}, {RequestID: probable, Level: MatchProbable}, {RequestID: email, Level: MatchEmail}}
-	for _, kind := range []FlowKind{FlowDataAccess, FlowDataErasure} {
-		got, err := approvedMatches(matches, nil, kind)
-		if err != nil || !slices.Equal(got, []uuid.UUID{strong}) {
-			t.Errorf("%s approvedMatches(nil) = %v, %v; want only the strong match", kind, got, err)
+	if got, err := approvedMatches(matches, nil, FlowDataAccess); err != nil || !slices.Equal(got, []uuid.UUID{strong}) {
+		t.Errorf("see my data approvedMatches(nil) = %v, %v; want the strong match", got, err)
+	}
+	if got, err := approvedMatches(matches, nil, FlowDataErasure); err != nil || !slices.Equal(got, []uuid.UUID{strong, probable}) {
+		t.Errorf("erasure approvedMatches(nil) = %v, %v; want the strong and the probable match", got, err)
+	}
+	if got, err := approvedMatches(matches, []uuid.UUID{email}, FlowDataErasure); err != nil || !slices.Equal(got, []uuid.UUID{email}) {
+		t.Errorf("erasure ticking the e-mail match = %v, %v; want it taken", got, err)
+	}
+	now := time.Now()
+	erased := []DataMatch{{RequestID: strong, Level: MatchStrong, PurgedAt: &now}, {RequestID: email, Level: MatchEmail}}
+	if got, err := approvedMatches(erased, []uuid.UUID{}, FlowDataErasure); err != nil || !slices.Equal(got, []uuid.UUID{strong}) {
+		t.Errorf("erasure ticking nothing after an automatic erasure = %v, %v; want the erased match", got, err)
+	}
+	if kept := keptMatches(erased, []uuid.UUID{strong}); kept != 1 {
+		t.Errorf("kept = %d; want the unticked e-mail match", kept)
+	}
+}
+
+// erasureInReview is a "delete my data" request of a customer whose erasures
+// are decided as handling says, proven, matching a strong and a probable
+// session, and with unsure an unfinished one sent to the same address.
+func erasureInReview(t *testing.T, handling ErasureHandling, unsure bool) (fixture, *fakeDataRequests, Request) {
+	t.Helper()
+	f, data := newDataFixture(FlowDataErasure)
+	customer := f.customers.byID[initech.ID]
+	customer.Settings.ErasureHandling = handling
+	f.customers.byID[initech.ID] = customer
+	first, second := heldSession("Anna Jansen"), heldSession("Anna Jansen")
+	data.candidates = []Request{first, second}
+	data.matched = []Request{first, second}
+	data.checks = map[uuid.UUID]MatchLevel{first.ID: MatchStrong}
+	if unsure {
+		data.unfinished = []Request{{ID: uuid.New(), SubjectEmail: "anna@example.org", Status: StatusPending}}
+	}
+	f.sendForCustomer(t, "anna@example.org", "")
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
+	return f, data, f.reconcile(t)
+}
+
+// A customer can have its erasures decided without a reviewer: erased at once
+// when every match is sure, the unsure ones left to a reviewer, or all kept
+// under a legal duty.
+func TestErasureHandling(t *testing.T) {
+	t.Run("automatic, all sure", func(t *testing.T) {
+		f, data, req := erasureInReview(t, ErasureAutomatic, false)
+		if req.Status != StatusApproved || len(data.approved) != 2 {
+			t.Errorf("status %q, approved %v; want approved with both matches erased", req.Status, data.approved)
 		}
-	}
-	if got, err := approvedMatches(matches, []uuid.UUID{probable, email}, FlowDataAccess); err != nil || len(got) != 2 {
-		t.Errorf("approvedMatches(ticked) = %v, %v; want both ticked", got, err)
-	}
-	for _, id := range []uuid.UUID{probable, email} {
-		if got, err := approvedMatches(matches, []uuid.UUID{strong, id}, FlowDataErasure); !errors.Is(err, ErrInvalidInput) {
-			t.Errorf("erasure ticking a %v match = %v, %v; want ErrInvalidInput", id, got, err)
+		if got := f.ips.deletes; got != 3 {
+			t.Errorf("sessions erased = %d; want both matches and the request", got)
 		}
-	}
+	})
+	t.Run("automatic, one unsure", func(t *testing.T) {
+		f, data, req := erasureInReview(t, ErasureAutomatic, true)
+		if req.Status != StatusNeedsReview || data.approved != nil {
+			t.Errorf("status %q, decided %v; want it left in review", req.Status, data.approved)
+		}
+		if got := f.ips.deletes; got != 2 {
+			t.Errorf("sessions erased = %d; want the two sure matches now", got)
+		}
+	})
+	t.Run("keep", func(t *testing.T) {
+		f, _, req := erasureInReview(t, ErasureKeep, true)
+		if req.Status != StatusRejected || req.ErrorCode != ErrorLegalRetention {
+			t.Errorf("status %q (%s); want rejected with %s", req.Status, req.ErrorCode, ErrorLegalRetention)
+		}
+		if got := f.ips.deletes; got != 0 {
+			t.Errorf("sessions erased = %d; want none", got)
+		}
+	})
+	t.Run("review", func(t *testing.T) {
+		f, _, req := erasureInReview(t, ErasureReview, false)
+		if req.Status != StatusNeedsReview || f.ips.deletes != 0 {
+			t.Errorf("status %q, erased %d; want it waiting for a reviewer", req.Status, f.ips.deletes)
+		}
+	})
 }
 
 // Every given name and the family name must match, in order, with the birth

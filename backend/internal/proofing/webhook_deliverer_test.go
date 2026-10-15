@@ -84,9 +84,10 @@ func TestSendFairSendsEveryDelivery(t *testing.T) {
 }
 
 func TestDeliveryBatchFitsLease(t *testing.T) {
-	// One endpoint that never answers holds the whole batch, endpointWorkers
-	// deep, while every worker busy adds the rest; keep that under half the lease.
-	depth := (deliveryBatch + endpointWorkers - 1) / endpointWorkers
+	// claimDue takes at most endpointWorkers of an endpoint's deliveries, so
+	// one that never answers holds its lane one round deep, while every worker
+	// busy adds the rest; keep that under half the lease.
+	depth := 1
 	busy := (deliveryBatch + deliveryWorkers - 1) / deliveryWorkers
 	worst := time.Duration(depth+busy) * safehttp.RequestTimeout
 	if worst > deliveryLease/2 {

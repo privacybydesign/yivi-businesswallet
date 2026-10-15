@@ -297,12 +297,16 @@ type ChipAccessKey struct {
 
 // ParsedMRZ is a document's MRZ identity fields, flattened for storage.
 type ParsedMRZ struct {
-	DocumentType   string `json:"documentType,omitempty"`
-	IssuingState   string `json:"issuingState,omitempty"`
-	Number         string `json:"number,omitempty"`
-	Nationality    string `json:"nationality,omitempty"`
-	Surname        string `json:"surname,omitempty"`
-	GivenNames     string `json:"givenNames,omitempty"`
+	DocumentType string `json:"documentType,omitempty"`
+	IssuingState string `json:"issuingState,omitempty"`
+	Number       string `json:"number,omitempty"`
+	Nationality  string `json:"nationality,omitempty"`
+	Surname      string `json:"surname,omitempty"`
+	GivenNames   string `json:"givenNames,omitempty"`
+	// FullSurname and FullGivenNames are the chip's DG11 name, when it has
+	// one: unlike the MRZ fields above, never cut off at a field's width.
+	FullSurname    string `json:"fullSurname,omitempty"`
+	FullGivenNames string `json:"fullGivenNames,omitempty"`
 	Sex            string `json:"sex,omitempty"`
 	DateOfBirth    string `json:"dateOfBirth,omitempty"`
 	DateOfExpiry   string `json:"dateOfExpiry,omitempty"`

@@ -175,6 +175,7 @@ func documentEvidence(doc *documentInfo) session.DocumentStepEvidence {
 		Parsed: session.ParsedMRZ{
 			DocumentType: doc.Type, IssuingState: doc.IssuingState, Number: doc.Number,
 			Nationality: doc.Nationality, Surname: doc.LastName, GivenNames: doc.FirstName,
+			FullSurname: doc.FullLastName, FullGivenNames: doc.FullFirstName,
 			Sex: doc.Sex, DateOfBirth: doc.DateOfBirth, DateOfExpiry: doc.DateOfExpiry,
 			PersonalNumber: doc.PersonalNumber,
 			// No MRZ checksums run here: Passive Authentication vouches for this data, so
@@ -187,9 +188,15 @@ func documentEvidence(doc *documentInfo) session.DocumentStepEvidence {
 func documentInfoFromParsedMRZ(p session.ParsedMRZ, now time.Time) documentInfo {
 	valid := p.AllChecksValid
 	notExpired := !documentExpired(p.DateOfExpiry, now)
+	// The display name is DG11's when the chip has one, as at the chip read.
+	shownGiven, shownSurname := p.GivenNames, p.Surname
+	if p.FullSurname != "" {
+		shownGiven, shownSurname = p.FullGivenNames, p.FullSurname
+	}
 	return documentInfo{
 		Type: p.DocumentType, Number: p.Number, IssuingState: p.IssuingState, Nationality: p.Nationality,
-		FirstName: p.GivenNames, LastName: p.Surname, DisplayName: displayName(p.GivenNames, p.Surname),
+		FirstName: p.GivenNames, LastName: p.Surname, DisplayName: displayName(shownGiven, shownSurname),
+		FullFirstName: p.FullGivenNames, FullLastName: p.FullSurname,
 		Sex: p.Sex, DateOfBirth: p.DateOfBirth, DateOfExpiry: p.DateOfExpiry, PersonalNumber: p.PersonalNumber,
 		Validity: &documentValidityInfo{
 			DocumentNumberCheckDigitValid: &valid, DateOfBirthCheckDigitValid: &valid,

@@ -279,3 +279,25 @@ func TestMintHandoverLimited(t *testing.T) {
 		t.Errorf("three mints = %v, want two OK and then 429", codes)
 	}
 }
+
+// The chip's DG11 name is stored with the document and is what the finish
+// shows, so a name the MRZ cut off reaches the result whole.
+func TestFullNameSurvivesToTheFinish(t *testing.T) {
+	read := documentInfo{
+		Type: "I", IssuingState: "NLD", FirstName: "JOHA", LastName: "VAN DEN BERG SCHOONHOVEN",
+		FullFirstName: "Johanna Wilhelmina", FullLastName: "van den Berg-Schoonhoven",
+		DateOfBirth: "1990-01-02", DateOfExpiry: "2031-05-01",
+	}
+	stored := documentEvidence(&read)
+	finished := documentInfoFromParsedMRZ(stored.Parsed, time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC))
+	if finished.FullFirstName != read.FullFirstName || finished.FullLastName != read.FullLastName {
+		t.Errorf("full name at the finish = %q %q, want DG11's", finished.FullFirstName, finished.FullLastName)
+	}
+	if want := "Johanna Wilhelmina van den Berg-Schoonhoven"; finished.DisplayName != want {
+		t.Errorf("display name = %q, want %q", finished.DisplayName, want)
+	}
+	without := documentInfoFromParsedMRZ(documentEvidence(&documentInfo{FirstName: "ANNA", LastName: "JANSEN"}).Parsed, time.Now())
+	if without.DisplayName != "ANNA JANSEN" {
+		t.Errorf("display name without DG11 = %q, want the MRZ's", without.DisplayName)
+	}
+}

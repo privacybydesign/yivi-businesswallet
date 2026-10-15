@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/http";
 import i18n from "../i18n";
 import type { ProofingFlow } from "../api/identity-proofing";
-import { DIPLOMA_MODES } from "../api/identity-proofing";
+import { DIPLOMA_MODES, ERASURE_HANDLINGS } from "../api/identity-proofing";
 import {
   diplomaRejectionReason,
   diplomaStepDone,
@@ -15,7 +15,7 @@ import {
   verifyStages,
   progressPollContinues,
   reviewSubmitStep,
-  matchTickable,
+  matchTickedByDefault,
   assignedFlows,
   attributeAvailable,
   draftFromFlow,
@@ -823,6 +823,26 @@ describe("diploma modes mirror backend/internal/proofing", () => {
   });
 });
 
+describe("erasure handlings mirror backend/internal/proofing", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../backend/internal/proofing/proofing.go",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const backend = [
+    ...source.matchAll(/Erasure\w+\s+ErasureHandling = "(\w+)"/g),
+  ].map((m) => m[1]);
+
+  it("has every backend handling and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    expect([...ERASURE_HANDLINGS].sort()).toEqual([...backend].sort());
+  });
+});
+
 describe("sessionView", () => {
   const until = "2026-10-12T12:00:00Z";
   const running = {
@@ -963,11 +983,14 @@ describe("diploma step", () => {
 });
 
 describe("data request review", () => {
-  it("ticks only a same-document match for an erasure", () => {
-    expect(matchTickable("data_erasure", "strong")).toBe(true);
-    for (const level of ["probable", "email", "name"]) {
-      expect(matchTickable("data_erasure", level)).toBe(false);
-      expect(matchTickable("data_access", level)).toBe(true);
+  it("starts an erasure with the matches read off a verified chip ticked", () => {
+    expect(matchTickedByDefault("data_erasure", "strong")).toBe(true);
+    expect(matchTickedByDefault("data_erasure", "probable")).toBe(true);
+    expect(matchTickedByDefault("data_access", "strong")).toBe(true);
+    expect(matchTickedByDefault("data_access", "probable")).toBe(false);
+    for (const level of ["email", "name"]) {
+      expect(matchTickedByDefault("data_erasure", level)).toBe(false);
+      expect(matchTickedByDefault("data_access", level)).toBe(false);
     }
   });
 

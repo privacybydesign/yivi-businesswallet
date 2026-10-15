@@ -22,11 +22,11 @@ func TestRedirectOriginsAreHTTPS(t *testing.T) {
 	f := newFixture()
 	customer := f.testCustomer()
 	saved, err := f.svc.SaveCustomerRedirectOrigins(context.Background(), testOrg.ID, customer.ID,
-		[]string{"https://Portal.Initech.example/", "http://localhost:3000", "https://portal.initech.example"})
+		[]string{"https://Portal.Initech.example/", "http://localhost:3000", "https://portal.initech.example", "http://[::1]:8080"})
 	if err != nil {
 		t.Fatalf("SaveCustomerRedirectOrigins: %v", err)
 	}
-	if want := []string{"https://portal.initech.example", "http://localhost:3000"}; !slices.Equal(saved.RedirectOrigins, want) {
+	if want := []string{"https://portal.initech.example", "http://localhost:3000", "http://[::1]:8080"}; !slices.Equal(saved.RedirectOrigins, want) {
 		t.Errorf("origins = %v, want %v (lowercased, once each)", saved.RedirectOrigins, want)
 	}
 	tooMany := make([]string, maxRedirectOrigins+1)
@@ -41,6 +41,12 @@ func TestRedirectOriginsAreHTTPS(t *testing.T) {
 		"no host":        {"https://"},
 		"another scheme": {"javascript:alert(1)"},
 		"too many":       tooMany,
+		// Each would mean something else in the hosted page's frame-ancestors.
+		"any host":         {"https://*"},
+		"any subdomain":    {"https://*.initech.example"},
+		"a CSP keyword":    {"https://'self'"},
+		"a CSP separator":  {"https://a.example;script-src"},
+		"a leading hyphen": {"https://-initech.example"},
 	} {
 		if _, err := f.svc.SaveCustomerRedirectOrigins(context.Background(), testOrg.ID, customer.ID, origins); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: %v, want ErrInvalidInput", name, err)

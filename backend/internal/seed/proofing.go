@@ -225,9 +225,8 @@ func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID, createdBy u
 		if _, err := customers.SaveFlows(ctx, orgID, customer.ID, sel); err != nil {
 			return fmt.Errorf("seed: customer %s flows: %w", c.name, err)
 		}
-		settings := customer.Settings
-		settings.DataRetentionDays = c.retentionDays
-		if _, err := customers.SaveSettings(ctx, orgID, customer.ID, settings); err != nil {
+		if _, err := customers.SaveSettings(ctx, orgID, customer.ID,
+			proofing.CustomerSettingsChange{DataRetentionDays: &c.retentionDays}); err != nil {
 			return fmt.Errorf("seed: customer %s settings: %w", c.name, err)
 		}
 	}

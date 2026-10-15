@@ -36,6 +36,9 @@ type Handler struct {
 	apiCalls    *ratelimit.Limiter
 	apiSessions *ratelimit.Limiter
 	hostedCalls *ratelimit.Limiter
+	// staleLinks holds each hosted link no longer live on its own, off its
+	// customer's hostedCalls.
+	staleLinks *ratelimit.Limiter
 	// authFailures holds unknown API keys and hosted links per source
 	// (failureLimited).
 	authFailures *ratelimit.Limiter
@@ -44,6 +47,9 @@ type Handler struct {
 	// memberFaceFrames holds the on-screen Yivi face check's frames per org:
 	// each one is a Regula call.
 	memberFaceFrames *ratelimit.Limiter
+	// webhookTests holds an admin's test events per customer: each one is a
+	// delivery the shared deliverer sends.
+	webhookTests *ratelimit.Limiter
 	// idempotency keeps customer-API POST answers by Idempotency-Key; nil
 	// runs every call.
 	idempotency *IdempotencyStore
@@ -60,17 +66,19 @@ func NewHandler(service *Service, requireUser, authorize func(http.Handler) http
 		apiCalls: ratelimit.New(apiCallLimit), apiSessions: ratelimit.New(APISessionLimit),
 		hostedCalls: ratelimit.New(hostedCallLimit), memberFaceFrames: ratelimit.New(memberFaceFrameLimit),
 		authFailures: newAuthFailures(), hostedSources: ratelimit.New(hostedSourceLimit),
+		webhookTests: ratelimit.New(webhookTestLimit), staleLinks: ratelimit.New(staleLinkLimit),
 	}
 }
 
 func newAuthFailures() *ratelimit.Limiter { return ratelimit.New(authFailureLimit) }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	// Every org route refuses while the org's proofing is paused; the pause
-	// routes themselves are registerPause's.
-	member := func(next http.Handler) http.Handler { return h.requireUser(h.authorize(h.active(next))) }
+	// A paused org's routes stay open: the service refuses only what starts
+	// proofing (CreateRequest, startHosted), so an admin can still revoke a
+	// key, remove a webhook or erase data, and running sessions still settle.
+	member := func(next http.Handler) http.Handler { return h.requireUser(h.authorize(next)) }
 	admin := func(next http.Handler) http.Handler {
-		return h.requireUser(h.authorize(organization.RequireOrgAdmin(h.active(next))))
+		return h.requireUser(h.authorize(organization.RequireOrgAdmin(next)))
 	}
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows", member(respond.HandlerFunc(h.listFlows)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows", admin(respond.HandlerFunc(h.createFlow)))
@@ -689,10 +697,12 @@ type customerResponse struct {
 	PausedAt      *time.Time     `json:"pausedAt,omitempty"`
 	// SessionTTLSeconds is how long a mailed session runs; DataRetentionDays how
 	// long an approved subject's proofed name is kept.
-	SessionTTLSeconds int                   `json:"sessionTtlSeconds"`
-	DataRetentionDays int                   `json:"dataRetentionDays"`
-	Webhook           webhookHealthResponse `json:"webhook"`
-	Branding          brandingResponse      `json:"branding"`
+	SessionTTLSeconds int `json:"sessionTtlSeconds"`
+	DataRetentionDays int `json:"dataRetentionDays"`
+	// ErasureHandling is how its "delete my data" requests are decided.
+	ErasureHandling ErasureHandling       `json:"erasureHandling"`
+	Webhook         webhookHealthResponse `json:"webhook"`
+	Branding        brandingResponse      `json:"branding"`
 	// AllowedRedirectOrigins are where a hosted page may send its subject back
 	// to and be embedded on.
 	AllowedRedirectOrigins []string  `json:"allowedRedirectOrigins"`
@@ -713,6 +723,7 @@ func newCustomerResponse(slug string, c Customer, health map[uuid.UUID]WebhookHe
 		PausedAt:          c.PausedAt,
 		SessionTTLSeconds: int(c.Settings.SessionTTL.Seconds()),
 		DataRetentionDays: c.Settings.DataRetentionDays,
+		ErasureHandling:   c.Settings.ErasureHandling,
 		Webhook:           newWebhookHealthResponse(health[c.ID]),
 		Branding:          newBrandingResponse(slug, c),
 		HasAPIKey:         c.HasAPIKey,
@@ -797,6 +808,8 @@ type updateCustomerRequest struct {
 	Paused            *bool   `json:"paused"`
 	SessionTTLSeconds *int    `json:"sessionTtlSeconds"`
 	DataRetentionDays *int    `json:"dataRetentionDays"`
+	// ErasureHandling is review, automatic or keep (ErasureHandling).
+	ErasureHandling *ErasureHandling `json:"erasureHandling"`
 	// AllowedRedirectOrigins replaces the list; absent leaves it.
 	AllowedRedirectOrigins *[]string `json:"allowedRedirectOrigins"`
 }
@@ -812,50 +825,27 @@ func (h *Handler) updateCustomer(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	if body.Name == nil && body.Paused == nil && body.SessionTTLSeconds == nil && body.DataRetentionDays == nil &&
-		body.AllowedRedirectOrigins == nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "nothing to update"}
+	update := CustomerUpdate{
+		Name: body.Name, RedirectOrigins: body.AllowedRedirectOrigins,
+		Settings: CustomerSettingsChange{DataRetentionDays: body.DataRetentionDays, ErasureHandling: body.ErasureHandling},
 	}
-
-	orgID := orgFromRequest(r).ID
-	var c Customer
-	if body.Name != nil {
-		if c, err = h.service.RenameCustomer(r.Context(), orgID, id, *body.Name); err != nil {
-			return mapError(err)
-		}
-	}
-
 	if body.Paused != nil {
 		status := CustomerActive
 		if *body.Paused {
 			status = CustomerPaused
 		}
-		if c, err = h.service.SetCustomerStatus(r.Context(), orgID, id, status); err != nil {
-			return mapError(err)
-		}
+		update.Status = &status
 	}
-
-	if body.SessionTTLSeconds != nil || body.DataRetentionDays != nil {
-		current, err := h.service.Customer(r.Context(), orgID, id)
-		if err != nil {
-			return mapError(err)
-		}
-		settings := current.Settings
-		if body.SessionTTLSeconds != nil {
-			settings.SessionTTL = time.Duration(*body.SessionTTLSeconds) * time.Second
-		}
-		if body.DataRetentionDays != nil {
-			settings.DataRetentionDays = *body.DataRetentionDays
-		}
-		if c, err = h.service.SaveCustomerSettings(r.Context(), orgID, id, settings); err != nil {
-			return mapError(err)
-		}
+	if body.SessionTTLSeconds != nil {
+		ttl := time.Duration(*body.SessionTTLSeconds) * time.Second
+		update.Settings.SessionTTL = &ttl
 	}
-
-	if body.AllowedRedirectOrigins != nil {
-		if c, err = h.service.SaveCustomerRedirectOrigins(r.Context(), orgID, id, *body.AllowedRedirectOrigins); err != nil {
-			return mapError(err)
-		}
+	if update.Name == nil && update.Status == nil && update.Settings.empty() && update.RedirectOrigins == nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "nothing to update"}
+	}
+	c, err := h.service.UpdateCustomer(r.Context(), orgFromRequest(r).ID, id, update)
+	if err != nil {
+		return mapError(err)
 	}
 
 	return h.respondCustomer(w, r, c)
@@ -1046,7 +1036,7 @@ func mapError(err error) error {
 	case errors.Is(err, ErrOrgNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "organization_not_found", Message: "organisation not found"}
 	case errors.Is(err, ErrFlowNoIdentity):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "a data request flow must read the name and date of birth, which a person's sessions are found by"}
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "the flow must read the name and date of birth: a data request finds a person's sessions by them, and a diploma's holder is matched against them"}
 	case errors.Is(err, ErrDataFlowForMember):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "data_flow_for_member", Message: "a data request flow is for a customer's subjects, not for members"}
 	case errors.Is(err, ErrExportUnavailable):

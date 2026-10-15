@@ -520,6 +520,7 @@ export const en = {
       docExpired: "document expired",
       assuranceNotMet: "below the flow's required assurance level",
       reviewLapsed: "not reviewed within 30 days",
+      legalRetention: "the customer is bound by law to keep this data",
       orgPaused:
         "identity proofing was paused for this organisation while the session waited for review; try again later",
       identityMismatch:
@@ -923,9 +924,9 @@ export const en = {
           name: "Same name",
         },
         erasureUntickHint:
-          "Only sessions proven with the same document can be erased: one that only shares the name and date of birth may be another person's, and an erasure cannot be undone. Untick what must be kept, for example under a legal retention duty.",
+          "Sessions whose name and date of birth were read off a verified chip are ticked, on the same document or another: they are this person's. Untick what must be kept, for example under a legal retention duty.",
         erasureEmailMatchesHint:
-          "These never finished, so there is no proven identity to compare and they cannot be erased here: their data is deleted when the customer's retention lapses.",
+          "These never finished, so there is no proven identity to compare: only the e-mail address or the name typed in matches. Tick the ones that are this person's to erase them too; the rest is deleted when the customer's retention lapses.",
         untickHint:
           "Sessions proven with the same document are ticked; one that only shares the name and date of birth is not, so tick it only when you are sure it is this person's. Untick what must be kept, for example under a legal retention duty.",
         erased: "Erased",
@@ -1018,6 +1019,21 @@ export const en = {
         "A session's personal data (the name and e-mail address it was sent to, everything read off the document and chip, the photos, and any diplomas) is purged this long after it ends. The result and the audit trail stay.",
       days_one: "{{count}} day",
       days_other: "{{count}} days",
+      erasure: "Erasure requests",
+      erasureHint:
+        "How a request to delete someone's data is decided once their identity is proven.",
+      erasureOptions: {
+        review: "Reviewer decides",
+        automatic: "Automatic",
+        keep: "Keep: legal duty",
+      },
+      erasureOptionHints: {
+        review:
+          "A reviewer decides each request. Sessions proven to be this person's start ticked; the reviewer ticks any found only by e-mail address or name.",
+        automatic:
+          "Sessions proven to be this person's are deleted at once. Only sessions found by e-mail address or name go to a reviewer.",
+        keep: "Every request is refused and the data kept, because a law requires this customer to keep it. The person is told why.",
+      },
       nameTitle: "Name",
       nameHint: "Shown to your members and in the audit log.",
       redirectOriginsTitle: "Redirect origins",
@@ -1353,6 +1369,12 @@ export const en = {
           "Your request was sent to {{customer}} for review. Open this link again later to see the outcome.",
       },
       erased: "Your data was deleted.",
+      erasedPartly_one:
+        "We deleted the data we could link to you for certain. {{count}} earlier request we could not link to you for certain was kept; its data is deleted when {{customer}}'s retention period ends.",
+      erasedPartly_other:
+        "We deleted the data we could link to you for certain. {{count}} earlier requests we could not link to you for certain were kept; their data is deleted when {{customer}}'s retention period ends.",
+      keptByLaw:
+        "{{customer}} is required by law to keep your data, so it was not deleted.",
       download: "Download my data",
       downloadUntil: "Available until {{date}}.",
       downloadExpired: "The download is no longer available.",

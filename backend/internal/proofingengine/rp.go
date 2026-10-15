@@ -405,7 +405,7 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 	}, &out); err != nil {
 		return pp.Result{}, err
 	}
-	res := pp.Result{Status: out.Status, ErrorCode: out.ErrorCode, CompletedAt: out.CompletedAt}
+	res := pp.Result{Status: out.Status, ErrorCode: out.ErrorCode, CompletedAt: out.CompletedAt, ExpiresAt: sess.ExpiresAt}
 	var roles []string
 	for _, d := range out.Devices {
 		roles = append(roles, d.Role)
@@ -457,8 +457,11 @@ type resultView struct {
 			DisplayName  string `json:"displayName"`
 			FirstName    string `json:"firstName"`
 			LastName     string `json:"lastName"`
-			DateOfBirth  string `json:"dateOfBirth"`
-			DateOfExpiry string `json:"dateOfExpiry"`
+			// The chip's DG11 name, never cut off; absent without DG11.
+			FullFirstName string `json:"fullFirstName"`
+			FullLastName  string `json:"fullLastName"`
+			DateOfBirth   string `json:"dateOfBirth"`
+			DateOfExpiry  string `json:"dateOfExpiry"`
 		} `json:"document"`
 		ChipChecks *struct {
 			Passive *struct {
@@ -599,6 +602,7 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	}
 	if doc := res.Document; doc != nil {
 		out.GivenName, out.FamilyName = strings.TrimSpace(doc.FirstName), strings.TrimSpace(doc.LastName)
+		out.FullGivenName, out.FullFamilyName = strings.TrimSpace(doc.FullFirstName), strings.TrimSpace(doc.FullLastName)
 		out.BirthDate, out.Nationality = doc.DateOfBirth, doc.Nationality
 		ev.DocumentType, ev.IssuingState, ev.ExpiryDate = doc.Type, doc.IssuingState, doc.DateOfExpiry
 	}

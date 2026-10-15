@@ -244,7 +244,9 @@ function HostedFlow({
                 customer={customer.name}
                 kind={flow.kind as DataKind}
                 status={settledStatus ?? page.status}
+                errorCode={page.errorCode}
                 exportUntil={page.dataExportUntil}
+                kept={page.dataMatchesKept}
               />
             ) : undefined
           }
@@ -258,19 +260,24 @@ type DataKind = Exclude<FlowKind, "identity">;
 
 // What a data request's person sees once their identity check settled: that
 // the request awaits the customer's review, its outcome, and an approved "see
-// my data" request's download while it lasts.
+// my data" request's download while it lasts. An erasure that kept sessions
+// says so, and one refused under a legal duty says why.
 function DataRequestOutcome({
   token,
   customer,
   kind,
   status,
+  errorCode,
   exportUntil,
+  kept,
 }: {
   token: string;
   customer: string;
   kind: DataKind;
   status: string;
+  errorCode: string | undefined;
   exportUntil: string | undefined;
+  kept: number | undefined;
 }): React.JSX.Element | null {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
@@ -285,7 +292,12 @@ function DataRequestOutcome({
       if (kind === "data_erasure") {
         return (
           <p role="status" className={HINT}>
-            {t("proofLink.dataRequest.erased")}
+            {kept
+              ? t("proofLink.dataRequest.erasedPartly", {
+                  count: kept,
+                  customer,
+                })
+              : t("proofLink.dataRequest.erased")}
           </p>
         );
       }
@@ -309,7 +321,17 @@ function DataRequestOutcome({
           {t("proofLink.dataRequest.downloadExpired")}
         </p>
       );
+    case "rejected":
+      return kind === "data_erasure" && errorCode === LEGAL_RETENTION ? (
+        <p role="status" className={HINT}>
+          {t("proofLink.dataRequest.keptByLaw", { customer })}
+        </p>
+      ) : null;
     default:
       return null;
   }
 }
+
+// The error code of an erasure its customer refused under a legal duty to
+// keep the data (ErrorLegalRetention in backend/internal/proofing).
+const LEGAL_RETENTION = "LEGAL_RETENTION";

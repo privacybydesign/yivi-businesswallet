@@ -29,8 +29,8 @@ type ReviewInput struct {
 	Approve   bool
 	ErrorCode string
 	Reason    string
-	// RequestIDs are the matched sessions approving a data request takes;
-	// nil takes only the MatchStrong ones. Only for a data request.
+	// RequestIDs are the matched sessions approving a data request takes; nil
+	// takes those approvedMatches takes without a tick. Only for a data request.
 	RequestIDs []uuid.UUID
 }
 
@@ -70,7 +70,10 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 	if err := s.ips.DecideReview(ctx, tenant, req.session.ID, req.session.Token, decision); err != nil {
 		var rejected *proofingprovider.RejectedError
 		if errors.As(err, &rejected) {
-			// The engine no longer holds it under review: another decision won, or it ended.
+			// The engine no longer holds it under review: another decision won,
+			// or it ended. Read what it holds, so the request does not wait in
+			// review for a notice that may have been missed.
+			_, _ = s.tryReconcile(ctx, tenant, req)
 			return Request{}, ErrNotUnderReview
 		}
 		return Request{}, fmt.Errorf("proofing: decide review request %s: %w", req.ID, err)
@@ -79,6 +82,9 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 	if in.Approve {
 		decided = StatusApproved
 	}
+	// The engine has decided: who decided and why is recorded even if the
+	// caller has gone, or the outcome would land as the system's.
+	ctx = context.WithoutCancel(ctx)
 	if err := s.requests.RecordReviewDecision(ctx, req, decided, in.Reason, in.ErrorCode); err != nil {
 		return Request{}, err
 	}

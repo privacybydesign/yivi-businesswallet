@@ -75,7 +75,7 @@ func TestReadDiplomaFilesInMemory(t *testing.T) {
 		uploadPart{field: diplomaFormField, name: "b.pdf", size: MaxDiplomaFileBytes},
 		uploadPart{field: "other", name: "c.pdf", size: 10},
 	)
-	files, err := readDiplomaFiles(httptest.NewRecorder(), r)
+	files, err := readDiplomaFiles(httptest.NewRecorder(), r, MaxDiplomasPerRequest)
 	if err != nil {
 		t.Fatalf("readDiplomaFiles: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestReadDiplomaFilesRefused(t *testing.T) {
 		}, http.StatusRequestEntityTooLarge, "too_large"},
 		{"the upload too large", func(t *testing.T) *http.Request {
 			return diplomaUpload(t, uploadPart{field: diplomaFormField, name: "a.pdf", size: 1},
-				uploadPart{field: "padding", size: maxDiplomaUploadBytes})
+				uploadPart{field: "padding", size: int(maxDiplomaUpload(MaxDiplomasPerRequest))})
 		}, http.StatusRequestEntityTooLarge, "too_large"},
 		{"too many files", func(t *testing.T) *http.Request {
 			return diplomaUpload(t, tooMany...)
@@ -117,11 +117,28 @@ func TestReadDiplomaFilesRefused(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			noTempFiles(t)
-			_, err := readDiplomaFiles(httptest.NewRecorder(), tc.req(t))
+			_, err := readDiplomaFiles(httptest.NewRecorder(), tc.req(t), MaxDiplomasPerRequest)
 			var apiErr *respond.APIError
 			if !errors.As(err, &apiErr) || apiErr.Status != tc.status || apiErr.Code != tc.code {
 				t.Errorf("readDiplomaFiles = %v, want %d %s", err, tc.status, tc.code)
 			}
 		})
+	}
+}
+
+// An upload is read only as far as the extracts the request still takes: an
+// anonymous caller cannot make the server hold ten extracts' worth of a body
+// for a request that takes one more.
+func TestDiplomaUploadReadsOnlyTheSlotsLeft(t *testing.T) {
+	two := diplomaUpload(t, uploadPart{field: diplomaFormField, name: "a.pdf", size: 1},
+		uploadPart{field: diplomaFormField, name: "b.pdf", size: 1})
+	var apiErr *respond.APIError
+	if _, err := readDiplomaFiles(httptest.NewRecorder(), two, 1); !errors.As(err, &apiErr) || apiErr.Code != "too_many_files" {
+		t.Errorf("two extracts with one slot left = %v, want too_many_files", err)
+	}
+	big := diplomaUpload(t, uploadPart{field: diplomaFormField, name: "a.pdf", size: 1},
+		uploadPart{field: "padding", size: int(maxDiplomaUpload(1))})
+	if _, err := readDiplomaFiles(httptest.NewRecorder(), big, 1); !errors.As(err, &apiErr) || apiErr.Code != "too_large" {
+		t.Errorf("a body past one slot's worth = %v, want too_large", err)
 	}
 }

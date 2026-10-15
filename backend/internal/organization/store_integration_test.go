@@ -259,6 +259,12 @@ func TestStoreDeleteStripsProofingSubjects(t *testing.T) {
 	ctx := context.Background()
 	org := makeOrg(t, pool, "Acme", "acme")
 	requestID := uuid.NewString()
+	userID := uuid.NewString()
+	if err := (audit.DBRecorder{}).Record(ctx, pool, audit.IdentityProofingRequested,
+		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: requestID, OrgID: &org.ID},
+		map[string]any{"subjectUserId": userID, "subjectName": "Anna"}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
 	if err := (audit.DBRecorder{}).Record(ctx, pool, audit.IdentityProofingSessionCancelled,
 		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: requestID, OrgID: &org.ID},
 		audit.Updated(map[string]any{"status": "pending", "subjectName": "Anna", "subjectEmail": "anna@example.org"},
@@ -272,7 +278,8 @@ func TestStoreDeleteStripsProofingSubjects(t *testing.T) {
 
 	var named int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE target_id = $1
-		AND (metadata::text LIKE '%Anna%' OR metadata::text LIKE '%anna@example.org%')`, requestID).Scan(&named); err != nil {
+		AND (metadata::text LIKE '%Anna%' OR metadata::text LIKE '%anna@example.org%'
+			OR metadata::text LIKE '%' || $2 || '%')`, requestID, userID).Scan(&named); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if named != 0 {

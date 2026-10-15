@@ -6,7 +6,10 @@ import {
   useRemoveCustomerMutation,
   useUpdateCustomerMutation,
 } from "../api/identity-proofing.queries";
-import type { ProofingCustomer } from "../api/identity-proofing";
+import {
+  ERASURE_HANDLINGS,
+  type ProofingCustomer,
+} from "../api/identity-proofing";
 import {
   DATA_RETENTION_DAY_OPTIONS,
   SESSION_TTL_OPTIONS_SECONDS,
@@ -21,8 +24,8 @@ const HINT = "text-muted text-[12px]";
 const ERROR = "text-error text-[12.5px]";
 
 // A customer's settings: how long a mailed session runs, how long an approved
-// subject's name is kept, where its hosted pages may hand the subject back, its
-// name, and removing it.
+// subject's name is kept, how its erasure requests are decided, where its
+// hosted pages may hand the subject back, its name, and removing it.
 export function SettingsTab({
   slug,
   customer,
@@ -74,6 +77,30 @@ export function SettingsTab({
               onChange={(days) => update.mutate({ dataRetentionDays: days })}
             />
           </SettingRow>
+          <SettingRow
+            label={t("customers.settings.erasure")}
+            hint={t("customers.settings.erasureHint")}
+          >
+            <div className="flex flex-col gap-2">
+              <Segmented
+                label={t("customers.settings.erasure")}
+                options={ERASURE_HANDLINGS.map((handling) => ({
+                  value: handling,
+                  label: t(`customers.settings.erasureOptions.${handling}`),
+                }))}
+                value={customer.erasureHandling}
+                disabled={update.isPending}
+                onChange={(handling) =>
+                  update.mutate({ erasureHandling: handling })
+                }
+              />
+              <p className={HINT}>
+                {t(
+                  `customers.settings.erasureOptionHints.${customer.erasureHandling}`,
+                )}
+              </p>
+            </div>
+          </SettingRow>
         </div>
         {update.isError && (
           <p className={`${ERROR} px-5 pb-4`}>
@@ -108,7 +135,7 @@ function SettingRow({
   );
 }
 
-function Segmented<T extends number>({
+function Segmented<T extends string | number>({
   label,
   options,
   value,
@@ -117,7 +144,7 @@ function Segmented<T extends number>({
 }: {
   label: string;
   options: { value: T; label: string }[];
-  value: number;
+  value: T;
   disabled: boolean;
   onChange: (value: T) => void;
 }): React.JSX.Element {

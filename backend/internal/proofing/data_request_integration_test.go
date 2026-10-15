@@ -98,7 +98,7 @@ func TestDataRequestStore(t *testing.T) {
 	}
 
 	until := time.Now().Add(DataExportWindow)
-	if err := data.RecordDecision(ctx, dr, []uuid.UUID{session.ID}, &until); err != nil {
+	if err := data.RecordDecision(ctx, dr, []uuid.UUID{session.ID}, &until, nil); err != nil {
 		t.Fatalf("RecordDecision: %v", err)
 	}
 	if matches, _ := data.Matches(ctx, dr); len(matches) != 1 || matches[0].Approved == nil || !*matches[0].Approved {
@@ -152,7 +152,7 @@ func TestDataRequestStore(t *testing.T) {
 	if other, err = requests.Get(ctx, orgID, other.ID); err != nil {
 		t.Fatalf("Get other: %v", err)
 	}
-	if err := requests.Purge(ctx, other); err != nil {
+	if err := requests.Purge(ctx, other, nil); err != nil {
 		t.Fatalf("Purge other: %v", err)
 	}
 	var keyed bool

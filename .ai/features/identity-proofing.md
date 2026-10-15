@@ -382,6 +382,21 @@ engine reports it `expired` or `cancelled` undecided, `EndSession` stamps
 `ips_session_ended_at` (audited `identity_proofing.session_ended`) and the
 request reads as expired. A new request means a new mail.
 
+- **The cap follows the engine.** Opening a session gives it more time in the
+  engine than it was created with (`SessionOpenTTL`, within
+  `SessionMaxLifetime`). `SessionStatus` reports the engine's expiry
+  (`Result.ExpiresAt`), and every reconcile moves `ips_session_expires_at`
+  later to match (`ExtendSession`; never earlier). Without it a request read
+  expired while its subject was still at it, then flipped to their outcome.
+- **Cancel and purge end the engine session under the row's lock.**
+  `RequestStore.Cancel` and `.Purge` take an `endSession` callback and call
+  the engine inside their transaction, after their UPDATE took the row. The
+  engine's own change notice for it then waits, and finds the request
+  cancelled or purged instead of recording it expired: one cancel sends one
+  final webhook. A failed engine call rolls the write back. A cancel runs on
+  its own context once the engine has been asked. `MarkStarted` ignores a
+  cancelled or ended request, so a late "opened" cannot follow either.
+
 **Mail URLs.** A mail URL is otherwise absolute http(s) only. The proofing
 link variable (`proofingUrl`) is declared with `AppScheme: "vcmrtd"`
 (`internal/email/catalog.go`): its value must be a `vcmrtd:` link with a host,
@@ -500,7 +515,10 @@ post-review outcome stay the system's.
   - the same key and body replay the first successful answer
     (`Idempotent-Replayed: true`); another body is 422 `idempotency_key_reused`;
     a call still running is 409 `idempotency_in_flight`.
-  - a call that errs or panics releases the key, so it can be retried.
+  - a call that errs or panics releases the key, so it can be retried; a
+    release that fails is logged, as the caller only sees the call's answer.
+  - without an encryption key a keyed call is 409 `no_encryption_key`, like
+    an unkeyed one.
   - a key is never run again once the call may have had its effect: an answer
     that fails to store, or a replica lost mid-call, keeps the key in flight
     (409) until the 24 h prune. There is no timeout release.
@@ -523,9 +541,12 @@ post-review outcome stay the system's.
   - The key lookup is a read; the customer's limit is taken before the key's
     `last_used_at` is written, at most once a minute (`apiKeyTouchEvery`).
   - An unknown key counts against its source (`authFailureLimit`, 60 a
-    minute, by remote address): past it the guess answers 429 instead of 401.
-    It never holds a valid key, so a shared proxy address is never locked out
-    by someone else's guesses.
+    minute): past it the guess answers 429 instead of 401. It never holds a
+    valid key, so a shared proxy address is never locked out by someone
+    else's guesses. A source is the client address `clientip` resolves behind
+    `TRUSTED_PROXIES`, an IPv6 one its /64 (`SourceKey`); the first request
+    with `X-Forwarded-For` from a peer the list leaves out is logged once, as
+    every caller would then share the proxy's limit.
 - **Webhooks**: a customer's results show in Sessions, the API and the audit
   log whatever its webhook. A customer without an endpoint of its own is sent
   no events (nothing is queued; `test` needs an endpoint). One that hosts its
@@ -551,12 +572,19 @@ post-review outcome stay the system's.
   A delivery's `sessionId` is the `ps_` id (absent for a `test` delivery). Each outbox insert
   `pg_notify`s `identity_proofing_webhooks`, so the deliverer sends as the change
   commits; it then sleeps until the next retry or lapsed lease. It leases due rows (`FOR UPDATE SKIP LOCKED`, 5-minute lease).
-  - Per batch (`deliveryBatch` 20): `deliveryWorkers` (10) sends at once, at
-    most `endpointWorkers` (2) to one URL (`sendFair`), so an endpoint that
-    never answers holds two workers, not other orgs' deliveries.
-  - Worst batch: 10 sends deep on one endpoint plus 2 rounds of all workers,
-    12 x `safehttp.RequestTimeout` = 120 s, inside the lease
+  - Per batch (`deliveryBatch` 20) `claimDue` takes at most `endpointWorkers`
+    (2) of one endpoint's deliveries, its oldest (a `row_number()` per
+    customer over everything due, held rows counted, so across replicas too).
+    `deliveryWorkers` (10) send at once, `sendFair` keeping to 2 per URL. The
+    next batch waits for the last, so an endpoint that never answers costs
+    every other org one `safehttp.RequestTimeout` per batch, not its backlog.
+  - Worst batch: one round per endpoint plus 2 rounds of all workers,
+    3 x `safehttp.RequestTimeout` = 30 s, inside the lease
     (`TestDeliveryBatchFitsLease`).
+  - A delivery whose endpoint secret no longer decrypts counts as a failed
+    attempt, so it fails in time and drops its diploma, instead of being
+    claimed every 5 minutes forever.
+  - `POST …/webhook/test` is 10 a minute per customer (`webhookTestLimit`).
 
   It POSTs
   through `safehttp` (https, public addresses only, dialed IP = vetted IP, no
@@ -565,6 +593,8 @@ post-review outcome stay the system's.
   `Yivi-Event`, `Yivi-Delivery`; 8 attempts over about 24 h, then `failed`.
   Health (`delivering` / `failing` since / pending retries) is derived from the
   deliveries; a failing endpoint makes an active customer read "Needs attention".
+  The failing streak counts from a delivery's `first_attempt_at` (or the last
+  success, if later): `last_attempt_at` moves with every retry.
 - **Branding** (columns on the customer): display name, `#rrggbb` colour, logo
   (PNG/JPEG/GIF/WebP, 512 KiB; no SVG, mail clients do not render it), support
   contact, https privacy URL. It applies to the proofing mail of the customer's
@@ -572,8 +602,11 @@ post-review outcome stay the system's.
   replaces the org's primary seed, the logo replaces the org's (none shows the
   name as wordmark, never the org's logo), and the `supportContact` /
   `privacyUrl` paragraphs appear only when set (an all-empty paragraph collapses).
-- **Settings**: `session_ttl_seconds` (120/300/600) and `data_retention_days`
-  (7/30/90/180/365, default 30: the design's maximum of a year; the proofed-name retention). The frontend options are held to the Go
+- **Settings**: `session_ttl_seconds` (120/300/600), `data_retention_days`
+  (7/30/90/180/365, default 30: the design's maximum of a year; the proofed-name retention)
+  and `erasure_handling` (`review`/`automatic`/`keep`, §15). A change sets
+  only what it names, applied under the customer's lock, and a `PATCH` checks
+  every part before it saves any (`UpdateCustomer`). The frontend options are held to the Go
   lists by `lib/identity-proofing.test.ts`.
 - **Remove customer** deletes its requests (addresses, names, outcomes), keys,
   endpoint and deliveries; the audit trail stays (`customer_removed`).
@@ -626,9 +659,14 @@ what is collected, the app, then its session. Its API is `/api/v1/proof/{token}`
 the API is:
 
 - The link is looked up once per call (the limiter hands the request it read
-  to the handler), then the call counts against its customer's
+  to the handler). A live link's call counts against its customer's
   `hostedCallLimit` across all its links (a member's link counts against its
-  org). Past it: 429 `rate_limited` with `Retry-After`.
+  org); a link no longer live (`Request.linkLive`: not waiting to start, its
+  session not running or in review, no diploma or export window open) counts
+  against its own `staleLinkLimit` (60 a minute), so an old link polled hard
+  leaves the customer's live pages alone. Every call also counts against its
+  source's `hostedSourceLimit`; an IPv6 source is its /64 (`clientip.SourceKey`).
+  Past either: 429 `rate_limited` with `Retry-After`.
 - Its own bucket, not the API's, sized for the page (face frames every 400 ms).
 - As with an unknown API key, a token that matches no link is a 404 that counts
   against its source's `authFailureLimit`; past it, 429.
@@ -659,7 +697,9 @@ engine's day of grace, rounded up ("deleted at most N days after"). Its Decline 
 actor label `hosted_link`); a started link is 409 `link_started`. A customer
 lists `allowedRedirectOrigins` (customer settings tab, `PATCH` customer; stored
 `identity_proofing_customers.allowed_redirect_origins`): https origins, or http
-on a loopback host, at most 10, normalised lowercase. A hosted create may carry
+on a loopback host, at most 10, normalised lowercase. The host must be a DNS
+name or an IP address (`validHost`): the origins are written into the page's
+`frame-ancestors`, where `*`, a quote or a `;` would mean something else. A hosted create may carry
 `redirectUrl` on one of them (else 400 `redirect_not_allowed`; any other channel
 400). The page view answers `sessionId` (the `ps_` id), `redirectUrl`,
 `embedOrigins` and `language`. Once `Session` reports an outcome
@@ -700,12 +740,13 @@ the "Identity proofing" column on `/admin/organizations`, list at
 `GET /admin/identity-proofing/pauses`), which the org cannot lift, and the org
 admin's own switch (`PUT /orgs/{slug}/identity-proofing/pause`, the card at the
 bottom of the overview). Default: never paused. Audited `identity_proofing.paused`
-/ `.resumed` with `by: platform|organization`. While paused, every org route
-(the `member`/`admin` closures wrap `h.active`), every customer-API call
-(`requireAPIKey`) and every hosted link (`hostedRequest`, so the page, its start
-and its `frame-ancestors`) answers 403 `proofing_paused`; the overview shows why
-instead. Only the pause routes stay reachable. Running sessions still settle
-(engine notices, the deadline job) and webhooks still go out. Pausing (either
+/ `.resumed` with `by: platform|organization`. While paused, nothing new
+starts: `CreateRequest` (a member's send, the customer API's create) and
+`startHosted` (a hosted link's start, the API's headless start) answer 403
+`proofing_paused`; the overview shows why. Every other route stays open, so an
+admin who paused over a leaked key can still revoke it, remove a webhook or
+erase data. Running sessions still settle (engine notices, the deadline job,
+the on-screen Yivi check's frames) and webhooks still go out. Pausing (either
 level) rejects every open review of the org with `ORG_PAUSED` (reviewer
 "system: organisation paused"), so nothing waits on a decision nobody can
 make; both pause dialogs say so. No review stays open under a pause:
@@ -915,7 +956,9 @@ only: the engine knows nothing of it.
 - **Per flow** (`identity_proofing_flow_settings.diplomas`, `FlowDiplomaStore`,
   `PUT .../flows/{id}/diplomas`, admin): `off` (the default) or `required`,
   audited `flow_diplomas_configured`. A step is in the flow or not, so there is
-  no optional diploma step.
+  no optional diploma step. `required` needs a flow that reads the name and
+  date of birth (`flow_no_identity`): each extract's holder is matched
+  against them.
   The flow editor shows it as the last step, "Upload diplomas (DUO)": a step
   for the admin, never sent to the engine (its steps are the app's, and it
   would refuse one it does not know). It is saved after the flow, so a new flow
@@ -931,7 +974,9 @@ only: the engine knows nothing of it.
 - **Upload** (`POST .../requests/{id}/diplomas`, `POST /proof/{token}/diplomas`,
   multipart `file` parts): only on an approved request, within
   `DiplomaUploadWindow` (1 h) of its approval (`diplomasUntil` in the
-  request, hosted progress), at most 10 per request, 5 MiB each. The page
+  request, hosted progress), at most 10 per request, 5 MiB each; the hosted
+  route reads a body only as large as the extracts the request still takes
+  (`HostedDiplomasOpen`, `maxDiplomaUpload`). The page
   shows the step after an approval and hands back (`onSettled`, the hosted
   redirect) only once the subject is done: at least one extract held, or the
   window closed.
@@ -944,7 +989,8 @@ only: the engine knows nothing of it.
   at most 2 diploma parses hold an instance at once, so VOG keeps the rest),
   which is killed past 20 s. The printed holder (one line, `MatchFullName`)
   and birth date must match the identity the engine approved, read with
-  `SessionIdentity` at upload; each name word matches plain or ICAO 9303
+  `SessionIdentity` at upload (the chip's DG11 name when it has one, as the MRZ
+  cuts a long name off); each name word matches plain or ICAO 9303
   transliterated, so "Müller" matches MUELLER and MULLER, and the given names
   must be the same ones (one may list only the first of the other's), not
   merely share the first.
@@ -999,7 +1045,11 @@ proofs whoever scans, and the wallet holds the outcome to the person.
 - **The match** (`matchSubject`, in `tryReconcile` after `enforceAssurance`):
   on an approval it reads `SessionIdentity` and requires the same full name,
   word for word (`diploma.SameName`, plain or ICAO-transliterated; no missing
-  or extra name), and the same birth date. A mismatch is recorded as
+  or extra name), and the same birth date. The chip's DG11 name counts as
+  well as the MRZ's (`Identity.FullGivenName`/`FullFamilyName`, kept through
+  the finish in `ParsedMRZ.FullSurname`/`FullGivenNames`): the MRZ cuts a long
+  name off at its field's width (30 characters on an ID card). A chip without
+  DG11 is matched on the MRZ name alone. A mismatch is recorded as
   `rejected` with `IDENTITY_MISMATCH` (no proofed name kept); a failed
   identity read leaves the request undecided for the next reconcile. A
   review approval is matched too. The engine still holds its approval, so
@@ -1102,19 +1152,37 @@ editor's Type, and the hosted page.
 - **Review.** The session's panel shows the person's identity and proof (name,
   date of birth, document, chip, face match, liveness, eIDAS level; the
   result read allows a data request in review, `heldToVerdict`) and the
-  matches. Only `strong` matches start ticked; `probable`, `email` and `name` ones are
-  taken only when ticked, and the API's approve without `requestIds` takes the
-  `strong` ones alone. An erasure takes `strong` matches only (the others
-  cannot be ticked; listing one is 400): nothing tells them from another
-  person's session, and an erasure cannot be undone. `DecideReview` → `decideDataRequest` (decided in the
+  matches. A match whose name and date of birth were read off a verified chip
+  is a sure one (`sureMatch`: `strong`, or `probable` on another document);
+  `email` and `name` ones are not. An erasure starts with its sure matches
+  ticked, an access request with its `strong` ones; any other is taken only
+  when ticked (`approvedMatches`, `matchTickedByDefault` in the frontend), and
+  an erasure may take any match a reviewer ticks. `DecideReview` → `decideDataRequest` (decided in the
   engine too if it holds a review there). Approving an erasure asks to confirm
   the number of sessions, then purges each approved match through
   `Service.purge` (row stays, personal data goes, `session.purged` per
   session), then the request itself. Access sets `data_export_until`
   (`DataExportWindow`, 7 days; 24 h through the hosted link). Reject records
   `MANUAL_REVIEW_REJECTED` unless a code is given.
+- **How an erasure is decided** is the customer's `erasure_handling`
+  (`ErasureHandling`, its Settings tab; `handleErasure`, run once as the
+  request reaches review, under the review lock):
+  - `review` (default): a reviewer decides, as above.
+  - `automatic`: the sure matches are erased at once. Without unsure ones the
+    request is approved and purged then (reviewer `automatic`); with them it
+    waits for a reviewer, who decides only those (the erased ones show
+    "Erased" and stay ticked).
+  - `keep`: refused at once with `LEGAL_RETENTION`, for a customer bound by
+    law to keep the data (Art. 17(3)(b)); nothing is erased.
+  A failure there leaves the request in review. An approved erasure stores how
+  many matches it kept (`data_matches_kept`), and the hosted page says so
+  instead of "Your data was deleted."; a refused one says the customer must
+  keep the data by law. Its `purge_at` is its decision time, so a final purge
+  that failed is retried by the hourly `PurgeDue`.
 - **Nobody reviews it.** A data request left in review 30 days (GDPR Art.
-  12(3)) is rejected `REVIEW_LAPSED` and purged by `PurgeDue`.
+  12(3)) is rejected `REVIEW_LAPSED` and purged by `PurgeDue`. An identity
+  review counts its retention from going to review, and lapses the same way
+  then: it is kept no longer than a decided one.
 - **Export.** An approved access request's data: per approved session the
   outcome and its `match`. Only a `strong` match also carries the contact the
   customer gave, identity and evidence, and diplomas: a ticked `probable`,

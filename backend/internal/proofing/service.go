@@ -61,11 +61,12 @@ type requestStore interface {
 	AttachSession(ctx context.Context, req Request, sess proofingprovider.Session) (bool, error)
 	List(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error)
 	MarkStarted(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error
+	ExtendSession(ctx context.Context, req Request, sessionID string, expiresAt time.Time) error
 	EndSession(ctx context.Context, req Request, sessionID string, ipsStatus proofingprovider.Status, method proofingprovider.Method) error
 	ListPage(ctx context.Context, scope CustomerScope, after *RequestCursor, limit int) ([]Request, error)
-	Cancel(ctx context.Context, req Request) (bool, error)
+	Cancel(ctx context.Context, req Request, endSession func(context.Context) error) (bool, error)
 	RecordResultRead(ctx context.Context, req Request) error
-	Purge(ctx context.Context, req Request) error
+	Purge(ctx context.Context, req Request, endSession func(context.Context) error) error
 	Member(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
 	RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
@@ -118,7 +119,7 @@ type customerStore interface {
 	Rename(ctx context.Context, orgID, id uuid.UUID, name string) (Customer, error)
 	SaveFlows(ctx context.Context, orgID, id uuid.UUID, sel FlowSelection) (Customer, error)
 	SetStatus(ctx context.Context, orgID, id uuid.UUID, status CustomerStatus) (Customer, error)
-	SaveSettings(ctx context.Context, orgID, id uuid.UUID, settings CustomerSettings) (Customer, error)
+	SaveSettings(ctx context.Context, orgID, id uuid.UUID, change CustomerSettingsChange) (Customer, error)
 	SaveBranding(ctx context.Context, orgID, id uuid.UUID, b CustomerBranding, logo LogoChange) (Customer, error)
 	SaveRedirectOrigins(ctx context.Context, orgID, id uuid.UUID, origins []string) (Customer, error)
 	Logo(ctx context.Context, orgID, id uuid.UUID) (CustomerLogo, error)
@@ -465,8 +466,12 @@ type Sent struct {
 // mails the subject the session's vcmrtd deep link: SessionTTL runs from the
 // send. An on-screen request is created only once the subject accepted what is
 // collected, so its session starts then. A session whose request then fails to
-// store is erased again (discardSession).
+// store is erased again (discardSession). Nothing is sent while the org's
+// proofing is paused.
 func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in NewRequest) (Sent, error) {
+	if err := s.checkActive(ctx, org.ID); err != nil {
+		return Sent{}, err
+	}
 	in, err := normalizeRequest(in)
 	if err != nil {
 		return Sent{}, err
@@ -870,6 +875,19 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 			slog.String("request_id", req.ID.String()), slog.Any("error", err))
 		return req, err
 	}
+	// Opening a session gives it more time in the engine than it was created
+	// with: the stored cap follows, or the request would read expired while
+	// its subject is still at it, and then flip to their outcome.
+	if res.ExpiresAt.After(sess.ExpiresAt) {
+		if err := s.requests.ExtendSession(ctx, req, sess.ID, res.ExpiresAt); err != nil {
+			slog.WarnContext(ctx, "identity proofing: extend session failed",
+				slog.String("request_id", req.ID.String()), slog.Any("error", err))
+			return req, err
+		}
+		extended := *sess
+		extended.ExpiresAt = res.ExpiresAt
+		req.session, sess = &extended, &extended
+	}
 
 	var next Status
 	switch res.Status {
@@ -1014,7 +1032,17 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 			slog.String("request_id", req.ID.String()), slog.Any("error", err))
 		return req, err
 	}
-	return decided, nil
+	if decided.Status != StatusNeedsReview {
+		return decided, nil
+	}
+	handled, err := s.handleErasure(ctx, decided)
+	if err != nil {
+		// Left in review: a reviewer decides it as any other.
+		slog.WarnContext(ctx, "identity proofing: decide an erasure as its customer set failed",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
+		return decided, nil
+	}
+	return handled, nil
 }
 
 // enforceAssurance holds an approval the engine reported to the level the
@@ -1037,7 +1065,8 @@ func enforceAssurance(req Request, res proofingprovider.Result) (Status, proofin
 // matchSubject holds an approval of a request for one known person to that
 // person: the identity read off the document must be the request's full name,
 // every word in order (samePerson), born on its birth date, or the request is
-// rejected with errorIdentityMismatch. A request
+// rejected with errorIdentityMismatch. The chip's DG11 name counts as well as
+// the MRZ's, which cuts a long name off at its field's width. A request
 // already decided holds no birth date any more, and is never matched again.
 func (s *Service) matchSubject(ctx context.Context, tenant proofingprovider.Tenant, req Request, res proofingprovider.Result) (Status, proofingprovider.Result, error) {
 	if req.expectedBirthDate == "" {
@@ -1047,7 +1076,8 @@ func (s *Service) matchSubject(ctx context.Context, tenant proofingprovider.Tena
 	if err != nil {
 		return "", res, fmt.Errorf("proofing: identity to match request %s: %w", req.ID, err)
 	}
-	if samePerson(identity.GivenName, identity.FamilyName, identity.BirthDate, req.SubjectName, req.expectedBirthDate) {
+	if samePerson(identity.GivenName, identity.FamilyName, identity.BirthDate, req.SubjectName, req.expectedBirthDate) ||
+		samePerson(identity.FullGivenName, identity.FullFamilyName, identity.BirthDate, req.SubjectName, req.expectedBirthDate) {
 		return StatusApproved, res, nil
 	}
 	res.ErrorCode = errorIdentityMismatch
@@ -1216,18 +1246,24 @@ func (s *Service) cancelOnce(ctx context.Context, req Request) error {
 	if st := req.EffectiveStatus(s.now()); st != StatusPending && st != StatusInProgress || req.PurgedAt != nil {
 		return ErrSessionOver
 	}
+	var endSession func(context.Context) error
 	if sess := req.liveSession(s.now()); sess != nil {
 		tenant := requestTenant(req)
-		if err := s.ips.CancelSession(ctx, tenant, sess.ID, sess.Token); err != nil {
-			var rejected *proofingprovider.RejectedError
-			if errors.As(err, &rejected) {
-				// The engine decided it first; the notified outcome records that.
-				return ErrSessionOver
+		endSession = func(ctx context.Context) error {
+			if err := s.ips.CancelSession(ctx, tenant, sess.ID, sess.Token); err != nil {
+				var rejected *proofingprovider.RejectedError
+				if errors.As(err, &rejected) {
+					// The engine decided it first; the notified outcome records that.
+					return ErrSessionOver
+				}
+				return fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
 			}
-			return fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
+			return nil
 		}
 	}
-	cancelled, err := s.requests.Cancel(ctx, req)
+	// Its own context: once the engine has cancelled, the row must say so even
+	// if the caller has gone.
+	cancelled, err := s.requests.Cancel(context.WithoutCancel(ctx), req, endSession)
 	if err != nil {
 		return err
 	}
@@ -1365,25 +1401,25 @@ func (s *Service) purgeDue(ctx context.Context) (int64, error) {
 	}
 }
 
-// errorReviewLapsed is the error code of a data request nobody reviewed in
-// time: dataRequestReviewDays after it went to review (purge_at,
-// refreshPurgeAt).
+// errorReviewLapsed is the error code of a request nobody reviewed in time: a
+// data request dataRequestReviewDays after it went to review, an identity
+// request its retention after (purge_at, refreshPurgeAt).
 const errorReviewLapsed = "REVIEW_LAPSED"
 
-// lapseReview rejects a data request whose review is due for purge: nobody
-// decided it in time, and it is not left purged in review. Any other request
-// is left as it is.
+// lapseReview rejects a request whose review is due for purge: nobody decided
+// it in time, and it is not left purged in review, so its customer hears the
+// end. Any other request is left as it is.
 func (s *Service) lapseReview(ctx context.Context, req Request) error {
-	if !req.FlowKind.dataRequest() || req.Status != StatusNeedsReview || req.session == nil {
+	if req.Status != StatusNeedsReview || req.session == nil {
 		return nil
 	}
 	return s.requests.RecordOutcome(ctx, req, req.session.ID, StatusRejected,
 		proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: errorReviewLapsed})
 }
 
-// purge erases req's session in the engine, then what the wallet holds of it.
-// A session attached since req was read (a hosted start racing the purge) is
-// read back and erased too, before the row is purged.
+// purge erases req's session in the engine and what the wallet holds of it,
+// together (RequestStore.Purge). A session attached since req was read (a
+// hosted start racing the purge) is read back and erased too.
 func (s *Service) purge(ctx context.Context, req Request) error {
 	if err := s.purgeOnce(ctx, req); !errors.Is(err, errPurgeSessionMoved) {
 		return err
@@ -1397,12 +1433,16 @@ func (s *Service) purge(ctx context.Context, req Request) error {
 }
 
 func (s *Service) purgeOnce(ctx context.Context, req Request) error {
-	if req.session != nil {
-		if err := s.ips.DeleteSession(ctx, requestTenant(req), req.session.ID, req.session.Token); err != nil {
-			return fmt.Errorf("proofing: purge request %s: %w", req.ID, err)
+	var endSession func(context.Context) error
+	if sess := req.session; sess != nil {
+		endSession = func(ctx context.Context) error {
+			if err := s.ips.DeleteSession(ctx, requestTenant(req), sess.ID, sess.Token); err != nil {
+				return fmt.Errorf("proofing: purge request %s: %w", req.ID, err)
+			}
+			return nil
 		}
 	}
-	return s.requests.Purge(ctx, req)
+	return s.requests.Purge(ctx, req, endSession)
 }
 
 // Request is one of the org's requests, what an on-screen session's page
@@ -1802,16 +1842,87 @@ func (s *Service) CustomerLogo(ctx context.Context, orgID, id uuid.UUID) (Custom
 	return s.customers.Logo(ctx, orgID, id)
 }
 
-// SaveCustomerSettings replaces a customer's session settings; each must be one
-// of its options.
-func (s *Service) SaveCustomerSettings(ctx context.Context, orgID, id uuid.UUID, settings CustomerSettings) (Customer, error) {
-	if !slices.Contains(SessionTTLOptions, settings.SessionTTL) {
-		return Customer{}, fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)
+// SaveCustomerSettings changes some of a customer's settings; each one set
+// must be one of its options.
+func (s *Service) SaveCustomerSettings(ctx context.Context, orgID, id uuid.UUID, change CustomerSettingsChange) (Customer, error) {
+	if err := checkSettingsChange(change); err != nil {
+		return Customer{}, err
 	}
-	if !slices.Contains(DataRetentionDayOptions, settings.DataRetentionDays) {
-		return Customer{}, fmt.Errorf("%w: the data retention must be 7, 30, 90, 180 or 365 days", ErrInvalidInput)
+	return s.customers.SaveSettings(ctx, orgID, id, change)
+}
+
+func checkSettingsChange(change CustomerSettingsChange) error {
+	if change.SessionTTL != nil && !slices.Contains(SessionTTLOptions, *change.SessionTTL) {
+		return fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)
 	}
-	return s.customers.SaveSettings(ctx, orgID, id, settings)
+	if change.DataRetentionDays != nil && !slices.Contains(DataRetentionDayOptions, *change.DataRetentionDays) {
+		return fmt.Errorf("%w: the data retention must be 7, 30, 90, 180 or 365 days", ErrInvalidInput)
+	}
+	if change.ErasureHandling != nil && !change.ErasureHandling.valid() {
+		return fmt.Errorf("%w: erasure requests are decided by review, automatically or kept", ErrInvalidInput)
+	}
+	return nil
+}
+
+// CustomerUpdate is a change to a customer: each field set is applied, a nil
+// one left as it is.
+type CustomerUpdate struct {
+	Name            *string
+	Status          *CustomerStatus
+	Settings        CustomerSettingsChange
+	RedirectOrigins *[]string
+}
+
+// UpdateCustomer applies u. Every part is checked before any is written, and
+// the status goes first, as the one part the stored state can refuse
+// (ErrCustomerHasOpenReviews): a refused update changes nothing.
+func (s *Service) UpdateCustomer(ctx context.Context, orgID, id uuid.UUID, u CustomerUpdate) (Customer, error) {
+	var name string
+	if u.Name != nil {
+		var err error
+		if name, err = customerName(*u.Name); err != nil {
+			return Customer{}, err
+		}
+	}
+	if u.Status != nil && *u.Status != CustomerActive && *u.Status != CustomerPaused {
+		return Customer{}, fmt.Errorf("%w: a customer is active or paused", ErrInvalidInput)
+	}
+	if err := checkSettingsChange(u.Settings); err != nil {
+		return Customer{}, err
+	}
+	var origins []string
+	if u.RedirectOrigins != nil {
+		var err error
+		if origins, err = redirectOrigins(*u.RedirectOrigins); err != nil {
+			return Customer{}, err
+		}
+	}
+
+	c, err := s.customers.Get(ctx, orgID, id)
+	if err != nil {
+		return Customer{}, err
+	}
+	if u.Status != nil {
+		if c, err = s.SetCustomerStatus(ctx, orgID, id, *u.Status); err != nil {
+			return Customer{}, err
+		}
+	}
+	if u.Name != nil {
+		if c, err = s.customers.Rename(ctx, orgID, id, name); err != nil {
+			return Customer{}, err
+		}
+	}
+	if !u.Settings.empty() {
+		if c, err = s.customers.SaveSettings(ctx, orgID, id, u.Settings); err != nil {
+			return Customer{}, err
+		}
+	}
+	if u.RedirectOrigins != nil {
+		if c, err = s.customers.SaveRedirectOrigins(ctx, orgID, id, origins); err != nil {
+			return Customer{}, err
+		}
+	}
+	return c, nil
 }
 
 // Stats counts the customer requests sent within statsWindow, per customer and

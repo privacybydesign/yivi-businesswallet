@@ -5,13 +5,16 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 // fakePauses keeps pauses in memory, as the store would.
@@ -86,15 +89,17 @@ func TestPauseLevelsLiftOwnOnly(t *testing.T) {
 	}
 }
 
-func TestPausedOrgHostedLinkRefuses(t *testing.T) {
+// A paused org's hosted link still opens, so its page can say why, but
+// starts no session.
+func TestPausedOrgHostedLinkStartsNothing(t *testing.T) {
 	f := newFixture()
 	_, token := f.sendHosted(t)
 	withPauses(f)
 	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PausePlatform, PauseOn, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.HostedRequest(context.Background(), token); !errors.Is(err, ErrProofingPaused) {
-		t.Errorf("open while paused = %v, want ErrProofingPaused", err)
+	if _, err := f.svc.HostedRequest(context.Background(), token); err != nil {
+		t.Errorf("open while paused = %v, want the page", err)
 	}
 	if _, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem); !errors.Is(err, ErrProofingPaused) {
 		t.Errorf("start while paused = %v, want ErrProofingPaused", err)
@@ -102,36 +107,38 @@ func TestPausedOrgHostedLinkRefuses(t *testing.T) {
 	if len(f.ips.sessions) != 0 {
 		t.Errorf("a paused org made %d IPS sessions, want none", len(f.ips.sessions))
 	}
-	h := NewHandler(f.svc, nil, nil)
-	header := http.Header{}
-	h.PageHeaders(httptest.NewRequest(http.MethodGet, "/p/"+token, nil), header)
-	if got := header.Get(headerCSP); got != frameNone {
-		t.Errorf("paused page CSP = %q, want %q", got, frameNone)
-	}
 }
 
-func TestPausedOrgRoutesSayPaused(t *testing.T) {
+// A pause refuses only sending: the rest of the org's routes stay open, so an
+// admin who paused over a leaked key can still revoke it, remove a webhook or
+// erase data.
+func TestPausedOrgKeepsItsRoutes(t *testing.T) {
 	f := newFixture()
 	withPauses(f)
-	h := NewHandler(f.svc, nil, nil)
-	reached := false
-	route := h.active(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
-	call := func() int {
-		r := httptest.NewRequest(http.MethodGet, "/orgs/acme/identity-proofing/flows", nil)
-		r = r.WithContext(organization.ContextWithOrg(r.Context(), organization.Organization{ID: testOrg.ID}))
-		rec := httptest.NewRecorder()
-		route.ServeHTTP(rec, r)
-		return rec.Code
-	}
-	if call(); !reached {
-		t.Fatal("an active org's route was not reached")
-	}
 	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PauseOrganization, PauseOn, nil); err != nil {
 		t.Fatal(err)
 	}
-	reached = false
-	if code := call(); code != http.StatusForbidden || reached {
-		t.Errorf("paused org route = %d (reached %v), want 403 without reaching it", code, reached)
+	asAdmin := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := auth.ContextWithUser(r.Context(), user.User{ID: alex.UserID})
+			ctx = organization.ContextWithOrg(ctx, organization.Organization{ID: testOrg.ID})
+			next.ServeHTTP(w, r.WithContext(organization.ContextWithRole(ctx, organization.RoleAdmin)))
+		})
+	}
+	pass := func(next http.Handler) http.Handler { return next }
+	mux := http.NewServeMux()
+	NewHandler(f.svc, pass, asAdmin).Register(mux)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return rec
+	}
+	if rec := call(http.MethodGet, "/orgs/acme/identity-proofing/flows", ""); rec.Code != http.StatusOK {
+		t.Errorf("list flows while paused = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+	rec := call(http.MethodPost, "/orgs/acme/identity-proofing/requests", `{"email":"anna@example.org","name":"Anna"}`)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "proofing_paused") {
+		t.Errorf("send while paused = %d %s, want 403 proofing_paused", rec.Code, rec.Body.String())
 	}
 }
 
