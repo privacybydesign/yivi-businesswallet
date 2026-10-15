@@ -206,12 +206,24 @@ type Server struct {
 	handoverLimit *ratelimit.Limiter
 	waiters       eventWaiters
 	denials       denialSet
+	// draining is closed by StopWaiting, when the server shuts down: every
+	// waiting /events poll answers at once instead of holding the drain.
+	draining     chan struct{}
+	stopWaitOnce sync.Once
 
 	// changed queues the sessions to tell notify about; pending holds the
 	// ones queued, so a burst of events for one session is one notice.
 	changed   chan string
 	pendingMu sync.Mutex
 	pending   map[string]bool
+}
+
+// StopWaiting answers every waiting /events poll with the session as it is,
+// and every later one at once: the server is shutting down
+// (http.Server.RegisterOnShutdown), and a poll would otherwise hold the drain
+// for its whole wait. The app polls again, at another replica.
+func (s *Server) StopWaiting() {
+	s.stopWaitOnce.Do(func() { close(s.draining) })
 }
 
 // Engine is the name internal/proofing and cmd/api know the engine by.
@@ -238,9 +250,10 @@ func New(cfg Config, sessions session.Interface, flows flow.Store, tenants Tenan
 	s := &Server{
 		cfg: cfg, sessions: sessions, flows: flows, tenants: tenants, notify: notify,
 		claimLimit: ratelimit.New(cfg.ClaimLimit), handoverLimit: ratelimit.New(cfg.HandoverLimit),
-		changed: make(chan string, notifyQueue),
-		pending: map[string]bool{},
-		waiters: eventWaiters{bySession: map[string]int{}},
+		changed:  make(chan string, notifyQueue),
+		pending:  map[string]bool{},
+		waiters:  eventWaiters{bySession: map[string]int{}},
+		draining: make(chan struct{}),
 	}
 	// A session expiring is noticed lazily, by whichever read finds its
 	// deadline passed; this is how that reaches the wallet.

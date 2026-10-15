@@ -214,21 +214,43 @@ func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID, createdBy u
 		if slices.ContainsFunc(existing, func(e proofing.Customer) bool { return e.Name == c.name }) {
 			continue
 		}
-		customer, err := customers.Create(ctx, orgID, createdBy, c.name)
-		if err != nil {
-			return fmt.Errorf("seed: customer %s: %w", c.name, err)
+		if err := createProofingCustomer(ctx, pool, recorder, orgID, createdBy, c, flowIDs); err != nil {
+			return err
 		}
-		sel := proofing.FlowSelection{DefaultFlowID: flowIDs[c.flows[0]]}
-		for _, name := range c.flowNames() {
-			sel.FlowIDs = append(sel.FlowIDs, flowIDs[name])
-		}
-		if _, err := customers.SaveFlows(ctx, orgID, customer.ID, sel); err != nil {
-			return fmt.Errorf("seed: customer %s flows: %w", c.name, err)
-		}
-		if _, err := customers.SaveSettings(ctx, orgID, customer.ID,
-			proofing.CustomerSettingsChange{DataRetentionDays: &c.retentionDays}); err != nil {
-			return fmt.Errorf("seed: customer %s settings: %w", c.name, err)
-		}
+	}
+	return nil
+}
+
+// createProofingCustomer creates c with its flows and settings in one
+// transaction, so a re-run, which skips a customer it finds by name, never
+// finds one without them.
+func createProofingCustomer(ctx context.Context, pool *pgxpool.Pool, recorder audit.Recorder, orgID, createdBy uuid.UUID,
+	c demoProofingCustomer, flowIDs map[string]string,
+) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("seed: customer %s: %w", c.name, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	customers := proofing.NewCustomerStore(tx, recorder)
+	customer, err := customers.Create(ctx, orgID, createdBy, c.name)
+	if err != nil {
+		return fmt.Errorf("seed: customer %s: %w", c.name, err)
+	}
+	sel := proofing.FlowSelection{DefaultFlowID: flowIDs[c.flows[0]]}
+	for _, name := range c.flowNames() {
+		sel.FlowIDs = append(sel.FlowIDs, flowIDs[name])
+	}
+	if _, err := customers.SaveFlows(ctx, orgID, customer.ID, sel); err != nil {
+		return fmt.Errorf("seed: customer %s flows: %w", c.name, err)
+	}
+	if _, err := customers.SaveSettings(ctx, orgID, customer.ID,
+		proofing.CustomerSettingsChange{DataRetentionDays: &c.retentionDays}); err != nil {
+		return fmt.Errorf("seed: customer %s settings: %w", c.name, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("seed: customer %s: %w", c.name, err)
 	}
 	return nil
 }
@@ -256,6 +278,14 @@ func EnsureProofingDemo(ctx context.Context, dsn, addressDomain string) error {
 		org, err := ensureOrg(ctx, pool, o, addressDomain)
 		if err != nil {
 			return err
+		}
+		// requireSeedOwned proved it the seed's: an older seed's name (one
+		// without "(Demo)") follows the current one.
+		if org.Name != o.name {
+			if _, err := pool.Exec(ctx, `UPDATE organizations SET name = $2 WHERE id = $1`, org.ID, o.name); err != nil {
+				return fmt.Errorf("seed: rename org %q: %w", o.slug, err)
+			}
+			org.Name = o.name
 		}
 		for _, m := range yiviTeam {
 			if err := ensureTeamMember(ctx, users, orgs, org.ID, m); err != nil {

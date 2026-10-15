@@ -16,6 +16,11 @@ const SessionChannel = "identity_proofing_sessions"
 // passed while the engine still had it open.
 const deadlineRetry = 30 * time.Second
 
+// deadlineSafetyNet is the longest ReconcileDue sleeps: a request another
+// replica leased and then died with has no deadline ahead to wake a timer, so
+// without it that request waits for an unrelated notice.
+const deadlineSafetyNet = time.Minute
+
 // SessionChanged reconciles the request of a session the engine reports
 // changed (it opened, a step started, or it settled): the engine calls it,
 // off its request path, as the engine's event webhook used to.
@@ -70,6 +75,9 @@ func (s *Service) ReconcileDue(ctx context.Context) (time.Time, error) {
 	}
 	if retry := now.Add(deadlineRetry); open && (next.IsZero() || retry.Before(next)) {
 		next = retry
+	}
+	if net := now.Add(deadlineSafetyNet); next.IsZero() || net.Before(next) {
+		next = net
 	}
 	return next, nil
 }

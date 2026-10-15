@@ -252,3 +252,33 @@ func TestComposeOverrideKeepsDiplomaTrustCache(t *testing.T) {
 		t.Errorf("backend mounts no volume at %s; the trust cache is lost on every restart", devDiplomaTrustCacheDir)
 	}
 }
+
+// Every dev service that sets DEV_MODE sets APP_BASE_URL too: Load refuses
+// DEV_MODE without it.
+func TestComposeOverrideDevModeHasAppBaseURL(t *testing.T) {
+	raw, err := os.ReadFile(composeOverridePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", composeOverridePath, err)
+	}
+	var file struct {
+		Services map[string]struct {
+			Environment map[string]string `yaml:"environment"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("parse %s: %v", composeOverridePath, err)
+	}
+	devServices := 0
+	for name, svc := range file.Services {
+		if svc.Environment[envDevMode] == "" {
+			continue
+		}
+		devServices++
+		if svc.Environment[envAppBaseURL] == "" {
+			t.Errorf("service %s sets %s without %s", name, envDevMode, envAppBaseURL)
+		}
+	}
+	if devServices == 0 {
+		t.Errorf("no service in %s sets %s", composeOverridePath, envDevMode)
+	}
+}

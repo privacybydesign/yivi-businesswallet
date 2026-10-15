@@ -117,9 +117,12 @@ const (
 	envIdentityProofingStubOutcome = "IDENTITY_PROOFING_STUB_OUTCOME"
 	// envDevMode ("true") marks a local developer stack: only then may the
 	// stub identity proofing provider, its scripted outcome and the stub
-	// diploma validator run, and the first Yivi login on a fresh database
-	// become its admin. It refuses to start unless APP_BASE_URL is a localhost
-	// URL, so a deployment cannot switch it on by accident.
+	// diploma validator run, the phone-facing proofing URLs use plain http to
+	// another host (a phone on the LAN),
+	// and the first Yivi login by an unknown address become its admin. It
+	// refuses to start unless APP_BASE_URL is set, to a localhost URL: set,
+	// because its default is localhost, so a deployment that left it out and
+	// picked up DEV_MODE would otherwise pass.
 	envDevMode = "DEV_MODE"
 
 	// Attestation issuance (OpenID4VCI). The hosted Veramo issuer is addressed per
@@ -686,11 +689,22 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	devMode := strings.EqualFold(os.Getenv(envDevMode), "true")
-	if devMode && !localhostURL(appBaseURL) {
-		return Config{}, fmt.Errorf("config: %s is only for a local stack: %s must be a localhost URL, not %q",
-			envDevMode, envAppBaseURL, appBaseURL)
+	if devMode && (os.Getenv(envAppBaseURL) == "" || !localhostURL(appBaseURL)) {
+		return Config{}, fmt.Errorf("config: %s is only for a local stack: %s must be set to a localhost URL, not %q",
+			envDevMode, envAppBaseURL, os.Getenv(envAppBaseURL))
 	}
 	if !devMode {
+		// The Idem app sends chip data, selfies and liveness frames to these:
+		// over the network only with https. Plain http to this machine never
+		// leaves it.
+		for key, raw := range map[string]string{
+			envIdentityProofingPublicURL: identityProofingPublicURL,
+			envRegulaFaceAPIPublicURL:    regulaFaceAPIPublicURL,
+		} {
+			if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
+				return Config{}, fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)
+			}
+		}
 		for key, stubbed := range map[string]bool{
 			envIdentityProofingProvider:    identityProofingProvider == ProviderStub,
 			envIdentityProofingStubOutcome: identityProofingStubOutcome != "",

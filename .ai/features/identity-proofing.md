@@ -159,9 +159,11 @@ the app calls them), and the deep link's `api=` is
 - **Retention.** A finished session is deleted 90 days after it ended, unless
   it carries its own retention: a customer's session carries its flow's
   retention override when set, else the customer's data retention, plus a day
-  (`engineRetention`), so `PurgeDue` erases it first. `Engine.Purge` (removal
-  in batches of 100, each with its own timeout) and `Engine.SweepRegula` run on
-  `SESSION_PRUNE_INTERVAL`.
+  (`engineRetention`), so `PurgeDue` erases it first. `PurgeDue`,
+  `Engine.Purge` (removal in batches of 100, each with its own timeout) and
+  `Engine.SweepRegula` run at start and then every `SESSION_PRUNE_INTERVAL`
+  (`startPruner`): a replica restarted more often than the interval would
+  otherwise never purge.
 - **Device trail.** Which device claimed a session, handovers, and refused app
   requests go to the org's audit log (`Config.DeviceTrail` →
   `RequestStore.RecordDeviceEvent`: `identity_proofing.device_claimed`,
@@ -426,7 +428,7 @@ job (`ReconcileDue`), which sleeps until the earliest cap and is woken by
 engine still reports open past its cap is asked again after 30 s. The job leases
 what it re-checks (`ips_reconcile_leased_until`, `FOR UPDATE SKIP LOCKED`), so
 API replicas never re-check the same session at once. Nothing runs on a fixed
-interval. List reads never call the engine; a single-request read (the on-screen page,
+interval but the job's one-minute safety net (below). List reads never call the engine; a single-request read (the on-screen page,
 the customer API's `GET sessions/{id}`) re-checks a live request at most once
 per `readReconcileEvery` (10 s), as a fallback for a missed notice. A change for a
 session not attached yet is dropped; its deadline or next change reconciles it. `needs_review` is not final: a reviewer decides it, or the engine ends it (expired/cancelled), which ends the request as expired and sends
@@ -448,7 +450,18 @@ refreshes the request lists refreshes the counts.
 
 **No background polling.** `database.RunOnNotify` runs a job on a Postgres
 NOTIFY or at the deadline the job returns, never on a ticker; the deadline job
-and the customer-webhook deliverer both use it.
+and the customer-webhook deliverer both use it. The deadline job sleeps at most
+`deadlineSafetyNet` (a minute), so a request a replica leased and then died
+with is picked up again without waiting for an unrelated notice, and it skips
+(and logs) a request whose seal does not open instead of failing the rest.
+
+**Shutdown.** The proofing jobs run on a context of their own that outlives
+the HTTP drain (`proofingJobs` in `cmd/api`), so the notices and deliveries
+the last requests cause still go out. A waiting `/events` poll answers at
+once when shutdown starts (`Engine.StopWaiting`, registered with
+`http.Server.RegisterOnShutdown`), instead of holding the drain past
+`shutdownTimeout`. A configured Regula is pinged at boot, and a failed ping
+fails the boot.
 
 **Method and timeline.** `proofingprovider` derives the app a subject used
 from the session's status, reading only each device's `role` and whether a

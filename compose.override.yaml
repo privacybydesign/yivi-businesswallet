@@ -161,7 +161,9 @@ services:
       # can log in (must match the backend service's value above).
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-admin@yivi.app}
       # The seed loads the backend's config, so it needs the same switch for
-      # the stub settings .env may carry.
+      # the stub settings .env may carry, and DEV_MODE needs APP_BASE_URL set
+      # (the backend service's value above).
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
       DEV_MODE: "true"
     depends_on:
       migrate:

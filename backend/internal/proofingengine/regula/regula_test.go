@@ -177,3 +177,20 @@ func TestDeleteLivenessByTag(t *testing.T) {
 		t.Error("an empty tag would delete by nothing: want an error")
 	}
 }
+
+// Ping passes on any answer short of a server error, Regula's 404 for an
+// unknown transaction included, and fails on a 5xx or an unreachable host.
+func TestPing(t *testing.T) {
+	for status, ok := range map[int]bool{http.StatusNotFound: true, http.StatusOK: true, http.StatusServiceUnavailable: false} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
+		if err := regula.New(srv.URL).Ping(context.Background()); (err == nil) != ok {
+			t.Errorf("Ping against %d = %v, want ok %v", status, err, ok)
+		}
+		srv.Close()
+	}
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	if err := regula.New(closed.URL).Ping(context.Background()); err == nil {
+		t.Error("Ping against a closed server passed, want an error")
+	}
+}

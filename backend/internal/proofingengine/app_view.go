@@ -257,6 +257,9 @@ func (s *Server) handleAppSessionEvents(w http.ResponseWriter, r *http.Request) 
 			}
 			s.handleAppSession(w, r)
 			return
+		case <-s.draining:
+			s.handleAppSession(w, r)
+			return
 		case <-ticker.C:
 			at, err := s.sessions.ChangedAt(sess.TenantID, sess.ID)
 			if err != nil {

@@ -301,3 +301,31 @@ func TestFullNameSurvivesToTheFinish(t *testing.T) {
 		t.Errorf("display name without DG11 = %q, want the MRZ's", without.DisplayName)
 	}
 }
+
+// A shutting-down server answers a waiting /events poll at once, so the poll
+// does not hold the drain for its whole wait.
+func TestStopWaitingAnswersPolls(t *testing.T) {
+	sess := deviceSession("ps_1")
+	cfg := DefaultConfig()
+	cfg.SessionEventsWait = time.Minute
+	s := New(cfg, newMemSessions(sess), singleFlow{fd: flow.FlowDefinition{ID: "flow", Version: 1, Name: "Chip", Steps: []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead}}}, nil, nil)
+	mux := http.NewServeMux()
+	s.Register(mux)
+	since := s.appSessionChangeKey(sess, time.Now())
+	done := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, appRequest(http.MethodGet, "/app/"+sess.Token+"/events?since="+since, ""))
+		done <- rec.Code
+	}()
+	s.StopWaiting()
+	s.StopWaiting() // a second call is harmless
+	select {
+	case code := <-done:
+		if code != http.StatusOK {
+			t.Errorf("events after StopWaiting = %d, want 200", code)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the poll still waits after StopWaiting")
+	}
+}
