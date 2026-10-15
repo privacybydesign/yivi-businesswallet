@@ -326,7 +326,10 @@ describe("assurance level", () => {
 describe("accepted documents", () => {
   it("sends document types and countries in capitals, as the engine compares them", () => {
     const spec = flowSpecFromDraft(
-      draft({ acceptedDocumentTypes: "p, id", acceptedIssuingCountries: "nld" }),
+      draft({
+        acceptedDocumentTypes: "p, id",
+        acceptedIssuingCountries: "nld",
+      }),
     );
     expect(spec.acceptedDocumentTypes).toEqual(["P", "ID"]);
     expect(spec.acceptedIssuingCountries).toEqual(["NLD"]);
@@ -856,22 +859,26 @@ describe("secondsUntil", () => {
 describe("rejection codes mirror the backend", () => {
   const read = (path: string): string =>
     readFileSync(
-      fileURLToPath(new URL(`../../../backend/internal/${path}`, import.meta.url)),
+      fileURLToPath(
+        new URL(`../../../backend/internal/${path}`, import.meta.url),
+      ),
       "utf8",
     );
   const codes = (source: string, pattern: RegExp): string[] =>
     [...source.matchAll(pattern)].map((m) => m[1]);
-  const engine = [
-    "sessions.go",
-    "chip_verify.go",
-    "yivi.go",
-    "rp.go",
-  ].flatMap((file) =>
-    codes(read(`proofingengine/${file}`), /errCode\w+\s*=\s*"([A-Z][A-Z_]+)"/g),
+  const engine = ["sessions.go", "chip_verify.go", "yivi.go", "rp.go"].flatMap(
+    (file) =>
+      codes(
+        read(`proofingengine/${file}`),
+        /errCode\w+\s*=\s*"([A-Z][A-Z_]+)"/g,
+      ),
   );
   const wallet = ["proofing.go", "service.go", "data_request.go"].flatMap(
     (file) =>
-      codes(read(`proofing/${file}`), /\b[eE]rror[A-Z]\w*\s*=\s*"([A-Z][A-Z_]+)"/g),
+      codes(
+        read(`proofing/${file}`),
+        /\b[eE]rror[A-Z]\w*\s*=\s*"([A-Z][A-Z_]+)"/g,
+      ),
   );
   const backend = [...new Set([...engine, ...wallet])];
 
@@ -1175,7 +1182,9 @@ describe("hostedErrorMessage", () => {
 
   it("keeps the copy the subject can act on, and the generic one offline", () => {
     const started = apiError(409, "link_started", "started");
-    expect(hostedErrorMessage(started, t)).toBe(proofingErrorMessage(started, t));
+    expect(hostedErrorMessage(started, t)).toBe(
+      proofingErrorMessage(started, t),
+    );
     expect(hostedErrorMessage(new Error("offline"), t)).toBe(
       t("identityProofing.errors.generic"),
     );
@@ -1192,7 +1201,9 @@ describe("deliveriesPollInterval", () => {
       { status: "pending", attempts: 0 },
       { status: "pending", attempts: 4 },
     ]);
-    const retrying = deliveriesPollInterval([{ status: "pending", attempts: 4 }]);
+    const retrying = deliveriesPollInterval([
+      { status: "pending", attempts: 4 },
+    ]);
     expect(typeof firstSend).toBe("number");
     expect(typeof retrying).toBe("number");
     expect(firstSend as number).toBeLessThan(retrying as number);

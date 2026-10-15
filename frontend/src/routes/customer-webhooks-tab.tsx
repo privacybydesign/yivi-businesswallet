@@ -303,9 +303,7 @@ function EndpointCard({
         </div>
       </dl>
       {test.isError && (
-        <p className={`${ERROR} px-5`}>
-          {proofingErrorMessage(test.error, t)}
-        </p>
+        <p className={`${ERROR} px-5`}>{proofingErrorMessage(test.error, t)}</p>
       )}
       <div className="flex flex-wrap gap-2 px-5 pt-2 pb-4">
         <Button

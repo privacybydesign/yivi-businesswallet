@@ -65,7 +65,9 @@ export function reviewPollContinues(
 }
 
 function refusedForGood(error: Error | null): boolean {
-  return error instanceof ApiError && FINAL_POLL_STATUSES.includes(error.status);
+  return (
+    error instanceof ApiError && FINAL_POLL_STATUSES.includes(error.status)
+  );
 }
 
 export function proofingStatusTone(status: string): ProofingStatusTone {
@@ -748,7 +750,10 @@ export function readsIdentity(
 // Whether a flow of kind with diplomas must read the name and date of birth
 // (proofing.identityRequired): a data request's other sessions are found by
 // them, and a required diploma's holder is checked against them.
-export function identityRequired(kind: FlowKind, diplomas: DiplomaMode): boolean {
+export function identityRequired(
+  kind: FlowKind,
+  diplomas: DiplomaMode,
+): boolean {
   return isDataRequest(kind) || diplomas !== "off";
 }
 
