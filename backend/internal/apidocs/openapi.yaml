@@ -102,13 +102,23 @@ tags:
         `referencePhoto` with your photo. It runs in the Idem app only and reaches no
         assurance level: it shows the live person matches your photo, not who they are.
 
+      ### Embedding the hosted page
+
+      The hosted page may be shown in an iframe on one of the customer's
+      `allowedRedirectOrigins`; it posts `{type: "proofing.completed", session, status}` to
+      the parent once settled. A flow whose face check runs in the browser (the Yivi app
+      method) needs the camera: give the iframe `allow="camera"`, or the browser refuses it
+      and the page asks the person to open it in a tab of its own.
+
       ### Outcomes
 
       `status` ends as `approved`, `rejected` (`errorCode` says why; the wallet itself
-      sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET`, `REVIEW_LAPSED` and `LEGAL_RETENTION`; the session
-      itself is rejected for `FACE_NO_MATCH`, `LIVENESS_FAILED`, `DOC_EXPIRED`,
-      `DOC_TAMPERED` and `ASSURANCE_NOT_MET`), `needs_review` (an admin decides), `expired` or
-      `cancelled`.
+      sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET`, `MANUAL_REVIEW_REJECTED`, `REVIEW_LAPSED`,
+      `ORG_PAUSED` and `LEGAL_RETENTION`; the session itself is rejected for `FACE_NO_MATCH`,
+      `REFERENCE_NO_FACE`, `PHOTO_MISSING`, `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
+      `CHIP_CLONE_DETECTED`, `DOCUMENT_TYPE_NOT_ACCEPTED`, `DOCUMENT_COUNTRY_NOT_ACCEPTED`,
+      `FACE_STEP_NOT_COMPLETED` and `ASSURANCE_NOT_MET`), `needs_review` (an admin decides),
+      `expired` or `cancelled`.
 paths:
   /api/v1/admin/identity-proofing/pauses:
     get:
@@ -5101,7 +5111,8 @@ paths:
         Requires an administrator role in the organisation. Same body as creating a flow; it is
         stored as the next version and made the active one. Requests already sent keep the
         version their session pinned. An empty `name` or `steps`, or an unknown `faceProvider`,
-        is 400 `invalid_input`.
+        is 400 `invalid_input`. A data request flow, or one requiring diplomas, keeps `dg1` in
+        `requestedAttributes` (422 `flow_no_identity`).
       requestBody:
         required: true
         content:
@@ -5152,7 +5163,7 @@ paths:
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '422':
-          description: The flow does not exist (`flow_not_found`), or the proofing engine refused the configuration (`rejected_by_provider`).
+          description: The flow does not exist (`flow_not_found`), the proofing engine refused the configuration (`rejected_by_provider`), or a data request or diplomas-required flow would stop reading the name and date of birth (`flow_no_identity`).
           content:
             application/json:
               schema:
@@ -5183,7 +5194,9 @@ paths:
       summary: Activate a version of an identity proofing flow
       description: >-
         Requires an administrator role in the organisation. Makes the version the only
-        active one (a rollback or roll-forward); new requests run it from then on.
+        active one (a rollback or roll-forward); new requests run it from then on. A data
+        request flow, or one requiring diplomas, only goes to a version that reads `dg1`
+        (422 `flow_no_identity`).
       responses:
         '200':
           description: The version, now the active one.
@@ -5218,7 +5231,7 @@ paths:
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '422':
-          description: The flow or version does not exist (`flow_not_found`).
+          description: The flow or version does not exist (`flow_not_found`), or the version does not read the name and date of birth that the flow's kind or diplomas need (`flow_no_identity`).
           content:
             application/json:
               schema:
@@ -6531,7 +6544,9 @@ paths:
       description: >-
         Requires organisation membership. Every audit event about the request, oldest
         first: sent, session created and started, the outcome or expiry. An
-        administrator sees any request's, a member only one they sent.
+        administrator sees any request's in full, a member only one they sent, without the
+        subject's personal fields, a reviewer's reason, or which admin acted (`actorLabel`
+        `admin`).
       responses:
         '200':
           description: The request's timeline, oldest first.

@@ -1055,6 +1055,10 @@ export interface ProofingProgress {
   linkExpiresAt: string;
   // Until when the subject can add diploma extracts, once approved.
   diplomasUntil?: string;
+  // A hosted data request's: until when approved data downloads, and how many
+  // sessions an approved erasure kept.
+  dataExportUntil?: string;
+  dataMatchesKept?: number;
 }
 
 export function startProofingYivi(

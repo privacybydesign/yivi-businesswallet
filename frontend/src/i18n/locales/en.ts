@@ -474,7 +474,8 @@ export const en = {
         title: "Customers",
         viewAll: "View all",
         empty: "No customers yet.",
-        summary: "{{count}} sessions · {{share}} verified",
+        summary_one: "{{count}} session · {{share}} verified",
+        summary_other: "{{count}} sessions · {{share}} verified",
         noSessions: "No sessions in 30 days",
         webhookAlertNoAnswer_one:
           "{{name}}: webhook has not answered since {{since}}. {{count}} result is queued for retry.",
@@ -513,18 +514,21 @@ export const en = {
       documentCountryNotAccepted: "issuing country not accepted by the flow",
       faceStepNotCompleted: "face verification not completed",
       faceNoMatch: "face did not match the document",
+      referenceNoFace: "no face was found in the shared photo",
+      photoMissing: "the passport or ID card was shared without its photo",
       livenessFailed: "liveness check failed",
-      chipAuthMissing: "the chip check this flow requires did not pass",
       docTampered: "document chip data was tampered with",
       chipCloneDetected: "cloned document chip detected",
       docExpired: "document expired",
       assuranceNotMet: "below the flow's required assurance level",
+      manualReviewRejected: "refused by a reviewer",
       reviewLapsed: "not reviewed within 30 days",
       legalRetention: "the customer is bound by law to keep this data",
       orgPaused:
-        "identity proofing was paused for this organisation while the session waited for review; try again later",
+        "identity proofing was paused while the session waited for review; try again later",
       identityMismatch:
         "a different person: the name or date of birth on the document is not the one the request was for",
+      unknown: "the check did not pass ({{code}})",
     },
     errors: {
       noEncryptionKey:
@@ -577,6 +581,8 @@ export const en = {
       dataFlowForMember:
         "A data request flow is for a customer's subjects. Take it off the members' flows first.",
       exportUnavailable: "This data can no longer be downloaded.",
+      mandateWithdrawn:
+        "Your mandate for this organization is no longer active, so its admin settings are closed to you. A legal representative can grant you a new one.",
       tooLarge: "The file is too large.",
       generic: "Something went wrong. Please try again.",
     },
@@ -604,6 +610,7 @@ export const en = {
       closed: "The time to add diplomas is up.",
       done: "Done",
       needOne: "Add at least one diploma to continue.",
+      verdictsAnnounced: "Accepted: {{accepted}}. Refused: {{refused}}.",
       level: "level {{level}}",
       reasons: {
         notADiploma:
@@ -847,6 +854,9 @@ export const en = {
         noFace: "No face found. Move closer to the camera.",
         cameraError:
           "The camera could not be opened. Allow this page to use it and try again.",
+        cameraFramed:
+          "This page is shown inside another website, which does not let it use your camera. Open it in a tab of its own to continue.",
+        openInTab: "Open in a new tab",
         retry: "Try again",
       },
       outcome: {
@@ -857,6 +867,10 @@ export const en = {
         rejected: {
           title: "Not verified",
           message: "The check did not succeed.",
+        },
+        refused: {
+          title: "Request refused",
+          message: "You proved who you are, but your request was not granted.",
         },
         expired: {
           title: "Session ended",
@@ -1016,7 +1030,13 @@ export const en = {
       minutes_other: "{{count}} min",
       retention: "Data retention",
       retentionHint:
-        "A session's personal data (the name and e-mail address it was sent to, everything read off the document and chip, the photos, and any diplomas) is purged this long after it ends. The result and the audit trail stay.",
+        "A session's personal data (the name and e-mail address it was sent to, everything read off the document and chip, the photos, and any diplomas) is purged this long after it ends. The result and the audit trail stay. A change applies to existing sessions too.",
+      shortenConfirm: {
+        title: "Shorten retention to {{days}}?",
+        message:
+          "This applies to existing sessions too: every session that ended more than {{days}} ago loses its personal data within the hour, in the wallet and in the proofing service. This cannot be undone.",
+        confirm: "Shorten retention",
+      },
       days_one: "{{count}} day",
       days_other: "{{count}} days",
       erasure: "Erasure requests",
@@ -1119,6 +1139,8 @@ export const en = {
         title: "Revoke {{name}}?",
         message:
           "Anything using this key stops working straight away. This cannot be undone.",
+        lastMessage:
+          "Anything using this key stops working straight away. It is this customer's last active key, so members cannot send its verification requests from the dashboard either until you create a new one. This cannot be undone.",
       },
       createdTitle: "Your new API key",
       createdHint:
@@ -1149,7 +1171,7 @@ export const en = {
       rotateConfirm: {
         title: "Rotate the signing secret?",
         message:
-          "Events are signed with the new secret from now on, including those waiting for a retry. Switch your receiver to it.",
+          "Events are signed with the new secret from now on, including those waiting for a retry. For 24 hours they also carry a signature made with the old secret, so your receiver keeps working while you switch it to the new one.",
       },
       removeConfirm: {
         title: "Remove the webhook endpoint?",
@@ -1303,6 +1325,8 @@ export const en = {
       faceWithoutChip:
         "Without reading the chip there is no chip photo: the face is matched against the customer's own photo of the person, which its system sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
       dataTitle: "Requested result data",
+      identityLocked:
+        "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma is checked against them.",
       dataHint:
         "Controls which result data the proofing service returns. Only data from a step in this flow can be requested; with none ticked, only the outcome is returned. The wallet itself keeps only the outcome and assurance level.",
       checksTitle: "Required checks",
@@ -1347,12 +1371,28 @@ export const en = {
           "Use 3-letter country codes such as NLD, separated by commas.",
         faceMatchThreshold: "Enter a number from 0 to 1.",
         retentionSeconds: "Enter a whole number of seconds.",
+        identity:
+          "A data request or diploma flow needs the name and date of birth: turn on the document scan and tick Name and document details.",
       },
     },
   },
   proofLink: {
     notFound: "This link does not exist, or it was removed.",
     decline: "Decline",
+    declineConfirm: {
+      title: "Decline this request?",
+      message:
+        "{{customer}} does not get your data, and this link stops working. To verify later, ask {{customer}} for a new link.",
+      confirm: "Decline",
+    },
+    errors: {
+      unavailable:
+        "This link can't be used right now. Contact the organisation that sent it to you.",
+      sessionOver:
+        "This session has ended. Ask the organisation that sent you this link for a new one.",
+      methodUnavailable:
+        "The Yivi app can't be used for this check right now. Choose the Idem app.",
+    },
     redirecting: "Taking you back…",
     poweredBy: "Powered by Yivi",
     dataRequest: {
@@ -1373,8 +1413,15 @@ export const en = {
         "We deleted the data we could link to you for certain. {{count}} earlier request we could not link to you for certain was kept; its data is deleted when {{customer}}'s retention period ends.",
       erasedPartly_other:
         "We deleted the data we could link to you for certain. {{count}} earlier requests we could not link to you for certain were kept; their data is deleted when {{customer}}'s retention period ends.",
-      keptByLaw:
-        "{{customer}} is required by law to keep your data, so it was not deleted.",
+      refused: {
+        reviewer:
+          "{{customer}} refused your request. Contact them if you want to know why.",
+        lapsed:
+          "{{customer}} did not answer your request within 30 days. Ask them for a new link.",
+        paused:
+          "{{customer}} could not handle your request just now. Ask them for a new link later.",
+        law: "{{customer}} is required by law to keep your data, so it was not deleted.",
+      },
       download: "Download my data",
       downloadUntil: "Available until {{date}}.",
       downloadExpired: "The download is no longer available.",
@@ -1678,6 +1725,7 @@ export const en = {
     system: "System",
     apiKeyActor: "API key {{prefix}}…",
     hostedLinkActor: "Subject, through a hosted link",
+    adminActor: "An admin",
     columns: {
       when: "When",
       actor: "Actor",

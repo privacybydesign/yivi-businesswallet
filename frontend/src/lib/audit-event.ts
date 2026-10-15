@@ -164,6 +164,9 @@ const API_KEY_ACTOR_PREFIX = "api_key:";
 // hostedSubjectActor in backend/internal/proofing/hosted.go: the subject of a
 // hosted link, who has no account.
 const HOSTED_LINK_ACTOR = "hosted_link";
+// adminActorLabel in backend/internal/proofing/service.go: an admin who acted
+// on a member's request, unnamed in the member's timeline.
+const ADMIN_ACTOR = "admin";
 // SubjectAppActorPrefix in backend/internal/proofing/service.go: the app a
 // subject proofed with, as the actor of what it caused.
 const SUBJECT_APP_ACTOR_PREFIX = "app:";
@@ -183,6 +186,9 @@ export function auditActorLabel(
   }
   if (label === HOSTED_LINK_ACTOR) {
     return t("auditLog.hostedLinkActor");
+  }
+  if (label === ADMIN_ACTOR) {
+    return t("auditLog.adminActor");
   }
   if (label.startsWith(SUBJECT_APP_ACTOR_PREFIX)) {
     return proofingMethodLabel(label.slice(SUBJECT_APP_ACTOR_PREFIX.length), t);

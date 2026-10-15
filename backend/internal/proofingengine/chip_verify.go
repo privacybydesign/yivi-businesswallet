@@ -181,9 +181,13 @@ func aaChallengeMatches(nonceHex, expectedHex string) bool {
 	return subtle.ConstantTimeCompare(nonce, expected) == 1
 }
 
-// errCodeChipCloneDetected rejects a chip that did not prove it holds its
-// private key (authenticityFailure).
-const errCodeChipCloneDetected = "CHIP_CLONE_DETECTED"
+// Rejection codes of a chip that failed its authenticity checks
+// (authenticityFailure): data that does not match its signature, or a chip
+// that did not prove it holds its private key.
+const (
+	errCodeDocTampered       = "DOC_TAMPERED"
+	errCodeChipCloneDetected = "CHIP_CLONE_DETECTED"
+)
 
 // authenticityFailure reports a tampered or cloned chip, which rejects the
 // session whatever else held. No chip evidence is not a failure.
@@ -198,7 +202,7 @@ func authenticityFailure(fd *flow.FlowDefinition, checks *chipChecksInfo) (faile
 		return false, ""
 	}
 	if checks.TamperDetected != nil && *checks.TamperDetected {
-		return true, "DOC_TAMPERED"
+		return true, errCodeDocTampered
 	}
 	if checks.CloneDetected != nil && *checks.CloneDetected {
 		return true, errCodeChipCloneDetected

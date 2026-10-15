@@ -491,7 +491,8 @@ export const nl: Translation<typeof en> = {
         title: "Klanten",
         viewAll: "Alles bekijken",
         empty: "Nog geen klanten.",
-        summary: "{{count}} sessies · {{share}} geverifieerd",
+        summary_one: "{{count}} sessie · {{share}} geverifieerd",
+        summary_other: "{{count}} sessies · {{share}} geverifieerd",
         noSessions: "Geen sessies in 30 dagen",
         webhookAlertNoAnswer_one:
           "{{name}}: webhook antwoordt niet sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
@@ -531,18 +532,21 @@ export const nl: Translation<typeof en> = {
         "land van uitgifte niet toegestaan in de flow",
       faceStepNotCompleted: "gezichtsverificatie niet afgerond",
       faceNoMatch: "gezicht komt niet overeen met het document",
+      referenceNoFace: "er is geen gezicht gevonden op de gedeelde foto",
+      photoMissing: "het paspoort of de ID-kaart is gedeeld zonder foto",
       livenessFailed: "levendheidscontrole mislukt",
-      chipAuthMissing: "de chipcontrole die deze flow vereist is niet geslaagd",
       docTampered: "chipgegevens van het document zijn gemanipuleerd",
       chipCloneDetected: "gekloonde documentchip gedetecteerd",
       docExpired: "document verlopen",
       assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",
+      manualReviewRejected: "geweigerd door een beoordelaar",
       reviewLapsed: "niet binnen 30 dagen beoordeeld",
       legalRetention: "de klant moet deze gegevens volgens de wet bewaren",
       orgPaused:
         "identiteitsverificatie werd gepauzeerd terwijl de sessie op beoordeling wachtte; probeer het later opnieuw",
       identityMismatch:
         "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
+      unknown: "de controle is niet geslaagd ({{code}})",
     },
     errors: {
       noEncryptionKey:
@@ -594,6 +598,8 @@ export const nl: Translation<typeof en> = {
       dataFlowForMember:
         "Een flow voor gegevensverzoeken is voor de mensen van een klant. Haal hem eerst uit de flows voor leden.",
       exportUnavailable: "Deze gegevens kunnen niet meer worden gedownload.",
+      mandateWithdrawn:
+        "Je mandaat voor deze organisatie is niet meer actief, daarom zijn de beheerinstellingen voor jou gesloten. Een wettelijk vertegenwoordiger kan je een nieuw mandaat geven.",
       tooLarge: "Het bestand is te groot.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
     },
@@ -621,6 +627,7 @@ export const nl: Translation<typeof en> = {
       closed: "De tijd om diploma's toe te voegen is voorbij.",
       done: "Klaar",
       needOne: "Voeg minstens één diploma toe om verder te gaan.",
+      verdictsAnnounced: "Geaccepteerd: {{accepted}}. Geweigerd: {{refused}}.",
       level: "niveau {{level}}",
       reasons: {
         notADiploma:
@@ -866,6 +873,9 @@ export const nl: Translation<typeof en> = {
         noFace: "Geen gezicht gevonden. Kom dichter bij de camera.",
         cameraError:
           "De camera kon niet worden geopend. Geef deze pagina toegang en probeer het opnieuw.",
+        cameraFramed:
+          "Deze pagina staat in een andere website, die haar je camera niet laat gebruiken. Open haar in een eigen tabblad om verder te gaan.",
+        openInTab: "Openen in een nieuw tabblad",
         retry: "Opnieuw proberen",
       },
       outcome: {
@@ -876,6 +886,11 @@ export const nl: Translation<typeof en> = {
         rejected: {
           title: "Niet geverifieerd",
           message: "De controle is niet gelukt.",
+        },
+        refused: {
+          title: "Verzoek geweigerd",
+          message:
+            "Je hebt bewezen wie je bent, maar je verzoek is niet ingewilligd.",
         },
         expired: {
           title: "Sessie beëindigd",
@@ -1038,7 +1053,13 @@ export const nl: Translation<typeof en> = {
       minutes_other: "{{count}} min",
       retention: "Bewaartermijn",
       retentionHint:
-        "De persoonsgegevens van een sessie (de naam en het e-mailadres waarheen hij is verstuurd, alles wat van het document en de chip is gelezen, de foto's en eventuele diploma's) worden zo lang na afloop gewist. Het resultaat en het auditspoor blijven.",
+        "De persoonsgegevens van een sessie (de naam en het e-mailadres waarheen hij is verstuurd, alles wat van het document en de chip is gelezen, de foto's en eventuele diploma's) worden zo lang na afloop gewist. Het resultaat en het auditspoor blijven. Een wijziging geldt ook voor bestaande sessies.",
+      shortenConfirm: {
+        title: "Bewaartermijn verkorten tot {{days}}?",
+        message:
+          "Dit geldt ook voor bestaande sessies: elke sessie die meer dan {{days}} geleden is afgelopen, verliest binnen het uur haar persoonsgegevens, in de wallet en in de verificatiedienst. Dit kan niet ongedaan worden gemaakt.",
+        confirm: "Bewaartermijn verkorten",
+      },
       days_one: "{{count}} dag",
       days_other: "{{count}} dagen",
       erasure: "Verwijderverzoeken",
@@ -1142,6 +1163,8 @@ export const nl: Translation<typeof en> = {
         title: "{{name}} intrekken?",
         message:
           "Alles wat deze sleutel gebruikt, werkt meteen niet meer. Dit kan niet ongedaan worden gemaakt.",
+        lastMessage:
+          "Alles wat deze sleutel gebruikt, werkt meteen niet meer. Het is de laatste actieve sleutel van deze klant, dus ook leden kunnen vanuit het dashboard geen verificatieverzoeken voor deze klant meer sturen tot je een nieuwe maakt. Dit kan niet ongedaan worden gemaakt.",
       },
       createdTitle: "Je nieuwe API-sleutel",
       createdHint:
@@ -1172,7 +1195,7 @@ export const nl: Translation<typeof en> = {
       rotateConfirm: {
         title: "Ondertekeningsgeheim vernieuwen?",
         message:
-          "Berichten worden vanaf nu met het nieuwe geheim ondertekend, ook de berichten die op een nieuwe poging wachten. Stel je ontvanger in op het nieuwe geheim.",
+          "Berichten worden vanaf nu met het nieuwe geheim ondertekend, ook de berichten die op een nieuwe poging wachten. Nog 24 uur dragen ze ook een handtekening met het oude geheim, zodat je ontvanger blijft werken terwijl je hem op het nieuwe geheim instelt.",
       },
       removeConfirm: {
         title: "Webhook-endpoint verwijderen?",
@@ -1330,6 +1353,8 @@ export const nl: Translation<typeof en> = {
       faceWithoutChip:
         "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met de eigen foto van de klant van deze persoon, die het systeem van de klant bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
       dataTitle: "Gevraagde resultaatgegevens",
+      identityLocked:
+        "Naam en documentgegevens blijft aan: een gegevensverzoek vindt de sessies van de persoon op naam en geboortedatum, en een diploma wordt daarmee vergeleken.",
       dataHint:
         "Bepaalt welke resultaatgegevens de verificatiedienst teruggeeft. Alleen gegevens van een stap in deze flow kunnen worden gevraagd; zonder vinkje wordt alleen de uitkomst teruggegeven. De wallet bewaart zelf alleen de uitkomst en het betrouwbaarheidsniveau.",
       checksTitle: "Vereiste controles",
@@ -1374,12 +1399,28 @@ export const nl: Translation<typeof en> = {
           "Gebruik landcodes van drie letters zoals NLD, gescheiden door komma's.",
         faceMatchThreshold: "Vul een getal van 0 tot 1 in.",
         retentionSeconds: "Vul een heel aantal seconden in.",
+        identity:
+          "Een gegevensverzoek of diplomaflow heeft de naam en geboortedatum nodig: zet het scannen van het document aan en vink Naam en documentgegevens aan.",
       },
     },
   },
   proofLink: {
     notFound: "Deze link bestaat niet, of is verwijderd.",
     decline: "Weigeren",
+    declineConfirm: {
+      title: "Dit verzoek weigeren?",
+      message:
+        "{{customer}} krijgt je gegevens niet, en deze link werkt daarna niet meer. Wil je later toch verifiëren, vraag {{customer}} dan om een nieuwe link.",
+      confirm: "Weigeren",
+    },
+    errors: {
+      unavailable:
+        "Deze link werkt nu niet. Neem contact op met de organisatie die hem stuurde.",
+      sessionOver:
+        "Deze sessie is afgelopen. Vraag de organisatie die je deze link stuurde om een nieuwe.",
+      methodUnavailable:
+        "De Yivi-app kan nu niet voor deze controle worden gebruikt. Kies de Idem-app.",
+    },
     redirecting: "Je wordt teruggestuurd…",
     poweredBy: "Mogelijk gemaakt door Yivi",
     dataRequest: {
@@ -1400,8 +1441,15 @@ export const nl: Translation<typeof en> = {
         "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerder verzoek konden we niet met zekerheid aan jou koppelen; dat is bewaard en wordt verwijderd zodra de bewaartermijn van {{customer}} verloopt.",
       erasedPartly_other:
         "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerdere verzoeken konden we niet met zekerheid aan jou koppelen; die zijn bewaard en worden verwijderd zodra de bewaartermijn van {{customer}} verloopt.",
-      keptByLaw:
-        "{{customer}} moet je gegevens volgens de wet bewaren, daarom zijn ze niet verwijderd.",
+      refused: {
+        reviewer:
+          "{{customer}} heeft je verzoek geweigerd. Neem contact met hen op als je wilt weten waarom.",
+        lapsed:
+          "{{customer}} heeft je verzoek niet binnen 30 dagen beantwoord. Vraag hen om een nieuwe link.",
+        paused:
+          "{{customer}} kon je verzoek nu niet behandelen. Vraag hen later om een nieuwe link.",
+        law: "{{customer}} moet je gegevens volgens de wet bewaren, daarom zijn ze niet verwijderd.",
+      },
       download: "Mijn gegevens downloaden",
       downloadUntil: "Beschikbaar tot {{date}}.",
       downloadExpired: "De download is niet meer beschikbaar.",
@@ -1708,6 +1756,7 @@ export const nl: Translation<typeof en> = {
     system: "Systeem",
     apiKeyActor: "API-sleutel {{prefix}}…",
     hostedLinkActor: "Persoon, via een gehoste link",
+    adminActor: "Een beheerder",
     columns: {
       when: "Wanneer",
       actor: "Actor",

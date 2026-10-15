@@ -150,7 +150,15 @@ export function ApiKeysTab({
           title={t("customers.apiKeys.revokeConfirm.title", {
             name: revoking.name,
           })}
-          message={t("customers.apiKeys.revokeConfirm.message")}
+          message={
+            // Members send through the customer's key too: without an active
+            // one, the dashboard cannot send this customer's requests either.
+            (keys.data ?? []).filter(
+              (key) => key.revokedAt === undefined && key.id !== revoking.id,
+            ).length === 0
+              ? t("customers.apiKeys.revokeConfirm.lastMessage")
+              : t("customers.apiKeys.revokeConfirm.message")
+          }
           confirmLabel={t("customers.apiKeys.revoke")}
           busy={revoke.isPending}
           error={

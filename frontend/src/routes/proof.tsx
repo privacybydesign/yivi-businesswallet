@@ -13,6 +13,7 @@ import type {
   HostedProofing,
   HostedStart,
   ProofingMethod,
+  ProofingProgress,
 } from "../api/identity-proofing";
 import i18n from "../i18n";
 import { errorCode } from "../lib/api-error";
@@ -25,13 +26,19 @@ import {
 } from "../lib/hosted-completion";
 import { applyOrgTheme, clearOrgTheme } from "../lib/theme";
 import {
+  dataRequestRefusal,
+  hostedErrorMessage,
   isProofingLive,
-  proofingErrorMessage,
   verifyStages,
 } from "../lib/identity-proofing";
-import { Button, Card, Stepper } from "../ui";
+import { Button, Card, ConfirmDialog, Stepper } from "../ui";
 import { CustomerMark } from "./proofing-customer-ui";
-import { MethodChoice, Overview, Session } from "./proofing-verify-steps";
+import {
+  MethodChoice,
+  Overview,
+  Session,
+  StepRegion,
+} from "./proofing-verify-steps";
 
 const HINT = "text-ink-soft text-[13px]";
 const NOT_FOUND = "session_not_found";
@@ -73,7 +80,7 @@ export default function Proof(): React.JSX.Element {
             <p role="alert" className="text-error text-[13.5px]">
               {errorCode(page.error) === NOT_FOUND
                 ? t("proofLink.notFound")
-                : proofingErrorMessage(page.error, t)}
+                : hostedErrorMessage(page.error, t)}
             </p>
           </Card>
         ) : (
@@ -110,6 +117,7 @@ function HostedFlow({
   const [started, setStarted] = useState<HostedStart>();
   const start = useStartHostedMutation(token);
   const decline = useDeclineHostedMutation(token);
+  const [confirmDecline, setConfirmDecline] = useState(false);
 
   useEffect(() => {
     const preferred =
@@ -132,13 +140,15 @@ function HostedFlow({
   // Handed back once, however often the outcome is rendered.
   const handedBack = useRef(false);
   const [redirecting, setRedirecting] = useState(false);
-  const [settledStatus, setSettledStatus] = useState<string>();
+  // The latest outcome the session reported: the page's own data is as it
+  // loaded, before the session settled.
+  const [settled, setSettled] = useState<ProofingProgress>();
   const settle = useCallback(
-    (status: string) => {
-      setSettledStatus(status);
+    (progress: ProofingProgress) => {
+      setSettled(progress);
       const handBack = hostedHandBack({
         sessionId: page.sessionId,
-        status,
+        status: progress.status,
         handedBack: handedBack.current,
         dataRequest,
         framed: window.parent !== window,
@@ -153,7 +163,9 @@ function HostedFlow({
       }
       if (handBack.redirectTo) {
         setRedirecting(true);
-        window.location.assign(handBack.redirectTo);
+        // Replace: back from the customer's page must not land on this link,
+        // which would redirect forward again.
+        window.location.replace(handBack.redirectTo);
       }
     },
     [page.sessionId, page.embedOrigins, page.redirectUrl, dataRequest],
@@ -169,10 +181,8 @@ function HostedFlow({
   }
 
   const actionError = start.isError
-    ? proofingErrorMessage(start.error, t)
-    : decline.isError
-      ? proofingErrorMessage(decline.error, t)
-      : undefined;
+    ? hostedErrorMessage(start.error, t)
+    : undefined;
   return (
     <Card className="flex flex-col gap-6 p-6">
       <div className="flex items-center gap-3">
@@ -190,6 +200,7 @@ function HostedFlow({
         steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
         current={stages.indexOf(inDiplomas ? "diplomas" : step)}
       />
+      <StepRegion step={inDiplomas ? "diplomas" : step}>
       {step === "overview" && (
         <Overview
           customer={customer}
@@ -200,16 +211,36 @@ function HostedFlow({
           cancel={
             <Button
               variant="secondary"
-              loading={decline.isPending}
               disabled={start.isPending}
-              onClick={() =>
-                decline.mutate(undefined, {
-                  onSuccess: () => setStep("session"),
-                })
-              }
+              onClick={() => setConfirmDecline(true)}
             >
               {t("proofLink.decline")}
             </Button>
+          }
+        />
+      )}
+      {confirmDecline && (
+        <ConfirmDialog
+          title={t("proofLink.declineConfirm.title")}
+          message={t("proofLink.declineConfirm.message", {
+            customer: customer.name,
+          })}
+          confirmLabel={t("proofLink.declineConfirm.confirm")}
+          busy={decline.isPending}
+          error={
+            decline.isError ? hostedErrorMessage(decline.error, t) : undefined
+          }
+          onClose={() => {
+            setConfirmDecline(false);
+            decline.reset();
+          }}
+          onConfirm={() =>
+            decline.mutate(undefined, {
+              onSuccess: () => {
+                setConfirmDecline(false);
+                setStep("session");
+              },
+            })
           }
         />
       )}
@@ -233,6 +264,7 @@ function HostedFlow({
           diplomas={page.diplomas}
           onDiplomaStep={setInDiplomas}
           onSettled={settle}
+          dataRequest={dataRequest}
           outcomeActions={
             redirecting ? (
               <p role="status" className={HINT}>
@@ -243,15 +275,13 @@ function HostedFlow({
                 token={token}
                 customer={customer.name}
                 kind={flow.kind as DataKind}
-                status={settledStatus ?? page.status}
-                errorCode={page.errorCode}
-                exportUntil={page.dataExportUntil}
-                kept={page.dataMatchesKept}
+                progress={settled ?? page}
               />
             ) : undefined
           }
         />
       )}
+      </StepRegion>
     </Card>
   );
 }
@@ -261,26 +291,26 @@ type DataKind = Exclude<FlowKind, "identity">;
 // What a data request's person sees once their identity check settled: that
 // the request awaits the customer's review, its outcome, and an approved "see
 // my data" request's download while it lasts. An erasure that kept sessions
-// says so, and one refused under a legal duty says why.
+// says so, and a refused request says why.
 function DataRequestOutcome({
   token,
   customer,
   kind,
-  status,
-  errorCode,
-  exportUntil,
-  kept,
+  progress,
 }: {
   token: string;
   customer: string;
   kind: DataKind;
-  status: string;
-  errorCode: string | undefined;
-  exportUntil: string | undefined;
-  kept: number | undefined;
+  progress: ProofingProgress;
 }): React.JSX.Element | null {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
+  const {
+    status,
+    errorCode,
+    dataExportUntil: exportUntil,
+    dataMatchesKept: kept,
+  } = progress;
   switch (status) {
     case "needs_review":
       return (
@@ -321,17 +351,15 @@ function DataRequestOutcome({
           {t("proofLink.dataRequest.downloadExpired")}
         </p>
       );
-    case "rejected":
-      return kind === "data_erasure" && errorCode === LEGAL_RETENTION ? (
+    case "rejected": {
+      const why = dataRequestRefusal(errorCode);
+      return why === undefined ? null : (
         <p role="status" className={HINT}>
-          {t("proofLink.dataRequest.keptByLaw", { customer })}
+          {t(`proofLink.dataRequest.refused.${why}`, { customer })}
         </p>
-      ) : null;
+      );
+    }
     default:
       return null;
   }
 }
-
-// The error code of an erasure its customer refused under a legal duty to
-// keep the data (ErrorLegalRetention in backend/internal/proofing).
-const LEGAL_RETENTION = "LEGAL_RETENTION";

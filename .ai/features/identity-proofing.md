@@ -471,7 +471,10 @@ none while no device claimed the session. It is stored on the request
 (`method`) by `MarkStarted`, `RecordOutcome` and `EndSession`, and carried in
 their audit snapshots. `GET /identity-proofing/requests/{id}/events` is the
 request's timeline: its audit events (target `identity_proofing_request`),
-oldest first, for an admin or the member who sent it. Everything `reconcile`
+oldest first, for an admin, or trimmed for the member who sent it
+(`memberTimeline`): `IdentityProofingPersonalKeys` (subject, diplomas, a
+reviewer's reason) leave the metadata, and any actor but the member becomes the
+label `admin` ("An admin"), since the identity result is admin-only. Everything `reconcile`
 records runs under `audit.WithoutActor`: the outcome is the subject's doing,
 not that of whoever's read triggered the check. What the subject's app caused, `session_started` and
 an outcome not decided in review, names that app instead (`subjectAppContext`,
@@ -704,7 +707,8 @@ audited `session_ended` with `reason: link_lapsed`, webhook `session.expired`).
 what is collected, retention, privacy link). The retention it states is the
 server's `retentionDays` (hosted view `flow`, customer flow list):
 `subjectRetentionDays`, the flow's override else the customer's days, plus the
-engine's day of grace, rounded up ("deleted at most N days after"). Its Decline calls
+engine's day of grace, rounded up ("deleted at most N days after"). Its Decline,
+after a confirmation that says the link stops working, calls
 `POST /proof/{token}/decline`, which cancels a link not yet started
 (`DeclineHosted` → `RequestStore.Cancel`, audited `session_cancelled` with the
 actor label `hosted_link`); a started link is 409 `link_started`. A customer
@@ -717,7 +721,8 @@ name or an IP address (`validHost`): the origins are written into the page's
 400). The page view answers `sessionId` (the `ps_` id), `redirectUrl`,
 `embedOrigins` and `language`. Once `Session` reports an outcome
 (`onSettled`), `proof.tsx` posts `{type: "proofing.completed", session, status}`
-to its parent for each allowed origin (never `*`), then redirects with
+to its parent for each allowed origin (never `*`), then redirects
+(`location.replace`, so back does not land on the link and redirect again) with
 `?session=&status=` when there is a redirect; otherwise it shows its own
 outcome (`cancelled` included). A data request in review is not handed back:
 the page says it is in review. The page's language is the request's
@@ -730,7 +735,10 @@ origins, an unknown or throttled link, or a failed read (counted against the
 link's customer's `hostedCallLimit`). Only where the API serves the SPA (`STATIC_DIR`); in
 dev Vite serves it without the header. The rest of the SPA still sends no CSP.
 The page's outcomes, failures and errors are live regions (`role="alert"`
-for a failure, `status` otherwise). The deep-link gap of §11 applies: the page
+for a failure, `status` otherwise); the diploma step keeps one mounted for
+each upload's verdicts, and `StepRegion` moves focus to the new step's
+heading. Embedded, the Yivi face check needs the iframe's `allow="camera"`:
+without it the page says so and offers the link in a tab of its own. The deep-link gap of §11 applies: the page
 shows the QR, and says so.
 
 **Per-flow hosted settings** (the `hosted_*` columns of
@@ -796,7 +804,9 @@ serialised (`LockReview`).
 ## 10. Data minimisation
 
 Stored and audited: status, the engine's assurance tier, achieved eIDAS level,
-error code (the reason, shown in words by `proofingRejectionReason`). Each
+error code (the reason, shown in words by `proofingRejectionReason`, whose
+table `identity-proofing.test.ts` holds to the engine's `errCode…` and the
+wallet's `error…` constants both ways; name a new code as a constant there). Each
 outcome is its own action, `identity_proofing.approved` / `.rejected` /
 `.needs_review`, so a rejection never reads as a success. Every request event
 names its subject
@@ -847,7 +857,8 @@ dashboard shows the time as `purgeAt`. A member's request is not purged.
     `TestPurgeAtSetOnEveryWrite` checks each against the rule.
   - A customer's changed `data_retention_days` (`SaveSettings`) recomputes its
     unpurged requests without a flow retention (`refreshCustomerPurgeAt`,
-    through the org's customer index). Lock order (rule at
+    through the org's customer index). A shorter one therefore erases older
+    sessions within the hour: the settings tab confirms it first. Lock order (rule at
     `lockCustomer`):
 
     | Transaction | Customer row | Request rows |
@@ -971,7 +982,10 @@ only: the engine knows nothing of it.
   audited `flow_diplomas_configured`. A step is in the flow or not, so there is
   no optional diploma step. `required` needs a flow that reads the name and
   date of birth (`flow_no_identity`): each extract's holder is matched
-  against them.
+  against them. `identityRequired` holds such a flow, and a data request
+  flow, to it in `EditFlow` (the spec must name `dg1`) and
+  `ActivateFlowVersion` too; the editor locks Name and document details on
+  and saves a setting that lifts the rule before a version that drops `dg1`.
   The flow editor shows it as the last step, "Upload diplomas (DUO)": a step
   for the admin, never sent to the engine (its steps are the app's, and it
   would refuse one it does not know). It is saved after the flow, so a new flow
@@ -1129,6 +1143,13 @@ editor's Type, and the hosted page.
   (`flow_no_identity`) and is never a members' flow (`data_flow_for_member`,
   a CHECK and both service paths); it asks for no diplomas. A request keeps
   the kind it was sent with (`identity_proofing_requests.flow_kind`).
+- **The subject's page.** A data request refused after the person proved who
+  they are (`dataRequestRefusal`: `MANUAL_REVIEW_REJECTED`, `REVIEW_LAPSED`,
+  `ORG_PAUSED`, `LEGAL_RETENTION`) reads "Request refused" with the reason in
+  the subject's words, not "Not verified". The outcome lines read the live
+  progress `Session` hands `onSettled`, never the page as it loaded. Errors on
+  the hosted page go through `hostedErrorMessage`: what the subject cannot act
+  on reads "This link can't be used right now".
 - **To review, not approved.** When the engine approves a data request's
   person, `tryReconcile` calls `findDataMatches` and records `needs_review`
   (sending `session.review_opened`) instead of approving; it keeps the proofed

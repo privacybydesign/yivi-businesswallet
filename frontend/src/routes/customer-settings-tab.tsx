@@ -35,6 +35,9 @@ export function SettingsTab({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const update = useUpdateCustomerMutation(slug, customer.id);
+  // A shorter retention waiting for its confirmation: it applies to every
+  // existing session, so older ones lose their personal data within the hour.
+  const [shorter, setShorter] = useState<number>();
 
   return (
     <div className="flex max-w-3xl flex-col gap-5">
@@ -74,7 +77,11 @@ export function SettingsTab({
               }))}
               value={customer.dataRetentionDays}
               disabled={update.isPending}
-              onChange={(days) => update.mutate({ dataRetentionDays: days })}
+              onChange={(days) =>
+                days < customer.dataRetentionDays
+                  ? setShorter(days)
+                  : update.mutate({ dataRetentionDays: days })
+              }
             />
           </SettingRow>
           <SettingRow
@@ -102,12 +109,37 @@ export function SettingsTab({
             </div>
           </SettingRow>
         </div>
-        {update.isError && (
+        {update.isError && shorter === undefined && (
           <p className={`${ERROR} px-5 pb-4`}>
             {proofingErrorMessage(update.error, t)}
           </p>
         )}
       </Card>
+      {shorter !== undefined && (
+        <ConfirmDialog
+          title={t("customers.settings.shortenConfirm.title", {
+            days: t("customers.settings.days", { count: shorter }),
+          })}
+          message={t("customers.settings.shortenConfirm.message", {
+            days: t("customers.settings.days", { count: shorter }),
+          })}
+          confirmLabel={t("customers.settings.shortenConfirm.confirm")}
+          busy={update.isPending}
+          error={
+            update.isError ? proofingErrorMessage(update.error, t) : undefined
+          }
+          onConfirm={() =>
+            update.mutate(
+              { dataRetentionDays: shorter },
+              { onSuccess: () => setShorter(undefined) },
+            )
+          }
+          onClose={() => {
+            setShorter(undefined);
+            update.reset();
+          }}
+        />
+      )}
       <RedirectOriginsCard slug={slug} customer={customer} />
       <NameCard slug={slug} customer={customer} />
       <RemoveCard slug={slug} customer={customer} />
@@ -313,11 +345,6 @@ function RemoveCard({
           {t("customers.settings.removeTitle")}
         </h2>
         <p className={`${HINT} mt-0.5`}>{t("customers.settings.removeHint")}</p>
-        {remove.isError && (
-          <p className={`${ERROR} mt-1`}>
-            {proofingErrorMessage(remove.error, t)}
-          </p>
-        )}
       </div>
       <Button
         variant="dangerGhost"
@@ -335,6 +362,9 @@ function RemoveCard({
           message={t("customers.settings.removeConfirm.message")}
           confirmLabel={t("customers.settings.remove")}
           busy={remove.isPending}
+          error={
+            remove.isError ? proofingErrorMessage(remove.error, t) : undefined
+          }
           onConfirm={() =>
             remove.mutate(undefined, {
               onSuccess: () =>
@@ -343,7 +373,10 @@ function RemoveCard({
                 }),
             })
           }
-          onClose={() => setConfirming(false)}
+          onClose={() => {
+            setConfirming(false);
+            remove.reset();
+          }}
         />
       )}
     </Card>

@@ -6,6 +6,12 @@ import i18n from "../i18n";
 import type { ProofingFlow } from "../api/identity-proofing";
 import { DIPLOMA_MODES, ERASURE_HANDLINGS } from "../api/identity-proofing";
 import {
+  PROOFING_REJECTION_CODES,
+  dataRequestRefusal,
+  deliveriesPollInterval,
+  hostedErrorMessage,
+  identityRequired,
+  proofingRejectionReason,
   diplomaRejectionReason,
   diplomaStepDone,
   OUTCOME_ONLY,
@@ -14,6 +20,7 @@ import {
   sessionView,
   verifyStages,
   progressPollContinues,
+  reviewPollContinues,
   reviewSubmitStep,
   matchTickedByDefault,
   assignedFlows,
@@ -316,6 +323,16 @@ describe("assurance level", () => {
   });
 });
 
+describe("accepted documents", () => {
+  it("sends document types and countries in capitals, as the engine compares them", () => {
+    const spec = flowSpecFromDraft(
+      draft({ acceptedDocumentTypes: "p, id", acceptedIssuingCountries: "nld" }),
+    );
+    expect(spec.acceptedDocumentTypes).toEqual(["P", "ID"]);
+    expect(spec.acceptedIssuingCountries).toEqual(["NLD"]);
+  });
+});
+
 describe("flowDraftError", () => {
   it("points at the field to fix", () => {
     expect(flowDraftError(draft())).toBeNull();
@@ -341,6 +358,29 @@ describe("flowDraftError", () => {
     expect(flowDraftError(draft({ retentionSeconds: "-1" }))).toBe(
       "retentionSeconds",
     );
+  });
+});
+
+describe("identity for data requests and diplomas", () => {
+  it("is needed by a data request or required diplomas", () => {
+    expect(identityRequired("identity", "off")).toBe(false);
+    expect(identityRequired("identity", "required")).toBe(true);
+    expect(identityRequired("data_erasure", "off")).toBe(true);
+    expect(identityRequired("data_access", "off")).toBe(true);
+  });
+
+  it("refuses a draft that drops the name and date of birth when needed", () => {
+    const noDocumentData = draft({ requestedAttributes: new Set(["dg2"]) });
+    expect(flowDraftError(noDocumentData)).toBeNull();
+    expect(flowDraftError(noDocumentData, true)).toBe("identity");
+    expect(flowDraftError(draft(), true)).toBeNull();
+    // Without the document scan there is no document data to read.
+    expect(
+      flowDraftError(
+        draft({ documentAndChip: false, faceVerification: true }),
+        true,
+      ),
+    ).toBe("identity");
   });
 });
 
@@ -456,6 +496,18 @@ describe("proofing status", () => {
     expect(isProofingLive("needs_review")).toBe(false);
     expect(isProofingLive("approved")).toBe(false);
     expect(isProofingLive("expired")).toBe(false);
+  });
+
+  it("re-reads a session in review until it is decided or gone", () => {
+    expect(reviewPollContinues({ status: "needs_review" }, null)).toBe(true);
+    expect(reviewPollContinues({ status: "rejected" }, null)).toBe(false);
+    expect(reviewPollContinues(undefined, null)).toBe(false);
+    expect(
+      reviewPollContinues(
+        { status: "needs_review" },
+        new ApiError(404, "", "/api/v1/x", null),
+      ),
+    ).toBe(false);
   });
 
   it("labels known statuses and passes an unknown one through", () => {
@@ -799,6 +851,37 @@ describe("secondsUntil", () => {
   });
 });
 
+// Every code a session can be rejected with has copy, and copy is only kept
+// for codes the backend still sends: the engine's and the wallet's own.
+describe("rejection codes mirror the backend", () => {
+  const read = (path: string): string =>
+    readFileSync(
+      fileURLToPath(new URL(`../../../backend/internal/${path}`, import.meta.url)),
+      "utf8",
+    );
+  const codes = (source: string, pattern: RegExp): string[] =>
+    [...source.matchAll(pattern)].map((m) => m[1]);
+  const engine = [
+    "sessions.go",
+    "chip_verify.go",
+    "yivi.go",
+    "rp.go",
+  ].flatMap((file) =>
+    codes(read(`proofingengine/${file}`), /errCode\w+\s*=\s*"([A-Z][A-Z_]+)"/g),
+  );
+  const wallet = ["proofing.go", "service.go", "data_request.go"].flatMap(
+    (file) =>
+      codes(read(`proofing/${file}`), /\b[eE]rror[A-Z]\w*\s*=\s*"([A-Z][A-Z_]+)"/g),
+  );
+  const backend = [...new Set([...engine, ...wallet])];
+
+  it("has copy for every backend code and no other", () => {
+    expect(engine.length).toBeGreaterThan(0);
+    expect(wallet.length).toBeGreaterThan(0);
+    expect([...PROOFING_REJECTION_CODES].sort()).toEqual(backend.sort());
+  });
+});
+
 // The diploma modes the flows page offers are the ones the backend accepts,
 // both ways.
 describe("diploma modes mirror backend/internal/proofing", () => {
@@ -1057,5 +1140,61 @@ describe("progress poll", () => {
       true,
     );
     expect(progressPollContinues(undefined, new Error("offline"))).toBe(true);
+  });
+});
+
+describe("rejection reasons", () => {
+  it("names a code the copy does not know rather than showing it bare", () => {
+    expect(proofingRejectionReason("SOMETHING_NEW", t)).toBe(
+      "the check did not pass (SOMETHING_NEW)",
+    );
+    expect(proofingRejectionReason("MANUAL_REVIEW_REJECTED", t)).toBe(
+      "refused by a reviewer",
+    );
+  });
+
+  it("tells a refused data request from a failed identity check", () => {
+    expect(dataRequestRefusal("MANUAL_REVIEW_REJECTED")).toBe("reviewer");
+    expect(dataRequestRefusal("LEGAL_RETENTION")).toBe("law");
+    expect(dataRequestRefusal("FACE_NO_MATCH")).toBeUndefined();
+    expect(dataRequestRefusal(undefined)).toBeUndefined();
+  });
+});
+
+describe("hostedErrorMessage", () => {
+  it("tells the subject the link does not work instead of what an admin should do", () => {
+    const paused = hostedErrorMessage(
+      apiError(409, "customer_paused", "paused"),
+      t,
+    );
+    expect(paused).toBe(t("proofLink.errors.unavailable"));
+    expect(paused).not.toBe(
+      proofingErrorMessage(apiError(409, "customer_paused", "paused"), t),
+    );
+  });
+
+  it("keeps the copy the subject can act on, and the generic one offline", () => {
+    const started = apiError(409, "link_started", "started");
+    expect(hostedErrorMessage(started, t)).toBe(proofingErrorMessage(started, t));
+    expect(hostedErrorMessage(new Error("offline"), t)).toBe(
+      t("identityProofing.errors.generic"),
+    );
+  });
+});
+
+describe("deliveriesPollInterval", () => {
+  it("polls soon for a first send, slowly for a retry, and not without one pending", () => {
+    expect(deliveriesPollInterval(undefined)).toBe(false);
+    expect(deliveriesPollInterval([{ status: "delivered", attempts: 1 }])).toBe(
+      false,
+    );
+    const firstSend = deliveriesPollInterval([
+      { status: "pending", attempts: 0 },
+      { status: "pending", attempts: 4 },
+    ]);
+    const retrying = deliveriesPollInterval([{ status: "pending", attempts: 4 }]);
+    expect(typeof firstSend).toBe("number");
+    expect(typeof retrying).toBe("number");
+    expect(firstSend as number).toBeLessThan(retrying as number);
   });
 });

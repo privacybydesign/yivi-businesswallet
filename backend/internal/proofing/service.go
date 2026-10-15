@@ -3,6 +3,7 @@ package proofing
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -357,10 +358,19 @@ func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.F
 
 // EditFlow saves in as the next version of flow id. The engine makes it the active
 // version at once; requests already sent keep the version their session pinned.
+// A flow that must read the name and date of birth (identityRequired) keeps
+// naming dg1: an empty list would leave what it releases to the engine.
 func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
 	in, err := normalizeFlow(in)
 	if err != nil {
 		return proofingprovider.Flow{}, err
+	}
+	required, err := s.identityRequired(ctx, org.ID, id)
+	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if required && !slices.Contains(in.RequestedAttributes, attributeDocument) {
+		return proofingprovider.Flow{}, ErrFlowNoIdentity
 	}
 	tenant := orgTenant(org.ID)
 	flow, err := s.ips.CreateFlowVersion(ctx, tenant, id, in)
@@ -390,9 +400,24 @@ func (s *Service) FlowVersions(ctx context.Context, org Org, id string) ([]proof
 }
 
 // ActivateFlowVersion makes an earlier (or later) version of flow id the one new
-// requests run, and audits it.
+// requests run, and audits it. A flow that must read the name and date of
+// birth (identityRequired) only goes back to a version that reads them.
 func (s *Service) ActivateFlowVersion(ctx context.Context, org Org, id string, version int) (proofingprovider.Flow, error) {
 	tenant := orgTenant(org.ID)
+	required, err := s.identityRequired(ctx, org.ID, id)
+	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if required {
+		versions, err := s.FlowVersions(ctx, org, id)
+		if err != nil {
+			return proofingprovider.Flow{}, err
+		}
+		i := slices.IndexFunc(versions, func(f proofingprovider.Flow) bool { return f.Version == version })
+		if i >= 0 && !readsIdentity(versions[i]) {
+			return proofingprovider.Flow{}, ErrFlowNoIdentity
+		}
+	}
 	flow, err := s.ips.ActivateFlowVersion(ctx, tenant, id, version)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
 		return proofingprovider.Flow{}, ErrFlowNotFound
@@ -756,6 +781,24 @@ func expectedBirthDate(raw, name string, now time.Time) (string, error) {
 		return "", fmt.Errorf("%w: the date of birth is a past date written YYYY-MM-DD", ErrInvalidInput)
 	}
 	return date.Format(birthDateLayout), nil
+}
+
+// identityRequired reports whether flow flowID must read the name and date of
+// birth: a data request's other sessions are found by them, and a required
+// diploma's holder is checked against them.
+func (s *Service) identityRequired(ctx context.Context, orgID uuid.UUID, flowID string) (bool, error) {
+	kind, err := s.flowKind(ctx, orgID, flowID)
+	if err != nil {
+		return false, err
+	}
+	if kind.dataRequest() {
+		return true, nil
+	}
+	mode, err := s.flowDiplomas(ctx, orgID, flowID)
+	if err != nil {
+		return false, err
+	}
+	return mode.asked(), nil
 }
 
 // readsIdentity reports whether flow f's result carries the holder's name and
@@ -1683,7 +1726,47 @@ func (s *Service) RequestEvents(ctx context.Context, orgID, id uuid.UUID, reques
 		return nil, err
 	}
 	slices.Reverse(page.Events)
+	if requestedBy != nil {
+		if err := memberTimeline(page.Events, *requestedBy); err != nil {
+			return nil, err
+		}
+	}
 	return page.Events, nil
+}
+
+// adminActorLabel names whoever acted on a member's request when that is
+// not the member: an admin reading the identity or deciding its review.
+const adminActorLabel = "admin"
+
+// memberTimeline trims a request's events to what the member who sent it may
+// read: what happened and when, as the org audit log shows an ordinary member,
+// plus their own name. The subject's personal fields and a reviewer's reason go
+// (the identity result is admin-only), and another actor becomes "an admin".
+func memberTimeline(events []audit.Event, member uuid.UUID) error {
+	for i := range events {
+		e := &events[i]
+		if e.Actor != nil && e.Actor.UserID != member {
+			e.Actor = nil
+			label := adminActorLabel
+			e.ActorLabel = &label
+		}
+		if len(e.Metadata) == 0 {
+			continue
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(e.Metadata, &fields); err != nil {
+			return fmt.Errorf("proofing: read event %s metadata: %w", e.ID, err)
+		}
+		for _, key := range audit.IdentityProofingPersonalKeys {
+			delete(fields, key)
+		}
+		trimmed, err := json.Marshal(fields)
+		if err != nil {
+			return fmt.Errorf("proofing: trim event %s metadata: %w", e.ID, err)
+		}
+		e.Metadata = trimmed
+	}
+	return nil
 }
 
 // CreateAPIKey adds a key with every scope to a customer; the returned secret

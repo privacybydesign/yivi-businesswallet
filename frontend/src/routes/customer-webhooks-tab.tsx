@@ -241,7 +241,6 @@ function EndpointCard({
   const remove = useRemoveWebhookMutation(slug, customerId);
   const [confirm, setConfirm] = useState<"rotate" | "remove" | null>(null);
   const failing = webhook.health.state === "failing";
-  const error = test.error ?? rotate.error ?? remove.error;
 
   return (
     <Card>
@@ -303,8 +302,10 @@ function EndpointCard({
           )}
         </div>
       </dl>
-      {error && (
-        <p className={`${ERROR} px-5`}>{proofingErrorMessage(error, t)}</p>
+      {test.isError && (
+        <p className={`${ERROR} px-5`}>
+          {proofingErrorMessage(test.error, t)}
+        </p>
       )}
       <div className="flex flex-wrap gap-2 px-5 pt-2 pb-4">
         <Button
@@ -332,15 +333,23 @@ function EndpointCard({
           confirmLabel={t("customers.webhooks.rotate")}
           confirmVariant="primary"
           busy={rotate.isPending}
+          error={
+            rotate.isError ? proofingErrorMessage(rotate.error, t) : undefined
+          }
           onConfirm={() =>
             rotate.mutate(undefined, {
               onSuccess: (hook) => {
                 setConfirm(null);
+                // An old test's failure was about the endpoint as it was.
+                test.reset();
                 if (hook.secret) onRotated(hook.secret);
               },
             })
           }
-          onClose={() => setConfirm(null)}
+          onClose={() => {
+            setConfirm(null);
+            rotate.reset();
+          }}
         />
       )}
       {confirm === "remove" && (
@@ -349,10 +358,16 @@ function EndpointCard({
           message={t("customers.webhooks.removeConfirm.message")}
           confirmLabel={t("customers.webhooks.remove")}
           busy={remove.isPending}
+          error={
+            remove.isError ? proofingErrorMessage(remove.error, t) : undefined
+          }
           onConfirm={() =>
             remove.mutate(undefined, { onSuccess: () => setConfirm(null) })
           }
-          onClose={() => setConfirm(null)}
+          onClose={() => {
+            setConfirm(null);
+            remove.reset();
+          }}
         />
       )}
     </Card>

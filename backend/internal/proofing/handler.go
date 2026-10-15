@@ -604,7 +604,7 @@ func newFaceVerdictResponse(verdict proofingprovider.FaceVerdict) faceFrameRespo
 
 // requestEvents is one request's timeline, oldest first: every audit event
 // about it (sent, session created and started, outcome, expiry). An admin sees
-// any request's, a member only one they sent.
+// any request's in full, a member only one they sent, trimmed (memberTimeline).
 func (h *Handler) requestEvents(w http.ResponseWriter, r *http.Request) error {
 	id, requestedBy, err := sentRequestTarget(r)
 	if err != nil {

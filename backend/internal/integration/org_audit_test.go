@@ -38,7 +38,8 @@ func (e *testEnv) orgAuditEvents(slug string) orgAuditPage {
 
 // An admin reads the org log in full; an ordinary member reads only the org's
 // configuration events, without who acted, on whom and what changed. An
-// invitation (its target is the invitee's email) stays admin-only.
+// invitation (its target is the invitee's email), a proofing customer and a
+// proofing request (whom it verified) stay admin-only.
 func TestOrgAuditDetailIsAdminOnly(t *testing.T) {
 	env := setup(t)
 	orgID := env.adminOf("acme", "Acme", "boss@example.test")
@@ -53,10 +54,13 @@ func TestOrgAuditDetailIsAdminOnly(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create department = %d, want 201", resp.StatusCode)
 	}
+	env.newProofingTenant("acme", "Initech")
 
 	admin := env.orgAuditEvents("acme")
 	invited := 0
+	adminOnly := map[string]int{}
 	for _, ev := range admin.Events {
+		adminOnly[ev.TargetType]++
 		if ev.DetailHidden {
 			t.Errorf("admin event %s: detailHidden = true, want false", ev.Action)
 		}
@@ -70,6 +74,11 @@ func TestOrgAuditDetailIsAdminOnly(t *testing.T) {
 	if invited != 1 {
 		t.Fatalf("admin sees %d %s events, want 1", invited, audit.MembershipInvited)
 	}
+	for _, target := range []string{audit.TargetIdentityProofingCustomer, audit.TargetIdentityProofingRequest} {
+		if adminOnly[target] == 0 {
+			t.Fatalf("admin sees no %s events, want the customer and session created above", target)
+		}
+	}
 
 	memberID := env.loginAs("member@example.test")
 	env.addMembership(memberID, orgID, organization.RoleMember)
@@ -80,8 +89,9 @@ func TestOrgAuditDetailIsAdminOnly(t *testing.T) {
 		if ev.Action == audit.DepartmentCreated {
 			departments++
 		}
-		if ev.TargetType == audit.TargetMembership {
-			t.Errorf("member sees %s, want membership events admin-only", ev.Action)
+		switch ev.TargetType {
+		case audit.TargetMembership, audit.TargetIdentityProofingCustomer, audit.TargetIdentityProofingRequest:
+			t.Errorf("member sees %s, want %s events admin-only", ev.Action, ev.TargetType)
 		}
 		if !ev.DetailHidden || ev.Actor != nil || ev.TargetID != "" || string(ev.Metadata) != `{}` {
 			t.Errorf("member event %s: detailHidden=%v actor=%v targetId=%q metadata=%s, want detail withheld",
