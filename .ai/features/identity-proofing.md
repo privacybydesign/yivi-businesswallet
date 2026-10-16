@@ -342,7 +342,13 @@ the app calls them), and the deep link's `api=` is
   `internal/migrate/customers_removed_integration_test.go` runs them over two
   customers' data). What the org keeps of them:
   - the oldest customer's settings (`identity_proofing_settings`), and all
-    API keys, now the org's;
+    API keys, now the org's. A key keeps working but reaches every external
+    session of the org (list, read results, cancel, purge), and the org's one
+    webhook gets every flow's events, so keys that were issued to different
+    customers now see each other's sessions. The migration does not revoke or
+    rotate them; before deploying, find the orgs where that matters with
+    `SELECT organization_id FROM identity_proofing_api_keys WHERE revoked_at IS
+    NULL GROUP BY 1 HAVING count(DISTINCT customer_id) > 1`;
   - one webhook endpoint, the oldest customer's that had one; deliveries still
     waiting for an endpoint that was dropped are deleted (the ones for the
     wallet's default endpoint stay), and the kept Idempotency-Key answers are
