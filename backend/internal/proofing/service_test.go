@@ -1122,8 +1122,9 @@ func TestExternalRequestLifetime(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
 	short := SessionSettings{SessionTTL: 2 * time.Minute, DataRetentionDays: 7}
-	if _, err := f.svc.SaveSessionSettings(ctx, testOrg.ID, short); err != nil {
-		t.Fatalf("SaveSessionSettings: %v", err)
+	change := SettingsChange{SessionTTL: &short.SessionTTL, DataRetentionDays: &short.DataRetentionDays}
+	if _, err := f.svc.UpdateSettings(ctx, testOrg.ID, change); err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
 	}
 	f.sendExternal(t, "anna@example.org", "")
 	if got := f.ips.sessions[0].TTL; got != short.SessionTTL {
@@ -1141,8 +1142,9 @@ func TestSaveSettingsOwnOptionsOnly(t *testing.T) {
 		{SessionTTL: SessionTTL, DataRetentionDays: 366},
 		{SessionTTL: SessionTTL, DataRetentionDays: 60},
 	} {
-		if _, err := f.svc.SaveSessionSettings(context.Background(), testOrg.ID, settings); !errors.Is(err, ErrInvalidInput) {
-			t.Errorf("SaveSessionSettings(%+v) = %v, want ErrInvalidInput", settings, err)
+		change := SettingsChange{SessionTTL: &settings.SessionTTL, DataRetentionDays: &settings.DataRetentionDays}
+		if _, err := f.svc.UpdateSettings(context.Background(), testOrg.ID, change); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("UpdateSettings(%+v) = %v, want ErrInvalidInput", settings, err)
 		}
 	}
 }

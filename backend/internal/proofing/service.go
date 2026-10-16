@@ -1685,15 +1685,6 @@ func (s *Service) Logo(ctx context.Context, orgID uuid.UUID) (Logo, error) {
 	return s.orgSettings.Logo(ctx, orgID)
 }
 
-// SaveSessionSettings replaces the org's session settings; each must be one of
-// its options.
-func (s *Service) SaveSessionSettings(ctx context.Context, orgID uuid.UUID, session SessionSettings) (Settings, error) {
-	if err := checkSessionSettings(session); err != nil {
-		return Settings{}, err
-	}
-	return s.orgSettings.SaveSession(ctx, orgID, session)
-}
-
 func checkSessionSettings(session SessionSettings) error {
 	if !slices.Contains(SessionTTLOptions, session.SessionTTL) {
 		return fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)

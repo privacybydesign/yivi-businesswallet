@@ -373,17 +373,8 @@ func parseRedirectOrigin(raw string) (string, error) {
 	return origin, nil
 }
 
-// SaveRedirectOrigins replaces the origins the org's hosted pages may redirect
-// to and be embedded on: each an origin, kept once, in the order given.
-func (s *Service) SaveRedirectOrigins(ctx context.Context, orgID uuid.UUID, origins []string) (Settings, error) {
-	out, err := normalizeOrigins(origins)
-	if err != nil {
-		return Settings{}, err
-	}
-	return s.orgSettings.SaveRedirectOrigins(ctx, orgID, out)
-}
-
-// normalizeOrigins checks each origin and drops the duplicates.
+// normalizeOrigins checks the origins the org's hosted pages may redirect to
+// and be embedded on: each an origin, kept once, in the order given.
 func normalizeOrigins(origins []string) ([]string, error) {
 	if len(origins) > maxRedirectOrigins {
 		return nil, fmt.Errorf("%w: at most %d redirect origins", ErrInvalidInput, maxRedirectOrigins)

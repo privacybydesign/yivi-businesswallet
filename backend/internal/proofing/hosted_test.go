@@ -18,12 +18,17 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
+// saveOrigins sets the org's redirect origins as a settings update does.
+func saveOrigins(svc *Service, origins []string) (Settings, error) {
+	return svc.UpdateSettings(context.Background(), testOrg.ID, SettingsChange{RedirectOrigins: &origins})
+}
+
 func TestRedirectOriginsAreHTTPS(t *testing.T) {
 	f := newFixture()
-	saved, err := f.svc.SaveRedirectOrigins(context.Background(), testOrg.ID,
+	saved, err := saveOrigins(f.svc,
 		[]string{"https://Portal.Acme.example/", "http://localhost:3000", "https://portal.acme.example"})
 	if err != nil {
-		t.Fatalf("SaveRedirectOrigins: %v", err)
+		t.Fatalf("saveOrigins: %v", err)
 	}
 	if want := []string{"https://portal.acme.example", "http://localhost:3000"}; !slices.Equal(saved.RedirectOrigins, want) {
 		t.Errorf("origins = %v, want %v (lowercased, once each)", saved.RedirectOrigins, want)
@@ -41,7 +46,7 @@ func TestRedirectOriginsAreHTTPS(t *testing.T) {
 		"another scheme": {"javascript:alert(1)"},
 		"too many":       tooMany,
 	} {
-		if _, err := f.svc.SaveRedirectOrigins(context.Background(), testOrg.ID, origins); !errors.Is(err, ErrInvalidInput) {
+		if _, err := saveOrigins(f.svc, origins); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: %v, want ErrInvalidInput", name, err)
 		}
 	}
@@ -50,9 +55,8 @@ func TestRedirectOriginsAreHTTPS(t *testing.T) {
 func TestHostedRedirectAllowedOnly(t *testing.T) {
 	f := newFixture()
 	f.svc.SetHostedBaseURL(testHostedBase)
-	if _, err := f.svc.SaveRedirectOrigins(context.Background(), testOrg.ID,
-		[]string{"https://portal.acme.example"}); err != nil {
-		t.Fatalf("SaveRedirectOrigins: %v", err)
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example"}); err != nil {
+		t.Fatalf("saveOrigins: %v", err)
 	}
 	by := Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)}
 	for name, redirect := range map[string]string{
@@ -137,9 +141,8 @@ func TestHostedPageFrameOrigins(t *testing.T) {
 	if got := csp("/p/" + token); got != frameNone {
 		t.Errorf("no origins: CSP = %q, want %q", got, frameNone)
 	}
-	if _, err := f.svc.SaveRedirectOrigins(context.Background(), testOrg.ID,
-		[]string{"https://portal.acme.example", "http://localhost:3000"}); err != nil {
-		t.Fatalf("SaveRedirectOrigins: %v", err)
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example", "http://localhost:3000"}); err != nil {
+		t.Fatalf("saveOrigins: %v", err)
 	}
 	if got, want := csp("/p/"+token), "frame-ancestors https://portal.acme.example http://localhost:3000"; got != want {
 		t.Errorf("with origins: CSP = %q, want %q", got, want)
@@ -174,7 +177,7 @@ func TestFlowHostedSettingsLinks(t *testing.T) {
 	f.svc.flowHostedSettings = &fakeFlowHosted{byFlow: map[string]FlowHosted{}}
 	f.svc.SetHostedBaseURL(testHostedBase)
 	ctx := context.Background()
-	if _, err := f.svc.SaveRedirectOrigins(ctx, testOrg.ID, []string{"https://portal.acme.example"}); err != nil {
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example"}); err != nil {
 		t.Fatal(err)
 	}
 	by := Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)}
