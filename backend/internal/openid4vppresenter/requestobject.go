@@ -59,7 +59,7 @@ func checkFields(policy Policy, expectedClientID, identity, raw string, f reques
 	default:
 		return RequestObject{}, fmt.Errorf("%w: unsupported response_mode", ErrInvalidRequestObject)
 	}
-	if _, err := policy.checkURL(f.responseURI); err != nil {
+	if _, err := policy.CheckURL(f.responseURI); err != nil {
 		return RequestObject{}, fmt.Errorf("%w: response_uri: %w", ErrInvalidRequestObject, err)
 	}
 	if !validNonce(f.nonce) {

@@ -174,7 +174,7 @@ export default function PostguardSend(): React.JSX.Element {
       />
 
       {blockedReason ? (
-        <div className="p-8">
+        <div className="p-4 sm:p-8">
           <PostguardNotReady reason={blockedReason} isAdmin={isAdmin} />
         </div>
       ) : (
@@ -182,7 +182,7 @@ export default function PostguardSend(): React.JSX.Element {
           id={FORM_ID}
           onSubmit={handleSubmit}
           noValidate
-          className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_320px]"
+          className="grid grid-cols-1 gap-5 p-4 sm:p-8 lg:grid-cols-[1fr_320px]"
         >
           <Card className="flex flex-col gap-5 p-5">
             {/* File */}

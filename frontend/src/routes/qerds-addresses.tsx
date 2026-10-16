@@ -206,7 +206,7 @@ export default function QerdsAddresses(): React.JSX.Element {
         title={t("qerds.addresses.title")}
         subtitle={t("qerds.addresses.subtitle")}
       />
-      <div className="p-8">{body()}</div>
+      <div className="p-4 sm:p-8">{body()}</div>
       {pendingDelete && (
         <ConfirmDialog
           title={t("qerds.addresses.deleteTitle")}

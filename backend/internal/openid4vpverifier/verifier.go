@@ -31,6 +31,8 @@ const (
 	ClaimDateOfBirth = "dateOfBirth"
 	ClaimNationality = "nationality"
 	ClaimPhone       = "mobilenumber"
+	// ClaimPhoto is the passport and id-card portrait, base64 (ScopeProofing).
+	ClaimPhoto = "photo"
 
 	// pbdf.vog claim keys (#242 §4). Named distinctly from the identity claims
 	// above even where the value happens to coincide (ClaimDateOfBirth), because
@@ -95,6 +97,24 @@ var identityCredentialIDs = []string{credIDPassport, credIDIDCard, credIDEmail, 
 // hand-built value) falls back to the flattened Claims.
 func (p Presentation) IdentityClaims() map[string]string {
 	return p.claimsOf(identityCredentialIDs...)
+}
+
+// IdentityDocument is the passport or id-card a presentation disclosed.
+type IdentityDocument struct {
+	// Credential is the credential's vct (e.g. pbdf-staging.pbdf.passport).
+	Credential string
+	Claims     map[string]string
+}
+
+// Document returns the passport or id-card the presentation disclosed,
+// passport first; false when it carried neither.
+func (p Presentation) Document() (IdentityDocument, bool) {
+	for _, c := range [...]struct{ id, vct string }{{credIDPassport, vctPassport}, {credIDIDCard, vctIDCard}} {
+		if claims, ok := p.ByCredential[c.id]; ok {
+			return IdentityDocument{Credential: c.vct, Claims: claims}, true
+		}
+	}
+	return IdentityDocument{}, false
 }
 
 // VogClaims returns the pbdf.vog credential's disclosed claims; see IdentityClaims.

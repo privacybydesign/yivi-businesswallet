@@ -83,7 +83,7 @@ export function DepartmentSettings({
       : null;
 
   return (
-    <Card className="max-w-2xl p-7">
+    <Card className="max-w-2xl p-5 sm:p-7">
       <h2 className="text-[16px] font-semibold">{t("departments.heading")}</h2>
       <p className="text-ink-soft mt-1 text-[13px]">
         {t("departments.description")}
@@ -127,7 +127,7 @@ export function DepartmentSettings({
             {departments.data.map((department) => (
               <li
                 key={department.id}
-                className="flex items-center gap-2 px-4 py-2.5"
+                className="flex flex-wrap items-center gap-2 px-4 py-2.5"
               >
                 {editingId === department.id ? (
                   <>
@@ -155,7 +155,7 @@ export function DepartmentSettings({
                   </>
                 ) : (
                   <>
-                    <span className="text-ink flex-1 text-[13.5px]">
+                    <span className="text-ink min-w-0 flex-1 text-[13.5px] break-words">
                       {department.name}
                     </span>
                     <Button

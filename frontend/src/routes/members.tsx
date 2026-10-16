@@ -320,7 +320,7 @@ export default function Members(): React.JSX.Element {
         }
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {org.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
@@ -341,8 +341,8 @@ export default function Members(): React.JSX.Element {
           </Card>
         ) : (
           <Card className="overflow-hidden">
-            <div className="border-line flex items-center gap-3 border-b px-4 py-3">
-              <div className="max-w-[320px] flex-1">
+            <div className="border-line flex flex-wrap items-center gap-3 border-b px-4 py-3">
+              <div className="basis-full sm:max-w-[320px] sm:flex-1 sm:basis-0">
                 <Input
                   icon="search"
                   placeholder={t("members.search")}

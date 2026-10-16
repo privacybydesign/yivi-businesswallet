@@ -61,7 +61,7 @@ export default function Settings(): React.JSX.Element {
     <>
       <TopBar title={t("settings.title")} subtitle={t("settings.subtitle")} />
 
-      <div className="border-line bg-surface flex gap-1 border-b px-8">
+      <div className="border-line bg-surface flex gap-1 overflow-x-auto border-b px-4 sm:px-8">
         {SETTINGS_TABS.map((item) => {
           const active = tab === item.key;
           return (
@@ -70,7 +70,7 @@ export default function Settings(): React.JSX.Element {
               type="button"
               onClick={() => goTo({ tab: item.key, section })}
               className={[
-                "h-11 border-b-2 px-3.5 text-[13.5px] transition-colors",
+                "h-11 shrink-0 border-b-2 px-3.5 text-[13.5px] whitespace-nowrap transition-colors",
                 active
                   ? "border-primary text-ink font-semibold"
                   : "text-ink-soft hover:text-ink border-transparent font-medium",
@@ -82,7 +82,7 @@ export default function Settings(): React.JSX.Element {
         })}
       </div>
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {org.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">

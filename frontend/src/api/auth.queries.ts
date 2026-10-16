@@ -77,7 +77,10 @@ export function useLogoutMutation(): UseMutationResult<void, Error, void> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => logout(),
+    // Nothing the signed-out user read stays in memory for whoever uses the
+    // browser next: every cached answer goes, then "me" reads signed out.
     onSuccess: () => {
+      queryClient.removeQueries();
       queryClient.setQueryData(meQueryKey, null);
     },
   });
