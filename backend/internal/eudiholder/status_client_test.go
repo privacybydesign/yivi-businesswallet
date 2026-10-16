@@ -78,21 +78,25 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { re
 
 // A redirect is checked like the first request: outside dev, an https list
 // that redirects to plain http is refused before that hop is sent.
-func TestStatusClientChecksEachRedirect(t *testing.T) {
+func TestStatusClientEachRedirect(t *testing.T) {
+	const locationHeader = "Location"
+
 	var sent []string
 	issuer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		sent = append(sent, req.URL.String())
 		return &http.Response{
 			StatusCode: http.StatusFound,
-			Header:     http.Header{"Location": {"http://issuer.example/list"}},
+			Header:     http.Header{locationHeader: {"http://issuer.example/list"}},
 			Body:       io.NopCloser(strings.NewReader("")),
 			Request:    req,
 		}, nil
 	})
+
 	client := &http.Client{
 		Transport:     policyTransport{policy: safehttp.Policy{}, next: issuer},
 		CheckRedirect: followStatusRedirect,
 	}
+
 	if err := statusGet(t, client, "https://issuer.example/list"); !errors.Is(err, safehttp.ErrNotHTTPS) {
 		t.Errorf("downgrading redirect = %v, want ErrNotHTTPS", err)
 	}

@@ -162,7 +162,7 @@ func TestDecodeSchemaRejectsDuplicateLocalizedLanguage(t *testing.T) {
 
 // A member reads a held credential's history as the audit log shows it, except
 // a status change, which names no one and keeps which way it moved.
-func TestHideHeldHistoryDetailKeepsStatusChanges(t *testing.T) {
+func TestHideHeldHistoryDetail(t *testing.T) {
 	statusChange := json.RawMessage(`{"before":{"revoked":false},"after":{"revoked":true}}`)
 	events := []audit.Event{
 		{

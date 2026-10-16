@@ -403,7 +403,7 @@ func TestRecheckHeldOne(t *testing.T) {
 // The scheduled sweep re-checks every holder org, and stops between orgs once
 // its context is cancelled: each org's re-check ignores cancellation, so the
 // loop is where a shutdown lands.
-func TestRecheckAllHeldStopsWhenCancelled(t *testing.T) {
+func TestRecheckAllHeldCancelled(t *testing.T) {
 	t.Parallel()
 	store := &heldViewStore{holderOrgs: []uuid.UUID{uuid.New(), uuid.New()}}
 	holder := &heldViewHolder{validities: map[string]eudiholder.HeldValidity{}}
