@@ -402,6 +402,9 @@ func TestMemberExternalRequest(t *testing.T) {
 	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests", nil)); len(list) != 2 {
 		t.Errorf("member requests = %+v, want the two they sent", list)
 	}
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests?subjectKind=external", nil)); len(list) != 1 || !list[0].External {
+		t.Errorf("member external requests = %+v, want the one sent to an external person", list)
+	}
 	stats := decodeJSON[proofingStatsResp](t, env.do(http.MethodGet, base+"/stats", nil))
 	if len(stats.Rows) != 1 || stats.Rows[0].FlowID != shared.ID || stats.Rows[0].Sessions != 1 {
 		t.Errorf("member stats = %+v, want one session on the shared flow", stats)
@@ -411,6 +414,14 @@ func TestMemberExternalRequest(t *testing.T) {
 	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests", nil)); len(list) != 3 {
 		t.Errorf("admin requests = %+v, want all three", list)
 	}
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests?subjectKind=external", nil)); len(list) != 2 {
+		t.Errorf("admin external requests = %+v, want the two sent to external people", list)
+	}
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests?subjectKind=member", nil)); len(list) != 1 || list[0].External {
+		t.Errorf("admin member requests = %+v, want the one sent to a member", list)
+	}
+	wantProofingError(t, "unknown subject kind", env.do(http.MethodGet, base+"/requests?subjectKind=robot", nil),
+		http.StatusBadRequest, "invalid_input")
 	stats = decodeJSON[proofingStatsResp](t, env.do(http.MethodGet, base+"/stats", nil))
 	if len(stats.Rows) != 2 || stats.Rows[0].Sessions != 1 || stats.Rows[1].Sessions != 1 {
 		t.Errorf("admin stats = %+v, want one session on each flow", stats)

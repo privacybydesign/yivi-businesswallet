@@ -4869,10 +4869,11 @@ paths:
       description: >-
         Requires organisation membership. An administrator sees every request of the
         organisation, a member the requests they sent; `?subjectUserId=` narrows either to the
-        ones proofing one member (a malformed id is 400 `invalid_id`). `external` is true for a
-        request that went to an external person, not a member. At most the 200 newest, as
-        stored: outcomes land as the engine reports them, and a list read does not re-check it.
-        Only the outcome and assurance level are returned, and for an external person's
+        ones proofing one member (a malformed id is 400 `invalid_id`), and `?subjectKind=` to
+        those sent to members or to external people (any other value is 400 `invalid_input`).
+        `external` is true for a request that went to an external person, not a member. At most
+        the 200 newest of those asked for, as stored: outcomes land as the engine reports them,
+        and a list read does not re-check it. Only the outcome and assurance level are returned, and for an external person's
         approved request the name read off the document (`proofedName`), until the
         organisation's data retention (`dataRetentionDays`, default 30 days) clears it. No
         other document data.
@@ -4884,6 +4885,13 @@ paths:
             type: string
             format: uuid
           description: Only the requests proofing this member, newest first.
+        - name: subjectKind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [member, external]
+          description: Only the requests sent to members, or only those sent to external people.
       responses:
         '200':
           description: The requests, newest first.

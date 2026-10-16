@@ -425,12 +425,16 @@ type OrgFlow struct {
 	RetentionDays int
 }
 
-// RequestFilter narrows a request list: to the requests one member sent, and/or
-// to the ones proofing one member. A nil field does not narrow.
+// RequestFilter narrows a request list: to the requests one member sent, to the
+// ones proofing one member, and/or to those sent to one kind of subject. A nil
+// field does not narrow.
 type RequestFilter struct {
 	RequestedBy *uuid.UUID
 	// SubjectUserID narrows to the requests proofing one member.
 	SubjectUserID *uuid.UUID
+	// SubjectKind narrows to the requests sent to members or to external people;
+	// the list's cap then counts only those.
+	SubjectKind *SubjectKind
 }
 
 // NewRequest is a sender's ask to proof someone on a flow: another member

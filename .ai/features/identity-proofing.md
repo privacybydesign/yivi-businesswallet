@@ -334,7 +334,9 @@ the app calls them), and the deep link's `api=` is
   keys and webhook, reading a request's result and deciding reviews are
   `RequireOrgAdmin`; an admin lists every flow (with `allowed`/`default`) and
   every request of the org. `GET requests?subjectUserId=` narrows either view to
-  the requests proofing one member.
+  the requests proofing one member, and `?subjectKind=external|member` to those
+  sent to external people or to members; the list's cap of 200 applies after
+  the narrowing, so the Sessions page and the Overview ask for `external`.
 - **Customers were removed from the model** (ten migrations,
   `20261016150000` to `20261016150900`;
   `internal/migrate/customers_removed_integration_test.go` runs them over two

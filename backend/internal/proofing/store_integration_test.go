@@ -1718,6 +1718,41 @@ func TestRequestListBySubjectUser(t *testing.T) {
 	}
 }
 
+// The cap on a list applies after the narrowing: an external request older
+// than the newest maxListedRequests member ones is still listed when only the
+// external ones are asked for.
+func TestRequestListBySubjectKind(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	alex := makeUser(t, pool, "alex@example.org")
+	ctx := context.Background()
+	external, err := store.Create(ctx, newStoredRequest(orgID, sam, externalSubject("a@example.org")))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for range maxListedRequests {
+		if _, err := store.Create(ctx, newStoredRequest(orgID, sam, Subject{Kind: SubjectMember, UserID: &alex, Email: "alex@example.org"})); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	}
+
+	all, err := store.List(ctx, orgID, RequestFilter{})
+	if err != nil || len(all) != maxListedRequests || slices.ContainsFunc(all, func(r Request) bool { return r.ID == external.ID }) {
+		t.Fatalf("List = %d rows, %v; want the newest %d, all members'", len(all), err, maxListedRequests)
+	}
+	kind := SubjectExternal
+	got, err := store.List(ctx, orgID, RequestFilter{SubjectKind: &kind})
+	if err != nil || len(got) != 1 || got[0].ID != external.ID {
+		t.Errorf("List external = %d rows, %v; want only the external request", len(got), err)
+	}
+	kind = SubjectMember
+	if got, err = store.List(ctx, orgID, RequestFilter{SubjectKind: &kind}); err != nil || len(got) != maxListedRequests {
+		t.Errorf("List members = %d rows, %v; want %d", len(got), err, maxListedRequests)
+	}
+}
+
 // A request for one known person drops the expected birth date as soon as no
 // match can follow: here, cancelled.
 func TestCancelDropsBirthDate(t *testing.T) {
