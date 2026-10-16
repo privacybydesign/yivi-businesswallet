@@ -2,25 +2,33 @@
 
 **Status:** Integrated (backend + frontend). The wallet runs proofing itself, in
 its own engine (`internal/proofingengine`, §0); every org is the engine's
-tenant under the org's own id, with no provisioning step. The sidebar's "Identity proofing" section holds three pages under
-`/{org}/identity-proofing`: **Overview** (the last 30 days' customer sessions
-counted, the newest ones, the customers, and an alert per failing webhook),
-**Customers** (search, 30-day sessions and verified share, webhook health,
-status) and, admin-only, **Flows** (full flow configuration, versioned, and which
-flows members may use). A customer's page has tabs: Flows and Sessions for every
-member; Branding, API keys, Webhooks and Settings for an admin. "Verify a
-person" in its header opens the send form; an admin can pause a customer, after
-which no request can be sent for it (`customer_paused`, 409) while sent ones run
-out. The customers API is at `/orgs/{slug}/customers`. A member is sent a
-request from their member detail page (admin-only, like that page). Customers
-are B2B clients with no login: members act for them, and their own backend can
-through the public API with one of their keys. Sending creates an engine session
-(2, 5 or 10 minutes, per customer) and mails its vcmrtd deep link as a QR code
+tenant under the org's own id, with no provisioning step. Flows are the org's
+main object: an org has one set of flows with one default, one set of settings,
+one set of API keys and one webhook endpoint, and no customers (§1). The
+sidebar's "Identity proofing" section holds up to three pages under
+`/{org}/identity-proofing`: **Overview** (the last 30 days' external sessions
+counted, the newest ones, the org's flows with their sessions, and an alert
+for a failing webhook) and, admin-only, **Flows** (full flow configuration,
+versioned, which flows members may use, and the default flow) and
+**Developers** (tabs: API keys, Webhook, Branding and Sessions settings; the
+last two are temporary homes). The **Sessions** list
+(`/{org}/identity-proofing/sessions`, opened from the Overview;
+`?session=<id>` opens a row) is not in the sidebar. "Verify a person" in the
+header of the Overview and of Sessions opens the send form, for any member. Only a
+platform admin pauses an org's proofing, after which no request can be sent
+(`proofing_paused`, 403) while sent ones run out (§8). A member is sent a
+request from their member detail page (admin-only, like that page). The people
+an org verifies are its members, or external people with no login: an e-mail
+address and an optional name, a request without a `userId`. The org's own
+backend can send to them through the public API with one of its keys. Sending
+creates an engine session (2, 5 or 10 minutes, the org's session lifetime for an
+external person) and mails its vcmrtd deep link as a QR code
 and a button: the mail is the session, with no wallet page in between. The
-outcome lands on the request, in the audit log and at the customer's webhook.
+outcome lands on the request, in the audit log and, for an external person, at
+the org's webhook.
 The send form can instead **show the session on this screen**
 (`channel: on_screen`, for a subject who is with the member): it opens
-`customers/{id}/verify?flow=`, a page in the customer's branding that shows what
+`/{org}/identity-proofing/verify?flow=`, a page in the org's branding that shows what
 the flow collects, lets the subject pick the Yivi app or the Idem app, and only
 then creates the request (so the session's minutes start there). Idem shows the
 vcmrtd QR and link; Yivi starts an **OpenID4VP** disclosure of the passport or
@@ -40,17 +48,23 @@ The hosted page's completion (redirect origins, decline, locale) is in §7.
 **Slice:** `internal/proofingengine` (the engine: sessions, flows, the Idem app's
 routes, chip verification, results, Regula), `internal/proofingprovider` (the
 seam's value types + a test stub, leaf level),
-`internal/proofing` (settings, flow selection, members, requests, service,
+`internal/proofing` (org settings, flow selection, members, requests, service,
 handler), `internal/email` (kind `identity_proofing_requested`, the `qr` block),
 `frontend/src/routes/member-proofing.tsx` (the member detail panel),
 `frontend/src/routes/identity-proofing-overview.tsx` (the overview),
-`frontend/src/routes/customer-*-tab.tsx` (branding, API keys, webhooks,
-settings), `internal/proofing/api_handler.go` (the public API),
+`frontend/src/routes/developers.tsx` + `developers-api-keys.tsx` +
+`developers-webhook.tsx` + `proofing-branding.tsx` + `proofing-settings.tsx`
+(the Developers page and its tabs), `internal/proofing/api_handler.go` (the
+public API and the API key routes), `apikey_store.go` (keys),
+`org_settings_store.go` + `settings_handler.go` + `branding_handler.go` (the org's
+settings; `settings_store.go` is the flow selection),
 `webhook*.go` (endpoint, outbox, deliverer), `internal/safehttp` (the SSRF
 guard every externally supplied URL goes through),
 `frontend/src/routes/identity-proofing-flows.tsx` (admin: flow editor, versions,
-selection), `frontend/src/routes/customers.tsx` + `customer-detail.tsx`
-(customers, tabs, assignment, send, requests, pause), `hosted*.go` +
+selection), `frontend/src/routes/proofing-sessions.tsx` (the sessions list,
+details and review), `proofing-send.tsx` (the Verify a person dialog),
+`proofing-verify.tsx` (the on-screen check), `proofing-ui.tsx` (marks and
+tags), `proofing-pause.tsx` (the paused notice), `hosted*.go` +
 `routes/proof.tsx` (the hosted link, §7), `pause*.go` (§8), `flow_hosted*.go` +
 `routes/flow-hosted-settings.tsx` (per-flow hosted settings), `diploma*.go` +
 `internal/diploma` + `routes/identity-proofing-flows.tsx` (the flow's diploma
@@ -99,7 +113,7 @@ the app calls them), and the deep link's `api=` is
       asked, so concurrent frames cannot overshoot the budget; a frame past
       it decides the session without a call.
   - The member route `yivi/face` counts each frame against its org's
-    `MemberFaceFrameLimit` (1500 a minute); past it 429 `rate_limited`. A JPEG2000 chip
+    `memberFaceFrameLimit` (1500 a minute); past it 429 `rate_limited`. A JPEG2000 chip
   portrait is converted to PNG in pure Go (`images`, go-jpeg2000), refused
   past 4 megapixels (`images.MaxJPEG2000Pixels`) before its raster is decoded.
 - **Regula clean-up.** Every Regula tag the app is handed is queued for
@@ -108,11 +122,11 @@ the app calls them), and the deep link's `api=` is
   whatever the outcome (`Queue.Settle`). An erased session (`DeleteSession`)
   is due at once. `Engine.SweepRegula` deletes them.
 - **Retention.** A finished session is deleted 90 days after it ended, unless
-  it carries its own retention: a customer's session carries its flow's
-  retention override when set, else the customer's data retention, plus a day
+  it carries its own retention: an external person's session carries its flow's
+  retention override when set, else the org's data retention, plus a day
   (`engineRetention`), so `PurgeDue` erases it first. `Engine.Purge` (removal
   in batches of 100, each with its own timeout) and `Engine.SweepRegula` run on
-  `SESSION_PRUNE_EVERY`.
+  `SESSION_PRUNE_INTERVAL`.
 - **Device trail.** Which device claimed a session, handovers, and refused app
   requests go to the org's audit log (`Config.DeviceTrail` →
   `RequestStore.RecordDeviceEvent`: `identity_proofing.device_claimed`,
@@ -141,21 +155,27 @@ the app calls them), and the deep link's `api=` is
 - **The org is the engine's tenant: one tenant id, the org's.** A session and a
   flow carry `organizations.id`; there is nothing to provision, no key to hold
   and no enable step.
-- **Customers are the wallet's, not engine tenants.** A customer
-  (`identity_proofing_customers`) is a wallet row under the org, and every
-  session runs on the org's tenant in the engine. A customer
-  has no login: members act for it in the UI (the design plan's "org is the only
-  party in the UI"), and its own backend uses the customer API with its keys (§4). Flows stay the org's; a customer gets an
-  allow-list over them with one default (`identity_proofing_customer_flows`,
-  audited `customer_flows_configured` with before/after), independent of the
-  members' list: any completable org flow may be assigned. Customers are created,
-  renamed and paused or resumed (`customer_created`; `customer_updated` with the
-  `name` or `status` before and after; `paused_at` on the row), and removed
-  (`customer_removed`), which first purges each of its requests as an erasure
-  does (engine session deleted, subject scrubbed from their audit events), then
-  deletes them (§4).
+- **There are no customers; what an org sets up is the org's own, once, for all
+  its flows.** Every session runs on the org's tenant in the engine, and an
+  external person has no login or row of their own: they are the subject of a
+  request. The org holds (§4 has the detail):
+  - **Settings**, one row per org (`identity_proofing_settings`,
+    `OrgSettingsStore` in `org_settings_store.go`, `Settings` in `proofing.go`):
+    session (QR) lifetime 2, 5 or 10 minutes; data retention 7, 30, 90, 180 or
+    365 days (default 30); branding (display name, colour, logo, support
+    contact, privacy URL, hide "powered by"); allowed redirect origins. No row
+    reads as the defaults (10 minutes, 30 days, the org's own look, no redirect
+    origins).
+  - **API keys**, one set: a key works on every flow and reaches every
+    external request of the org. No key is needed to send from the app.
+  - **One webhook endpoint** for the events of all its flows.
+  - **Flows**, one set with one default, and the list of flows members may use
+    (below). Nothing is assigned to anyone; who may send which flow is under
+    Recipients.
+  - The rate limits (`apiCallLimit`, `APISessionLimit`) and the hosted page's
+    (`hostedCallLimit`) are per org.
 - **Flows live in the engine** (`proofingengine/flow`), versioned per org; the
-  wallet's "Proofing flows" tab edits them through `proofing.Service`, and it is
+  wallet's "Proofing flows" page edits them through `proofing.Service`, and it is
   `RequireOrgAdmin`. The rules are `flow.Validate`'s, mirrored in the editor:
   - Steps: `document_capture` (vcmrtd scans the MRZ to unlock the chip) and
     `nfc_read` (NFC chip read) toggle as a pair; `document_photo` (a photo of
@@ -246,8 +266,8 @@ the app calls them), and the deep link's `api=` is
     sessions, which the engine approves without comparing; one it reports no
     level for counts as low (`yiviEIDASLevel`).
   - Overrides: BSN policy, blur face and blur BSN (inherit/true/false), and
-    retention in seconds, which replaces the customer's retention for the
-    flow's sessions.
+    retention in seconds, which replaces the org's data retention for the
+    flow's sessions of external people.
   - Legal basis, purpose and assurance tiers are not in the editor: they are
     carried over unchanged when a version is saved.
   Face capture is forced to `native` (§11). The face provider is always
@@ -257,7 +277,8 @@ the app calls them), and the deep link's `api=` is
   photographs the document or matches against a reference photo, which only
   the Idem app does. A face step without `nfc_read` needs a
   per-session reference photo (§14): such a flow is not `completable` for
-  members, but a customer may be assigned it and send it through its API. A flow with
+  members, but it is `externalCompletable`, so an admin or an API key may send it
+  to an external person (only the API carries the photo). A flow with
   `document_photo` (front and back, or a passport's photo page) runs in the
   Idem app only: it rules out the Yivi app. "Edit" is
   `POST /flows/{id}/versions`: the new version is active at once, and a session
@@ -265,14 +286,21 @@ the app calls them), and the deep link's `api=` is
   (`flow_version`). Activating an earlier version rolls back. Audited:
   `flow_created`, `flow_version_created`, `flow_version_activated`, each with
   the full configuration (a flow holds no personal data).
-- **Admin allow-list.** `identity_proofing_flow_settings.member_allowed` marks the
-  flows an admin made available to members, and `member_default` exactly one
-  default (partial unique index). That table is the wallet's one row per org and
-  flow id, shared with the hosted and diploma settings below; saving one of the
-  three leaves the others alone, and no row reads as every default.
-  `PUT /flow-selection` replaces it whole, audited `identity_proofing.flows_configured`
-  with before/after. A new flow starts unselected. A request is refused
-  (`flow_not_allowed`) on any flow outside the list, for admins too. An id the
+- **Flow selection.** `identity_proofing_flow_settings.member_allowed` marks the
+  flows an admin made available to members, and `is_default` exactly one
+  default (partial unique index), the org's: the flow an external person's
+  request without a `flowId` runs, and the one the send form preselects. The default is
+  independent of `member_allowed`; it must be an identity flow an external person
+  can be sent (`externalCompletable`), never a data request flow (a CHECK, and
+  400 `invalid_input` from `validSelection`). That table is the wallet's one row per org and
+  flow id, shared with the hosted, diploma and kind settings below; saving one of
+  the four leaves the others alone, and no row reads as every default.
+  `PUT /flow-selection {flowIds, defaultFlowId}` replaces the selection whole
+  (`flowIds` are the flows members may use), audited `identity_proofing.flows_configured`
+  with before/after. `GET .../flows` rows carry `allowed`, `default` and
+  `retentionDays`. A new flow starts unselected. A request to a member is
+  refused (`flow_not_allowed`) on any flow outside the list, for admins too
+  (for an external person, see Recipients). An id the
   engine does not list is ignored on read. With the stub provider, flows live in memory, so
   a backend restart empties the list while the settings rows stay (and are ignored).
   Stub sessions never decide unless `IDENTITY_PROOFING_STUB_OUTCOME` is set
@@ -283,30 +311,66 @@ the app calls them), and the deep link's `api=` is
   API). It is the request mail's locale and the engine session's `language`,
   which the Idem app gets, so the app shows the same language. Absent, the mail
   uses the deployment default and the app the phone's language.
-- **Recipients: a member, or a customer's subject.** A request names either a
-  `userId` of the org (`subject_user_id`; any role, employees and externals
-  alike) on a flow members may use, or a `customerId` plus an e-mail address and
-  an optional name (a CHECK keeps the two exclusive) on a flow assigned to that
-  customer (`flow_not_assigned` otherwise). A subject is never a user or member.
-  Name and address are a snapshot; `subject_name` is `''` when none was given.
-- **Roles:** any member lists allowed flows, customers and a customer's
-  assigned flows, sends requests, and sees the requests they sent; creating and
-  editing flows, versions and the selection, and creating, renaming and assigning
-  flows to customers, are `RequireOrgAdmin`; an admin lists every flow (with
-  `allowed`/`default`, or `assigned`/`default` per customer) and every request of
-  the org. `GET requests?customerId=` narrows either view to one customer.
+- **Recipients: a member, or an external person.** A request names either a
+  `userId` of the org (`subject_user_id`, `subject_kind` `member`; any role,
+  employees and externals alike), or an e-mail address and an optional name
+  (`subject_kind` `external`, no `userId`; a CHECK keeps an external request
+  free of one). `subject_kind` is stored because `subject_user_id` is cleared
+  when the member's user is removed; `SubjectKind` and `Request.External()` read
+  it, and the request responses carry `external`. An external person is never a
+  user or member. Name and address are a snapshot; `subject_name` is `''` when
+  none was given. Which flow:
+  - a member recipient: only a flow members may use (`flow_not_allowed`
+    otherwise), whoever sends;
+  - an external person: an admin and an API key may send any flow a recipient
+    can finish (`externalCompletable`); a plain member only a flow members may
+    use (`flow_not_allowed` otherwise);
+  - an omitted `flowId` is the org's default flow for an external person, else
+    422 `no_default_flow` (`sendableFlow` in `service.go`; `Requester.Admin`
+    and `APIKeyID` decide who is held to the members' list).
+- **Roles:** any member lists the flows made available to them, reads the org's
+  settings, sends requests, and sees the requests they sent; creating and
+  editing flows, versions and the selection, changing the org's settings, API
+  keys and webhook, reading a request's result and deciding reviews are
+  `RequireOrgAdmin`; an admin lists every flow (with `allowed`/`default`) and
+  every request of the org. `GET requests?subjectUserId=` narrows either view to
+  the requests proofing one member.
+- **Customers were removed from the model** (ten migrations,
+  `20261016150000` to `20261016150900`;
+  `internal/migrate/customers_removed_integration_test.go` runs them over two
+  customers' data). What the org keeps of them:
+  - the oldest customer's settings (`identity_proofing_settings`), and all
+    API keys, now the org's;
+  - one webhook endpoint, the oldest customer's that had one; deliveries still
+    waiting for an endpoint that was dropped are deleted (the ones for the
+    wallet's default endpoint stay), and the kept Idempotency-Key answers are
+    deleted;
+  - the default flow: the members' default is now the org's, and an org
+    without one takes that of its oldest customer that had one, unless that is
+    a data request flow; the per-customer assignment
+    (`identity_proofing_customer_flows`) is dropped;
+  - every request: one that had a customer is `external`, one that had none
+    `member`; already sent requests keep their stored purge time until their
+    next write;
+  - a pause the org set itself is lifted, since only a platform admin can pause
+    now (§8).
+
+  Audit events recorded for customers stay in the log and still read
+  (`customer_created`, `customer_updated`, `customer_flows_configured`,
+  `customer_removed`). The down migrations rebuild one customer per org.
 
 ## 2. The mail is the session
 
-A session runs the customer's session lifetime (2, 5 or 10 minutes) within the
+A session runs the org's session lifetime (2, 5 or 10 minutes; a member's runs
+`SessionTTL`, 10) within the
 engine's hard cap `SessionMaxLifetime` (15), and its claim, the `handover`
 token in the `vcmrtd://verify?handover=…&api=…` deep link, is single use and
 claimable for `ClaimTokenTTL` (10 minutes, never past the session's own
 expiry), so the mailed QR works for the whole session.
 
-**Send.** `CreateRequest` creates the engine session (`ttlSeconds` = the
-customer's `session_ttl_seconds`, else `proofing.SessionTTL` (600); client
-reference = the request id), stores the request
+**Send.** `CreateRequest` creates the engine session (`TTL` = the org's
+`session_ttl_seconds` for an external person, else `proofing.SessionTTL` (600);
+client reference = the request id), stores the request
 with `link_expires_at` = the session's expiry, attaches the session
 (`AttachSession`, audited `identity_proofing.session_created`; `flow_version`
 becomes the version the engine pinned), and mails the create response's native claim:
@@ -356,7 +420,7 @@ engine still reports open past its cap is asked again after 30 s. The job leases
 what it re-checks (`ips_reconcile_leased_until`, `FOR UPDATE SKIP LOCKED`), so
 API replicas never re-check the same session at once. Nothing runs on a fixed
 interval. List reads never call the engine; a single-request read (the on-screen page,
-the customer API's `GET sessions/{id}`) re-checks a live request at most once
+the public API's `GET sessions/{id}`) re-checks a live request at most once
 per `readReconcileEvery` (10 s), as a fallback for a missed notice. A change for a
 session not attached yet is dropped; its deadline or next change reconciles it. `needs_review` is not final: a reviewer decides it, or the engine ends it (expired/cancelled), which ends the request as expired and sends
 `session.expired`. The UI treats it as not live: it stops polling and shows
@@ -367,9 +431,10 @@ is never lost. `expired` is
 derived (no live session and no outcome), never stored. An engine failure during
 a read is logged and the last known status is shown.
 
-**Counts.** `GET /identity-proofing/stats` counts the customer requests of the
-last `StatsWindow` (30 days) per customer and flow, by outcome, scoped like the
-request list (an admin's the org's, a member's their own). Expired is derived
+**Counts.** `GET /orgs/{slug}/identity-proofing/stats` counts the external
+requests of the last `statsWindow` (30 days) per flow, by outcome, scoped like the
+request list (an admin's the org's, a member's their own); members' own
+requests are not counted. Expired is derived
 in SQL exactly as `EffectiveStatus` does; cancelled requests have their own
 count. The counts are as last reconciled: they read the rows, never the engine, so an outcome no list read has picked up yet is
 not in them. The stats query key sits under the requests key, so whatever
@@ -377,7 +442,7 @@ refreshes the request lists refreshes the counts.
 
 **No background polling.** `database.RunOnNotify` runs a job on a Postgres
 NOTIFY or at the deadline the job returns, never on a ticker; the deadline job
-and the customer-webhook deliverer both use it.
+and the webhook deliverer both use it.
 
 **Method and timeline.** `proofingprovider` derives the app a subject used
 from the session's status, reading only each device's `role` and whether a
@@ -394,21 +459,26 @@ an outcome not decided in review, names that app instead (`subjectAppContext`,
 actor label `app:<method>`, shown as "Idem app"/"Yivi app"); an expiry and a
 post-review outcome stay the system's.
 
-## 4. Customer API, webhooks, branding
+## 4. Public API, webhook, settings
 
-- **API keys** (`identity_proofing_api_keys`): `yp_live_` + 32 random bytes,
-  stored as SHA-256 only, shown once; `prefix` tells keys apart. Revoke is
-  permanent; removing the customer removes them. Audited `api_key_created` /
-  `api_key_revoked` (with its scopes) on the customer. There are no test keys
-  (§5). A customer takes no request, from the dashboard or otherwise, until it
-  holds an unrevoked key (409 `customer_no_api_key`; `hasApiKey` on the
-  customer, "Setup needed" in the UI).
+- **API keys** (`identity_proofing_api_keys`, `apikey_store.go`) belong to the
+  org: `GET` and `POST /orgs/{slug}/identity-proofing/api-keys`, and
+  `DELETE .../api-keys/{keyID}`, admin only. `yp_live_` + 32 random bytes,
+  stored as SHA-256 only, shown once; `prefix` tells keys apart. One key works
+  on every flow and reaches every external request of the org. Revoke is
+  permanent. Audited `api_key_created` (with its scopes) / `api_key_revoked` on
+  the org (target `org_identity_proofing_settings`). There are no test keys
+  (§5). No key is needed to send from the app.
 - **Public API** (`/api/v1/proofing/{flows,sessions,sessions/{id}}`, Bearer
-  key, no cookie): acts exactly as a member sending for the customer, on its
-  assigned flows (no `flowId` is its default), refused while paused. `sendMail:
+  key, no cookie): acts as an admin sending to an external person, on any flow
+  a recipient can finish (`externalCompletable`; no `flowId` is the org's
+  default flow, else 422 `no_default_flow`), refused while paused. It reaches
+  the org's external requests only (`RequestStore.GetExternal`,
+  `ListExternalPage`); a member's request is a 404 there. `sendMail:
   false` skips the mail; the create answer always carries the `deepLink`. A
   request made this way has `requested_by` NULL and `api_key_id` set, and every
-  mail for a customer's subject names the customer as requester, never the key.
+  mail to an external person names the org as requester (`Settings.SignedAs`:
+  the branding's display name, else the org's name), never the key or the member.
   `POST /proofing/sessions/{id}/cancel` ends a `pending`/`in_progress` session in
   the engine too (`cancelled_at`; status reads `cancelled`; audited `session_cancelled`).
   `DELETE /proofing/sessions/{id}` erases it in the engine and clears its personal data
@@ -419,25 +489,29 @@ post-review outcome stay the system's.
   session's identity and evidence from the engine on each call (`SessionIdentity`
   decodes only name, birth date, nationality, the checks and the `photo` and
   `selfie` images; never the document number), audited `result_read`; 404 once
-  erased. The customer API never returns an image.
+  erased. The public API never returns an image.
   An org admin reads the same shape in the wallet at
   `GET /orgs/{slug}/identity-proofing/requests/{id}/result`
   (`AdminRequestResult`, sharing `requestResult`), audited `result_read` with the
   admin as actor; a member's request is 404. For an approval this response adds
-  `photo` (the document's portrait, DG2 or the disclosed credential's) and
-  `selfie`, `{mimeType, data}`, only PNG/JPEG/WebP (anything else, like an
-  unconverted JPEG2000, is dropped). The customer's Sessions tab reads it when
+  `photo` (the document's portrait, DG2 or the disclosed credential's),
+  `selfie` and, where the flow collects them, `referencePhoto` (§14),
+  `documentImage` and `documentImageBack`, each `{mimeType, data}`, only
+  PNG/JPEG/WebP (anything else, like an
+  unconverted JPEG2000, is dropped). The Sessions page (`proofing-sessions.tsx`)
+  reads it when
   an admin opens an approved, rejected or in-review row and folds
-  it into the row's detail list with the two photos: one audited read per open
+  it into the row's detail list with the photos: one audited read per open
   (`staleTime: Infinity`), and the timeline then shows it.
   Keys carry `scopes` (`sessions:write`, `sessions:read`, `results:read`,
   `flows:read`); every key gets all four, and only a signed-in org admin
   creates one. A missing scope is 403
   `insufficient_scope`.
-  `GET /proofing/sessions?limit=&cursor=` pages a customer's sessions newest
-  first from stored state (cursor: created_at + id), `{sessions, nextCursor}`.
+  `GET /proofing/sessions?limit=&cursor=` pages the org's external sessions
+  newest first from stored state (cursor: created_at + id), `{sessions, nextCursor}`.
   `Idempotency-Key` on create, cancel and the headless start (`idempotency.go`,
-  `identity_proofing_idempotency_keys`, pruned after 24 h):
+  `identity_proofing_idempotency_keys`, keyed by org and key, so two orgs may
+  use the same one (`TestIdemKeyIsPerOrg`); pruned after 24 h):
   - the same key and body replay the first successful answer
     (`Idempotent-Replayed: true`); another body is 422 `idempotency_key_reused`;
     a call still running is 409 `idempotency_in_flight`.
@@ -447,38 +521,46 @@ post-review outcome stay the system's.
     (409) until the 24 h prune. There is no timeout release.
   - the stored answer is sealed and linked to its session (`request_id`, read
     from the answer's `id`); `RequestStore.Purge` deletes it.
+
   Headless: `POST /proofing/sessions/{id}/methods/{idem_app|yivi_app}` starts a
-  `hosted: true` session in that app from the customer's own UI (`appLink` or
+  `hosted: true` session in that app from the org's own UI (`appLink` or
   `walletLink`; not hosted is 409 `not_hosted`); `GET …/methods/{m}/status`
   answers from stored state. The hosted token is the poll token: the Yivi face
   check and a new Idem code run through `/proof/{token}/…`.
   Sessions are named by an opaque `ps_` id (base32 of the request UUID,
-  `public_id.go`) on the customer API and in webhooks; the org routes take
+  `public_id.go`) on the public API and in webhooks; the org routes take
   either form.
   What a key causes is audited with the key as actor: `audit_events.actor_label`
   `api_key:<prefix>`, no `actor_user_id`; the audit log shows "API key <prefix>…".
-  Rate-limited per customer (`internal/ratelimit`, in-process token buckets,
-  so per API replica): `APICallLimit` 120 calls a minute, and of those
-  `APISessionLimit` 10 session creations, so one customer cannot use up the
-  deployment's capacity. Past it: 429 `rate_limited` with `Retry-After`.
-- **Webhooks**: a customer's results show in Sessions, the API and the audit
-  log whatever its webhook. Every event is really sent: without an endpoint of
-  its own it goes to the
+  Rate-limited per org (`internal/ratelimit`, in-process token buckets,
+  so per API replica): `apiCallLimit` 120 calls a minute, and of those
+  `APISessionLimit` 10 session creations, so one org cannot use up the
+  deployment's capacity. Past it: 429 `rate_limited` with `Retry-After`. The
+  hosted page has its own per-org bucket (§7).
+- **Webhook**: one endpoint per org, for the events of all its flows
+  (`identity_proofing_webhooks`, one row per org, secret sealed with the
+  proofing key, `whsec_…`, shown once). Admin only: `GET`, `PUT` and `DELETE
+  /orgs/{slug}/identity-proofing/webhook`, `POST .../webhook/rotate-secret`,
+  `POST .../webhook/test` and `GET .../webhook/deliveries` (the 20 most recent).
+  Removing the endpoint deletes the deliveries still waiting for it. The org's
+  results show in Sessions, the API and the audit log whatever its webhook.
+  Only external requests send webhook events: a member's request sends none.
+  Every such event is really sent: without an endpoint of its own it goes to the
   wallet's default endpoint (`endpoint_url` NULL, the tab's "Wallet default"),
   `POST /api/v1/identity-proofing/default-webhook` at
   `IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL` (default `APP_BASE_URL` + that path;
   dev: the backend's own `localhost:8080`), signed with a secret HKDF-derived from
   `IDENTITY_PROOFING_ENCRYPTION_KEY` (`Cipher.DeriveSecret`), which the receiver
   checks and acknowledges (204). Sent through a client that may reach a private
-  address (the deployment configured it); left out of the customer's endpoint
-  health; `test` needs an endpoint of its own. A customer that hosts its own receiver adds one
-  endpoint (`identity_proofing_webhooks`, secret
-  sealed with the proofing key, `whsec_…`, shown once). Events
+  address (the deployment configured it); left out of the org's endpoint
+  health; `test` needs an endpoint of its own. An org that hosts its own receiver adds one
+  endpoint. Events
   `session.created` / `.started` / `.handover` / `.verified` / `.failed` /
-  `.review_opened` / `.expired` / `.cancelled` / `.purged` are written to the
-  outbox (`identity_proofing_webhook_deliveries`) in the same transaction as the
+  `.review_opened` / `.expired` / `.cancelled` / `.purged` / `.diploma_added`
+  (`WebhookEvents`) are written to the
+  outbox (`identity_proofing_webhook_deliveries`, keyed by org) in the same transaction as the
   change (`AttachSession`, `MarkStarted`, `RecordHandover`, `RecordOutcome`,
-  `EndSession`, `LapseLinks`, `Cancel`, `Purge`); an
+  `EndSession`, `LapseLinks`, `Cancel`, `Purge`, `DiplomaStore.Add`); an
   endpoint saved before an event existed is not subscribed to it. `test` is sent on
   request whatever is subscribed. The payload is the session id, status, flow,
   method, assurance and error code: never a name or address (the API has those).
@@ -496,25 +578,37 @@ post-review outcome stay the system's.
   through `safehttp` (https, public addresses only, dialed IP = vetted IP, no
   redirects) with `Yivi-Signature: t=<unix>,v1=<hex HMAC-SHA256("<t>.<body>")>`,
   `Yivi-Event`, `Yivi-Delivery`; 8 attempts over about 24 h, then `failed`.
-  Health (`delivering` / `failing` since / pending retries) is derived from the
-  deliveries; a failing endpoint makes an active customer read "Needs attention".
-- **Branding** (columns on the customer): display name, `#rrggbb` colour, logo
-  (PNG/JPEG/GIF/WebP, 512 KiB; no SVG, mail clients do not render it), support
-  contact, https privacy URL. It applies to the proofing mail of the customer's
-  subjects: subject, heading and requester are the display name, the colour
-  replaces the org's primary seed, the logo replaces the org's (none shows the
-  name as wordmark, never the org's logo), and the `supportContact` /
-  `privacyUrl` paragraphs appear only when set (an all-empty paragraph collapses).
-- **Settings**: `session_ttl_seconds` (120/300/600) and `data_retention_days`
-  (7/30/90/180/365, default 30: the design's maximum of a year; the proofed-name retention). The frontend options are held to the Go
-  lists by `lib/identity-proofing.test.ts`.
-- **Remove customer** deletes its requests (addresses, names, outcomes), keys,
-  endpoint and deliveries; the audit trail stays (`customer_removed`).
-  - Each request is purged first (§10), then `CustomerStore.Remove` locks the
-    customer row (a request's insert waits on it) and refuses while any request
-    is unpurged: one sent meanwhile.
-  - The service purges and tries again, `removeCustomerAttempts` (3) times, then
-    answers 409 `customer_sessions_left`.
+  Health is one `WebhookHealth` for the org (`not_configured`, `delivering`, or
+  `failing` since, with the last status code and the pending retries), derived
+  from the deliveries to its own endpoint; a failing endpoint shows as an alert on
+  the Overview (for an admin) and on the Webhook tab.
+- **Settings** (`identity_proofing_settings`, one row per org): `GET` and
+  `PATCH /orgs/{slug}/identity-proofing/settings` (any of `sessionTtlSeconds`,
+  `dataRetentionDays`, `allowedRedirectOrigins`; absent is left as is),
+  `PUT .../settings/branding` (multipart) and `GET .../settings/logo`. Any
+  member reads them (the verify page needs the branding); an admin writes them.
+  Audited `identity_proofing.settings_updated` on target
+  `org_identity_proofing_settings`, with before and after (whether a logo is
+  set, never its bytes); saving what it already holds changes and audits
+  nothing. Held in `OrgSettingsStore`; no row reads as the defaults.
+  - **Session**: `session_ttl_seconds` (120/300/600, default 600) and
+    `data_retention_days` (7/30/90/180/365, default 30: the design's maximum of
+    a year; the proofed-name retention). A change of the retention moves the
+    purge time of the org's unpurged external requests (§10). The frontend
+    options are held to the Go lists by `lib/identity-proofing.test.ts`.
+  - **Branding**: display name, `#rrggbb` colour, logo (PNG/JPEG/GIF/WebP,
+    512 KiB; no SVG, mail clients do not render it), support contact, https
+    privacy URL, and whether to hide "powered by" (§7). It applies to the
+    proofing mail of external people (a member's mail is the org's own):
+    subject, heading and requester are the display name, the colour replaces
+    the org's theme primary seed, the logo replaces the org's theme logo (none
+    shows the name as wordmark, never the theme logo), and the `supportContact`
+    / `privacyUrl` paragraphs appear only when set (an all-empty paragraph
+    collapses). The hosted page and the on-screen page show the same display
+    name, colour, logo, support contact and privacy URL.
+  - **Allowed redirect origins** (§7).
+  - The settings have no page of their own yet: branding and the session
+    settings are tabs of the Developers page.
 
 ## 5. No test mode
 
@@ -543,34 +637,35 @@ manual "Show a new code", which the hosted page still uses.
 
 ## 7. Hosted link
 
-`POST /proofing/sessions` with `hosted: true` (customer API)
+`POST /proofing/sessions` with `hosted: true` (public API)
 creates no engine session: it stores the request with a link token (only its
-SHA-256, `link_token_hash`) valid `HostedLinkTTL` (72 h) and answers
-`hostedUrl` = `APP_BASE_URL/p/<token>`, which the customer hands its subject.
+SHA-256, `link_token_hash`) valid `hostedLinkTTL` (72 h) and answers
+`hostedUrl` = `APP_BASE_URL/p/<token>`, which the org hands its subject.
 Nothing is mailed. The public page `/p/:token` (`routes/proof.tsx`) runs the
 same steps as the on-screen page (`routes/proofing-verify-steps.tsx`, shared):
 what is collected, the app, then its session. Its API is `/api/v1/proof/{token}`
 (`hosted_handler.go`), unauthenticated like `/vog/{token}` and rate-limited as
 the API is:
 
-- The link is looked up, then the call counts against its customer's
-  `HostedCallLimit` across all its links (a member's link counts against its
-  org). Past it: 429 `rate_limited` with `Retry-After`.
+- The link is looked up, then the call counts against its org's
+  `hostedCallLimit` across all its links. Past it: 429 `rate_limited` with
+  `Retry-After`.
 - Its own bucket, not the API's, sized for the page (face frames every 400 ms).
 - As with an unknown API key, a token that matches no link is a 404 and counts
   against nothing.
 
 Its routes: the page, `status`, `start` (once: a second start is 409
-`link_started`), the customer's `logo`, and the Yivi `start`/`disclosure`/`face`
+`link_started`), the org's `logo`, and the Yivi `start`/`disclosure`/`face`
 routes, which share their implementation with the org routes. The session is
 created at `start` for the app the subject picked (`AttachSession` records it)
-and runs the customer's session TTL. An unstarted link reads as pending until
+and runs the org's session TTL. An unstarted link reads as pending until
 it lapses, then expired, in `EffectiveStatus` and the stats alike.
 
-A member makes the same link from the wallet: "Copy a link" in the send form
-(`channel: hosted` on `POST .../requests`, which answers `hostedUrl`), for a
-person not present and a flow the mail cannot carry (diplomas); the form
-shows the link to copy (`SecretReveal`). No redirect: the page ends on its
+A member makes the same link from the wallet: "Copy a link" in the Verify a
+person dialog (`channel: hosted` on `POST .../requests`, which answers
+`hostedUrl`; for an external person only), for a
+person not present and a flow the mail cannot carry (diplomas); the dialog
+shows the link to copy (`SecretReveal`) once it has closed. No redirect: the page ends on its
 own done screen.
 
 A link that lapses unstarted is ended by the deadline job (`LapseLinks`,
@@ -578,18 +673,20 @@ audited `session_ended` with `reason: link_lapsed`, webhook `session.expired`).
 
 **Consent and completion.** The overview step is the consent screen (who asks,
 what is collected, retention, privacy link). The retention it states is the
-server's `retentionDays` (hosted view `flow`, customer flow list):
-`subjectRetentionDays`, the flow's override else the customer's days, plus the
+server's `retentionDays` (hosted view `flow`, flow list):
+`subjectRetentionDays`, the flow's override else the org's days, plus the
 engine's day of grace, rounded up ("deleted at most N days after"). Its Decline calls
 `POST /proof/{token}/decline`, which cancels a link not yet started
 (`DeclineHosted` → `RequestStore.Cancel`, audited `session_cancelled` with the
-actor label `hosted_link`); a started link is 409 `link_started`. A customer
-lists `allowedRedirectOrigins` (customer settings tab, `PATCH` customer; stored
-`identity_proofing_customers.allowed_redirect_origins`): https origins, or http
+actor label `hosted_link`); a started link is 409 `link_started`. The org
+lists `allowedRedirectOrigins` (org settings, `PATCH .../settings`; stored
+`identity_proofing_settings.allowed_redirect_origins`; the "Sessions" settings tab
+of the Developers page): https origins, or http
 on a loopback host, at most 10, normalised lowercase. A hosted create may carry
 `redirectUrl` on one of them (else 400 `redirect_not_allowed`; any other channel
 400). The page view answers `sessionId` (the `ps_` id), `redirectUrl`,
-`embedOrigins` and `language`. Once `Session` reports an outcome
+`embedOrigins`, `language` and `organization` (name, branding and data
+retention; the org's own, so the page is in the org's branding). Once `Session` reports an outcome
 (`onSettled`), `proof.tsx` posts `{type: "proofing.completed", session, status}`
 to its parent for each allowed origin (never `*`), then redirects with
 `?session=&status=` when there is a redirect; otherwise it shows its own
@@ -601,7 +698,7 @@ stored choice. Framing: the proofing handler is a `server.PageHeaderer`, so the
 SPA handler asks it for headers on each index fallback; on `/p/<token>` it sets
 `Content-Security-Policy: frame-ancestors <allowed origins>`, or `'none'` for no
 origins, an unknown or throttled link, or a failed read (counted against the
-link's customer's `HostedCallLimit`). Only where the API serves the SPA (`STATIC_DIR`); in
+link's org's `hostedCallLimit`). Only where the API serves the SPA (`STATIC_DIR`); in
 dev Vite serves it without the header. The rest of the SPA still sends no CSP.
 Not built: the full-theme endpoint, and an automated
 accessibility test (axe, WCAG 2.2 AA): it needs a rendered DOM, and the frontend
@@ -615,28 +712,29 @@ hosted create is 409 `hosted_disabled`), `locales` (empty: every one; a create
 with another `language` is 400; the page keeps to them), and `completion`
 (`redirect`, or `done`, where a create with a `redirectUrl` is 400).
 Admins edit them under "Hosted page" on a flow in the flows page, with a
-preview of the overview step in a customer's branding. No row is the defaults.
-**Theme:** the page applies the customer's `primaryColor` through
+preview of the overview step in the org's branding. No row is the defaults.
+**Theme:** the page applies the org's branding `primaryColor` through
 `applyOrgTheme` (`hostedTheme`) while it shows, and a "Powered by Yivi" line the
-customer can leave off (`hide_powered_by`, branding tab).
+org can leave off (`hide_powered_by`, the Branding tab).
 
 ## 8. Pausing an org's proofing
 
-Two switches, either of which stops it (`identity_proofing_org_pauses`,
-`pause.go`): a platform admin's pause (`PUT /admin/organizations/{id}/identity-proofing/pause`,
-the "Identity proofing" column on `/admin/organizations`, list at
-`GET /admin/identity-proofing/pauses`), which the org cannot lift, and the org
-admin's own switch (`PUT /orgs/{slug}/identity-proofing/pause`, the card at the
-bottom of the overview). Default: never paused. Audited `identity_proofing.paused`
-/ `.resumed` with `by: platform|organization`. While paused, every org route
-(the `member`/`admin` closures wrap `h.active`), every customer-API call
+Only a platform admin pauses an org's proofing (`identity_proofing_org_pauses`,
+`pause.go`): `PUT /admin/organizations/{id}/identity-proofing/pause`, the
+"Identity proofing" column on `/admin/organizations`, list at
+`GET /admin/identity-proofing/pauses`. The org cannot pause or resume itself,
+and nothing below the org (a flow, a person) can be paused. Any member reads
+`GET /orgs/{slug}/identity-proofing/pause`, which stays reachable, and the
+Overview shows why proofing is stopped instead of its content
+(`proofing-pause.tsx`). Default: never paused. Audited `identity_proofing.paused`
+/ `.resumed` with `by: platform`. While paused, every org route
+(the `member`/`admin` closures wrap `h.active`), every public-API call
 (`requireAPIKey`) and every hosted link (`hostedRequest`, so the page, its start
-and its `frame-ancestors`) answers 403 `proofing_paused`; the overview shows why
-instead. Only the pause routes stay reachable. Running sessions still settle
-(engine notices, the deadline job) and webhooks still go out. Pausing (either
-level) rejects every open review of the org with `ORG_PAUSED` (reviewer
+and its `frame-ancestors`) answers 403 `proofing_paused`. Running sessions still settle
+(engine notices, the deadline job) and webhooks still go out. Pausing
+rejects every open review of the org with `ORG_PAUSED` (reviewer
 "system: organisation paused"), so nothing waits on a decision nobody can
-make; both pause dialogs say so. No review stays open under a pause:
+make; the pause's confirmation says so. No review stays open under a pause:
 
 | When | What |
 |---|---|
@@ -645,24 +743,23 @@ make; both pause dialogs say so. No review stays open under a pause:
 | A session reaches review while paused | `tryReconcile` rejects it at once (`rejectIfPaused`). The pause is read after the review is written, and the pause lists reviews after it is set, so one of the two sees the other. |
 | A rejection there failed | The hourly `PurgeDue` rejects the reviews still open in every paused org (`rejectPausedReviews`). |
 
-The platform pause asks for confirmation, and both levels record who paused (`platformPausedBy`, `orgPausedBy`). A customer
-cannot be paused while one of its sessions waits for review (409
-`customer_has_open_reviews`), checked in the pause's own transaction under the
-customer row's lock. A review reached after a customer pause stays decidable:
-a customer pause refuses only new requests. `Stores.Pauses` nil
+The pause records who set it (`PlatformPausedBy`). The
+columns of an org's own pause (`org_paused_at`, `org_paused_by`) are dropped, and
+a pause an org had set itself was lifted by the migration. Audit events
+recorded with `by: organization` stay in the log. `Stores.Pauses` nil
 (unit tests) never pauses.
 
 ## 9. Manual review
 
 A session in review (`needs_review`) waits for a decision (or for the engine to
 end it, §3). The reviewer sees the person's identity and check results (an
-audited result read). An admin decides it on the customer's Sessions tab (filter
+audited result read). An admin decides it on the Sessions page (filter
 "Needs review", also counted on the overview): approve or reject (optionally
 with an error code), with a required reason. `POST .../requests/{id}/review` calls the engine's
 `DecideReview` (the admin's e-mail as `reviewer`), audits
 `identity_proofing.review_decided` with the admin as actor, then reconciles:
 the outcome lands like any other, so an approval still has to meet the flow's
-assurance level and the customer's webhook is sent. A request no longer under
+assurance level and the org's webhook is sent (for an external request). A request no longer under
 review is 409 `not_under_review`. Two reviewers deciding at once are
 serialised (`LockReview`). When an identity session goes to review is still a
 product decision; today only data requests (§15) do.
@@ -678,27 +775,29 @@ names its subject
 status, error code, completion time, assurance and the document's name
 (`displayName`, else `firstName lastName`).
 
-The name is the one exception, and only for a **customer's subject** once the
+The name is the one exception, and only for an **external person** once the
 session is **approved** (the sender may know only an address): it is sealed
 under `IDENTITY_PROOFING_ENCRYPTION_KEY` in `proofed_name_ciphertext`, shown as
 `proofedName`, never audited. A member's request, or a rejected or
 `needs_review` one, keeps no name.
 
-A customer's session is purged by the `identity_proofing_purge` pruner
+An external person's session is purged by the `identity_proofing_purge` pruner
 (`Service.PurgeDue`) its flow's retention override (kept on the request,
-`retention_override_seconds`) or, without one, its customer's
+`retention_override_seconds`) or, without one, the org's
 `data_retention_days` (§4) after it ends
 (completed, cancelled, expired; not while it awaits review): as `DELETE`
 above, erased in the engine, then its personal data cleared here, the
 reviewer's reason in its audit events included. The expected birth date
 (§13) goes as soon as the session ends, is cancelled or its link lapses. The
-dashboard shows the time as `purgeAt`. A member's request is not purged.
+dashboard shows the time as `purgeAt`. A member's request is not purged, unless
+its flow carries a retention override.
 - **`purge_at` is stored** (migration `20261005113000`), so the hourly
   `ListPurgeDue` reads a partial index (`purged_at IS NULL`) instead of
   computing the time for every unpurged row.
   - The store computes it, not a trigger: `setPurgeAt` in
     `request_store.go` is the one rule (retention after settling, a data
-    request's review lapse after `dataRequestReviewDays`, NULL for a member's).
+    request's review lapse after `dataRequestReviewDays`, NULL for a member's
+    request on a flow without a retention override).
   - Every write to one of its inputs calls `refreshPurgeAt` on the same
     transaction, after the write:
 
@@ -712,24 +811,24 @@ dashboard shows the time as `purgeAt`. A member's request is not purged.
 
     A new write to one of those columns must call it too;
     `TestPurgeAtSetOnEveryWrite` checks each against the rule.
-  - A customer's changed `data_retention_days` (`SaveSettings`) recomputes its
-    unpurged requests (`refreshCustomerPurgeAt`). Lock order (rule at
-    `lockCustomer`):
+  - An org's changed `data_retention_days` (`OrgSettingsStore.SaveSession`)
+    recomputes the purge time of its unpurged external requests
+    (`refreshOrgPurgeAt`). Lock order (rule at `lockSettings`, an advisory lock
+    on the org: an org that saved nothing has no settings row to lock):
 
-    | Transaction | Customer row | Request rows |
+    | Transaction | Settings lock | Request rows |
     |---|---|---|
-    | `SaveSettings` | `FOR NO KEY UPDATE`, first | then all unpurged, `FOR NO KEY UPDATE` in id order |
-    | `RequestStore.Create` | `FOR SHARE`, before the insert | its new row |
-    | Request writers (`Cancel`, `RecordOutcome`, `Purge`, ...) | `FOR KEY SHARE` (webhook delivery's foreign key), after | their row, first |
-    | `SetStatus`, `Remove` | `FOR UPDATE` | read only (`Remove` deletes purged ones) |
-    | `ClearExpiredProofedNames` | none | due rows in id order |
+    | `SaveSession` | exclusive (`settingsLockWrite`), first | then all unpurged external ones, `FOR NO KEY UPDATE` in id order |
+    | `RequestStore.Create` (external person) | shared (`settingsLockCreate`), before the insert | its new row |
+    | Request writers (`Cancel`, `RecordOutcome`, `Purge`, ...) | none | their row |
+    | `ClearExpiredProofedNames` | none | due rows in id order, `FOR NO KEY UPDATE` |
 
-    - `FOR SHARE` and `FOR NO KEY UPDATE` conflict, so no request is created
-      against the old retention and left stale (`TestRetentionWaitsForInsert`).
-    - `FOR KEY SHARE` passes `FOR NO KEY UPDATE`, so a request writer holding
-      a row the retention change waits on still enqueues its webhook and
-      commits. With `FOR UPDATE` that was a deadlock (40P01,
-      `TestRetentionBesideWrite`).
+    - The exclusive and the shared lock conflict, so no request is created
+      against the old retention and left stale (`TestRetentionWaitsForInsert`);
+      inserts share it and never wait on each other.
+    - No other writer takes the lock, so none waits on it while holding a
+      request's row: a request writer holding a row the retention change waits
+      on still enqueues its webhook and commits (`TestRetentionBesideWrite`).
     - Statements that wait on several request rows lock them in id order;
       `LapseLinks` and `ListDue` use `SKIP LOCKED` and never wait.
   - Migration `20261005113000` backfilled existing rows with the same rule, as
@@ -748,7 +847,7 @@ dashboard shows the time as `purgeAt`. A member's request is not purged.
   app (`selfieLocation: native`) can be sent; the wallet forces `native` and
   refuses others (`flow_not_completable`).
 - **Reconciling reads `SessionStatus`**, which carries no personal data; the full
-  result is read only for an approved customer subject, whose name is kept.
+  result is read only for an approved external person, whose name is kept.
 - **No face engine of its own.** A flow's face step and the Yivi method need
   Regula.
 - **EU driving licences** are refused, 422 `document_unsupported`
@@ -820,8 +919,8 @@ only: the engine knows nothing of it.
   PDF, the holder's name or birth date. Audited `diploma_added` (webhook
   `session.diploma_added`) and `diploma_rejected` (reason only:
   `not_a_diploma`, `signature_invalid`, `holder_mismatch`, `duplicate`).
-  Shown in the request responses, the customer API's `result`, and the
-  Sessions tab. `Purge` deletes them with the rest.
+  Shown in the request responses, the public API's `result`, and the
+  Sessions page. `Purge` deletes them with the rest.
 - **Not built**: mailing a hosted link for a diploma flow (the mail is the
   Idem session, §2); diplomas on a member's request page; no real DUO
   extract is in the test suite (personal data), so the parser is covered by
@@ -835,10 +934,10 @@ account recovery (the org's "wachtwoord vergeten" sends its user to a hosted
 session) or "Dibran Mulder must identify himself". Wallet-side only: the engine
 proofs whoever scans, and the wallet holds the outcome to the person.
 
-- **Send.** A customer's request with a `birthDate` (YYYY-MM-DD, past, with
-  `name`): the send form's "Date of birth" (shown only for a flow that reads
-  the document data), `POST .../requests`, and the customer API's
-  `POST /proofing/sessions`, on every channel. A member's request cannot
+- **Send.** An external person's request with a `birthDate` (YYYY-MM-DD, past, with
+  `name`): the Verify a person dialog's "Date of birth" (shown only for a flow that reads
+  the document data), `POST .../requests`, and the public API's
+  `POST /proofing/sessions`, on every channel. A request to a member cannot
   (`ErrInvalidInput`: the wallet holds no birth date of a member), nor a flow
   whose result lacks the document data (`readsIdentity`, the same name in the
   backend and the frontend: `dg1` requested). Without a birth date the name stays a
@@ -856,31 +955,33 @@ proofs whoever scans, and the wallet holds the outcome to the person.
   `rejected` with `IDENTITY_MISMATCH` (no proofed name kept); a failed
   identity read leaves the request undecided for the next reconcile. A
   review approval is matched too. The engine still holds its approval, so
-  the result read (`requestResult` → `heldToVerdict`, customer API and admin
+  the result read (`requestResult` → `heldToVerdict`, public API and admin
   view alike) answers the wallet's rejection and code with no identity or
   images: the other person is never shown (`ASSURANCE_NOT_MET` likewise).
-- **Shown.** `expectedSubject` on the request, the customer API's session
-  and its webhooks; "Expected person" in the Sessions tab's details; the
+- **Shown.** `expectedSubject` on the request, the public API's session
+  and its webhooks; "Expected person" in the Sessions page's details; the
   reason in words (`proofingRejectionReason`).
 - **Not built:** the hosted and on-screen pages do not name the expected
   person to the subject.
 
-## 14. The customer's own photo (reference photo)
+## 14. The org's own photo (reference photo)
 
-For a customer that already holds a photo of the person and wants a live face
+For an org that already holds a photo of the person and wants a live face
 check against it without the document (an insurer confirming a policy
 holder's change of bank account).
 
 - **Flow.** A face step without `nfc_read` (`NeedsReferencePhoto`; the
   editor's "Face check" alone). `Completable` stays false for it (a member
-  has no photo to send); `CustomerCompletable` is true, so it can be
-  assigned to a customer, and the flow lists carry `needsReferencePhoto`.
+  has no photo to send); `externalCompletable` is true, so an admin or an API
+  key can send it to an external person, and the flow lists carry
+  `needsReferencePhoto`.
   It runs in the Idem app only (`yiviAppAvailable` false: the Yivi app
   matches against its credential's photo) and reaches no eIDAS level (the
-  levels need the chip; the engine scores it with `chipReference` false).
+  levels need the chip; the engine scores it with the sender's photo as the face's
+  source, `matchedRelyingPartyPhoto`).
   The send form leaves it out.
-- **Send.** Only the customer API: `referencePhoto`, standard base64,
-  sniffed as PNG/JPEG/WebP, at most `MaxReferencePhotoBytes` (512 KiB;
+- **Send.** Only the public API: `referencePhoto`, standard base64,
+  sniffed as PNG/JPEG/WebP, at most `maxReferencePhotoBytes` (512 KiB;
   the create body is capped at 1 MiB, an idempotent one past that is 413
   `body_too_large`). Required on such a flow (422
   `reference_photo_required`), refused on any other (400), so a chip flow is
@@ -896,19 +997,21 @@ holder's change of bank account).
 - **In the result.** The session's result marks `faceReference:
   relying_party` (the evidence reads `reference_photo`, not `emrtd`) and,
   when the flow requests the selfie, releases the photo beside it
-  (`referencePhoto`), kept and purged with the selfie: the Sessions tab
-  shows "Customer's photo" next to the selfie. The customer API's result
+  (`referencePhoto`), kept and purged with the selfie: the Sessions page
+  shows "Photo sent with the request" next to the selfie. The public API's result
   carries no image, as ever.
 - **Not built:** sending it from the wallet's own send form; combining it
   with the expected-subject match (§13), which needs the document data.
 
 ## 15. Data requests (GDPR access and erasure)
 
-A person asks a customer what is held of them ("see my data", Art. 15) or for
-its erasure ("delete my data", Art. 17). The customer sends them a session on
+A person asks the org what is held of them ("see my data", Art. 15) or for
+its erasure ("delete my data", Art. 17). The org sends them a session on
 a flow of that kind, like any other session (API, hosted link, mail or
 on-screen); the person proves who they are, and the session goes to the
-customer's **needs review**, where an org admin decides. Code:
+org's **needs review**, where an org admin decides. For now a data request is
+a flow of the kind `data_access` or `data_erasure`; it is not yet a standard
+feature of its own. Code:
 `data_request*.go`; frontend `routes/data-request-review.tsx`, the flow
 editor's Type, and the hosted page.
 
@@ -917,7 +1020,9 @@ editor's Type, and the hosted page.
   (`PUT …/flows/{id}/kind`, audited `identity_proofing.flow_kind_configured`).
   A data request flow must read the name and date of birth
   (`flow_no_identity`) and is never a members' flow (`data_flow_for_member`,
-  a CHECK and both service paths); it asks for no diplomas. A request keeps
+  a CHECK and both service paths) and never the org's default flow (a CHECK,
+  and 400 `invalid_input` from `validSelection` and `SaveFlowKind`); it asks for
+  no diplomas. A request keeps
   the kind it was sent with (`identity_proofing_requests.flow_kind`).
 - **To review, not approved.** When the engine approves a data request's
   person, `tryReconcile` calls `findDataMatches` and records `needs_review`
@@ -925,13 +1030,13 @@ editor's Type, and the hosted page.
   name like an approval. From then on the wallet owns the decision: a later
   engine read (approved, or the session purged at the engine) changes nothing.
 - **Matches.** `findDataMatches` reads the person's identity and every
-  `Candidates` session of the **same customer** (not purged, settled; the
+  `Candidates` session of the **org**, external ones only (not purged, settled; the
   person's earlier data requests too once decided, as each holds who asked, so
   an erasure clears them; one still in review never), skipping one whose kept
   proofed name lacks the family name. A match needs the same full name word for
   word (`diploma.SameName`) and birth date: `strong` when document type,
   issuing state and expiry also agree (the same document; the document number
-  is never read), `probable` otherwise. The customer's unfinished sessions
+  is never read), `probable` otherwise. The org's unfinished external sessions
   (pending, in progress, expired, cancelled; `UnfinishedCandidates`) hold no
   proofed identity, only what the sender typed, and are listed apart:
   - `email`: sent to exactly the same e-mail address, case aside.
@@ -955,13 +1060,14 @@ editor's Type, and the hosted page.
 - **Nobody reviews it.** A data request left in review 30 days (GDPR Art.
   12(3)) is rejected `REVIEW_LAPSED` and purged by `PurgeDue`.
 - **Export.** An approved access request's data: per approved session the
-  outcome, the contact the customer gave, identity and evidence, diplomas;
+  outcome, the contact the org gave, identity and evidence, diplomas;
   images named in `imagesHeld`, never included. For the person on their
   hosted link (`GET /proof/{token}/data-export`, `dataExportUntil` in the
   progress; 24 h), for the admin (`…/requests/{id}/data-export`) and for the
-  customer (`GET /proofing/sessions/{id}/data-export`). Audited
+  org's software (`GET /proofing/sessions/{id}/data-export`). Audited
   `identity_proofing.data_exported`.
-- **Not built:** matching across customers or orgs (each customer is the
-  controller of its own sessions); a mail to the person when decided (a hosted
-  person reopens the link; otherwise the customer tells them); members' own
-  proofing requests.
+- **Not built:** matching across orgs (each org is the controller of its own
+  sessions); a mail to the person when decided (a hosted
+  person reopens the link; otherwise the org tells them); members' own
+  proofing requests; data requests as a standard feature of the org rather
+  than a kind of flow.
