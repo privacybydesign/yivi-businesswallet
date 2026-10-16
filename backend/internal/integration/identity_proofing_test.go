@@ -499,7 +499,7 @@ func testLogoPNG(t *testing.T) []byte {
 
 // A settings update that fails validation changes nothing, whichever of its
 // fields is the bad one.
-func TestSettingsPatchChangesNothingOnError(t *testing.T) {
+func TestBadPatchChangesNothing(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("admin@acme.test")

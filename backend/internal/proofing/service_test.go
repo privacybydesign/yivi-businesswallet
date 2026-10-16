@@ -1147,7 +1147,7 @@ func TestSaveSettingsOwnOptionsOnly(t *testing.T) {
 	}
 }
 
-func TestUpdateSettingsValidatesFirst(t *testing.T) {
+func TestUpdateSettingsAtomic(t *testing.T) {
 	f := newFixture()
 	before := f.orgSettings.settings
 	retention := 90
