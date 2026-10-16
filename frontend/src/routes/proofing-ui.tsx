@@ -1,35 +1,29 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import { useCreateCustomerMutation } from "../api/identity-proofing.queries";
 import type {
-  ProofingCustomer,
+  ProofingBranding,
   ProofingRequest,
+  WebhookHealth,
 } from "../api/identity-proofing";
 import { absoluteApiUrl } from "../api/http";
 import { useWhenFormatter } from "../lib/format-when";
 import {
-  customerDisplayStatus,
   isHexColor,
-  proofingErrorMessage,
   proofingRejectionReason,
   proofingStatusLabel,
   proofingStatusTone,
   readableTextOn,
 } from "../lib/identity-proofing";
-import { Button, Input, Modal, Tag } from "../ui";
-
-const ERROR = "text-error text-[12.5px]";
-const NEW_CUSTOMER_FORM = "proofing-new-customer";
+import { Button, Modal, Tag } from "../ui";
 
 const MARK_SIZES = {
   md: "h-8 w-8 text-[13px] rounded-md",
   lg: "h-12 w-12 text-[18px] rounded-lg",
 } as const;
 
-// The tile colours a customer without its own gets, picked by name so a
-// customer keeps its colour across pages.
+// The tile colour a brand without its own gets, picked by name so it keeps its
+// colour across pages.
 const MARK_PALETTE = ["#1F5B4A", "#26307A", "#8B2332", "#3F3F46"] as const;
 const MARK_HASH_MULTIPLIER = 31;
 
@@ -41,17 +35,18 @@ function markColor(name: string): string {
   return MARK_PALETTE[Math.abs(hash) % MARK_PALETTE.length];
 }
 
-// A customer's mark: its logo, else its initial on its primary colour (or a
-// colour picked by its name).
-export function CustomerMark({
-  customer,
+// The mark of a name as the branding shows it: its logo, else its initial on
+// its primary colour (or a colour picked by the name).
+export function BrandMark({
+  name: orgName,
+  branding,
   size = "md",
 }: {
-  customer: Pick<ProofingCustomer, "name" | "branding">;
+  name: string;
+  branding: Pick<ProofingBranding, "displayName" | "primaryColor" | "logoUri">;
   size?: keyof typeof MARK_SIZES;
 }): React.JSX.Element {
-  const { branding } = customer;
-  const name = branding.displayName || customer.name;
+  const name = branding.displayName || orgName;
   const [failed, setFailed] = useState(false);
   if (branding.logoUri && !failed) {
     return (
@@ -69,7 +64,7 @@ export function CustomerMark({
       color={
         isHexColor(branding.primaryColor)
           ? branding.primaryColor
-          : markColor(customer.name)
+          : markColor(orgName)
       }
       className={MARK_SIZES[size]}
     />
@@ -114,7 +109,7 @@ export function ResultTag({
   return (
     <Tag tone={proofingStatusTone(request.status)} dot title={reason}>
       {reason && !compact
-        ? t("customers.sessions.failedBecause", {
+        ? t("identityProofing.sessions.failedBecause", {
             status: label,
             reason,
           })
@@ -123,41 +118,11 @@ export function ResultTag({
   );
 }
 
-export function CustomerStatusTag({
-  customer,
-}: {
-  customer: Pick<ProofingCustomer, "status" | "webhook" | "hasApiKey">;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  switch (customerDisplayStatus(customer)) {
-    case "paused":
-      return <Tag dot>{t("customers.status.paused")}</Tag>;
-    case "setup_needed":
-      return (
-        <Tag tone="amber" dot>
-          {t("customers.status.setupNeeded")}
-        </Tag>
-      );
-    case "needs_attention":
-      return (
-        <Tag tone="amber" dot>
-          {t("customers.status.needsAttention")}
-        </Tag>
-      );
-    default:
-      return (
-        <Tag tone="green" dot>
-          {t("customers.status.active")}
-        </Tag>
-      );
-  }
-}
-
-// How the customer's webhook endpoint answers, in a few words.
+// How the org's webhook endpoint answers, in a few words.
 export function WebhookStateText({
   webhook,
 }: {
-  webhook: ProofingCustomer["webhook"];
+  webhook: WebhookHealth;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
@@ -167,8 +132,8 @@ export function WebhookStateText({
       return (
         <span>
           {webhook.lastStatusCode === undefined
-            ? t("customers.webhookState.delivering")
-            : t("customers.webhookState.deliveringCode", {
+            ? t("identityProofing.webhookState.delivering")
+            : t("identityProofing.webhookState.deliveringCode", {
                 code: webhook.lastStatusCode,
               })}
         </span>
@@ -177,8 +142,8 @@ export function WebhookStateText({
       return (
         <span className="text-error">
           {webhook.lastStatusCode === undefined
-            ? t("customers.webhookState.failingNoAnswer", { since })
-            : t("customers.webhookState.failing", {
+            ? t("identityProofing.webhookState.failingNoAnswer", { since })
+            : t("identityProofing.webhookState.failing", {
                 code: webhook.lastStatusCode,
                 since,
               })}
@@ -187,7 +152,7 @@ export function WebhookStateText({
     default:
       return (
         <span className="text-muted">
-          {t("customers.webhookState.notConfigured")}
+          {t("identityProofing.webhookState.notConfigured")}
         </span>
       );
   }
@@ -219,7 +184,7 @@ export function SecretReveal({
       dismissible={false}
       footer={
         <Button size="sm" onClick={onClose}>
-          {doneLabel ?? t("customers.secret.done")}
+          {doneLabel ?? t("identityProofing.secret.done")}
         </Button>
       }
     >
@@ -247,7 +212,9 @@ export function SecretReveal({
               });
           }}
         >
-          {copied ? t("customers.secret.copied") : t("customers.secret.copy")}
+          {copied
+            ? t("identityProofing.secret.copied")
+            : t("identityProofing.secret.copy")}
         </Button>
       </div>
       {copyFailed && (
@@ -255,87 +222,6 @@ export function SecretReveal({
           {t("common.copyFailed")}
         </p>
       )}
-    </Modal>
-  );
-}
-
-// The admin's "Add customer": a name is all a customer needs; its flows are
-// assigned on its own page, which the new customer opens on.
-export function NewCustomerModal({
-  slug,
-  onClose,
-}: {
-  slug: string;
-  onClose: () => void;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const create = useCreateCustomerMutation(slug);
-  const [name, setName] = useState("");
-  const [touched, setTouched] = useState(false);
-  const missing = name.trim() === "";
-
-  function submit(event: React.FormEvent): void {
-    event.preventDefault();
-    setTouched(true);
-    if (missing) {
-      return;
-    }
-    create.mutate(name.trim(), {
-      onSuccess: (customer) => {
-        void navigate(`/${slug}/identity-proofing/customers/${customer.id}`);
-      },
-    });
-  }
-
-  return (
-    <Modal
-      title={t("customers.new.title")}
-      closeLabel={t("common.close")}
-      onClose={onClose}
-      footer={
-        <>
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            {t("customers.new.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            form={NEW_CUSTOMER_FORM}
-            size="sm"
-            icon="add"
-            loading={create.isPending}
-          >
-            {t("customers.new.create")}
-          </Button>
-        </>
-      }
-    >
-      <form
-        id={NEW_CUSTOMER_FORM}
-        className="flex flex-col gap-1"
-        onSubmit={submit}
-        noValidate
-      >
-        <label
-          htmlFor="proofing-customer-name"
-          className="text-ink-soft text-[12px] font-semibold"
-        >
-          {t("customers.new.name")}
-        </label>
-        <Input
-          id="proofing-customer-name"
-          value={name}
-          placeholder={t("customers.new.namePlaceholder")}
-          aria-invalid={touched && missing}
-          onChange={(event) => setName(event.target.value)}
-        />
-        {touched && missing && (
-          <p className={ERROR}>{t("customers.new.nameRequired")}</p>
-        )}
-        {create.isError && (
-          <p className={ERROR}>{proofingErrorMessage(create.error, t)}</p>
-        )}
-      </form>
     </Modal>
   );
 }

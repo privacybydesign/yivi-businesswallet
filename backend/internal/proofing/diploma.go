@@ -297,7 +297,7 @@ func (s *DiplomaStore) Add(ctx context.Context, req Request, d Diploma) (Diploma
 			"qualification": d.Qualification, "institution": d.Institution,
 			"dateAwarded": d.DateAwarded.Format(time.DateOnly), "nlqfLevel": d.NLQFLevel, "eqfLevel": d.EQFLevel,
 		}
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionDiplomaAdded, &req.ID, data)
+		return enqueueRequestWebhook(ctx, q, req, EventSessionDiplomaAdded, data)
 	})
 	if err != nil {
 		return Diploma{}, false, err

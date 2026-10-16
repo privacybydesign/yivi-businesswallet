@@ -4,6 +4,7 @@ package proofing
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -18,16 +19,11 @@ func TestDataRequestStore(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	recorder := audit.NewDBRecorder()
-	customers := NewCustomerStore(pool, recorder)
 	requests := NewRequestStore(pool, recorder, cipher)
 	data := NewDataRequestStore(pool, recorder, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
 
 	// A flow's kind defaults to an identity check, and is listed once set.
 	if kind, err := data.FlowKind(ctx, orgID, "f-data"); err != nil || kind != FlowIdentity {
@@ -44,12 +40,12 @@ func TestDataRequestStore(t *testing.T) {
 	}
 
 	// The person's earlier session, and their data request.
-	session := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "anna@example.org"}), "s1")
+	session := createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("anna@example.org")), "s1")
 	if err := requests.RecordOutcome(ctx, session, "s1", StatusApproved,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
 		t.Fatalf("RecordOutcome session: %v", err)
 	}
-	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "anna@example.org"})
+	in := newStoredRequest(orgID, sam, externalSubject("anna@example.org"))
 	in.FlowKind = FlowDataAccess
 	dr, err := requests.Create(ctx, in)
 	if err != nil {
@@ -62,7 +58,26 @@ func TestDataRequestStore(t *testing.T) {
 		t.Fatalf("Get data request = %q, %v; want data_access", dr.FlowKind, err)
 	}
 
-	// Only the customer's identity sessions with personal data are candidates.
+	// Only the org's external identity sessions with personal data are
+	// candidates: not a member's session, nor another org's.
+	otherOrg := makeOrg(t, pool, "globex")
+	for i, in := range []NewStoredRequest{
+		newStoredRequest(orgID, sam, memberSubject(Member{UserID: sam, Name: "Sam", Email: "sam@example.org"})),
+		newStoredRequest(otherOrg, sam, externalSubject("anna@example.org")),
+	} {
+		sid := "s-other-" + strconv.Itoa(i)
+		held, err := requests.Create(ctx, in)
+		if err != nil {
+			t.Fatalf("Create %s: %v", sid, err)
+		}
+		if ok, err := requests.AttachSession(ctx, held, attachedSession(sid)); err != nil || !ok {
+			t.Fatalf("AttachSession %s = %v, %v", sid, ok, err)
+		}
+		if err := requests.RecordOutcome(ctx, held, sid, StatusApproved,
+			proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
+			t.Fatalf("RecordOutcome %s: %v", sid, err)
+		}
+	}
 	candidates, err := data.Candidates(ctx, dr)
 	if err != nil || len(candidates) != 1 || candidates[0].ID != session.ID || candidates[0].ProofedName != "Anna Jansen" {
 		t.Fatalf("Candidates = %+v, %v; want the earlier session with its name", candidates, err)
@@ -103,24 +118,24 @@ func TestDataRequestStore(t *testing.T) {
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
 		t.Fatalf("RecordOutcome data request: %v", err)
 	}
-	inReview := newDataRequest(t, requests, orgID, sam, customer.ID, FlowDataAccess, "s3")
+	inReview := newDataRequest(t, requests, orgID, sam, FlowDataAccess, "s3")
 	if err := requests.RecordOutcome(ctx, inReview, "s3", StatusNeedsReview,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
 		t.Fatalf("RecordOutcome in review: %v", err)
 	}
-	erasure := newDataRequest(t, requests, orgID, sam, customer.ID, FlowDataErasure, "s4")
+	erasure := newDataRequest(t, requests, orgID, sam, FlowDataErasure, "s4")
 	candidates, err = data.Candidates(ctx, erasure)
 	if err != nil || len(candidates) != 2 || candidates[0].ID != session.ID || candidates[1].ID != dr.ID {
 		t.Fatalf("erasure Candidates = %+v, %v; want the session and the decided access request", candidates, err)
 	}
 }
 
-// newDataRequest creates a data request of kind for customerID with its
-// session attached.
-func newDataRequest(t *testing.T, requests *RequestStore, orgID, by, customerID uuid.UUID, kind FlowKind, sessionID string) Request {
+// newDataRequest creates an external data request of kind with its session
+// attached.
+func newDataRequest(t *testing.T, requests *RequestStore, orgID, by uuid.UUID, kind FlowKind, sessionID string) Request {
 	t.Helper()
 	ctx := context.Background()
-	in := newStoredRequest(orgID, by, Subject{CustomerID: &customerID, Email: "anna@example.org"})
+	in := newStoredRequest(orgID, by, externalSubject("anna@example.org"))
 	in.FlowKind = kind
 	req, err := requests.Create(ctx, in)
 	if err != nil {
@@ -135,26 +150,21 @@ func newDataRequest(t *testing.T, requests *RequestStore, orgID, by, customerID 
 	return req
 }
 
-// An erasure also finds the customer's unfinished sessions, for matching by
+// An erasure also finds the org's unfinished external sessions, for matching by
 // address or typed name; a settled one is matched on identity instead. Such a
 // match is stored and listed after the identity matches.
 func TestDataRequestUnfinishedCandidates(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	recorder := audit.NewDBRecorder()
-	customers := NewCustomerStore(pool, recorder)
 	requests := NewRequestStore(pool, recorder, cipher)
 	data := NewDataRequestStore(pool, recorder, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
 	send := func(email string) Request {
 		t.Helper()
-		req, err := requests.Create(ctx, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: email}))
+		req, err := requests.Create(ctx, newStoredRequest(orgID, sam, externalSubject(email)))
 		if err != nil {
 			t.Fatalf("Create %s: %v", email, err)
 		}
@@ -162,14 +172,23 @@ func TestDataRequestUnfinishedCandidates(t *testing.T) {
 	}
 
 	// createStarted expects the org's first request.
-	settled := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "anna@example.org"}), "s1")
+	settled := createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("anna@example.org")), "s1")
 	if err := requests.RecordOutcome(ctx, settled, "s1", StatusApproved,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
 	pending := send("Anna@Example.org")
 	other := send("piet@example.org")
-	erasure := newDataRequest(t, requests, orgID, sam, customer.ID, FlowDataErasure, "s2")
+	erasure := newDataRequest(t, requests, orgID, sam, FlowDataErasure, "s2")
+
+	// A member's unfinished request, and another org's, are not candidates.
+	if _, err := requests.Create(ctx, newStoredRequest(orgID, sam,
+		memberSubject(Member{UserID: sam, Name: "Sam", Email: "sam@example.org"}))); err != nil {
+		t.Fatalf("Create member request: %v", err)
+	}
+	if _, err := requests.Create(ctx, newStoredRequest(makeOrg(t, pool, "globex"), sam, externalSubject("anna@example.org"))); err != nil {
+		t.Fatalf("Create other org's request: %v", err)
+	}
 
 	candidates, err := data.UnfinishedCandidates(ctx, erasure)
 	if err != nil || len(candidates) != 2 || candidates[0].ID != pending.ID || candidates[1].ID != other.ID {
@@ -192,16 +211,11 @@ func TestDataRequestReviewLapses(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	recorder := audit.NewDBRecorder()
-	customers := NewCustomerStore(pool, recorder)
 	requests := NewRequestStore(pool, recorder, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	erasure := newDataRequest(t, requests, orgID, sam, customer.ID, FlowDataErasure, "s1")
+	erasure := newDataRequest(t, requests, orgID, sam, FlowDataErasure, "s1")
 	if err := requests.RecordOutcome(ctx, erasure, "s1", StatusNeedsReview,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
 		t.Fatalf("RecordOutcome review: %v", err)

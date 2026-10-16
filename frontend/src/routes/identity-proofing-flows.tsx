@@ -61,7 +61,8 @@ export type EditorMode = { kind: "new" } | { kind: "edit"; flow: EditableFlow };
 // The org admin's identity proofing flows: define flows at the proofing
 // service with every setting it takes, edit one by saving a new version (active
 // at once; sent requests keep the version they pinned), roll back to an earlier
-// version, and choose which flows members may send a request on.
+// version, choose which flows members may send a request on, and which flow is
+// the org's default.
 export default function IdentityProofingFlows(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug } = useParams();
@@ -145,8 +146,8 @@ function FlowsCard({
   const [historyOf, setHistoryOf] = useState<string | null>(null);
   const [hostedOf, setHostedOf] = useState<string | null>(null);
 
-  // A default the admin unticked falls to the first flow still ticked; a flow
-  // that can no longer be ticked drops out.
+  // A flow that can no longer be ticked drops out. The default is any identity
+  // flow an external person can be sent, whether or not members may use it.
   const selectable = flows.filter(
     (f) => f.completable && !isDataRequest(f.kind),
   );
@@ -159,7 +160,6 @@ function FlowsCard({
       defaultFlowId: flows.find((f) => f.default)?.id ?? "",
     },
   );
-  const effectiveDefault = selection.defaultFlowId;
 
   function toggle(id: string, on: boolean): void {
     setAllowed((current) => {
@@ -251,8 +251,10 @@ function FlowsCard({
                         type="radio"
                         name="proofing-default-flow"
                         className="h-4 w-4"
-                        checked={on && effectiveDefault === flow.id}
-                        disabled={!on}
+                        checked={defaultId === flow.id}
+                        disabled={
+                          isDataRequest(flow.kind) || !selectable.includes(flow)
+                        }
                         onChange={() => setDefaultId(flow.id)}
                       />
                       {t("identityProofingFlows.selection.default")}
@@ -423,8 +425,8 @@ function VersionHistory({
   );
 }
 
-// The flow editor, here and on a customer's Flows tab: onDone closes it (after
-// a save or a cancel), onSaved gets the saved flow first.
+// The flow editor: onDone closes it (after a save or a cancel), onSaved gets
+// the saved flow first.
 export function FlowEditor({
   slug,
   mode,

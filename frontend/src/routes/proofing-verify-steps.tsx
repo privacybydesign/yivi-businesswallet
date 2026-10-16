@@ -15,7 +15,7 @@ import {
 import type {
   DiplomaMode,
   DiplomaVerdict,
-  ProofingCustomer,
+  ProofingBranding,
   HostedDiploma,
   ProofingFaceVerdict,
   ProofingApp,
@@ -40,8 +40,8 @@ import { yiviUniversalLink } from "../lib/yivi-universal-link";
 import { Button, DataDisclosure, Icon, Outcome } from "../ui";
 import type { DataDisclosureItem, IconName } from "../ui";
 
-// The steps a customer's subject goes through to be verified, shared by the
-// on-screen page a member shows (customer-verify) and the hosted page a link
+// The steps an external person goes through to be verified, shared by the
+// on-screen page a member shows (proofing-verify) and the hosted page a link
 // opens (proof): what is collected, the app to use, then that app's session.
 
 const HINT = "text-ink-soft text-[13px]";
@@ -59,8 +59,11 @@ const FACE_FRAME_QUALITY = 0.8;
 const FACE_FRAME_INTERVAL_MS = 400;
 const FACE_DECISION_PENDING = "pending";
 
-// Who asks: the customer as the steps show it.
-export type VerifyCustomer = Pick<ProofingCustomer, "name" | "branding">;
+// Who asks: the org as the steps show it, with its branding.
+export interface VerifyOrg {
+  name: string;
+  branding: ProofingBranding;
+}
 
 // What the flow collects, as the steps show it.
 export interface VerifyFlowInfo {
@@ -70,7 +73,7 @@ export interface VerifyFlowInfo {
   // Whether the subject is asked for their DUO diploma extracts afterwards.
   diplomaMode?: DiplomaMode;
   // The most days the session's data is kept, as the server works it out:
-  // the flow's retention when it sets one, else the customer's.
+  // the flow's retention when it sets one, else the org's.
   retentionDays: number;
 }
 
@@ -93,29 +96,29 @@ const METHOD_ICONS: Record<ProofingMethod, IconName> = {
 };
 
 export function Overview({
-  customer,
+  org,
   flow,
   onContinue,
   starting,
   error,
   cancel,
 }: {
-  customer: VerifyCustomer;
+  org: VerifyOrg;
   flow: VerifyFlowInfo;
   onContinue: () => void;
   starting: boolean;
   error?: string;
-  // A way out beside Continue, e.g. back to the customer; none when absent.
+  // A way out beside Continue, e.g. back to the overview; none when absent.
   cancel?: React.ReactNode;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const name = customer.branding.displayName || customer.name;
+  const name = org.branding.displayName || org.name;
   const items: DataDisclosureItem[] = (flow.requestedAttributes ?? [])
     .filter(isRequestedAttribute)
     .map((value) => ({
       icon: ATTRIBUTE_ICONS[value],
       label: t(`identityProofingFlows.attributes.${value}`),
-      detail: t(`customers.onScreen.attributeDetails.${value}`),
+      detail: t(`identityProofing.onScreen.attributeDetails.${value}`),
     }));
   if (flow.diplomaMode !== undefined && flow.diplomaMode !== "off") {
     items.push({
@@ -124,43 +127,45 @@ export function Overview({
       detail: t("identityProofing.diplomas.overview.detail"),
     });
   }
-  const { supportContact, privacyUrl } = customer.branding;
+  const { supportContact, privacyUrl } = org.branding;
 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
         <h2 className="text-ink text-[18px] font-bold">
-          {t("customers.onScreen.overview.heading", { name })}
+          {t("identityProofing.onScreen.overview.heading", { name })}
         </h2>
         <p className={HINT}>
-          {t("customers.onScreen.overview.intro", { name })}
+          {t("identityProofing.onScreen.overview.intro", { name })}
         </p>
       </div>
       {items.length === 0 ? (
-        <p className={HINT}>{t("customers.onScreen.overview.noData")}</p>
+        <p className={HINT}>{t("identityProofing.onScreen.overview.noData")}</p>
       ) : (
         <DataDisclosure items={items} />
       )}
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <div className={CAPTION}>{t("customers.onScreen.overview.flow")}</div>
+          <div className={CAPTION}>
+            {t("identityProofing.onScreen.overview.flow")}
+          </div>
           <div className="text-ink mt-1 text-[13px]">{flow.name}</div>
         </div>
         <div>
           <div className={CAPTION}>
-            {t("customers.onScreen.overview.assurance")}
+            {t("identityProofing.onScreen.overview.assurance")}
           </div>
           <div className="text-ink mt-1 text-[13px]">
             {flow.requiredAssuranceLevel
-              ? t("customers.flows.eidas", {
+              ? t("identityProofing.flows.eidas", {
                   level: assuranceLevelLabel(flow.requiredAssuranceLevel, t),
                 })
-              : t("customers.flows.noAssurance")}
+              : t("identityProofing.flows.noAssurance")}
           </div>
         </div>
       </div>
       <p className={HINT}>
-        {t("customers.onScreen.overview.retention", {
+        {t("identityProofing.onScreen.overview.retention", {
           count: flow.retentionDays,
         })}
       </p>
@@ -168,7 +173,7 @@ export function Overview({
         <div className="flex flex-col gap-1 text-[13px]">
           {supportContact !== "" && (
             <span className="text-ink-soft">
-              {t("customers.onScreen.overview.support", {
+              {t("identityProofing.onScreen.overview.support", {
                 contact: supportContact,
               })}
             </span>
@@ -180,7 +185,7 @@ export function Overview({
               rel="noreferrer"
               className="text-link font-semibold hover:underline"
             >
-              {t("customers.onScreen.overview.privacy")}
+              {t("identityProofing.onScreen.overview.privacy")}
             </a>
           )}
         </div>
@@ -189,7 +194,7 @@ export function Overview({
       <div className="flex justify-end gap-2">
         {cancel}
         <Button icon="arrow_front" loading={starting} onClick={onContinue}>
-          {t("customers.onScreen.overview.continue")}
+          {t("identityProofing.onScreen.overview.continue")}
         </Button>
       </div>
     </div>
@@ -220,11 +225,11 @@ export function MethodChoice({
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-ink text-[18px] font-bold">
-        {t("customers.onScreen.method.heading")}
+        {t("identityProofing.onScreen.method.heading")}
       </h2>
       <fieldset className="flex flex-col gap-3">
         <legend className="sr-only">
-          {t("customers.onScreen.method.heading")}
+          {t("identityProofing.onScreen.method.heading")}
         </legend>
         {options.map((option) => {
           const checked = method === option.value;
@@ -251,10 +256,10 @@ export function MethodChoice({
               </span>
               <span className="flex flex-col gap-0.5">
                 <span className="text-ink text-[14.5px] font-bold">
-                  {t(`customers.onScreen.method.${option.key}.title`)}
+                  {t(`identityProofing.onScreen.method.${option.key}.title`)}
                 </span>
                 <span className="text-ink-soft text-[13px]">
-                  {t(`customers.onScreen.method.${option.key}.detail`)}
+                  {t(`identityProofing.onScreen.method.${option.key}.detail`)}
                 </span>
               </span>
             </label>
@@ -264,10 +269,10 @@ export function MethodChoice({
       {error && <p className={ERROR}>{error}</p>}
       <div className="flex justify-between gap-2">
         <Button variant="secondary" icon="arrow_back" onClick={onBack}>
-          {t("customers.onScreen.method.back")}
+          {t("identityProofing.onScreen.method.back")}
         </Button>
         <Button icon="scan_qrcode" loading={starting} onClick={onContinue}>
-          {t("customers.onScreen.method.continue")}
+          {t("identityProofing.onScreen.method.continue")}
         </Button>
       </div>
     </div>
@@ -341,10 +346,10 @@ export function Session({
           })
         }
       >
-        {t("customers.onScreen.scan.newCode")}
+        {t("identityProofing.onScreen.scan.newCode")}
       </Button>
       <p className={`${HINT} text-center`}>
-        {t("customers.onScreen.scan.newCodeHint")}
+        {t("identityProofing.onScreen.scan.newCodeHint")}
       </p>
       {fresh.isError && (
         <p className={`${ERROR} text-center`}>
@@ -376,14 +381,14 @@ export function Session({
   const manualIdem = link ? (
     <>
       <h2 className="text-ink text-[18px] font-bold">
-        {t("customers.onScreen.scan.idemHeading")}
+        {t("identityProofing.onScreen.scan.idemHeading")}
       </h2>
       <QrCode value={link} />
       <p className={`${HINT} text-center`}>
-        {t("customers.onScreen.scan.idemHint")}
+        {t("identityProofing.onScreen.scan.idemHint")}
       </p>
       <a href={link} className={LINK_BUTTON}>
-        {t("customers.onScreen.scan.openIdem")}
+        {t("identityProofing.onScreen.scan.openIdem")}
       </a>
       <Countdown seconds={secondsLeft} />
       {newCode}
@@ -393,7 +398,7 @@ export function Session({
     // unless it was closed and a new code hands the session over.
     <>
       <p className={`${HINT} text-center`}>
-        {t("customers.onScreen.scan.startedElsewhere")}
+        {t("identityProofing.onScreen.scan.startedElsewhere")}
       </p>
       {newCode}
     </>
@@ -422,7 +427,7 @@ export function Session({
         method === "idem_app" &&
         target.kind === "hosted" && (
           <p className="text-link text-[13px] font-semibold">
-            {t("customers.onScreen.scan.inProgress")}
+            {t("identityProofing.onScreen.scan.inProgress")}
           </p>
         )}
     </div>
@@ -694,9 +699,11 @@ function IdemOnScreen({
           <Icon name="phone" size={24} />
         </span>
         <h2 className="text-ink text-[18px] font-bold">
-          {t("customers.onScreen.scan.connectedHeading")}
+          {t("identityProofing.onScreen.scan.connectedHeading")}
         </h2>
-        <p className={HINT}>{t("customers.onScreen.scan.connectedHint")}</p>
+        <p className={HINT}>
+          {t("identityProofing.onScreen.scan.connectedHint")}
+        </p>
         <Countdown seconds={sessionSecondsLeft} />
       </div>
     );
@@ -704,19 +711,21 @@ function IdemOnScreen({
   const away = state === "away";
   const heading = t(
     away
-      ? "customers.onScreen.scan.awayHeading"
-      : "customers.onScreen.scan.idemHeading",
+      ? "identityProofing.onScreen.scan.awayHeading"
+      : "identityProofing.onScreen.scan.idemHeading",
   );
   const hint = t(
     away
-      ? "customers.onScreen.scan.awayHint"
-      : "customers.onScreen.scan.idemHint",
+      ? "identityProofing.onScreen.scan.awayHint"
+      : "identityProofing.onScreen.scan.idemHint",
   );
   if (!shown) {
     return (
       <div className="flex flex-col items-center gap-4">
         <h2 className="text-ink text-[18px] font-bold">{heading}</h2>
-        <QrPlaceholder label={t("customers.onScreen.scan.newCodeLoading")} />
+        <QrPlaceholder
+          label={t("identityProofing.onScreen.scan.newCodeLoading")}
+        />
         {fresh.isError && (
           <p className={`${ERROR} text-center`}>
             {proofingErrorMessage(fresh.error, t)}
@@ -753,7 +762,7 @@ function IdemQr({
       <QrCode value={code.deepLink} />
       <p className={`${HINT} text-center`}>{hint}</p>
       <a href={code.deepLink} className={LINK_BUTTON}>
-        {t("customers.onScreen.scan.openIdem")}
+        {t("identityProofing.onScreen.scan.openIdem")}
       </a>
       <Countdown seconds={seconds} />
     </div>
@@ -807,7 +816,7 @@ function YiviSession({
     if (!disclosure.data.ok) {
       return (
         <Failed
-          message={t("customers.onScreen.yiviEnded", {
+          message={t("identityProofing.onScreen.yiviEnded", {
             reason: yiviEndReason(disclosure.data.code, t),
           })}
           onRestart={onRestart}
@@ -829,19 +838,19 @@ function YiviSession({
   return (
     <>
       <h2 className="text-ink text-[18px] font-bold">
-        {t("customers.onScreen.scan.yiviHeading")}
+        {t("identityProofing.onScreen.scan.yiviHeading")}
       </h2>
       {link === undefined ? (
-        <QrPlaceholder label={t("customers.onScreen.scan.starting")} />
+        <QrPlaceholder label={t("identityProofing.onScreen.scan.starting")} />
       ) : (
         <QrCode value={link} />
       )}
       <p className={`${HINT} text-center`}>
-        {t("customers.onScreen.scan.yiviHint")}
+        {t("identityProofing.onScreen.scan.yiviHint")}
       </p>
       {link !== undefined && (
         <a href={link} className={LINK_BUTTON}>
-          {t("customers.onScreen.scan.openYivi")}
+          {t("identityProofing.onScreen.scan.openYivi")}
         </a>
       )}
       {start.data && <Countdown seconds={secondsLeft} />}
@@ -852,11 +861,11 @@ function YiviSession({
 function yiviEndReason(code: string | undefined, t: TFunction): string {
   switch (code) {
     case "photo_missing":
-      return t("customers.onScreen.yiviCodes.photoMissing");
+      return t("identityProofing.onScreen.yiviCodes.photoMissing");
     case "reference_no_face":
-      return t("customers.onScreen.yiviCodes.referenceNoFace");
+      return t("identityProofing.onScreen.yiviCodes.referenceNoFace");
     case "document_not_accepted":
-      return t("customers.onScreen.yiviCodes.documentNotAccepted");
+      return t("identityProofing.onScreen.yiviCodes.documentNotAccepted");
     default:
       return code ?? t("identityProofing.errors.generic");
   }
@@ -950,15 +959,15 @@ function FaceCheck({
   return (
     <>
       <h2 className="text-ink text-[18px] font-bold">
-        {t("customers.onScreen.face.heading")}
+        {t("identityProofing.onScreen.face.heading")}
       </h2>
       <p className={`${HINT} text-center`}>
-        {t("customers.onScreen.face.hint")}
+        {t("identityProofing.onScreen.face.hint")}
       </p>
       {cameraError ? (
         <Failed
-          message={t("customers.onScreen.face.cameraError")}
-          actionLabel={t("customers.onScreen.face.retry")}
+          message={t("identityProofing.onScreen.face.cameraError")}
+          actionLabel={t("identityProofing.onScreen.face.retry")}
           onRestart={() => {
             setCameraError(false);
             setAttempt((a) => a + 1);
@@ -975,17 +984,17 @@ function FaceCheck({
       {frameError !== undefined ? (
         <Failed
           message={frameError}
-          actionLabel={t("customers.onScreen.face.retry")}
+          actionLabel={t("identityProofing.onScreen.face.retry")}
           onRestart={() => setFrameError(undefined)}
         />
       ) : verdict && !verdict.faceDetected ? (
         <p className="text-warning-fg text-[13px]">
-          {t("customers.onScreen.face.noFace")}
+          {t("identityProofing.onScreen.face.noFace")}
         </p>
       ) : (
         total !== undefined && (
           <p className="text-ink-soft text-[13px]">
-            {t("customers.onScreen.face.progress", {
+            {t("identityProofing.onScreen.face.progress", {
               count: verdict?.consecutive ?? 0,
               total,
             })}
@@ -1024,8 +1033,8 @@ function SessionOutcome({
         <Outcome
           tone="success"
           icon="valid"
-          title={t("customers.onScreen.outcome.approved.title")}
-          message={t("customers.onScreen.outcome.approved.message")}
+          title={t("identityProofing.onScreen.outcome.approved.title")}
+          message={t("identityProofing.onScreen.outcome.approved.message")}
           action={actions}
         />
       );
@@ -1034,11 +1043,11 @@ function SessionOutcome({
         <Outcome
           tone="error"
           icon="invalid"
-          title={t("customers.onScreen.outcome.rejected.title")}
+          title={t("identityProofing.onScreen.outcome.rejected.title")}
           message={
             progress.errorCode
               ? proofingRejectionReason(progress.errorCode, t)
-              : t("customers.onScreen.outcome.rejected.message")
+              : t("identityProofing.onScreen.outcome.rejected.message")
           }
           action={actions}
         />
@@ -1048,8 +1057,8 @@ function SessionOutcome({
         <Outcome
           tone="info"
           icon="time"
-          title={t("customers.onScreen.outcome.review.title")}
-          message={t("customers.onScreen.outcome.review.message")}
+          title={t("identityProofing.onScreen.outcome.review.title")}
+          message={t("identityProofing.onScreen.outcome.review.message")}
           action={actions}
         />
       );
@@ -1058,8 +1067,8 @@ function SessionOutcome({
         <Outcome
           tone="info"
           icon="invalid"
-          title={t("customers.onScreen.outcome.cancelled.title")}
-          message={t("customers.onScreen.outcome.cancelled.message")}
+          title={t("identityProofing.onScreen.outcome.cancelled.title")}
+          message={t("identityProofing.onScreen.outcome.cancelled.message")}
           action={actions}
         />
       );
@@ -1068,8 +1077,8 @@ function SessionOutcome({
         <Outcome
           tone="info"
           icon="time"
-          title={t("customers.onScreen.outcome.expired.title")}
-          message={t("customers.onScreen.outcome.expired.message")}
+          title={t("identityProofing.onScreen.outcome.expired.title")}
+          message={t("identityProofing.onScreen.outcome.expired.message")}
           action={actions}
         />
       );
@@ -1080,10 +1089,13 @@ function Expired({ onRestart }: { onRestart?: () => void }): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center gap-4">
-      <QrPlaceholder label={t("customers.onScreen.scan.expired")} expired />
+      <QrPlaceholder
+        label={t("identityProofing.onScreen.scan.expired")}
+        expired
+      />
       {onRestart && (
         <Button variant="secondary" icon="scan_qrcode" onClick={onRestart}>
-          {t("customers.onScreen.scan.restart")}
+          {t("identityProofing.onScreen.scan.restart")}
         </Button>
       )}
     </div>
@@ -1105,7 +1117,7 @@ function Failed({
       <p className={ERROR}>{message}</p>
       {onRestart && (
         <Button variant="secondary" onClick={onRestart}>
-          {actionLabel ?? t("customers.onScreen.scan.restart")}
+          {actionLabel ?? t("identityProofing.onScreen.scan.restart")}
         </Button>
       )}
     </div>
@@ -1118,7 +1130,7 @@ function Countdown({ seconds }: { seconds: number }): React.JSX.Element {
     <p className="text-ink-soft flex items-center gap-1.5 text-[13px]">
       <Icon name="time" />
       <span role="timer" aria-live="off">
-        {t("customers.onScreen.scan.expiresIn", {
+        {t("identityProofing.onScreen.scan.expiresIn", {
           time: formatDuration(seconds),
         })}
       </span>

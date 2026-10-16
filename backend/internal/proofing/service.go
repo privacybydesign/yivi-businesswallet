@@ -62,7 +62,7 @@ type requestStore interface {
 	List(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error)
 	MarkStarted(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error
 	EndSession(ctx context.Context, req Request, sessionID string, ipsStatus proofingprovider.Status, method proofingprovider.Method) error
-	ListPage(ctx context.Context, scope CustomerScope, after *RequestCursor, limit int) ([]Request, error)
+	ListExternalPage(ctx context.Context, orgID uuid.UUID, after *RequestCursor, limit int) ([]Request, error)
 	Cancel(ctx context.Context, req Request) (bool, error)
 	RecordResultRead(ctx context.Context, req Request) error
 	Purge(ctx context.Context, req Request) error
@@ -71,7 +71,7 @@ type requestStore interface {
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	ReferencePhoto(ctx context.Context, req Request) (*proofingprovider.Image, error)
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
-	GetForCustomer(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error)
+	GetExternal(ctx context.Context, orgID, id uuid.UUID) (Request, error)
 	Get(ctx context.Context, orgID, id uuid.UUID) (Request, error)
 	ListDue(ctx context.Context, now time.Time, limit int) ([]Request, error)
 	NextDeadline(ctx context.Context, now time.Time) (time.Time, error)
@@ -81,9 +81,8 @@ type requestStore interface {
 	RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode string) error
 	RecordHandover(ctx context.Context, req Request, expiresAt time.Time) error
 	ListPurgeDue(ctx context.Context, limit int) ([]Request, error)
-	ListUnpurgedForCustomer(ctx context.Context, orgID, customerID uuid.UUID) ([]Request, error)
 	ClearExpiredProofedNames(ctx context.Context) (int64, error)
-	ListOpenReviews(ctx context.Context, orgID uuid.UUID, customerID *uuid.UUID) ([]Request, error)
+	ListOpenReviews(ctx context.Context, orgID uuid.UUID) ([]Request, error)
 	LockReview(ctx context.Context, id uuid.UUID) (func(), error)
 }
 
@@ -93,41 +92,35 @@ type eventReader interface {
 }
 
 type webhookStore interface {
-	Get(ctx context.Context, orgID, customerID uuid.UUID) (Webhook, error)
-	Save(ctx context.Context, orgID, customerID uuid.UUID, url string, events []string) (Webhook, string, error)
-	RotateSecret(ctx context.Context, orgID, customerID uuid.UUID) (Webhook, string, error)
-	Remove(ctx context.Context, orgID, customerID uuid.UUID) error
-	SendTest(ctx context.Context, orgID, customerID uuid.UUID) error
-	Deliveries(ctx context.Context, orgID, customerID uuid.UUID) ([]Delivery, error)
-	Health(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]WebhookHealth, error)
+	Get(ctx context.Context, orgID uuid.UUID) (Webhook, error)
+	Save(ctx context.Context, orgID uuid.UUID, url string, events []string) (Webhook, string, error)
+	RotateSecret(ctx context.Context, orgID uuid.UUID) (Webhook, string, error)
+	Remove(ctx context.Context, orgID uuid.UUID) error
+	SendTest(ctx context.Context, orgID uuid.UUID) error
+	Deliveries(ctx context.Context, orgID uuid.UUID) ([]Delivery, error)
+	Health(ctx context.Context, orgID uuid.UUID) (WebhookHealth, error)
 	DefaultSecret() (string, error)
 }
 
 type apiKeyStore interface {
-	Create(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string, scopes []string) (APIKey, string, error)
-	List(ctx context.Context, orgID, customerID uuid.UUID) ([]APIKey, error)
-	Revoke(ctx context.Context, orgID, customerID, id uuid.UUID) (APIKey, error)
+	Create(ctx context.Context, orgID, createdBy uuid.UUID, name string, scopes []string) (APIKey, string, error)
+	List(ctx context.Context, orgID uuid.UUID) ([]APIKey, error)
+	Revoke(ctx context.Context, orgID, id uuid.UUID) (APIKey, error)
 	Authenticate(ctx context.Context, raw string) (APIKeyCaller, error)
 }
 
-type customerStore interface {
-	List(ctx context.Context, orgID uuid.UUID) ([]Customer, error)
-	Get(ctx context.Context, orgID, id uuid.UUID) (Customer, error)
-	Create(ctx context.Context, orgID, createdBy uuid.UUID, name string) (Customer, error)
-	Rename(ctx context.Context, orgID, id uuid.UUID, name string) (Customer, error)
-	SaveFlows(ctx context.Context, orgID, id uuid.UUID, sel FlowSelection) (Customer, error)
-	SetStatus(ctx context.Context, orgID, id uuid.UUID, status CustomerStatus) (Customer, error)
-	SaveSettings(ctx context.Context, orgID, id uuid.UUID, settings CustomerSettings) (Customer, error)
-	SaveBranding(ctx context.Context, orgID, id uuid.UUID, b CustomerBranding, logo LogoChange) (Customer, error)
-	SaveRedirectOrigins(ctx context.Context, orgID, id uuid.UUID, origins []string) (Customer, error)
-	Logo(ctx context.Context, orgID, id uuid.UUID) (CustomerLogo, error)
-	Remove(ctx context.Context, orgID, id uuid.UUID) error
+type orgSettingsStore interface {
+	Get(ctx context.Context, orgID uuid.UUID) (Settings, error)
+	SaveSession(ctx context.Context, orgID uuid.UUID, session SessionSettings) (Settings, error)
+	SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error)
+	SaveRedirectOrigins(ctx context.Context, orgID uuid.UUID, origins []string) (Settings, error)
+	Logo(ctx context.Context, orgID uuid.UUID) (Logo, error)
 }
 
 type pauseStore interface {
 	Get(ctx context.Context, orgID uuid.UUID) (OrgPause, error)
 	List(ctx context.Context) ([]OrgPause, error)
-	Set(ctx context.Context, orgID uuid.UUID, level PauseLevel, state PauseState, by *uuid.UUID) (OrgPause, error)
+	Set(ctx context.Context, orgID uuid.UUID, state PauseState, by *uuid.UUID) (OrgPause, error)
 }
 
 type flowHostedStore interface {
@@ -140,15 +133,15 @@ type Mailer interface {
 	SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, m email.ProofingMail) error
 }
 
-// Service orchestrates the engine, the settings, request and customer stores, and the mailer.
+// Service orchestrates the engine, the settings and request stores, and the mailer.
 type Service struct {
-	settings  settingsStore
-	requests  requestStore
-	customers customerStore
-	apiKeys   apiKeyStore
-	webhooks  webhookStore
-	events    eventReader
-	pauses    pauseStore
+	settings    settingsStore
+	requests    requestStore
+	orgSettings orgSettingsStore
+	apiKeys     apiKeyStore
+	webhooks    webhookStore
+	events      eventReader
+	pauses      pauseStore
 	// flowHostedSettings is each flow's hosted page settings; nil the defaults.
 	flowHostedSettings flowHostedStore
 	// flowDiplomaSettings is each flow's DiplomaMode, diplomas the extracts
@@ -171,13 +164,13 @@ type Service struct {
 
 // Stores are the service's persistence, one store per concern.
 type Stores struct {
-	Settings  settingsStore
-	Requests  requestStore
-	Customers customerStore
-	APIKeys   apiKeyStore
-	Webhooks  webhookStore
-	Events    eventReader
-	// Pauses holds who paused an org's proofing; nil never pauses.
+	Settings    settingsStore
+	Requests    requestStore
+	OrgSettings orgSettingsStore
+	APIKeys     apiKeyStore
+	Webhooks    webhookStore
+	Events      eventReader
+	// Pauses holds whether a platform admin paused an org's proofing; nil never pauses.
 	Pauses pauseStore
 	// FlowHosted holds each flow's hosted page settings; nil is the defaults.
 	FlowHosted flowHostedStore
@@ -193,7 +186,7 @@ type Stores struct {
 // NewService builds the proofing service. A nil mailer skips the e-mail (tests).
 func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *Service {
 	return &Service{
-		settings: stores.Settings, requests: stores.Requests, customers: stores.Customers, apiKeys: stores.APIKeys,
+		settings: stores.Settings, requests: stores.Requests, orgSettings: stores.OrgSettings, apiKeys: stores.APIKeys,
 		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
 		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, dataRequests: stores.DataRequests,
 		ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
@@ -207,33 +200,33 @@ func orgTenant(orgID uuid.UUID) proofingprovider.Tenant {
 	return proofingprovider.Tenant{ID: orgID.String()}
 }
 
-// retentionGrace is how much longer the engine keeps a customer's session
-// than the customer's data retention, so PurgeDue (which erases it in the
+// retentionGrace is how much longer the engine keeps an external person's
+// session than the org's data retention, so PurgeDue (which erases it in the
 // engine too) always runs first.
 const retentionGrace = 24 * time.Hour
 
 // engineRetention is how long the engine keeps a session once it ended: the
-// flow's own override when it set one, else the customer's data retention,
-// plus grace; a member's request leaves it to the engine (the flow's
+// flow's own override when it set one, else the org's data retention, plus
+// grace; a member's request (settings nil) leaves it to the engine (the flow's
 // override, or its default).
-func engineRetention(customer *Customer, override time.Duration) time.Duration {
-	if customer == nil {
+func engineRetention(settings *Settings, override time.Duration) time.Duration {
+	if settings == nil {
 		return 0
 	}
-	retention := customer.Settings.DataRetention()
+	retention := settings.Session.DataRetention()
 	if override > 0 {
 		retention = override
 	}
 	return retention + retentionGrace
 }
 
-// subjectRetentionDays is what the subject is told about their session's data
-// on a customer's flow: how long it is kept anywhere at most, the retention
-// that applies (engineRetention: the flow's override, else the customer's)
-// with the engine's grace, rounded up to whole days.
-func subjectRetentionDays(customer Customer, override time.Duration) int {
+// subjectRetentionDays is what an external person is told about their
+// session's data on a flow: how long it is kept anywhere at most, the retention
+// that applies (engineRetention: the flow's override, else the org's) with the
+// engine's grace, rounded up to whole days.
+func subjectRetentionDays(settings Settings, override time.Duration) int {
 	day := hoursPerDay * time.Hour
-	return int((engineRetention(&customer, override) + day - 1) / day)
+	return int((engineRetention(&settings, override) + day - 1) / day)
 }
 
 // requestTenant is the tenant req's session runs under.
@@ -243,6 +236,7 @@ func requestTenant(req Request) proofingprovider.Tenant {
 
 // Flows returns the org's active flows with the admin's selection applied:
 // every flow for FlowsAll, else only the ones members may send a request on.
+// A flow reads Allowed (members may use it) and Default independently.
 func (s *Service) Flows(ctx context.Context, org Org, view FlowView) ([]OrgFlow, error) {
 	tenant := orgTenant(org.ID)
 	return s.orgFlows(ctx, org, tenant, view)
@@ -266,11 +260,16 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	if err != nil {
 		return nil, err
 	}
+	settings, err := s.orgSettings.Get(ctx, org.ID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]OrgFlow, 0, len(flows))
 	for _, f := range flows {
 		of := OrgFlow{
 			Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && flowCompletable(f), Default: f.ID == sel.DefaultFlowID,
 			Diplomas: DiplomasOff, Kind: FlowIdentity,
+			RetentionDays: subjectRetentionDays(settings, time.Duration(f.RetentionOverrideSeconds)*time.Second),
 		}
 		if kind, ok := kinds[f.ID]; ok {
 			of.Kind = kind
@@ -285,26 +284,25 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	return out, nil
 }
 
-// ConfigureFlows replaces the org's allow-list. Every chosen flow must be an
-// active the engine flow a recipient can finish, and a non-empty selection needs a
-// default among it.
+// ConfigureFlows replaces the org's selection. Every flow members may use must
+// be an active the engine flow a recipient can finish, and the default an
+// identity flow that can be sent to an external person.
 func (s *Service) ConfigureFlows(ctx context.Context, org Org, sel FlowSelection) error {
-	sel, err := s.validSelection(ctx, org, sel, flowCompletable)
-	if err != nil {
+	if err := s.checkMemberFlowKinds(ctx, org.ID, sel.FlowIDs); err != nil {
 		return err
 	}
-	if err := s.checkMemberFlowKinds(ctx, org.ID, sel.FlowIDs); err != nil {
+	sel, err := s.validSelection(ctx, org, sel)
+	if err != nil {
 		return err
 	}
 	return s.settings.SaveFlowSelection(ctx, org.ID, sel)
 }
 
-// validSelection deduplicates sel and checks it: every flow an active the engine flow
-// of the org a recipient can finish, and a non-empty selection has its default
-// among it. Both the members' allow-list and a customer's assignment are one;
-// completable is what the recipients can finish (flowCompletable for members,
-// customerCompletable for a customer's subjects).
-func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection, completable func(proofingprovider.Flow) bool) (FlowSelection, error) {
+// validSelection deduplicates sel and checks it: every flow members may use an
+// active the engine flow of the org a recipient can finish, and the default an
+// active identity flow that can be sent to an external person, whether or not
+// members may use it.
+func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection) (FlowSelection, error) {
 	ids := make([]string, 0, len(sel.FlowIDs))
 	for _, id := range sel.FlowIDs {
 		if !slices.Contains(ids, id) {
@@ -312,12 +310,6 @@ func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection
 		}
 	}
 	sel.FlowIDs = ids
-	if len(ids) == 0 && sel.DefaultFlowID != "" {
-		return sel, fmt.Errorf("%w: the default flow must be one of the available flows", ErrInvalidInput)
-	}
-	if len(ids) > 0 && !slices.Contains(ids, sel.DefaultFlowID) {
-		return sel, fmt.Errorf("%w: choose which of the available flows is the default", ErrInvalidInput)
-	}
 	flows, err := s.Flows(ctx, org, FlowsAll)
 	if err != nil {
 		return sel, err
@@ -327,9 +319,22 @@ func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection
 		if i < 0 {
 			return sel, ErrFlowNotFound
 		}
-		if !completable(flows[i].Flow) {
+		if !flowCompletable(flows[i].Flow) {
 			return sel, ErrFlowNotCompletable
 		}
+	}
+	if sel.DefaultFlowID == "" {
+		return sel, nil
+	}
+	i := slices.IndexFunc(flows, func(f OrgFlow) bool { return f.ID == sel.DefaultFlowID })
+	if i < 0 {
+		return sel, ErrFlowNotFound
+	}
+	if !externalCompletable(flows[i].Flow) {
+		return sel, ErrFlowNotCompletable
+	}
+	if flows[i].Kind.dataRequest() {
+		return sel, fmt.Errorf("%w: the default flow must be an identity check", ErrInvalidInput)
 	}
 	return sel, nil
 }
@@ -427,13 +432,19 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 	return in, nil
 }
 
-// Requester is the member sending a request.
+// Requester is who sends a request: a member, or the org's software calling
+// the API.
 type Requester struct {
 	UserID uuid.UUID
 	Name   string
-	// APIKeyID is set, and UserID nil, for a customer's backend calling the API.
+	// Admin is an org admin, who may send an external person any flow.
+	Admin bool
+	// APIKeyID is set, and UserID nil, for the org's software calling the API.
 	APIKeyID *uuid.UUID
 }
+
+// mayUseAnyFlow reports a sender who is not held to the flows members may use.
+func (r Requester) mayUseAnyFlow() bool { return r.Admin || r.APIKeyID != nil }
 
 func (r Requester) userID() *uuid.UUID {
 	if r.UserID == uuid.Nil {
@@ -458,8 +469,9 @@ type Sent struct {
 }
 
 // CreateRequest sends a proofing request: to a member, on one of the flows the
-// org admin made available to members, or for a customer to its subject, on one
-// of the flows assigned to that customer. It creates the request's engine session
+// org admin made available to members, or to an external person, on any flow of
+// the org an admin or an API key may send and a member only if members may use
+// it. It creates the request's engine session
 // for the chosen app, stores the request with it, and, for a mailed request,
 // mails the subject the session's vcmrtd deep link: SessionTTL runs from the
 // send. An on-screen request is created only once the subject accepted what is
@@ -470,16 +482,16 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, err
 	}
-	subject, customer, err := s.subject(ctx, org, in)
+	subject, settings, err := s.subject(ctx, org, in)
 	if err != nil {
 		return Sent{}, err
 	}
 	ttl := SessionTTL
-	if customer != nil && customer.Settings.SessionTTL != 0 {
-		ttl = customer.Settings.SessionTTL
+	if settings != nil && settings.Session.SessionTTL != 0 {
+		ttl = settings.Session.SessionTTL
 	}
 	tenant := orgTenant(org.ID)
-	flow, err := s.sendableFlow(ctx, org, tenant, in.FlowID, customer)
+	flow, err := s.sendableFlow(ctx, org, tenant, in.FlowID, by, subject)
 	if err != nil {
 		return Sent{}, err
 	}
@@ -501,10 +513,10 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, err
 	}
-	// A data request is a customer's subject asking for their data; it
+	// A data request is an external person asking for their data; it
 	// collects no diplomas.
 	if kind.dataRequest() {
-		if customer == nil {
+		if settings == nil {
 			return Sent{}, ErrDataFlowForMember
 		}
 		diplomas = DiplomasOff
@@ -513,13 +525,13 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 		return Sent{}, ErrDiplomasNeedPage
 	}
 	if in.Channel == ChannelHosted {
-		return s.createHosted(ctx, org, by, in, subject, *customer, flow, diplomas, kind, photo)
+		return s.createHosted(ctx, org, by, in, subject, *settings, flow, diplomas, kind, photo)
 	}
 
 	id := uuid.New()
 	input := proofingprovider.SessionInput{
 		FlowID: flow.ID, ClientReference: id.String(), TTL: ttl, Method: in.Method,
-		Language: string(in.Language), Retention: engineRetention(customer, time.Duration(flow.RetentionOverrideSeconds)*time.Second), ReferencePhoto: photo,
+		Language: string(in.Language), Retention: engineRetention(settings, time.Duration(flow.RetentionOverrideSeconds)*time.Second), ReferencePhoto: photo,
 	}
 	sess, err := s.ips.CreateSession(ctx, tenant, input)
 	if err != nil {
@@ -556,7 +568,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	}
 	out.DeepLink, out.DeepLinkExpiresAt = sess.Claim.DeepLink, sess.Claim.ExpiresAt
 	if s.mailer != nil && !in.SkipMail && in.Channel == ChannelEmail {
-		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, s.proofingMail(ctx, org, customer, subject, by, sess.Claim.DeepLink, ttl, in.Language))
+		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, s.proofingMail(ctx, org, settings, subject, by, sess.Claim.DeepLink, ttl, in.Language))
 		if err != nil {
 			slog.WarnContext(ctx, "identity proofing: request e-mail not sent",
 				slog.String("org_id", org.ID.String()), slog.String("request_id", req.ID.String()), slog.Any("error", err))
@@ -583,9 +595,9 @@ func (s *Service) discardSession(ctx context.Context, tenant proofingprovider.Te
 
 // createHosted stores a hosted request with its link and no the engine session yet:
 // the subject starts one from the page (StartHosted) until hostedLinkTTL. Its
-// redirect must be on one of the customer's allowed origins.
+// redirect must be on one of the org's allowed origins.
 func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in NewRequest, subject Subject,
-	customer Customer, flow proofingprovider.Flow, diplomas DiplomaMode, kind FlowKind, photo *proofingprovider.Image,
+	settings Settings, flow proofingprovider.Flow, diplomas DiplomaMode, kind FlowKind, photo *proofingprovider.Image,
 ) (Sent, error) {
 	if s.hostedBaseURL == "" {
 		return Sent{}, errors.New("proofing: no hosted page URL configured")
@@ -604,7 +616,7 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 		if hosted.Completion == CompletionDone {
 			return Sent{}, fmt.Errorf("%w: this flow's hosted page ends on its own thank-you page, without a redirect", ErrInvalidInput)
 		}
-		if err := checkRedirect(in.RedirectURL, customer); err != nil {
+		if err := checkRedirect(in.RedirectURL, settings); err != nil {
 			return Sent{}, err
 		}
 	}
@@ -648,40 +660,32 @@ func normalizeRequest(in NewRequest) (NewRequest, error) {
 		return NewRequest{}, fmt.Errorf("%w: send the request by e-mail, show it on screen or as a link", ErrInvalidInput)
 	case in.Method == proofingprovider.MethodYivi && in.Channel == ChannelEmail:
 		return NewRequest{}, fmt.Errorf("%w: a Yivi app session runs on this screen and cannot be e-mailed", ErrInvalidInput)
-	case in.Channel == ChannelHosted && in.CustomerID == nil:
-		return NewRequest{}, fmt.Errorf("%w: a link goes to a customer's subject", ErrInvalidInput)
+	case in.Channel == ChannelHosted && !in.external():
+		return NewRequest{}, fmt.Errorf("%w: a link goes to an external person", ErrInvalidInput)
 	case in.RedirectURL != "" && in.Channel != ChannelHosted:
 		return NewRequest{}, fmt.Errorf("%w: only a hosted session redirects its subject", ErrInvalidInput)
 	}
 	return in, nil
 }
 
-// subject resolves who a new request goes to: the member, or the customer's
-// subject by the address and optional name the sender gave, with the customer.
-// An on-screen request's subject is in front of the sender and needs no address.
-func (s *Service) subject(ctx context.Context, org Org, in NewRequest) (Subject, *Customer, error) {
-	if in.CustomerID == nil {
+// subject resolves who a new request goes to: the member, or an external
+// person by the address and optional name the sender gave, with the org's
+// settings. An on-screen request's subject is in front of the sender and needs
+// no address.
+func (s *Service) subject(ctx context.Context, org Org, in NewRequest) (Subject, *Settings, error) {
+	if !in.external() {
 		if strings.TrimSpace(in.SubjectBirthDate) != "" {
-			return Subject{}, nil, fmt.Errorf("%w: only a customer's request can be for one known person", ErrInvalidInput)
+			return Subject{}, nil, fmt.Errorf("%w: only an external person's request can be for one known person", ErrInvalidInput)
 		}
 		m, err := s.requests.Member(ctx, org.ID, in.SubjectUserID)
 		if err != nil {
 			return Subject{}, nil, err
 		}
-		return Subject{UserID: &m.UserID, Name: m.Name, Email: m.Email}, nil, nil
+		return Subject{Kind: SubjectMember, UserID: &m.UserID, Name: m.Name, Email: m.Email}, nil, nil
 	}
-	if in.SubjectUserID != uuid.Nil {
-		return Subject{}, nil, fmt.Errorf("%w: a request goes to a member or to a customer's subject, not both", ErrInvalidInput)
-	}
-	customer, err := s.customers.Get(ctx, org.ID, *in.CustomerID)
+	settings, err := s.orgSettings.Get(ctx, org.ID)
 	if err != nil {
 		return Subject{}, nil, err
-	}
-	if customer.Paused() {
-		return Subject{}, nil, ErrCustomerPaused
-	}
-	if !customer.HasAPIKey {
-		return Subject{}, nil, ErrCustomerNoAPIKey
 	}
 	name := strings.TrimSpace(in.SubjectName)
 	if len(name) > maxSubjectNameLength {
@@ -691,18 +695,18 @@ func (s *Service) subject(ctx context.Context, org Org, in NewRequest) (Subject,
 	if err != nil {
 		return Subject{}, nil, err
 	}
-	subject := Subject{CustomerID: in.CustomerID, Name: name, BirthDate: birthDate}
+	subject := Subject{Kind: SubjectExternal, Name: name, BirthDate: birthDate}
 	// No address is needed when nothing is mailed: on screen, a hosted link,
 	// or a session the caller shows its own QR for (SkipMail).
 	if (in.Channel != ChannelEmail || in.SkipMail) && strings.TrimSpace(in.SubjectEmail) == "" {
-		return subject, &customer, nil
+		return subject, &settings, nil
 	}
 	email, err := user.ParseEmail(in.SubjectEmail)
 	if err != nil {
 		return Subject{}, nil, fmt.Errorf("%w: enter a valid e-mail address", ErrInvalidInput)
 	}
 	subject.Email = string(email)
-	return subject, &customer, nil
+	return subject, &settings, nil
 }
 
 // referencePhotoFor checks the reference photo a request on flow carries: one
@@ -759,27 +763,27 @@ func readsIdentity(f proofingprovider.Flow) bool {
 	return slices.Contains(f.RequestedAttributes, attributeDocument)
 }
 
-// proofingMail is the mail a request sends. A member's is the org's; a
-// customer's subject's is signed with and styled as the customer, with its
+// proofingMail is the mail a request sends. A member's is the org's; an
+// external person's is signed with and styled as the org's branding, with its
 // support contact and privacy statement. A logo that cannot be read is left
 // out (the wordmark shows): a cosmetic loss must not block the send.
-func (s *Service) proofingMail(ctx context.Context, org Org, customer *Customer, subject Subject, by Requester,
+func (s *Service) proofingMail(ctx context.Context, org Org, settings *Settings, subject Subject, by Requester,
 	deepLink string, ttl time.Duration, locale email.Locale,
 ) email.ProofingMail {
 	m := email.ProofingMail{
 		To: subject.Email, OrgName: org.Name, RequesterName: by.Name, DeepLink: deepLink, ValidFor: ttl, Locale: locale,
 	}
-	if customer == nil {
+	if settings == nil {
 		return m
 	}
-	m.OrgName, m.RequesterName = customer.SignedAs(), customer.SignedAs()
-	m.SupportContact, m.PrivacyURL = customer.Branding.SupportContact, customer.Branding.PrivacyURL
-	m.Brand = &email.CustomerBrand{PrimaryColor: customer.Branding.PrimaryColor}
-	if customer.Branding.HasLogo {
-		logo, err := s.customers.Logo(ctx, org.ID, customer.ID)
+	m.OrgName, m.RequesterName = settings.SignedAs(), settings.SignedAs()
+	m.SupportContact, m.PrivacyURL = settings.Branding.SupportContact, settings.Branding.PrivacyURL
+	m.Brand = &email.ProofingBrand{PrimaryColor: settings.Branding.PrimaryColor}
+	if settings.Branding.HasLogo {
+		logo, err := s.orgSettings.Logo(ctx, org.ID)
 		if err != nil {
-			slog.WarnContext(ctx, "identity proofing: customer logo not read, mailing the wordmark",
-				slog.String("customer_id", customer.ID.String()), slog.Any("error", err))
+			slog.WarnContext(ctx, "identity proofing: logo not read, mailing the wordmark",
+				slog.String("org_id", org.ID.String()), slog.Any("error", err))
 		} else {
 			m.Brand.Logo = email.Logo{Bytes: logo.Bytes, ContentType: logo.ContentType}
 		}
@@ -788,11 +792,13 @@ func (s *Service) proofingMail(ctx context.Context, org Org, customer *Customer,
 }
 
 // sendableFlow is the flow a new request runs, if the sender may use it: for a
-// member (customer nil), a flow the admin made available to members; for a
-// customer's subject, one assigned to that customer, its default when flowID is
-// empty. Either way it must be one a recipient can finish.
-func (s *Service) sendableFlow(ctx context.Context, org Org, tenant proofingprovider.Tenant, flowID string, customer *Customer) (proofingprovider.Flow, error) {
-	if customer == nil {
+// member, a flow the admin made available to members; for an external person,
+// any flow a recipient can finish when the sender is an admin or an API key,
+// else one members may use, the org's default when flowID is empty.
+func (s *Service) sendableFlow(ctx context.Context, org Org, tenant proofingprovider.Tenant, flowID string,
+	by Requester, subject Subject,
+) (proofingprovider.Flow, error) {
+	if subject.Kind == SubjectMember {
 		flows, err := s.orgFlows(ctx, org, tenant, FlowsAll)
 		if err != nil {
 			return proofingprovider.Flow{}, err
@@ -810,26 +816,30 @@ func (s *Service) sendableFlow(ctx context.Context, org Org, tenant proofingprov
 		return flows[i].Flow, nil
 	}
 	if flowID == "" {
-		// An API caller that names no flow gets the customer's default.
-		if flowID = customer.Flows.DefaultFlowID; flowID == "" {
-			return proofingprovider.Flow{}, ErrFlowNotAssigned
+		// A caller that names no flow gets the org's default.
+		sel, err := s.settings.FlowSelection(ctx, org.ID)
+		if err != nil {
+			return proofingprovider.Flow{}, err
+		}
+		if flowID = sel.DefaultFlowID; flowID == "" {
+			return proofingprovider.Flow{}, ErrNoDefaultFlow
 		}
 	}
-	flows, err := s.ips.ListFlows(ctx, tenant)
+	flows, err := s.orgFlows(ctx, org, tenant, FlowsAll)
 	if err != nil {
-		return proofingprovider.Flow{}, fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
+		return proofingprovider.Flow{}, err
 	}
-	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
+	i := slices.IndexFunc(flows, func(f OrgFlow) bool { return f.ID == flowID })
 	if i < 0 {
 		return proofingprovider.Flow{}, ErrFlowNotFound
 	}
-	if !customerCompletable(flows[i]) {
+	if !externalCompletable(flows[i].Flow) {
 		return proofingprovider.Flow{}, ErrFlowNotCompletable
 	}
-	if !slices.Contains(customer.Flows.FlowIDs, flowID) {
-		return proofingprovider.Flow{}, ErrFlowNotAssigned
+	if !by.mayUseAnyFlow() && !flows[i].Allowed {
+		return proofingprovider.Flow{}, ErrFlowNotAllowed
 	}
-	return flows[i], nil
+	return flows[i].Flow, nil
 }
 
 // Requests lists the org's requests narrowed by filter, as stored: outcomes
@@ -926,7 +936,7 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 		if req.Status == StatusApproved || req.Status == StatusRejected {
 			return req, nil
 		}
-		// A proven person's data request goes to review with the customer's
+		// A proven person's data request goes to review with the org's
 		// sessions of that person, found once.
 		if next == StatusApproved || next == StatusNeedsReview {
 			if req.Status != StatusNeedsReview {
@@ -942,11 +952,11 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	if next == req.Status {
 		return req, nil
 	}
-	// The name read off the document is kept only for a customer's subject the
+	// The name read off the document is kept only for an external person the
 	// sender may know only by address, and only once the document is approved
 	// (or, for a data request, the person is proven): only then is the full
 	// result, with its personal data, read at all.
-	if req.CustomerID != nil && (next == StatusApproved || (req.FlowKind.dataRequest() && next == StatusNeedsReview)) {
+	if req.External() && (next == StatusApproved || (req.FlowKind.dataRequest() && next == StatusNeedsReview)) {
 		full, err := s.ips.SessionResult(ctx, tenant, sess.ID, sess.Token)
 		if err != nil {
 			slog.WarnContext(ctx, "identity proofing: read the approved result failed",
@@ -1047,93 +1057,25 @@ func methodOr(reported, known proofingprovider.Method) proofingprovider.Method {
 	return known
 }
 
-// Customers lists the org's customers, each with its assigned flows.
-func (s *Service) Customers(ctx context.Context, orgID uuid.UUID) ([]Customer, error) {
-	return s.customers.List(ctx, orgID)
-}
-
-// Customer returns one of the org's customers.
-func (s *Service) Customer(ctx context.Context, orgID, id uuid.UUID) (Customer, error) {
-	return s.customers.Get(ctx, orgID, id)
-}
-
-// CustomerFlows is the org's flows with the customer's assignment applied: every
-// flow (the admin's view, to assign from) or only the assigned ones a recipient
-// can finish (what a member may send on for the customer).
-func (s *Service) CustomerFlows(ctx context.Context, org Org, id uuid.UUID, view FlowView) ([]CustomerFlow, error) {
-	customer, err := s.customers.Get(ctx, org.ID, id)
-	if err != nil {
-		return nil, err
-	}
-	flows, err := s.Flows(ctx, org, FlowsAll)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]CustomerFlow, 0, len(flows))
-	for _, f := range flows {
-		cf := CustomerFlow{
-			Flow:     f.Flow,
-			Assigned: slices.Contains(customer.Flows.FlowIDs, f.ID) && customerCompletable(f.Flow),
-			Default:  f.ID == customer.Flows.DefaultFlowID,
-			Diplomas: f.Diplomas,
-			Kind:     f.Kind,
-			RetentionDays: subjectRetentionDays(customer,
-				time.Duration(f.RetentionOverrideSeconds)*time.Second),
-		}
-		if view == FlowsAll || cf.Assigned {
-			out = append(out, cf)
-		}
-	}
-	return out, nil
-}
-
-// CreateCustomer adds a customer to the org, with no flows assigned yet.
-func (s *Service) CreateCustomer(ctx context.Context, orgID, createdBy uuid.UUID, name string) (Customer, error) {
-	name, err := customerName(name)
-	if err != nil {
-		return Customer{}, err
-	}
-	return s.customers.Create(ctx, orgID, createdBy, name)
-}
-
-// RenameCustomer changes a customer's name.
-func (s *Service) RenameCustomer(ctx context.Context, orgID, id uuid.UUID, name string) (Customer, error) {
-	name, err := customerName(name)
-	if err != nil {
-		return Customer{}, err
-	}
-	return s.customers.Rename(ctx, orgID, id, name)
-}
-
-// SetCustomerStatus pauses or resumes proofing for a customer: while paused,
-// no request can be sent for it. One with a session waiting for review is
-// ErrCustomerHasOpenReviews, checked with the pause in one transaction.
-func (s *Service) SetCustomerStatus(ctx context.Context, orgID, id uuid.UUID, status CustomerStatus) (Customer, error) {
-	if status != CustomerActive && status != CustomerPaused {
-		return Customer{}, fmt.Errorf("%w: a customer is active or paused", ErrInvalidInput)
-	}
-	return s.customers.SetStatus(ctx, orgID, id, status)
-}
-
-// CustomerRequest is one of a customer's requests; see readReconciled.
-func (s *Service) CustomerRequest(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {
-	req, err := s.requests.GetForCustomer(ctx, scope, id)
+// ExternalRequest is one of the org's external requests; see readReconciled.
+func (s *Service) ExternalRequest(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
+	req, err := s.requests.GetExternal(ctx, orgID, id)
 	if err != nil {
 		return Request{}, err
 	}
 	return s.readReconciled(ctx, req)
 }
 
-// StoredCustomerRequest is one of a customer's requests as stored, without
-// re-checking the engine: what a headless poll answers from.
-func (s *Service) StoredCustomerRequest(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {
-	return s.requests.GetForCustomer(ctx, scope, id)
+// StoredExternalRequest is one of the org's external requests as stored,
+// without re-checking the engine: what a headless poll answers from.
+func (s *Service) StoredExternalRequest(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
+	return s.requests.GetExternal(ctx, orgID, id)
 }
 
-// CustomerRequestPage is a page of a customer's requests, newest first, from
-// stored state (no the engine call), and the cursor of the next page ("" at the end).
-// A cursor that does not decode is ErrInvalidInput.
-func (s *Service) CustomerRequestPage(ctx context.Context, scope CustomerScope, cursor string, limit int) ([]Request, string, error) {
+// ExternalRequestPage is a page of the org's external requests, newest first,
+// from stored state (no the engine call), and the cursor of the next page ("" at
+// the end). A cursor that does not decode is ErrInvalidInput.
+func (s *Service) ExternalRequestPage(ctx context.Context, orgID uuid.UUID, cursor string, limit int) ([]Request, string, error) {
 	if limit <= 0 {
 		limit = defaultPageSize
 	}
@@ -1147,7 +1089,7 @@ func (s *Service) CustomerRequestPage(ctx context.Context, scope CustomerScope, 
 		after = &c
 	}
 	// One extra row tells whether a next page exists.
-	reqs, err := s.requests.ListPage(ctx, scope, after, limit+1)
+	reqs, err := s.requests.ListExternalPage(ctx, orgID, after, limit+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1159,10 +1101,10 @@ func (s *Service) CustomerRequestPage(ctx context.Context, scope CustomerScope, 
 	return reqs, encodeRequestCursor(RequestCursor{CreatedAt: last.CreatedAt, ID: last.ID}), nil
 }
 
-// CancelRequest ends a customer's request that has no outcome yet, in the engine too,
+// CancelRequest ends an external request that has no outcome yet, in the engine too,
 // and marks it cancelled. One that has an outcome or ended is ErrSessionOver.
-func (s *Service) CancelRequest(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {
-	req, err := s.CustomerRequest(ctx, scope, id)
+func (s *Service) CancelRequest(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
+	req, err := s.ExternalRequest(ctx, orgID, id)
 	if err != nil {
 		return Request{}, err
 	}
@@ -1178,7 +1120,7 @@ func (s *Service) CancelRequest(ctx context.Context, scope CustomerScope, id uui
 	if err != nil {
 		return Request{}, err
 	}
-	return s.requests.GetForCustomer(ctx, scope, id)
+	return s.requests.GetExternal(ctx, orgID, id)
 }
 
 // cancelOnce ends req's live engine session and marks req cancelled.
@@ -1207,11 +1149,11 @@ func (s *Service) cancelOnce(ctx context.Context, req Request) error {
 	return nil
 }
 
-// RequestResult reads a settled customer request's result from the engine, the
+// RequestResult reads a settled external request's result from the engine, the
 // wallet storing no identity, and audits identity_proofing.result_read. One
 // not settled yet is ErrResultNotReady; one erased or gone in the engine is not found.
-func (s *Service) RequestResult(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, proofingprovider.Identity, error) {
-	req, err := s.CustomerRequest(ctx, scope, id)
+func (s *Service) RequestResult(ctx context.Context, orgID, id uuid.UUID) (Request, proofingprovider.Identity, error) {
+	req, err := s.ExternalRequest(ctx, orgID, id)
 	if err != nil {
 		return Request{}, proofingprovider.Identity{}, err
 	}
@@ -1219,7 +1161,7 @@ func (s *Service) RequestResult(ctx context.Context, scope CustomerScope, id uui
 }
 
 // AdminRequestResult is RequestResult for an org admin reading one of the org's
-// customer requests in the wallet: audited identity_proofing.result_read with
+// external requests in the wallet: audited identity_proofing.result_read with
 // the admin as actor. A member's request is not found: its subject is a
 // colleague, whose identity the wallet shows nowhere.
 func (s *Service) AdminRequestResult(ctx context.Context, orgID, id uuid.UUID) (Request, proofingprovider.Identity, error) {
@@ -1227,7 +1169,7 @@ func (s *Service) AdminRequestResult(ctx context.Context, orgID, id uuid.UUID) (
 	if err != nil {
 		return Request{}, proofingprovider.Identity{}, err
 	}
-	if req.CustomerID == nil {
+	if !req.External() {
 		return Request{}, proofingprovider.Identity{}, ErrRequestNotFound
 	}
 	return s.requestResult(ctx, req)
@@ -1272,10 +1214,10 @@ func heldToVerdict(req Request, identity proofingprovider.Identity) proofingprov
 	}
 }
 
-// PurgeRequest erases a customer's request in the engine and every personal detail
+// PurgeRequest erases an external request in the engine and every personal detail
 // the wallet holds of it, whatever its state; the row stays, marked purged.
-func (s *Service) PurgeRequest(ctx context.Context, scope CustomerScope, id uuid.UUID) error {
-	req, err := s.requests.GetForCustomer(ctx, scope, id)
+func (s *Service) PurgeRequest(ctx context.Context, orgID, id uuid.UUID) error {
+	req, err := s.requests.GetExternal(ctx, orgID, id)
 	if err != nil {
 		return err
 	}
@@ -1288,7 +1230,7 @@ func (s *Service) PurgeRequest(ctx context.Context, scope CustomerScope, id uuid
 // purgeBatch is how many overdue requests PurgeDue takes at a time.
 const purgeBatch = 100
 
-// PurgeDue purges every request past its customer's retention, for the
+// PurgeDue purges every request past its retention, for the
 // pruner. One that the engine fails to erase is left for the next run. It
 // first rejects the reviews left open in a paused org (rejectPausedReviews),
 // whose failure is reported once the purge ran.
@@ -1615,27 +1557,24 @@ func (s *Service) RequestEvents(ctx context.Context, orgID, id uuid.UUID, reques
 	return page.Events, nil
 }
 
-// CreateAPIKey adds a key with every scope to a customer; the returned secret
-// is shown once.
-func (s *Service) CreateAPIKey(ctx context.Context, orgID, customerID, createdBy uuid.UUID, name string) (APIKey, string, error) {
+// CreateAPIKey adds a key with every scope to the org; the returned secret is
+// shown once.
+func (s *Service) CreateAPIKey(ctx context.Context, orgID, createdBy uuid.UUID, name string) (APIKey, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > maxAPIKeyNameLength {
 		return APIKey{}, "", fmt.Errorf("%w: an API key needs a name of at most %d characters", ErrInvalidInput, maxAPIKeyNameLength)
 	}
-	return s.apiKeys.Create(ctx, orgID, customerID, createdBy, name, slices.Clone(APIKeyScopes))
+	return s.apiKeys.Create(ctx, orgID, createdBy, name, slices.Clone(APIKeyScopes))
 }
 
-// APIKeys lists a customer's keys, revoked ones included.
-func (s *Service) APIKeys(ctx context.Context, orgID, customerID uuid.UUID) ([]APIKey, error) {
-	if _, err := s.customers.Get(ctx, orgID, customerID); err != nil {
-		return nil, err
-	}
-	return s.apiKeys.List(ctx, orgID, customerID)
+// APIKeys lists the org's keys, revoked ones included.
+func (s *Service) APIKeys(ctx context.Context, orgID uuid.UUID) ([]APIKey, error) {
+	return s.apiKeys.List(ctx, orgID)
 }
 
-// RevokeAPIKey stops one of a customer's keys authenticating.
-func (s *Service) RevokeAPIKey(ctx context.Context, orgID, customerID, id uuid.UUID) (APIKey, error) {
-	return s.apiKeys.Revoke(ctx, orgID, customerID, id)
+// RevokeAPIKey stops one of the org's keys authenticating.
+func (s *Service) RevokeAPIKey(ctx context.Context, orgID, id uuid.UUID) (APIKey, error) {
+	return s.apiKeys.Revoke(ctx, orgID, id)
 }
 
 // AuthenticateAPIKey resolves a raw key to who it acts for.
@@ -1643,19 +1582,16 @@ func (s *Service) AuthenticateAPIKey(ctx context.Context, raw string) (APIKeyCal
 	return s.apiKeys.Authenticate(ctx, raw)
 }
 
-// Webhook returns a customer's endpoint, or ErrWebhookNotFound.
-func (s *Service) Webhook(ctx context.Context, orgID, customerID uuid.UUID) (Webhook, error) {
-	if _, err := s.customers.Get(ctx, orgID, customerID); err != nil {
-		return Webhook{}, err
-	}
-	return s.webhooks.Get(ctx, orgID, customerID)
+// Webhook returns the org's endpoint, or ErrWebhookNotFound.
+func (s *Service) Webhook(ctx context.Context, orgID uuid.UUID) (Webhook, error) {
+	return s.webhooks.Get(ctx, orgID)
 }
 
-// SaveWebhook sets a customer's endpoint: an absolute https URL (checked again
+// SaveWebhook sets the org's endpoint: an absolute https URL (checked again
 // at every send, against the address it resolves to) and at least one known
 // event. A new endpoint's signing secret is returned, the one time it is
 // readable.
-func (s *Service) SaveWebhook(ctx context.Context, orgID, customerID uuid.UUID, rawURL string, events []string) (Webhook, string, error) {
+func (s *Service) SaveWebhook(ctx context.Context, orgID uuid.UUID, rawURL string, events []string) (Webhook, string, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if len(rawURL) > maxWebhookURLLength {
 		return Webhook{}, "", fmt.Errorf("%w: the URL is too long", ErrInvalidInput)
@@ -1673,34 +1609,31 @@ func (s *Service) SaveWebhook(ctx context.Context, orgID, customerID uuid.UUID, 
 	if len(picked) == 0 {
 		return Webhook{}, "", fmt.Errorf("%w: pick at least one event", ErrInvalidInput)
 	}
-	return s.webhooks.Save(ctx, orgID, customerID, rawURL, picked)
+	return s.webhooks.Save(ctx, orgID, rawURL, picked)
 }
 
-// RotateWebhookSecret replaces a customer's signing secret and returns it once.
-func (s *Service) RotateWebhookSecret(ctx context.Context, orgID, customerID uuid.UUID) (Webhook, string, error) {
-	return s.webhooks.RotateSecret(ctx, orgID, customerID)
+// RotateWebhookSecret replaces the org's signing secret and returns it once.
+func (s *Service) RotateWebhookSecret(ctx context.Context, orgID uuid.UUID) (Webhook, string, error) {
+	return s.webhooks.RotateSecret(ctx, orgID)
 }
 
-// RemoveWebhook deletes a customer's endpoint and its waiting deliveries.
-func (s *Service) RemoveWebhook(ctx context.Context, orgID, customerID uuid.UUID) error {
-	return s.webhooks.Remove(ctx, orgID, customerID)
+// RemoveWebhook deletes the org's endpoint and its waiting deliveries.
+func (s *Service) RemoveWebhook(ctx context.Context, orgID uuid.UUID) error {
+	return s.webhooks.Remove(ctx, orgID)
 }
 
-// SendTestWebhook queues a test event for a customer's endpoint.
-func (s *Service) SendTestWebhook(ctx context.Context, orgID, customerID uuid.UUID) error {
-	return s.webhooks.SendTest(ctx, orgID, customerID)
+// SendTestWebhook queues a test event for the org's endpoint.
+func (s *Service) SendTestWebhook(ctx context.Context, orgID uuid.UUID) error {
+	return s.webhooks.SendTest(ctx, orgID)
 }
 
-// WebhookDeliveries lists a customer's most recent deliveries.
-func (s *Service) WebhookDeliveries(ctx context.Context, orgID, customerID uuid.UUID) ([]Delivery, error) {
-	if _, err := s.customers.Get(ctx, orgID, customerID); err != nil {
-		return nil, err
-	}
-	return s.webhooks.Deliveries(ctx, orgID, customerID)
+// WebhookDeliveries lists the org's most recent deliveries.
+func (s *Service) WebhookDeliveries(ctx context.Context, orgID uuid.UUID) ([]Delivery, error) {
+	return s.webhooks.Deliveries(ctx, orgID)
 }
 
 // ReceiveDefaultWebhook takes a delivery at the wallet's own endpoint: the
-// default for a customer without one. Its result is already stored where the
+// default for an org without one. Its result is already stored where the
 // event came from, so a delivery signed with the default secret is only
 // acknowledged; any other is ErrBadSignature.
 func (s *Service) ReceiveDefaultWebhook(body []byte, signature string) error {
@@ -1711,110 +1644,110 @@ func (s *Service) ReceiveDefaultWebhook(body []byte, signature string) error {
 	return verifyWebhookSignature(secret, signature, body, s.now())
 }
 
-// WebhookHealth reports how each of the org's customers' endpoints answers.
-func (s *Service) WebhookHealth(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]WebhookHealth, error) {
+// WebhookHealth reports how the org's endpoint answers.
+func (s *Service) WebhookHealth(ctx context.Context, orgID uuid.UUID) (WebhookHealth, error) {
 	return s.webhooks.Health(ctx, orgID)
 }
 
-// removeCustomerAttempts is how often RemoveCustomer purges and tries again
-// when requests keep being sent for the customer meanwhile.
-const removeCustomerAttempts = 3
-
-// RemoveCustomer deletes a customer and every request sent for it. Each
-// request is erased as a purge erases it first: its engine session, and the
-// subject's name, e-mail and diplomas in its audit trail, which stays once
-// the rows are gone. The removal itself refuses while a request is left
-// unpurged (one sent meanwhile), so this purges again, up to
-// removeCustomerAttempts times, then answers ErrCustomerSessionsLeft.
-func (s *Service) RemoveCustomer(ctx context.Context, orgID, id uuid.UUID) error {
-	if _, err := s.customers.Get(ctx, orgID, id); err != nil {
-		return err
-	}
-	var err error
-	for range removeCustomerAttempts {
-		reqs, listErr := s.requests.ListUnpurgedForCustomer(ctx, orgID, id)
-		if listErr != nil {
-			return listErr
-		}
-		for _, req := range reqs {
-			if err := s.purge(ctx, req); err != nil {
-				return err
-			}
-		}
-		if err = s.customers.Remove(ctx, orgID, id); !errors.Is(err, ErrCustomerSessionsLeft) {
-			return err
-		}
-	}
-	return err
+// Settings returns what the org set once for all its flows: the defaults when
+// it set none.
+func (s *Service) Settings(ctx context.Context, orgID uuid.UUID) (Settings, error) {
+	return s.orgSettings.Get(ctx, orgID)
 }
 
-// SaveCustomerBranding replaces a customer's branding. The colour is a
-// #rrggbb hex, the privacy statement an https URL; empty fields fall back.
-func (s *Service) SaveCustomerBranding(ctx context.Context, orgID, id uuid.UUID, b CustomerBranding, logo LogoChange) (Customer, error) {
+// SaveBranding replaces the org's branding. The colour is a #rrggbb hex, the
+// privacy statement an https URL; empty fields fall back.
+func (s *Service) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error) {
 	b.DisplayName = strings.TrimSpace(b.DisplayName)
 	b.PrimaryColor = strings.TrimSpace(b.PrimaryColor)
 	b.SupportContact = strings.TrimSpace(b.SupportContact)
 	b.PrivacyURL = strings.TrimSpace(b.PrivacyURL)
 	switch {
-	case len(b.DisplayName) > maxCustomerNameLength:
-		return Customer{}, fmt.Errorf("%w: the display name is too long", ErrInvalidInput)
+	case len(b.DisplayName) > maxDisplayNameLength:
+		return Settings{}, fmt.Errorf("%w: the display name is too long", ErrInvalidInput)
 	case b.PrimaryColor != "" && !hexColor.MatchString(b.PrimaryColor):
-		return Customer{}, fmt.Errorf("%w: the primary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
+		return Settings{}, fmt.Errorf("%w: the primary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
 	case len(b.SupportContact) > maxSupportContactLen:
-		return Customer{}, fmt.Errorf("%w: the support contact is too long", ErrInvalidInput)
+		return Settings{}, fmt.Errorf("%w: the support contact is too long", ErrInvalidInput)
 	case len(b.PrivacyURL) > maxWebhookURLLength:
-		return Customer{}, fmt.Errorf("%w: the privacy statement URL is too long", ErrInvalidInput)
+		return Settings{}, fmt.Errorf("%w: the privacy statement URL is too long", ErrInvalidInput)
 	}
 	if b.PrivacyURL != "" {
 		if _, err := (safehttp.Policy{}).CheckURL(b.PrivacyURL); err != nil {
-			return Customer{}, fmt.Errorf("%w: the privacy statement must be an absolute https URL", ErrInvalidInput)
+			return Settings{}, fmt.Errorf("%w: the privacy statement must be an absolute https URL", ErrInvalidInput)
 		}
 	}
-	return s.customers.SaveBranding(ctx, orgID, id, b, logo)
+	return s.orgSettings.SaveBranding(ctx, orgID, b, logo)
 }
 
-// CustomerLogo returns a customer's logo, or ErrNoCustomerLogo.
-func (s *Service) CustomerLogo(ctx context.Context, orgID, id uuid.UUID) (CustomerLogo, error) {
-	return s.customers.Logo(ctx, orgID, id)
+// Logo returns the org's logo, or ErrNoLogo.
+func (s *Service) Logo(ctx context.Context, orgID uuid.UUID) (Logo, error) {
+	return s.orgSettings.Logo(ctx, orgID)
 }
 
-// SaveCustomerSettings replaces a customer's session settings; each must be one
-// of its options.
-func (s *Service) SaveCustomerSettings(ctx context.Context, orgID, id uuid.UUID, settings CustomerSettings) (Customer, error) {
-	if !slices.Contains(SessionTTLOptions, settings.SessionTTL) {
-		return Customer{}, fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)
+func checkSessionSettings(session SessionSettings) error {
+	if !slices.Contains(SessionTTLOptions, session.SessionTTL) {
+		return fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)
 	}
-	if !slices.Contains(DataRetentionDayOptions, settings.DataRetentionDays) {
-		return Customer{}, fmt.Errorf("%w: the data retention must be 7, 30, 90, 180 or 365 days", ErrInvalidInput)
+	if !slices.Contains(DataRetentionDayOptions, session.DataRetentionDays) {
+		return fmt.Errorf("%w: the data retention must be 7, 30, 90, 180 or 365 days", ErrInvalidInput)
 	}
-	return s.customers.SaveSettings(ctx, orgID, id, settings)
+	return nil
 }
 
-// Stats counts the customer requests sent within statsWindow, per customer and
-// flow, narrowed to one member's when requestedBy is set.
+// SettingsChange is a partial update of the org's session settings and
+// redirect origins; a nil field is left as it is.
+type SettingsChange struct {
+	SessionTTL        *time.Duration
+	DataRetentionDays *int
+	RedirectOrigins   *[]string
+}
+
+// UpdateSettings applies change once every field in it is valid, so a
+// rejected update leaves the settings, and the audit log, as they were.
+func (s *Service) UpdateSettings(ctx context.Context, orgID uuid.UUID, change SettingsChange) (Settings, error) {
+	current, err := s.orgSettings.Get(ctx, orgID)
+	if err != nil {
+		return Settings{}, err
+	}
+
+	session := current.Session
+	if change.SessionTTL != nil {
+		session.SessionTTL = *change.SessionTTL
+	}
+	if change.DataRetentionDays != nil {
+		session.DataRetentionDays = *change.DataRetentionDays
+	}
+	saveSession := change.SessionTTL != nil || change.DataRetentionDays != nil
+	if saveSession {
+		if err := checkSessionSettings(session); err != nil {
+			return Settings{}, err
+		}
+	}
+	var origins []string
+	if change.RedirectOrigins != nil {
+		if origins, err = normalizeOrigins(*change.RedirectOrigins); err != nil {
+			return Settings{}, err
+		}
+	}
+
+	if saveSession {
+		if current, err = s.orgSettings.SaveSession(ctx, orgID, session); err != nil {
+			return Settings{}, err
+		}
+	}
+	if change.RedirectOrigins != nil {
+		if current, err = s.orgSettings.SaveRedirectOrigins(ctx, orgID, origins); err != nil {
+			return Settings{}, err
+		}
+	}
+	return current, nil
+}
+
+// Stats counts the external requests sent within statsWindow, per flow,
+// narrowed to one member's when requestedBy is set.
 func (s *Service) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID) ([]StatsRow, time.Time, error) {
 	since := s.now().Add(-statsWindow)
 	rows, err := s.requests.Stats(ctx, orgID, requestedBy, since)
 	return rows, since, err
-}
-
-// AssignCustomerFlows replaces the flows assigned to a customer. Any flow of the
-// org a recipient can finish may be assigned, whether or not members may use it.
-func (s *Service) AssignCustomerFlows(ctx context.Context, org Org, id uuid.UUID, sel FlowSelection) (Customer, error) {
-	if _, err := s.customers.Get(ctx, org.ID, id); err != nil {
-		return Customer{}, err
-	}
-	sel, err := s.validSelection(ctx, org, sel, customerCompletable)
-	if err != nil {
-		return Customer{}, err
-	}
-	return s.customers.SaveFlows(ctx, org.ID, id, sel)
-}
-
-func customerName(raw string) (string, error) {
-	name := strings.TrimSpace(raw)
-	if name == "" || len(name) > maxCustomerNameLength {
-		return "", fmt.Errorf("%w: a customer needs a name of at most %d characters", ErrInvalidInput, maxCustomerNameLength)
-	}
-	return name, nil
 }

@@ -1,12 +1,8 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import {
-  useRemoveCustomerMutation,
-  useUpdateCustomerMutation,
-} from "../api/identity-proofing.queries";
-import type { ProofingCustomer } from "../api/identity-proofing";
+import { useUpdateSettingsMutation } from "../api/identity-proofing.queries";
+import type { ProofingSettings } from "../api/identity-proofing";
 import {
   DATA_RETENTION_DAY_OPTIONS,
   SESSION_TTL_OPTIONS_SECONDS,
@@ -14,45 +10,45 @@ import {
   ttlMinutes,
 } from "../lib/identity-proofing";
 import { originLines } from "../lib/hosted-completion";
-import { Button, Card, ConfirmDialog, Input } from "../ui";
+import { Button, Card } from "../ui";
 
 const LABEL = "text-ink text-[13px] font-semibold";
 const HINT = "text-muted text-[12px]";
 const ERROR = "text-error text-[12.5px]";
 
-// A customer's settings: how long a mailed session runs, how long an approved
-// subject's name is kept, where its hosted pages may hand the subject back, its
-// name, and removing it.
+// The org's session settings: how long a mailed session runs, how long an
+// approved person's name is kept, and where its hosted pages may hand the
+// person back.
 export function SettingsTab({
   slug,
-  customer,
+  settings,
 }: {
   slug: string;
-  customer: ProofingCustomer;
+  settings: ProofingSettings;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const update = useUpdateCustomerMutation(slug, customer.id);
+  const update = useUpdateSettingsMutation(slug);
 
   return (
     <div className="flex max-w-3xl flex-col gap-5">
       <Card>
         <h2 className="font-display border-line border-b px-5 py-4 text-[17px] font-bold">
-          {t("customers.settings.sessionsTitle")}
+          {t("identityProofing.settings.sessionsTitle")}
         </h2>
         <div className="divide-line divide-y px-5">
           <SettingRow
-            label={t("customers.settings.qrLifetime")}
-            hint={t("customers.settings.qrLifetimeHint")}
+            label={t("identityProofing.settings.qrLifetime")}
+            hint={t("identityProofing.settings.qrLifetimeHint")}
           >
             <Segmented
-              label={t("customers.settings.qrLifetime")}
+              label={t("identityProofing.settings.qrLifetime")}
               options={SESSION_TTL_OPTIONS_SECONDS.map((seconds) => ({
                 value: seconds,
-                label: t("customers.settings.minutes", {
+                label: t("identityProofing.settings.minutes", {
                   count: ttlMinutes(seconds),
                 }),
               }))}
-              value={customer.sessionTtlSeconds}
+              value={settings.sessionTtlSeconds}
               disabled={update.isPending}
               onChange={(seconds) =>
                 update.mutate({ sessionTtlSeconds: seconds })
@@ -60,16 +56,16 @@ export function SettingsTab({
             />
           </SettingRow>
           <SettingRow
-            label={t("customers.settings.retention")}
-            hint={t("customers.settings.retentionHint")}
+            label={t("identityProofing.settings.retention")}
+            hint={t("identityProofing.settings.retentionHint")}
           >
             <Segmented
-              label={t("customers.settings.retention")}
+              label={t("identityProofing.settings.retention")}
               options={DATA_RETENTION_DAY_OPTIONS.map((days) => ({
                 value: days,
-                label: t("customers.settings.days", { count: days }),
+                label: t("identityProofing.settings.days", { count: days }),
               }))}
-              value={customer.dataRetentionDays}
+              value={settings.dataRetentionDays}
               disabled={update.isPending}
               onChange={(days) => update.mutate({ dataRetentionDays: days })}
             />
@@ -81,9 +77,7 @@ export function SettingsTab({
           </p>
         )}
       </Card>
-      <RedirectOriginsCard slug={slug} customer={customer} />
-      <NameCard slug={slug} customer={customer} />
-      <RemoveCard slug={slug} customer={customer} />
+      <RedirectOriginsCard slug={slug} settings={settings} />
     </div>
   );
 }
@@ -154,16 +148,16 @@ const TEXTAREA =
 // The origins a hosted page may redirect its subject to and be embedded on.
 function RedirectOriginsCard({
   slug,
-  customer,
+  settings,
 }: {
   slug: string;
-  customer: ProofingCustomer;
+  settings: ProofingSettings;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const update = useUpdateCustomerMutation(slug, customer.id);
-  const saved = customer.allowedRedirectOrigins.join("\n");
+  const update = useUpdateSettingsMutation(slug);
+  const saved = settings.allowedRedirectOrigins.join("\n");
   const [text, setText] = useState(saved);
-  const fieldId = `redirect-origins-${customer.id}`;
+  const fieldId = "redirect-origins";
 
   function submit(event: React.FormEvent): void {
     event.preventDefault();
@@ -180,10 +174,10 @@ function RedirectOriginsCard({
         htmlFor={fieldId}
         className="font-display block text-[15px] font-bold"
       >
-        {t("customers.settings.redirectOriginsTitle")}
+        {t("identityProofing.settings.redirectOriginsTitle")}
       </label>
       <p className={`${HINT} mt-0.5`}>
-        {t("customers.settings.redirectOriginsHint")}
+        {t("identityProofing.settings.redirectOriginsHint")}
       </p>
       <form className="mt-3 flex flex-col gap-3" onSubmit={submit} noValidate>
         <textarea
@@ -201,7 +195,7 @@ function RedirectOriginsCard({
             loading={update.isPending}
             disabled={originLines(text).join("\n") === saved}
           >
-            {t("customers.settings.save")}
+            {t("identityProofing.settings.save")}
           </Button>
         </div>
       </form>
@@ -209,115 +203,6 @@ function RedirectOriginsCard({
         <p className={`${ERROR} mt-2`}>
           {proofingErrorMessage(update.error, t)}
         </p>
-      )}
-    </Card>
-  );
-}
-
-function NameCard({
-  slug,
-  customer,
-}: {
-  slug: string;
-  customer: ProofingCustomer;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const update = useUpdateCustomerMutation(slug, customer.id);
-  const [name, setName] = useState(customer.name);
-  const trimmed = name.trim();
-
-  function submit(event: React.FormEvent): void {
-    event.preventDefault();
-    if (trimmed !== "") {
-      update.mutate({ name: trimmed });
-    }
-  }
-
-  return (
-    <Card className="px-5 py-4">
-      <h2 className="font-display text-[15px] font-bold">
-        {t("customers.settings.nameTitle")}
-      </h2>
-      <p className={`${HINT} mt-0.5`}>{t("customers.settings.nameHint")}</p>
-      <form
-        className="mt-3 flex flex-wrap items-end gap-3"
-        onSubmit={submit}
-        noValidate
-      >
-        <Input
-          aria-label={t("customers.settings.nameTitle")}
-          value={name}
-          className="max-w-sm"
-          onChange={(event) => setName(event.target.value)}
-        />
-        <Button
-          type="submit"
-          loading={update.isPending}
-          disabled={trimmed === "" || trimmed === customer.name}
-        >
-          {t("customers.settings.save")}
-        </Button>
-      </form>
-      {update.isError && (
-        <p className={`${ERROR} mt-2`}>
-          {proofingErrorMessage(update.error, t)}
-        </p>
-      )}
-    </Card>
-  );
-}
-
-function RemoveCard({
-  slug,
-  customer,
-}: {
-  slug: string;
-  customer: ProofingCustomer;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const remove = useRemoveCustomerMutation(slug, customer.id);
-  const [confirming, setConfirming] = useState(false);
-
-  return (
-    <Card className="border-error/40 flex flex-wrap items-center justify-between gap-4 px-5 py-4">
-      <div className="min-w-0 flex-1 basis-64">
-        <h2 className="font-display text-[15px] font-bold">
-          {t("customers.settings.removeTitle")}
-        </h2>
-        <p className={`${HINT} mt-0.5`}>{t("customers.settings.removeHint")}</p>
-        {remove.isError && (
-          <p className={`${ERROR} mt-1`}>
-            {proofingErrorMessage(remove.error, t)}
-          </p>
-        )}
-      </div>
-      <Button
-        variant="dangerGhost"
-        icon="delete"
-        className="border-error text-error shrink-0 border"
-        onClick={() => setConfirming(true)}
-      >
-        {t("customers.settings.remove")}
-      </Button>
-      {confirming && (
-        <ConfirmDialog
-          title={t("customers.settings.removeConfirm.title", {
-            name: customer.name,
-          })}
-          message={t("customers.settings.removeConfirm.message")}
-          confirmLabel={t("customers.settings.remove")}
-          busy={remove.isPending}
-          onConfirm={() =>
-            remove.mutate(undefined, {
-              onSuccess: () =>
-                void navigate(`/${slug}/identity-proofing/customers`, {
-                  replace: true,
-                }),
-            })
-          }
-          onClose={() => setConfirming(false)}
-        />
       )}
     </Card>
   );

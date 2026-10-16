@@ -47,9 +47,9 @@ const (
 	DeliveryHeader = "Yivi-Delivery"
 )
 
-// Deliverer sends due webhook deliveries: to a customer's endpoint through the
+// Deliverer sends due webhook deliveries: to an org's endpoint through the
 // SSRF-guarded client, to the default endpoint through a client that may reach
-// it on a private address, since the deployment configured it, not a customer.
+// it on a private address, since the deployment configured it, not an org.
 type Deliverer struct {
 	store         *WebhookStore
 	policy        safehttp.Policy

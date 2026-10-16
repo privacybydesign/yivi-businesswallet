@@ -18,7 +18,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 )
 
-// hostedCallLimit holds the hosted page per customer across all its links, as
+// hostedCallLimit holds the hosted page per org across all its links, as
 // apiCallLimit holds the API, and per API replica. It fits some twenty people
 // at a hosted face check at once: its frames go every 400 ms, its status polls
 // every 2 s.
@@ -31,7 +31,7 @@ const hostedPagePrefix = "/p/"
 const frameNone = "frame-ancestors 'none'"
 
 // PageHeaders sets the hosted page's Content-Security-Policy: only its
-// customer's allowed origins may frame it. An unknown or throttled link, or a
+// org's allowed origins may frame it. An unknown or throttled link, or a
 // failed read, may be framed by none.
 func (h *Handler) PageHeaders(r *http.Request, header http.Header) {
 	token, ok := strings.CutPrefix(r.URL.Path, hostedPagePrefix)
@@ -54,7 +54,7 @@ func (h *Handler) framePolicy(r *http.Request, token string) string {
 	}
 	origins, err := h.service.HostedEmbedOrigins(r.Context(), token)
 	if err != nil {
-		if !errors.Is(err, ErrRequestNotFound) && !errors.Is(err, ErrCustomerNotFound) {
+		if !errors.Is(err, ErrRequestNotFound) && !errors.Is(err, ErrOrgNotFound) {
 			slog.ErrorContext(r.Context(), "proofing: hosted page frame origins", slog.Any("error", err))
 		}
 		return frameNone
@@ -134,7 +134,7 @@ func openExport(req Request, now time.Time) *time.Time {
 
 type hostedViewResponse struct {
 	hostedProgressResponse
-	// SessionID is the customer's id for the session, handed back on completion.
+	// SessionID is the API's id for the session, handed back on completion.
 	SessionID string `json:"sessionId"`
 	// RedirectURL is where the page sends its subject once settled; absent
 	// shows the page's own done screen. EmbedOrigins are the origins that may
@@ -143,13 +143,13 @@ type hostedViewResponse struct {
 	EmbedOrigins []string `json:"embedOrigins"`
 	// Language is the page's language (en/nl); absent leaves the browser's.
 	// Locales are the languages the flow's page offers; empty is every one.
-	Language string         `json:"language,omitempty"`
-	Locales  []email.Locale `json:"locales"`
-	Customer struct {
+	Language     string         `json:"language,omitempty"`
+	Locales      []email.Locale `json:"locales"`
+	Organization struct {
 		Name              string           `json:"name"`
 		Branding          brandingResponse `json:"branding"`
 		DataRetentionDays int              `json:"dataRetentionDays"`
-	} `json:"customer"`
+	} `json:"organization"`
 	Flow struct {
 		Name                   string   `json:"name"`
 		RequiredAssuranceLevel string   `json:"requiredAssuranceLevel,omitempty"`
@@ -201,19 +201,19 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.SessionID = publicSessionID(hosted.Request.ID)
 	out.RedirectURL, out.Language = hosted.Request.RedirectURL, string(hosted.Request.Language)
 
-	c := hosted.Customer
-	out.EmbedOrigins = append([]string{}, c.RedirectOrigins...)
-	out.Locales = append([]email.Locale{}, hosted.Settings.Locales...)
-	out.Customer.Name = c.SignedAs()
-	out.Customer.Branding = brandingResponse{
-		DisplayName: c.Branding.DisplayName, PrimaryColor: c.Branding.PrimaryColor,
-		SupportContact: c.Branding.SupportContact, PrivacyURL: c.Branding.PrivacyURL,
-		HidePoweredBy: c.Branding.HidePoweredBy,
+	st := hosted.Settings
+	out.EmbedOrigins = append([]string{}, st.RedirectOrigins...)
+	out.Locales = append([]email.Locale{}, hosted.FlowSettings.Locales...)
+	out.Organization.Name = st.SignedAs()
+	out.Organization.Branding = brandingResponse{
+		DisplayName: st.Branding.DisplayName, PrimaryColor: st.Branding.PrimaryColor,
+		SupportContact: st.Branding.SupportContact, PrivacyURL: st.Branding.PrivacyURL,
+		HidePoweredBy: st.Branding.HidePoweredBy,
 	}
-	if c.Branding.HasLogo {
-		out.Customer.Branding.LogoURI = fmt.Sprintf("/api/v1/proof/%s/logo?v=%d", url.PathEscape(token), c.UpdatedAt.Unix())
+	if st.Branding.HasLogo {
+		out.Organization.Branding.LogoURI = fmt.Sprintf("/api/v1/proof/%s/logo?v=%d", url.PathEscape(token), st.UpdatedAt.Unix())
 	}
-	out.Customer.DataRetentionDays = c.Settings.DataRetentionDays
+	out.Organization.DataRetentionDays = st.Session.DataRetentionDays
 
 	f := hosted.Flow
 	out.Flow.Name, out.Flow.RequiredAssuranceLevel = f.Name, f.RequiredAssuranceLevel
@@ -224,7 +224,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.YiviAvailable = yiviAppAvailable(f)
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
 	out.Flow.Kind = hosted.Request.FlowKind
-	out.Flow.RetentionDays = subjectRetentionDays(c, hosted.Request.RetentionOverride)
+	out.Flow.RetentionDays = subjectRetentionDays(st, hosted.Request.RetentionOverride)
 
 	diplomas, err := h.service.RequestDiplomas(r.Context(), []uuid.UUID{hosted.Request.ID})
 	if err != nil {

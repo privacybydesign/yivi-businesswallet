@@ -14,6 +14,15 @@ PR state on 2026-10-06:
 - Ruben's "Questions for the author" are settled in the code.
 - The `Yivi Design System.zip` deletion is intended: the archive is not needed.
 
+Update 2026-10-16: the customer model this plan was written against is gone. Identity proofing
+has no customers any more: the org holds one set of settings, its API keys and one webhook
+endpoint, flows have one default, and an external person is the subject of a request. What is
+built is described in `.ai/features/identity-proofing.md`. The items below that mention
+customers, such as custom customer domains, white labelling, rate limits with customers inside
+an org budget, API usage per customer, the controller chain, matching in the flow editor and
+the retention raise, are the original design and are left as written; none has been revisited
+for the org-level model.
+
 ## Waiting on the user
 
 - [ ] **When does the engine send a real session to review?** Today only data requests go to

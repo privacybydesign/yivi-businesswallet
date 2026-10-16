@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
+import { useOrganizationQuery } from "../api/organization.queries";
 import {
-  useProofingCustomerFlowsQuery,
-  useProofingCustomersQuery,
   useProofingFlowHostedQuery,
+  useProofingSettingsQuery,
   useSaveFlowHostedMutation,
 } from "../api/identity-proofing.queries";
 import type {
@@ -14,22 +14,19 @@ import type {
 import { SUPPORTED_LANGUAGES } from "../i18n";
 import { proofingErrorMessage } from "../lib/identity-proofing";
 import { Button, Card } from "../ui";
-import { CustomerMark } from "./proofing-customer-ui";
+import { BrandMark } from "./proofing-ui";
 import { Overview } from "./proofing-verify-steps";
 
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
 const ERROR = "text-error text-[12.5px]";
-const SELECT_CLASS =
-  "rounded-yivi border-line-strong bg-surface text-ink w-full max-w-xs border px-3 py-2 text-[13.5px] outline-none focus:border-ink focus:ring-ink/10 focus:ring-3 h-10";
 const COMPLETIONS: readonly ProofingFlowHosted["completion"][] = [
   "redirect",
   "done",
 ];
 
 // A flow's hosted page: whether links may be made for it, the languages it
-// offers, how it ends, and a preview of its first step in a customer's
-// branding.
+// offers, how it ends, and a preview of its first step in the org's branding.
 export function FlowHostedSettings({
   slug,
   flow,
@@ -162,81 +159,53 @@ function HostedForm({
   );
 }
 
-// The hosted page's first step for this flow, in the branding of a customer it
-// is assigned to (or any customer): what the subject sees before starting.
+// The hosted page's first step for this flow, in the org's branding: what the
+// subject sees before starting.
 function HostedPreview({
   slug,
   flow,
 }: {
   slug: string;
   flow: ProofingFlow;
-}): React.JSX.Element | null {
+}): React.JSX.Element {
   const { t } = useTranslation();
-  const customers = useProofingCustomersQuery(slug);
-  const all = customers.data ?? [];
-  const assigned = all.filter((c) => c.flowIds.includes(flow.id));
-  const choices = assigned.length > 0 ? assigned : all;
-  const [picked, setPicked] = useState("");
-  const customer = choices.find((c) => c.id === picked) ?? choices.at(0);
-  // The retention a subject is told is the server's: this flow for this customer.
-  const customerFlows = useProofingCustomerFlowsQuery(slug, customer?.id ?? "");
-  const retentionDays = customerFlows.data?.find(
-    (f) => f.id === flow.id,
-  )?.retentionDays;
-  const selectId = `hosted-preview-${flow.id}`;
+  const org = useOrganizationQuery(slug);
+  const settings = useProofingSettingsQuery(slug);
 
-  if (customer === undefined) {
+  if (org.isError || settings.isError) {
     return (
-      <p className={HINT}>{t("identityProofingFlows.hosted.noCustomer")}</p>
+      <p className={ERROR}>
+        {proofingErrorMessage(settings.error ?? org.error, t)}
+      </p>
     );
   }
+  if (org.isPending || settings.isPending) {
+    return <p className={HINT}>{t("common.loading")}</p>;
+  }
+  const { branding } = settings.data;
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor={selectId} className={LABEL}>
-          {t("identityProofingFlows.hosted.previewAs")}
-        </label>
-        <select
-          id={selectId}
-          className={SELECT_CLASS}
-          value={customer.id}
-          onChange={(event) => setPicked(event.target.value)}
-        >
-          {choices.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </div>
       <Card
         className="pointer-events-none flex max-w-xl flex-col gap-6 p-6"
         aria-label={t("identityProofingFlows.hosted.preview")}
       >
         <div className="flex items-center gap-3">
-          <CustomerMark customer={customer} size="lg" />
+          <BrandMark name={org.data.name} branding={branding} size="lg" />
           <span className="text-ink text-[16px] font-bold">
-            {customer.branding.displayName || customer.name}
+            {branding.displayName || org.data.name}
           </span>
         </div>
-        {customerFlows.isError ? (
-          <p className={ERROR}>
-            {proofingErrorMessage(customerFlows.error, t)}
-          </p>
-        ) : customerFlows.isPending ? (
-          <p className={HINT}>{t("common.loading")}</p>
-        ) : (
-          // A flow the customer's list lacks (not the active version) has no
-          // retention to tell: no preview of it.
-          retentionDays !== undefined && (
-            <Overview
-              customer={customer}
-              flow={{ ...flow, retentionDays }}
-              onContinue={() => undefined}
-              starting={false}
-            />
-          )
-        )}
+        <Overview
+          org={{ name: org.data.name, branding }}
+          flow={{
+            ...flow,
+            // The retention a subject is told is the server's, from the list.
+            retentionDays:
+              flow.retentionDays ?? settings.data.dataRetentionDays,
+          }}
+          onContinue={() => undefined}
+          starting={false}
+        />
       </Card>
     </section>
   );

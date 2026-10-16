@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useSaveBrandingMutation } from "../api/identity-proofing.queries";
-import type { ProofingCustomer } from "../api/identity-proofing";
+import type { ProofingSettings } from "../api/identity-proofing";
 import {
   isHexColor,
   proofingErrorMessage,
@@ -10,7 +10,7 @@ import {
 } from "../lib/identity-proofing";
 import { absoluteApiUrl } from "../api/http";
 import { Button, Card, Icon, Input } from "../ui";
-import { InitialMark } from "./proofing-customer-ui";
+import { InitialMark } from "./proofing-ui";
 
 const LABEL = "text-ink text-[13px] font-semibold";
 const HINT = "text-muted text-[12px]";
@@ -19,7 +19,7 @@ const CAPTION =
   "text-muted font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase";
 // A few starting points; any #rrggbb works.
 const PRESET_COLORS = ["#1F5B4A", "#26307A", "#8B2332", "#1A1A1A"] as const;
-// Shown when the customer has no colour: the Yivi default the mail falls back to.
+// Shown when the org has no colour: the Yivi default the mail falls back to.
 const FALLBACK_PREVIEW_COLOR = "#1A1A1A";
 const LOGO_ACCEPT = "image/png,image/jpeg,image/gif,image/webp";
 const PREVIEW_QR_ICON = 40;
@@ -35,8 +35,8 @@ interface Draft {
   removeLogo: boolean;
 }
 
-function draftFrom(customer: ProofingCustomer): Draft {
-  const b = customer.branding;
+function draftFrom(settings: ProofingSettings): Draft {
+  const b = settings.branding;
   return {
     displayName: b.displayName,
     primaryColor: b.primaryColor,
@@ -48,19 +48,21 @@ function draftFrom(customer: ProofingCustomer): Draft {
   };
 }
 
-// The look of the proofing mail a customer's subjects get: the name it signs
-// with, its logo and colour, and its support contact and privacy statement,
-// with a live preview beside the form.
+// The look of the proofing mail external people get, and of the hosted page:
+// the name it signs with, its logo and colour, and its support contact and
+// privacy statement, with a live preview beside the form.
 export function BrandingTab({
   slug,
-  customer,
+  orgName,
+  settings,
 }: {
   slug: string;
-  customer: ProofingCustomer;
+  orgName: string;
+  settings: ProofingSettings;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const save = useSaveBrandingMutation(slug, customer.id);
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(customer));
+  const save = useSaveBrandingMutation(slug);
+  const [draft, setDraft] = useState<Draft>(() => draftFrom(settings));
   const fileInput = useRef<HTMLInputElement>(null);
   // A picked file previews from a local object URL, freed when replaced.
   const logoPreview = useMemo(
@@ -74,7 +76,7 @@ export function BrandingTab({
     [logoPreview],
   );
 
-  const saved = draftFrom(customer);
+  const saved = draftFrom(settings);
   const dirty =
     draft.logo !== null ||
     draft.removeLogo ||
@@ -87,9 +89,9 @@ export function BrandingTab({
     draft.primaryColor !== "" && !isHexColor(draft.primaryColor);
   const logoUri =
     logoPreview ??
-    (draft.removeLogo || !customer.branding.logoUri
+    (draft.removeLogo || !settings.branding.logoUri
       ? ""
-      : absoluteApiUrl(customer.branding.logoUri));
+      : absoluteApiUrl(settings.branding.logoUri));
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
     setDraft((d) => ({ ...d, [key]: value }));
 
@@ -120,26 +122,32 @@ export function BrandingTab({
         <form onSubmit={submit} noValidate>
           <div className="border-line border-b px-6 py-4">
             <h2 className="font-display text-[17px] font-bold">
-              {t("customers.branding.title")}
+              {t("identityProofing.branding.title")}
             </h2>
-            <p className={`${HINT} mt-1`}>{t("customers.branding.hint")}</p>
+            <p className={`${HINT} mt-1`}>
+              {t("identityProofing.branding.hint")}
+            </p>
           </div>
           <div className="flex flex-col gap-5 px-6 py-5">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="branding-display-name" className={LABEL}>
-                {t("customers.branding.displayName")}
+                {t("identityProofing.branding.displayName")}
               </label>
               <Input
                 id="branding-display-name"
                 value={draft.displayName}
-                placeholder={customer.name}
+                placeholder={orgName}
                 onChange={(e) => set("displayName", e.target.value)}
               />
-              <p className={HINT}>{t("customers.branding.displayNameHint")}</p>
+              <p className={HINT}>
+                {t("identityProofing.branding.displayNameHint")}
+              </p>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <span className={LABEL}>{t("customers.branding.logo")}</span>
+              <span className={LABEL}>
+                {t("identityProofing.branding.logo")}
+              </span>
               <div className="border-line-strong flex items-center gap-3 rounded-lg border border-dashed p-3">
                 {logoUri ? (
                   <img
@@ -149,7 +157,7 @@ export function BrandingTab({
                   />
                 ) : (
                   <InitialMark
-                    name={draft.displayName.trim() || customer.name}
+                    name={draft.displayName.trim() || orgName}
                     color={
                       isHexColor(draft.primaryColor)
                         ? draft.primaryColor
@@ -162,17 +170,19 @@ export function BrandingTab({
                   <div className="text-ink truncate text-[13px] font-semibold">
                     {draft.logo?.name ??
                       (logoUri
-                        ? t("customers.branding.logoSet")
-                        : t("customers.branding.noLogo"))}
+                        ? t("identityProofing.branding.logoSet")
+                        : t("identityProofing.branding.noLogo"))}
                   </div>
-                  <div className={HINT}>{t("customers.branding.logoHint")}</div>
+                  <div className={HINT}>
+                    {t("identityProofing.branding.logoHint")}
+                  </div>
                 </div>
                 <input
                   ref={fileInput}
                   type="file"
                   accept={LOGO_ACCEPT}
                   className="sr-only"
-                  aria-label={t("customers.branding.logo")}
+                  aria-label={t("identityProofing.branding.logo")}
                   onChange={(e) => {
                     const file = e.target.files?.[0] ?? null;
                     setDraft((d) => ({ ...d, logo: file, removeLogo: false }));
@@ -186,8 +196,8 @@ export function BrandingTab({
                   onClick={() => fileInput.current?.click()}
                 >
                   {logoUri
-                    ? t("customers.branding.replace")
-                    : t("customers.branding.upload")}
+                    ? t("identityProofing.branding.replace")
+                    : t("identityProofing.branding.upload")}
                 </Button>
                 {logoUri && (
                   <Button
@@ -198,7 +208,7 @@ export function BrandingTab({
                       setDraft((d) => ({ ...d, logo: null, removeLogo: true }))
                     }
                   >
-                    {t("customers.branding.removeLogo")}
+                    {t("identityProofing.branding.removeLogo")}
                   </Button>
                 )}
               </div>
@@ -206,7 +216,7 @@ export function BrandingTab({
 
             <div className="flex flex-col gap-1.5">
               <span id="branding-color-label" className={LABEL}>
-                {t("customers.branding.primaryColor")}
+                {t("identityProofing.branding.primaryColor")}
               </span>
               <div
                 role="group"
@@ -235,7 +245,7 @@ export function BrandingTab({
                 })}
                 <input
                   type="color"
-                  aria-label={t("customers.branding.customColor")}
+                  aria-label={t("identityProofing.branding.customColor")}
                   value={
                     isHexColor(draft.primaryColor)
                       ? draft.primaryColor
@@ -247,8 +257,8 @@ export function BrandingTab({
                 <div className="ml-2 w-32">
                   <Input
                     value={draft.primaryColor}
-                    placeholder={t("customers.branding.orgColor")}
-                    aria-label={t("customers.branding.primaryColor")}
+                    placeholder={t("identityProofing.branding.orgColor")}
+                    aria-label={t("identityProofing.branding.primaryColor")}
                     aria-invalid={colorInvalid}
                     className="font-mono text-[12.5px]"
                     onChange={(e) => set("primaryColor", e.target.value.trim())}
@@ -256,10 +266,12 @@ export function BrandingTab({
                 </div>
               </div>
               {colorInvalid ? (
-                <p className={ERROR}>{t("customers.branding.colorInvalid")}</p>
+                <p className={ERROR}>
+                  {t("identityProofing.branding.colorInvalid")}
+                </p>
               ) : (
                 <p className={HINT}>
-                  {t("customers.branding.primaryColorHint")}
+                  {t("identityProofing.branding.primaryColorHint")}
                 </p>
               )}
             </div>
@@ -267,24 +279,28 @@ export function BrandingTab({
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="branding-support" className={LABEL}>
-                  {t("customers.branding.supportContact")}
+                  {t("identityProofing.branding.supportContact")}
                 </label>
                 <Input
                   id="branding-support"
                   value={draft.supportContact}
-                  placeholder={t("customers.branding.supportPlaceholder")}
+                  placeholder={t(
+                    "identityProofing.branding.supportPlaceholder",
+                  )}
                   onChange={(e) => set("supportContact", e.target.value)}
                 />
               </div>
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="branding-privacy" className={LABEL}>
-                  {t("customers.branding.privacyUrl")}
+                  {t("identityProofing.branding.privacyUrl")}
                 </label>
                 <Input
                   id="branding-privacy"
                   type="url"
                   value={draft.privacyUrl}
-                  placeholder={t("customers.branding.privacyPlaceholder")}
+                  placeholder={t(
+                    "identityProofing.branding.privacyPlaceholder",
+                  )}
                   onChange={(e) => set("privacyUrl", e.target.value)}
                 />
               </div>
@@ -295,7 +311,7 @@ export function BrandingTab({
                   checked={draft.hidePoweredBy}
                   onChange={(e) => set("hidePoweredBy", e.target.checked)}
                 />
-                {t("customers.branding.hidePoweredBy")}
+                {t("identityProofing.branding.hidePoweredBy")}
               </label>
             </div>
             {save.isError && (
@@ -307,22 +323,22 @@ export function BrandingTab({
               type="button"
               variant="secondary"
               disabled={!dirty || save.isPending}
-              onClick={() => setDraft(draftFrom(customer))}
+              onClick={() => setDraft(draftFrom(settings))}
             >
-              {t("customers.branding.discard")}
+              {t("identityProofing.branding.discard")}
             </Button>
             <Button
               type="submit"
               loading={save.isPending}
               disabled={!dirty || colorInvalid}
             >
-              {t("customers.branding.save")}
+              {t("identityProofing.branding.save")}
             </Button>
           </div>
         </form>
       </Card>
       <MailPreview
-        name={draft.displayName.trim() || customer.name}
+        name={draft.displayName.trim() || orgName}
         color={isHexColor(draft.primaryColor) ? draft.primaryColor : ""}
         logoUri={logoUri}
         supportContact={draft.supportContact.trim()}
@@ -353,7 +369,7 @@ function MailPreview({
   return (
     <div>
       <div className={`${CAPTION} mb-2`}>
-        {t("customers.branding.preview.caption")}
+        {t("identityProofing.branding.preview.caption")}
       </div>
       <div className="border-line bg-surface-2 rounded-xl border p-4">
         <div className="mb-3 flex items-center gap-2">
@@ -370,10 +386,10 @@ function MailPreview({
         </div>
         <div className="bg-surface border-line rounded-lg border p-5">
           <h3 className="text-ink text-[17px] leading-snug font-bold">
-            {t("customers.branding.preview.heading", { name })}
+            {t("identityProofing.branding.preview.heading", { name })}
           </h3>
           <p className="text-ink-soft mt-2 text-[12.5px]">
-            {t("customers.branding.preview.body", { name })}
+            {t("identityProofing.branding.preview.body", { name })}
           </p>
           <div className="border-line text-muted mx-auto my-4 flex h-24 w-24 items-center justify-center rounded-md border">
             <Icon name="scan_qrcode" size={PREVIEW_QR_ICON} />
@@ -382,23 +398,25 @@ function MailPreview({
             className="rounded-md py-2.5 text-center text-[13px] font-semibold"
             style={{ backgroundColor: fill, color: onFill }}
           >
-            {t("customers.branding.preview.button")}
+            {t("identityProofing.branding.preview.button")}
           </div>
           {supportContact && (
             <p className="text-ink-soft mt-3 text-[12px]">
-              {t("customers.branding.preview.support", {
+              {t("identityProofing.branding.preview.support", {
                 contact: supportContact,
               })}
             </p>
           )}
           {privacyUrl && (
             <p className="text-ink-soft mt-1 text-[12px] break-all">
-              {t("customers.branding.preview.privacy", { url: privacyUrl })}
+              {t("identityProofing.branding.preview.privacy", {
+                url: privacyUrl,
+              })}
             </p>
           )}
         </div>
         <p className="text-muted mt-3 text-center text-[11px]">
-          {t("customers.branding.preview.footer")}
+          {t("identityProofing.branding.preview.footer")}
         </p>
       </div>
     </div>

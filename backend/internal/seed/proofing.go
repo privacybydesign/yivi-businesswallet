@@ -18,12 +18,11 @@ import (
 )
 
 // The identity proofing use cases of the demo orgs: each org runs proofing
-// for its own dummy customers, with the flows its use case needs and the two
-// data request flows, as an org admin would set them up. A flow is found by
-// its name within its org, a customer by its name, so a re-run creates only
-// what is missing. What a session of a use case needs beyond the flow (an
-// expected person's name and date of birth, a reference photo) is sent with
-// the session through the customer API.
+// for external people, with the flows its use case needs and the two data
+// request flows, as an org admin would set them up. A flow is found by its
+// name within its org, so a re-run creates only what is missing. What a session
+// of a use case needs beyond the flow (an expected person's name and date of
+// birth, a reference photo) is sent with the session through the API.
 
 // demoProofingFlow is one of a demo org's flows: its engine definition and
 // the wallet's own settings for it.
@@ -33,21 +32,14 @@ type demoProofingFlow struct {
 	diplomas proofing.DiplomaMode
 }
 
-// demoProofingCustomer is a customer with the flows assigned to it, the
-// first its default; every customer is also given the data request flows. Its
-// name says "(Demo)", like the seeded orgs: they are real organisations.
-type demoProofingCustomer struct {
-	name          string
-	flows         []string
-	retentionDays int
-}
-
 // demoProofingOrg is a demo org (by slug, one of demoOrganizations) with its
-// own flows, besides the data request flows every org has, and its customers.
+// own flows, besides the data request flows every org has, the one of them that
+// is its default, and how long it keeps a session's personal data.
 type demoProofingOrg struct {
-	slug      string
-	flows     []demoProofingFlow
-	customers []demoProofingCustomer
+	slug          string
+	flows         []demoProofingFlow
+	defaultFlow   string
+	retentionDays int
 }
 
 // The engine's names for what a flow reads and checks.
@@ -64,9 +56,9 @@ var (
 	cmAttributes = []string{"dg1", "chip_checks", "biometrics"}
 )
 
-// demoRetentionDays and shortRetentionDays are how long a demo customer
-// keeps a session's personal data: the default, and CM's minimum for a
-// ticket's age check.
+// demoRetentionDays and shortRetentionDays are how long a demo org keeps a
+// session's personal data: the default, and CM's minimum for a ticket's age
+// check.
 const (
 	demoRetentionDays  = 30
 	shortRetentionDays = 7
@@ -83,7 +75,7 @@ func chipAndFace(name string, basis privacy.LegalBasis, purpose string) flow.Flo
 	}
 }
 
-// Flow names, also how a customer below names its flows.
+// Flow names, also how an org below names its default flow.
 const (
 	flowRadboudEnrol     = "Aanmelden cursist"
 	flowRadboudPassword  = "Wachtwoord herstellen"
@@ -98,10 +90,9 @@ const (
 // purposeDataRequest is the processing purpose of the data request flows.
 const purposeDataRequest = "Verzoek van de betrokkene (AVG art. 15/17)"
 
-// dataRequestFlows are every org's: a customer's subject asks what is held of
+// dataRequestFlows are every org's: an external person asks what is held of
 // them, or for its erasure, and the session goes to review once they are
-// proven. Every customer is offered them: each holds personal data a subject
-// may ask about.
+// proven. Every org has them: each holds personal data a person may ask about.
 var dataRequestFlows = []demoProofingFlow{
 	{def: chipAndFace(flowDataAccess, privacy.LegalBasisLegalObligation, purposeDataRequest), kind: proofing.FlowDataAccess},
 	{def: chipAndFace(flowDataErasure, privacy.LegalBasisLegalObligation, purposeDataRequest), kind: proofing.FlowDataErasure},
@@ -109,7 +100,7 @@ var dataRequestFlows = []demoProofingFlow{
 
 var demoProofingOrgs = []demoProofingOrg{
 	{
-		slug: radboudSlug,
+		slug: radboudSlug, defaultFlow: flowRadboudEnrol, retentionDays: demoRetentionDays,
 		flows: []demoProofingFlow{
 			// A new course participant enrols with their passport or identity
 			// card, then uploads their DUO diploma extracts.
@@ -119,13 +110,9 @@ var demoProofingOrgs = []demoProofingOrg{
 			// session).
 			{def: chipAndFace(flowRadboudPassword, privacy.LegalBasisContract, "Herstel van het wachtwoord")},
 		},
-		customers: []demoProofingCustomer{
-			{name: "Radboud Academy (Demo)", flows: []string{flowRadboudEnrol, flowRadboudPassword}, retentionDays: demoRetentionDays},
-			{name: "Radboud Studentenservice (Demo)", flows: []string{flowRadboudPassword}, retentionDays: demoRetentionDays},
-		},
 	},
 	{
-		slug: asrSlug,
+		slug: asrSlug, defaultFlow: flowASRKnownPerson, retentionDays: demoRetentionDays,
 		flows: []demoProofingFlow{
 			// A pre-configured person (name and birth date sent with the
 			// session) identifies themselves; anyone else is rejected
@@ -140,26 +127,18 @@ var demoProofingOrgs = []demoProofingOrg{
 				LegalBasis: privacy.LegalBasisContract, ProcessingPurpose: "Wijziging van het rekeningnummer op de polis",
 			}},
 		},
-		customers: []demoProofingCustomer{
-			{name: "a.s.r. Schadeverzekeringen (Demo)", flows: []string{flowASRKnownPerson, flowASRAccountChange}, retentionDays: demoRetentionDays},
-			{name: "a.s.r. Levensverzekeringen (Demo)", flows: []string{flowASRKnownPerson, flowASRAccountChange}, retentionDays: demoRetentionDays},
-		},
 	},
 	{
-		slug: unibetSlug,
+		slug: unibetSlug, defaultFlow: flowUnibetOnboarding, retentionDays: demoRetentionDays,
 		flows: []demoProofingFlow{
 			// A new player under the AMLR: full identification and liveness.
 			// The occupational status (UWV Verzekeringsbericht) is not a step
 			// the wallet can collect yet.
 			{def: chipAndFace(flowUnibetOnboarding, privacy.LegalBasisLegalObligation, "Klantonderzoek kansspelen (AMLR/Wwft)")},
 		},
-		customers: []demoProofingCustomer{
-			{name: "Unibet Casino (Demo)", flows: []string{flowUnibetOnboarding}, retentionDays: demoRetentionDays},
-			{name: "Unibet Sport (Demo)", flows: []string{flowUnibetOnboarding}, retentionDays: demoRetentionDays},
-		},
 	},
 	{
-		slug: cmSlug,
+		slug: cmSlug, defaultFlow: flowCMAgeCheck, retentionDays: shortRetentionDays,
 		flows: []demoProofingFlow{
 			// Buying a ticket: a real, live person of age. Only the chip's data
 			// and the checks come back, never an image.
@@ -170,10 +149,6 @@ var demoProofingOrgs = []demoProofingOrg{
 				LegalBasis:          privacy.LegalBasisContract, ProcessingPurpose: "Leeftijdscontrole bij aankoop ticket",
 			}},
 		},
-		customers: []demoProofingCustomer{
-			{name: "CM Tickets Concerten (Demo)", flows: []string{flowCMAgeCheck}, retentionDays: shortRetentionDays},
-			{name: "CM Tickets Festivals (Demo)", flows: []string{flowCMAgeCheck}, retentionDays: shortRetentionDays},
-		},
 	},
 }
 
@@ -182,60 +157,60 @@ func (o demoProofingOrg) allFlows() []demoProofingFlow {
 	return append(slices.Clone(o.flows), dataRequestFlows...)
 }
 
-// seedProofing gives each demo proofing org, found in orgsBySlug, its flows
-// and customers, created by createdBy.
-func seedProofing(ctx context.Context, pool *pgxpool.Pool, orgsBySlug map[string]organization.Organization, createdBy uuid.UUID) error {
+// seedProofing gives each demo proofing org, found in orgsBySlug, its flows,
+// default flow and retention.
+func seedProofing(ctx context.Context, pool *pgxpool.Pool, orgsBySlug map[string]organization.Organization) error {
 	for _, o := range demoProofingOrgs {
 		org, ok := orgsBySlug[o.slug]
 		if !ok {
 			return fmt.Errorf("seed: proofing org %s not seeded", o.slug)
 		}
-		if err := seedProofingOrg(ctx, pool, org.ID, createdBy, o); err != nil {
+		if err := seedProofingOrg(ctx, pool, org.ID, o); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// seedProofingOrg gives orgID o's flows and customers, created by createdBy.
-func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID, createdBy uuid.UUID, o demoProofingOrg) error {
+// seedProofingOrg gives orgID o's flows, default flow and retention. An org
+// that has a default flow already keeps it.
+func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, o demoProofingOrg) error {
 	recorder := audit.NewDBRecorder()
 	flowIDs, err := ensureProofingFlows(ctx, pool, recorder, orgID, o.allFlows())
 	if err != nil {
 		return err
 	}
-	customers := proofing.NewCustomerStore(pool, recorder)
-	existing, err := customers.List(ctx, orgID)
+	selections := proofing.NewSettingsStore(pool, recorder)
+	sel, err := selections.FlowSelection(ctx, orgID)
 	if err != nil {
-		return fmt.Errorf("seed: list customers %s: %w", o.slug, err)
+		return fmt.Errorf("seed: flow selection %s: %w", o.slug, err)
 	}
-	for _, c := range o.customers {
-		if slices.ContainsFunc(existing, func(e proofing.Customer) bool { return e.Name == c.name }) {
-			continue
+	if sel.DefaultFlowID == "" {
+		sel.DefaultFlowID = flowIDs[o.defaultFlow]
+		if err := selections.SaveFlowSelection(ctx, orgID, sel); err != nil {
+			return fmt.Errorf("seed: default flow %s: %w", o.slug, err)
 		}
-		customer, err := customers.Create(ctx, orgID, createdBy, c.name)
-		if err != nil {
-			return fmt.Errorf("seed: customer %s: %w", c.name, err)
-		}
-		sel := proofing.FlowSelection{DefaultFlowID: flowIDs[c.flows[0]]}
-		for _, name := range c.flowNames() {
-			sel.FlowIDs = append(sel.FlowIDs, flowIDs[name])
-		}
-		if _, err := customers.SaveFlows(ctx, orgID, customer.ID, sel); err != nil {
-			return fmt.Errorf("seed: customer %s flows: %w", c.name, err)
-		}
-		settings := customer.Settings
-		settings.DataRetentionDays = c.retentionDays
-		if _, err := customers.SaveSettings(ctx, orgID, customer.ID, settings); err != nil {
-			return fmt.Errorf("seed: customer %s settings: %w", c.name, err)
-		}
+	}
+	settings := proofing.NewOrgSettingsStore(pool, recorder)
+	current, err := settings.Get(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("seed: proofing settings %s: %w", o.slug, err)
+	}
+	if !current.UpdatedAt.IsZero() {
+		return nil
+	}
+
+	session := current.Session
+	session.DataRetentionDays = o.retentionDays
+	if _, err := settings.SaveSession(ctx, orgID, session); err != nil {
+		return fmt.Errorf("seed: proofing settings %s: %w", o.slug, err)
 	}
 	return nil
 }
 
-// EnsureProofingDemo provisions the demo proofing orgs with their flows and
-// customers, and the Yivi team as their admins, so identity proofing can be
-// tried on staging. Idempotent; staging only (`seed --proofing-demo`).
+// EnsureProofingDemo provisions the demo proofing orgs with their flows, and
+// the Yivi team as their admins, so identity proofing can be tried on staging.
+// Idempotent; staging only (`seed --proofing-demo`).
 func EnsureProofingDemo(ctx context.Context, dsn, addressDomain string) error {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -262,24 +237,11 @@ func EnsureProofingDemo(ctx context.Context, dsn, addressDomain string) error {
 		orgsBySlug[o.slug] = org
 	}
 
-	creator, err := ensureUser(ctx, users, yiviTeam[0].email, yiviTeam[0].givenNames, yiviTeam[0].lastName, yiviTeam[0].preferredName)
-	if err != nil {
-		return err
-	}
-	if err := seedProofing(ctx, pool, orgsBySlug, creator.ID); err != nil {
+	if err := seedProofing(ctx, pool, orgsBySlug); err != nil {
 		return err
 	}
 	slog.Info("ensured identity proofing demo", slog.Int("orgs", len(orgsBySlug)))
 	return nil
-}
-
-// flowNames is every flow c is offered: its own and the data request flows.
-func (c demoProofingCustomer) flowNames() []string {
-	names := slices.Clone(c.flows)
-	for _, f := range dataRequestFlows {
-		names = append(names, f.def.Name)
-	}
-	return names
 }
 
 // ensureProofingFlows creates each of want that orgID lacks, with its kind and

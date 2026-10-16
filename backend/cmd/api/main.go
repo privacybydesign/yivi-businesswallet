@@ -854,7 +854,7 @@ func run() error {
 
 	// Identity proofing: the wallet's own engine runs every org's sessions, the
 	// org being its tenant. The deployment key seals the sessions' evidence and
-	// the customer secrets; without it nothing can be sent
+	// the webhook secrets; without it nothing can be sent
 	// (proofing.ErrNoEncryptionKey).
 	proofingCipher, err := crypto.NewCipher(cfg.IdentityProofingEncryptionKey)
 	if err != nil {
@@ -870,7 +870,7 @@ func run() error {
 	proofingService := proofing.NewService(proofing.Stores{
 		Settings:     proofing.NewSettingsStore(pool, recorder),
 		Requests:     proofingRequests,
-		Customers:    proofing.NewCustomerStore(pool, recorder),
+		OrgSettings:  proofing.NewOrgSettingsStore(pool, recorder),
 		APIKeys:      proofing.NewAPIKeyStore(pool, recorder),
 		Webhooks:     proofingWebhooks,
 		Events:       audit.NewReader(pool),
@@ -890,7 +890,7 @@ func run() error {
 		return fmt.Errorf("diploma validator ping: %w", err)
 	}
 	proofingService.SetDiplomaChecker(diplomaChecker)
-	// A customer's session keeps its personal data for its customer's data retention.
+	// An external person's session keeps its personal data for the org's data retention.
 	startPruner(ctx, "identity_proofing_purge", cfg.SessionPruneEvery, proofingService.PurgeDue)
 	// The engine tells the service about every session change; a session
 	// nobody finishes is reconciled at its cap. Neither polls.
@@ -907,9 +907,9 @@ func run() error {
 		startPruner(ctx, "identity_proofing_regula_sweep", cfg.SessionPruneEvery, proofingEngine.SweepRegula)
 	}
 	database.RunOnNotify(ctx, pool, proofing.SessionChannel, "identity_proofing_deadlines", proofingService.ReconcileDue)
-	// Customer webhooks go out as their change commits, retries at their due
-	// time: to the customer's endpoint (https, public addresses only), or to the
-	// wallet's own default endpoint.
+	// Webhooks go out as their change commits, retries at their due time: to
+	// the org's endpoint (https, public addresses only), or to the wallet's own
+	// default endpoint.
 	database.RunOnNotify(ctx, pool, proofing.WebhookChannel, "identity_proofing_webhooks",
 		proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).Run)
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)

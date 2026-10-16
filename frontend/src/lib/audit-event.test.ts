@@ -192,7 +192,7 @@ describe("auditSubject", () => {
 });
 
 describe("auditActorLabel", () => {
-  it("names a customer API key by its prefix", () => {
+  it("names an API key by its prefix", () => {
     expect(auditActorLabel("api_key:yp_live_ab12", t)).toBe(
       t("auditLog.apiKeyActor", { prefix: "yp_live_ab12" }),
     );

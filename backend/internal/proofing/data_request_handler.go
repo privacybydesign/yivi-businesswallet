@@ -39,7 +39,7 @@ func (h *Handler) saveFlowKind(w http.ResponseWriter, r *http.Request) error {
 }
 
 // dataMatchesResponse is what a data request's review shows next to the
-// person's identity: what they ask for, and the customer's sessions of them.
+// person's identity: what they ask for, and the org's sessions of them.
 type dataMatchesResponse struct {
 	FlowKind FlowKind            `json:"flowKind"`
 	Matches  []dataMatchResponse `json:"matches"`
@@ -101,7 +101,7 @@ type dataExportSessionResponse struct {
 	// own; PurgedAt when it did.
 	PurgeAt  *time.Time `json:"purgeAt,omitempty"`
 	PurgedAt *time.Time `json:"purgedAt,omitempty"`
-	// Contact is the name and address the customer gave for the person.
+	// Contact is the name and address the sender gave for the person.
 	Contact struct {
 		Name  string `json:"name,omitempty"`
 		Email string `json:"email,omitempty"`
@@ -191,7 +191,7 @@ func (h *Handler) apiDataExport(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	export, err := h.service.CustomerDataExport(r.Context(), caller.Scope(), id)
+	export, err := h.service.ExternalDataExport(r.Context(), caller.Org.ID, id)
 	return writeDataExport(w, r, export, err)
 }
 

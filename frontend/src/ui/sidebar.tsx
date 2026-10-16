@@ -17,7 +17,8 @@ type NavLabelKey =
   | "nav.members"
   | "nav.identityProofing"
   | "nav.identityProofingOverview"
-  | "nav.customers"
+  | "nav.flows"
+  | "nav.developers"
   | "nav.qerds"
   | "nav.attestations"
   | "nav.postguard"
@@ -54,17 +55,24 @@ function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
     { to: `/${slug}`, labelKey: "nav.dashboard", icon: "view", end: true },
     { to: `/${slug}/members`, labelKey: "nav.members", icon: "personal" },
   ];
-  // Identity proofing is the org's customers. A member is sent a proofing
-  // request from their detail page, not from here.
+  // Identity proofing is the org's flows. Defining them, and the API keys and
+  // webhook, is for an admin. A member is sent a proofing request from their
+  // detail page, not from here.
   const proofing = `/${slug}/identity-proofing`;
+  const proofingChildren: NavChild[] = [
+    { to: proofing, labelKey: "nav.identityProofingOverview", end: true },
+  ];
+  if (visible.admin) {
+    proofingChildren.push(
+      { to: `${proofing}/flows`, labelKey: "nav.flows" },
+      { to: `${proofing}/developers`, labelKey: "nav.developers" },
+    );
+  }
   items.push({
     to: proofing,
     labelKey: "nav.identityProofing",
     icon: "scan_qrcode",
-    children: [
-      { to: proofing, labelKey: "nav.identityProofingOverview", end: true },
-      { to: `${proofing}/customers`, labelKey: "nav.customers" },
-    ],
+    children: proofingChildren,
   });
   items.push(
     { to: `/${slug}/qerds`, labelKey: "nav.qerds", icon: "email" },

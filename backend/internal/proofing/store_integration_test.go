@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
@@ -100,6 +101,46 @@ func TestSettingsReplacesFlows(t *testing.T) {
 	}
 }
 
+// The org's default flow is independent of the flows members may use: it can be
+// one they may not send, it moves without touching them, and the org holds one.
+func TestDefaultNeedNotBeAllowed(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewSettingsStore(pool, audit.NewDBRecorder())
+	orgID := makeOrg(t, pool, "acme")
+	ctx := context.Background()
+	defaults := func() int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM identity_proofing_flow_settings
+			WHERE organization_id = $1 AND is_default`, orgID).Scan(&n); err != nil {
+			t.Fatalf("count defaults: %v", err)
+		}
+		return n
+	}
+
+	for _, sel := range []FlowSelection{
+		{FlowIDs: []string{"f1"}, DefaultFlowID: "f2"},
+		{FlowIDs: []string{}, DefaultFlowID: "f3"},
+		{FlowIDs: []string{"f3", "f4"}, DefaultFlowID: "f3"},
+		{FlowIDs: []string{"f4"}},
+	} {
+		if err := store.SaveFlowSelection(ctx, orgID, sel); err != nil {
+			t.Fatalf("SaveFlowSelection %+v: %v", sel, err)
+		}
+		got, err := store.FlowSelection(ctx, orgID)
+		if err != nil || !slices.Equal(got.FlowIDs, sel.FlowIDs) || got.DefaultFlowID != sel.DefaultFlowID {
+			t.Errorf("FlowSelection = %+v, %v; want %+v", got, err, sel)
+		}
+		wantDefaults := 0
+		if sel.DefaultFlowID != "" {
+			wantDefaults = 1
+		}
+		if n := defaults(); n != wantDefaults {
+			t.Errorf("default flows after %+v = %d, want %d", sel, n, wantDefaults)
+		}
+	}
+}
+
 func makeMember(t *testing.T, pool *pgxpool.Pool, orgID, userID uuid.UUID, role string) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
@@ -109,7 +150,12 @@ func makeMember(t *testing.T, pool *pgxpool.Pool, orgID, userID uuid.UUID, role 
 }
 
 func memberSubject(m Member) Subject {
-	return Subject{UserID: &m.UserID, Name: m.Name, Email: m.Email}
+	return Subject{Kind: SubjectMember, UserID: &m.UserID, Name: m.Name, Email: m.Email}
+}
+
+// externalSubject is an external person known by e-mail address only.
+func externalSubject(email string) Subject {
+	return Subject{Kind: SubjectExternal, Email: email}
 }
 
 func newStoredRequest(orgID, requestedBy uuid.UUID, subject Subject) NewStoredRequest {
@@ -331,54 +377,283 @@ func TestStoreSessionDeadlines(t *testing.T) {
 	}
 }
 
-func TestCustomerStoreLifecycle(t *testing.T) {
+// settingsAudit is one identity_proofing.settings_updated event: the fields it
+// held before and after.
+type settingsAudit struct{ Before, After map[string]any }
+
+func settingsAudits(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID) []settingsAudit {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `SELECT metadata->'before', metadata->'after' FROM audit_events
+		WHERE action = $1 AND organization_id = $2 ORDER BY occurred_at, id`, audit.IdentityProofingSettingsUpdated, orgID)
+	if err != nil {
+		t.Fatalf("read settings audits: %v", err)
+	}
+	audits, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (settingsAudit, error) {
+		var a settingsAudit
+		err := row.Scan(&a.Before, &a.After)
+		return a, err
+	})
+	if err != nil {
+		t.Fatalf("read settings audits: %v", err)
+	}
+	return audits
+}
+
+// An org that saved nothing reads as the defaults, without a row being made
+// for it; one that does not exist is not found.
+func TestOrgSettingsDefaults(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := NewCustomerStore(pool, audit.NewDBRecorder())
+	store := NewOrgSettingsStore(pool, audit.NewDBRecorder())
 	orgID := makeOrg(t, pool, "acme")
-	otherOrg := makeOrg(t, pool, "globex")
-	admin := makeUser(t, pool, "admin@example.org")
 	ctx := context.Background()
 
-	c, err := store.Create(ctx, orgID, admin, "Initech")
-	if err != nil || c.Name != "Initech" || len(c.Flows.FlowIDs) != 0 {
-		t.Fatalf("Create = %+v, %v", c, err)
+	got, err := store.Get(ctx, orgID)
+	if err != nil || got.OrganizationID != orgID || got.OrgName != "acme" || got.Session.SessionTTL != SessionTTL ||
+		got.Session.DataRetention() != proofedNameRetention || got.Branding != (Branding{}) ||
+		len(got.RedirectOrigins) != 0 || !got.UpdatedAt.IsZero() || got.SignedAs() != "acme" {
+		t.Errorf("Get = %+v, %v; want the defaults, signed with the org's name", got, err)
 	}
-	if _, err := store.Create(ctx, orgID, admin, "INITECH"); !errors.Is(err, ErrCustomerExists) {
-		t.Errorf("duplicate name err = %v, want ErrCustomerExists", err)
+	var rows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM identity_proofing_settings`).Scan(&rows); err != nil || rows != 0 {
+		t.Errorf("settings rows after a read = %d, %v; want none", rows, err)
 	}
-	if _, err := store.Create(ctx, otherOrg, admin, "Initech"); err != nil {
-		t.Errorf("another org's customer of the same name: %v", err)
-	}
-	if _, err := store.Get(ctx, otherOrg, c.ID); !errors.Is(err, ErrCustomerNotFound) {
-		t.Errorf("Get from another org = %v, want ErrCustomerNotFound", err)
-	}
-
-	if c, err = store.Rename(ctx, orgID, c.ID, "Initech BV"); err != nil || c.Name != "Initech BV" {
-		t.Fatalf("Rename = %+v, %v", c, err)
-	}
-	sel := FlowSelection{FlowIDs: []string{"f1", "f2"}, DefaultFlowID: "f2"}
-	if c, err = store.SaveFlows(ctx, orgID, c.ID, sel); err != nil {
-		t.Fatalf("SaveFlows: %v", err)
-	}
-	if !slices.Equal(c.Flows.FlowIDs, sel.FlowIDs) || c.Flows.DefaultFlowID != "f2" {
-		t.Errorf("flows = %+v, want %+v", c.Flows, sel)
-	}
-	if c, err = store.SaveFlows(ctx, orgID, c.ID, FlowSelection{FlowIDs: []string{}}); err != nil || len(c.Flows.FlowIDs) != 0 {
-		t.Errorf("clearing flows = %+v, %v", c.Flows, err)
+	if _, err := store.Logo(ctx, orgID); !errors.Is(err, ErrNoLogo) {
+		t.Errorf("Logo of an org without settings = %v, want ErrNoLogo", err)
 	}
 
-	list, err := store.List(ctx, orgID)
-	if err != nil || len(list) != 1 || list[0].ID != c.ID {
-		t.Errorf("List = %+v, %v; want only this org's customer", list, err)
+	unknown := uuid.New()
+	if _, err := store.Get(ctx, unknown); !errors.Is(err, ErrOrgNotFound) {
+		t.Errorf("Get unknown org = %v, want ErrOrgNotFound", err)
 	}
-	for action, want := range map[string]int{
-		audit.IdentityProofingCustomerCreated:         2,
-		audit.IdentityProofingCustomerUpdated:         1,
-		audit.IdentityProofingCustomerFlowsConfigured: 2,
-	} {
-		if n := auditCount(t, pool, action); n != want {
-			t.Errorf("%s audits = %d, want %d", action, n, want)
+	if _, err := store.SaveSession(ctx, unknown, SessionSettings{SessionTTL: SessionTTL, DataRetentionDays: 7}); !errors.Is(err, ErrOrgNotFound) {
+		t.Errorf("SaveSession unknown org = %v, want ErrOrgNotFound", err)
+	}
+	if _, err := store.SaveBranding(ctx, unknown, Branding{DisplayName: "Acme"}, LogoChange{}); !errors.Is(err, ErrOrgNotFound) {
+		t.Errorf("SaveBranding unknown org = %v, want ErrOrgNotFound", err)
+	}
+	if _, err := store.SaveRedirectOrigins(ctx, unknown, []string{"https://portal.example"}); !errors.Is(err, ErrOrgNotFound) {
+		t.Errorf("SaveRedirectOrigins unknown org = %v, want ErrOrgNotFound", err)
+	}
+	if n := auditCount(t, pool, audit.IdentityProofingSettingsUpdated); n != 0 {
+		t.Errorf("settings_updated audits after the refused saves = %d, want 0", n)
+	}
+}
+
+// Session settings round trip per org, are audited with before and after, and
+// saving what the org already has changes and audits nothing.
+func TestOrgSettingsSession(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewOrgSettingsStore(pool, audit.NewDBRecorder())
+	orgID := makeOrg(t, pool, "acme")
+	otherOrg := makeOrg(t, pool, "globex")
+	ctx := context.Background()
+	week := SessionSettings{SessionTTL: 5 * time.Minute, DataRetentionDays: 7}
+	year := SessionSettings{SessionTTL: SessionTTL, DataRetentionDays: 365}
+
+	if saved, err := store.SaveSession(ctx, orgID, year); err != nil || saved.Session != year {
+		t.Fatalf("SaveSession(a year) = %+v, %v; the database must allow up to 365 days", saved.Session, err)
+	}
+	saved, err := store.SaveSession(ctx, orgID, week)
+	if err != nil || saved.Session != week || saved.UpdatedAt.IsZero() {
+		t.Fatalf("SaveSession = %+v, %v", saved, err)
+	}
+	for range 2 {
+		again, err := store.SaveSession(ctx, orgID, week)
+		if err != nil || again.Session != week || !again.UpdatedAt.Equal(saved.UpdatedAt) {
+			t.Errorf("saving the same settings = %+v, %v; want them and their update time kept", again, err)
 		}
+	}
+
+	audits := settingsAudits(t, pool, orgID)
+	if len(audits) != 2 {
+		t.Fatalf("settings_updated audits = %d, want 2 (a repeat changes nothing)", len(audits))
+	}
+	if last := audits[1]; last.Before["dataRetentionDays"] != float64(365) || last.After["dataRetentionDays"] != float64(7) ||
+		last.Before["sessionTtlSeconds"] != float64(600) || last.After["sessionTtlSeconds"] != float64(300) {
+		t.Errorf("last audit = %+v; want the year before and the week after", last)
+	}
+	if first := audits[0]; first.Before["dataRetentionDays"] != float64(defaultDataRetentionDays) {
+		t.Errorf("first audit before = %+v; want the defaults", first.Before)
+	}
+
+	other, err := store.Get(ctx, otherOrg)
+	if err != nil || other.Session.SessionTTL != SessionTTL || other.Session.DataRetention() != proofedNameRetention {
+		t.Errorf("another org = %+v, %v; want its own defaults", other.Session, err)
+	}
+	if n := len(settingsAudits(t, pool, otherOrg)); n != 0 {
+		t.Errorf("settings_updated audits of another org = %d, want 0", n)
+	}
+}
+
+// The redirect origins round trip, are audited, and are cleared by an empty
+// list.
+func TestSettingsRedirectOrigins(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewOrgSettingsStore(pool, audit.NewDBRecorder())
+	orgID := makeOrg(t, pool, "acme")
+	ctx := context.Background()
+	origins := []string{"https://portal.initech.example", "http://localhost:3000"}
+
+	// Nothing to save for an org that has none: no row, no audit.
+	if saved, err := store.SaveRedirectOrigins(ctx, orgID, nil); err != nil || len(saved.RedirectOrigins) != 0 {
+		t.Fatalf("SaveRedirectOrigins(none) = %v, %v", saved.RedirectOrigins, err)
+	}
+	if n := len(settingsAudits(t, pool, orgID)); n != 0 {
+		t.Fatalf("settings_updated audits after saving no origins = %d, want 0", n)
+	}
+
+	saved, err := store.SaveRedirectOrigins(ctx, orgID, origins)
+	if err != nil || !slices.Equal(saved.RedirectOrigins, origins) {
+		t.Fatalf("SaveRedirectOrigins = %v, %v; want %v", saved.RedirectOrigins, err, origins)
+	}
+	// The row the save made holds the defaults for the rest.
+	if saved.Session.SessionTTL != SessionTTL || saved.Session.DataRetention() != proofedNameRetention || saved.Branding != (Branding{}) {
+		t.Errorf("settings after saving origins = %+v; want the defaults for the rest", saved)
+	}
+	again, err := store.SaveRedirectOrigins(ctx, orgID, origins)
+	if err != nil || !slices.Equal(again.RedirectOrigins, origins) || !again.UpdatedAt.Equal(saved.UpdatedAt) {
+		t.Errorf("saving the same origins = %+v, %v; want them and their update time kept", again, err)
+	}
+	if n := len(settingsAudits(t, pool, orgID)); n != 1 {
+		t.Errorf("settings_updated audits = %d, want 1 (a repeat changes nothing)", n)
+	}
+
+	cleared, err := store.SaveRedirectOrigins(ctx, orgID, []string{})
+	if err != nil || len(cleared.RedirectOrigins) != 0 {
+		t.Fatalf("clearing the origins = %v, %v", cleared.RedirectOrigins, err)
+	}
+	audits := settingsAudits(t, pool, orgID)
+	if len(audits) != 2 || len(audits[1].Before["allowedRedirectOrigins"].([]any)) != 2 ||
+		len(audits[1].After["allowedRedirectOrigins"].([]any)) != 0 {
+		t.Errorf("settings_updated audits = %+v; want the clearing audited with both origins before", audits)
+	}
+}
+
+// The branding round trips with its logo, which a save keeps, replaces or
+// removes as asked; each change is audited once, without the logo's bytes, and
+// the other settings stay as they were.
+func TestOrgSettingsBranding(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewOrgSettingsStore(pool, audit.NewDBRecorder())
+	orgID := makeOrg(t, pool, "acme")
+	ctx := context.Background()
+	logoA := Logo{Bytes: []byte("\x89PNG logo a"), ContentType: "image/png"}
+	logoB := Logo{Bytes: []byte("\xff\xd8\xff logo b"), ContentType: "image/jpeg"}
+	branding := Branding{
+		DisplayName: "Acme Verify", PrimaryColor: "#0a5cff", SupportContact: "help@acme.example",
+		PrivacyURL: "https://acme.example/privacy", HidePoweredBy: true,
+	}
+	expectLogo := func(step string, want Logo) {
+		t.Helper()
+		got, err := store.Logo(ctx, orgID)
+		if err != nil || !bytes.Equal(got.Bytes, want.Bytes) || got.ContentType != want.ContentType {
+			t.Errorf("%s: Logo = %q %q, %v; want %q %q", step, got.Bytes, got.ContentType, err, want.Bytes, want.ContentType)
+		}
+	}
+
+	week := SessionSettings{SessionTTL: 5 * time.Minute, DataRetentionDays: 7}
+	if _, err := store.SaveSession(ctx, orgID, week); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	saved, err := store.SaveBranding(ctx, orgID, branding, LogoChange{Replace: true, Logo: logoA})
+	wantBranding := branding
+	wantBranding.HasLogo = true
+	if err != nil || saved.Branding != wantBranding || saved.SignedAs() != "Acme Verify" || saved.Session != week {
+		t.Fatalf("SaveBranding = %+v, %v; want %+v beside the session settings", saved, err, wantBranding)
+	}
+	expectLogo("added", logoA)
+
+	// The same values, the logo kept: nothing changes.
+	again, err := store.SaveBranding(ctx, orgID, branding, LogoChange{})
+	if err != nil || again.Branding != wantBranding || !again.UpdatedAt.Equal(saved.UpdatedAt) {
+		t.Errorf("saving the same branding = %+v, %v; want it and its update time kept", again.Branding, err)
+	}
+	if n := len(settingsAudits(t, pool, orgID)); n != 2 {
+		t.Errorf("settings_updated audits = %d, want 2 (the session settings, then the branding)", n)
+	}
+
+	// A change that keeps the logo leaves it as it is.
+	renamed := branding
+	renamed.DisplayName = "Acme"
+	if got, err := store.SaveBranding(ctx, orgID, renamed, LogoChange{}); err != nil || got.Branding.DisplayName != "Acme" || !got.Branding.HasLogo {
+		t.Fatalf("rename with the logo kept = %+v, %v", got.Branding, err)
+	}
+	expectLogo("kept", logoA)
+
+	// A change that replaces the logo.
+	recoloured := renamed
+	recoloured.PrimaryColor = "#112233"
+	if got, err := store.SaveBranding(ctx, orgID, recoloured, LogoChange{Replace: true, Logo: logoB}); err != nil || got.Branding.PrimaryColor != "#112233" || !got.Branding.HasLogo {
+		t.Fatalf("recolour with another logo = %+v, %v", got.Branding, err)
+	}
+	expectLogo("replaced", logoB)
+
+	// Replacing with nothing removes the logo, and nothing else.
+	removed, err := store.SaveBranding(ctx, orgID, recoloured, LogoChange{Replace: true})
+	if err != nil || removed.Branding.HasLogo || removed.Branding.PrimaryColor != "#112233" {
+		t.Fatalf("remove the logo = %+v, %v", removed.Branding, err)
+	}
+	if _, err := store.Logo(ctx, orgID); !errors.Is(err, ErrNoLogo) {
+		t.Errorf("Logo after removing = %v, want ErrNoLogo", err)
+	}
+
+	// Session settings saved on top leave the branding alone.
+	if _, err := store.SaveBranding(ctx, orgID, recoloured, LogoChange{Replace: true, Logo: logoA}); err != nil {
+		t.Fatalf("add a logo again: %v", err)
+	}
+	year := SessionSettings{SessionTTL: SessionTTL, DataRetentionDays: 365}
+	if got, err := store.SaveSession(ctx, orgID, year); err != nil || got.Session != year ||
+		got.Branding.DisplayName != "Acme" || got.Branding.PrimaryColor != "#112233" || !got.Branding.HasLogo {
+		t.Errorf("SaveSession over the branding = %+v, %v; want the branding kept", got, err)
+	}
+	expectLogo("after the session settings", logoA)
+
+	// Emptied, the branding reads as the org's own again.
+	cleared, err := store.SaveBranding(ctx, orgID, Branding{}, LogoChange{Replace: true})
+	if err != nil || cleared.Branding != (Branding{}) || cleared.SignedAs() != "acme" {
+		t.Errorf("cleared branding = %+v, %v; want none, signed with the org's name", cleared.Branding, err)
+	}
+
+	// The audit holds whether a logo is set, never its bytes.
+	audits := settingsAudits(t, pool, orgID)
+	if len(audits) != 8 {
+		t.Fatalf("settings_updated audits = %d, want 8", len(audits))
+	}
+	if a := audits[1]; a.Before["displayName"] != "" || a.After["displayName"] != "Acme Verify" ||
+		a.Before["hasLogo"] != false || a.After["hasLogo"] != true {
+		t.Errorf("branding added audit = %+v", a)
+	}
+	var leaks int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE metadata::text LIKE '%logo a%' OR metadata::text LIKE '%logo b%'`).
+		Scan(&leaks); err != nil || leaks != 0 {
+		t.Errorf("audit events holding a logo's bytes = %d, %v; want none", leaks, err)
+	}
+}
+
+// A new logo is saved when nothing else in the branding changes: the branding
+// only says whether a logo is set, so the bytes have to be compared apart.
+func TestBrandingSavesLogoAlone(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewOrgSettingsStore(pool, audit.NewDBRecorder())
+	orgID := makeOrg(t, pool, "acme")
+	ctx := context.Background()
+	logoA := Logo{Bytes: []byte("\x89PNG logo a"), ContentType: "image/png"}
+	logoB := Logo{Bytes: []byte("\xff\xd8\xff logo b"), ContentType: "image/jpeg"}
+	branding := Branding{DisplayName: "Acme Verify"}
+
+	if _, err := store.SaveBranding(ctx, orgID, branding, LogoChange{Replace: true, Logo: logoA}); err != nil {
+		t.Fatalf("add a logo: %v", err)
+	}
+	if _, err := store.SaveBranding(ctx, orgID, branding, LogoChange{Replace: true, Logo: logoB}); err != nil {
+		t.Fatalf("replace the logo: %v", err)
+	}
+	got, err := store.Logo(ctx, orgID)
+	if err != nil || !bytes.Equal(got.Bytes, logoB.Bytes) || got.ContentType != logoB.ContentType {
+		t.Errorf("Logo = %q %q, %v; want the replacement %q %q", got.Bytes, got.ContentType, err, logoB.Bytes, logoB.ContentType)
+	}
+	if n := len(settingsAudits(t, pool, orgID)); n != 2 {
+		t.Errorf("settings_updated audits = %d, want 2 (the logo added, then replaced)", n)
 	}
 }
 
@@ -391,7 +666,7 @@ func TestStoreRejectionAuditsReason(t *testing.T) {
 	requester := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
 	req := createStarted(t, store, newStoredRequest(orgID, requester,
-		Subject{Name: "Anna Jansen", Email: "anna@example.org"}), "s1")
+		Subject{Kind: SubjectExternal, Name: "Anna Jansen", Email: "anna@example.org"}), "s1")
 
 	const code = "DOCUMENT_TYPE_NOT_ACCEPTED"
 	res := proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: code}
@@ -417,24 +692,19 @@ func TestStoreRejectionAuditsReason(t *testing.T) {
 	}
 }
 
-// A customer's subject is stored without a member; the proofed name is sealed,
-// shown until its retention passes, and then purged with the subject.
-func TestStoreCustomerProofedName(t *testing.T) {
+// An external person's subject is stored without a member; the proofed name is
+// sealed, shown until its retention passes, and then purged with the subject.
+func TestStoreExternalProofedName(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	orgID := makeOrg(t, pool, "acme")
+	otherOrg := makeOrg(t, pool, "globex")
 	requester := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, requester, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
 
-	req := createStarted(t, store, newStoredRequest(orgID, requester,
-		Subject{CustomerID: &customer.ID, Email: "anna@example.org"}), "s1")
-	if req.SubjectUserID != nil || req.CustomerID == nil || *req.CustomerID != customer.ID || req.CustomerName != "Initech" {
-		t.Errorf("created = %+v", req)
+	req := createStarted(t, store, newStoredRequest(orgID, requester, externalSubject("anna@example.org")), "s1")
+	if req.SubjectUserID != nil || req.SubjectKind != SubjectExternal || !req.External() {
+		t.Errorf("created = %+v; want an external request without a member", req)
 	}
 
 	const name = "Anna Jansen"
@@ -459,13 +729,12 @@ func TestStoreCustomerProofedName(t *testing.T) {
 		t.Error("the proofed name was audited")
 	}
 
-	theirs, err := store.List(ctx, orgID, RequestFilter{CustomerID: &customer.ID})
+	theirs, err := store.List(ctx, orgID, RequestFilter{})
 	if err != nil || len(theirs) != 1 || theirs[0].ProofedName != name {
-		t.Fatalf("List for customer = %+v, %v", theirs, err)
+		t.Fatalf("List = %+v, %v", theirs, err)
 	}
-	other := uuid.New()
-	if none, err := store.List(ctx, orgID, RequestFilter{CustomerID: &other}); err != nil || len(none) != 0 {
-		t.Errorf("List for another customer = %+v, %v; want none", none, err)
+	if none, err := store.List(ctx, otherOrg, RequestFilter{}); err != nil || len(none) != 0 {
+		t.Errorf("List for another org = %+v, %v; want none", none, err)
 	}
 
 	if due, err := store.ListPurgeDue(ctx, 10); err != nil || len(due) != 0 {
@@ -485,7 +754,7 @@ func TestStoreCustomerProofedName(t *testing.T) {
 	if err := store.Purge(ctx, due[0]); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
-	after, err := store.List(ctx, orgID, RequestFilter{CustomerID: &customer.ID})
+	after, err := store.List(ctx, orgID, RequestFilter{})
 	if err != nil || len(after) != 1 || after[0].ProofedName != "" || after[0].SubjectEmail != "" ||
 		after[0].Status != StatusApproved || after[0].PurgedAt == nil {
 		t.Errorf("after purge = %+v, %v; want the outcome without the subject", after, err)
@@ -500,8 +769,7 @@ func TestStoreCustomerProofedName(t *testing.T) {
 
 	// A request whose session never got attached settles when its link
 	// lapses, and is purged its retention after that.
-	orphan, err := store.Create(ctx, newStoredRequest(orgID, requester,
-		Subject{CustomerID: &customer.ID, Email: "bram@example.org"}))
+	orphan, err := store.Create(ctx, newStoredRequest(orgID, requester, externalSubject("bram@example.org")))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -518,23 +786,71 @@ func TestStoreCustomerProofedName(t *testing.T) {
 	}
 }
 
+// The API reads only the org's external requests: a member's request is neither
+// listed nor found, and another org's is not either.
+func TestExternalReadsSkipMembers(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	otherOrg := makeOrg(t, pool, "globex")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+
+	member, err := store.Create(ctx, newStoredRequest(orgID, sam, memberSubject(Member{UserID: sam, Name: "Sam", Email: "sam@example.org"})))
+	if err != nil {
+		t.Fatalf("Create member request: %v", err)
+	}
+	if member.External() || member.SubjectKind != SubjectMember {
+		t.Errorf("member request = kind %q; want a member's", member.SubjectKind)
+	}
+	var sent []Request
+	for _, email := range []string{"anna@example.org", "bram@example.org", "carla@example.org"} {
+		req, err := store.Create(ctx, newStoredRequest(orgID, sam, externalSubject(email)))
+		if err != nil {
+			t.Fatalf("Create external request: %v", err)
+		}
+		sent = append(sent, req)
+	}
+	foreign, err := store.Create(ctx, newStoredRequest(otherOrg, sam, externalSubject("dora@example.org")))
+	if err != nil {
+		t.Fatalf("Create other org's request: %v", err)
+	}
+
+	if got, err := store.GetExternal(ctx, orgID, sent[0].ID); err != nil || got.ID != sent[0].ID {
+		t.Errorf("GetExternal = %+v, %v; want the external request", got, err)
+	}
+	for name, id := range map[string]uuid.UUID{"a member's": member.ID, "another org's": foreign.ID} {
+		if _, err := store.GetExternal(ctx, orgID, id); !errors.Is(err, ErrRequestNotFound) {
+			t.Errorf("GetExternal of %s request = %v, want ErrRequestNotFound", name, err)
+		}
+	}
+	if got, err := store.Get(ctx, orgID, member.ID); err != nil || got.ID != member.ID {
+		t.Errorf("Get of the member's request = %+v, %v; want it, which the wallet's own reads may", got, err)
+	}
+
+	// Newest first, in pages: the cursor continues after the last one read.
+	page, err := store.ListExternalPage(ctx, orgID, nil, 2)
+	if err != nil || len(page) != 2 || page[0].ID != sent[2].ID || page[1].ID != sent[1].ID {
+		t.Fatalf("first page = %+v, %v; want the two newest external requests", page, err)
+	}
+	rest, err := store.ListExternalPage(ctx, orgID, &RequestCursor{CreatedAt: page[1].CreatedAt, ID: page[1].ID}, 2)
+	if err != nil || len(rest) != 1 || rest[0].ID != sent[0].ID {
+		t.Errorf("second page = %+v, %v; want the oldest external request only", rest, err)
+	}
+}
+
 // A request for one known person seals the expected birth date, audits only
 // that a person is expected, and drops the date once decided.
 func TestStoreExpectedSubject(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	orgID := makeOrg(t, pool, "acme")
 	requester := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, requester, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
 
 	const birthDate = "1984-07-21"
 	req := createStarted(t, store, newStoredRequest(orgID, requester,
-		Subject{CustomerID: &customer.ID, Name: "Dibran Mulder", Email: "dibran@example.org", BirthDate: birthDate}), "s1")
+		Subject{Kind: SubjectExternal, Name: "Dibran Mulder", Email: "dibran@example.org", BirthDate: birthDate}), "s1")
 	if !req.ExpectsSubject || req.expectedBirthDate != birthDate {
 		t.Fatalf("created expects subject = %v, birth date = %q", req.ExpectsSubject, req.expectedBirthDate)
 	}
@@ -579,16 +895,11 @@ func TestStoreExpectedSubject(t *testing.T) {
 func TestStoreHoldsPhotoUntilStart(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	orgID := makeOrg(t, pool, "acme")
 	requester := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, requester, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
 	photo := &proofingprovider.Image{MimeType: "image/jpeg", Base64: "/9j/4AAQ"}
-	in := newStoredRequest(orgID, requester, Subject{CustomerID: &customer.ID, Email: "dibran@example.org"})
+	in := newStoredRequest(orgID, requester, externalSubject("dibran@example.org"))
 	in.LinkTokenHash, in.ReferencePhoto = []byte("hash"), photo
 	req, err := store.Create(ctx, in)
 	if err != nil {
@@ -613,48 +924,14 @@ func TestStoreHoldsPhotoUntilStart(t *testing.T) {
 	}
 }
 
-func TestCustomerPauseAndResume(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	store := NewCustomerStore(pool, audit.NewDBRecorder())
-	orgID := makeOrg(t, pool, "acme")
-	admin := makeUser(t, pool, "admin@example.org")
-	ctx := context.Background()
-	c, err := store.Create(ctx, orgID, admin, "Initech")
-	if err != nil || c.Status() != CustomerActive {
-		t.Fatalf("Create = %+v, %v; want an active customer", c, err)
-	}
-
-	if c, err = store.SetStatus(ctx, orgID, c.ID, CustomerPaused); err != nil || c.Status() != CustomerPaused {
-		t.Fatalf("pause = %+v, %v", c, err)
-	}
-	// Pausing a paused customer changes and audits nothing.
-	if c, err = store.SetStatus(ctx, orgID, c.ID, CustomerPaused); err != nil || !c.Paused() {
-		t.Fatalf("pause again = %+v, %v", c, err)
-	}
-	if c, err = store.SetStatus(ctx, orgID, c.ID, CustomerActive); err != nil || c.Status() != CustomerActive {
-		t.Fatalf("resume = %+v, %v", c, err)
-	}
-	if _, err := store.SetStatus(ctx, orgID, uuid.New(), CustomerPaused); !errors.Is(err, ErrCustomerNotFound) {
-		t.Errorf("pause unknown = %v, want ErrCustomerNotFound", err)
-	}
-	if n := auditCount(t, pool, audit.IdentityProofingCustomerUpdated); n != 2 {
-		t.Errorf("customer_updated audited %d times, want 2", n)
-	}
-}
-
 func TestStoreStatsByOutcome(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	kim := makeUser(t, pool, "kim@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	subject := Subject{CustomerID: &customer.ID, Email: "anna@example.org"}
+	subject := externalSubject("anna@example.org")
 
 	// Sam: one approved, one still running. Kim: one never attached (expired).
 	approved, err := store.Create(ctx, newStoredRequest(orgID, sam, subject))
@@ -697,7 +974,7 @@ func TestStoreStatsByOutcome(t *testing.T) {
 	}
 
 	// A cancelled one counts apart from the expired ones.
-	cancelled, err := store.Create(ctx, newStoredRequest(orgID, kim, Subject{CustomerID: &customer.ID, Email: "c@example.org"}))
+	cancelled, err := store.Create(ctx, newStoredRequest(orgID, kim, externalSubject("c@example.org")))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -705,14 +982,19 @@ func TestStoreStatsByOutcome(t *testing.T) {
 		t.Fatalf("Cancel = %v, %v", ok, err)
 	}
 
+	// A request to a member is not counted: the overview is of external people.
+	if _, err := store.Create(ctx, newStoredRequest(orgID, sam, memberSubject(Member{UserID: kim, Name: "Kim", Email: "kim@example.org"}))); err != nil {
+		t.Fatalf("Create member request: %v", err)
+	}
+
 	since := time.Now().Add(-statsWindow)
 	rows, err := store.Stats(ctx, orgID, nil, since)
-	want := StatsRow{CustomerID: customer.ID, FlowID: "f1", Sessions: 6, Approved: 1, NeedsReview: 1, Expired: 2, Cancelled: 1}
+	want := StatsRow{FlowID: "f1", Sessions: 6, Approved: 1, NeedsReview: 1, Expired: 2, Cancelled: 1}
 	if err != nil || len(rows) != 1 || rows[0] != want {
 		t.Errorf("Stats = %+v, %v; want [%+v]", rows, err, want)
 	}
 	rows, err = store.Stats(ctx, orgID, &sam, since)
-	want = StatsRow{CustomerID: customer.ID, FlowID: "f1", Sessions: 2, Approved: 1}
+	want = StatsRow{FlowID: "f1", Sessions: 2, Approved: 1}
 	if err != nil || len(rows) != 1 || rows[0] != want {
 		t.Errorf("Stats for sam = %+v, %v; want [%+v]", rows, err, want)
 	}
@@ -721,73 +1003,22 @@ func TestStoreStatsByOutcome(t *testing.T) {
 	}
 }
 
-func TestCustomerStoreRemovePurges(t *testing.T) {
+// An external request's proofed name is kept as long as the org's retention,
+// counted from its outcome; a member's request keeps it for the fixed period,
+// whatever the org set.
+func TestOrgSettingsNameRetention(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	customers := NewCustomerStore(pool, audit.NewDBRecorder())
+	settings := NewOrgSettingsStore(pool, audit.NopRecorder{})
 	requests := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	gone, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	kept, err := customers.Create(ctx, orgID, sam, "Globex")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	for _, c := range []Customer{gone, kept} {
-		req, err := requests.Create(ctx, newStoredRequest(orgID, sam, Subject{CustomerID: &c.ID, Email: "a@example.org"}))
-		if err != nil {
-			t.Fatalf("create request: %v", err)
-		}
-		// Removal takes only purged requests (Service.RemoveCustomer purges first).
-		if c.ID == gone.ID {
-			if err := requests.Purge(ctx, req); err != nil {
-				t.Fatalf("purge request: %v", err)
-			}
-		}
+	week := SessionSettings{SessionTTL: 5 * time.Minute, DataRetentionDays: 7}
+	if _, err := settings.SaveSession(ctx, orgID, week); err != nil {
+		t.Fatalf("SaveSession: %v", err)
 	}
 
-	if err := customers.Remove(ctx, orgID, gone.ID); err != nil {
-		t.Fatalf("Remove: %v", err)
-	}
-	if _, err := customers.Get(ctx, orgID, gone.ID); !errors.Is(err, ErrCustomerNotFound) {
-		t.Errorf("Get removed = %v, want ErrCustomerNotFound", err)
-	}
-	left := onlyRequest(t, requests, orgID)
-	if left.CustomerID == nil || *left.CustomerID != kept.ID {
-		t.Errorf("left request = %+v, want only the kept customer's", left)
-	}
-	if err := customers.Remove(ctx, orgID, gone.ID); !errors.Is(err, ErrCustomerNotFound) {
-		t.Errorf("Remove again = %v, want ErrCustomerNotFound", err)
-	}
-	if n := auditCount(t, pool, audit.IdentityProofingCustomerRemoved); n != 1 {
-		t.Errorf("customer_removed audited %d times, want 1", n)
-	}
-}
-
-func TestCustomerStoreSettings(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	customers := NewCustomerStore(pool, audit.NewDBRecorder())
-	requests := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
-	orgID := makeOrg(t, pool, "acme")
-	sam := makeUser(t, pool, "sam@example.org")
-	ctx := context.Background()
-	c, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil || c.Settings.SessionTTL != SessionTTL || c.Settings.DataRetention() != proofedNameRetention {
-		t.Fatalf("Create = %+v, %v; want the default settings", c, err)
-	}
-	week := CustomerSettings{SessionTTL: 5 * time.Minute, DataRetentionDays: 7}
-	year := CustomerSettings{SessionTTL: SessionTTL, DataRetentionDays: 365}
-	if saved, err := customers.SaveSettings(ctx, orgID, c.ID, year); err != nil || saved.Settings != year {
-		t.Fatalf("SaveSettings(a year) = %+v, %v; the database must allow up to 365 days", saved.Settings, err)
-	}
-	if c, err = customers.SaveSettings(ctx, orgID, c.ID, week); err != nil || c.Settings != week {
-		t.Fatalf("SaveSettings = %+v, %v", c.Settings, err)
-	}
-
-	req := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &c.ID, Email: "a@example.org"}), "s1")
+	req := createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
 	if req.NameRetention != week.DataRetention() {
 		t.Errorf("NameRetention = %v, want %v", req.NameRetention, week.DataRetention())
 	}
@@ -803,21 +1034,24 @@ func TestCustomerStoreSettings(t *testing.T) {
 	if want := time.Now().Add(week.DataRetention()); purgeAfter.Sub(want).Abs() > time.Minute {
 		t.Errorf("purge after = %v, want about %v", purgeAfter, want)
 	}
+
+	member, err := requests.Create(ctx, newStoredRequest(orgID, sam, memberSubject(Member{UserID: sam, Name: "Sam", Email: "sam@example.org"})))
+	if err != nil {
+		t.Fatalf("Create member request: %v", err)
+	}
+	if member.NameRetention != proofedNameRetention {
+		t.Errorf("a member's NameRetention = %v, want %v", member.NameRetention, proofedNameRetention)
+	}
 }
 
 func TestWebhookOutboxBackOff(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
 	webhooks := NewWebhookStore(pool, audit.NewDBRecorder(), cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
 
 	var failing atomic.Bool
 	type received struct {
@@ -835,18 +1069,18 @@ func TestWebhookOutboxBackOff(t *testing.T) {
 	t.Cleanup(receiver.Close)
 
 	// Only session.verified is subscribed to.
-	hook, secret, err := webhooks.Save(ctx, orgID, customer.ID, receiver.URL, []string{EventSessionVerified})
+	hook, secret, err := webhooks.Save(ctx, orgID, receiver.URL, []string{EventSessionVerified})
 	if err != nil || !strings.HasPrefix(secret, webhookSecretPrefix) || hook.SecretLast4 != secretLast4(secret) {
 		t.Fatalf("Save = %+v, %q, %v", hook, secret, err)
 	}
-	if _, again, err := webhooks.Save(ctx, orgID, customer.ID, receiver.URL, WebhookEvents); err != nil || again != "" {
+	if _, again, err := webhooks.Save(ctx, orgID, receiver.URL, WebhookEvents); err != nil || again != "" {
 		t.Fatalf("second Save = %q, %v; want the secret kept", again, err)
 	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, receiver.URL, []string{EventSessionVerified}); err != nil {
+	if _, _, err := webhooks.Save(ctx, orgID, receiver.URL, []string{EventSessionVerified}); err != nil {
 		t.Fatalf("third Save: %v", err)
 	}
 
-	subject := Subject{CustomerID: &customer.ID, Email: "a@example.org"}
+	subject := externalSubject("a@example.org")
 	approved := createStarted(t, requests, newStoredRequest(orgID, sam, subject), "s1")
 	res := proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: "substantial", Name: "Anna"}
 	if err := requests.RecordOutcome(ctx, approved, "s1", StatusApproved, res); err != nil {
@@ -874,7 +1108,7 @@ func TestWebhookOutboxBackOff(t *testing.T) {
 
 	// A failing endpoint is retried later, not now, and shows as failing.
 	failing.Store(true)
-	if err := webhooks.SendTest(ctx, orgID, customer.ID); err != nil {
+	if err := webhooks.SendTest(ctx, orgID); err != nil {
 		t.Fatalf("SendTest: %v", err)
 	}
 	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
@@ -884,23 +1118,22 @@ func TestWebhookOutboxBackOff(t *testing.T) {
 	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 0 {
 		t.Errorf("DeliverDue right after a failure = %d, %v; want nothing due", n, err)
 	}
-	health, err := webhooks.Health(ctx, orgID)
-	h := health[customer.ID]
+	h, err := webhooks.Health(ctx, orgID)
 	if err != nil || h.State != WebhookFailing || h.LastStatusCode == nil || *h.LastStatusCode != http.StatusServiceUnavailable ||
 		h.PendingRetries != 1 || h.FailingSince == nil {
 		t.Errorf("health = %+v, %v; want failing on 503 with one retry pending", h, err)
 	}
-	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	deliveries, err := webhooks.Deliveries(ctx, orgID)
 	if err != nil || len(deliveries) != 2 || deliveries[0].Event != EventTest || deliveries[0].Status != DeliveryPending ||
 		deliveries[0].Attempts != 1 || deliveries[1].Status != DeliveryDelivered {
 		t.Errorf("deliveries = %+v, %v", deliveries, err)
 	}
 
 	// Removing the endpoint drops what waits for it.
-	if err := webhooks.Remove(ctx, orgID, customer.ID); err != nil {
+	if err := webhooks.Remove(ctx, orgID); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	if deliveries, _ := webhooks.Deliveries(ctx, orgID, customer.ID); len(deliveries) != 1 {
+	if deliveries, _ := webhooks.Deliveries(ctx, orgID); len(deliveries) != 1 {
 		t.Errorf("deliveries after remove = %+v, want only the delivered one", deliveries)
 	}
 	for action, want := range map[string]int{
@@ -915,20 +1148,15 @@ func TestWebhookOutboxBackOff(t *testing.T) {
 func TestPurgeSendsPurgedEvent(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
 	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", []string{EventSessionPurged}); err != nil {
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", []string{EventSessionPurged}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	req := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	req := createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
 	if err := requests.RecordOutcome(ctx, req, "s1", StatusApproved,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna"}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
@@ -936,7 +1164,7 @@ func TestPurgeSendsPurgedEvent(t *testing.T) {
 	if err := requests.Purge(ctx, req); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
-	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	deliveries, err := webhooks.Deliveries(ctx, orgID)
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionPurged ||
 		deliveries[0].RequestID == nil || *deliveries[0].RequestID != req.ID {
 		t.Errorf("deliveries = %+v, %v; want only session.purged for the request", deliveries, err)
@@ -948,25 +1176,20 @@ func TestPurgeSendsPurgedEvent(t *testing.T) {
 func TestNeedsReviewSendsEvent(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
 	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", WebhookEvents); err != nil {
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", WebhookEvents); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	req := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	req := createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
 	if err := requests.RecordOutcome(ctx, req, "s1", StatusNeedsReview,
 		proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
-	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	deliveries, err := webhooks.Deliveries(ctx, orgID)
 	// Newest first: the session's creation, then its review.
 	if err != nil || len(deliveries) != 2 || deliveries[0].Event != EventSessionReviewOpened ||
 		deliveries[1].Event != EventSessionCreated {
@@ -974,25 +1197,20 @@ func TestNeedsReviewSendsEvent(t *testing.T) {
 	}
 }
 
-// A session's states before its outcome reach the customer too: created, the
-// app joining, a new code handed over, and a cancel.
+// A session's states before its outcome reach the org's endpoint too: created,
+// the app joining, a new code handed over, and a cancel.
 func TestSessionStatesSendWebhooks(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
 	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", WebhookEvents); err != nil {
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", WebhookEvents); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	req := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	req := createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
 	if err := requests.MarkStarted(ctx, req, "s1", proofingprovider.MethodIdem); err != nil {
 		t.Fatalf("MarkStarted: %v", err)
 	}
@@ -1003,7 +1221,7 @@ func TestSessionStatesSendWebhooks(t *testing.T) {
 	if ok, err := requests.Cancel(ctx, req); err != nil || !ok {
 		t.Fatalf("Cancel = %v, %v", ok, err)
 	}
-	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	deliveries, err := webhooks.Deliveries(ctx, orgID)
 	if err != nil {
 		t.Fatalf("Deliveries: %v", err)
 	}
@@ -1018,21 +1236,16 @@ func TestSessionStatesSendWebhooks(t *testing.T) {
 	}
 }
 
-// A customer without its own endpoint is sent every event at the wallet's
-// default endpoint: signed with the default secret, retried like any other.
+// An org without its own endpoint is sent every event at the wallet's default
+// endpoint: signed with the default secret, retried like any other.
 func TestWebhookDefaultEndpoint(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
 	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
 	secret, err := webhooks.DefaultSecret()
 	if err != nil {
 		t.Fatalf("DefaultSecret: %v", err)
@@ -1051,7 +1264,7 @@ func TestWebhookDefaultEndpoint(t *testing.T) {
 	t.Cleanup(receiver.Close)
 	webhooks.SetDefaultEndpoint(receiver.URL)
 
-	req := createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	req := createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
 	if err := requests.RecordOutcome(ctx, req, "s1", StatusRejected,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, ErrorCode: "ASSURANCE_NOT_MET"}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
@@ -1072,31 +1285,234 @@ func TestWebhookDefaultEndpoint(t *testing.T) {
 	if !events[EventSessionCreated] || !events[EventSessionFailed] {
 		t.Errorf("received %v, want session.created and session.failed", events)
 	}
-	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	deliveries, err := webhooks.Deliveries(ctx, orgID)
 	if err != nil || len(deliveries) != 2 || deliveries[0].Event != EventSessionFailed || deliveries[0].Status != DeliveryDelivered ||
 		deliveries[0].EndpointURL != "" || deliveries[0].Attempts != 1 || deliveries[0].LastStatusCode == nil ||
 		*deliveries[0].LastStatusCode != http.StatusNoContent {
 		t.Fatalf("deliveries = %+v, %v; want session.failed delivered to the default endpoint", deliveries, err)
 	}
-	if err := webhooks.SendTest(ctx, orgID, customer.ID); !errors.Is(err, ErrWebhookNotFound) {
+	if err := webhooks.SendTest(ctx, orgID); !errors.Is(err, ErrWebhookNotFound) {
 		t.Errorf("SendTest = %v, want ErrWebhookNotFound", err)
 	}
 
 	// Its own endpoint takes over from then on; the default's deliveries leave its health alone.
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", WebhookEvents); err != nil {
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", WebhookEvents); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	if err := requests.Purge(ctx, req); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
-	deliveries, err = webhooks.Deliveries(ctx, orgID, customer.ID)
+	deliveries, err = webhooks.Deliveries(ctx, orgID)
 	if err != nil || len(deliveries) != 3 || deliveries[0].Event != EventSessionPurged ||
 		deliveries[0].Status != DeliveryPending || deliveries[0].EndpointURL != "https://hooks.example.org/x" {
 		t.Errorf("deliveries = %+v, %v; want session.purged queued for the endpoint", deliveries, err)
 	}
-	health, err := webhooks.Health(ctx, orgID)
-	if h := health[customer.ID]; err != nil || h.State != WebhookDelivering || h.LastStatusCode != nil || h.PendingRetries != 0 {
+	h, err := webhooks.Health(ctx, orgID)
+	if err != nil || h.State != WebhookDelivering || h.LastStatusCode != nil || h.PendingRetries != 0 {
 		t.Errorf("health = %+v, %v", h, err)
+	}
+}
+
+// An org has one endpoint: saving again changes it and keeps its secret, and an
+// org without one reads as not configured, whatever another org's endpoint
+// receives.
+func TestWebhookIsOnePerOrg(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	webhooks := NewWebhookStore(pool, audit.NewDBRecorder(), cipher)
+	orgID := makeOrg(t, pool, "acme")
+	otherOrg := makeOrg(t, pool, "globex")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	const firstURL, secondURL = "https://hooks.example.org/one", "https://hooks.example.org/two"
+
+	if h, err := webhooks.Health(ctx, orgID); err != nil || h.State != WebhookNotConfigured {
+		t.Errorf("health without an endpoint = %+v, %v; want %s", h, err, WebhookNotConfigured)
+	}
+	if _, err := webhooks.Get(ctx, orgID); !errors.Is(err, ErrWebhookNotFound) {
+		t.Errorf("Get without an endpoint = %v, want ErrWebhookNotFound", err)
+	}
+	if _, _, err := webhooks.RotateSecret(ctx, orgID); !errors.Is(err, ErrWebhookNotFound) {
+		t.Errorf("RotateSecret without an endpoint = %v, want ErrWebhookNotFound", err)
+	}
+	if err := webhooks.Remove(ctx, orgID); !errors.Is(err, ErrWebhookNotFound) {
+		t.Errorf("Remove without an endpoint = %v, want ErrWebhookNotFound", err)
+	}
+
+	first, secret, err := webhooks.Save(ctx, orgID, firstURL, []string{EventSessionVerified})
+	if err != nil || secret == "" || first.URL != firstURL {
+		t.Fatalf("first Save = %+v, %q, %v", first, secret, err)
+	}
+	second, again, err := webhooks.Save(ctx, orgID, secondURL, WebhookEvents)
+	if err != nil || again != "" || second.URL != secondURL || second.SecretLast4 != first.SecretLast4 ||
+		!slices.Equal(second.Events, WebhookEvents) {
+		t.Fatalf("second Save = %+v, %q, %v; want the endpoint changed and its secret kept", second, again, err)
+	}
+	var endpoints int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM identity_proofing_webhooks WHERE organization_id = $1`, orgID).
+		Scan(&endpoints); err != nil || endpoints != 1 {
+		t.Errorf("endpoints of the org = %d, %v; want one", endpoints, err)
+	}
+	if n := auditCount(t, pool, audit.IdentityProofingWebhookConfigured); n != 2 {
+		t.Errorf("webhook_configured audits = %d, want 2 (created, then updated)", n)
+	}
+	if rotated, newSecret, err := webhooks.RotateSecret(ctx, orgID); err != nil || newSecret == "" || newSecret == secret || rotated.URL != secondURL {
+		t.Errorf("RotateSecret = %+v, %q, %v; want a new secret on the same endpoint", rotated, newSecret, err)
+	}
+
+	// Each org's events reach its own endpoint, or the default one without.
+	createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
+	createStarted(t, requests, newStoredRequest(otherOrg, sam, externalSubject("b@example.org")), "s2")
+	ours, err := webhooks.Deliveries(ctx, orgID)
+	if err != nil || len(ours) != 1 || ours[0].EndpointURL != secondURL {
+		t.Errorf("deliveries of the org = %+v, %v; want one, for its endpoint", ours, err)
+	}
+	theirs, err := webhooks.Deliveries(ctx, otherOrg)
+	if err != nil || len(theirs) != 1 || theirs[0].EndpointURL != "" {
+		t.Errorf("deliveries of the other org = %+v, %v; want one, for the default endpoint", theirs, err)
+	}
+	if h, err := webhooks.Health(ctx, otherOrg); err != nil || h.State != WebhookNotConfigured {
+		t.Errorf("health of the org without an endpoint = %+v, %v; want %s", h, err, WebhookNotConfigured)
+	}
+	if _, err := webhooks.Get(ctx, otherOrg); !errors.Is(err, ErrWebhookNotFound) {
+		t.Errorf("Get of the org without an endpoint = %v, want ErrWebhookNotFound", err)
+	}
+
+	// Removing one org's endpoint leaves the other's.
+	if _, _, err := webhooks.Save(ctx, otherOrg, firstURL, WebhookEvents); err != nil {
+		t.Fatalf("Save other org: %v", err)
+	}
+	if err := webhooks.Remove(ctx, orgID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if got, err := webhooks.Get(ctx, otherOrg); err != nil || got.URL != firstURL {
+		t.Errorf("Get of the other org after the removal = %+v, %v; want its endpoint kept", got, err)
+	}
+	if _, err := webhooks.Get(ctx, orgID); !errors.Is(err, ErrWebhookNotFound) {
+		t.Errorf("Get after the removal = %v, want ErrWebhookNotFound", err)
+	}
+}
+
+// Only external requests are reported: one to a member sends no webhook, though
+// the endpoint subscribes to every event.
+func TestMemberRequestNoWebhook(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", WebhookEvents); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	member := createStarted(t, requests, newStoredRequest(orgID, sam,
+		memberSubject(Member{UserID: sam, Name: "Sam", Email: "sam@example.org"})), "s1")
+	if err := requests.MarkStarted(ctx, member, "s1", proofingprovider.MethodIdem); err != nil {
+		t.Fatalf("MarkStarted: %v", err)
+	}
+	if err := requests.RecordOutcome(ctx, member, "s1", StatusNeedsReview,
+		proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	if err := requests.RecordOutcome(ctx, member, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	if err := requests.Purge(ctx, onlyRequest(t, requests, orgID)); err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	if deliveries, err := webhooks.Deliveries(ctx, orgID); err != nil || len(deliveries) != 0 {
+		t.Fatalf("deliveries for a member's request = %+v, %v; want none", deliveries, err)
+	}
+
+	// The same events of an external request are sent.
+	external, err := requests.Create(ctx, newStoredRequest(orgID, sam, externalSubject("a@example.org")))
+	if err != nil {
+		t.Fatalf("Create external request: %v", err)
+	}
+	if ok, err := requests.AttachSession(ctx, external, attachedSession("s2")); err != nil || !ok {
+		t.Fatalf("AttachSession = %v, %v", ok, err)
+	}
+	if deliveries, err := webhooks.Deliveries(ctx, orgID); err != nil || len(deliveries) != 1 ||
+		deliveries[0].RequestID == nil || *deliveries[0].RequestID != external.ID {
+		t.Errorf("deliveries for an external request = %+v, %v; want its session.created", deliveries, err)
+	}
+}
+
+// An API key belongs to the org: it is listed there only, authenticates to it,
+// and only the org can revoke it.
+func TestAPIKeysBelongToOrg(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewAPIKeyStore(pool, audit.NewDBRecorder())
+	orgID := makeOrg(t, pool, "acme")
+	otherOrg := makeOrg(t, pool, "globex")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+
+	ci, ciSecret, err := store.Create(ctx, orgID, sam, "CI", APIKeyScopes)
+	if err != nil || ci.OrganizationID != orgID || !strings.HasPrefix(ciSecret, apiKeyPrefix) {
+		t.Fatalf("Create = %+v, %v", ci, err)
+	}
+	_, backofficeSecret, err := store.Create(ctx, orgID, sam, "Backoffice", APIKeyScopes)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	other, otherSecret, err := store.Create(ctx, otherOrg, sam, "Other", APIKeyScopes)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	keys, err := store.List(ctx, orgID)
+	if err != nil || len(keys) != 2 || keys[0].Name != "CI" || keys[1].Name != "Backoffice" {
+		t.Fatalf("List = %+v, %v; want the org's two keys, oldest first", keys, err)
+	}
+	if keys, err := store.List(ctx, otherOrg); err != nil || len(keys) != 1 || keys[0].ID != other.ID {
+		t.Errorf("List of the other org = %+v, %v; want its own key only", keys, err)
+	}
+
+	caller, err := store.Authenticate(ctx, ciSecret)
+	if err != nil || caller.Org.ID != orgID || caller.Org.Name != "acme" || caller.KeyID != ci.ID || caller.KeyName != "CI" ||
+		!slices.Equal(caller.Scopes, APIKeyScopes) {
+		t.Errorf("Authenticate = %+v, %v; want the key acting for its org", caller, err)
+	}
+	if caller, err := store.Authenticate(ctx, otherSecret); err != nil || caller.Org.ID != otherOrg {
+		t.Errorf("Authenticate the other org's key = %+v, %v; want that org", caller, err)
+	}
+	if _, err := store.Authenticate(ctx, apiKeyPrefix+"unknown"); !errors.Is(err, ErrAPIKeyInvalid) {
+		t.Errorf("Authenticate unknown key = %v, want ErrAPIKeyInvalid", err)
+	}
+	if keys, _ := store.List(ctx, orgID); keys[0].LastUsedAt == nil || keys[1].LastUsedAt != nil {
+		t.Errorf("last used = %v and %v; want only the key that authenticated stamped", keys[0].LastUsedAt, keys[1].LastUsedAt)
+	}
+
+	// Another org cannot revoke it.
+	if _, err := store.Revoke(ctx, otherOrg, ci.ID); !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Errorf("Revoke from another org = %v, want ErrAPIKeyNotFound", err)
+	}
+	if _, err := store.Authenticate(ctx, ciSecret); err != nil {
+		t.Errorf("Authenticate after the refused revoke = %v, want the key kept", err)
+	}
+	for range 2 {
+		if revoked, err := store.Revoke(ctx, orgID, ci.ID); err != nil || revoked.RevokedAt == nil {
+			t.Fatalf("Revoke = %+v, %v", revoked, err)
+		}
+	}
+	if _, err := store.Authenticate(ctx, ciSecret); !errors.Is(err, ErrAPIKeyInvalid) {
+		t.Errorf("Authenticate a revoked key = %v, want ErrAPIKeyInvalid", err)
+	}
+	if _, err := store.Authenticate(ctx, backofficeSecret); err != nil {
+		t.Errorf("Authenticate the org's other key = %v, want it kept", err)
+	}
+	if keys, err := store.List(ctx, orgID); err != nil || len(keys) != 2 || keys[0].RevokedAt == nil {
+		t.Errorf("List after the revoke = %+v, %v; want the revoked key listed", keys, err)
+	}
+	for action, want := range map[string]int{audit.IdentityProofingAPIKeyCreated: 3, audit.IdentityProofingAPIKeyRevoked: 1} {
+		if n := auditCount(t, pool, action); n != want {
+			t.Errorf("%s audited %d times, want %d (a repeat changes nothing)", action, n, want)
+		}
 	}
 }
 
@@ -1105,19 +1521,14 @@ func TestWebhookDefaultEndpoint(t *testing.T) {
 func TestRequestStoreHostedLink(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
 	_, hash, err := newLinkToken()
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID})
+	in := newStoredRequest(orgID, sam, Subject{Kind: SubjectExternal})
 	in.LinkTokenHash, in.LinkExpiresAt = hash, time.Now().Add(hostedLinkTTL)
 	if _, err := store.Create(ctx, in); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1148,16 +1559,11 @@ func TestStoreLapsesUnstartedLinks(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	store := NewRequestStore(pool, audit.NewDBRecorder(), cipher)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/proofing", []string{EventSessionExpired}); err != nil {
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/proofing", []string{EventSessionExpired}); err != nil {
 		t.Fatalf("save webhook: %v", err)
 	}
 	_, hash, err := newLinkToken()
@@ -1165,7 +1571,7 @@ func TestStoreLapsesUnstartedLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	lapse := time.Now().Add(time.Hour)
-	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID})
+	in := newStoredRequest(orgID, sam, Subject{Kind: SubjectExternal})
 	in.LinkTokenHash, in.LinkExpiresAt = hash, lapse
 	if _, err := store.Create(ctx, in); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1189,7 +1595,7 @@ func TestStoreLapsesUnstartedLinks(t *testing.T) {
 	if n := auditCount(t, pool, audit.IdentityProofingSessionEnded); n != 1 {
 		t.Errorf("session_ended audits = %d, want 1", n)
 	}
-	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	deliveries, err := webhooks.Deliveries(ctx, orgID)
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionExpired {
 		t.Errorf("deliveries = %+v, %v; want one session.expired", deliveries, err)
 	}
@@ -1200,20 +1606,15 @@ func TestStoreLapsesUnstartedLinks(t *testing.T) {
 func TestPruneDeliveries(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
 	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", WebhookEvents); err != nil {
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", WebhookEvents); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	createStarted(t, requests, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
 	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries
 		SET created_at = now() - $1::interval - interval '1 day'`, DeliveryRetention.String()); err != nil {
 		t.Fatalf("age deliveries: %v", err)
@@ -1274,16 +1675,11 @@ func TestLockReviewSerialises(t *testing.T) {
 func TestClearExpiredProofedNames(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	store := NewRequestStore(pool, audit.NopRecorder{}, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	req := createStarted(t, store, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"}), "s1")
+	req := createStarted(t, store, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
 	if err := store.RecordOutcome(ctx, req, "s1", StatusNeedsReview,
 		proofingprovider.Result{Status: proofingprovider.StatusNeedsReview, Name: "Anna Jansen"}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
@@ -1312,8 +1708,8 @@ func TestRequestListBySubjectUser(t *testing.T) {
 	sam := makeUser(t, pool, "sam@example.org")
 	alex := makeUser(t, pool, "alex@example.org")
 	ctx := context.Background()
-	mine := createStarted(t, store, newStoredRequest(orgID, sam, Subject{UserID: &alex, Email: "alex@example.org"}), "s1")
-	if _, err := store.Create(ctx, newStoredRequest(orgID, alex, Subject{UserID: &sam, Email: "sam@example.org"})); err != nil {
+	mine := createStarted(t, store, newStoredRequest(orgID, sam, Subject{Kind: SubjectMember, UserID: &alex, Email: "alex@example.org"}), "s1")
+	if _, err := store.Create(ctx, newStoredRequest(orgID, alex, Subject{Kind: SubjectMember, UserID: &sam, Email: "sam@example.org"})); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got, err := store.List(ctx, orgID, RequestFilter{SubjectUserID: &alex})
@@ -1322,21 +1718,51 @@ func TestRequestListBySubjectUser(t *testing.T) {
 	}
 }
 
+// The cap on a list applies after the narrowing: an external request older
+// than the newest maxListedRequests member ones is still listed when only the
+// external ones are asked for.
+func TestRequestListBySubjectKind(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	alex := makeUser(t, pool, "alex@example.org")
+	ctx := context.Background()
+	external, err := store.Create(ctx, newStoredRequest(orgID, sam, externalSubject("a@example.org")))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for range maxListedRequests {
+		if _, err := store.Create(ctx, newStoredRequest(orgID, sam, Subject{Kind: SubjectMember, UserID: &alex, Email: "alex@example.org"})); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	}
+
+	all, err := store.List(ctx, orgID, RequestFilter{})
+	if err != nil || len(all) != maxListedRequests || slices.ContainsFunc(all, func(r Request) bool { return r.ID == external.ID }) {
+		t.Fatalf("List = %d rows, %v; want the newest %d, all members'", len(all), err, maxListedRequests)
+	}
+	kind := SubjectExternal
+	got, err := store.List(ctx, orgID, RequestFilter{SubjectKind: &kind})
+	if err != nil || len(got) != 1 || got[0].ID != external.ID {
+		t.Errorf("List external = %d rows, %v; want only the external request", len(got), err)
+	}
+	kind = SubjectMember
+	if got, err = store.List(ctx, orgID, RequestFilter{SubjectKind: &kind}); err != nil || len(got) != maxListedRequests {
+		t.Errorf("List members = %d rows, %v; want %d", len(got), err, maxListedRequests)
+	}
+}
+
 // A request for one known person drops the expected birth date as soon as no
 // match can follow: here, cancelled.
 func TestCancelDropsBirthDate(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	orgID := makeOrg(t, pool, "acme")
 	requester := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, requester, "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
 	req := createStarted(t, store, newStoredRequest(orgID, requester,
-		Subject{CustomerID: &customer.ID, Name: "Anna de Vries", Email: "anna@example.org", BirthDate: "1990-04-12"}), "s1")
+		Subject{Kind: SubjectExternal, Name: "Anna de Vries", Email: "anna@example.org", BirthDate: "1990-04-12"}), "s1")
 	if ok, err := store.Cancel(ctx, req); err != nil || !ok {
 		t.Fatalf("Cancel = %v, %v", ok, err)
 	}
@@ -1347,20 +1773,15 @@ func TestCancelDropsBirthDate(t *testing.T) {
 	}
 }
 
-// A flow's own retention sets the purge, in place of the customer's: a week
+// A flow's own retention sets the purge, in place of the org's: a week
 // brings it forward, a year pushes it back.
 func TestPurgeFollowsFlowRetention(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	store := NewRequestStore(pool, audit.NopRecorder{}, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Initech") // 30 days by default
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
 	for _, tc := range []struct {
 		name     string
 		override time.Duration
@@ -1373,7 +1794,7 @@ func TestPurgeFollowsFlowRetention(t *testing.T) {
 		if _, err := pool.Exec(ctx, `DELETE FROM identity_proofing_requests`); err != nil {
 			t.Fatalf("clear: %v", err)
 		}
-		in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "a@example.org"})
+		in := newStoredRequest(orgID, sam, externalSubject("a@example.org"))
 		in.Flow.RetentionOverrideSeconds = int(tc.override.Seconds())
 		req := createStarted(t, store, in, "s-"+tc.age)
 		if req.RetentionOverride != tc.override || req.NameRetention != tc.override {
@@ -1404,7 +1825,7 @@ func TestRecordDeviceEvent(t *testing.T) {
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	req := createStarted(t, store, newStoredRequest(orgID, sam, Subject{UserID: &sam, Email: "sam@example.org"}), "s1")
+	req := createStarted(t, store, newStoredRequest(orgID, sam, Subject{Kind: SubjectMember, UserID: &sam, Email: "sam@example.org"}), "s1")
 	if err := store.RecordDeviceEvent(ctx, orgID.String(), "s1", "device_claimed", map[string]any{"role": "native", "deviceId": "d1"}); err != nil {
 		t.Fatalf("RecordDeviceEvent: %v", err)
 	}

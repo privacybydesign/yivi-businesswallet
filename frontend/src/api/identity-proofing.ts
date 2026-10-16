@@ -5,10 +5,10 @@ import { auditEventSchema } from "./organization";
 import type { AuditEvent } from "./organization";
 
 // Identity proofing: flows defined by org admins, who choose which members may
-// use, the org's customers (no login of their own) with the flows assigned to
-// each, and requests any member can send, to a member or a customer's subject.
-// Only a request's outcome and assurance level come back, plus, for a
-// customer's approved subject, the name on their document for a limited time.
+// use them and which is the default, the org's settings, API keys and webhook
+// endpoint, and requests any member can send, to a member or an external
+// person. Only a request's outcome and assurance level come back, plus, for an
+// approved external person, the name on their document for a limited time.
 //
 // Step, check and status values are plain strings rather than zod enums, so a
 // value the backend adds never breaks the page.
@@ -26,10 +26,10 @@ export type ProofingAssuranceTier = z.infer<typeof assuranceTierSchema>;
 export const DIPLOMA_MODES = ["off", "required"] as const;
 const diplomaModeSchema = z.enum(DIPLOMA_MODES);
 
-// What a flow's sessions are for: an identity check, or a customer's subject
+// What a flow's sessions are for: an identity check, or an external person
 // asking for the data held of them ("see my data") or for its erasure
 // ("delete my data"). A data request goes to review once the person is
-// proven, with the customer's sessions of that person.
+// proven, with the org's sessions of that person.
 export const FLOW_KINDS = ["identity", "data_access", "data_erasure"] as const;
 const flowKindSchema = z.enum(FLOW_KINDS);
 export type FlowKind = z.infer<typeof flowKindSchema>;
@@ -98,13 +98,18 @@ const proofingFlowSchema = z.object({
   // False for a flow a recipient cannot finish with only the vcmrtd app.
   completable: z.boolean(),
   // A flow that matches the face without reading the chip: every session on
-  // it carries the customer's own photo, sent through the customer API.
+  // it carries the sender's own photo, sent through the API.
   // Absent on a single version (created, edited, a version list).
   needsReferencePhoto: z.boolean().optional(),
-  // The admin made it available to members; default is the one the request
-  // form preselects. A member's list only holds allowed flows.
+  // The admin made it available to members; default is the org's one default,
+  // the one a request form preselects, whoever may use it. A member's list
+  // only holds allowed flows.
   allowed: z.boolean(),
   default: z.boolean(),
+  // The most days an external person's data is kept on this flow: the flow's
+  // retention, else the org's, plus the engine's extra day. Absent on a single
+  // version.
+  retentionDays: z.number().optional(),
   // Absent on a single version (created, edited, a version list): the flow
   // list carries it.
   diplomaMode: diplomaModeSchema.optional(),
@@ -117,11 +122,11 @@ export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
 const proofingRequestSchema = z.object({
   id: z.string(),
   requestedByName: z.string(),
-  // Set for a request the customer's backend created with one of its keys.
+  // Set for a request the org's software created with one of its keys.
   apiKeyName: z.string().optional(),
   subjectUserId: z.string().optional(),
-  customerId: z.string().optional(),
-  customerName: z.string().optional(),
+  // Whether the request went to an external person, not a member.
+  external: z.boolean(),
   subjectName: z.string(),
   subjectEmail: z.string(),
   proofedName: z.string().optional(),
@@ -165,8 +170,8 @@ const proofingSentSchema = proofingRequestSchema.extend({
   mailSent: z.boolean(),
   deepLink: z.string().optional(),
   deepLinkExpiresAt: z.string().optional(),
-  // A hosted request's link to the customer's page, for the member to hand
-  // the person; valid 72 hours.
+  // A hosted request's link to the hosted page, for the member to hand the
+  // person; valid 72 hours.
   hostedUrl: z.string().optional(),
 });
 
@@ -207,7 +212,6 @@ export type ProofingChannel = "email" | "on_screen" | "hosted";
 export type ProofingRequestInput =
   | { userId: string; flowId: string }
   | {
-      customerId: string;
       email: string;
       name: string;
       // YYYY-MM-DD: with name, only that person can pass.
@@ -217,11 +221,8 @@ export type ProofingRequestInput =
       channel?: ProofingChannel;
     };
 
-// A paused customer takes no new request; requests already sent run out.
-const PROOFING_CUSTOMER_STATUSES = ["active", "paused"] as const;
-
-// How a customer's webhook endpoint has been answering. State is a plain
-// string: an unknown one renders neutrally.
+// How the org's webhook endpoint has been answering. State is a plain string:
+// an unknown one renders neutrally.
 const webhookHealthSchema = z.object({
   state: z.string(),
   lastStatusCode: z.number().optional(),
@@ -231,47 +232,34 @@ const webhookHealthSchema = z.object({
 
 export type WebhookHealth = z.infer<typeof webhookHealthSchema>;
 
-// Empty strings fall back: the customer's name, the org's colour, no logo.
-const proofingCustomerBrandingSchema = z.object({
+// Empty strings fall back: the org's name, the org's colour, no logo.
+const proofingBrandingSchema = z.object({
   displayName: z.string(),
   primaryColor: z.string(),
   supportContact: z.string(),
   privacyUrl: z.string(),
   logoUri: z.string(),
-  // Leaves the "powered by" line off the customer's hosted pages.
+  // Leaves the "powered by" line off the hosted pages.
   hidePoweredBy: z.boolean(),
 });
 
-export type ProofingCustomerBranding = z.infer<
-  typeof proofingCustomerBrandingSchema
->;
+export type ProofingBranding = z.infer<typeof proofingBrandingSchema>;
 
-const proofingCustomerSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  flowIds: z.array(z.string()),
-  defaultFlowId: z.string().optional(),
-  status: z.enum(PROOFING_CUSTOMER_STATUSES),
-  pausedAt: z.string().optional(),
+// What the org set once for all its flows.
+const proofingSettingsSchema = z.object({
   sessionTtlSeconds: z.number(),
   dataRetentionDays: z.number(),
-  webhook: webhookHealthSchema,
-  branding: proofingCustomerBrandingSchema,
+  branding: proofingBrandingSchema,
   // Where a hosted page may send its subject back to and be embedded on.
   allowedRedirectOrigins: z.array(z.string()),
-  // Live requests need an unrevoked live API key.
-  hasApiKey: z.boolean(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
 });
 
-export type ProofingCustomer = z.infer<typeof proofingCustomerSchema>;
+export type ProofingSettings = z.infer<typeof proofingSettingsSchema>;
 
-// A customer's requests on one flow since `since`, by outcome; what the outcome
-// counts leave is still pending or in progress. As last reconciled by a request
-// list read.
+// The external requests of the last 30 days on one flow, by outcome; what the
+// outcome counts leave is still pending or in progress. As last reconciled by a
+// request list read.
 const proofingStatsRowSchema = z.object({
-  customerId: z.string(),
   flowId: z.string(),
   sessions: z.number(),
   approved: z.number(),
@@ -292,9 +280,7 @@ const proofingStatsSchema = z.object({
 export type ProofingStats = z.infer<typeof proofingStatsSchema>;
 
 // An absent field is left as it is.
-export interface ProofingCustomerUpdate {
-  name?: string;
-  paused?: boolean;
+export interface ProofingSettingsUpdate {
   sessionTtlSeconds?: number;
   dataRetentionDays?: number;
   allowedRedirectOrigins?: string[];
@@ -320,7 +306,7 @@ const createdProofingApiKeySchema = proofingApiKeySchema.extend({
 
 export type CreatedProofingApiKey = z.infer<typeof createdProofingApiKeySchema>;
 
-// A customer's endpoint; secret is set only in the answer that created it or
+// The org's endpoint; secret is set only in the answer that created it or
 // rotated it.
 const proofingWebhookSchema = z.object({
   configured: z.boolean(),
@@ -339,7 +325,7 @@ const webhookDeliverySchema = z.object({
   id: z.string(),
   event: z.string(),
   sessionId: z.string().optional(),
-  // The customer's own endpoint it went to; absent for the wallet's default.
+  // The org's own endpoint it went to; absent for the wallet's default.
   endpointUrl: z.string().optional(),
   status: z.string(),
   attempts: z.number(),
@@ -364,21 +350,8 @@ export interface ProofingBrandingInput {
   removeLogo?: boolean;
 }
 
-const proofingCustomerFlowSchema = proofingFlowSchema
-  .omit({ allowed: true, default: true })
-  .extend({
-    assigned: z.boolean(),
-    default: z.boolean(),
-    // The most days a subject's data is kept on this flow for this customer:
-    // the flow's retention, else the customer's, plus the engine's extra day.
-    retentionDays: z.number(),
-  });
-
-export type ProofingCustomerFlow = z.infer<typeof proofingCustomerFlowSchema>;
-
-// Whether an org's identity proofing is paused, and by whom: a platform
-// admin's pause the org's admin cannot lift.
-// Who first set a level's pause, while it holds.
+// Whether an org's identity proofing is paused by a platform admin, and by
+// whom.
 const proofingPausedBySchema = z.object({
   userId: z.string(),
   name: z.string(),
@@ -388,9 +361,7 @@ const proofingPauseSchema = z.object({
   organizationId: z.string(),
   paused: z.boolean(),
   platformPausedAt: z.string().optional(),
-  orgPausedAt: z.string().optional(),
   platformPausedBy: proofingPausedBySchema.optional(),
-  orgPausedBy: proofingPausedBySchema.optional(),
 });
 
 export type ProofingPause = z.infer<typeof proofingPauseSchema>;
@@ -401,20 +372,6 @@ export function getProofingPause(
 ): Promise<ProofingPause> {
   return request(`${base(slug)}/pause`, {
     schema: proofingPauseSchema,
-    signal,
-  });
-}
-
-// The org admin's own switch.
-export function setProofingPause(
-  slug: string,
-  paused: boolean,
-  signal?: AbortSignal,
-): Promise<ProofingPause> {
-  return request(`${base(slug)}/pause`, {
-    schema: proofingPauseSchema,
-    method: "PUT",
-    body: { paused },
     signal,
   });
 }
@@ -445,11 +402,6 @@ export function setPlatformProofingPause(
 
 function base(slug: string): string {
   return `/api/v1/orgs/${encodeURIComponent(slug)}/identity-proofing`;
-}
-
-// The org's customers live beside proofing, not under it.
-function customersBase(slug: string): string {
-  return `/api/v1/orgs/${encodeURIComponent(slug)}/customers`;
 }
 
 export function getProofingFlows(
@@ -601,7 +553,7 @@ export function setProofingFlowSelection(
   });
 }
 
-// The org's customer requests of the last 30 days, counted per customer and flow.
+// The org's external requests of the last 30 days, counted per flow.
 export function getProofingStats(
   slug: string,
   signal?: AbortSignal,
@@ -612,17 +564,17 @@ export function getProofingStats(
   });
 }
 
-// customerId narrows the list to the requests sent for that customer.
-// The org's requests, newest first and capped by the backend; narrowed to one
-// customer's or to those sent to one member.
+// The org's requests, newest first and capped by the backend after the
+// narrowing: to those sent to one member, or to those sent to members or to
+// external people.
 export function getProofingRequests(
   slug: string,
-  filter: { customerId?: string; subjectUserId?: string },
+  filter: { subjectUserId?: string; subjectKind?: "member" | "external" },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
   const params = new URLSearchParams();
-  if (filter.customerId) params.set("customerId", filter.customerId);
   if (filter.subjectUserId) params.set("subjectUserId", filter.subjectUserId);
+  if (filter.subjectKind) params.set("subjectKind", filter.subjectKind);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
     schema: z.array(proofingRequestSchema),
@@ -645,101 +597,34 @@ export function createProofingRequest(
   });
 }
 
-function customerBase(slug: string, customerId: string): string {
-  return `${customersBase(slug)}/${encodeURIComponent(customerId)}`;
-}
-
-export function getProofingCustomers(
+export function getProofingSettings(
   slug: string,
   signal?: AbortSignal,
-): Promise<ProofingCustomer[]> {
-  return request(customersBase(slug), {
-    schema: z.array(proofingCustomerSchema),
+): Promise<ProofingSettings> {
+  return request(`${base(slug)}/settings`, {
+    schema: proofingSettingsSchema,
     signal,
   });
 }
 
-export function createProofingCustomer(
+export function updateProofingSettings(
   slug: string,
-  name: string,
+  update: ProofingSettingsUpdate,
   signal?: AbortSignal,
-): Promise<ProofingCustomer> {
-  return request(customersBase(slug), {
-    schema: proofingCustomerSchema,
-    method: "POST",
-    body: { name },
-    signal,
-  });
-}
-
-export function getProofingCustomer(
-  slug: string,
-  customerId: string,
-  signal?: AbortSignal,
-): Promise<ProofingCustomer> {
-  return request(customerBase(slug, customerId), {
-    schema: proofingCustomerSchema,
-    signal,
-  });
-}
-
-export function updateProofingCustomer(
-  slug: string,
-  customerId: string,
-  update: ProofingCustomerUpdate,
-  signal?: AbortSignal,
-): Promise<ProofingCustomer> {
-  return request(customerBase(slug, customerId), {
-    schema: proofingCustomerSchema,
+): Promise<ProofingSettings> {
+  return request(`${base(slug)}/settings`, {
+    schema: proofingSettingsSchema,
     method: "PATCH",
     body: update,
     signal,
   });
 }
 
-export function getProofingCustomerFlows(
+export function saveProofingBranding(
   slug: string,
-  customerId: string,
-  signal?: AbortSignal,
-): Promise<ProofingCustomerFlow[]> {
-  return request(`${customerBase(slug, customerId)}/flows`, {
-    schema: z.array(proofingCustomerFlowSchema),
-    signal,
-  });
-}
-
-export function setProofingCustomerFlows(
-  slug: string,
-  customerId: string,
-  selection: ProofingFlowSelection,
-  signal?: AbortSignal,
-): Promise<ProofingCustomerFlow[]> {
-  return request(`${customerBase(slug, customerId)}/flow-selection`, {
-    schema: z.array(proofingCustomerFlowSchema),
-    method: "PUT",
-    body: selection,
-    signal,
-  });
-}
-
-export function removeProofingCustomer(
-  slug: string,
-  customerId: string,
-  signal?: AbortSignal,
-): Promise<void> {
-  return request(customerBase(slug, customerId), {
-    schema: z.void(),
-    method: "DELETE",
-    signal,
-  });
-}
-
-export function saveProofingCustomerBranding(
-  slug: string,
-  customerId: string,
   input: ProofingBrandingInput,
   signal?: AbortSignal,
-): Promise<ProofingCustomer> {
+): Promise<ProofingSettings> {
   const form = new FormData();
   form.set("displayName", input.displayName);
   form.set("primaryColor", input.primaryColor);
@@ -751,8 +636,8 @@ export function saveProofingCustomerBranding(
   } else if (input.removeLogo) {
     form.set("removeLogo", "true");
   }
-  return request(`${customerBase(slug, customerId)}/branding`, {
-    schema: proofingCustomerSchema,
+  return request(`${base(slug)}/settings/branding`, {
+    schema: proofingSettingsSchema,
     method: "PUT",
     body: form,
     signal,
@@ -761,10 +646,9 @@ export function saveProofingCustomerBranding(
 
 export function getProofingApiKeys(
   slug: string,
-  customerId: string,
   signal?: AbortSignal,
 ): Promise<ProofingApiKey[]> {
-  return request(`${customerBase(slug, customerId)}/api-keys`, {
+  return request(`${base(slug)}/api-keys`, {
     schema: z.array(proofingApiKeySchema),
     signal,
   });
@@ -772,11 +656,10 @@ export function getProofingApiKeys(
 
 export function createProofingApiKey(
   slug: string,
-  customerId: string,
   name: string,
   signal?: AbortSignal,
 ): Promise<CreatedProofingApiKey> {
-  return request(`${customerBase(slug, customerId)}/api-keys`, {
+  return request(`${base(slug)}/api-keys`, {
     schema: createdProofingApiKeySchema,
     method: "POST",
     body: { name },
@@ -786,26 +669,25 @@ export function createProofingApiKey(
 
 export function revokeProofingApiKey(
   slug: string,
-  customerId: string,
   keyId: string,
   signal?: AbortSignal,
 ): Promise<ProofingApiKey> {
-  return request(
-    `${customerBase(slug, customerId)}/api-keys/${encodeURIComponent(keyId)}`,
-    { schema: proofingApiKeySchema, method: "DELETE", signal },
-  );
+  return request(`${base(slug)}/api-keys/${encodeURIComponent(keyId)}`, {
+    schema: proofingApiKeySchema,
+    method: "DELETE",
+    signal,
+  });
 }
 
-function webhookBase(slug: string, customerId: string): string {
-  return `${customerBase(slug, customerId)}/webhook`;
+function webhookBase(slug: string): string {
+  return `${base(slug)}/webhook`;
 }
 
 export function getProofingWebhook(
   slug: string,
-  customerId: string,
   signal?: AbortSignal,
 ): Promise<ProofingWebhook> {
-  return request(webhookBase(slug, customerId), {
+  return request(webhookBase(slug), {
     schema: proofingWebhookSchema,
     signal,
   });
@@ -813,11 +695,10 @@ export function getProofingWebhook(
 
 export function saveProofingWebhook(
   slug: string,
-  customerId: string,
   input: { url: string; events: string[] },
   signal?: AbortSignal,
 ): Promise<ProofingWebhook> {
-  return request(webhookBase(slug, customerId), {
+  return request(webhookBase(slug), {
     schema: proofingWebhookSchema,
     method: "PUT",
     body: input,
@@ -827,10 +708,9 @@ export function saveProofingWebhook(
 
 export function removeProofingWebhook(
   slug: string,
-  customerId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  return request(webhookBase(slug, customerId), {
+  return request(webhookBase(slug), {
     schema: z.void(),
     method: "DELETE",
     signal,
@@ -839,10 +719,9 @@ export function removeProofingWebhook(
 
 export function rotateProofingWebhookSecret(
   slug: string,
-  customerId: string,
   signal?: AbortSignal,
 ): Promise<ProofingWebhook> {
-  return request(`${webhookBase(slug, customerId)}/rotate-secret`, {
+  return request(`${webhookBase(slug)}/rotate-secret`, {
     schema: proofingWebhookSchema,
     method: "POST",
     body: {},
@@ -852,10 +731,9 @@ export function rotateProofingWebhookSecret(
 
 export function sendProofingWebhookTest(
   slug: string,
-  customerId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  return request(`${webhookBase(slug, customerId)}/test`, {
+  return request(`${webhookBase(slug)}/test`, {
     schema: z.void(),
     method: "POST",
     body: {},
@@ -865,10 +743,9 @@ export function sendProofingWebhookTest(
 
 export function getProofingWebhookDeliveries(
   slug: string,
-  customerId: string,
   signal?: AbortSignal,
 ): Promise<WebhookDelivery[]> {
-  return request(`${webhookBase(slug, customerId)}/deliveries`, {
+  return request(`${webhookBase(slug)}/deliveries`, {
     schema: z.array(webhookDeliverySchema),
     signal,
   });
@@ -883,7 +760,7 @@ const proofingImageSchema = z.object({
 export type ProofingImage = z.infer<typeof proofingImageSchema>;
 
 // One request's timeline: its audit events, oldest first.
-// A settled customer request's result, as an admin reads it in the wallet:
+// A settled external request's result, as an admin reads it in the wallet:
 // the identity, the document's photo and the selfie only for an approval.
 // Every read is audited.
 const proofingResultSchema = z.object({
@@ -914,7 +791,7 @@ const proofingResultSchema = z.object({
   ),
   photo: proofingImageSchema.optional(),
   selfie: proofingImageSchema.optional(),
-  // The customer's own photo the selfie was matched against, for a flow
+  // The sender's own photo the selfie was matched against, for a flow
   // without the chip read.
   referencePhoto: proofingImageSchema.optional(),
   documentImage: proofingImageSchema.optional(),
@@ -934,7 +811,7 @@ export function getProofingRequestResult(
   );
 }
 
-// A data request's matches: the customer's sessions whose proofed identity is
+// A data request's matches: the org's sessions whose proofed identity is
 // the person's, strong when proven with the same document, probable on name
 // and date of birth alone. approved is the reviewer's choice, once decided.
 const proofingDataMatchSchema = z.object({
@@ -1163,7 +1040,7 @@ export type HostedProgress = z.infer<typeof hostedProgressSchema>;
 // The hosted page: who asks, what the flow collects, the progress, and how
 // the page hands its subject back once settled.
 const hostedProofingSchema = hostedProgressSchema.extend({
-  // The customer's id for the session, handed back on completion.
+  // The API's id for the session, handed back on completion.
   sessionId: z.string(),
   // Absent shows the page's own done screen.
   redirectUrl: z.string().optional(),
@@ -1173,9 +1050,9 @@ const hostedProofingSchema = hostedProgressSchema.extend({
   language: z.string().optional(),
   // The languages the flow's page offers; empty is every one.
   locales: z.array(z.string()),
-  customer: z.object({
+  organization: z.object({
     name: z.string(),
-    branding: proofingCustomerBrandingSchema,
+    branding: proofingBrandingSchema,
     dataRetentionDays: z.number(),
   }),
   flow: z.object({

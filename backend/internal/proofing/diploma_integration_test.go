@@ -40,21 +40,16 @@ func TestFlowDiplomaSavesAndAudits(t *testing.T) {
 func TestDiplomaExtractsUntilPurge(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	requests := NewRequestStore(pool, audit.NewDBRecorder(), cipher)
 	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
 	diplomas := NewDiplomaStore(pool, audit.NewDBRecorder())
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Hogeschool")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", []string{EventSessionDiplomaAdded}); err != nil {
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", []string{EventSessionDiplomaAdded}); err != nil {
 		t.Fatalf("Save webhook: %v", err)
 	}
-	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "anna@example.org"})
+	in := newStoredRequest(orgID, sam, externalSubject("anna@example.org"))
 	in.Diplomas = DiplomasRequired
 	req := createStarted(t, requests, in, "s1")
 	if req.Diplomas != DiplomasRequired {
@@ -92,7 +87,7 @@ func TestDiplomaExtractsUntilPurge(t *testing.T) {
 	if auditCount(t, pool, audit.IdentityProofingDiplomaAdded) != 1 || auditCount(t, pool, audit.IdentityProofingDiplomaRejected) != 1 {
 		t.Error("want one diploma_added and one diploma_rejected event")
 	}
-	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	deliveries, err := webhooks.Deliveries(ctx, orgID)
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionDiplomaAdded {
 		t.Errorf("deliveries = %+v, %v; want one session.diploma_added", deliveries, err)
 	}
