@@ -5,7 +5,7 @@ import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useDecideReviewMutation,
-  useProofingRequestsQuery,
+  useExternalRequestsQuery,
   useProofingRequestEventsQuery,
   useProofingRequestResultQuery,
   useProofingSettingsQuery,
@@ -92,14 +92,13 @@ function SessionsList({
   isAdmin: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const requests = useProofingRequestsQuery(slug);
+  const requests = useExternalRequestsQuery(slug);
   const settings = useProofingSettingsQuery(slug);
   const formatWhen = useWhenFormatter();
   const [searchParams] = useSearchParams();
   const [filter, setFilter] = useState<SessionFilter>("all");
   const [open, setOpen] = useState<string | null>(searchParams.get("session"));
-  // The list holds the requests sent to members too.
-  const all = (requests.data ?? []).filter((r) => r.external);
+  const all = requests.data ?? [];
   const counts = sessionFilterCounts(all);
   const shown = all.filter((r) => matchesSessionFilter(r.status, filter));
 

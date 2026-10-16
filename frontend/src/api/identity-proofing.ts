@@ -564,15 +564,17 @@ export function getProofingStats(
   });
 }
 
-// The org's requests, newest first and capped by the backend; narrowed to
-// those sent to one member.
+// The org's requests, newest first and capped by the backend after the
+// narrowing: to those sent to one member, or to those sent to members or to
+// external people.
 export function getProofingRequests(
   slug: string,
-  filter: { subjectUserId?: string },
+  filter: { subjectUserId?: string; subjectKind?: "member" | "external" },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
   const params = new URLSearchParams();
   if (filter.subjectUserId) params.set("subjectUserId", filter.subjectUserId);
+  if (filter.subjectKind) params.set("subjectKind", filter.subjectKind);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
     schema: z.array(proofingRequestSchema),

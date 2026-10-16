@@ -3,9 +3,9 @@ import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
+  useExternalRequestsQuery,
   useProofingFlowsQuery,
   useProofingPauseQuery,
-  useProofingRequestsQuery,
   useProofingStatsQuery,
   useProofingWebhookQuery,
 } from "../api/identity-proofing.queries";
@@ -205,14 +205,10 @@ function RecentSessions({
   isAdmin: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const requests = useProofingRequestsQuery(slug);
+  const requests = useExternalRequestsQuery(slug);
   const formatWhen = useWhenFormatter();
   const navigate = useNavigate();
-  // Requests arrive newest first; a member's own proofing is not an external
-  // person's.
-  const recent = (requests.data ?? [])
-    .filter((r) => r.external)
-    .slice(0, RECENT_SESSIONS);
+  const recent = (requests.data ?? []).slice(0, RECENT_SESSIONS);
 
   return (
     <Card>
