@@ -226,7 +226,7 @@ func TestApprovedSkipsEmailMatches(t *testing.T) {
 	}
 }
 
-func TestDataRequestFlowsAreNotForMembers(t *testing.T) {
+func TestDataFlowsNotForMembers(t *testing.T) {
 	f, _ := newDataFixture(FlowDataAccess)
 	f.settings.selection = FlowSelection{FlowIDs: []string{appFlow.ID, chipFlow.ID}, DefaultFlowID: appFlow.ID}
 	_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()},

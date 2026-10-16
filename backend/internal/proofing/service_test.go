@@ -1038,7 +1038,7 @@ func TestExternalRequestValidates(t *testing.T) {
 
 // A member may send an external person only a flow members may use; an admin
 // and an API key may send any flow a recipient can finish.
-func TestExternalRequestFlowsByRole(t *testing.T) {
+func TestExternalFlowsByRole(t *testing.T) {
 	member := Requester{UserID: uuid.New()}
 	key := Requester{Name: "key", APIKeyID: new(uuid.UUID)}
 	cases := map[string]struct {
@@ -1066,7 +1066,7 @@ func TestExternalRequestFlowsByRole(t *testing.T) {
 
 // A request that names no flow runs the org's default flow, which an admin
 // may send whether or not members may use it; with no default there is none.
-func TestExternalRequestDefaultFlow(t *testing.T) {
+func TestExternalDefaultFlow(t *testing.T) {
 	f := newFixture()
 	f.settings.selection = FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: chipFlow.ID}
 	if _, err := f.svc.CreateRequest(context.Background(), testOrg, sam, NewRequest{SubjectEmail: "a@example.org"}); err != nil {
@@ -1633,7 +1633,7 @@ func TestHostedLinkRunsYiviApp(t *testing.T) {
 	}
 }
 
-func TestHostedRequestNeedsExternalPerson(t *testing.T) {
+func TestHostedNeedsExternalPerson(t *testing.T) {
 	f := newFixture()
 	f.svc.SetHostedBaseURL(testHostedBase)
 	in := NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID, Channel: ChannelHosted}

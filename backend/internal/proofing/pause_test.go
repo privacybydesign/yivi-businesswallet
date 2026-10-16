@@ -51,7 +51,7 @@ func withPauses(f fixture) *fakePauses {
 	return pauses
 }
 
-func TestPauseStopsProofingUntilResumed(t *testing.T) {
+func TestPauseStopsUntilResumed(t *testing.T) {
 	f := newFixture()
 	withPauses(f)
 	ctx := context.Background()

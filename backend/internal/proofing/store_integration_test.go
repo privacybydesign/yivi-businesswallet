@@ -103,7 +103,7 @@ func TestSettingsReplacesFlows(t *testing.T) {
 
 // The org's default flow is independent of the flows members may use: it can be
 // one they may not send, it moves without touching them, and the org holds one.
-func TestSettingsDefaultFlowNeedNotBeAllowed(t *testing.T) {
+func TestDefaultNeedNotBeAllowed(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewSettingsStore(pool, audit.NewDBRecorder())
 	orgID := makeOrg(t, pool, "acme")
@@ -487,7 +487,7 @@ func TestOrgSettingsSession(t *testing.T) {
 
 // The redirect origins round trip, are audited, and are cleared by an empty
 // list.
-func TestOrgSettingsRedirectOrigins(t *testing.T) {
+func TestSettingsRedirectOrigins(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewOrgSettingsStore(pool, audit.NewDBRecorder())
 	orgID := makeOrg(t, pool, "acme")
@@ -633,7 +633,7 @@ func TestOrgSettingsBranding(t *testing.T) {
 
 // A new logo is saved when nothing else in the branding changes: the branding
 // only says whether a logo is set, so the bytes have to be compared apart.
-func TestOrgSettingsBrandingReplacesLogoAlone(t *testing.T) {
+func TestBrandingSavesLogoAlone(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewOrgSettingsStore(pool, audit.NewDBRecorder())
 	orgID := makeOrg(t, pool, "acme")
@@ -788,7 +788,7 @@ func TestStoreExternalProofedName(t *testing.T) {
 
 // The API reads only the org's external requests: a member's request is neither
 // listed nor found, and another org's is not either.
-func TestStoreExternalReadsLeaveOutMembers(t *testing.T) {
+func TestExternalReadsSkipMembers(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
@@ -1006,7 +1006,7 @@ func TestStoreStatsByOutcome(t *testing.T) {
 // An external request's proofed name is kept as long as the org's retention,
 // counted from its outcome; a member's request keeps it for the fixed period,
 // whatever the org set.
-func TestOrgSettingsSetNameRetention(t *testing.T) {
+func TestOrgSettingsNameRetention(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	settings := NewOrgSettingsStore(pool, audit.NopRecorder{})
 	requests := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
@@ -1396,7 +1396,7 @@ func TestWebhookIsOnePerOrg(t *testing.T) {
 
 // Only external requests are reported: one to a member sends no webhook, though
 // the endpoint subscribes to every event.
-func TestMemberRequestsSendNoWebhook(t *testing.T) {
+func TestMemberRequestNoWebhook(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)

@@ -20,13 +20,13 @@ const lastCustomerVersion int64 = 20261006120000
 // customersRemovedMigrations is how many migrations remove them.
 const customersRemovedMigrations = 10
 
-// TestUpFoldsCustomersIntoTheOrg applies the history up to the last one with
+// TestUpFoldsCustomersIntoOrg applies the history up to the last one with
 // customers, fills it with two customers' worth of data in one org, and checks
 // that what the customers held is the org's afterwards: the oldest customer's
 // settings, every key, one webhook endpoint, one default flow, and every
 // request, member and external, where it was. The down migrations then rebuild
 // a customer for the org.
-func TestUpFoldsCustomersIntoTheOrg(t *testing.T) {
+func TestUpFoldsCustomersIntoOrg(t *testing.T) {
 	ctx := context.Background()
 	dsn := testdb.Bare(t)
 	if err := migrate.UpTo(ctx, dsn, lastCustomerVersion); err != nil {

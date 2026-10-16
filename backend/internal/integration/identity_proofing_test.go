@@ -261,7 +261,7 @@ func TestProofingMemberCannotManage(t *testing.T) {
 // An admin sends an external person a request by address alone, on any flow of
 // the org (members need not be allowed it), or on the org's default flow when
 // none is named. No API key is needed to send from the app.
-func TestProofingExternalRequestHTTPFlow(t *testing.T) {
+func TestExternalRequestHTTPFlow(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("admin@acme.test")
@@ -339,7 +339,7 @@ func TestProofingExternalRequestHTTPFlow(t *testing.T) {
 // A plain member sends an external person only a flow the admin made available
 // to members (the org's default flow too, when it is one of them), and sees and
 // counts only the requests they sent; the admin sees all of them.
-func TestProofingMemberExternalRequest(t *testing.T) {
+func TestMemberExternalRequest(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	admin := env.login("admin@acme.test")
@@ -479,7 +479,7 @@ func testLogoPNG(t *testing.T) []byte {
 
 // The org sets its session lifetime, data retention, branding and redirect
 // origins once, for all its flows.
-func TestProofingOrgSettingsHTTPFlow(t *testing.T) {
+func TestOrgSettingsHTTPFlow(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
 	me := env.login("admin@acme.test")
@@ -1272,7 +1272,7 @@ func TestProofingWebhookHTTPFlow(t *testing.T) {
 // Only a platform admin pauses an org's proofing: every org route and the
 // org's API keys are then refused until it is lifted, and the org's own admin
 // can read the pause but not set or lift it.
-func TestProofingPausedByPlatformAdmin(t *testing.T) {
+func TestPausedByPlatformAdmin(t *testing.T) {
 	const root = "root@yivi.test"
 	env := setup(t, root)
 	orgID := env.createOrg("Acme", "acme")
