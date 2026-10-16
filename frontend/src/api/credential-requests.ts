@@ -77,6 +77,26 @@ export function sendCredentialRequest(
   });
 }
 
+// The trust scheme's catalogue: credential types issuers on this deployment
+// designed, to pick a request from.
+export const credentialTypeSchema = z.object({
+  vct: z.string(),
+  name: z.string(),
+  issuer: z.string(),
+  attributes: z.array(z.object({ key: z.string(), label: z.string() })),
+});
+export type CredentialType = z.infer<typeof credentialTypeSchema>;
+
+export function getCredentialTypes(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<CredentialType[]> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/openid4vp/credential-types`,
+    { schema: z.array(credentialTypeSchema), signal },
+  );
+}
+
 export const incomingRequestSchema = z.object({
   id: z.string(),
   verifier: z.string(),
